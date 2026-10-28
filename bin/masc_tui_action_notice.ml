@@ -96,3 +96,12 @@ let after_input notice ~input_seen ~operator_input ~currently_visible ~now ~wind
          | Some _ | None -> Some (Pending current))
     | Some (Pending _ | Draining _) | None -> notice.rejection in
   { notice with ordinary; rejection }
+
+let after_rejected_input notice ~ordinary_before ~currently_visible ~now ~window =
+  let ordinary_is_new = match ordinary_before, notice.ordinary with
+    | Some before, Some current -> before != current
+    | None, Some _ -> true
+    | (Some _ | None), None -> false in
+  let settled = after_input notice ~input_seen:true ~operator_input:false
+      ~currently_visible ~now ~window in
+  if ordinary_is_new then { settled with ordinary = notice.ordinary } else settled

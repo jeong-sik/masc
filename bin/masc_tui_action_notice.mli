@@ -40,3 +40,10 @@ val after_input :
 (** Ordinary feedback is cleared by input as before. A rejection can be
     cleared by operator input only while its exact identity is still visible.
     Before expiry, a notice hidden by another surface becomes pending again. *)
+
+val after_rejected_input :
+  t -> ordinary_before:(string * float) option -> currently_visible:rejection option ->
+  now:float -> window:float -> t
+(** A rejected input clears the ordinary notice that preceded input handling,
+    but preserves a newer notice produced during that handling. It never
+    acknowledges a rejection. Ordinary tuples are compared by identity. *)

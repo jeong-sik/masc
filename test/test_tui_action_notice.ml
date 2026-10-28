@@ -73,6 +73,37 @@ let () =
   let input = Notice.after_input failed ~input_seen:true ~operator_input:true ~currently_visible:None ~now:10. ~window:12. in
   require (Notice.ordinary input = None && Notice.same_rejection first (some (visible input 1000.)))
     "input before presentation clears only ordinary feedback";
+  let armed = Notice.set_ordinary failed (Some ("confirmation", 10.)) in
+  let shown_armed = Notice.presented armed first ~at:10. ~input_pending:false in
+  let idle_armed = Notice.after_input shown_armed ~input_seen:false ~operator_input:false
+      ~currently_visible:(Some first) ~now:11. ~window:12. in
+  require (Option.is_some (Notice.ordinary idle_armed))
+    "an idle turn preserves a confirmation";
+  let rejected = Notice.after_input shown_armed ~input_seen:true ~operator_input:false
+      ~currently_visible:(Some first) ~now:11. ~window:12. in
+  require (Notice.ordinary rejected = None
+           && Notice.same_rejection first (some (visible rejected 11.)))
+    "a rejected input cancels confirmation without acknowledging visible rejection";
+  let old_ordinary = some (Notice.ordinary shown_armed) in
+  let cancelled = Notice.after_rejected_input shown_armed ~ordinary_before:(Some old_ordinary)
+      ~currently_visible:(Some first) ~now:11. ~window:12. in
+  require (Notice.ordinary cancelled = None
+           && Notice.same_rejection first (some (visible cancelled 11.)))
+    "a rejected input clears the preceding confirmation but keeps rejection evidence";
+  let new_ordinary = (fst old_ordinary, snd old_ordinary +. Sys.opaque_identity 0.) in
+  require (new_ordinary = old_ordinary && new_ordinary != old_ordinary)
+    "fixture gives the later notice distinct identity with the same contents";
+  let newer_armed = Notice.set_ordinary shown_armed (Some new_ordinary) in
+  let preserved = Notice.after_rejected_input newer_armed ~ordinary_before:(Some old_ordinary)
+      ~currently_visible:(Some first) ~now:11. ~window:12. in
+  require (Option.exists (fun current -> current == new_ordinary) (Notice.ordinary preserved)
+           && Notice.same_rejection first (some (visible preserved 11.)))
+    "a later ordinary notice survives rejected input even with identical contents";
+  let csi_newer = Notice.start_csi newer_armed in
+  let csi_preserved = Notice.after_rejected_input csi_newer ~ordinary_before:None
+      ~currently_visible:(Some first) ~now:11. ~window:12. in
+  require (Notice.ordinary_is_csi csi_preserved)
+    "preserving a later CSI notice keeps its identity";
   let weaker = Notice.reject input Input_rejected ~now:1000. ~window:12. in
   require (Notice.same_rejection first (some (visible weaker 1000.)))
     "a later input rejection cannot replace an unpresented paste rejection";

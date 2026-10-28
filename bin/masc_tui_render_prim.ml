@@ -532,6 +532,15 @@ let recovery_slot (state : state) ~max_cells =
   | Rejection notice ->
       Some (pressable (Press_input_rejection notice) (Notice.rejection_text notice))
 
+let draw_box_bottom_with_recovery buf ~cols = function
+  | None -> box_bottom buf cols
+  | Some text -> box_line_styled buf cols ~style:(Theme.warn ()) text
+
+let recovery_box_bottom state buf ~cols =
+  let selected = recovery_slot state ~max_cells:(framed_inner_width cols) in
+  draw_box_bottom_with_recovery buf ~cols selected;
+  Option.is_some selected
+
 let footer_line ?(status = []) ?position ?(recovery_in_slot = false)
     (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room; "?:help" stays as the
@@ -1522,8 +1531,8 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : 
     empty buf cols
   done;
   (match recovery_in_slot, frame with
-   | None, (Chrome_screen | Chrome_overlay) -> bottom buf cols
-   | Some text, Chrome_screen -> box_line_styled buf cols ~style:(Theme.warn ()) text
+   | selected, Chrome_screen -> draw_box_bottom_with_recovery buf ~cols selected
+   | None, Chrome_overlay -> bottom buf cols
    | Some text, Chrome_overlay ->
        let remaining = max 0 (framed_rule_width cols - Message_layout.display_width text) in
        Buffer.add_string buf

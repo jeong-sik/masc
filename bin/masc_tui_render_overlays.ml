@@ -1139,15 +1139,21 @@ let render_terminal_too_small state ~recovery_notice ~rows ~cols =
     navigation_rows + surface_rows
     + Masc_tui_composer.rows_for ~terminal_rows:surface_rows
   in
+  let recovery_notice = Option.map (fun text ->
+      let short = Masc_tui_action_notice.csi_recovery_text in
+      if Message_layout.display_width text > cols
+         && Message_layout.display_width short <= cols then short else text)
+      recovery_notice in
+  let now = Unix.gettimeofday () in
+  let window = Masc_tui_types.last_action_window_s in
   let ordinary =
     Masc_tui_action_notice.ordinary_visible state.last_action
-      ~now:(Unix.gettimeofday ()) ~window:Masc_tui_types.last_action_window_s in
+      ~now ~window in
   let rejection =
     match recovery_notice, ordinary with
     | Some _, _ | None, Some _ -> None
     | None, None ->
-        (match Masc_tui_action_notice.rejection state.last_action
-                 ~now:(Unix.gettimeofday ()) ~window:Masc_tui_types.last_action_window_s with
+        (match Masc_tui_action_notice.rejection state.last_action ~now ~window with
          | Some notice when
              Message_layout.display_width (Masc_tui_action_notice.rejection_text notice) <= cols ->
              Some notice
@@ -1165,16 +1171,46 @@ let render_terminal_too_small state ~recovery_notice ~rows ~cols =
     match marked with
     | Some notice -> pressable (Press_input_rejection notice) text
     | None -> text in
-  let first = match notice with
-    | Some notice when rows <= 1 -> rendered notice
-    | Some _ | None -> resize_hint in
-  Buffer.add_string buf (fit_width first cols);
-  Buffer.add_char buf '\n';
-  (match notice with
-   | Some notice when rows > 1 ->
-       Buffer.add_string buf (fit_width (rendered notice) cols);
-       Buffer.add_char buf '\n'
-   | Some _ | None -> ());
+  (* A compact frame normally spends only two rows. A third lets an existing
+     confirmation stay visible while the recovery notice gets its own row. *)
+  let extra_recovery =
+    if rows < 3 then None
+    else match recovery_notice with
+      | Some _ ->
+          let text = Masc_tui_action_notice.csi_recovery_text in
+          if Message_layout.display_width text <= cols then Some text else None
+      | None when Masc_tui_action_notice.csi_active state.last_action -> None
+      | None -> recovery_slot state ~max_cells:cols in
+  let extra_ordinary = match ordinary, recovery_notice with
+    | Some _, Some _ when Masc_tui_action_notice.ordinary_is_csi state.last_action -> None
+    | Some (text, _), (Some _ | None) -> Some text
+    | None, (Some _ | None) -> None in
+  let extra_rejection = match extra_recovery, recovery_notice with
+    | Some _, Some _ when rows >= 3 + (if Option.is_some extra_ordinary then 1 else 0) ->
+        (match Masc_tui_action_notice.rejection state.last_action ~now ~window with
+         | Some notice when
+             Message_layout.display_width (Masc_tui_action_notice.rejection_text notice) <= cols ->
+             Some (pressable (Press_input_rejection notice)
+                     (Masc_tui_action_notice.rejection_text notice))
+         | Some _ | None -> None)
+    | (Some _ | None), (Some _ | None) -> None in
+  let add_row text =
+    Buffer.add_string buf (fit_width text cols);
+    Buffer.add_char buf '\n' in
+  (match extra_recovery with
+   | Some text ->
+       add_row resize_hint;
+       Option.iter (fun ordinary -> add_row (rendered (ordinary, None))) extra_ordinary;
+       add_row text;
+       Option.iter add_row extra_rejection
+   | None ->
+       let first = match notice with
+         | Some notice when rows <= 1 -> rendered notice
+         | Some _ | None -> resize_hint in
+       add_row first;
+       (match notice with
+        | Some notice when rows > 1 -> add_row (rendered notice)
+        | Some _ | None -> ()));
   finish_terminal_too_small_frame ~cursor:Frame_presenter.Hidden ~rows ~cols
     buf
 

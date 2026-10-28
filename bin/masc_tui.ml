@@ -25923,6 +25923,9 @@ and is loaded on demand through keeper_skill.
         input_barrier_held () || frame_unavailable ()
         || (not state.image_open && not state.msx_open
             && help_is_presented (!presented).reader <> help_is_current ()) in
+      (* A rejected event cancels any signal confirmation above. MIDI
+         withdrawal and async results after this point produce newer notices. *)
+      let ordinary_before_input = Masc_tui_action_notice.ordinary state.last_action in
       let retire_music_editor_for_input () =
         if Option.is_some interrupted_paste || input_reader_has_started_input input_reader then
           withdraw_pending_music_editor state
@@ -26212,12 +26215,20 @@ and is loaded on demand through keeper_skill.
          key, so the notice goes before anything handles it: it takes the
          room the key hints need, and a notice left standing after the
          operator moved on hid the hints of the screen they moved to. A key
-         that has something to say sets its own. *)
-      state.last_action <- Masc_tui_action_notice.after_input state.last_action
-          ~input_seen:(Option.is_some input)
-          ~operator_input:(Option.exists is_operator_input input)
-          ~currently_visible:(last_visible_rejection ())
-          ~now:(Unix.gettimeofday ()) ~window:last_action_window_s;
+         that has something to say sets its own. A rejected gesture cancels
+         ordinary confirmations too, but cannot acknowledge a rejection. *)
+      state.last_action <-
+        if rejected_operator_input then
+          Masc_tui_action_notice.after_rejected_input state.last_action
+            ~ordinary_before:ordinary_before_input
+            ~currently_visible:(last_visible_rejection ())
+            ~now:(Unix.gettimeofday ()) ~window:last_action_window_s
+        else
+          Masc_tui_action_notice.after_input state.last_action
+            ~input_seen:(Option.is_some input)
+            ~operator_input:(Option.exists is_operator_input input)
+            ~currently_visible:(last_visible_rejection ())
+            ~now:(Unix.gettimeofday ()) ~window:last_action_window_s;
       state.last_action <- Masc_tui_action_notice.after_drain state.last_action
           ~at:(Unix.gettimeofday ()) ~input_pending:(input_unsettled ())
           ~currently_visible:(last_visible_rejection ());

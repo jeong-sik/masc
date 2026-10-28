@@ -212,6 +212,11 @@ val recovery_slot : Masc_tui_types.state -> max_cells:int -> string option
 (** A complete CSI or rejection notice that fits a dedicated row, already
     marked for presentation evidence where applicable. *)
 
+val recovery_box_bottom : Masc_tui_types.state -> Buffer.t -> cols:int -> bool
+(** Draw the existing borderless bottom row, replacing it with a complete
+    recovery notice when one fits. The result is the same selection passed to
+    {!footer_line} to avoid duplicating it. *)
+
 val finish_frame_beside_acting_pane :
   Masc_tui_types.state ->
   ?clamped:Masc_tui_types.clamped_scroll ->

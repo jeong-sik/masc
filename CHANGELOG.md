@@ -2,6 +2,759 @@
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-10-27
+
+### Upgrade notes
+
+- Task originals capture both review goal and separate system instructions under verifier_review_original/v2 in the shared workspace lane-addons store. Resolve retained unfinished originals before changing schema/store; no automatic replacement or compatibility reader is provided. Goal proof and external Addon extraction remain separate. #45573
+- This layer introduces the Goal preparation contract. Production durable owner, worker dispatch and proof-commit recovery integration remain follow-up work; it does not change the current Goal verifier daemon or human confirmation boundary. #45637
+- The `dos-machine` package is published as `0.2.1` with the image `masc-lane-dos-machine:0.2.1`, because the host now sends `include_frame` and a worker built before #46196 rejects that argument. Run the `lane-addon-images.yml` workflow at the merged commit and load the image before starting the DOS lane (#46196).
+- `GET /api/v1/play/seat` no longer has a `participants` field. Read `GET /api/v1/play/participants` for the names `pass` accepts; the agent guide at `/play/agent.md` names the new URL (#46236).
+
+### Fresh state required
+
+- Official-client session frontiers now accept `snapshot_sha256` only when
+  `delivery` is `canonical_source_guard`. A stored `prepared_start_context`
+  or `held_by_vendor_session` frontier containing that field is refused as
+  `invalid context frontier fields`. The deployment preflight reports these
+  under `official-client session state`; the schema version alone does not
+  establish readability (#45458).
+- Stop every server and TUI using the affected base path and verify that they
+  have exited before changing stored state. Back up and move aside only each
+  refused `<base-path>/.masc/keepers/<keeper>/official-client-runtime/session.json`,
+  retaining its original bytes outside the Keeper store. Do not remove the
+  Keeper directory, transcript, canonical context, configuration or other
+  readable session bindings. `Restart_fresh` cannot repair an unreadable binding
+  because it reads that binding first (#45458).
+- Run the candidate helper directly, not the previously installed helper from
+  `PATH`. For a local build it is `<build-dir>/deployment_preflight_helper.exe`.
+  Check its `build-commit` against the chosen installation candidate, then run
+  that same executable with `validate-stores --base-path <base-path>`. Resolve
+  every remaining refusal before installing and starting that build.
+  Each removed binding starts a new vendor session;
+  its prior vendor session resume link is lost, while the other Keeper stores
+  remain. To roll back, stop the new runtime and restore the old executable and
+  its backed-up bindings together. Run that old build's full store validation
+  before starting it: stores written by the new runtime may require a matching
+  backup too. Keep the runtime stopped if validation fails; do not restore
+  refused bindings into the new decoder (#45458).
+- Back up affected persistent worker volumes before replacing them with empty state. Reconcile both worker and host inventories first: pending worker requests or unresolved dispatched host originals stop this reset, including originals whose worker record is absent. Preserve host originals, Exact proofs, domain ledgers, receipts and queues. Follow `docs/guides/EXACT-WORKER-STATE-HARD-CUT.md`; package revision changes reuse the same installation volume (#45540).
+- Old null started markers and cause-free unknown attempts are refused by deployment preflight. Before deploying the complete host/consumer stack, stop writers and set aside old Exact records together with their connected Curator chains and any affected Librarian admission/history scope groups, following RFC-exact-outcome-unknown-names-its-cause §3.8. Preserve proofs, source queues, committed memory and receipts; recount current originals instead of reusing the dated three-chain snapshot (#45555).
+- Cause-free shared refusal evidence is no longer decoded. Deploy this layer with the host incarnation-record layer and the joint Exact/Curator/conditional Librarian hard cut in RFC-exact-outcome-unknown-names-its-cause §3.8. No worker volume or worker wire change is required by these host layers; the terminal-body worker upgrade has a separate state inventory and hard cut (#45557).
+- The shared execution-capture envelope is v4. Old v3 classification and Briefing originals are refused. Before deploying, reconcile pending originals under a compatible build, or review a whole-scope fresh reprepare that preserves their evidence and records unresolved outcomes. Stop all writers, then move the complete Curator scope `sha256("workspace-curator")` (`5e5665b70b1920c0c1dc7d16ab2b33c8d21773a7a0fab71bed62b03a8dd851e3`) out of `<base-path>/.masc/lane-addons/` from all three locations: `tool-request-owners/<scope>/`, `tool-request-bodies/<scope>/`, and the entire `tool-request-owners-settled/<scope>/`, including every date's records and bodies. Keep authoritative queues and memory, current ledger/Briefing state, revisions, worker request stores/volumes, host Exact evidence/proofs and historical registry events/input/output payloads. Do not rewrite old registry payloads or replay old originals against changed domain state. Follow `docs/design/workspace-curator-addon-execution.md`, “Deploying the capture-only revision layer”, for inventory, verification and rollback (#45579).
+
+### Known issues
+
+- Record an installed-server counterexample where retargeting a recurring schedule and then cancelling it leaves its previous Keeper's accepted occurrence pending; the backend repair remains open under #25692. (#46157)
+- Record a real-model busy handoff counterexample where an unfinished scheduled request is acknowledged as completed before producing its requested result; this audit does not repair the defect. (#46157)
+
+### Added
+
+- `keeper_artifact_draft` is registered in the tool catalog with the same `keeper_shard_write` authority as `keeper_artifact_publish`. (#46464)
+- An unregistered model-visible tool fell back to the operator-only policy, so the sandbox tool policy surface test listed `keeper_artifact_draft` among tools a Worker token may not call and blocked the v0.65.0 release candidate at scenario V09. (#46464)
+- Add `Verifier_review_worker`, the E06 worker bridge that runs a retained verifier review attempt through the host-built tool-capable reviewer while keeping verdict extraction, `report_review_verdict`, and Task/Goal transitions on the host side. (#45471)
+- Bind retained review execution to the actual host lookup authority and recorded destination, execute its frozen prompt and media, and allocate retry identities from the durable owner inventory (#45471).
+- `BrowserInteract` `click` and `fill` take a `target` on an ego connection: a ref from the latest `BrowserRead` `mode=snapshot` of the same page (`{ref: 12}`), a role with its accessible name (`{role: "button", name: "Send"}`), or visible text (`{text: "Send"}`); `exact` (default true) matches the whole name or text. masc writes ego's locator itself and acts with ego's own `page.click` and `page.fill`. A target requires `expectedUrl` and excludes `selector` and `documentId`/`nodeId`. In the run that acts, the tab must still be at `expectedUrl` and the target must name exactly one element, or the step is refused before any effect. The receipt lists the pages the action opened as `{tabId, label}` and a JavaScript dialog it raised. Other connections refuse a target before any effect (#45494). Guide: `skills/browser-lanes/references/connection.md`.
+- Decode prompt authoring diagnostics with their original value and source, while distinguishing unreported and clean catalogs. (#45508)
+- `BrowserAct` `hand_off` gives an ego connection's whole task space to the operator for a step only a person can take, such as a sign-in or a captcha, and `take_over` takes it back. ego shows no button that returns a handed-off space, so `take_over` is the way back; call it only after the operator says they are done, because nothing checks that they did. Both need the observed `clientId`. While the operator holds the space, including after taking it over in ego themselves, every step on it is refused before any effect; `take_over` is refused while the agent holds it. The `take_over` receipt carries `activeTabId`, the tab that was active, unless it is a tab the operator opened. A connection now also opens on a space handed to the operator, so a restart during a hand-off can still take it back. Other connections refuse both before any effect (#45523). Guide: `skills/browser-lanes/references/connection.md`.
+- An ego connection lists the downloads of the pages an agent opened, through `BrowserRead mode=downloads` with an explicit ego browser and `tabId`. Each step that acts on such a page first arms one wait for its downloads (ego lite hands a download only to a wait armed before it starts). A download is saved under the worker's own download folder; ego's browser touches the operator's download folder while it runs and leaves nothing there. A completed one is published through the same broker as the owned Gecko's and returned as an `artifact`. Rows have the Gecko shape (pending, completed, interrupted); `watchingSince` says from when the current ego process watched, since a stopped command restarts it (#45533). Guide: `skills/browser-lanes/references/advanced.md`.
+- An ego connection takes `BrowserAct upload` with an explicit ego browser: the worker's copies of the Keeper's files are set on one CSS-matched file input (`multiple` for more than one file) of a page an agent opened, and the receipt lists what the input now holds. The host stages the copies for the exact live route, and the worker's upload broker grants them to that connection only. ego lite reads a file only when the page does, so the connection keeps the copies until its task space has ended (#45548). Guide: `skills/browser-lanes/references/advanced.md`.
+- An ego connection labels each pointer step beside ego's agent cursor: `MASC · <actor or agent> · <interaction>`, from the same pieces as the BiDi connection's pointer overlay. The label rides `mouse.move`, `mouse.click`, `mouse.wheel`, each drag move and the snapshot target click; ego's `fill`, `mouse.down` and `mouse.up` take no label. The worker passes the polled command's actor to the connection (#45574). Guide: `docs/rfc/RFC-browser-live-ego.md`.
+- Select explicit native UMP event groups and move or stretch their original
+  clocks together in one undo revision, preserving words, routes and source
+  identities without inferring note/expression ownership. (#45576)
+- Show grouped native UMP events in the TUI and carry their rhythm experiments
+  through Worker adoption, arrangement save/reopen and native export, with
+  documented source-terminal evidence and explicit device limits. (#45577)
+- Browser `select_option` supports replacing and clearing multiple selections with `values`, validates every option before changing the form, and reports the selection observed after page handlers. Guide: `skills/browser-lanes/references/observation.md`. (#45593)
+- `BrowserAct upload` takes `opener` instead of `selector` on an ego connection: the one CSS-matched control whose click opens the page's file chooser, for pages that make their file input only when clicked. The connection arms ego's `waitForFileChooser`, clicks the opener with the cursor label and hands the chooser the worker's copies; the receipt's `chosen` lists them. The click is the effect, so a chooser that does not open within 5 s, or one that takes one file when more were given, is reported as an unknown outcome, and a chooser left unfilled is closed with `setFiles([])` so the connection's next chooser can open. The automation Firefox refuses `opener` before any effect (#45602). Guide: `skills/browser-lanes/references/advanced.md`.
+- Music phrase editor: press `p` or run `:play-cursor` to audition from the edit cursor, preserving the saved loop locators and original MIDI. Seek, pause, restart and repeat follow the prepared audition window across audio and MIDI output, including restart during preparation and player startup. (#45604)
+- Ego browser hover and double-click accept observed accessibility targets, including iframe refs, through native input with URL and ownership checks. Guide: `skills/browser-lanes/references/observation.md`. (#45627)
+- Prepare an immutable Goal proof input from its actual pending request, criterion revision, submitted evidence and host-built shared-playground read authority, preserving both original prompt messages independently of later configuration changes. #45637
+- Preserve native MIDI2 Clip bytes, message identities, original PPQ, setup delays and unsigned tempo in an immutable source document. Native pitch/velocity, exact timing overlays and streaming export retain raw UMP precision and message order. (#45647)
+- Open native `.midi2` Clip files from the terminal MIDI importer and music library. Edit native pitch, velocity, per-note values, exact event-group timing and onset voicings with Undo/Redo, then save/reopen the original-source document or export native MIDI2. Imported Clip audition and arrangement placement remain separate follow-up work. (#45648)
+- Retain Goal verifier dispatch, exact structured judgments, fixed run identity and complete tool observations through the shared original/progress store and existing reviewer. #45650
+- Add an offline production Librarian comparison command that records the actual prompt preparation and accepted slot, excludes verified unread source messages, and compares full-history answers with saved/restored working-state answers using the same Memory and raw JEV judge. #45651
+- Restore the exact linked Goal verifier attempt, including its complete original input and staged run identity, before preparing another request. Only a definite typed terminal refusal can create a linked successor; unknown execution cannot. #45654
+- Retain Goal host commit intents and recover lost replies through exact authoritative before/after observations without another model call or independent completion authority. #45654
+- Add transaction-backed startup Admin token preparation that preserves a valid persisted credential pair and refuses invalid occupied state. (#45656)
+- Play native MIDI2 Clip schedules without creating a capture/WAV or reducing UMP precision. Preserve original PPQ and rational setup/sequence clocks until one final absolute-nanosecond rounding. A native2-only owner validates Ready/Start admission and owns notes, pedals and destination resources through pause, seek, stop and failure. (#45659) Guide: `tools/alphatex/MIDI-CLIP.md`.
+- Audition imported MIDI2 Clips from the terminal through an explicit native MIDI2 output: play/pause/resume, immutable-plan restart, exact event seek, output selection and session-only missing-tempo input. Stop, route changes and close retain ownership through native cleanup. Initial Ready is checked against the admitted source and exact plan clock before Start. (#45660)
+- Connect the actual Goal verifier agent to immutable retained inputs, fixed review runs, complete tool observations and host-owned proof commitment. Recover judgments before lookup/prompt preparation and discover work after the Goal phase has moved. #45671
+- Persist actor-bound explicit retries of definitely settled Goal reviews while keeping unknown dispatch non-replayable and automatic retry subject to typed candidate evidence. #45671
+- The Lane Add-ons overview's role grouping is now asserted at the contract level: a current category is read only from the one declaration whose installation id and source path both match in a complete, issue-free reading — an id-only or path-only claim, a duplicated claim, an issue on the declaration or an incomplete inventory all stay `Unverified` (#45677).
+- Lane Add-on packages may declare `world.web_search = true` and list secret-free web-search host requests: the host runs its existing `masc_web_search` provider chain and delivers the search envelope with the serving provider, per-provider errors and the provider's own typed result data, while credentials, cache keys and the provider plan never cross the port. Usage guide: `docs/guides/lane-addon-toml.md` §웹 검색. (#45680)
+- BrowserInteract can run a known Ego native Page sequence, SDK waits and final snapshot through one broker command, preserving completed progress and uncertain effects without replay. #45733
+- Add saved Prompt Preset inspection, safe new-name saving and explicit restore reports to Dashboard, with workspace-owned pending operations and matching TUI diagnostics. See the [Prompt Presets guide](../docs/guides/PROMPT-PRESETS.md) (#45738).
+- Backend-only 1Password OAuth connection storage with PKCE, configuration and connection identity binding, serialized token rotation and explicit uncertain-operation recovery. Browser login docking remains in development. (#45742)
+- A native 1Password connection Add-on with a host-admitted status tool, Keeper skill and declared connection readings. This development package reports connection state; browser sign-in and continuation remain unavailable. (#45745)
+- Add-on packages can dock private account controls in the existing Dashboard.
+  The reserved operator port requires an admin credential, preserves the original
+  worker owner and keeps OAuth requests/results out of model tools and retained
+  observations. Private callbacks clear their URL and are pinned to the original
+  popup, workspace and dashboard credential. #45763 Guide: `addons/onepassword/README.md`.
+- Preserve the original callback window or manual return through uncertain
+  delivery; clear it only after its private backend receipt matches the original
+  connection. Keep explicit retries bound to that same request. (#45763)
+- Dock 1Password OAuth connect, private callback completion and exact-attempt
+  cancellation in Add-on connection settings. Keep tokens backend-only, create
+  private stores only from operator setup, and reject stale or mixed connection
+  attempts. Browser autofill and Keeper continuation remain in development. #45765
+- Confirm original-key capture separately from connection success, and keep
+  uncertain capture or an unconfirmed decline from clearing the return. (#45765)
+- Verification response identities have a validated immutable representation and one owner for observed and unknown model-pair coverage, without inferring model independence from runtime aliases. #45767
+- Add a private Browser companion execution boundary pinned to the original
+  opened session and tab. Companion work shares page serialization, requires
+  settled Stagehand input and fences uncertain effects before observations can
+  resume. Explicit owned close joins pending companion cleanup. #45773
+- Capture provider-reported model and response identities for native Task submissions and verification verdicts, binding them to the actual admitted tool invocation and reporting missing coverage explicitly. #45775
+- Keeper sandbox settings select registered SSH endpoints, display prior lane observations, and save endpoint/network changes with the selected profile. Endpoint declaration changes no longer reuse another declaration's readiness and shim observations. #45778
+- Run trusted Browser extension companions through a private original-session
+  wire port, using the existing CDP connection, exact extension worker and
+  page-operation serializer. Add package-owned 1Password initialization,
+  request/status and fill programs with private projections. #45785
+- Add an independent private companion socket broker with one-use invocation
+  grants, immutable Browser/operation binding, joined cancellation and fixed
+  payload-free errors. Keep revocation separate from completed socket cleanup.
+  Add a two-phase Python client that exposes cancellation before binding and
+  never reconnects or retries uncertain commands. #45789
+- Expose closed Mermaid fences from declared Markdown resource parts as previews while retaining exact source and part order (#45799).
+- Markdown artifacts expose closed Mermaid diagrams to Pele previews and display prepared diagrams inline on Kitty graphics terminals with measured cell geometry. Retained source, literal search, multipart selection and stale-response ownership remain available. (#45801)
+- Native Add-on tools can negotiate a private companion capability in host call context and bind it to the original Browser owner. The host rechecks both owners and current declarations before effects, projects validated public replies, and joins private transport cleanup during retirement. The 1Password login lifecycle and real-account verification remain pending. (#45806)
+- Image previews on Kitty graphics terminals support zoom, pan, fit and return to the resource source, reusing the retained terminal image for crop changes. (#45807)
+- Added a repeatable actual Keeper remote-SSH file workflow and restart proof,
+  with pinned executable identity, endpoint readbacks, and canonical ledger checks.
+  Fixed the SSH fixture's intermediate Keeper workspace ownership. (#45810)
+- A private 1Password login engine retains caller/account/Browser ownership, approval progress, multi-page fills and confirmed release. Durable intent and an original process lease prevent automatic rebind or uncertain fill replay. Worker tools, approval UI, Keeper continuation and real-account validation remain pending. (#45811)
+- Keep login Journal payloads in a distinct protected record/reference domain; preserve strict per-domain validation and refuse missing or legacy state without treating it as an empty Journal. (#45811)
+- Add a typed Telegram Bot API receive, reply and edit client with lossless chat/topic coordinates and safe retry/error reporting for the native gateway integration. (#45813)
+- Add bot-bound Telegram poll custody with confirmed operation receipts, strict per-update offset persistence and protocol generations for long-idle update ID reuse. (#45819)
+- An owned background executor runs private 1Password request/check/fill/release steps while state reads remain available. Cancellation requests interrupt only the original handle and remain distinct from settlement; queued confirmations preserve updated vendor rate-limit floors. Initial host binding, public MCP exports, approval UI and Keeper continuation still require integration. (#45820)
+- Give artifact diagrams separate node and group surfaces in light and dark terminal palettes while retaining authored Mermaid colours and styles. Include a multi-diagram colour example. (#45823)
+- Route native Telegram polls into durable Keeper operations and return committed public reply blocks to their exact bot, chat and topic, preserving binding configuration and delivery failure evidence. (#45831)
+- Retain original Browser companion grants after validated asynchronous admission, and withdraw unused grants before confirming cancellation. (#45833)
+- Expose original-session 1Password login tools and private approval controls, with nonblocking account reads and settings retirement. (#45838)
+- Add an explicit native companion fixture scope to manual Browser candidate checks, retaining source/workflow identity and the matching server. (#45840)
+- feat(addons): retain original Keeper invocation before companion dispatch and refuse duplicate authority (#45850)
+- feat(onepassword): retain immutable progress publications with operation state and fence uncertain journal writes (#45856)
+- feat(addons): retain validated companion publications and deliver immutable original-source Keeper queue notices (#45858)
+- feat(addons): separate original invocation publication authority from Browser settlement and validate durable Keeper delivery before acknowledgement (#45863)
+- feat(onepassword): deliver immutable login notices on a separate joined outbox owner with original caller acknowledgements and coherent terminal snapshots (#45866)
+- Add local HTTP conformance scenarios for shared ordinary/exact/Fusion endpoint admission, independent endpoint/accounts, queued cancellation, HTTP429 permit reuse and undeclared direct dispatch. (#45884)
+- Align the mixed-admission fixture with the exact resolver's declared-target API after removal of unused environment reads, retaining the original runtime binding and HTTP assertions. (#45884)
+- Keeper chat shows its next scheduled Job and expands upcoming Jobs with F9, including local due times, relative times, proximity colors and retained/unknown/partial read status. (#45919)
+- Add opt-in schema-work observation for owned Keeper diagnostics, preserving physical identities and request scope across worker domains. (#45939)
+- Task and Goal reviewers can inspect explicit `task:<id>` evidence as an immutable primary Task state snapshot through a read-only exact lookup, preserving Task-free retained authority and distinguishing Done from approval history or external acceptance. (#45949)
+- Add explicit manual Linux arm64 and amd64 static SSH shim artifacts, with exact candidate checksums and an actual framed execution that loads endpoint environment configuration. (#45954)
+- 아티팩트 화면에 HTML·Markdown 원고 편집과 파일 가져오기를 추가했습니다. 저장 충돌과 연결 변경 시 원고를 유지하고, 저장한 버전을 다시 읽어 확인합니다. (#45957)
+- 접근 권한이나 작업 공간이 바뀌면 원래 원고를 별도로 보관해 다운로드하거나 명시적으로 폐기할 수 있습니다. 새 권한으로 원고를 저장하지 않습니다. (#45957)
+- 아티팩트 공동 편집의 공유 텍스트 병합과 상대 선택 영역을 추가했습니다. Keeper가 읽었던 문장 안이 바뀌면 교체를 거절하고, 앞에 텍스트가 추가되면 원래 문장을 따라갑니다. 서버·화면 연결은 후속 작업입니다. (#45960)
+- 아티팩트 공유 원고의 변환 프로세스를 호출하는 OCaml 경계를 추가했습니다. 응답·오류·UTF-16 위치를 검증하고 긴 본문을 잘리지 않은 전체 출력에서 읽습니다. (#45966)
+- Declare native MiniMax Responses bindings for M3 and M3.1-Flash with scoped plaintext replay, documented tool choice and model-specific effort controls. (#45969)
+- 아티팩트 공유 원고를 별도로 저장하고 인증된 열기·병합·선택·수정 API를 추가했습니다. 동시 수정은 새 원고에 다시 계산하며 문서·원고 세대·읽었던 문장이 다르면 덮어쓰지 않습니다. (#45970)
+- 아티팩트 원본을 여러 창에서 함께 편집하고 접속한 편집자의 커서·선택 영역을 실시간으로 표시합니다. 미전송 변경은 브라우저 복구 원고로 보존하고, 재게시할 때 최신 게시물과 비교할 수 있습니다. (#45988)
+- 공동 편집 원고의 재게시 복사본도 원래 접근 상태에 결속해 보관하여, 권한 변경 후 다운로드나 명시적 폐기가 가능하게 했습니다. (#45988)
+- 공동 편집 재게시 원고가 남아 있으면 편집기와 문서 창을 닫기 전에 폐기를 확인하고, 취소 시 원고와 다운로드를 유지합니다. (#45988)
+- Keeper가 사람과 같은 아티팩트 공유 원고를 읽고 선택한 문장을 수정할 수 있습니다. 편집 중인 Keeper 이름과 선택 영역을 표시하고, 턴이 끝나면 해당 편집 위치를 지웁니다. (#45996)
+- HTML 아티팩트의 공동 편집 화면에서 문장을 눌러 수정할 수 있습니다. 다른 편집자의 수정은 보존하고, 아직 반영하지 않은 문장도 인증·작업 공간이 바뀐 뒤 복구할 수 있습니다. (#45998)
+- 공유 원고의 문장에 댓글·답글·변경 제안을 남기고, 제안한 수정과 반영 기록을 한 번에 저장하는 API와 Keeper 도구를 추가합니다. 같은 요청의 재전송은 중복 기록 없이 확인하고, 원문이 바뀐 제안은 반영을 거절합니다. (#46002)
+- Commit frozen typed checkpoints during journal execution without a caller checkpoint sink, with strict root ownership and exact checkpoint event/cursor readback; explicit caller checkpoint authority remains exclusive. (#46003)
+- 공동 편집 화면에서 문장별 댓글·답글·변경 제안을 검토하고 반영·거절하거나 대화를 해결하고 다시 열 수 있습니다. 전송 결과를 놓친 요청과 미전송 입력은 문서·원고 세대·작성자별로 복구하며, 다른 탭의 새 복구본을 이전 응답이 삭제하지 않습니다. (#46005)
+- Markdown 미리보기에서 글을 눌러 해당 원문을 공동 편집하고 댓글·수정 제안을 남길 수 있습니다. GFM 원문 위치로 반복된 글을 구분하며, 앞부분의 인코딩 표식·줄바꿈·이모지와 선택 범위 밖의 원문을 보존합니다. 공유 원고가 시작한 게시 버전의 형식으로 표시하고 문장 복구본의 형식도 확인합니다. (#46010)
+- 게시된 HTML의 설문·메모 입력을 사용자·문서·버전별로 저장하는 API를 추가했습니다. 동시 저장 충돌을 알리고, 같은 요청의 재전송이 나중 입력을 되돌리지 않게 합니다. HTML 입력창의 자동 저장 연결은 후속 변경에서 제공합니다. (#46013)
+- HTML 아티팩트의 입력 변경을 사용자별로 저장·복원하고, 앱에서 `MASC.inputs.read/write`로 JSON 입력을 보관할 수 있습니다. 저장 결과가 불확실하면 입력을 남기고 조회로 확인하며, 충돌·재전송·복구는 명시적으로 선택합니다. 게시 원본과 빠른 미리보기는 바꾸지 않습니다. (#46018)
+- HTML 아티팩트에서 API·CDN 출처를 사용자·게시 버전별로 저장합니다. 확인된 설정을 적용하기 전에 마지막 입력을 보관하며, 문서가 응답하지 않으면 미수신 입력 유실 가능성을 확인한 뒤 다시 열 수 있습니다. 로그인 토큰은 문서에 전달하지 않습니다. (#46023)
+- 게시된 HTML·Markdown을 Word(.docx)로 내려받을 수 있습니다. 제목·목록·표·링크·문서에 포함된 PNG·JPEG를 옮기며, 변환 중 읽기 화면이나 인증이 바뀌면 이전 결과를 내려받지 않습니다. CSS 배치·앱의 실행 화면·현재 입력은 포함하지 않습니다. (#46027)
+- 아티팩트의 게시 버전을 편집 가능한 PPT 파일로 내려받습니다. 긴 한글 본문과 표를 슬라이드에 나누고, 병합 표는 각 행·열에 값을 반복해 표시합니다. (#46032)
+- Document experimental native MiniMax Responses configuration, credential
+  placement, declared model controls, failure diagnosis and removal. (#46035)
+- 게시한 아티팩트를 한글·굵은 글씨·단색 이모지 글꼴을 포함한 PDF로 내려받습니다. 긴 본문과 표를 페이지에 나누고, 한 페이지에 들어가지 않는 표 머리글도 내용을 보존합니다. (#46036)
+- Keeper 실행 환경에서 npm 의존성을 설치하고 React·TypeScript 모듈을 HTML로 묶는 실행기를 추가합니다. 원본 파일과 잠금 파일·결과 SHA를 보관합니다. 가져오기 화면과 실행 레인 배정은 후속 작업입니다. (#46039)
+- 프로젝트 실행기에 npm 빌드 스크립트 실행을 추가합니다. 프로젝트 설정으로 만든 여러 페이지·분할 모듈·자산을 그대로 보관하고 파일별 SHA를 기록합니다. 설치에 사용한 잠금 파일은 빌드 이후 변경과 구분하며, 결과 기록이 실패해도 작업 경로를 반환합니다. (#46040)
+- npm·React 프로젝트의 원본 파일과 빌드 방식을 workspace에 보관하고, 해시를 검사해 같은 실행기 요청으로 복원합니다. 원본은 저장소 정리 뒤에도 유지합니다. (#46045)
+- 원본 저장에 쓰는 공통 strict blob 저장 함수가 외부를 가리키는 디렉터리 링크를 거절하고, 새 디렉터리 경로를 동기화한 뒤 저장하도록 고쳤습니다. (#46045)
+- npm·React 빌드 결과를 원본과 연결해 보관하고, HTML·사이트 파일과 lock을 검사해 복원합니다. 생성된 파일은 저장소 정리 뒤에도 유지합니다. (#46047)
+- 브라우저 모듈 빌드가 선택한 시작 HTML을 결과에 남겨, 다른 시작 화면을 지정한 원본에 잘못 연결하지 않도록 검사합니다. (#46047)
+- The TUI stores its UI display language as `[tui].language` (`"ko"` or `"en"`) in `runtime.toml`, so a pick made from the `:language` palette, the System sub-navigation chip, or the Themes pane survives restarts. See the UI language chapter of the TUI guide. (#46063)
+- Ego browser workflows can focus editors, reload pages, type or insert text,
+  paste plain text or HTML with the SDK's clipboard restoration, and press key
+  chords. Receipt-less keyboard input checks for dialogs before another step;
+  observation failures retain completed effects without replaying the workflow
+  (#46081).
+- Publish validated flat immutable directories through the existing durable exclusive-publication transaction, preserving exact file modes, no-replace semantics and recovery evidence across cancellation or cleanup failures. (#46086)
+- Add an explicit browser-lane native proof scenario that builds a matching
+  TUI/server/Browser Addon worker/launcher and runs seven relevant behavior suites
+  once for an exact feature source. Preserve worker bytes and digest separately
+  from installed-runtime and visible-UI evidence (#46106).
+- Keep admitted borrowed Keeper lifecycle work under its original ownership until it drains, rejecting expired or mismatched scopes before mutation. (#46107)
+- Specify Keeper volume lifecycle, retention, cancellation evidence and incarnation-bound reclamation planning. #46121
+- Plan review work across GitHub accounts using outstanding user/team requests, return changed-head CRs to their owners, and optionally publish missing requests with scope refresh, readback, and preserved partial receipts. Keeper routing instructions skip closed PRs and prioritize assigned open work. (#46127)
+- Publish immutable guest GitHub credential snapshots through canonical filesystem recovery and reload their exact bytes and permissions under Keeper lifecycle ownership; require a complete successful runtime inventory before creation. (#46137)
+
+### Changed
+
+- Consolidate approval decisions in Gate and route chat/intervention shortcuts directly to it. (#45534)
+- Record disconnected Dashboard UI removal, Gate navigation checks, retained consumers, and isolated frontend build/browser evidence. (#45546)
+- Host Exact attempts retain a process incarnation and typed unknown cause: Interrupted for another process, Cut for this process and Raised for call exceptions. Completed original proofs take priority; worker result JSON stays unchanged (#45555).
+- Shared consumer refusal evidence preserves the host Exact cause. Curator releases classification facts and Briefing eligibility only for Interrupted originals and settles their chains after observer receipts are acknowledged; Cut and Raised continue to block. A worker's cause-free unknown result must match an authoritative host terminal (#45557).
+- Require prompt authoring diagnostics in TUI prompt snapshots; missing reports are rejected. (#45560)
+- Document that prompt registry entries always include an authoring diagnostics array. (#45561)
+- The host chooses the browser for every Browser Add-on command from the
+  worker's snapshot and names it in the receipt; the worker's
+  `browser_command` runs only the lane, and for live the client, it is given,
+  and refuses an automatic choice or `requiredActions`. A snapshot whose reply
+  is lost no longer fails the worker. The bundled browser Skill points
+  discovery and choice to the host browser tools (#45565).
+- Document how the native Addon candidate binds and locates its matching launcher, including receipt verification and actual-runtime limits. #45568
+- Cover metadata lookup through a non-directory parent and retain true absence behavior. (#45571)
+- Give phrase notes distinct pitch colours and expose direct play/pause,
+  restart, stop and explicit compatible-SoundFont preview controls. Keep stop
+  authoritative over delayed sound selection and harmony inspection. (#45590)
+- Record actual candidate launcher execution, original result/evidence/release preservation and cleanup in a bounded native Plugin observation, keeping historical limitations and remaining original54 criteria separate. #45600
+- Simplified Dashboard routing to current section paths and removed unused redirect tracking from navigation metrics (#45601).
+- Aligned navigation event validation with current Dashboard sections, including Lane Inventory, Artifacts, and Account (#45601).
+- Consume the required authoring report directly in prompt diagnostics and attention filters. (#45606)
+- Document cursor audition with focused Worker/controller and private TUI evidence, the installed auxiliary runtime identity, preserved original music, and limits for physical audio/MIDI validation. (#45609)
+- Link the original Addon worklist to the bounded exact-launcher lifecycle evidence and preserve the Task verifier compile failures, source repairs and unexecuted scopes separately. #45610
+- The browser capability table lists `read_frames` and `frame_interaction` for an ego connection: the viewport snapshot holds each iframe's content with refs, cross-origin frames included, a subtree snapshot rooted at the iframe's ref reads one frame, and `BrowserInteract` click/fill with `target` acts inside it (a ref from the frame's snapshot, or a role or text target ego finds in frames). Input and upload `framePath` refusals describe the supported target or top-document route. Frame-path reads and `mode=frames` are refused by the live transport capability gate before the peer; tool descriptions and guides explain the snapshot alternative (#45632). Guide: `skills/browser-lanes/references/advanced.md`.
+- Defer fourteen optional publishing, surface, memory, image and plan-inspection
+  tool schemas until they are needed. Codex and Claude Code retain discovery and
+  normal tool calls; bootstrap Skill/Candle visibility is unchanged. Antigravity
+  continues its existing eager schema delivery (#45714).
+- Split the TUI `MASC Features` bottom preview into a 2-column Korean status and failover overview, unify shared summary/detail rendering primitives, and organize full detail views into numbered sections (#45718).
+- Describe terminal runs with no recorded slot without inventing candidate exhaustion or missing responses, and label p50 latency as its median (#45718).
+- Ego Lite selector input now uses the native SDK for click, fill, hover, double-click and option selection. Keeper browser guidance prefers Ego snapshots and refs, and native SDK actionability replaces the extra MASC selector wait. #45727
+- Align Keeper Skill authoring and reuse instructions with current composition, authority and evidence contracts. Correct five installed runtime-authored review, DNS and test-receipt instructions with preserved originals and publication readback (#45739).
+- Ego uploads use native locator/ref resolution and SDK chooser waits; selector drags without custom waypoints use native dragAndDrop. MASC preserves file staging/leases and supplements confirmed SDK release gaps, retaining uncertain input boundaries. #45744
+- Keeper turns now carry the latest measurement and evidence for each Goal's current success criterion, including explicit missing or unavailable observations. Related Tasks are guided by that criterion while independent Tasks remain supported. #45748
+- Organize TUI `System / Runtime`, `Runtime Routes`, and `Activity / Logs` detail panes into numbered sections with live probe, health, and message summaries pinned to the top (#45756).
+- Promote operational verdicts, gate policies, and delivery hold diagnostics to the top of TUI `Keepers / Detail`, `Keepers / Schedules`, `Work / Task Review & Verdicts`, and `Keepers / Fusion` detail views (#45757).
+- Include exact frame timer windows and applied Ask identities in opt-in TUI timing reports, with the actual current or stale question reading recorded for each Home Build (#45808).
+- Extend the remote SSH Keeper proof to verify host-pin refusal, explicit trust restoration, and restart recovery, with retained candidate receipts. #45845
+- Retain browser endpoint-selection screenshots and independent Keeper configuration readback for the remote SSH sandbox. #45846
+- Tool schema cache misses use the weak table's automatic resize cleanup instead of sweeping every live binding under the shared mutex. (#45855)
+- Verify actual Keeper shell redirects over pinned SSH with bytes-preserving readback and distinguish that public route from internal typed IR attachments. #45864
+- Retain actual remote Keeper cwd-reuse failure evidence and propose a consistent endpoint namespace for scripts, prompts and execution metadata. #45865
+- Remove provider identity inference from endpoint URLs, hosts and paths; explicit provider IDs retain endpoint and codec authority. (#45876)
+- Resolve exact targets from their typed bindings without a second resolver environment input. (#45876)
+- Document isolated native Keeper status and failure-continuation evidence, complete 1Password package layout, Skill configuration and separate developer account requirements. (#45878)
+- Model catalog enumeration and exact binding use only the strict catalog's own rows. Remove raw-record catalog construction and caller-supplied row lists; migrate runtime and test consumers together ([#45883](https://github.com/jeong-sik/masc/pull/45883)).
+- Exercise real Keeper lane startup while Session restoration remains held, then verify restored peers, live notifications and concurrent removal. (#45890, refs #25899)
+- Read-only queue observation can now return one coherent complete owner state, including pending entries and committed transition evidence, while preserving the existing typed errors and pending-only projection. (#45897)
+- Retain multiple query keys per generation in `keeper_list_cache`, reuse the already-read persisted metadata row when effective Keeper profile resolution fails in `keeper_list_row_json`, and memoize parsed Keeper `.json` and `.toml` payloads by exact file content. Expired query payloads are released using their existing TTL while live query keys coexist. (#45898)
+- Precompute keeper-independent Candle policy, supply, catalog, and event encodings once per `Candle_observe.t` via `Candle_observe.account_revision_reader`, and batch `Keeper_board_address.read` in a single systhread pass during `Dashboard_projection_cache.with_current_keeper_observations`. (#45899)
+- Add a runtime Korean/English UI language toggle (`KO`/`EN`), a clickable System sub-navigation bar, and numbered section headings across TUI Configuration and detail views (#45925).
+- Document the Experimental language switch, its palette and click controls, partial translation scope, Korean recovery and session-only default in the [TUI guide](../docs/TUI-GUIDE.md#ui-language-experimental). (#45925)
+- Document actual Goal verifier Task-source lookup and correct positive/negative lifecycle judgments, with frozen source hashes, model receipts, dashboard capture and explicit limits. (#45973)
+- Reuse validated SDK schemas for static Keeper descriptors while preserving fresh per-call handlers and Add-on schema construction. (#45990)
+- Exercise Sys.Break and actual child cancellation after canonical Tool observation enqueue, verifying same-coordinator cursor replay without repeating effects or changing committed success. (#46000)
+- Project provider registry and runtime metadata from one immutable admitted declaration snapshot, rejecting conflicting cross-catalog identities. (#46009)
+- Publication recovery records retain explicit replacement or exclusive-create intent through preparation, binding and forensic inventory. Unsupported or ambiguous records remain refused and preserved. This prepares the recovery boundary; exclusive-create publication is unchanged in this layer. (#46046)
+- TUI navigation and language-switched labels show one language at a time instead of Korean–English bilingual titles. (#46063)
+- TUI verification queue: requests with no required artifacts now show only the submitted evidence count, and requests that owe at least one required artifact keep the submitted/required pair and draw in a distinct kind colour, so the rows with a contract baseline stand out when scanning the queue. (#46064)
+- Task Review now explains automatic verification and separates submitted evidence counts from requirements. Browse one evidence item at a time, read saved Board text and comments, and open or save original retained image/file copies with visible local paths. Operator downloads preserve original names and support files above the model inline attachment limit. Failed writes retain their attempted destination; missing or incomplete snapshots report their limitations. (#46074)
+- Derive Apple Keeper guest boot arguments and a stable plan label from the same typed request, with strict runtime-fact comparison and refusal of ambiguous duplicate inputs. This prepares guest adoption across server restarts; adoption behavior is not enabled by this change. (#46076)
+- Consolidate retained repository evidence, research and reports under `docs/`, separate executable dashboard fixtures, and write new local run output under ignored `artifacts/` without overwriting retained captures. (#46094)
+- Preserve capture-time manifests while indexing current file locations and validating retained hashes and historical Git objects. (#46094)
+- Remove the obsolete reports build exclusion after storage consolidation, keeping generated artifacts as data-only inputs. (#46103)
+- Reuse the canonical invocation identity and JSON helpers for Composition delivery. #46158
+- Use one durable scheduled-occurrence equality definition across Owner, handoff and heartbeat, and remove the obsolete handoff interface declaration. #46159
+- Reuse the existing direct-path executable file check in both browser setup and dependency lookup. #46160
+- Share JSON-RPC null-id HTTP error classification across HTTP/1 and HTTP/2. #46161
+- Share connector binding decisions and audit construction while preserving durable transaction ownership. #46162
+- Share official-client carried-history projection and prompt framing while preserving provider sessions and context observations. #46163
+- Share Companion persistence ownership and existing-target checks while preserving distinct lock inodes and uncertain outcomes. #46164
+- Each completed-history Librarian pass logs how many originals and gate records it validated, how many remain unfinished and how long validation took (`durable Librarian inventory validated: ...`), so the cost of a pass shows before any new work (#46243).
+- A completed-history Librarian pass moves each finished replacement chain, its history records and then their gate records, into the settled archive `<base>/.masc/lane-addons/tool-request-owners-settled/` under the day its root was minted, as Workspace Curator chains already are. Later passes no longer read or verify finished work, so a pass costs what is still unfinished. A settle stopped between two records is finished by a later pass; a stop between a record and its body leaves that body beside its scope, as an interrupted retain does (#45320) (#46244).
+
+### Removed
+
+- Remove disconnected Dashboard memory-lens, capability and persistence components. (#45534)
+- Removed disconnected Dashboard chat molecule adapters, their dedicated tests, orphan telemetry styles, and four retired route aliases (#45586).
+- Remove the log-only orchestrator consumer, its configuration and obsolete coverage while retaining orphan-task observation and Keeper shutdown ordering under workspace ownership (#45628).
+- Remove retired orchestrator environment settings from launch templates, scripts, fixtures and performance-harness instructions (#45629).
+- Remove the unreachable Agent Core history eviction/halving graph, its obsolete carried origins and dedicated tests, while retaining live boundary resend and Memory receipt recovery. #45641
+- Remove the alternate Agent execution journal, Builder attachment/auto-dump and save/bridge APIs so durable executions use the typed execution store. (#45854)
+- Remove independent Keeper VM cleanup mutation controllers; keep artifact cleanup under the runtime Owner. #46122
+
+### Fixed
+
+- The installed server no longer rejects its own release receipt as `invalid_receipt` because of the `masc-exec-ssh-bootstrap` companion that the installer always installs, so `/health` reports the installed release as verified again. (#46474)
+- Fixed obsolete completion rejection delivery after Task resubmission: fence queue publication by current authority, preserve delivered receipts for intake, and prevent stale unroutable releases from changing newer work. (#45493, #38059)
+- Exact Add-on workers hold one request body during the first inventory after a start, and check that their store directory is unchanged when they answer from memory. A pending record that is missing, invalid or finished when read again, or a missing or invalid record in the first inventory, now stops the worker: every later call, observations included, fails with that reason without reading the store again. Transient I/O errors fail only that call. Non-regular records are refused without leaking a file descriptor, and errors safely quote record names. Package revisions move to workspace-curator 0.1.3, candle-appraiser 0.1.4 and keeper-librarian 0.2.2 (#45500).
+- Show prompt authoring errors and original Markdown provenance in the TUI without changing body override behavior. (#45509)
+- Document the offline fresh-state recovery required by delivery-specific
+  official-client frontiers, including candidate helper identity, targeted
+  session backups and validation before installation or rollback. (#45512)
+- Keep denied Addon exports out of deferred loading while checking that separately admitted composition recovery controls remain usable. #45513
+- Align TUI action fixtures with the context/incarnation contract and verify schemaless installation decisions without display-text snapshots. #45514
+- Record actual selected Addon test failures, exact native artifact identity and preservation of the original 54 completion criteria. #45515
+- Share candidate quota/rate standing across Keeper, CLI, Vision and HTTP Exact calls; retain admitted runtime identity across callbacks and preserve provider quota reset hints without creating ownerless failure marks. (#45522, #38061)
+- Keep admitted verifier Read, Grep, media and layout operations on the endpoint whose path authority was captured, and correct the retained-worker fixture's model-facing file argument and evidence-store/workspace module references. #45524
+- Record successful selected Addon reruns, verified native artifact identity and actual native On/Off/reconnect with original result/receipt preservation against original A01/A02 criteria, preserving remaining work and historical failures. #45528
+- Refuse boot for Keeper metadata I/O failures observed during examination, even when quarantine is accepted; retain separate JSON and schema rejections for explicit quarantine (#45529).
+- Recheck an ego snapshot target tab after selector waiting, refuse partial-text quoting after native whitespace, and document native ref refresh requirements. (#45535)
+- Require an explicit observed live client for ego hand-off/take-over at the raw browser Add-on export, before browser selection. (#45536)
+- Exact workers replace finished request input bodies with the original ID, digest and result, retaining the destination in multi-tool packages. Workspace Curator 0.1.4, Candle Appraiser 0.1.5, Keeper Librarian 0.2.3 and HITL Auto Judge 0.1.1 use worker record version 2; worker request/result JSON is unchanged (#45540).
+- Bring ego snapshot-target click and fill from the feature branch into main,
+  and recheck the observed URL after waiting for a target so navigation during
+  that wait is refused before input. (#45541, forwards #45494)
+- Bring ego task-space hand-off and take-over into main, and require an explicit
+  observed live client in raw Browser Add-on control commands before dispatch.
+  Automatic discovery and non-live lanes cannot transfer ownership.
+  (#45542, forwards #45523)
+- Capture JSONL boundary fingerprints before folding so a boundary-changing rewrite cannot validate an older projection (#45550).
+- Internal workspace reset unlinks symbolic links without deleting their targets and preserves nested directory recreation for later writers. (#45552)
+- Keeper status and dashboard history retain valid short answers using recorded source provenance instead of punctuation, language, or byte-count heuristics. Remove the fragment-filter setting, obsolete fragment fields, redundant execution facade, and tests of the deleted heuristic. (#45553)
+- Preserve the authoritative provider-turn ordinal through settled terminal replay, Runtime outcomes and Keeper finalization, including official-client host stops, without requiring a new AfterTurn event or deriving identity from runtime counts. (#45563, #38066)
+- Package the exact-source native Addon launcher and its digest/dependencies with the native lifecycle candidate, so isolated worker observations can use the matching executable. #45564
+- Preserve explicit live client identity for hand-off and take-over at both
+  the host selection and worker command boundaries after rebasing onto the
+  current browser action contract. The integrated control regression reuses
+  its single process owner and waits for the exact ego client (#45565).
+- Slack and Discord status read the effective trigger policy directly from runtime parameters, keeping displayed policy consistent with dispatch after post-commit audit failures and removing duplicated mutable display mirrors. (#45566)
+- Preserve metadata lookup I/O failures instead of accepting them as file absence. (#45570)
+- Preserve terminal supersession when a retained verifier commit meets an operator Done or Cancelled decision. Validate the exact retained intent, retain its conflict receipt and close the run without another review or false stall; a competing nonterminal rejection remains a commit failure. #45573
+- Restore each Task verifier's retained original, dispatch facts, exact judgment/domain notes and host commit receipt. Unknown dispatch blocks the actual inner/outer candidate walks; genuine pre-admission refusal retries the same original and definite executed transient refusal requires linked successor authority. #45573
+- Bind the retained verifier fixture to the exported `Masc.Verification` module for its domain request and missing-request recovery checks. #45573
+- Enumerate both retained refusal stages in verifier attempt recovery so strict compilation checks the closed state coverage while preserving the existing retry and child-intent behavior. #45573
+- Default HTTP server Runtime_events rings to the canonical workspace through lease-preserving exec when no directory or active ring is configured. (#45580).
+- Install Poppler and FFmpeg host tools when a minimal behavior run explicitly selects the verification authority suite, preserving its real PDF and MP4 checks without enabling broad presentation or sandbox setup. #45583
+- Keep operator quiz history context in its own durable event so observing past answers does not decode old Exact request bodies. Publish package revision 0.2.1 for the current role/text protocol and preserve pending-session recovery through a fresh compose. (#45585)
+- Decode all context observation absence reasons and distinguish unobserved occupancy from malformed, unreadable, and over-window data across Dashboard Command, Fleet, and Keeper details (#45587).
+- Expose explicit FluidSynth and AlphaSynth SoundFont choices for phrases,
+  retain the chosen engine and source on failures, and show a direct recovery
+  action for incompatible AlphaSynth rendering instead of silently falling back.
+  (#45589)
+- Dashboard mention activity uses exact Keeper addresses and immutable counts, excluding ordinary substrings, email addresses, code and unsupported broadcasts. Rename the derived K2K fields and labels to addressed-message and mention activity so they do not imply verified delivery. (#45592)
+- Reuse prepared Dashboard responses when fresh Candle observations differ only by replay time, while retaining wallet, equipment, address, and account revision updates. (#45594)
+- Recheck execution snapshot identity and publication validity after observation I/O before returning prepared bytes or refreshed JSON (#45595).
+- Settle the file chooser wait even when its opener's click reports failure. Close any chooser that was opened without handing it files, preserve the original unknown click outcome, and leave the next chooser upload usable in the same connection (#45602).
+- Require the prompt authoring diagnostics report in the Dashboard catalog boundary. (#45605)
+- Keep exact query windows, telemetry bounds, optional filters, and source echoes distinct in cached observability responses. (#45613)
+- Preserve program-owned completion review evidence across typed size refusals and evaluator changes, using the actual tool bridge to retain admitted lookup views or explicit projection failures. #45614
+- Preserve accepted failure records for every claimed chat batch member through shutdown and restart; project transcript and journal independently and keep prior assistant output (#45616).
+- Reconcile settled failure history without reviving completed requests or retaining empty recovery placeholders (#45616).
+- Preserve repeated provider text and reasoning until an authoritative stop; remove local repetition cutoff and its abandoned error paths (#45617).
+- Separate captured runtime execution, host acceptance and missing execution evidence; retain identities and observed log attribution without fabricated attempts (#45618).
+- Report explicit Librarian installation, worker and exact-route availability; wake persisted history owners when dependencies change and keep private parser details out of public health (#45619).
+- Preserve an explicit unobserved Memory dependency section in cold and failed full-health snapshots (#45619).
+- Enforce persisted chat journal codec v2 and report unsupported epochs distinctly while preserving rejected files before any append or torn-tail repair (#45620).
+- Preserve official-client session read failures through boot admission and locked quarantine checks while keeping explicit JSON and schema recovery available. (#45624).
+- Preserve event queue I/O, inspection, coherence, ownership and cleanup failures through boot refusal and locked recovery, retaining explicit content quarantine and validated incomplete-journal resume. (#45625).
+- When a system-lane verifier reaches `commit_verdict` for a Task that already reached a terminal state (Done/Cancelled) between the wake and the verdict commit, record the run as superseded by that terminal authority instead of announcing a Stalled task with no retry armed. (#45636)
+- Keep Goal proof preparation in the host library beside Task verifier preparation, preserving the one-way dependency on the neutral Goal domain library. #45637
+- Keep fleet and exact-agent Eval Feed responses distinct while reusing equivalent fleet reads across unused limits and empty selectors. (#45644)
+- Keep Eval Feed listings and snapshots inside the workspace-owned eval tree, refusing traversal and symlink-supplied JSON while preserving literal agent names and retained ordering. (#45646)
+- Initialize the comparison's exact-output lanes from the same immutable configuration observation used to load its runtimes. #45651
+- Keep an opened optional file's short-read failure visible after unlink, and report unreadable Keeper metadata parents as errors rather than absence (#45652).
+- Submit actual nonempty Goal measurement snapshots in worker fixtures, preserving physical shared-root evidence and changed-request conflict coverage instead of passing unsupported note references. The earlier selected run compiled but all four worker cases failed setup. #45654
+- Yield direct Keeper turns to later original input only when it is the actual claimable queue head, preserving continuation FIFO and manual priority barriers. (#45655)
+- Reuse valid persisted startup Admin credentials when the environment override is absent; refuse credential preparation failures before readiness and mint only when both stored halves are absent. (#45657)
+- Refuse backward Clip reconstruction when earlier group tempo/meter state has no actual source baseline by the selected cut, instead of crediting a later declaration. (#45659)
+- Show Keeper memory health, unread turns and Librarian continuity lag first (#45661).
+- Decode current Gate Keeper failure, runtime lane, and administrator Board observations without dropping strict schema validation, restoring the connector Keeper directory (#45663).
+- Advance the Keeper cooling-retry observation wake when a new retry has an earlier deadline, while preserving existing earlier wakes and durable eligibility. (#45665)
+- Reconcile exact proof-ledger partial writes without another model call, preserve post-proof suspension/history and distinguish a changed request from an unchanged request whose commit was refused. Bind recovered proof commitment to its captured workspace. #45671
+- Expose the actual Candle runtime to verifier fixtures; the previous selected run failed compilation before all six cases. Existing callbacks and validation remain intact. #45671
+- The main tree compiles again after #45614 and #45651 merged unbound module references: the tool result projection now lives in the shared leaf library `masc.tool_projection`, and the affected tests and the `masc-librarian-continuity` executable reference their modules through declared dependencies (#45675).
+- The librarian continuity binary builds again: it links `masc_core` and `masc.prompt_registry` directly for the shared `Common.keepers_runtime_dir_of_base` helper, and calls the registry through its real unwrapped name `Prompt_registry.set_markdown_dir` — both introduced by the production working-state measurement (#45676).
+- Backported the published v0.64.0 version, release notes and usage-guide links to main. Preserved the post-cut browser migration clarification: an allocation retained by the operator is left in place and its backend payload is not read (#45678; clarification from #45511).
+- CI builds again when the hosted runner's apt index goes stale: the pin script's `--install` pass refreshes the apt index before opam depext can run apt-get, so superseded protobuf deb versions no longer 404 the whole build (#45681).
+- Retain Goal reviewer replies without a stated reason as settled non-judgments, preserving the exact reply and tool observations across restart. Ordinary wakes do not repeat the review; an explicit completion request can retain one linked retry and commit a later evidenced judgment through the existing human confirmation boundary. (#45684)
+- Match Goal registry and request phases exhaustively so the retained recovery boundary compiles under the repository's strict variant checks. (#45684)
+- Authenticate Goal commit intents against the exact retained judgment, preserving integral receipt metadata through restart instead of changing it during typed re-encoding. (#45684)
+- Require Lane Add-on packages to declare host web search before provider execution, and preserve the original result envelope through inline and retained delivery. (#45685)
+- Enumerate commit refusal variants so the terminal-authority settlement path compiles under strict variant checks. (#45690)
+- Settle late Task verdicts through a distinct superseded outcome after an authoritative terminal-state read, preserving operator completion or cancellation without retry or stalled-review notification. Keep actual nonterminal commit refusals visible. (#45690)
+- Preserve the backend-owned output-token receipt alongside final sync/stream generation bodies and use that exact decision for prepared-request output reservation (#27905). Completion outcome and MASC telemetry propagation remain separate follow-up work. (#45692)
+- Return typed serialization provenance alongside native sync/stream HTTP results, retaining the same output-token receipt on success and post-serialization errors without depending on observer delivery (#27905). Public completion/cache/custom transport and MASC propagation remain follow-up work. (#45693)
+- Preserve native output-token request provenance through HTTP transport factories and runtime wrappers. Custom callbacks explicitly return unobserved provenance, and interrupted calls do not infer serialization state (#27905). Public completion/cache and durable MASC propagation remain follow-up work. (#45697)
+- Return authoritative request provenance from all public completion entrypoints, preserve prepared serialization evidence on pre-dispatch rejection, and distinguish response-cache reuse from native HTTP serialization (#27905). Pipeline and MASC durable consumption remain follow-up work. (#45698)
+- Keep the ego session listener in its handshake scope so Linux socket cleanup cannot break command restart, cancelled startup or worker retirement. (#45699)
+- Preserve returned request provenance through Agent sync/stream routing and persist a separate single-assignment snapshot on its exact provider attempt, including returned errors. Read-only execution projections retain backend output-token receipts and body metadata after reopening the store (#27905). MASC TurnRecord consumption remains follow-up work. (#45700)
+- Validate raw authentication descriptors before creating an OCaml channel, preserving typed nonregular-file refusals and closing descriptors on admission or ownership-transfer failure (#45701).
+- Repair the audit stack's connector policy dependency direction by relocating the unchanged runtime registry into core and sharing one gate-owned typed trigger-policy authority across ingress and status readers (#45702).
+- Publish valid configured trigger policies before connector credential admission so disconnected and disabled connectors report the same policy and retain runtime overrides (#45702).
+- Copy authoritative native request receipts into per-runtime TurnRecord observations and expose requested/effective output tokens in the inspector. Exact call/cursor boundaries prevent stale same-runtime receipt attribution; missing scopes and unavailable evidence remain explicit (#27905). Unbound runtime receipt coverage and operational verification remain follow-up work. (#45705)
+- Keep completed Goal review publication acknowledgements with their original owner through registry display retention, and retain actual tool observations when review raises before rethrowing its original exception. (#45708)
+- Retain backend-owned output-token request decisions for native Keeper calls without a direct-operation binding. Each observed outer API invocation now publishes its canonical journal locator before effects and re-reads the same journal for TurnRecord observations, including returned errors. Missing or corrupt evidence remains explicit. (#45709)
+- Reuse the Goal worker admission projection for durable host publication, and align retention, exception and retry-observation regressions with the original execution contract (#45710).
+- Complete the missing web-search runner diagnostic in Keeper memory availability and qualify the preflight workspace dependency so the reported OCaml build errors are resolved. (#45711)
+- Read missing web-search runner diagnostics in the TUI Add-on inventory without rejecting the host-request cycle. (#45712)
+- Preserve typed message origins through canonical history, checkpoint v14 and MASC context captures. Distinguish runtime context, recovery and tool followups from caller input, and prevent an actual User message from being absorbed into a tool result. Provider-native origin lowering remains separate follow-up work. (#45715)
+- Use the canonical typed file-input target in the Firefox controls upload proof (#45717).
+- Keep native Ollama tool-result images on their correlated tool response so media does not introduce a synthetic caller-query boundary. (#45724)
+- Select official DeepSeek reasoning replay from the effective outgoing tools array, preserving all prior reasoning for tool-enabled requests and matching the read-only Keeper request view. (#45728)
+- Restore saved Prompt Presets that did not record lane request settings. Unrecorded settings retain current values; unavailable lanes remain inspectable and are explicitly skipped (#45730).
+- Use the canonical runtime parameter module in Dashboard Labels tests after its core move (#45731).
+- Viewport workflow snapshots use Ego's native default call, matching BrowserRead, rather than forwarding MASC's `viewport` spelling as an unsupported SDK scope. #45733
+- Retain OAuth credentials in an explicit native protected store, verify the inactive record before committing a nonsecret reference, and preserve active recovery authority when storage fails. (#45742)
+- Limit blocking OAuth socket I/O so a stalled exchange or refresh releases the connection locks while retaining its uncertain-operation recovery record. (#45742)
+- Normalize truncated OAuth HTTP responses to a safe transport error while retaining the original exchange/refresh recovery fence. (#45742)
+- Lower Qwen3.6 SDK controls into one initial System frame before selective reasoning replay, preserving caller and tool-media boundaries while keeping canonical histories unchanged. (#45743)
+- Close a captured chooser after a failed file assignment so subsequent chooser uploads can proceed; preserve assignment and cleanup failures without replaying the requested files. #45744
+- Mark the development connector Experimental and document supported disable/removal controls without treating a saved setting as confirmed shutdown or account revocation. (#45745)
+- Run the connector in its own environment with the pinned protected-store dependency and explicit host setup instructions. (#45745)
+- Filed image evidence is withheld from verification and operator previews when its current bytes or size differ from the submitted snapshot, including typed diagnostics in the TUI. #45749
+- Coding evaluation reports separate configured model, provider, memory mode and experiment cohorts, refuse ambiguous duplicate evidence keys, and preserve unknown total costs while including failed-run spending in cost per solved acceptance. #45753
+- Calibration reports runtime diversity separately from model independence, preserves an unknown rate when no runtime pair is recorded, and exposes unobserved model coverage through the dashboard API. #45754
+- Coding evaluation grades one captured candidate in isolated Docker containers, restores the complete Node oracle, and refuses resume receipts whose source, corpus, configuration, binary or image inputs changed. The driver explicitly supports Docker grading only. #45755
+- Restore accepted Prompt Preset settings while preserving current assignments and whole lanes rejected by the Runtime writer or unavailable catalog assignments. Show exclusions and partial restore state in Web and TUI without guessing replacement models. (#45759).
+- Preserve native turn-scoped System context and signed-thinking creation prefixes on explicitly supported Claude models; include scoped headers in prefix verification and Count_tokens beta selection. (#45760)
+- Keep saved Prompt Preset Runtime exclusions visible in the Web result, with per-target reasons, partial-restore attention and a compact count summary. Document existing snapshot recovery and copied-data measurements in the [Prompt Presets guide](../docs/guides/PROMPT-PRESETS.md). (#45761).
+- Preserve the operator callback authority check with the backend's explicit OAuth socket inactivity limit. (#45765)
+- Validate optional callback metadata without changing routing authority, and settle exact declined callbacks without exchanging credentials or borrowing an absent integration key. (#45765)
+- Persist a declined callback acknowledgement with its protected cancellation so a matching redelivery can recover after response loss, while other attempts and ordinary views cannot replay it. (#45765)
+- Distinguish Task lifecycle approval and cancellation from unobserved external acceptance in Task metrics, `masc_agent_fitness` (`task_lifecycle_success`), and Dashboard labels, while keeping Goal human confirmation separate. #45766
+- Fix provider error matching, host context notice origins, and exhaustive completion worker error handling to resolve compiler failures. #45768
+- Retain Task verifier judgments and observed execution facts atomically, reconcile typed terminal-authority races without another apply, and recover confirmed registry publication through its durable acknowledgement (#45769).
+- Preserve original native MiniMax inline Chat content through parsing, persisted history, reasoning projection and tool admission using validated replay witnesses and explicit carrier provenance. (#45772)
+- Keep unknown Stagehand delivery distinct from idle so a receiver failure
+  cannot admit later input. Discard raw CDP/private socket parse and transport
+  exception text before it can reach connection status or logs. #45773
+- Redact CDP command rejections and receiver exception details at delivery,
+  including failed model replies, while preserving before-effect refusal and
+  uncertain-effect recovery states. (#45773)
+- Deliver the current shared Goal criterion, reported measurement and read failures to a Keeper's direct owner request, using the same renderer as autonomous turns. #45774
+- Derive direct-turn Goal IDs and summaries from one authoritative observation, preserving unavailable state without a second Goal-store read. #45774
+- Keep independently bound retained verifier scopes from blocking another Task review after provenance changes, while unsupported target originals remain retained and cannot authorize redispatch. #45775
+- SSH bootstrap can prepare Keeper workspaces without GitHub tokens, preserves endpoint tool environment settings on reinstall, refuses symlinked workspace paths, and reports remote shim probe failures. (#45776)
+- Preserve distinct coding-eval model/run identities, validate all cohort fields before resume, and reject duplicate JSON keys before collecting or reusing receipts. #45779
+- Reject duplicate capability-manifest model identities and require validated manifest values at installation. (#45780)
+- Keep metric and agent-fitness tools usable in composable plans by emitting their supported primitive schemas, and exercise invalid NaN input through the authoritative metric reader. #45781
+- Distinguish declared provider policy from an explicit thinking override in provider tests, and document SDK response-label and missing model-identity coverage precisely. #45782
+- Offer Task creation and Goal measurement directly on a Keeper's initial tool surface so ordinary Goal work does not require a separate tool-loading step. #45784
+- Cancel and join active page/companion work when its exact extension worker is
+  lost, discard results returned during cancellation and keep stale events from
+  fencing a reopened browser. Keep private reply kinds and parser/transport
+  errors outside retained public model results. #45785
+- Preserve the actual collected provider binding in Agent state and checkpoint identity, and reject ambiguous nested replay contracts. (#45786)
+- Retain validated tool-free MiniMax inline Chat carriers when canonical text and reasoning are blank, after source and replay-policy admission. (#45787)
+- Align the inline-replay serializer interface with its implementation and exhaustively normalize the existing segment constructors. (#45787)
+- Keep a confirmed identity-bound owner termination request distinct from failed or pending readiness observation, without claiming process exit or replaying the request. #45790
+- Retain the current Goal criterion and measurement through a Keeper turn's tool requests, while keeping other world snapshots first-request-only. #45791
+- Carry an authoritative empty Goal observation through held-session Resume when the last active Goal ends, while preserving missing and unavailable observations. #45791
+- Report confirmed graceful shutdown requests separately from readiness failures or pending drain, and re-inspect setup without sending another termination request. Ship the CLI receipt producer and Python consumer together. #45792
+- Fix TUI lane-summary warning 4 by explicitly matching skill-evidence constructors without changing rendered output. (#45794)
+- Deployment preflight reports each completed store immediately, names refused stores and counts in its final error, and identifies turn-record and official-client history failures by full file path and physical line. Unreadable turn-record files are counted as refusals rather than silently skipped. The installer links a scoped hard-cut guide covering stopped writers, verified backups and dependent history/progress evidence. No runtime state is reset or migrated (#45796).
+- Show task titles without duplicate task IDs on operator-attention rows in TUI Home, Agenda, and Dashboard, display the stalled reason on TUI Task Detail, and prefill the cancellation reason when cancelling a stalled operator task (#45797).
+- Refuse incompatible stored reasoning before provider-bound checkpoint resume and after dispatch hooks, preserving canonical history, declared endpoint rotation and honored caller replay exclusion. (#45798)
+- Align output-token, native-retention, and Task reviewer test consumers with their current typed interfaces so main type checking can cover them. (#45800)
+- Declare the allocation fixture's direct `masc.fs_compat` dependency so its cleanup call compiles with implicit transitive dependencies disabled. (#45806)
+- Private companion retirement closes and joins the original listener and Browser settlements, preserves descriptor-close uncertainty, and retains stopped IPC filesystem entries with a host warning instead of deleting replacement socket or directory paths. (#45806)
+- An abandoned known extension operation remains unconfirmed when its original Browser is stopping or replaced; only an absent operation or confirmed original Release can certify settlement in this layer. (#45806)
+- Let Ego own native workflow waits: remove added step-count, default timeout and cumulative execution limits, await actual SDK settlement, and preserve explicit timeout options. Native workflow/upload/chooser calls retain host cancellation and process cleanup without a cumulative execution window. Record component checks, successful installed-SDK execution and the SDK's rejected timeout-zero attempt separately; ordinary target-input transport windows and current full-host/Keeper verification remain outside this proof (#45812).
+- Remote SSH commands authenticate independently with the declared key and pinned
+  hosts file. Removed ControlMaster sockets that failed under long workspace
+  paths, and prevented cached connections, default keys or ambient SSH agents
+  from masking changes to that authority. (#45814)
+- Declare canonical content carriers in the existing checkpoint binding fixtures so they match the required replay contract. (#45816)
+- Let Ego's native selector/ref input use SDK-owned waits while retaining other-browser and guarded-input policies. Keep a live connection for its actually running executor-owned request, releasing ownership on settlement, cancellation or disconnect; queued work cannot preserve a dead connection. Restore native workflow cases in browser selection and host admission, and retain focused lifetime tests and failed preceding-candidate CI evidence (#45821).
+- Keep chooser cleanup in Ego once file assignment starts; remove the second `setFiles([])` after an SDK failure, with actual same-process failure/recovery evidence. Captured choosers rejected before assignment still close once. (#45821)
+- Preserve the private reply window for selector requests; leave transport-specific SDK waits with the worker's admitted browser. (#45821)
+- Complete native workflow browser binding and discovery-only validation, and use the canonical typed ID module in TUI ask observations. (#45824)
+- Resolve TUI Ask timing provenance through the exported turn identity module while preserving the original Ask identities. (#45828)
+- Repair the raw TUI frame hook's identifier module reference and complete native browser workflow admission and exact browser binding matches. (#45829)
+- Let Ego own the SDK waits for ordinary navigation, reload and newly created page navigation, matching native workflows. Retain original tab/partial-creation receipts, explicit cancellation and other-browser reply policies (#45830).
+- Persist the original Telegram recipient and complete prepared request before Keeper admission, refusing cross-Keeper retries after cursor publication failure. (#45831)
+- Keep Telegram polling in the server by removing the external Python bot, connector subprocess lifecycle APIs and unused launcher configuration. (#45834)
+- Rasterize vector artifact previews at the visible terminal resolution, preserve source pixels at Fit, retain the document source anchor while diagrams settle, and keep terminal graphics replies from cancelling image reads. (#45835)
+- Show native Telegram setup and committed gateway state in the dashboard, remove external process controls, and distinguish configured connections from actual connectivity. (#45836)
+- Share the connector ID vocabulary between route filtering and native gateway setup. (#45836)
+- Exercise the package's declared interpreter and working directory in the host protocol fixture using an owned virtual environment, while retaining discovery, grant and status validation. (#45838)
+- Goal measurement receipts now report the actual Goal phase captured by the
+  recording transaction, alongside the reported observation and unchanged
+  completion effect. MCP and HTTP use the same serializer. Keeper reporting
+  instructions distinguish measurement from verification and final human
+  confirmation; no completion policy or runtime gate changes. (#45839)
+- End Ego's SDK session when its owning IPC connection ends, including while an async call is pending, and discard buffered commands after owner loss. Preserve live-owner execution and unknown browser-effect semantics without adding a work deadline or closing the user's browser (#45841).
+- Repair native companion command interface order, successful-start connection fields and the private operator HTTP namespace found by the macOS candidate build. (#45842)
+- Preserve complete Lane evidence and delivery receipts in a durable result manifest for Keeper projection, retaining unknown effect status if manifest storage fails. (#45843)
+- Align glossary entries with the typed retained-input observation, native worker release, recent action, and tool-loading contracts. (#45847)
+- Keep an unreported remote shim release distinct from a confirmed release mismatch in Keeper lane guidance. #45849
+- Let autonomous Keeper wakes answer Telegram and iMessage origins through exact Gate-approved native routes, with fresh binding checks and truthful actual-destination receipts. (#45851)
+- fix(addons): supply companion fixture Unix dependencies and retain uncalled settlement notifications (#45852)
+- Task approval and rejection observations retain their correlation keys in
+  the current turn's System context after tool replies. Official-client Resume
+  repeats these observations with exact source attribution; Start projects the
+  current event outside the vendor standing System. Goal context keeps
+  its existing lifetime, and other first-round world context remains separate. #45853
+- Dashboard memory inspection renders the Completion Authority input component
+  using its existing block metadata. #45853
+- fix(addons): exhaustively handle origin filesystem errors and declare original-invocation fixture dependencies (#45857)
+- fix(addons): decode tool-result queue notices alongside companion publication source validation (#45858)
+- fix(addons): preserve exhaustive receipt-pointer checks in the Codex outbox wake consumer fixtures (#45858)
+- Native MiniMax Chat replay activates through ordinary provider/model lookup,
+  including explicit M2 variants and M3/M3.1-Flash. Complete assistant content
+  is preserved through sync/SSE history. #45859
+- Keep native MiniMax rows valid in the strict catalog using exact model identities and declared provider bindings after removal of endpoint identity metadata. (#45859)
+- fix(browser): initialize the controlled extension companion fixture through the actual tab summary contract (#45860)
+- Decode the exact successful Stagehand response envelope before checking the original companion fixture payload (#45860).
+- A Task resubmission captures the current immutable Task and producer evidence
+  on its first attempt. Previous verification correlation stays in verdict and
+  event records and is not merged into artifact evidence. Capture, commit and
+  notification share the same submission snapshot. (#45861)
+- Capability manifests now declare exact model_id identities in schema version 2. Unknown variants do not inherit capabilities, declaration order cannot change lookup, and missing/null model lists are rejected. (#45862)
+- Native Keeper lifecycle fixtures follow the real unread/Owner boundaries
+  and terminate on explicit provider results after repeated tool execution.
+  Auth retry must reach a successful terminal; callback-isolated assertions
+  cannot hide a stale submission snapshot. (#45867)
+- fix(addons): retain late private Browser bindings through cancellation and align native fixtures with real lifecycle and Keeper admission contracts (#45868)
+- Add provider wire conformance coverage for structured tool intermediates, refusal, truncation and thinking-first JSON extraction (#27868). (#45869)
+- Expose the actual SSH workspace in Keeper prompts and Execute metadata, preserve remote output path bytes, and allow endpoint-absolute cwd and file paths through existing containment checks. #45870
+- Teach the TUI system-prompt reader the `workspace_unavailable` refusal reason this change adds on the server, so the operator sees the endpoint workspace failure by name instead of a decode failure. #45870
+- fix(keeper): admit companion notices in their original invocation and conversation without consuming deferred independent sources (#45871)
+- fix(keeper): declare the publication fixture Keeper and initialize its Codex route before testing inactive receipt-hint retirement (#45871)
+- Require exact model IDs in catalogs and explicit exact provider sharing; reject legacy prefix keys and duplicate constructed rows. Preserve CLI suggestions through declared presentation metadata (#27898). (#45872)
+- Verification fixtures use durable replayed Registry publication, preserve
+  rejection correlation outside submitted evidence, and supply a measured
+  assistant before Claude terminal hook checks. The audit records actual main
+  Goal measurement and proof-pending receipts separately from isolated results. (#45874)
+- Run the Browser extension companion fixture on the real Unix Eio backend and compare complete canonical publication envelopes in broker retries. (#45875)
+- Refuse a companion tool's late success unless its original provider, declaration, principal and invocation admission are still valid. (#45877)
+- Reuse and verify early-retained companion proof binaries instead of overwriting their read-only executable copies before the real Browser probe. (#45879)
+- Serialize Cohere compatibility schema output with its declared Chat envelope while retaining schema capability admission and frozen request identity. (#45881)
+- Deliver a host-owned unknown notice to the original Keeper invocation after an accepted companion provider exits, preserving its Task and conversation without fabricating a worker result. (#45882)
+- Confirm an abandoned original Browser binding only after its captured worker
+  stops and returns a matching settlement receipt, preserving independent late
+  publication authority. (#45882)
+- Verify worker-exit companion retirement through original socket refusal and
+  retained path identities, then join the owner on Detach. (#45882)
+- Preserve consumer request-schema semantics when retaining and reading Exact execution proofs, so Stagehand act answers with an object-or-null action can reach their original Browser model waiter. (#45885)
+- Preserve prompt override mutation availability after callback exceptions, and allow restore observers to persist a repair after the restored state commits. (#45886, refs #25891)
+- Retain the original Keeper turn on Dashboard surface posts and audit their typed terminal effect without comparing the posted body to a suppressed model reply. (#45887)
+- Compare canonical expected JSON in the Exact consumer act fixture so nested object member order does not fail otherwise valid proof and Browser delivery checks. (#45888)
+- Start Keepers after their runtime and persistence prerequisites without waiting for unrelated agent session discovery or falsely failing that discovery by elapsed time. (#45889, refs #25899)
+- Continue independent post-readiness startup callbacks after a synchronous failure, preserve every failed attempt, and expose startup-attempt evidence separately from service readiness. (#45891, refs #25899)
+- Distinguish Fusion's delivered judge success, failure, skipped judgment and successful fallback with failed judge nodes in invocation metrics, separately from sink delivery success or failure. Refs #25913, #23005. (#45892)
+- Enforce existing MCP tool-profile membership at the shared executor boundary so direct callers cannot bypass it; reject before tool hooks or effects and retain caller/audit attribution. Refs #25930, #22179. (#45893)
+- Count Gate-rejected trajectory calls in hourly failure totals using the same predicate as per-tool statistics, including rejections without separate error details and counting combined error/rejection rows once. Refs #25913. (#45894)
+- Keeper-scoped approval audit reads count actual matching records through the strict reverse reader, so unrelated Keeper traffic cannot hide durable history behind an estimated tail. Visited corruption remains explicit. (#45895)
+- Keeper chat approval lifecycle cards now link to the exact pending request. The approval page preserves that identity across reloads and shows unavailable detail instead of selecting another request when the target cannot be shown. (#45896)
+- Scheduled Keeper wakes retain committed completion, failure, cancellation and transfer evidence while reaction projection is pending, so the schedule page distinguishes settling from a lost wake and verifies exact durable source provenance. (#45901)
+- Suppress macOS Keychain authorization dialogs during 1Password protected-record reads and writes, restore the preceding interaction policy, and report unavailable when access requires approval. (#45902)
+- Sync `test_browser_task_capabilities` and `test_enum_mirror_sync` with the Ego `native_workflow` capability and `masc_browser_interact` workflow parameters (`steps`, `snapshotScope`, `maxChars`) after #45733. (#45903, #45726)
+- Viewer TRPG requests from cards, URLs and restored mode state now report explicit unavailability before starting unsupported polling or game requests. (#45904)
+- Pass the current Goal criterion's reported measurement and evidence locator into a fresh immutable proof-verifier prompt while preserving existing lookup authority and retained proof recovery. Selected native82 cases pass; isolated GLM5.3 source-grounded positive/negative controls and actual development-dashboard captures are recorded separately from production installation. (#45906)
+- Keep pending Codex tool calls responsive and preserve undelivered results for the next Keeper turn without repeating completed effects. (#45907)
+- Restore every page of pending Keeper chat operations after reload and allow Worker sessions to open their supported queue controls. (#45908)
+- Let unrelated Keepers prepare microVM guests concurrently while preserving same-Keeper and inventory lifecycle ownership. (#45909)
+- Clarify external MCP credential and session lifetimes, with an isolated installed-server restart proof for one unchanged Worker bearer. (#45911)
+- Verify informational completion input reaches a real Keeper checkpoint and durable ACK, with later-work retention and fresh-process intake checks. (#45912)
+- Declare the informational checkpoint fixture model by its exact catalog identity after strict model catalogs, preserving the provider, checkpoint and durable ACK assertions. (#45912)
+- Include the SSH endpoint bootstrap companion in release and local installation, runtime packaging and verified rollback, so installed operators can provision SSH Keepers without building the helper from source. #45915
+- Initialize the shared playground before fresh Goal proof review, so public-source Goals can prepare verification before a Keeper exists. Preserve existing state, producer evidence and pending request identities on re-initialization. Publish separately scoped actual Keeper-to-Goal and Docker grading measurements with failures and human-confirmation limits retained. (#45916)
+- Add Board exact-flow conformance for unconfirmed callback durability, covering blocked dispatch/advancement and retained quarantine. (#45920)
+- Clear the image entrypoint for Docker read commands so a missing search executable cannot be reinterpreted as successful no-match evidence. Keep genuine no-match exit 1 and existing sandbox routing. (#45922)
+- Update Cohere schema-wire regression fixtures for exact model declarations, capability manifest version 2, and the current resolver entrypoint (#45923).
+- Correct Librarian union expectations and provider/CLI failure argument types, and keep the wrapped Masc import outside the complete test documentation comment. (#45930)
+- Cover the Telegram continuation kind in the exhaustive Discord thread-parent match so `dune build @check` passes again after #45831 added the constructor (#45931).
+- Preserve full Responses reasoning text through sync history and request replay, with encrypted reasoning priority, summary fallback and explicit Responses-only plaintext policy. Keep opaque artifacts bound to their exact endpoint. (#45932)
+- Verify peer artifact delivery through the recipient sandbox before reporting completion. Repeated materialization reuses exact existing bytes, and a lost writer response can be recovered by readback without replaying the write. Approval decisions, cancellation, and original write evidence remain authoritative. (#45933)
+- Recover unread Codex tool results through the existing durable Keeper queue on retention, startup, and maintenance. Queue admission does not acknowledge result delivery; failed recovery turns remain retryable until successful exact-snapshot acknowledgement. Paused owners and non-Codex routes retain their results without forced restarts or effect replay. (#45934)
+- Keep the named-tool-choice catalog fixture inside its inline-test module, so release builds with inline tests disabled do not retain an unused test helper. Production capability selection is unchanged. (#45937)
+- Fix the TUI schedule-read build failure by reusing the exhaustive chat-surface predicate; message-target and roster-target ownership stay unchanged. (#45938)
+- Share one schema-cache lookup and byte-count publication implementation across disabled and active observation, retaining concurrent winners and cached JSON identity. (#45939)
+- Reuse the exhaustive chat predicate when applying Keeper schedule replies so the target check compiles with fragile-match warnings treated as errors (#45941).
+- Require a framed remote execution after installing an SSH shim before bootstrap reports success. Preserve transport and shim refusal details instead of reporting a missing remote root when its check never ran. (#45942)
+- Preserve full Responses reasoning across streaming boundaries and replay, reconcile indexed channels without duplicated summaries, and propagate owned thinking replacement through redaction, journals, TUI and Dashboard state. (#45950)
+- Clarify the Ego SDK/MASC chooser cleanup boundary, implemented native drag routing and the measured serial-session gap on SDK 0.6.1.11. (#45955)
+- Keep catalog fixtures inside inline tests and reuse the exhaustive Keeper chat view guard so release and focused builds retain their strict warning policy. (#45958)
+- Retain owned thinking block position through redacted replacement and durable TUI replay, and preserve Dashboard replacement prefixes when pending stream batches are reconstructed. (#45962)
+- Keep a healthy Goal's verification and retained result publication moving when another Goal's original body is damaged, while retaining strict metadata and selected-original validation (#45963).
+- Declare the required sandbox profile and registry owner in Keeper tool-result recovery test fixtures so the recovery scenarios reach their intended behavior. (#45965)
+- After an Apple work/build volume create times out, inspect that exact volume once and continue when its presence is confirmed. Preserve the original error if the volume is absent or unreadable; never replay create or claim recovery across calls or restart. (#45967) (#45968)
+- Native MiniMax M3.1 Chat transmits its documented reasoning depths and preserves explicit enable with omitted depth through a typed default-on declaration. Runtime configuration and Dashboard inventory retain that declaration; disable requests remain rejected. (#45972)
+- Keep observed Goal verification work queued when review slots are occupied, and drain the remaining Goals when a worker finishes or fails without automatically rediscovering failed originals (#45977).
+- Provider:model labels retain their selected provider identity and use its scoped context/tool policy, preventing unrelated bare model declarations from supplying another provider's limits. (#45980)
+- Preserve Firefox production memory, window-occlusion, background process priority, and hung-script guards under WebDriver BiDi and `geckodriver` automation by pinning `Browser_gecko_profile.resource_guard_prefs` in `<profile>/user.js` and `moz:firefoxOptions.prefs`, and heal profiles left with `remote.prefs.recommended.applied` overrides in `<profile>/prefs.js` after an earlier `SIGTERM` or crash (#45979, #45983).
+- Show retained-original read failures on the current Goal request and its Board stall notice, clear repaired observations, and prevent another workspace or replacement request from inheriting stale diagnostics (#45986).
+- Custom model labels require an explicit HTTP(S) endpoint and reject malformed authority or port inputs instead of borrowing environment/discovery destinations. (#45987)
+- 공동 편집 문서 전문은 각 접속의 첫 스냅샷과 새 문서 시퀀스에만 전송하고, 커서만 바뀐 프레임은 문서를 생략합니다. 같은 접속에서 이미 확인된 커서 위치는 재전송하지 않고 재접속 후에는 최신 위치를 이어서 전달합니다. (#45988)
+- Recover superseded retained input checkpoints (`pending_input = None`) across hard-cut checkpoint version bumps and turn-count resets in `Keeper_input_checkpoint_producer`, `Keeper_history_clear`, and `Keeper_input_wait_observation`, restore pre-#45715 (`v13`) durable Librarian `completed-history-execution` records without blocking history publication, and suppress duplicate `settled_failure` rows in TUI chat history when an operation already has a `terminal_result` `request_failure` row. (#45991)
+- Reuse a valid local Admin credential when its token file has surrounding whitespace, and normalize persisted token-file values at HTTP client reads without changing raw-token APIs, explicit bearer values, credential metadata or expiry. (#45992)
+- Resolve runtime model labels through the selected catalog binding and require its explicit default model for auto selection. Reject blank explicit default configuration. (#45993)
+- Preserve a committed Agent result and lifecycle when raw-trace finalization or ordinary observer diagnostics fail; reserved exceptions still propagate after lifecycle finalization. (#45995)
+- Include the artifact draft handler in built-in schema caching and observation when integrating current main. (#45996)
+- Preserve canonical durable tool occurrence identity across hooks, committed Event_bus observations and reopened readers; deliver completion after product observers and retry transport failures without repeating effects. (#45999)
+- Goal proof prompts distinguish declared measurement and evidence requirements from approval instructions, compare each required condition with observations, and explain the evidence scope in the verdict reason. Reported-number metrics, shared originals and declared aggregation retain their scope. Separate controls and a retained insufficient original11 approval preserve prompt identities without claiming production application or completion of the original Goal. (#46001)
+- Keep runtime capability projections and completion observers aligned with config-owned request admission, preserving frozen missing policy after catalog replacement. (#46006)
+- Preserve tools, native streaming and chat protocol defaults for anonymous `custom:` endpoints while keeping missing declared-provider policy conservative. (#46006)
+- Require typed message origins and current canonical checkpoint admission for retained Librarian input; remove metadata inference and alternate digest formats (#46007).
+- 공동 편집의 원고·문장 복구본을 입력 버전별로 보관해 이전 저장 응답이나 복구 완료가 다른 탭의 새 사본을 지우지 않도록 고쳤습니다. 브라우저 저장 공간이 부족할 때는 기존 저장본과 현재 입력을 유지하고, 다른 탭의 복구본도 목록에 반영합니다. (#46008)
+- Freeze exact model policy from the provider selection so catalog replacement cannot change a selected request or restore replaced seed permissions (#46014).
+- Preserve earlier atomic replacement cleanup failures when a later cleanup step is cancelled, retaining the original cancellation reason, backtrace and write authority (#46016).
+- TUI: a theme pick now saves on an install whose runtime.toml still carries
+  legacy keys a released masc once read (`models.*.max-prompt-bytes`,
+  `models.*.capabilities.supports-reasoning-budget`). Those keys are
+  recognized and ignored instead of failing the parse, and a save that lands
+  names them in one status-bar line so the reader knows the old key is inert.
+  A file with a real gap (e.g. a model binding with no max-context) still
+  refuses the save and says why. (#46017)
+- Normalize HITL judge context with the original-request store canonical form before retaining or preparing HTTP/CLI requests, preserving model-message bytes across reload while rejecting invalid JSON (#46020).
+- Goal proof instructions distinguish required subjects, states and delivery paths and use the content/range actually returned by lookup tools, including EOF and excerpt-local offsets. Reported values, declared aggregation and shared originals remain supported. Retained old insufficient approvals, three bounded controls and a later revision-refuted replay do not establish eleven-case proof or production completion (#46021).
+- Preserve actual recovery-record removal effects, original cancellation authority and interrupted write failures when cancellation arrives after record unlink. (#46030)
+- TUI: the config-save receipt decoder now accepts the `ignored_legacy_keys` commit member that main serializes (8e85e45ecc), so a successful dashboard/runtime config save is no longer rejected as an invalid receipt (#46031)
+- Cost-latency telemetry preserves missing token and cost readings as null in
+  exports and Dashboard decoding, retains explicitly reported zero, and avoids
+  presenting incomplete observations as complete lane or global totals. (#46033)
+- Restore completed Librarian absorption evidence after owner progress normalizes integral JSON numbers, while retaining strict request, destination and evidence validation (#46037).
+- Keep optional file reads on their documented `Sys_error` path when a directory cannot become a channel, allowing Librarian to retain its storage-failure evidence (#46038).
+- Make server startup rely on its HTTP listener and workspace lease, preserving unrelated port holders and linked PID observations instead of signalling or rewriting them; refuse a busy bind without retrying (#46041).
+- Keep Settings reachable on short desktop screens by scrolling the navigation rail without shrinking its menu buttons (#46042, #46043).
+- Bind companion origin/publication creation to mandatory private recovery and target capabilities, and reconcile unchanged pre-existing files without hiding cleanup or recovery-release failures. (#46049)
+- Hold the existing cross-process owner lock before companion recovery readiness so concurrent retries cannot reconcile a live writer's obligations. (#46049)
+- Exclusive file creation now requires its paired recovery target and owner capability, stages and syncs the payload privately, then publishes with a descriptor-relative no-replace rename. Append-to-missing follows this boundary; existing-file append remains independent. Removed direct public-leaf creation and its partial-public-target state. (#46049)
+- Standalone report exports use a stable owner in the destination parent's publication recovery registry. No-replace refusals discharge their exact obligation after cleanup; interrupted cleanup preserves typed cancellation evidence. (#46049)
+- CI: fix the Main minimal build after #46021 — the verifier review-owner test stanza now links `yojson`+`unix` it uses, and the keeper-task-query-replay probe builds the new `{lifecycle; projection; selection}` cursor filter (#46050)
+- Cache decoded successor-recall transitions instead of raw journal JSON in `recall_journal_cache` and avoid re-decoding cached rewrite lines on every recall query (#46057, #46058).
+- Stream all-scope original request discovery via `Lane_addon_tool_request_owner.fold_all`, memoize per-owner `Keeper_librarian_admission_parts.discover` within a wake scan, and coalesce concurrent Librarian Addon configuration/export wake rescans (#46057, #46058).
+- Dashboard API parser reads the top-level `code` field of server refusal bodies (`{"error": "...", "code": "..."}`) before falling back to the error sentence, so refusal-code branches like `workspace_precondition_failed` match again instead of showing the shared-editing hint. (#46059)
+- Main minimal build Set B partial-match: the two TUI chat test `delta_to_string` matches now cover the `Thinking_snapshot` constructor that #45950 introduced. (#46061)
+- CI: fix the Main minimal build after #46031 — the five runtime-config receipt test literals now supply the required `ignored_legacy_keys : string list` field the decoder contract added (#46062)
+- Dashboard: the desktop keeper nav keeps its active marker visible — `overflow-y: auto` on the rail now comes with the marker drawn inside the item, so the `left: -10px` rail edge no longer clips it (#46065)
+- TUI: in Korean input mode, letter shortcuts (j/k, q, i, d, s, ...) were silently dead — the terminal delivers the input method's Hangul character and no command spelling matched it. A command context now reads the two-set layout back into the Latin keys (`과` replays `r h k`), while every text field, the chat composer and the lane Add-ons drafts keep the Hangul as typed. Known limit: shift does not survive the input method, so uppercase shortcuts stay dead in Korean mode (#46066).
+- Restore dashboard typechecking for Keeper history fixtures without weakening cursor or settled-failure assertions. (#46070)
+- Fix OCaml warning-4 build failures in companion origin and publication retention while preserving existing-file detection. (#46073)
+- Keep repeated Keeper artifact materialization and recovered writes readable by attaching a durable manifest to each newly generated verification result. Preserve effect evidence and artifact roots if result storage fails, without repeating the write. (#46080)
+- Let Keeper provider/model changes retain canonical checkpoint history while deferring replay admission until the next caller query; only target-unselected foreign reasoning is excluded, and active mandatory replay remains protected. #46082
+- Match replay admission to the actual post-hook request tools, and preserve required tool reasoning when a transmission window omits its caller boundary. (#46082)
+- Restore TUI verification-evidence exports after the filesystem publication API change, retaining private files and recovery-aware exclusive creation. (#46085)
+- Verify durable GLM checkpoints continue through native DeepSeek and Kimi Chat/SSE tool rounds without replaying settled effects, and document source-change recovery and dispatch refusals. (#46087)
+- Keeper chat now keeps scheduled wake arrival, pending execution and occurrence results visible, with separate repeating-job hold reasons and explicit stale observations. Exact queue misses, contradictory evidence, transferred pending work and pending work retained after declaration cancellation retain distinct states; completed turns do not claim result delivery. (#46092)
+- Preserve supported missing-stimulus receipts as unconfirmed observations so they do not hide neighboring scheduled Jobs; retain strict rejection of contradictory identities and progress. (#46092)
+- Main minimal build: add the missing `fs_compat` library to the `test_tui_resource_export` stanza after #45775/#46049. (#46093)
+- Treat generated artifacts as Dune data-only inputs so incomplete evidence snapshots cannot break source discovery through missing include files or copied build stanzas. Add a regression check to the existing test suite and document the output boundary. (#46100)
+- Five test fixtures (`test_keeper_surface_post_turn_ref`, `test_keeper_event_genealogy_capture`, `test_keeper_memory_select` ×2, `test_keeper_memory_select_capture`, `test_keeper_memory_select_provider_wire`) now bind `artifact_draft_scope = None` in their `Runtime.context` literals, restoring the tree build after #45996 made the field required. (#46104)
+- Allow independent review approvals while other reviewers' change requests remain open, so reviewers can replace their own requests without a circular wait; merge admission and source receipts still reject outstanding change requests. (#46111)
+- Keep local release proof and feedback-loop measurements under `artifacts/`, with matching Make commands and contributor guides. Explicit release-evidence output paths remain supported. (#46112)
+- Provider error payloads on the streaming path are classified as provider errors instead of wire failures: Gemini SSE in-stream `{"error": ...}` chunks and 200 responses answered with a bare JSON error object (no `data:` payload) now keep the provider's declared 429/5xx status, so retry policy applies as it would for a pre-stream refusal (#46116). Closes #39098.
+- Allow current-head source approvals to be published independently of existing verdicts and selected CI, while merge and source-receipt admission retain account-owned blockers and reject cross-account PASS overrides. Repeated own-CR replacement, reapproval after a newer negative decision, pending-review exclusion, and actionable queue/CI diagnostics are covered by offline regressions. (#46117)
+- Keep PASS-formatted change requests blocking, and distinguish unavailable diff evidence from an ordinary review refusal. (#46117)
+- Clean owned managed Dune build targets while preserving source, links, locks and retention markers. #46122
+- Schedule background artifact cleanup independently per Keeper while preserving atomic admission and excluding overlapping attempts. #46123
+- Capture Keeper GitHub credentials, revision, helper configuration and Docker environment from the same immutable bytes; clean temporary credentials even when the caller is cancelled. (#46126)
+- The keeper config API can repair a keeper TOML the current build refuses: when the strict load of the current file fails, the call is assessed by applying its field edits to the current bytes and validating the merged content with the same strict reader, so a patch carrying a valid replacement proceeds instead of being refused with the file's old defect (#46130). Closes #39373.
+- Give pending Keeper schedule sources an Owner turn after a settled tool boundary or natural chat completion. Bind the handoff to the exact source cohort and heartbeat consumer lifetime so chat continuations cannot starve it and stale reservations release safely. (#46133)
+- Let official Keeper clients yield after delivering a settled tool result when requested work is waiting, preserving the actual tool name, terminal outcomes and resumable session checkpoint. (#46134)
+- Restore the TUI Memory roster when the server includes execution-availability diagnostics, retaining strict root validation and independent stored-memory evidence. (#46146)
+- Delimit the Keeper scheduled-yield result match so following wake-reason cases typecheck against the outer wake match. (#46149)
+- Remove an unused Keeper yield wrapper left after scheduled handoff admission switched to the source-aware probe, resolving fatal OCaml warning 32 in `keeper_unified_turn.ml` (#46151).
+- List shared DOS play invites when the DOS controller cannot be observed, such as right after a restart with no machine loaded. The list now reports the controller once as `held`, `free`, `no_machine` or `unobserved` with its reason, instead of failing the whole list with 503 (#46167).
+- Preserve declared Apple Keeper guests across server restarts, validate actual boot facts and immutable credentials before reuse, and recover uncertain boots without replay. Initialize shared shim readiness before admission and configure work-volume discard only when its current default is absent. (#46168)
+- Main minimal build: qualify the two bare `Http_server_eio` references in `test_verification_operator_evidence.ml` as `Masc.Http_server_eio`, matching how every other test reaches the module. (#46176)
+- Repair guest-survival verification inputs for host DNS, shim negotiation, sealed-directory moves, complete stuck-guest inventory and lifecycle teardown context, while retaining the tested outcomes. Correct the documented durable identity directory. (#46177)
+- The play seat route asks the DOS worker before taking the workspace credential lock, so a guest page polling its seat no longer makes the next invite issue or revoke wait past the TUI timeout (#46180).
+- Recheck schedule update and cancellation ownership under the ledger lock before withdrawing queued wakes or saving a replacement, preserving the existing ownership refusal fields. (#46182)
+- Preserve the latest stored recurrence when a schedule edit supplies a due time but omits the recurrence kind, without changing due-time or expiry replacement semantics. (#46193)
+- Withdraw a cancelled schedule's queued Keeper wakes across previous targets, transferred owners, and older instances, including after changing the definition to a Lane action. Serialize transfer projection with cancellation and refuse cancellation while matching transfer recovery or durable-state reads remain unresolved. (#46211)
+- Reuse Apple Keeper guests whose images supply an OCI entrypoint by comparing the complete image-applied command against descriptor- and platform-bound metadata, preserving the original plan label and refusing unknown or tampered commands. (#46213)
+- Retry failed schedule startup recovery before dispatching due work, and retain active runner ownership after recovery succeeds. (#46229)
+- Main minimal build: qualify the two bare `operation.operation_id` accesses in the `scheduled_source_handoff` test's `execute` callback as `operation.Chat_operation.operation_id`, the same established pattern every other callback in the file already uses, so type inference no longer leaves `operation` unresolved. (#46257)
+- main `@check`이 `test/test_schedule_consumer_dispatch.ml:3955`의 모호한 레코드 필드로 빨갛던 것(#46292). `seed_unsettled_running`의 바깥 `request` 인자에 `Schedule_domain.schedule_request` 주석을 붙여 두 읽기가 같은 레코드를 가리키게 했어요. 사용 가이드 없음
+
+### Performance
+
+- Index current tool-call identities once per TUI trail projection, preserving late results and superseded attempts without repeated full-list searches (#45549).
+- Read incremental JSONL file identity, boundary and appended bytes through one descriptor, reusing unchanged boundaries (#45550).
+- Return fresh Keeper observations directly from prepared execution snapshot reads instead of repeating their filesystem work in the HTTP fallback (#45595).
+- Share tool-quality cache entries for identical positive-window queries regardless of the unused recent-count parameter. (#45633)
+- Reduce repeated field-list searches when validating Keeper metadata keys with an immutable schema traversal, preserving duplicate priority, diagnostic order and current-schema completeness (#45645).
+- Capture optional Keeper metadata with one descriptor and blocking read job, while preserving caller-context decoding and recovery reporting (#45652).
+- Index blocked execution scopes within each Keeper queue observation while preserving full semantic validation, retry eligibility and queue order. (#45662)
+- Transfer each completed, privately owned Lane retained-read buffer to its immutable result without a full-record copy. Keep the independent verification read, syncs and identity checks. Selected-reader interpreter checks preserve byte/error results and show roughly half the allocation in durable double reads; whole-server improvement remains unmeasured. (#45672)
+- Build a projection-local Home action index so larger approval and question queues do not repeatedly scan and copy the growing decision list. Preserve action identity and first-seen order. (#45720)
+- Replay Fleet broadcast recipient acknowledgements through a decoder-local index and restore the admitted recipient order once, reducing repeated list reconstruction while retaining the durable journal and recovery protocol. (#45721)
+- Prepare the Home decision reading once per synchronous TUI Build so focus, scrolling and rendering share the same immutable projection. (#45735)
+- Seek retained tool-metric timestamp ranges directly in SQLite, preserving inclusive bounds and row ordering while avoiding full-index scans for filtered windows. (#45737)
+- Compact Keeper queue snapshot JSON after one construction and sanitization, retaining the existing formatter for accepted values that the compact writer rejects. (#45741)
+- Index runtime-event handler starts during late-arrival attribution so larger diagnostic windows avoid repeated full event scans while preserving the existing attribution heuristic (#45764).
+- Submit new provider-input blob publication through the existing shared I/O policy while preserving strict durability and ordered snapshot admission (#45777).
+- Reuse strictly verified provider-input blobs across Keeper histories, preserving mandatory payload and parent sync when physical content must be republished (#45803).
+- Reuse the Keeper checkpoint lineage for next-request forecasts while preserving exact carried positions, history bytes, and Librarian continuity. (#45837)
+- Cache exact tool-schema wire byte counts in the existing weak JSON cache and reuse them in Keeper wake telemetry; add opt-in SDK timing and allocation measurement (#45914).
+- Stream owned schema-observation reports through atomic output while preserving the decoded v1 value and event order. Report output now surfaces strict payload and parent-directory sync failures. (#45997)
+- Reuse cached compact SDK schema byte counts when measuring the Keeper request reserve, preserving tool occurrences, escaped system prompt bytes and the existing worker boundary. (#46012)
+- Prepare Keeper request reserve and fixed-prefix digest in one CPU worker job with a cooperative yield between the unchanged calculations. (#46034)
+- The live machine frame route parses each published frame once and prepares its compressed body once per observation, so every watcher of the same frame is served the same bytes instead of re-serializing and gzipping 1.2 MB per poll; a matching `If-None-Match` answers 304 (#46195).
+- `masc_dos_screen` accepts `include_frame=false` to skip the frame's RGB copy and PNG encode; the play seat poll, the invite list and the pad route use it, so watching guests no longer make the DOS worker PNG-encode a frame every 5 s each (#46196).
+- The play seat no longer builds the handoff roster on every poll. `GET /api/v1/play/seat` reads only the caller's participation and the observed holder, and the roster that reads every credential moves to `GET /api/v1/play/participants`, which the play page reads when it opens and when a player opens the handoff selector (#46236).
+- Reuse one strictly verified Librarian gate inventory during completed-history validation instead of rereading the whole gate scope for every original; recovery, publication and dispatch keep their fresh reads (#46242).
+
+### Documentation
+
+- Revise the unknown Exact outcome RFC: workers keep receiving the same result, the host record keeps the cause (interrupted, cut or raised) through a started marker that names the server incarnation, and the Curator stops fencing facts and Briefing passes only for interrupted originals (#45501).
+- Describe the server's graceful signal shutdown, keep proof-first recovery and incarnation-based causes during shutdown, and include conditional Librarian admission/history scope cleanup in the proposed hard cut (#45501).
+- Retain the historical Candle clock-observation reproduction with explicit Git source snapshots; current public-field observation identity is provided by #45594 (#45596).
+- Define browser parity coverage and comparable goal-only Keeper/human workflow evidence, including result inspection, tool cost, recovery and remaining implementation gaps. (#45597)
+- Record the source-backed feature audit, P1/P2 fixes, 63 large implementation candidates, remaining facade/state ownership work, and reproducible source-probe evidence with explicit verification limits. (#45608)
+- Record Dashboard residue cleanup scope, context decoder readback, focused validation, and candidate browser observations (#45622).
+- Refresh whole-stack integration evidence on fixed main, preserving merged Gate cleanup and recording fresh frontend checks and a read-only candidate observation (#45622).
+- Retain actual cross-origin iframe AX hover/double-click events, compatible receipts, result screenshot and the operator-authorized successor space record; separate primitive evidence from full Keeper workflow parity. (#45631)
+- Record controlled live-response decoding, strict contract checks, and browser proof for the connector Keeper directory repair (#45667).
+- Reconcile RFC-AC-029 with the implemented Chat/Responses phase replay fixtures and document the remaining MiniMax conformance evidence (#27924). (#45682)
+- Retain actual installed TUI role-grouping and original-action-target terminal captures, synthetic fixture inputs, request bodies, binary provenance and cleanup receipts with explicit execution limits (#45694).
+- Explain installed TUI role classification, original target preservation and replacement selection withdrawal using captured key-loop and HTTP evidence, while distinguishing synthetic receipts from real worker effects (#45695).
+- Preserve startup Admin execution failures, passing byte/inode/bearer checks, descriptor diagnostics, and the bounded proof scope of the repair (#45703).
+- Record the measured Firefox upload probe compile failure and bounded repair evidence (#45719).
+- Preserve exact product-build success and Dashboard Labels type-check repair evidence (#45732).
+- Ground MiniMax Responses replay work in the official schema and distinguish its sync reasoning-content gap from completed Chat replay repairs. (#45926)
+- Document the experimental schema-observe command, owned workspace and output requirements, modes, shutdown, failure symptoms and observation limits in docs/guides/SCHEMA-OBSERVATION.md. (#45939)
+- Map completion research to existing feature owners, functional acceptance, MASC Tasks and GitHub work, with Goal original-body isolation as the first feature stack. (#45951)
+- Mark RFC machine-spectating 3b as landed in the phase table, citing #39168 for removal of the legacy `/api/v1/msx/frame` route and its public-read whitelist entry. (#45971)
+- Update docs/guides/SCHEMA-OBSERVATION.md for staged atomic report streaming, retained event buffers and strict publication failures. (#45997)
+- Mark RFC machine-spectating 3b as landed in the phase table, citing #39168 for removal of the legacy `/api/v1/msx/frame` route and its public-read whitelist entry. (#46011)
+- Document focused shell and dashboard fixture checks as manual procedures with their evidence limits, and remove the replay smoke for a deleted fixture. (#46026)
+- Document the adopted run citation convention in docs/constitution.xml: Actions run citations now bind workflow name, run id, head/ref and actual conclusion; TARGET_SUITES stays a Test-workflow-only contract; past-SHA Merge compile results never carry over to current main (#46048).
+- Carry the preserved SSH bootstrap readiness repair from closed PR #45942 into a reviewable successor after GitHub refused reopening its frozen empty-head snapshot; preserve the original source and evidence without claiming a new runtime replay. (#46067)
+- Carry the preserved native bootstrap-to-Keeper replay from closed PR #45981 into its successor, retaining original drivers, receipts and checksums while distinguishing frozen PR metadata from actual Git source and historical execution from current validation. (#46068)
+- Preserve exact before-and-after execution evidence for the anonymous chat capability regression repair and separate earlier observations into history (#46077).
+- Add Korean guidance for research, verification records, reports, generated run output and product-owned runtime stores. (#46095)
+- Record the completion feature's merged-source integration audit, missing-field compiler failure and 63 passing Goal regression cases with exact source identities (#46101).
+- Explain local folder cleanup: preserve working records and dashboard copies under `artifacts/`, check active consumers, and remove only finished worktrees after preserving their output. (#46113)
+- Explain busy Keeper schedule handoff and distinguish dispatch acceptance, current queue evidence, turn execution and acknowledgement when investigating overdue work. (#46135)
+- Record the observed Memory response mismatch, strict consumer repair and bounded producer-to-TUI verification evidence. (#46147)
+- Retain actual seven-tool, two-user and restart/expiry schedule API evidence, separating passing state checks, the cancellation failure, interrupted backend requests and a failed targeted compile and the later 195-case targeted success from whole-feature completion. Add two real-provider note-effect baselines and the busy failure with exact executable provenance. (#46157)
+- Retain focused schedule-repair checks, native artifact provenance, and actual DeepSeek/GLM continuation evidence while preserving failed observers and Owner-suite failures as separate results. (#46221)
+
+### Internal
+
+- Repair the `test_verifier_review_owner` store fixture to use a dedicated owned base directory and to surface typed retain/load error details, so the durable owner retain path is exercised instead of failing at the shared `/tmp` ownership anchor. (#45442)
+- Cover real metadata I/O refusal and explicitly accepted malformed-content quarantine with filesystem regressions, and document the metadata rejection classes (#45530).
+- Curator classification originals name a verified immutable ledger revision instead of embedding the complete ledger. A durable write receipt binds the state to its physical workspace before publication, restore reads only the named revision, and children keep that reference. Commit/receipt states and Briefing work remain unchanged (#45579).
+- Document Runtime_events directory startup precedence, preloaded-ring scope and failure ownership. (#45581).
+- Curator records actual capture-restore invocations and failures per serialized owner pass, including zero-restore passes, in the existing metric store and a per-pass log. Classification/Briefing stage and discovery/observer/successor/primary labels distinguish the calling paths; repeated restores count separately. An unentered executor submission, internal ancestor decoding, out-of-pass consumer calls and asynchronous Exact authorization are outside the counted unit. These observations do not control scheduling or admission. See `docs/design/workspace-curator-pass-restores.md` for scope and the sample denominator (#45599).
+- Add a native execution-observation probe with isolated paused Keeper metadata, real Candle worker ownership, fresh address checks, and exact-source measurement receipts; retain variable 35/350-row timings without claiming active-agent capacity or a stable latency gain (#45623).
+- Remove the real-time timeout that misreported slow Keeper-up integration runs as target-lane joins. (#45638).
+- Hold the actual target Keeper lane at a clock barrier and observe caller-turn completion before releasing and joining it. (#45639).
+- Restore original judgments without another model call, keep unknown or cancelled executions pending, and allow only proven pre-admission repair to reuse the same captured input. Production Goal host selection, linked retries and proof commitment remain follow-up work. #45650
+- Keep production Goal agent wiring, registry recovery, actual external Addon execution, Candle-before-proof and human confirmation as explicit host integration work. This lifecycle layer alone does not complete E06. #45654
+- Keep Candle-before-proof and operator human confirmation in the real Goal host. Source, independent review, compiled execution, external Addon use and installation remain separate evidence. #45671
+- Fragment check failures now annotate file:line on the PR instead of hiding in the job log. (#45674)
+- Add native MiniMax M3 catalog-driven sync/SSE parse-to-history-to-request replay coverage for split and structured reasoning plus tool calls without thinking; record the failing offline inline `<think>` content-preservation probe, with the production repair still tracked under #27924. (#45689)
+- Manual probe artifacts can build an exact-source macOS Ego integration candidate containing the server, browser Add-on worker and native launcher, with dependency and binary identity receipts (#45751).
+- Add an owned loopback Keeper scale harness with actual provider turns, exact operation/result joins, offline SQLite verification and separate pacing, failure and cleanup evidence (#45752).
+- Record exact-code five-suite verification (105 passing cases), the current code source approval, and original compile failure/P2 evidence while preserving their distinct scopes (#45770).
+- Preserve exact combined-main build, selected behavior and failed type-check evidence alongside its bounded test-consumer repair. (#45804)
+- Preserve exact main build,146 selected cases and checkpoint carrier type-check failure evidence. (#45817)
+- Preserve the actual124-case checkpoint execution and subsequent browser/TUI compile failures with their exact source boundaries. (#45825)
+- Publish a reproducible component probe and source hashes for the Cohere exact declaration fixture repair (#45928).
+- Publish an actual-source compiler fragment reproducer for the Keeper schedule target warning-4 repair (#45947).
+- Add actual Goal host regression scenarios for foreign original-body failures, proof/publication recovery and strict own-body refusal. (#45952)
+- Exercise retained Goal result publication in a fresh executable after proof persistence, including an unrelated damaged body, durable acknowledgements, unchanged proof and no repeated reviewer call (#45964).
+- Reproduce healthy Goal starvation behind four damaged originals through the actual verifier daemon, and require its early original-read failure to reach the existing Board stall surface (#45976).
+- Verify packaged native bootstrap with an exact-source static shim, preserving the endpoint environment and files through actual Keeper file tools and server restart; retain the old same-major shim refusal and scoped runtime evidence. (#45981)
+- Verify real HITL owner completion releases admission and drains only that owner while another owner remains active, using concurrent recovery fibers and independent HTTP response barriers (#46019).
+- Replace exact-output generation cancellation timing assumptions with explicit pre-dispatch and post-dispatch barriers, verifying exact zero/one POST counts and refusal to redispatch the same flow (#46022).
+- Verify event-queue ACK cancellation ordering at the actual snapshot/WAL write boundaries, fresh-process source/outbox recovery, idempotent reaction projection, and cancellation before owner-lock admission. (#46024)
+- Validate real task pagination and conditional responses plus missing and pending metric observations against composition output schemas, including a negative cursor declaration control. (#46025)
+- Exercise browser composition recovery and output probes through the scripted native Runtime/MCP Add-on fixture while preserving effect, receipt and terminal checks. (#46028)
+- Align provider capability regression checks with anonymous chat protocol defaults while retaining declared-provider and explicit-override rejection controls (#46075).
+- Restore Goal daemon regression compilation after evaluator provenance integration by marking its controlled reviewer execution as unobserved (#46096).
+- Repair the Collab inventory tests that #46167 left passing bare row lists to `Masc_tui_collab.listed`, which no longer compiled, and sanitize the controller holder name in the invite list summary (#46184).
+- The add-on package image workflow runs each add-on test file in its own Python process (`scripts/ci/addon-tests-each-file.sh`), so a later test no longer reads another add-on's `server` module and skips the image build (#46223).
+
 ## [0.64.0] - 2026-10-23
 
 ### Upgrade notes

@@ -130,7 +130,7 @@ let bounded_integer_of_fields fields ~field ~default ~minimum ~maximum =
 
 let request_of_json = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* sha256 = sha256_of_fields fields in
     let* offset =
       bounded_integer_of_fields

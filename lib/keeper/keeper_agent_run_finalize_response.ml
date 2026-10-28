@@ -214,7 +214,7 @@ let finalize
       ~suppress_response_text:suppress_visible_response
       ()
   in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   receipt_response_text_present_ref := raw_response_text_present;
   let turn_ref =
     Ids.Turn_ref.make

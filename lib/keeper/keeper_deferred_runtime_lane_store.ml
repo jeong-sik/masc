@@ -21,7 +21,7 @@ let exact_fields expected fields =
   sort expected = sort (List.map fst fields)
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let failure_to_json failure =
   match Keeper_internal_error.classify_masc_internal_error failure with

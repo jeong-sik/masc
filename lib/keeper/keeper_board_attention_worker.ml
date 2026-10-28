@@ -524,7 +524,7 @@ let fatal_error_to_string error =
     error.detail
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let owner_wake ~base_path ~keeper_name =
   Keeper_registry.wakeup_running

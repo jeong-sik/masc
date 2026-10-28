@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type entry = { path : string; json : Yojson.Safe.t }
 type snapshot = { directory : string; entries : entry list }

@@ -1,7 +1,7 @@
 (** Pure current-schema partition codec, separate from durable state effects. *)
 open Keeper_board_attention_partition_types
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let schema_version = 7
 
 let state_to_string = function

@@ -109,7 +109,7 @@ let check_invocation t (invocation : Input.ticket) =
     | Awaiting_ticket | Conflicted | Ticket _ -> Ok ()
 
 let bind_owner t ~(invocation : Input.ticket) ~call_envelope_uuid ~call_ordinal ~call_id =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   (* Refuse captured observations from another runtime before touching the
      current owner's cache, even when all provider/session IDs were replayed. *)
   let* () = check_invocation t invocation in
@@ -138,21 +138,21 @@ let bind_owner t ~(invocation : Input.ticket) ~call_envelope_uuid ~call_ordinal 
 
 let bind_task t (observation : Runtime_claude_code.native_task_observation) =
   let owner = observation.owner in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* ticket, evidence = bind_owner t ~invocation:owner.invocation
     ~call_envelope_uuid:owner.call_envelope_uuid ~call_ordinal:owner.call_ordinal
     ~call_id:owner.call_id in
   Ok {ticket; evidence; observation}
 
 let bind_parent t (parent : Runtime_claude_code.native_agent_parent_witness) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* ticket, evidence = bind_owner t ~invocation:parent.invocation
     ~call_envelope_uuid:parent.call_envelope_uuid ~call_ordinal:parent.call_ordinal
     ~call_id:parent.call_id in
   Ok {ticket; evidence; parent}
 
 let bind_child t (content : Runtime_claude_code.complete_child_content) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = check_invocation t content.invocation in
   let* parent = match content.parent_occurrence with
     | None -> Error Unknown_parent

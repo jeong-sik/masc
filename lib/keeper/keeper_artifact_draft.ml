@@ -1,7 +1,7 @@
 module Draft = Artifact_draft
 module Store = Artifact_draft_store
 module Scope = Keeper_artifact_draft_scope
-let ( let* ) = Result.bind
+open Result.Syntax
 type command = Draft_command of Draft.command | Read of Draft.target | Leave of Draft.target
 let parse json =
   let action = match json with `Assoc fields -> List.assoc_opt "action" fields | _ -> None in

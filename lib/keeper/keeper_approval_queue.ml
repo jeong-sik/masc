@@ -2165,7 +2165,7 @@ let journal_resolution ~base_path ~id ~decision ~source ~remember_rule ~rule_exp
     | Error _ as error -> error
     | Ok (Journaled_resolution delivery) -> Ok (Previously_journaled delivery)
     | Ok (Pending_resolution entry) ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* resolution_sequence =
         match next_sequence_lifecycle ~base_path with
         | Ready sequence when sequence < max_int -> Ok sequence

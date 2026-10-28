@@ -158,7 +158,7 @@ let upsert_rule_with_save
       ; request_fingerprint = Keeper_approval_request_fingerprint.request_fingerprint input
       ; expires_at; actor = created_by }
     in
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* () = Application_store.validate_application application
       |> Result.map_error (fun reason -> { path = rules_path ~base_path (); reason }) in
     let* store = load_rule_store_unlocked ~base_path () in

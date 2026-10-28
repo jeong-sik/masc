@@ -1,5 +1,5 @@
 let deliver ~events ~load_blocks ~send =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let rec loop terminal =
     match Keeper_chat_events.subscribe events with
     | Keeper_chat_events.Closed -> Error "Telegram event stream closed before terminal completion"

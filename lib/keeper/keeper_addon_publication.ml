@@ -1,5 +1,5 @@
 module P = Lane_addon_companion_publication
-let ( let* ) = Result.bind
+open Result.Syntax
 type error = Publication_failed of P.error | Queue_unconfirmed
 let error_to_string = function
   | Publication_failed error -> P.error_to_string error

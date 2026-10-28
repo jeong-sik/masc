@@ -1,6 +1,6 @@
 module Async = Keeper_msg_async
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type error =
   | Storage_failed of string

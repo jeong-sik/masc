@@ -4,7 +4,7 @@ module AR = Task.Anti_rationalization
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let scope = "goal-proof-reviews"
 let tool_name = "goal_proof_review"
 let host_installation_id = "masc.goal-verification"

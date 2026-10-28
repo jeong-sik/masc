@@ -12,7 +12,7 @@ let error_to_string = function
   | Export_unavailable name -> "canonical child export is unavailable: " ^ name
   | Export_value_absent name -> "canonical child export has no value: " ^ name
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let select ~exports data =
   let* fields = match data with

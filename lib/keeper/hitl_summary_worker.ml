@@ -9,7 +9,7 @@ let lane_id = Standalone_lane.to_id Standalone_lane.Hitl_auto_judge
 
 let system_prompt = Hitl_judge_original.system_prompt
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* ── Metrics ────────────────────────────────────── *)
 

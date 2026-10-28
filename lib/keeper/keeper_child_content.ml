@@ -1,6 +1,6 @@
 module Binding = Keeper_claude_task_binding
 module Input = Runtime_claude_input_attribution
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type origin =
   { keeper_name : string; source : Runtime_native_tasks.source

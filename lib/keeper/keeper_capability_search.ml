@@ -18,7 +18,7 @@ type error =
 
 type query = Literal of string | Fts5 of string
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let error_to_yojson = function
   | Empty_query -> `Assoc [ "kind", `String "empty_query" ]

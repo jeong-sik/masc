@@ -265,7 +265,7 @@ let find_row rows_list ask_id =
 
 let answer_with_interleaving ~before_append ~after_append
     ~base_path ~keeper_name ~ask_id ~submissions ~responder ~now =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* snapshot = rows_result ~base_path ~keeper_name
       |> Result.map_error (fun error -> Store_failed (read_error_to_string error)) in
   let rows = match snapshot with Missing_log -> [] | Stored_rows rows -> rows in
@@ -305,7 +305,7 @@ let answer_with_interleaving ~before_append ~after_append
 let answer = answer_with_interleaving ~before_append:(fun () -> ()) ~after_append:(fun () -> ())
 
 let withdraw ~base_path ~keeper_name ~ask_id ~reason ~now =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* snapshot = rows_result ~base_path ~keeper_name
       |> Result.map_error (fun error -> Withdraw_store_failed (read_error_to_string error)) in
   let rows = match snapshot with Missing_log -> [] | Stored_rows rows -> rows in

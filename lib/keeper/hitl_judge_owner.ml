@@ -1,6 +1,6 @@
 module Owner = Lane_addon_tool_request_owner
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let scope = "hitl-judge-originals"
 let package_id = "hitl-auto-judge"

@@ -2,7 +2,7 @@ module Operation = Keeper_chat_operation
 module Payload = Keeper_chat_operation_payload
 
 let decode (operation : Operation.t) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* source = Payload.source_of_json operation.source in
   let* input = match operation.input with
     | None -> Error "queued operation has no input"

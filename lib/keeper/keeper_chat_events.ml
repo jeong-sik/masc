@@ -575,7 +575,7 @@ let model_content_activity_of_json json =
     else if List.exists (fun key -> not (List.mem key allowed)) keys then
       error "unknown field"
     else
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let index key = match List.assoc_opt key fields with
         | Some json ->
             (match Runtime_json_integer.of_json json with
@@ -611,7 +611,7 @@ let response_identity_of_json = function
     if List.sort String.compare keys <> ["content_generation"; "stream_scope"] then
       Error "response identity requires exactly content_generation and stream_scope"
     else
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let index key = match List.assoc_opt key fields with
         | Some json ->
           (match Runtime_json_integer.of_json json with
@@ -634,7 +634,7 @@ let generated_media_to_json (media : generated_media) =
 
 let generated_media_of_json = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let keys = List.sort String.compare (List.map fst fields) in
     if keys <> ["index"; "media_ref"; "media_type"; "response"; "source_type"] then
       Error "generated media requires exactly index, media_ref, media_type, response and source_type"

@@ -99,7 +99,7 @@ let synthesis_to_json (value : synthesis) =
       `Assoc ["start_atom", `Int range.start_atom; "end_atom", `Int range.end_atom;
         "completed_end_atom", `Int range.completed_end_atom])]
 let synthesis_of_json json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let object_fields keys = function
     | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare keys -> Ok fields
     | _ -> Error "invalid synthesis observation fields" in

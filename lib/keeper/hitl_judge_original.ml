@@ -1,6 +1,6 @@
 module Schema = Keeper_structured_output_schema
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let schema = "keeper.hitl-judge-original.v1"
 

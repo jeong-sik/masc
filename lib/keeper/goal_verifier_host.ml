@@ -4,7 +4,7 @@ module R = Goal_verification_run_registry
 module P = Lane_addon_request_progress
 module AR = Task.Anti_rationalization
 module Observer = Lane_addon_request_receipt
-let ( let* ) = Result.bind
+open Result.Syntax
 type error = Unavailable of string | Invalid_original of string | Conflict of string
 let error_to_string = function Unavailable d | Invalid_original d | Conflict d -> d
 let worker_error = function

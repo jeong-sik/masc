@@ -1,6 +1,6 @@
 (* See .mli. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let is_blank s = String.trim s = ""
 

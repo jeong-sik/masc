@@ -1,5 +1,5 @@
 module Id = Keeper_shutdown_types.Operation_id
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type state = Prepared | Cleanup_required of string | Artifacts_removed | Removed
 type receipt = {

@@ -1,5 +1,5 @@
 module Child = Keeper_child_content
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type error =
   | Invalid_scope of string | Invalid_observation of string | Missing_store

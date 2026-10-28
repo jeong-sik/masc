@@ -1,7 +1,7 @@
 module A = Verification_authority_tools
 module Evidence = Workspace_verification_store
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let schema = "goal_verifier_original/v1"
 
 type t = {

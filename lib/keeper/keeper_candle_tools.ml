@@ -1,6 +1,6 @@
 module Item = Keeper_portrait_item
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type operation =
   | Balance

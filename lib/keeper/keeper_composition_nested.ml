@@ -56,7 +56,7 @@ type expanded_node =
   | Inline_child of nested_node * Plan.t * call * Plan.inline_arguments option
   | Async_child of nested_node * Plan.async_child * call
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let plan compiled = compiled.plan
 let calls compiled = compiled.calls
 let id_json id = `String (Plan.Node_id.to_string id)

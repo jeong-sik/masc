@@ -304,7 +304,7 @@ let validate_entry_exact_attempt
 let pending_entry_of_yojson ~base_path json =
   match json with
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let surface = "gate_pending.entry" in
     let* () =
       reject_unknown_fields
@@ -478,7 +478,7 @@ let pending_entry_invariant_error json =
 let approval_decision_of_yojson json =
   match json with
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* kind = required_string ~surface:"gate_pending.decision" "kind" fields in
     (match kind with
      | "approve" ->
@@ -521,7 +521,7 @@ let replay_artifact_ref_of_yojson ~surface field fields =
 
 let resolution_replay_outcome_of_yojson ~surface = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* kind = required_string ~surface "kind" fields in
     (match kind with
      | "applied" ->
@@ -580,7 +580,7 @@ let resolution_replay_outcome_of_yojson ~surface = function
 let persisted_delivery_of_yojson ~base_path json =
   match json with
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let surface = "gate_pending.delivery" in
     let* () =
       reject_unknown_fields
@@ -706,7 +706,7 @@ let parse_list_with_entry_errors ~surface ?(fatal_error = fun _ -> None) parse =
 let replay_result_row_of_yojson json =
   match json with
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let surface = "gate_replay_results.outcomes[]" in
     let* () =
       reject_unknown_fields
@@ -728,7 +728,7 @@ let replay_result_row_of_yojson json =
 let replay_results_of_yojson json =
   match json with
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let surface = "gate_replay_results" in
     let* () =
       reject_unknown_fields
@@ -793,7 +793,7 @@ let validate_snapshot_sequences ~next_sequence pending_entries delivery_entries 
 let snapshot_of_yojson ~base_path json =
   match json with
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let surface = "gate_pending" in
     let* () =
       reject_unknown_fields
@@ -873,7 +873,7 @@ type decoded_log_row =
   }
 
 let log_row_of_yojson ~base_path json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let surface = "gate_pending.log" in
   match json with
   | `Assoc fields ->
@@ -968,7 +968,7 @@ let replay_log_lines ~base_path ~snapshot_generation ~pending_map ~delivery_map
       (Ok (pending_map, delivery_map, next_sequence, 0))
       lines
   in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* pending_map, delivery_map, next_sequence, rows = applied in
   let* () = validate_snapshot_sequences ~next_sequence
       (List.map snd (SMap.bindings pending_map))

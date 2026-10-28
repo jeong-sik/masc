@@ -11,6 +11,11 @@ let path_of_base_path ~base_path =
   Filename.concat (Common.auth_dir_from_base_path ~base_path) file_name
 ;;
 
+type stop =
+  { path : string
+  ; reason : string
+  }
+
 type t =
   { path : string
   ; zone : Eio.Mutex.t
@@ -18,6 +23,10 @@ type t =
   ; mutable cursor : Fs_compat.Private_jsonl_cursor.t
   ; mutable stopped : string option
   }
+
+let stopped (log : t) =
+  Option.map (fun reason -> { path = log.path; reason }) log.stopped
+;;
 
 type writer =
   { log : t
@@ -79,7 +88,11 @@ let open_error_to_string reason_to_string = function
 let store_error = Fs_compat.private_jsonl_transaction_error_to_string
 
 (* A completed transaction whose descriptor settlement stayed incomplete has
-   still done its work, so the caller goes on and the evidence is logged. *)
+   still done its work, so the caller goes on and the evidence is logged.
+   Settlement is the close of a descriptor after the transaction body returned.
+   For an append the body syncs the lines before it returns, and the contract
+   of [Fs_compat.private_jsonl_success_receipt] lets a consumer advance from the
+   value as long as it observes the error. *)
 let observe_settlement ~path error =
   Log.Auth.warn
     "authorization log: descriptor settlement incomplete path=%s detail=%s"
@@ -127,7 +140,7 @@ let size_of_file ~path =
 ;;
 
 (* Reads the file as the recovery read of [Fs_compat] does, which is the only
-   read that cuts a torn last line. Process start is the one caller the
+   read that cuts a last line that never ended. Process start is the one caller the
    contract of [Fs_compat] allows. *)
 let read_for_recovery ~path =
   match size_of_file ~path with
@@ -176,6 +189,10 @@ let contents_of ~missing ~line_count =
   if missing then Missing else if line_count = 0 then Empty else Lines line_count
 ;;
 
+(* A size that is not larger than the bytes kept means nothing was cut. That
+   also covers a file that grew between the stat and the lock, which only a
+   second writer causes; its append then returns [Diverged] for the process
+   that wrote second. *)
 let tail_of ~size_before ~kept_bytes =
   let discarded_bytes = size_before - kept_bytes in
   if discarded_bytes > 0 then Cut { kept_bytes; discarded_bytes } else Complete
@@ -206,20 +223,19 @@ let open_at_start ~path ~init ~step =
      | Complete -> ()
      | Cut { kept_bytes; discarded_bytes } ->
        Log.Auth.warn
-         "authorization log %s: cut %d bytes of a last line that was never completed, kept \
-          %d bytes"
+         "authorization log %s: cut %d bytes of a last line that never ended, kept %d \
+          bytes, next seq %d after hash %s"
          path
          discarded_bytes
-         kept_bytes);
+         kept_bytes
+         (Authz_record.next_seq head)
+         (Authz_record.Hash.to_hex (Authz_record.head_hash head)));
     Ok ({ path; zone = Eio.Mutex.create (); head; cursor; stopped = None }, state, recovered)
 ;;
 
 type append_error =
   | Writer_expired
-  | Stopped of
-      { path : string
-      ; reason : string
-      }
+  | Stopped of stop
   | Wrong_seq of
       { index : int
       ; expected : int
@@ -302,6 +318,17 @@ let write_on_thread (log : t) payload =
 
 let write (log : t) ~head payload =
   match write_on_thread log payload with
+  | exception exn ->
+    (* The lines may or may not be in the file, and the head and the cursor
+       stay where they were. The log stops, so that no caller reads the head as
+       if it were current. The exception goes on to the caller. *)
+    let backtrace = Printexc.get_raw_backtrace () in
+    log.stopped
+    <- Some
+         (Printf.sprintf
+            "a write raised %s, so the end of the file is not known"
+            (Printexc.to_string exn));
+    Printexc.raise_with_backtrace exn backtrace
   | Ok { Fs_compat.value = cursor; settlement_error } ->
     Option.iter (observe_settlement ~path:log.path) settlement_error;
     log.head <- head;
@@ -334,25 +361,35 @@ let append writer records =
           write log ~head (String.concat "" (List.map (fun line -> line ^ "\n") lines))))
 ;;
 
+type 'a zone_outcome =
+  | Entered of 'a
+  | Refused of stop
+  | Raised of exn * Printexc.raw_backtrace
+
 (* [Eio.Mutex.use_rw] disables the mutex for good when its function raises.
    That would turn any exception of the caller's, even one that never touched the
    file, into a log that cannot be entered again. What the file holds is kept
    consistent by the cursor and by [stopped], so the exception is carried out of
-   the critical section and raised after the mutex is released. *)
+   the critical section and raised after the mutex is released. A stop that
+   happened while this fiber waited is seen only after the zone is its own. *)
 let with_writer (log : t) f =
   let outcome =
     Eio.Mutex.use_rw ~protect:true log.zone (fun () ->
-      let writer = { log; live = true } in
-      match f writer log.head with
-      | result ->
-        writer.live <- false;
-        Ok result
-      | exception exn ->
-        let backtrace = Printexc.get_raw_backtrace () in
-        writer.live <- false;
-        Error (exn, backtrace))
+      match log.stopped with
+      | Some reason -> Refused { path = log.path; reason }
+      | None ->
+        let writer = { log; live = true } in
+        (match f writer log.head with
+         | result ->
+           writer.live <- false;
+           Entered result
+         | exception exn ->
+           let backtrace = Printexc.get_raw_backtrace () in
+           writer.live <- false;
+           Raised (exn, backtrace)))
   in
   match outcome with
-  | Ok result -> result
-  | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
+  | Entered result -> Ok result
+  | Refused stop -> Error stop
+  | Raised (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
 ;;

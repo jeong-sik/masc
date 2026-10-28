@@ -144,21 +144,28 @@ let open_error ~path =
   | Error error -> error
 ;;
 
+(* The zone of a log that is not stopped. *)
+let in_zone log f =
+  match L.with_writer log f with
+  | Ok value -> value
+  | Error stop -> Alcotest.failf "the log is stopped: %s" stop.L.reason
+;;
+
 let append_ok log records =
-  L.with_writer log (fun writer _head ->
+  in_zone log (fun writer _head ->
     match L.append writer records with
     | Ok head -> head
     | Error error -> Alcotest.failf "append refused: %s" (L.append_error_to_string error))
 ;;
 
 let append_error log records =
-  L.with_writer log (fun writer _head ->
+  in_zone log (fun writer _head ->
     match L.append writer records with
     | Ok _ -> Alcotest.fail "append succeeded where it should have been refused"
     | Error error -> error)
 ;;
 
-let head_of_log log = L.with_writer log (fun _writer head -> head)
+let head_of_log log = in_zone log (fun _writer head -> head)
 
 let check_contents label expected (recovered : L.recovered) =
   let name = function
@@ -207,6 +214,11 @@ let append_error_name : L.append_error -> string = function
   | L.Write_locked { path } -> Printf.sprintf "Write_locked path=%s" path
   | L.Diverged { path } -> Printf.sprintf "Diverged path=%s" path
   | L.Write_failed { path; _ } -> Printf.sprintf "Write_failed path=%s" path
+;;
+
+let outcome_name = function
+  | Ok _ -> "Ok"
+  | Error error -> append_error_name error
 ;;
 
 let open_error_name : 'reason L.open_error -> string = function
@@ -503,6 +515,7 @@ let continuity_is_checked_before_any_byte () =
       [ second; second ];
     Alcotest.(check string) "no byte written by the refused calls" before (read_file path);
     (* None of these refusals stopped the log. *)
+    Alcotest.(check bool) "not stopped" true (Option.is_none (L.stopped log));
     ignore (append_ok log [ second; third ] : R.head);
     let _, state, _ = open_ok ~path in
     check_seqs "the log still takes the chain" [ 1; 2; 3 ] state)
@@ -511,13 +524,11 @@ let continuity_is_checked_before_any_byte () =
 let writer_expires_with_its_zone () =
   with_base (fun path ->
     let log, _, _ = open_ok ~path in
-    let kept = L.with_writer log (fun writer _head -> writer) in
-    let outcome =
-      match L.append kept (chain_from ~head:R.genesis ~count:1) with
-      | Ok _ -> "Ok"
-      | Error error -> append_error_name error
-    in
-    Alcotest.(check string) "a writer outside its zone" "Writer_expired" outcome;
+    let kept = in_zone log (fun writer _head -> writer) in
+    Alcotest.(check string)
+      "a writer outside its zone"
+      "Writer_expired"
+      (outcome_name (L.append kept (chain_from ~head:R.genesis ~count:1)));
     Alcotest.(check bool) "nothing written" false (Sys.file_exists path))
 ;;
 
@@ -528,7 +539,7 @@ let exception_in_a_zone_leaves_the_log_usable () =
     let log, _, _ = open_ok ~path in
     let records = chain_from ~head:R.genesis ~count:3 in
     Alcotest.check_raises "the caller's exception comes out unchanged" Caller_failure (fun () ->
-      L.with_writer log (fun writer _head ->
+      in_zone log (fun writer _head ->
         (match L.append writer (take 1 records) with
          | Ok _ -> ()
          | Error error -> Alcotest.failf "append refused: %s" (L.append_error_to_string error));
@@ -546,7 +557,7 @@ let zones_do_not_overlap () =
     let trace = ref [] in
     let note entry = trace := entry :: !trace in
     let zone name =
-      L.with_writer log (fun writer head ->
+      in_zone log (fun writer head ->
         note (Printf.sprintf "%s enters at %d" name (R.next_seq head));
         (* Hand the domain over while holding the zone: the other fiber would
            run here if the zone did not keep it out. *)
@@ -580,7 +591,7 @@ let cancelled_waiter_never_enters () =
     let waiter_entered = ref false in
     Eio.Fiber.both
       (fun () ->
-        L.with_writer log (fun _writer _head ->
+        in_zone log (fun _writer _head ->
           Eio.Promise.resolve resolve_holder_inside ();
           Eio.Promise.await release))
       (fun () ->
@@ -588,7 +599,7 @@ let cancelled_waiter_never_enters () =
         (match
            Eio.Fiber.first
              (fun () ->
-               L.with_writer log (fun _writer _head -> waiter_entered := true);
+               in_zone log (fun _writer _head -> waiter_entered := true);
                `Entered)
              (fun () ->
                Eio.Fiber.yield ();
@@ -610,7 +621,7 @@ let cancellation_waits_for_the_zone () =
     let outcome =
       Eio.Fiber.first
         (fun () ->
-          L.with_writer log (fun writer _head ->
+          in_zone log (fun writer _head ->
             Eio.Promise.resolve resolve_inside ();
             (* The other fiber finishes while this one is suspended here, which
                cancels this fiber. Cancellation must not reach it before the
@@ -643,18 +654,25 @@ let second_log_on_the_same_file_diverges () =
     let records = chain_from ~head:R.genesis ~count:2 in
     ignore (append_ok first (take 1 records) : R.head);
     let before = read_file path in
-    check_append_error
-      "another log appended first"
-      (Printf.sprintf "Diverged path=%s" path)
-      second
-      (take 1 records);
-    (* The log that diverged refuses everything after it. *)
-    check_append_error
-      "after Diverged"
-      (Printf.sprintf "Stopped path=%s" path)
-      second
-      (take 1 records);
+    let outcomes =
+      in_zone second (fun writer _head ->
+        let diverged = L.append writer (take 1 records) in
+        (* The log that diverged refuses everything after it. *)
+        let refused = L.append writer (take 1 records) in
+        [ outcome_name diverged; outcome_name refused ])
+    in
+    Alcotest.(check (list string))
+      "another log appended first, then the diverged log refuses"
+      [ Printf.sprintf "Diverged path=%s" path; Printf.sprintf "Stopped path=%s" path ]
+      outcomes;
     Alcotest.(check string) "the diverged log wrote nothing" before (read_file path);
+    (match L.stopped second with
+     | Some { L.path = reported; _ } -> Alcotest.(check string) "stop path" path reported
+     | None -> Alcotest.fail "the diverged log is not stopped");
+    (match L.with_writer second (fun _writer _head -> ()) with
+     | Error _ -> ()
+     | Ok () -> Alcotest.fail "a stopped log was entered");
+    Alcotest.(check bool) "the other log is not stopped" true (Option.is_none (L.stopped first));
     (* The other log goes on. *)
     ignore (append_ok first [ List.nth records 1 ] : R.head);
     let _, state, _ = open_ok ~path in
@@ -672,6 +690,7 @@ let outside_cut_diverges () =
       (Printf.sprintf "Diverged path=%s" path)
       log
       [ List.nth records 2 ];
+    Alcotest.(check bool) "stopped" true (Option.is_some (L.stopped log));
     Alcotest.(check string) "the file stays as it was left" "" (read_file path))
 ;;
 
@@ -690,6 +709,7 @@ let outside_replacement_diverges () =
       (Printf.sprintf "Diverged path=%s" path)
       log
       [ List.nth records 2 ];
+    Alcotest.(check bool) "stopped" true (Option.is_some (L.stopped log));
     Alcotest.(check string) "the copy stays as it was" text (read_file path))
 ;;
 
@@ -785,11 +805,12 @@ let failed_write_stops_the_log () =
           [ List.nth records 1 ]);
     Alcotest.(check string) "nothing was written" before (read_file path);
     (* The file is writable again, but this process no longer knows its end. *)
-    check_append_error
-      "after an unknown failure"
-      (Printf.sprintf "Stopped path=%s" path)
-      log
-      [ List.nth records 1 ];
+    (match L.stopped log with
+     | Some { L.path = reported; _ } -> Alcotest.(check string) "stop path" path reported
+     | None -> Alcotest.fail "the log is not stopped after an unknown failure");
+    (match L.with_writer log (fun _writer _head -> ()) with
+     | Error _ -> ()
+     | Ok () -> Alcotest.fail "a stopped log was entered");
     (* A new start reads the file, which is the only truth. *)
     let restarted, state, _ = open_ok ~path in
     check_seqs "the file holds what was acknowledged" [ 1 ] state;

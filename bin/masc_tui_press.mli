@@ -63,7 +63,8 @@ val queue_selection_visible : inner_width:int -> marker:string -> text:string ->
 val presented_queue_selection : press_target Masc_tui_hit.zones -> queue_selection option
 (** Find the Queue selection that made it into the frame's final cells. *)
 
-val queue_owner_matches : Masc_tui_types.state -> Masc_tui_types.queue_panel -> Masc_tui_types.queue_panel_owner -> bool
+val queue_owner_matches : Masc_tui_types.state -> Masc_tui_types.queue_panel ->
+  viewport:Masc_tui_types.queue_panel_viewport -> Masc_tui_types.queue_panel_owner -> bool
 (** Match the list or detail owner of a presented Queue to the current panel. *)
 
 val queue_owner_authority_changed :
@@ -86,9 +87,12 @@ type queue_play_input_owner =
 val queue_play_input_owner :
   play_presented:Masc_tui_play_card.t option -> play_shown:Masc_tui_play_card.t option -> compact:bool ->
   state:Masc_tui_types.state -> beneath:Masc_tui_types.queue_panel option ->
+  viewport:Masc_tui_types.queue_panel_viewport option ->
   presented_queue:Masc_tui_types.queue_panel_owner option -> queue_play_input_owner
 (** Choose who may receive input across the Queue/Play presentation boundary.
-    [beneath] is the Queue under Play after normal overlay priority. *)
+    [beneath] is the Queue under Play after normal overlay priority. [viewport]
+    is its current placement, content height and document length. A change waits for
+    presentation before keys can use its new page step or selection window. *)
 
 val queue_selection_authority_changed :
   presented:press_target Masc_tui_hit.zones -> candidate:press_target Masc_tui_hit.zones -> bool

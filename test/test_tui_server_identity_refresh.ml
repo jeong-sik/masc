@@ -4890,15 +4890,16 @@ let test_queue_play_input_authority () =
   let panel = {qp_keeper="keeper"; qp_layout=Masc_tui_queue_layout.Adaptive; qp_reading=Queue_current; qp_observation=None;
     qp_notice=None; qp_receipt=None; qp_selected=None; qp_scroll=0; qp_detail=None;
     qp_detail_scroll=0; qp_refresh_after_priority=false} in
-  let queue_owner panel = Some (queue_panel_owner state panel) in
+  let viewport = {qv_placement=Masc_tui_queue_layout.Full; qv_content_rows=1; qv_document_rows=2} in
+  let queue_owner panel = Some (queue_panel_owner state panel ~viewport) in
   let make_card () = match Masc_tui_play_card.make ~project:(fun _ -> None)
       ~name:"same-name" ~expires_at:"fixture" ~link:"https://example.test/fixture" with
     | Ok card -> card
     | Error _ -> Alcotest.fail "could not create invite fixture" in
   let card_a, card_b = make_card (), make_card () in
   let shown_queue = queue_owner panel and shown_play = Some card_a in
-  let decide ~play_presented ~play_shown ~compact ~beneath ~presented_queue =
-    Press.queue_play_input_owner ~play_presented ~play_shown ~compact ~state ~beneath ~presented_queue in
+  let decide ?(viewport=Some viewport) ~play_presented ~play_shown ~compact ~beneath ~presented_queue () =
+    Press.queue_play_input_owner ~play_presented ~play_shown ~compact ~state ~beneath ~viewport ~presented_queue in
   let check_wait name value =
     Alcotest.(check bool) name true (match value with
       | Press.Wait_for_frame -> true | Queue_input _ | Play_input | Other_input -> false) in
@@ -4906,8 +4907,8 @@ let test_queue_play_input_authority () =
     Alcotest.(check bool) name true (match value with
       | Press.Queue_input actual -> actual.qp_keeper = expected.qp_keeper && actual.qp_detail = expected.qp_detail
       | Wait_for_frame | Play_input | Other_input -> false) in
-  let queue_decision ?(compact=false) ?(beneath=Some panel) presented_queue =
-    decide ~play_presented:None ~play_shown:(Some card_a) ~compact ~beneath ~presented_queue in
+  let queue_decision ?(compact=false) ?(beneath=Some panel) ?(viewport=Some viewport) presented_queue =
+    decide ~viewport ~play_presented:None ~play_shown:(Some card_a) ~compact ~beneath ~presented_queue () in
   check_queue "empty Queue owns input before Play is presented" panel (queue_decision shown_queue);
   let detail = {panel with qp_detail=Some (Inbox.Local_message "item")} in
   check_queue "pinned Queue detail owns input" detail
@@ -4918,12 +4919,20 @@ let test_queue_play_input_authority () =
     (queue_decision ~beneath:(Some expanded) shown_queue);
   check_queue "expanded Queue owns input after presentation" expanded
     (queue_decision ~beneath:(Some expanded) (queue_owner expanded));
+  check_wait "unpresented automatic placement cannot supply page geometry"
+    (queue_decision ~viewport:(Some {viewport with qv_placement=Bottom {context_rows=1; queue_rows=1}}) shown_queue);
+  check_wait "unpresented receipt height cannot supply page geometry"
+    (queue_decision ~viewport:(Some {viewport with qv_content_rows=0}) shown_queue);
+  check_wait "unpresented document length cannot supply a page boundary"
+    (queue_decision ~viewport:(Some {viewport with qv_document_rows=3}) shown_queue);
+  check_wait "missing current viewport cannot authorize Queue input"
+    (queue_decision ~viewport:None shown_queue);
   check_wait "a higher overlay prevents Queue input" (queue_decision ~beneath:None shown_queue);
   check_wait "unpresented Queue does not own input" (queue_decision None);
   check_wait "closed Queue does not expose its underlying surface"
-    (decide ~play_presented:None ~play_shown:None ~compact:false ~beneath:None ~presented_queue:shown_queue);
+    (decide ~play_presented:None ~play_shown:None ~compact:false ~beneath:None ~presented_queue:shown_queue ());
   check_wait "new Queue is not actionable before its first frame"
-    (decide ~play_presented:None ~play_shown:None ~compact:false ~beneath:(Some panel) ~presented_queue:None);
+    (decide ~play_presented:None ~play_shown:None ~compact:false ~beneath:(Some panel) ~presented_queue:None ());
   Alcotest.(check bool) "compact frame keeps global input" true
     (match queue_decision ~compact:true shown_queue with
      | Press.Other_input -> true | Queue_input _ | Play_input | Wait_for_frame -> false);
@@ -4933,7 +4942,7 @@ let test_queue_play_input_authority () =
   state.workspace_read_authority <- reading;
   let decide_play current =
     decide ~play_presented:shown_play ~play_shown:current ~compact:false
-      ~beneath:None ~presented_queue:None in
+      ~beneath:None ~presented_queue:None () in
   Alcotest.(check bool) "same painted Play card owns input" true
     (match decide_play (Some card_a) with
      | Press.Play_input -> true | Queue_input _ | Wait_for_frame | Other_input -> false);

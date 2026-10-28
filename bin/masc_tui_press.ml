@@ -91,8 +91,8 @@ let same_queue_selection left right =
   && String.equal left.qs_text right.qs_text
   && left.qs_action_ready = right.qs_action_ready
 
-let queue_owner_matches state panel presented =
-  same_queue_panel_owner presented (queue_panel_owner state panel)
+let queue_owner_matches state panel ~viewport presented =
+  same_queue_panel_owner presented (queue_panel_owner state panel ~viewport)
 
 let queue_owner_authority_changed ~presented ~candidate =
   not (Option.equal same_queue_panel_owner presented candidate)
@@ -111,15 +111,17 @@ type queue_play_input_owner =
   | Wait_for_frame
   | Other_input
 
-let queue_play_input_owner ~play_presented ~play_shown ~compact ~state ~beneath ~presented_queue =
+let queue_play_input_owner ~play_presented ~play_shown ~compact ~state ~beneath ~viewport ~presented_queue =
   if compact then Other_input
   else if Option.is_some play_presented then
     if play_card_matches ~presented:play_presented ~current:play_shown then Play_input else Wait_for_frame
-  else match presented_queue, beneath, play_shown with
-    | Some owner, Some panel, (Some _ | None) when queue_owner_matches state panel owner -> Queue_input panel
-    | Some _, (Some _ | None), (Some _ | None)
-    | None, Some _, (Some _ | None) | None, None, Some _ -> Wait_for_frame
-    | None, None, None -> Other_input
+  else match presented_queue, beneath, viewport, play_shown with
+    | Some owner, Some panel, Some viewport, (Some _ | None)
+      when queue_owner_matches state panel ~viewport owner -> Queue_input panel
+    | Some _, (Some _ | None), (Some _ | None), (Some _ | None)
+    | None, Some _, (Some _ | None), (Some _ | None)
+    | None, None, (Some _ | None), Some _ -> Wait_for_frame
+    | None, None, (Some _ | None), None -> Other_input
 
 let presented_queue_selection zones =
   Masc_tui_hit.to_list zones |> List.find_map (fun (_, _, _, target) ->

@@ -30,18 +30,29 @@ a result does not make the preview appear/disappear. Actual list height still
 uses the facts currently displayed. Both key handling and rendering use that
 remaining height.
 
-`f` switches adaptive/expanded view; arrows or `j/k` select, Enter opens detail,
+`f` changes the preference between automatic layout and a full reader. Its
+labels are `prefer full` and `allow context`; the title names the preference.
+Allowing context does not force it into a viewport where both documents do
+not fit. Arrows or `j/k` select, Enter opens detail,
 `?` opens Help and Esc returns. The key table drives both Help and the list and
 detail footers. `f` is a local disclosed action, not a claim that every terminal
 application uses that shortcut. Text input retains literal characters. Physical
 Korean IME/chord behavior needs an actual operator-terminal observation.
 
 Conversation and Queue have separate copy rectangles. Their headings,
-boundaries and shared footer remain copyable. Pane geometry changes and
+boundaries and shared footer remain copyable. On presentation, pane geometry changes and
 explicit layout changes retire the old gesture and quarantine observed
 pending input through the existing presentation barrier. Terminal input and
 output observations are not atomic; these source boundaries still need the
 actual interaction comparison below.
+
+The presented Queue owner also retains placement, available content height
+and document length. Navigation waits for a replacement frame if an async
+read or receipt changes these values. Fast queued navigation can therefore
+be rejected with the common transition feedback. This does not freeze item
+order or prove that all input/output is atomic. Exact selected-row authority
+continues to guard changes, and copying the still-presented frame remains a
+separate operation.
 
 ## What the importance scores mean here
 
@@ -127,7 +138,7 @@ This supports Side as the wide default for the observed work, and Full for a
 narrow overflowing queue. The revised source therefore allows Bottom only if
 the entire Queue document, including reserved status/receipt/action-note rows,
 still fits. It retains Bottom where it consumes spare space rather than list
-capacity. This revision and the later footer-order change are newer than the
+capacity. This revision, viewport input admission and the later footer-order change are newer than the
 observed binary and still need native confirmation. A small preview may still
 show only diagnostics; the partial caption and Esc to full chat make that limit
 explicit rather than selecting content by guessed importance.
@@ -137,6 +148,14 @@ layout and size changes, `n` then `l` sent `immediate` and `low` for the same
 `fixture-event-01`, incarnation `1`. The fixture acknowledged the requests but
 did not apply or execute them. These observations establish targeting in this
 sequence, not real-server urgency semantics, physical IME/chord delivery or
-human task time. Final-head native execution, pointer-copy behavior and browser
+human task time. Final-head native execution and browser
 pixel comparison remain open; no user preference or general comprehension
 improvement has been measured.
+
+Synthetic SGR mouse reports also produced two OSC 52 copy requests: one
+conversation drag across the pane boundary contained only the left document;
+one Queue drag contained only the right document. A third drag, held while
+`f` changed placement and released after the replacement frame, produced no
+copy request. These are injected protocol observations of `38b6edd`, not a
+physical pointer study or proof that an operating-system clipboard accepted
+the requests.

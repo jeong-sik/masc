@@ -889,10 +889,24 @@ let queue_panel_list_budget state panel =
   Masc_tui_queue_layout.queue_rows
     ~body_rows:(surface_chrome_budget state ~terminal_rows) (queue_panel_layout state panel)
 
+let queue_panel_viewport state panel =
+  let qv_placement = queue_panel_layout state panel in
+  let qv_document_rows, qv_content_rows =
+    if Option.is_some panel.qp_detail then queue_panel_detail_viewport state panel
+    else
+      let items = queue_panel_items state panel in
+      List.length items, max 0 (queue_panel_list_budget state panel
+        - queue_panel_fixed_rows ~items panel) in
+  {qv_placement; qv_content_rows; qv_document_rows}
+
 let render_queue_panel (state : state) (panel : queue_panel) =
   let terminal_rows, cols = get_terminal_size () in
-  let title label = screen_title label ^ "  " ^ Terminal_text.single_line panel.qp_keeper in
-  let owner () = Queue_panel_presented (queue_panel_owner state panel) in
+  let title label = screen_title (label
+    ^ (if Option.is_some panel.qp_detail then "" else match panel.qp_layout with
+       | Masc_tui_queue_layout.Adaptive -> " · automatic"
+       | Expanded -> " · full")) ^ "  " ^ Terminal_text.single_line panel.qp_keeper in
+  let owner () = Queue_panel_presented
+      (queue_panel_owner state panel ~viewport:(queue_panel_viewport state panel)) in
   if Option.is_some panel.qp_detail then
     let lines = queue_panel_detail_lines state panel ~cols in
     surface_chrome ~overflow:(Self_scrolled owner) state ~terminal_rows ~cols

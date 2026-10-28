@@ -88,6 +88,10 @@ val queue_panel_list_budget : Masc_tui_types.state -> Masc_tui_types.queue_panel
 (** Queue body height after the same adaptive context reservation used to draw.
     Selection, paging and action admission use this exact geometry. *)
 
+val queue_panel_viewport : Masc_tui_types.state -> Masc_tui_types.queue_panel -> Masc_tui_types.queue_panel_viewport
+(** The placement, actual content height and document length shared by drawing
+    and input admission, including current receipt and selected-action rows. *)
+
 val queue_panel_detail_viewport : Masc_tui_types.state -> Masc_tui_types.queue_panel -> int * int
 
 val render_agenda :

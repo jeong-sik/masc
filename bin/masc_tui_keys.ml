@@ -2432,7 +2432,9 @@ let queue_bindings state panel =
         | Queue_event_urgency -> [b Act "n" "immediate priority"; b Act "l" "low priority"]
         | Queue_no_priority -> [] in
     actions @ [b Navigate "↑/↓ / j/k" "select"; b Navigate "Enter" "read"]
-    @ [b Navigate "f" "expand/context";
+    @ [b Navigate "f" (match panel.qp_layout with
+         | Masc_tui_queue_layout.Adaptive -> "prefer full"
+         | Expanded -> "allow context");
        b Navigate "PgUp/PgDn" "page"; b Navigate "Home/End" "edges";
        b Act "r" "refresh"] @ close
 

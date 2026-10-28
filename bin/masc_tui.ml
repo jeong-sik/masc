@@ -26990,7 +26990,9 @@ and is loaded on demand through keeper_skill.
       let rows, _ = get_terminal_size () in
       let beneath = Masc_tui_render.queue_below_play state ~terminal_rows:rows in
       let queue_play_owner = queue_play_input_owner ~play_presented:presented_play
-          ~play_shown ~compact:compact_viewport ~state ~beneath ~presented_queue in
+          ~play_shown ~compact:compact_viewport ~state ~beneath
+          ~viewport:(Option.map (Masc_tui_render_overlays.queue_panel_viewport state) beneath)
+          ~presented_queue in
       let presented_queue_input = match queue_play_owner with
         | Queue_input panel -> Some panel
         | Play_input | Wait_for_frame | Other_input -> None in

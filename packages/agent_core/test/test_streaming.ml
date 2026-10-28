@@ -734,7 +734,7 @@ let test_synthetic_image_media_delta () =
     { id = "msg-img"
     ; model = "test"
     ; stop_reason = EndTurn
-    ; content = [ Image { media_type = "image/png"; data = "abc"; source_type = Base64 } ]
+    ; content = [ Image { media_type = "image/png"; source = Base64 "abc" } ]
     ; usage = None
     ; telemetry = None
     }

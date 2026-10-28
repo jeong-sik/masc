@@ -54,11 +54,11 @@ let content_block_gen =
         QCheck.Gen.string_printable
         QCheck.Gen.bool
     ; QCheck.Gen.map2
-        (fun mt d -> Image { media_type = mt; data = d; source_type = Base64 })
+        (fun mt d -> Image { media_type = mt; source = Base64 d })
         (QCheck.Gen.return "image/png")
         QCheck.Gen.string_printable
     ; QCheck.Gen.map2
-        (fun mt d -> Document { media_type = mt; data = d; source_type = Base64 })
+        (fun mt d -> Document { media_type = mt; source = Base64 d })
         (QCheck.Gen.return "application/pdf")
         QCheck.Gen.string_printable
     ]

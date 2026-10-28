@@ -187,10 +187,13 @@ let test_acc_content_block_start_image () =
        });
   let resp = finalize_ok acc in
   match resp.content with
-  | [ Image { media_type; source_type; data } ] ->
+  | [ Image { media_type; source } ] ->
     check_string "media_type" "image/png" media_type;
-    check_string "source_type" "base64" (Types.media_source_kind_to_string source_type);
-    check_string "data" "iVBORw0KGgo=" data
+    check_string
+      "source_type"
+      "base64"
+      (Types.media_source_kind_to_string (Types.media_source_kind_of_source source));
+    check_string "data" "iVBORw0KGgo=" (Types.media_source_payload source)
   | _ -> Alcotest.fail "expected single Image block"
 ;;
 

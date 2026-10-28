@@ -757,7 +757,7 @@ let test_terminal_media_delivery_failure_keeps_applied_effect () =
             (Masc.Keeper_surface_post.To_discord {channel_id="fixture-destination"}));
         Ok { Agent_core.Types.content="already-applied receipt"
            ; content_blocks=Some [Agent_core.Types.Document
-               {media_type="application/pdf";data="Zml4dHVyZQ==";source_type=Base64}]
+               {media_type="application/pdf";source=Base64 "Zml4dHVyZQ=="}]
            ; _meta=None }) in
     let result = tool.call ~call_id:"terminal-media" (`Assoc []) in
     check bool "failed delivery is settled as failure" false result.success;
@@ -780,7 +780,7 @@ let test_terminal_media_delivery_failure_keeps_applied_effect () =
 let image_result ~receipt ~media_type ~data _ =
   Ok { Agent_core.Types.content = receipt
      ; content_blocks =
-         Some [ Agent_core.Types.Image { media_type; data; source_type = Base64 } ]
+         Some [ Agent_core.Types.Image { media_type; source = Base64 data } ]
      ; _meta = None }
 ;;
 
@@ -1376,14 +1376,13 @@ let test_reasoning_and_media_blocks_are_strictly_preserved () =
           }
       ; RedactedThinking "redacted-payload"
       ; Image
-          { media_type = "image/png"; data = "image-data"; source_type = Url }
+          { media_type = "image/png"; source = Url "image-data" }
       ; Document
           { media_type = "application/pdf"
-          ; data = "document-data"
-          ; source_type = Base64
+          ; source = Base64 "document-data"
           }
       ; Audio
-          { media_type = "audio/wav"; data = "audio-data"; source_type = File_id }
+          { media_type = "audio/wav"; source = File_id "audio-data" }
       ]
   in
   let source source_type media_type data =

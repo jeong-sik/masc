@@ -265,7 +265,7 @@ let test_image_block_media_delta () =
   let response =
     make_response
       [ Types.Image
-          { media_type = "image/png"; data = "base64data"; source_type = Types.Base64 }
+          { media_type = "image/png"; source = Types.Base64 "base64data" }
       ]
   in
   let events = collect_events response in
@@ -290,7 +290,7 @@ let test_document_block_media_delta () =
   let response =
     make_response
       [ Types.Document
-          { media_type = "application/pdf"; data = "pdfdata"; source_type = Types.Base64 }
+          { media_type = "application/pdf"; source = Types.Base64 "pdfdata" }
       ]
   in
   let events = collect_events response in

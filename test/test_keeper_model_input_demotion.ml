@@ -622,7 +622,7 @@ let media_projection_binds_actual_argument_positions () =
   let input = long_arguments "media" in
   let canonical = match argument_cycle ~id:"media" input with
     | first :: rest -> {first with content =
-        Types.Image {media_type = "image/png"; data = "aW1hZ2U="; source_type = Types.Base64}
+        Types.Image {media_type = "image/png"; source = Types.Base64 "aW1hZ2U="}
         :: first.content} :: rest
     | [] -> Alcotest.fail "nonempty fixture" in
   let dispatch, dropped = Agent_core.Llm_provider.Api_common.degrade_image_messages

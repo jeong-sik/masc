@@ -67,7 +67,7 @@ let test_original_presentation () =
        Alcotest.(check bool) "table text is included" true
          (String_util.contains_substring second "Leave" && String_util.contains_substring second "Take");
        let images = List.filter_map (function
-         | Llm_provider.Types.Image {media_type="image/png";data;source_type=Base64} -> Some (Base64.decode_exn data)
+         | Llm_provider.Types.Image {media_type="image/png";source=Base64 data} -> Some (Base64.decode_exn data)
          | _ -> None) blocks in
        let pages = member "rendered_slides" data |> to_list in
        Alcotest.(check int) "every slide becomes visual input" 2 (List.length images);

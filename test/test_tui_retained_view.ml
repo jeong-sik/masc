@@ -96,8 +96,7 @@ let test_an_image_states_its_size () =
   let text =
     message_text
       [ Types.Image
-          { media_type = "image/png"; data = String.make 100 'x'
-          ; source_type = Types.Base64
+          { media_type = "image/png"; source = Types.Base64 (String.make 100 'x')
           }
       ]
   in

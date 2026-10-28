@@ -136,7 +136,7 @@ let test_seed_witness_uses_raw_source_and_dropped_arguments_are_not_written () =
   | Ok None -> () | Ok (Some _) -> fail "discarded argument was written" | Error error -> fail (Tool_blob_store.fetch_error_to_string error)
 
 let test_declared_pinned_prefix_and_media_replay_keep_occurrence_coordinates () = with_base @@ fun base ->
-  let image = T.Image {media_type="image/png";data="fixture";source_type=T.Base64} in
+  let image = T.Image {media_type="image/png";source=T.Base64 "fixture"} in
   let canonical = T.make_message ~role:T.User [T.Text "The Librarian read this.";image] :: List.tl raw_seed in
   let replay_prefix = Keeper_replay_prefix.media_degraded ~canonical_prefix:canonical ~dispatch_prefix:raw_seed in
   let prefix = [text T.System "Caller-owned task reference."] in
@@ -238,7 +238,7 @@ let test_completion_review_preserves_the_full_evidence_without_history_reads () 
   with_base @@ fun base ->
   let attachment = T.make_message ~role:T.User
       [T.Text "Review the attached original evidence."
-      ; T.Image { media_type = "image/png"; data = "original-image-bytes"; source_type = T.Base64 }]
+      ; T.Image { media_type = "image/png"; source = T.Base64 "original-image-bytes" }]
   in
   let evidence = raw_history @ [attachment] in
   let original = List.map Agent_core.Checkpoint.message_to_json evidence in

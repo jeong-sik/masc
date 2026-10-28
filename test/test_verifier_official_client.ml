@@ -183,7 +183,7 @@ candidates = ["forbidden.verifier", "official.verifier"]
     ~log_info:(fun _ -> ()) ~log_warn:(fun _ -> ())
     ~render_prompt:(fun () -> Ok "Verify the supplied image and read proof.txt before reporting.")
     ~goal_blocks:[Agent_core.Types.Image
-      { media_type="image/png"; data=png; source_type=Base64 }]
+      { media_type="image/png"; source = Base64 png }]
     ~lookup ~provider_rest:Verification_retry.provider_rest ~base_path:root
     ~on_tool_result:(fun ~input:_ result -> calls := result :: !calls) () in
   let result = review () in
@@ -323,7 +323,7 @@ let test_unsafe_slots_refused_before_spawn () =
       ~log_info:(fun _ -> ()) ~log_warn:(fun _ -> ())
       ~render_prompt:(fun () -> Ok "A prose approval must never authorize this review.")
       ~goal_blocks:[Agent_core.Types.Image
-        { media_type="image/png"; data=png; source_type=Base64 }]
+        { media_type="image/png"; source = Base64 png }]
       ~lookup ~provider_rest:Verification_retry.provider_rest ~base_path:root () in
     check bool (label ^ " explicit override cannot bypass admission") true
       (result.verdict = None && result.gate = AR.Evaluator_unavailable);

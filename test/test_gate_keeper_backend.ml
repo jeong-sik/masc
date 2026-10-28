@@ -569,12 +569,13 @@ let test_keeper_multimodal_input_converts_user_blocks_to_agent_core_blocks () =
   with
   | Ok
       [
-        Agent_core.Types.Image { media_type; data; source_type };
+        Agent_core.Types.Image { media_type; source };
         Agent_core.Types.Text text;
       ] ->
       check string "media type" "image/png" media_type;
-      check string "data" "abc123" data;
-      check bool "source type" true (source_type = Agent_core.Types.Base64);
+      check string "data" "abc123" (Agent_core.Types.media_source_payload source);
+      check bool "source type" true
+        (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64);
       check string "text" "describe this" text
   | Ok _ -> fail "expected image then text AGENT_CORE blocks"
   | Error err -> fail ("expected AGENT_CORE block conversion: " ^ err)
@@ -716,11 +717,10 @@ let test_keeper_multimodal_reference_crosses_in_native_form () =
   with
   | Ok
       [ Agent_core.Types.Image
-          { media_type = url_mime; data = url; source_type = Agent_core.Types.Url }
+          { media_type = url_mime; source = Agent_core.Types.Url url }
       ; Agent_core.Types.Image
           { media_type = default_mime
-          ; data = file_id
-          ; source_type = Agent_core.Types.File_id
+          ; source = Agent_core.Types.File_id file_id
           }
       ] ->
       check string "url rides as the data" "https://example.test/a.png" url;
@@ -875,10 +875,11 @@ let test_keeper_multimodal_input_preserves_binary_document () =
     Keeper_multimodal_input.to_agent_core_blocks ~attachments
       [ Keeper_multimodal_input.User_document media ]
   with
-  | Ok [ Agent_core.Types.Document { media_type; data; source_type } ] ->
+  | Ok [ Agent_core.Types.Document { media_type; source } ] ->
       check string "media type" "application/pdf" media_type;
-      check string "base64 payload" payload data;
-      check bool "source type" true (source_type = Agent_core.Types.Base64)
+      check string "base64 payload" payload (Agent_core.Types.media_source_payload source);
+      check bool "source type" true
+        (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64)
   | Ok _ -> fail "PDF should remain one AGENT_CORE document block"
   | Error err -> fail ("PDF document projection failed: " ^ err)
 
@@ -946,10 +947,11 @@ let test_keeper_multimodal_input_accepts_mixed_case_data_url () =
     Keeper_multimodal_input.to_agent_core_blocks ~attachments
       [ Keeper_multimodal_input.User_image (Attached media) ]
   with
-  | Ok [ Agent_core.Types.Image { media_type; data; source_type } ] ->
+  | Ok [ Agent_core.Types.Image { media_type; source } ] ->
       check string "media type" "image/png" media_type;
-      check string "data" "abc123" data;
-      check bool "source type" true (source_type = Agent_core.Types.Base64)
+      check string "data" "abc123" (Agent_core.Types.media_source_payload source);
+      check bool "source type" true
+        (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64)
   | Ok _ -> fail "expected image AGENT_CORE block"
   | Error err -> fail ("expected mixed-case data URL conversion: " ^ err)
 
@@ -980,10 +982,11 @@ let test_keeper_multimodal_input_normalizes_inferred_data_url_mime () =
     Keeper_multimodal_input.to_agent_core_blocks ~attachments
       [ Keeper_multimodal_input.User_image (Attached media) ]
   with
-  | Ok [ Agent_core.Types.Image { media_type; data; source_type } ] ->
+  | Ok [ Agent_core.Types.Image { media_type; source } ] ->
       check string "media type" "image/png" media_type;
-      check string "data" "abc123" data;
-      check bool "source type" true (source_type = Agent_core.Types.Base64)
+      check string "data" "abc123" (Agent_core.Types.media_source_payload source);
+      check bool "source type" true
+        (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64)
   | Ok _ -> fail "expected image AGENT_CORE block"
   | Error err -> fail ("expected inferred data URL MIME conversion: " ^ err)
 
@@ -3824,7 +3827,7 @@ let test_runtime_run_blocks_appends_multimodal_input_to_agent_core_agent () =
   let blocks =
     [
       Agent_core.Types.Text "Inspect this";
-      Agent_core.Types.image_block ~media_type:"image/png" ~data:"img" ();
+      Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "img");
     ]
   in
   (match
@@ -3846,12 +3849,13 @@ let test_runtime_run_blocks_appends_multimodal_input_to_agent_core_agent () =
           match content with
           | [
               Agent_core.Types.Text text;
-              Agent_core.Types.Image { media_type; data; source_type };
+              Agent_core.Types.Image { media_type; source };
             ] ->
               check string "text preserved" "Inspect this" text;
               check string "image media type" "image/png" media_type;
-              check string "image data" "img" data;
-              check bool "source type" true (source_type = Agent_core.Types.Base64)
+              check string "image data" "img" (Agent_core.Types.media_source_payload source);
+              check bool "source type" true
+                (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64)
           | _ -> fail "stored user input lost multimodal block shape")
       | _ -> fail "missing appended AGENT_CORE user message")
 
@@ -3876,7 +3880,7 @@ let test_runtime_multimodal_gate_model_caps_fail_closed () =
       model_caps
   in
   let blocks =
-    [ Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" () ]
+    [ Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc") ]
   in
   match
     Runtime_agent.For_testing.validate_content_blocks_against_capabilities
@@ -3898,8 +3902,8 @@ let test_runtime_multimodal_gate_lists_required_modalities () =
   let blocks =
     [
       Agent_core.Types.Text "describe these";
-      Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ();
-      Agent_core.Types.audio_block ~media_type:"audio/wav" ~data:"def" ();
+      Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc");
+      Agent_core.Types.audio_block ~media_type:"audio/wav" ~source:(Agent_core.Types.Base64 "def");
     ]
   in
   check (list string) "required modalities" [ "image"; "audio" ]
@@ -3912,7 +3916,7 @@ let test_runtime_multimodal_gate_includes_initial_messages () =
         content =
           [
             Agent_core.Types.Text "previous image turn";
-            Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ();
+            Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc");
           ];
         name = None;
         tool_call_id = None;
@@ -3948,7 +3952,7 @@ let test_runtime_multimodal_gate_includes_initial_messages () =
 
 let test_runtime_multimodal_gate_rejects_unsupported_image () =
   let blocks =
-    [ Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" () ]
+    [ Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc") ]
   in
   match
     Runtime_agent.For_testing.validate_content_blocks_against_capabilities
@@ -3975,7 +3979,7 @@ let test_runtime_multimodal_gate_allows_supported_image () =
   let blocks =
     [
       Agent_core.Types.Text "describe this";
-      Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ();
+      Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc");
     ]
   in
   match
@@ -3993,8 +3997,7 @@ let test_runtime_multimodal_gate_requires_multimodal_for_document () =
     [
       Agent_core.Types.document_block
         ~media_type:"application/pdf"
-        ~data:"abc"
-        ();
+        ~source:(Agent_core.Types.Base64 "abc");
     ]
   in
   let rejected =

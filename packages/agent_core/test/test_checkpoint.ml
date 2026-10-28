@@ -226,7 +226,7 @@ let test_encoding_memo_writes_to_string_bytes () =
            ; outcome = reported_tool_failure
            ; json = Some (`Assoc [ "rows", `Int 3 ])
            ; content_blocks =
-               Some [ Image { media_type = "image/png"; data = "aW1hZ2U="; source_type = Base64 } ]
+               Some [ Image { media_type = "image/png"; source = Base64 "aW1hZ2U=" } ]
            })
     ]
   in
@@ -647,10 +647,9 @@ let test_a_read_message_the_encoder_rewrites_is_not_held () =
 let test_image_carriers_remain_canonical () =
   let open Types in
   let images =
-    [ Image { media_type = "image/png"; data = "aW1hZ2U="; source_type = Base64 }
-    ; Image { media_type = "image/png"; data = "https://images.invalid/old.png"
-            ; source_type = Url }
-    ; Image { media_type = "image/png"; data = "file_history_image"; source_type = File_id }
+    [ Image { media_type = "image/png"; source = Base64 "aW1hZ2U=" }
+    ; Image { media_type = "image/png"; source = Url "https://images.invalid/old.png" }
+    ; Image { media_type = "image/png"; source = File_id "file_history_image" }
     ]
   in
   let messages =
@@ -690,7 +689,7 @@ let test_tool_image_survives_dispatch_and_checkpoint () =
   Eio_main.run @@ fun env ->
   let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a14sAAAAASUVORK5CYII=" in
   let summary = "artifact.png: original PNG bytes" in
-  let blocks = [ Types.image_block ~media_type:"image/png" ~data:png () ] in
+  let blocks = [ Types.image_block ~media_type:"image/png" ~source:(Types.Base64 png) ] in
   let calls = ref 0 in
   let tool =
     Tool.create ~name:"inspect_image" ~description:"Read an image" ~parameters:[]

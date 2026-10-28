@@ -23,7 +23,7 @@ let messages =
   [ msg
       User
       [ Text "Inspect this image"
-      ; Image { media_type = "image/png"; data = "AAAA"; source_type = Base64 }
+      ; Image { media_type = "image/png"; source = Base64 "AAAA" }
       ]
   ; msg
       Assistant
@@ -43,7 +43,7 @@ let messages =
           ; content_blocks =
               Some
                 [ Text "inspection complete"
-                ; Image { media_type = "image/png"; data = "BBBB"; source_type = Base64 }
+                ; Image { media_type = "image/png"; source = Base64 "BBBB" }
                 ]
           }
       ]
@@ -313,7 +313,7 @@ let tool_result_projection_cases =
       ; content_blocks = Some [ Text "nested result"
                               ; Thinking { content = "nested signed data"; signature = Some "nested-signature" } ]
       }
-  ; "audio", Audio { media_type = "audio/wav"; data = "YXVkaW8="; source_type = Base64 }
+  ; "audio", Audio { media_type = "audio/wav"; source = Base64 "YXVkaW8=" }
   ]
 ;;
 
@@ -327,11 +327,11 @@ let messages_with_tool_result_data block =
           ; json = None
           ; content_blocks = Some
               [ Text "before"
-              ; Image { media_type = "image/png"; data = "AAAA"; source_type = Base64 }
-              ; Image { media_type = "image/png"; data = "https://example.test/tool.png"; source_type = Url }
-              ; Image { media_type = "image/png"; data = "file_tool_image"; source_type = File_id }
+              ; Image { media_type = "image/png"; source = Base64 "AAAA" }
+              ; Image { media_type = "image/png"; source = Url "https://example.test/tool.png" }
+              ; Image { media_type = "image/png"; source = File_id "file_tool_image" }
               ; block
-              ; Document { media_type = "application/pdf"; data = "UERG"; source_type = Base64 }
+              ; Document { media_type = "application/pdf"; source = Base64 "UERG" }
               ; Text "after"
               ]
           }

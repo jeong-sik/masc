@@ -913,7 +913,7 @@ let test_signed_inline_image_roundtrip () =
   let parsed = Backend_gemini.parse_response response in
   (match parsed.content with
    | [ RedactedThinking carrier
-     ; Image { media_type = "image/png"; data = "iVBORw0KGgo="; source_type = Base64 }
+     ; Image { media_type = "image/png"; source = Base64 "iVBORw0KGgo=" }
      ] -> check_part_signature_carrier ~target:"image" ~signature:"sig-image" carrier
    | _ -> fail "expected signed inline image response pair");
   let messages =
@@ -1100,8 +1100,7 @@ let test_contents_multimodal () =
           [ Text "Describe this image:"
           ; Image
               { media_type = "image/png"
-              ; data = "base64data"
-              ; source_type = Types.Base64
+              ; source = Types.Base64 "base64data"
               }
           ]
       ; name = None
@@ -1637,7 +1636,7 @@ let test_gemini_stream_signed_inline_image () =
          { content =
              [ RedactedThinking carrier
              ; Image
-                 { media_type = "image/png"; source_type = Base64; data = "iVBORw0KGgo=" }
+                 { media_type = "image/png"; source = Base64 "iVBORw0KGgo=" }
              ]
          ; _
          } ->

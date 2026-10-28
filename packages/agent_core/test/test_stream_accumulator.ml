@@ -1066,7 +1066,7 @@ let test_media_metadata_is_frozen_by_first_delta () =
     ];
   let accepted_response = finalize_with_end_turn accepted in
   (match accepted_response.content with
-   | [ Image { media_type = "image/png"; source_type = Base64; data = "ab" } ] -> ()
+   | [ Image { media_type = "image/png"; source = Base64 "ab" } ] -> ()
    | _ -> Alcotest.fail "matching media chunks did not assemble canonically");
   let acc = Streaming.create_stream_acc () in
   Streaming.accumulate_event acc

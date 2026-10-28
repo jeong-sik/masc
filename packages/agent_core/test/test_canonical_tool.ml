@@ -247,10 +247,10 @@ let test_tool_call_none_for_non_tooluse () =
         ; json = None
         ; content_blocks = None
         }
-    ; Types.Image { media_type = "image/png"; data = "AAAA"; source_type = Types.Base64 }
+    ; Types.Image { media_type = "image/png"; source = Types.Base64 "AAAA" }
     ; Types.Document
-        { media_type = "application/pdf"; data = "JVBE"; source_type = Types.Base64 }
-    ; Types.Audio { media_type = "audio/wav"; data = "UklG"; source_type = Types.Base64 }
+        { media_type = "application/pdf"; source = Types.Base64 "JVBE" }
+    ; Types.Audio { media_type = "audio/wav"; source = Types.Base64 "UklG" }
     ]
   in
   List.iter
@@ -321,10 +321,10 @@ let test_result_none_for_non_toolresult () =
     ; Types.ReasoningDetails { reasoning_content = Some "why"; details = [] }
     ; Types.RedactedThinking "redacted"
     ; Types.ToolUse { id = "call_x"; name = "t"; input = `Null }
-    ; Types.Image { media_type = "image/png"; data = "AAAA"; source_type = Types.Base64 }
+    ; Types.Image { media_type = "image/png"; source = Types.Base64 "AAAA" }
     ; Types.Document
-        { media_type = "application/pdf"; data = "JVBE"; source_type = Types.Base64 }
-    ; Types.Audio { media_type = "audio/wav"; data = "UklG"; source_type = Types.Base64 }
+        { media_type = "application/pdf"; source = Types.Base64 "JVBE" }
+    ; Types.Audio { media_type = "audio/wav"; source = Types.Base64 "UklG" }
     ]
   in
   List.iter

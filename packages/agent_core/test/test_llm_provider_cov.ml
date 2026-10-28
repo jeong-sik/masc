@@ -241,8 +241,7 @@ let test_base64_media_data_url () =
       ~backend:"test_backend"
       ~block:"image"
       ~media_type:"image/png"
-      ~data:"abc"
-      Types.Base64
+      (Types.Base64 "abc")
   in
   Alcotest.(check string) "data URL" "data:image/png;base64,abc" result
 ;;
@@ -252,8 +251,7 @@ let test_base64_media_payload () =
     Api_common.base64_media_payload
       ~backend:"test_backend"
       ~block:"audio"
-      ~data:"abc"
-      Types.Base64
+      (Types.Base64 "abc")
   in
   Alcotest.(check string) "payload" "abc" result
 ;;
@@ -265,8 +263,7 @@ let test_base64_media_source_rejects_url () =
          ~backend:"test_backend"
          ~block:"image"
          ~media_type:"image/png"
-         ~data:"https://example.invalid/image.png"
-         Types.Url);
+         (Types.Url "https://example.invalid/image.png"));
     Alcotest.fail "expected Url media source to fail closed"
   with
   | Invalid_argument message ->
@@ -342,7 +339,7 @@ let test_content_block_to_json_tool_result () =
 let test_content_block_to_json_image () =
   let json =
     Api_common.content_block_to_json
-      (Image { media_type = "image/png"; data = "abc"; source_type = Types.Base64 })
+      (Image { media_type = "image/png"; source = Types.Base64 "abc" })
   in
   let open Yojson.Safe.Util in
   Alcotest.(check string) "type" "image" (json |> member "type" |> to_string);
@@ -357,7 +354,7 @@ let test_content_block_to_json_document () =
   let json =
     Api_common.content_block_to_json
       (Document
-         { media_type = "application/pdf"; data = "pdf"; source_type = Types.Base64 })
+         { media_type = "application/pdf"; source = Types.Base64 "pdf" })
   in
   let open Yojson.Safe.Util in
   Alcotest.(check string) "type" "document" (json |> member "type" |> to_string)
@@ -366,7 +363,7 @@ let test_content_block_to_json_document () =
 let test_content_block_to_json_audio () =
   let json =
     Api_common.content_block_to_json
-      (Audio { media_type = "audio/wav"; data = "wav"; source_type = Types.Base64 })
+      (Audio { media_type = "audio/wav"; source = Types.Base64 "wav" })
   in
   let open Yojson.Safe.Util in
   Alcotest.(check string) "type" "audio" (json |> member "type" |> to_string)
@@ -456,7 +453,7 @@ let test_content_block_of_json_image () =
       ]
   in
   match Api_common.content_block_of_json json with
-  | Some (Image { media_type = "image/png"; data = "abc"; source_type = Types.Base64 }) ->
+  | Some (Image { media_type = "image/png"; source = Types.Base64 "abc" }) ->
     ()
   | _ -> Alcotest.fail "image roundtrip"
 ;;

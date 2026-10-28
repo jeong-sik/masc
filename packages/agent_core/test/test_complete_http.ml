@@ -4254,14 +4254,13 @@ let test_complete_rejects_missing_anthropic_output_ceiling_before_io () =
 let test_responses_tool_images_on_http ~stream () =
   let open Types in
   let inline_image =
-    Image { media_type = "image/png"; data = "aW1hZ2U="; source_type = Base64 }
+    Image { media_type = "image/png"; source = Base64 "aW1hZ2U=" }
   in
   let url_image =
-    Image { media_type = "image/png"; data = "https://images.invalid/reference.png"
-          ; source_type = Url }
+    Image { media_type = "image/png"; source = Url "https://images.invalid/reference.png" }
   in
   let file_image =
-    Image { media_type = "image/png"; data = "file_fixture_image"; source_type = File_id }
+    Image { media_type = "image/png"; source = File_id "file_fixture_image" }
   in
   let failed =
     Tool_failed { failure_kind = Reported_tool_error; error_class = Some Transient }
@@ -4294,7 +4293,7 @@ let test_responses_tool_images_on_http ~stream () =
     ; "text_blocks", Tool_succeeded, "still text", Some [ Text "still text" ]
     ; "empty_blocks", Tool_succeeded, "", Some []
     ; "audio_and_image", Tool_succeeded, "mixed media",
-        Some [ Audio { media_type = "audio/wav"; data = "YXVkaW8="; source_type = Base64 }
+        Some [ Audio { media_type = "audio/wav"; source = Base64 "YXVkaW8=" }
              ; inline_image ]
     ; "nested_only", Tool_succeeded, "", Some [ nested_parent ]
     ; "direct_and_nested", Tool_succeeded, "",
@@ -4411,11 +4410,11 @@ let test_responses_tool_images_on_http ~stream () =
 let test_anthropic_image_sources_on_http ~stream () =
   let open Types in
   let images =
-    [ Image { media_type = "image/png"; data = "aW1hZ2U="; source_type = Base64 }
+    [ Image { media_type = "image/png"; source = Base64 "aW1hZ2U=" }
     ; Image { media_type = "application/octet-stream"
-            ; data = "https://images.invalid/reference.png"; source_type = Url }
+            ; source = Url "https://images.invalid/reference.png" }
     ; Image { media_type = "application/octet-stream"
-            ; data = "file_fixture_image"; source_type = File_id }
+            ; source = File_id "file_fixture_image" }
     ]
   in
   let image source = `Assoc [ "type", `String "image"; "source", source ] in

@@ -122,9 +122,7 @@ let test_projected_reading_follows_its_attachment () =
   let block =
     Agent_core.Types.audio_block
       ~media_type:"audio/wav"
-      ~data
-      ~source_type:Agent_core.Types.Base64
-      ()
+      ~source:(Agent_core.Types.Base64 data)
   in
   let _ =
     Reading.project_blocks

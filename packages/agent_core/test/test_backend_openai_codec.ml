@@ -1056,10 +1056,10 @@ let test_content_parts_cover_modalities () =
   let parts =
     Serialize.openai_content_parts_of_blocks
       [ Text "hello"
-      ; Image { media_type = "image/png"; data = "img"; source_type = Types.Base64 }
+      ; Image { media_type = "image/png"; source = Types.Base64 "img" }
       ; Document
-          { media_type = "application/pdf"; data = "doc"; source_type = Types.Base64 }
-      ; Audio { media_type = "wav"; data = "aud"; source_type = Types.Base64 }
+          { media_type = "application/pdf"; source = Types.Base64 "doc" }
+      ; Audio { media_type = "wav"; source = Types.Base64 "aud" }
       ; Thinking { signature = None; content = "hidden" }
       ; RedactedThinking "redacted"
       ; ToolUse { id = "tc"; name = "tool"; input = `Assoc [] }
@@ -1098,10 +1098,8 @@ let test_content_parts_reference_carriers () =
      part's file_id. *)
   let parts =
     Serialize.openai_content_parts_of_blocks
-      [ Image { media_type = "image/png"; data = "https://example.com/a.png"
-              ; source_type = Types.Url }
-      ; Image { media_type = "image/png"; data = "file-api-1"
-              ; source_type = Types.File_id }
+      [ Image { media_type = "image/png"; source = Types.Url "https://example.com/a.png" }
+      ; Image { media_type = "image/png"; source = Types.File_id "file-api-1" }
       ]
   in
   check_int "reference parts" 2 (List.length parts);
@@ -1132,8 +1130,7 @@ let test_non_base64_media_source_fails_closed () =
           User
           [ Image
               { media_type = "image/png"
-              ; data = "https://example.invalid/image.png"
-              ; source_type = Types.Url
+              ; source = Types.Url "https://example.invalid/image.png"
               }
           ]
       ]
@@ -1153,8 +1150,7 @@ let test_non_base64_media_source_fails_closed () =
             User
             [ Document
                 { media_type = "application/pdf"
-                ; data = "file_abc123"
-                ; source_type = Types.File_id
+                ; source = Types.File_id "file_abc123"
                 }
             ]
         ]
@@ -1247,7 +1243,7 @@ let test_wire_adjacency_nudged_tool_turn () =
 let test_user_multimodal_preserve_and_visual_first () =
   let content =
     [ Text "caption"
-    ; Image { media_type = "image/jpeg"; data = "jpeg"; source_type = Types.Base64 }
+    ; Image { media_type = "image/jpeg"; source = Types.Base64 "jpeg" }
     ]
   in
   let openai = Serialize.openai_messages_of_message (msg User content) |> only "openai" in
@@ -1274,7 +1270,7 @@ let test_ollama_native_multimodal_variants () =
       ~supports_image_input:true
       [ msg
           User
-          [ Image { media_type = "image/png"; data = "png1"; source_type = Types.Base64 }
+          [ Image { media_type = "image/png"; source = Types.Base64 "png1" }
           ]
       ]
     |> only "ollama"
@@ -1290,7 +1286,7 @@ let test_ollama_native_multimodal_variants () =
       ~supports_image_input:false
       [ msg
           User
-          [ Audio { media_type = "audio/wav"; data = "wav1"; source_type = Types.Base64 }
+          [ Audio { media_type = "audio/wav"; source = Types.Base64 "wav1" }
           ]
       ]
     |> ignore);
@@ -1301,7 +1297,7 @@ let test_ollama_native_multimodal_variants () =
       [ msg
           User
           [ Text "describe these"
-          ; Image { media_type = "image/png"; data = "png2"; source_type = Types.Base64 }
+          ; Image { media_type = "image/png"; source = Types.Base64 "png2" }
           ]
       ]
     |> only "ollama"
@@ -1531,9 +1527,9 @@ let test_tool_choice_and_tool_schema_conversion () =
 let ignored_blocks : content_block list =
   [ Thinking { signature = None; content = "   " }
   ; RedactedThinking "hidden"
-  ; Image { media_type = "image/png"; data = "img"; source_type = Types.Base64 }
-  ; Document { media_type = "application/pdf"; data = "doc"; source_type = Types.Base64 }
-  ; Audio { media_type = "wav"; data = "aud"; source_type = Types.Base64 }
+  ; Image { media_type = "image/png"; source = Types.Base64 "img" }
+  ; Document { media_type = "application/pdf"; source = Types.Base64 "doc" }
+  ; Audio { media_type = "wav"; source = Types.Base64 "aud" }
   ]
 ;;
 
@@ -3112,7 +3108,7 @@ let test_conformant_request_drops_combinator_type_information () =
 let test_tool_image_followups_preserve_batch_order () =
   let open Yojson.Safe.Util in
   let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a14sAAAAASUVORK5CYII=" in
-  let image = image_block ~media_type:"image/png" ~data:png () in
+  let image = image_block ~media_type:"image/png" ~source:(Base64 png) in
   let result id blocks =
     ToolResult { tool_use_id = id; content = "read " ^ id; outcome = Tool_succeeded
                ; json = None; content_blocks = blocks }
@@ -3197,7 +3193,7 @@ let test_tool_image_followups_preserve_batch_order () =
 ;;
 
 let test_ollama_tool_media_occurrence_ownership () =
-  let image data = image_block ~media_type:"image/png" ~data () in
+  let image data = image_block ~media_type:"image/png" ~source:(Base64 data) in
   let result id blocks =
     ToolResult { tool_use_id = id; content = "summary"; outcome = Tool_succeeded
                ; json = None; content_blocks = Some blocks }
@@ -3220,8 +3216,8 @@ let test_ollama_tool_media_occurrence_ownership () =
       |> Yojson.Safe.from_string |> to_list |> List.hd in
   check_bool "nested result retains its text and identity without image duplication" true
     (nested_wire = Api_common.content_block_to_json (result "nested" [Text "nested text"]));
-  let invalid_image = image_block ~source_type:Url ~media_type:"image/png"
-      ~data:"https://example.test/image.png" () in
+  let invalid_image = image_block ~media_type:"image/png"
+      ~source:(Url "https://example.test/image.png") in
   expect_invalid_arg "native tool URL image" (fun () ->
     ollama_messages ~supports_image_input:true
       [msg User [Text "Inspect"]; use "Read"; msg Tool [result "reused" [invalid_image]]]);
@@ -3244,7 +3240,7 @@ let test_tool_image_degrades_without_declared_capability () =
     from 0
   in
   let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a14sAAAAASUVORK5CYII=" in
-  let image = image_block ~media_type:"image/png" ~data:png () in
+  let image = image_block ~media_type:"image/png" ~source:(Base64 png) in
   let result blocks =
     ToolResult { tool_use_id = "a"; content = "read a"; outcome = Tool_succeeded
                ; json = None; content_blocks = blocks }
@@ -3364,12 +3360,12 @@ let test_tool_document_audio_degrade_without_declared_capability () =
     in
     from 0
   in
-  let document = document_block ~media_type:"application/pdf" ~data:"UERG" () in
-  let audio = audio_block ~media_type:"wav" ~data:"QVVE" () in
+  let document = document_block ~media_type:"application/pdf" ~source:(Base64 "UERG") in
+  let audio = audio_block ~media_type:"wav" ~source:(Base64 "QVVE") in
   (* The B-1 residual scenario: an Image and a Document/Audio share one tool
      result, so [with_image_followups] projects all of them onto the media
      follow-up turn — unless the unrepresentable ones are degraded first. *)
-  let image = image_block ~media_type:"image/png" ~data:"cG5n" () in
+  let image = image_block ~media_type:"image/png" ~source:(Base64 "cG5n") in
   let result blocks =
     ToolResult { tool_use_id = "a"; content = "read a"; outcome = Tool_succeeded
                ; json = None; content_blocks = blocks }

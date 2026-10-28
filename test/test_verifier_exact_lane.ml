@@ -503,7 +503,7 @@ let test_recorded_images_ride_to_the_reviewer_as_blocks () =
        (match !received with
         | Some
             [ Agent_core.Types.Text prompt
-            ; Agent_core.Types.Image { media_type; data; _ } ] ->
+            ; Agent_core.Types.Image { media_type; source = Agent_core.Types.Base64 data } ] ->
           Alcotest.(check string)
             "the image block carries the recorded media type" "image/png"
             media_type;

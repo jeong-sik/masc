@@ -98,7 +98,7 @@ let test_initial_message_media_drives_reroute () =
   let initial_messages =
     [ message_with_blocks
         [ Agent_core.Types.Text "previous image turn"
-        ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+        ; Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc")
         ]
     ]
   in
@@ -158,7 +158,7 @@ let test_history_media_floor_rejects_before_provider () =
   let initial_messages =
     [ message_with_blocks
         [ Agent_core.Types.Text "previous image turn"
-        ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+        ; Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc")
         ]
     ]
   in
@@ -185,7 +185,7 @@ let test_checkpoint_media_drives_reroute_and_floor () =
   let checkpoint_messages =
     [ message_with_blocks
         [ Agent_core.Types.Text "checkpoint image turn"
-        ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+        ; Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc")
         ]
     ]
   in
@@ -228,13 +228,13 @@ let test_checkpoint_history_repeated_in_initial_messages_adds_no_modality () =
   let shared =
     message_with_blocks
       [ Agent_core.Types.Text "shared image history"
-      ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+      ; Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc")
       ]
   in
   let checkpoint_audio =
     message_with_blocks
       [ Agent_core.Types.Text "checkpoint-only audio"
-      ; Agent_core.Types.audio_block ~media_type:"audio/wav" ~data:"def" ()
+      ; Agent_core.Types.audio_block ~media_type:"audio/wav" ~source:(Agent_core.Types.Base64 "def")
       ]
   in
   let required ~checkpoint_messages =
@@ -300,7 +300,7 @@ let dropped_count modality dropped =
 let test_strip_drops_unsupported_image () =
   let blocks =
     [ Agent_core.Types.Text "hello"
-    ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+    ; Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc")
     ]
   in
   let kept, dropped =
@@ -312,7 +312,7 @@ let test_strip_drops_unsupported_image () =
 let test_strip_keeps_supported_image () =
   let blocks =
     [ Agent_core.Types.Text "hi"
-    ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+    ; Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc")
     ]
   in
   let kept, dropped =
@@ -325,7 +325,7 @@ let test_strip_messages_drops_history_image () =
   let messages =
     [ message_with_blocks
         [ Agent_core.Types.Text "prev"
-        ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"x" ()
+        ; Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "x")
         ]
     ]
   in
@@ -369,7 +369,7 @@ let test_strip_descends_into_tool_result () =
     [ Agent_core.Types.Text "hello"
     ; tool_result_with_blocks
         [ Agent_core.Types.Text "caption"
-        ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+        ; Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc")
         ]
     ]
   in
@@ -384,7 +384,7 @@ let test_strip_descends_into_tool_result () =
 let test_strip_keeps_nested_media_a_vision_runtime_accepts () =
   let blocks =
     [ tool_result_with_blocks
-        [ Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" () ]
+        [ Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc") ]
     ]
   in
   let kept, dropped =
@@ -404,7 +404,7 @@ let test_stripped_blocks_pass_the_capability_floor () =
   let blocks =
     [ Agent_core.Types.Text "hello"
     ; tool_result_with_blocks
-        [ Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" () ]
+        [ Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc") ]
     ]
   in
   check (list string) "the scan requires image"
@@ -432,7 +432,7 @@ let test_strip_messages_descends_into_tool_result () =
   let messages =
     [ message_with_blocks
         [ tool_result_with_blocks
-            [ Agent_core.Types.image_block ~media_type:"image/png" ~data:"x" () ]
+            [ Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "x") ]
         ]
     ]
   in
@@ -472,7 +472,7 @@ let test_emptied_tool_result_sends_its_content () =
     Runtime_agent.strip_unsupported_modality_blocks (caps ())
       [ tool_result_with_blocks
           [ Agent_core.Types.document_block
-              ~media_type:"application/pdf" ~data:"pdf" () ] ]
+              ~media_type:"application/pdf" ~source:(Agent_core.Types.Base64 "pdf") ] ]
   in
   check int "the document is dropped" 1 (dropped_count "document" dropped);
   let content, content_blocks = only_tool_result_fields kept in
@@ -496,7 +496,7 @@ let test_emptied_blank_tool_result_sends_no_block_list () =
   let kept, _dropped =
     Runtime_agent.strip_unsupported_modality_blocks (caps ())
       [ tool_result_with_content ~content:""
-          [ Agent_core.Types.audio_block ~media_type:"audio/wav" ~data:"wav" () ] ]
+          [ Agent_core.Types.audio_block ~media_type:"audio/wav" ~source:(Agent_core.Types.Base64 "wav") ] ]
   in
   let content, content_blocks = only_tool_result_fields kept in
   check bool "no empty structured view is left" true (content_blocks = None);
@@ -588,7 +588,7 @@ let test_media_degrade_restores_canonical_replay_prefix () =
   let canonical_history =
     [ message_with_blocks
         [ Agent_core.Types.Text "pre-turn"
-        ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"image" ()
+        ; Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "image")
         ]
     ]
   in
@@ -638,7 +638,7 @@ let test_media_degrade_preserves_already_canonical_checkpoint () =
   let canonical_history =
     [ message_with_blocks
         [ Agent_core.Types.Text "canonical"
-        ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"image" ()
+        ; Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "image")
         ]
     ]
   in
@@ -710,7 +710,7 @@ supports-multimodal-inputs = true
         (Runtime_execution.Codex_app_server
            { cli_path = "codex"; account_home = None; model = Some "vision"; timeout_s = 30. })
     in
-    let image = Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" () in
+    let image = Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc") in
     (match Runtime_agent.decide_modality_reroute_for_runtime_candidates
              ~assigned:antigravity ~candidates:[ claude; native ] [ image ] with
      | Runtime_agent.Reroute { target; _ } ->
@@ -827,7 +827,7 @@ supports-image-input = true
     in
     let ids = List.map (fun (runtime : Runtime_instance.t) -> runtime.Runtime_instance.id) in
     let image =
-      Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+      Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc")
     in
     check (list string)
       "an image run walks the image-capable candidates in order"

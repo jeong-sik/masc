@@ -829,8 +829,7 @@ let test_a_rewriting_snapshot_waits_for_its_target () =
    still refuses. *)
 let test_a_candidates_own_rendering_is_what_the_check_holds_it_to () =
   let looked = message T.User [T.Text "Look at this";
-    T.Image {media_type = "image/png"; data = "https://example.invalid/shot.png";
-             source_type = T.Url}] in
+    T.Image {media_type = "image/png"; source = T.Url "https://example.invalid/shot.png"}] in
   let read_instead = message T.User [T.Text "Look at this";
     T.Text "[unread image URL: https://example.invalid/shot.png; this runtime cannot view the image]"] in
   let history = [pinned; looked; text T.Assistant "The build passed."] in

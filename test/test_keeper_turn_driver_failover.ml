@@ -897,8 +897,7 @@ let test_lane_media_degrade_uses_first_candidate_runtime_id () =
       let image_block =
         Agent_core.Types.Image
           { media_type = "image/png"
-          ; data = Base64.encode_string "image"
-          ; source_type = Agent_core.Types.Base64
+          ; source = Agent_core.Types.Base64 (Base64.encode_string "image")
           }
       in
       (* The decision is produced, not hand-built: [reroute_decision] is private,
@@ -949,8 +948,7 @@ let test_run_named_media_degrade_emits_typed_manifest () =
     let audio =
       Agent_core.Types.audio_block
         ~media_type:"audio/wav"
-        ~data:(Base64.encode_string "synthetic-audio")
-        ()
+        ~source:(Agent_core.Types.Base64 (Base64.encode_string "synthetic-audio"))
     in
     ignore
       (Driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "media-degrade-keeper" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
@@ -1102,16 +1100,12 @@ let h5_project_for_text_only ?project_media ~goal_blocks () =
 let h5_audio_block () =
   Agent_core.Types.audio_block
     ~media_type:"audio/wav"
-    ~data:(Base64.encode_string h5_fact_audio)
-    ~source_type:Agent_core.Types.Base64
-    ()
+    ~source:(Agent_core.Types.Base64 (Base64.encode_string h5_fact_audio))
 
 let h5_document_block () =
   Agent_core.Types.document_block
     ~media_type:"application/pdf"
-    ~data:(Base64.encode_string h5_fact_document)
-    ~source_type:Agent_core.Types.Base64
-    ()
+    ~source:(Agent_core.Types.Base64 (Base64.encode_string h5_fact_document))
 
 let h5_fresh_dir () =
   let dir = Filename.temp_file "h5-media-readings-" "" in
@@ -1283,9 +1277,7 @@ let test_h5_attachments_share_one_deadline () =
 let h5_doc_block ~media_type =
   Agent_core.Types.document_block
     ~media_type
-    ~data:(Base64.encode_string h5_fact_document)
-    ~source_type:Agent_core.Types.Base64
-    ()
+    ~source:(Agent_core.Types.Base64 (Base64.encode_string h5_fact_document))
 
 let h5_reader_only_pdf calls ~deadline:_ ~kind:_ ~media_type ~bytes:_ =
   incr calls;
@@ -1418,9 +1410,7 @@ let test_h5_stored_record_keeps_the_payload_probe () =
   let block =
     Agent_core.Types.audio_block
       ~media_type:"audio/wav"
-      ~data
-      ~source_type:Agent_core.Types.Base64
-      ()
+      ~source:(Agent_core.Types.Base64 data)
   in
   let _ =
     h5_project_direct ~base_path:dir
@@ -1451,9 +1441,7 @@ let test_h5_stored_record_keeps_the_payload_probe () =
 let synthetic_image () =
   Agent_core.Types.image_block
     ~media_type:"image/png"
-    ~source_type:Agent_core.Types.Url
-    ~data:"https://example.invalid/screenshot.png"
-    ()
+    ~source:(Agent_core.Types.Url "https://example.invalid/screenshot.png")
 
 (* Per-attempt image projection: one image turn projected for the text-only
    candidate retains image references in the goal and the history and records
@@ -1679,7 +1667,7 @@ let test_current_image_checkpoint_survives_text_fallback () =
       | Some runtime -> runtime
       | None -> Alcotest.failf "missing runtime %s" id in
     let image = Agent_core.Types.image_block ~media_type:"image/png"
-        ~data:(Base64.encode_string "original current-goal pixels") () in
+        ~source:(Agent_core.Types.Base64 (Base64.encode_string "original current-goal pixels")) in
     let canonical_blocks = [ Agent_core.Types.Text "inspect this"; image ] in
     let history = [ message [ Agent_core.Types.Text "previous turn" ] ] in
     let checkpoint =
@@ -2087,8 +2075,7 @@ let test_lane_media_reroute_prefers_lane_candidate () =
       let image_block =
         Agent_core.Types.Image
           { media_type = "image/png"
-          ; data = Base64.encode_string "image"
-          ; source_type = Agent_core.Types.Base64
+          ; source = Agent_core.Types.Base64 (Base64.encode_string "image")
           }
       in
       match
@@ -2131,8 +2118,7 @@ let test_lane_media_reroute_stays_in_lane () =
     let image_block =
       Agent_core.Types.Image
         { media_type = "image/png"
-        ; data = Base64.encode_string "image"
-        ; source_type = Agent_core.Types.Base64
+        ; source = Agent_core.Types.Base64 (Base64.encode_string "image")
         }
     in
     let candidates remaining_runtimes =
@@ -2225,8 +2211,7 @@ let test_lane_media_reroute_walks_past_exhausted_candidate () =
       let image_block =
         Agent_core.Types.Image
           { media_type = "image/png"
-          ; data = Base64.encode_string "image"
-          ; source_type = Agent_core.Types.Base64
+          ; source = Agent_core.Types.Base64 (Base64.encode_string "image")
           }
       in
       (match
@@ -2313,8 +2298,7 @@ let test_media_turn_starts_from_the_live_walk_head () =
       let image_block =
         Agent_core.Types.Image
           { media_type = "image/png"
-          ; data = Base64.encode_string "image"
-          ; source_type = Agent_core.Types.Base64
+          ; source = Agent_core.Types.Base64 (Base64.encode_string "image")
           }
       in
       let candidates =
@@ -2409,8 +2393,7 @@ let test_image_turn_degrades_while_its_capable_candidate_rests () =
            let image_block =
              Agent_core.Types.Image
                { media_type = "image/png"
-               ; data = Base64.encode_string "image"
-               ; source_type = Agent_core.Types.Base64
+               ; source = Agent_core.Types.Base64 (Base64.encode_string "image")
                }
            in
            let walk = Driver.Fresh_walk_by test_recorder in
@@ -5084,8 +5067,7 @@ let test_run_named_reroutes_an_image_to_the_recorders_marked_candidate () =
       [ Agent_core.Types.Text "describe the image"
       ; Agent_core.Types.Image
           { media_type = "image/png"
-          ; data = Base64.encode_string "image"
-          ; source_type = Agent_core.Types.Base64
+          ; source = Agent_core.Types.Base64 (Base64.encode_string "image")
           }
       ]
     in

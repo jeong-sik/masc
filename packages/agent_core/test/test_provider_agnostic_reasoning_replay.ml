@@ -2472,7 +2472,7 @@ let test_initial_system_control_lowering () =
      check_bool "fresh recovery remains active" true (List.mem "CURRENT_RECOVERY" active)
    | _ -> Alcotest.fail "missing consolidated System");
   let invalid = messages @ [message ~origin:System_context User
-      [image_block ~media_type:"image/png" ~data:"image" ()]] in
+      [image_block ~media_type:"image/png" ~source:(Base64 "image")]] in
   (match Backend_openai_serialize.project_history config invalid with
    | Error (Invalid_control_lowering (Non_text_control {message_index=14})) -> ()
    | Error error -> Alcotest.fail (Reasoning_history_projection.error_to_string error)
@@ -2485,7 +2485,7 @@ let test_initial_system_control_lowering () =
    | Error Unsupported_codec -> ()
    | Error error -> Alcotest.fail (Message_origin_lowering.error_to_string error)
    | Ok _ -> Alcotest.fail "initial-system policy cannot rewrite a signed Anthropic prefix");
-  let image = image_block ~media_type:"image/png" ~data:"png" () in
+  let image = image_block ~media_type:"image/png" ~source:(Base64 "png") in
   let image_history = [message User [Text "Inspect"];
     with_source source Assistant [reasoning "MEDIA_REASONING"; tool "media"];
     message Tool [ToolResult {tool_use_id="media";content="image";outcome=Tool_succeeded;

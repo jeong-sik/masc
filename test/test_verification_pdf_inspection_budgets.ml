@@ -298,9 +298,7 @@ let test_extract_text_stops_a_slow_tool_at_the_callers_deadline () =
 let h5_pdf_block () =
   Agent_core.Types.document_block
     ~media_type:"application/pdf"
-    ~data:(Base64.encode_string two_page_pdf)
-    ~source_type:Agent_core.Types.Base64
-    ()
+    ~source:(Agent_core.Types.Base64 (Base64.encode_string two_page_pdf))
 
 let project_pdf ~base_path ~budget_sec =
   Masc.Keeper_media_reading.project_blocks
@@ -397,8 +395,7 @@ let test_h5_real_poppler_reaches_the_projection () =
           ~deadline:(Monotonic_deadline.after ~seconds:60.)
           ~read:(Masc.Keeper_media_reading.production_reader ~base_path ~budget_sec:60.)
           [ Agent_core.Types.document_block ~media_type:"application/pdf"
-              ~data:(Base64.encode_string h5_ledger_pdf)
-              ~source_type:Agent_core.Types.Base64 () ]
+              ~source:(Agent_core.Types.Base64 (Base64.encode_string h5_ledger_pdf)) ]
       in
       let text = text_of blocks in
       check bool "status is read" true (contains ~needle:"status=read" text);

@@ -2,7 +2,7 @@ type rejection_kind = Input_rejected | Paste_rejected
 type rejection = { kind : rejection_kind; generation : int list }
 type preferred = No_preferred | Csi_recovery | Rejection of rejection
 type lifetime = Pending of rejection | Draining of rejection | Presented of rejection * float
-type csi = Csi_inactive | Csi_active
+type csi = Csi_inactive | Csi_active of (string * float) option
 type t = {
   ordinary : (string * float) option;
   rejection : lifetime option;
@@ -17,9 +17,14 @@ let ordinary_visible notice ~now ~window =
   | Some (_, at) as ordinary when now -. at <= window -> ordinary
   | Some _ | None -> None
 let set_ordinary notice ordinary = { notice with ordinary }
-let csi_active notice = match notice.csi with Csi_inactive -> false | Csi_active -> true
-let start_csi notice = { notice with csi = Csi_active }
+let csi_active notice = match notice.csi with Csi_inactive -> false | Csi_active _ -> true
+let start_csi notice = { notice with csi = Csi_active notice.ordinary }
 let end_csi notice = { notice with csi = Csi_inactive }
+let ordinary_is_csi notice =
+  match notice.csi, notice.ordinary with
+  | Csi_active (Some original), Some current -> original == current
+  | Csi_active (Some _), None | Csi_active None, (Some _ | None)
+  | Csi_inactive, (Some _ | None) -> false
 
 (* Little-endian digits avoid both integer wraparound and a mutable token. *)
 let rec successor = function
@@ -49,6 +54,14 @@ let preferred notice ~existing_action ~now ~window =
   else match rejection notice ~now ~window with
     | Some notice -> Rejection notice
     | None -> No_preferred
+
+let csi_recovery_text = "Key pending; Ctrl-C"
+
+let recovery_slot notice ~now ~window ~csi_fits ~rejection_fits =
+  match preferred notice ~existing_action:false ~now ~window with
+  | Csi_recovery -> if csi_fits then Csi_recovery else No_preferred
+  | Rejection rejection -> if rejection_fits then Rejection rejection else No_preferred
+  | No_preferred -> No_preferred
 
 let rejection_text rejection = match rejection.kind with
   | Input_rejected -> "Input lost; retry"

@@ -4976,7 +4976,11 @@ let render_keeper_message (state : state) =
 
     (* Reuse the existing bottom spacer as input padding: the input has a
        clear surface without taking another row from conversation history. *)
-    box_line_styled chat_buf chat_cols ~style:chat_theme.Chat_theme.user_background "";
+    let recovery_in_slot = recovery_slot state ~max_cells:(framed_inner_width chat_cols) in
+    (match recovery_in_slot with
+     | None -> box_line_styled chat_buf chat_cols ~style:chat_theme.Chat_theme.user_background ""
+     | Some text ->
+         box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) text);
     (* Footer *)
     let disposition = send_disposition state ~keeper_name in
     let pending_count =
@@ -5240,6 +5244,7 @@ let render_keeper_message (state : state) =
     Buffer.add_string buf (" " ^ fit_width identity_row telemetry_cells ^ "\n");
     finish_frame_beside_acting_pane state ~surface_key:"keeper-message"
       ~clamped:(Message_scroll scroll_feedback) ?roster
+      ~recovery_in_slot:(Option.is_some recovery_in_slot)
       ~cursor:
         (if state.keeper_message_focus = Left_pane then
            Frame_presenter.Hidden

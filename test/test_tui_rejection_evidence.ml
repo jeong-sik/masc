@@ -28,4 +28,14 @@ let () =
   require (not (Press.press_is_interactive (Press.Press_input_rejection notice)))
     "evidence-only marks are excluded from pointer dispatch";
   require (Press.press_is_interactive (Press.Press_keeper_row "keeper"))
-    "ordinary marked targets remain interactive"
+    "ordinary marked targets remain interactive";
+  let keeper = Hit.mark registry (Press.Press_keeper_row "keeper") "keeper" in
+  let _, combined = Hit.extract registry [marker; keeper] in
+  let interactive = Hit.filter Press.press_is_interactive combined in
+  require (Hit.target_at interactive ~row:1 ~column:1 = None)
+    "a notice cannot consume a pointer event";
+  require (Hit.target_at interactive ~row:2 ~column:1 = Some (Press.Press_keeper_row "keeper"))
+    "filtering notice evidence preserves other pointer targets";
+  require (Option.exists (Notice.same_rejection notice)
+             (Press.presented_input_rejection ~rows:2 ~cols:width combined))
+    "excluding the notice from pointer dispatch does not erase its presentation evidence"

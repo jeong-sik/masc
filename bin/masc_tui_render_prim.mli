@@ -154,6 +154,7 @@ val search_marker_styled : Masc_tui_types.state -> string
 val footer_line :
   ?status:Masc_tui_footer.status_item list ->
   ?position:string ->
+  ?recovery_in_slot:bool ->
   Masc_tui_types.state -> max_cells:int -> hints:string -> string
 (** [position] is where a scrolling surface stands in what it is scrolling.
     It is separate from [hints] because the fitter gives up key items from
@@ -207,10 +208,15 @@ type acting_pane_footer =
     These frames draw no agenda row, so the footer is drawn here. What waits
     on the operator is on the surface strip, which they draw like every
     other frame. *)
+val recovery_slot : Masc_tui_types.state -> max_cells:int -> string option
+(** A complete CSI or rejection notice that fits a dedicated row, already
+    marked for presentation evidence where applicable. *)
+
 val finish_frame_beside_acting_pane :
   Masc_tui_types.state ->
   ?clamped:Masc_tui_types.clamped_scroll ->
   ?roster:Masc_tui_pane_selection.roster_split ->
+  ?recovery_in_slot:bool ->
   surface_key:string ->
   cursor:Frame_presenter.cursor ->
   rows:int ->
@@ -275,6 +281,7 @@ val surface_chrome :
   ?frame:chrome_frame ->
   ?status:Masc_tui_footer.status_item list ->
   ?sidebar:(int * (rows:int -> Buffer.t -> unit)) ->
+  ?recovery_at_bottom:bool ->
   Masc_tui_types.state ->
   terminal_rows:int ->
   cols:int ->

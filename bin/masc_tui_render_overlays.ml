@@ -894,7 +894,7 @@ let render_queue_panel (state : state) (panel : queue_panel) =
   let owner () = Queue_panel_presented (queue_panel_owner state panel) in
   if Option.is_some panel.qp_detail then
     let lines = queue_panel_detail_lines state panel ~cols in
-    surface_chrome ~overflow:(Self_scrolled owner) state ~terminal_rows ~cols
+    surface_chrome ~overflow:(Self_scrolled owner) ~recovery_at_bottom:true state ~terminal_rows ~cols
       ~surface_key:"keeper-queue-detail" ~frame:Chrome_overlay
       ~title:(title " MASC Queue item")
       ~hints:"↑/↓:scroll  PgUp/PgDn:page  Esc:return  ?:help"
@@ -929,7 +929,7 @@ let render_queue_panel (state : state) (panel : queue_panel) =
       "↑/↓:select  Enter:read  n:immediate priority  l:low priority  r:refresh  Esc:close"
     | Some (Masc_tui_queue_inspection.Running_message _ | Schedule _) | None ->
       "↑/↓:select  Enter:read  PgUp/PgDn:page  r:refresh  Esc:close" in
-  surface_chrome ~overflow:(Self_scrolled owner) state ~terminal_rows ~cols
+  surface_chrome ~overflow:(Self_scrolled owner) ~recovery_at_bottom:true state ~terminal_rows ~cols
     ~surface_key:"keeper-queue" ~frame:Chrome_overlay
     ~title:(title " MASC Queue")
     ~hints:(hints ^ "  ?:help")

@@ -17,12 +17,28 @@ let () =
   require (Option.get (Notice.ordinary failed) == csi)
     "adding a rejection preserves the CSI tuple identity";
   let csi_held = Notice.start_csi failed in
+  require (Notice.ordinary_is_csi csi_held)
+    "the original CSI ordinary tuple retains its identity";
   require (Notice.preferred csi_held ~existing_action:true ~now:10. ~window:12.
            = Notice.No_preferred)
     "existing action feedback retains priority over CSI and rejection";
   require (Notice.preferred csi_held ~existing_action:false ~now:10. ~window:12.
            = Notice.Csi_recovery)
     "CSI recovery takes priority over rejection when no action is displayed";
+  require (Notice.recovery_slot csi_held ~now:10. ~window:12.
+             ~csi_fits:true ~rejection_fits:true = Notice.Csi_recovery)
+    "a separate slot gives active CSI priority over a rejection";
+  require (Notice.recovery_slot csi_held ~now:10. ~window:12.
+             ~csi_fits:false ~rejection_fits:true = Notice.No_preferred)
+    "an unfitted CSI does not consume or replace the pending rejection";
+  (match Notice.recovery_slot failed ~now:10. ~window:12.
+           ~csi_fits:true ~rejection_fits:true with
+   | Notice.Rejection notice ->
+       require (Notice.same_rejection first notice) "a fitted rejection keeps its identity"
+   | Notice.No_preferred | Notice.Csi_recovery -> failwith "expected rejection slot");
+  require (Notice.recovery_slot failed ~now:10. ~window:12.
+             ~csi_fits:true ~rejection_fits:false = Notice.No_preferred)
+    "an unfitted rejection has no presentation authority";
   (match Notice.preferred failed ~existing_action:false ~now:10. ~window:12. with
    | Notice.Rejection notice ->
        require (Notice.same_rejection first notice)
@@ -33,9 +49,17 @@ let () =
            && Notice.same_rejection first (some (visible failed 1000.)))
     "existing action feedback delays, but cannot erase, the rejection";
   let csi_replaced = Notice.set_ordinary csi_held (Some ("later status", 11.)) in
-  require (Notice.csi_active csi_replaced
+  require (Notice.csi_active csi_replaced && not (Notice.ordinary_is_csi csi_replaced)
            && Notice.same_rejection first (some (visible csi_replaced 1000.)))
     "replacing ordinary feedback preserves active CSI and the pending rejection";
+  (* The zero is opaque so the compiler cannot fold the sum into the constant
+     tuple [csi] and share it: the fixture must be a distinct allocation. *)
+  let equal_csi = (fst csi, snd csi +. Sys.opaque_identity 0.) in
+  require (equal_csi = csi && not (equal_csi == csi)) "fixture has equal content and distinct identity";
+  let csi_replaced = Notice.set_ordinary csi_held (Some equal_csi) in
+  require (not (Notice.ordinary_is_csi csi_replaced))
+    "a later ordinary notice with identical contents is not the old CSI notice";
+  let csi_replaced = Notice.set_ordinary csi_held (Some ("later status", 11.)) in
   let csi_ended = Notice.end_csi csi_replaced in
   require (not (Notice.csi_active csi_ended)
            && Notice.ordinary csi_ended = Some ("later status", 11.))

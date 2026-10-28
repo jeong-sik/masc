@@ -516,7 +516,23 @@ let task_creation_status (state : state) =
     Some (Masc_tui_footer.Task_creation {keeper=Terminal_text.single_line intent.keeper;phase}))
 
 
-let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
+let recovery_slot (state : state) ~max_cells =
+  let module Notice = Masc_tui_action_notice in
+  let now = Unix.gettimeofday () in
+  let window = Masc_tui_types.last_action_window_s in
+  let fits text = Message_layout.display_width text <= max 0 max_cells in
+  let rejection_fits =
+    Option.exists (fun notice -> fits (Notice.rejection_text notice))
+      (Notice.rejection state.last_action ~now ~window) in
+  match Notice.recovery_slot state.last_action ~now ~window
+          ~csi_fits:(fits Notice.csi_recovery_text) ~rejection_fits with
+  | No_preferred -> None
+  | Csi_recovery -> Some Notice.csi_recovery_text
+  | Rejection notice ->
+      Some (pressable (Press_input_rejection notice) (Notice.rejection_text notice))
+
+let footer_line ?(status = []) ?position ?(recovery_in_slot = false)
+    (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room; "?:help" stays as the
      door back. One seam for every surface, which is what makes the setting
      a setting instead of per-screen behaviour. *)
@@ -575,6 +591,8 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
     | Some _ -> image_progress
     | None -> (match Masc_tui_action_notice.ordinary_visible state.last_action
         ~now:(Unix.gettimeofday ()) ~window:Masc_tui_types.last_action_window_s with
+    | Some _ when recovery_in_slot
+                  && Masc_tui_action_notice.ordinary_is_csi state.last_action -> None
     | Some (text, _)
       when (not
                  (String.starts_with
@@ -584,11 +602,12 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
     | Some _ | None -> None)))))
   in
   let preferred_action =
+    if recovery_in_slot then None else
     match Masc_tui_action_notice.preferred state.last_action
             ~existing_action:(Option.is_some action_text)
             ~now:(Unix.gettimeofday ()) ~window:Masc_tui_types.last_action_window_s with
     | No_preferred -> None
-    | Csi_recovery -> Some ("Key pending; Ctrl-C", Fun.id)
+    | Csi_recovery -> Some (Masc_tui_action_notice.csi_recovery_text, Fun.id)
     | Rejection notice ->
         Some (Masc_tui_action_notice.rejection_text notice,
               pressable (Press_input_rejection notice)) in
@@ -1311,13 +1330,13 @@ type acting_pane_footer =
    The footer is drawn here rather than by each frame, because these frames
    draw no agenda row: an open question would otherwise be on screen nowhere
    while the operator chats, which is where a Keeper's question goes unseen. *)
-let finish_frame_beside_acting_pane (state : state) ?clamped ?roster
+let finish_frame_beside_acting_pane (state : state) ?clamped ?roster ?(recovery_in_slot = false)
     ~surface_key ~cursor ~rows ~cols ~footer buf =
   (match footer with
    | No_footer -> ()
    | Footer_hints { hints; position } ->
        Buffer.add_string buf
-         (footer_line ?position state ~max_cells:cols ~hints));
+         (footer_line ?position ~recovery_in_slot state ~max_cells:cols ~hints));
   let framed = Buffer.create (Buffer.length buf + 4096) in
   let lines = frame_lines buf in
   (* These frames draw neither the shared composer nor the agenda. Only
@@ -1395,7 +1414,8 @@ let surface_window_height state ~terminal_rows ~count =
     ~chrome:surface_chrome_rows ~count ~preview_keep:None
     ~overflow_takes_row:true
 
-let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : state)
+let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar
+    ?(recovery_at_bottom = false) (state : state)
     ~terminal_rows ~cols ~surface_key ~title ~hints
     ~(body : budget:int -> chrome_body -> unit) =
   let setup_started = Masc_tui_frame_timing.start_stage () in
@@ -1403,6 +1423,9 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : 
   let full_cols = cols in
   let sidebar_cols = match sidebar with None -> 0 | Some (width, _) -> width in
   let cols = cols - sidebar_cols in
+  let recovery_in_slot = match recovery_at_bottom, frame with
+    | true, Chrome_overlay -> recovery_slot state ~max_cells:(framed_rule_width cols)
+    | false, (Chrome_screen | Chrome_overlay) | true, Chrome_screen -> None in
   let buf = Buffer.create 4096 in
   let top, line, line_styled, line_selected, divider, empty, bottom =
     match frame with
@@ -1493,7 +1516,13 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : 
   for _ = !used + 1 to budget do
     empty buf cols
   done;
-  bottom buf cols;
+  (match recovery_in_slot with
+   | None -> bottom buf cols
+   | Some text ->
+       let remaining = max 0 (framed_rule_width cols - Message_layout.display_width text) in
+       Buffer.add_string buf
+         (Ansi.gray ^ Ansi.box_bl ^ Ansi.reset ^ Theme.warn () ^ text ^ Ansi.reset
+          ^ Ansi.gray ^ draw_hline remaining ^ Ansi.box_br ^ Ansi.reset ^ "\n"));
   let buf = match sidebar with
     | None -> buf
     | Some (left_cols, draw) ->
@@ -1503,7 +1532,9 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : 
         write_two_panes combined ~left_cols ~left ~right:buf;
         combined
   in
-  Buffer.add_string buf (footer_line ?status state ~max_cells:full_cols ~hints);
+  Buffer.add_string buf
+    (footer_line ?status ~recovery_in_slot:(Option.is_some recovery_in_slot)
+       state ~max_cells:full_cols ~hints);
   Masc_tui_frame_timing.finish_stage ~name:"surface.materialize" materialize_started;
   finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols:full_cols buf
 

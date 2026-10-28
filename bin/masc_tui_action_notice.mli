@@ -13,13 +13,20 @@ val set_ordinary : t -> (string * float) option -> t
 val csi_active : t -> bool
 val start_csi : t -> t
 val end_csi : t -> t
+val ordinary_is_csi : t -> bool
 (** CSI recovery is independent of ordinary notice replacement and remains
-    active until the input reader confirms that the sequence ended. *)
+    active until the input reader confirms that the sequence ended. The
+    original ordinary tuple keeps its physical identity. *)
 val reject : t -> rejection_kind -> now:float -> window:float -> t
 val rejection : t -> now:float -> window:float -> rejection option
 (** Existing action feedback retains its previous priority. A pending input
     rejection stays in state until it can be offered without replacing it. *)
 val preferred : t -> existing_action:bool -> now:float -> window:float -> preferred
+val csi_recovery_text : string
+val recovery_slot :
+  t -> now:float -> window:float -> csi_fits:bool -> rejection_fits:bool -> preferred
+(** Choose a separate recovery slot. An active CSI takes precedence even when
+    it does not fit; an unshown rejection remains pending. *)
 val rejection_text : rejection -> string
 val same_rejection : rejection -> rejection -> bool
 val presented : t -> rejection -> at:float -> input_pending:bool -> t

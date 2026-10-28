@@ -86,13 +86,18 @@ let kind_labels_round_trip () =
   Alcotest.(check bool) "unknown label" true (Option.is_none (R.Kind.of_string "grant"))
 ;;
 
-let body = `Assoc [ "x", `Int 1 ]
+let body_of json =
+  match Authz_body.of_yojson json with
+  | Ok body -> body
+  | Error error -> Alcotest.failf "fixture body refused: %s" (Authz_body.error_to_string error)
+;;
+
+let body = body_of (`Assoc [ "x", `Int 1 ])
 
 let make_exn ~head ~at_ms ~author ~kind ~body =
   match R.make ~head ~at_ms ~author ~kind ~body with
   | Ok record -> record
   | Error (R.Author_not_admitted _) -> Alcotest.fail "fixture author not admitted"
-  | Error R.Body_not_plain -> Alcotest.fail "fixture body is not plain JSON"
 ;;
 
 (* Three records chained from genesis, by three different authors. *)
@@ -111,7 +116,7 @@ let chain =
       ~at_ms:2000
       ~author:Author.System_cron
       ~kind:R.Kind.Trigger_evidence
-      ~body:(`List [ `String "t" ])
+      ~body:(body_of (`List [ `String "t" ]))
   in
   let third =
     make_exn
@@ -119,7 +124,7 @@ let chain =
       ~at_ms:3000
       ~author:Author.Local_operator
       ~kind:R.Kind.Local_recovery
-      ~body:`Null
+      ~body:Authz_body.null
   in
   [ first; second; third ]
 ;;
@@ -190,7 +195,7 @@ let different_content_has_a_different_hash () =
   Alcotest.(check bool)
     "body"
     false
-    (String.equal base (hash_of ~at_ms:1 ~body:(`Assoc [ "x", `Int 2 ])))
+    (String.equal base (hash_of ~at_ms:1 ~body:(body_of (`Assoc [ "x", `Int 2 ]))))
 ;;
 
 let make_refuses_an_author_who_may_not_write () =
@@ -204,7 +209,6 @@ let make_refuses_an_author_who_may_not_write () =
   with
   | Error (R.Author_not_admitted { kind; author = _ }) ->
     Alcotest.(check string) "kind" "runtime_grant" (R.Kind.to_string kind)
-  | Error R.Body_not_plain -> Alcotest.fail "the body is plain, the author is not admitted"
   | Ok _ -> Alcotest.fail "a cron job wrote a grant"
 ;;
 
@@ -323,17 +327,18 @@ let hash_hex_checks () =
 
 (* One record written out by hand. Python rebuilt this line and its hash from
    the design alone: the field order, the "masc-authz-record-v1\n" prefix, and
-   the escapes of Python's json module. The bytes matched. If Yojson prints
-   differently, or this module changes a field or the hash prefix, a log already
-   on disk stops verifying, and this test fails first. *)
+   the escapes of Python's json module. The bytes matched. If this module
+   changes a field, an escape, or the hash prefix, a log already on disk stops
+   verifying, and this test fails first. *)
 let golden_body =
-  `Assoc
-    [ "text", `String "quote \" backslash \\ tab \t control \001 caf\u{e9} \u{65e5}\u{672c}"
-    ; "count", `Int (-12345)
-    ; "flag", `Bool true
-    ; "none", `Null
-    ; "items", `List [ `Int 1; `String "two" ]
-    ]
+  body_of
+    (`Assoc
+        [ "text", `String "quote \" backslash \\ tab \t control \001 caf\u{e9} \u{65e5}\u{672c}"
+        ; "count", `Int (-12345)
+        ; "flag", `Bool true
+        ; "none", `Null
+        ; "items", `List [ `Int 1; `String "two" ]
+        ])
 ;;
 
 let golden_hash = "8d1574bce143d9011dcd49a49471526da380e87ad6a066b6fcb374bc86f74a68"
@@ -401,13 +406,16 @@ let author_words =
 let author_shapes_are_the_names_on_disk () =
   List.iter
     (fun (author, kind, words) ->
-      let line = R.to_line (make_exn ~head:R.genesis ~at_ms:0 ~author ~kind ~body:`Null) in
+      let line =
+        R.to_line (make_exn ~head:R.genesis ~at_ms:0 ~author ~kind ~body:Authz_body.null)
+      in
       let expected = {|"author":|} ^ words ^ {|,"kind":"|} ^ R.Kind.to_string kind ^ {|"|} in
       Alcotest.(check bool) expected true (contains ~sub:expected line))
     author_words
 ;;
 
-(* A body is plain JSON: see the top of authz_record.mli. *)
+(* Which bodies exist is tested in test_authz_body. These check that a record
+   keeps a body that holds each kind of value, and reads it back. *)
 
 let plain_bodies =
   [ "null", `Null
@@ -415,61 +423,32 @@ let plain_bodies =
     , `Assoc [ "a", `Assoc [ "b", `List [ `Int 1; `Null; `Bool false ] ]; "c", `String "text" ] )
   ; "the same name at different depths", `Assoc [ "x", `Assoc [ "x", `Int 1 ] ]
   ; "non-ASCII text", `Assoc [ "name", `String "caf\u{e9} \u{65e5}\u{672c}" ]
-  ; "the largest int", `Int max_int
+  ; "the largest int every reader reads exactly", `Int 9007199254740991
   ; "an empty object and an empty list", `List [ `Assoc []; `List [] ]
   ]
 ;;
 
 let plain_bodies_are_accepted () =
   List.iter
-    (fun (label, body) ->
-      match
-        R.make
+    (fun (label, json) ->
+      let body = body_of json in
+      let record =
+        make_exn
           ~head:R.genesis
           ~at_ms:0
           ~author:(Author.Authenticated alice)
           ~kind:R.Kind.Runtime_grant
           ~body
-      with
-      | Error _ -> Alcotest.failf "%s: refused" label
-      | Ok record ->
-        (match R.of_line ~head:R.genesis (R.to_line record) with
-         | Ok _ -> ()
-         | Error error ->
-           Alcotest.failf "%s: written but not read back: %s" label (R.decode_error_to_string error)))
+      in
+      match R.of_line ~head:R.genesis (R.to_line record) with
+      | Ok back ->
+        Alcotest.(check string)
+          label
+          (Authz_body.to_string body)
+          (Authz_body.to_string back.R.body)
+      | Error error ->
+        Alcotest.failf "%s: written but not read back: %s" label (R.decode_error_to_string error))
     plain_bodies
-;;
-
-let bodies_that_are_not_plain =
-  [ "a float", `Float 1.5
-  ; "a float inside a list", `List [ `Int 1; `Float 2.5 ]
-  ; "nan", `Float Float.nan
-  ; "an integer too large for int", `Intlit "123456789012345678901234567890"
-  ; "a repeated name", `Assoc [ "x", `Int 1; "x", `Int 2 ]
-  ; "a repeated name inside a list", `List [ `Assoc [ "y", `Null; "y", `Null ] ]
-  ; "a repeated name inside an object", `Assoc [ "a", `Assoc [ "y", `Null; "y", `Null ] ]
-  ; "text that is not UTF-8", `String "\xff"
-  ; "a name that is not UTF-8", `Assoc [ "\xc3", `Int 1 ]
-  ; "half of a surrogate pair", `String "\xed\xa0\x80"
-  ]
-;;
-
-let make_refuses_a_body_that_is_not_plain =
-  List.map
-    (fun (label, body) ->
-      Alcotest.test_case label `Quick (fun () ->
-        match
-          R.make
-            ~head:R.genesis
-            ~at_ms:0
-            ~author:(Author.Authenticated alice)
-            ~kind:R.Kind.Runtime_grant
-            ~body
-        with
-        | Error R.Body_not_plain -> ()
-        | Error (R.Author_not_admitted _) -> Alcotest.fail "the author is admitted"
-        | Ok _ -> Alcotest.failf "%s: accepted" label))
-    bodies_that_are_not_plain
 ;;
 
 (* [line] with its hash made over what it now says, as a writer would sign it.
@@ -491,19 +470,62 @@ let resigning_an_untouched_line_changes_nothing () =
   Alcotest.(check string) "second line" second_line (resign second_line)
 ;;
 
-(* Each line below carries a correct hash, so only the body is wrong. *)
-let not_plain_line_tests =
-  let case name ~by =
+(* Each line below carries a correct hash over its own text, and the body is the
+   only thing wrong with it. *)
+let invalid_body_line_tests =
+  let case name ~by expected =
     Alcotest.test_case name `Quick (fun () ->
       expect_decode_error
         ~head:R.genesis
         (resign (replace_once ~line:first_line ~old:{|"x":1|} ~by))
-        R.Body_not_plain)
+        (R.Invalid_body expected))
   in
-  [ case "a repeated name, signed" ~by:{|"x":1,"x":2|}
-  ; case "a float, signed" ~by:{|"x":1.5|}
-  ; case "text that is not UTF-8, signed" ~by:"\"x\":\"\xff\""
+  [ case "a repeated name, signed" ~by:{|"x":1,"x":2|} (Authz_body.Repeated_name "x")
+  ; case "a float, signed" ~by:{|"x":1.5|} Authz_body.Float_not_allowed
+  ; case "a float written as a whole number, signed" ~by:{|"x":1.0|} Authz_body.Float_not_allowed
+  ; case "an exponent, signed" ~by:{|"x":1e2|} Authz_body.Float_not_allowed
+  ; case "text that is not UTF-8, signed" ~by:"\"x\":\"\xff\"" Authz_body.Invalid_utf8
+  ; case "an int above 2^53 - 1, signed" ~by:{|"x":9007199254740992|} Authz_body.Integer_out_of_range
+  ; case
+      "an int below -(2^53 - 1), signed"
+      ~by:{|"x":-9007199254740992|}
+      Authz_body.Integer_out_of_range
+  ; case
+      "an int too large for an OCaml int, signed"
+      ~by:{|"x":123456789012345678901234567890|}
+      Authz_body.Integer_out_of_range
+  ; (* Yojson 3.0.0 reads the escape of a low surrogate half as three bytes that
+       are not UTF-8. *)
+    case "half of a surrogate pair, signed" ~by:{|"x":"\udc00"|} Authz_body.Invalid_utf8
   ]
+;;
+
+(* Yojson 3.0.0 refuses the escape of a high surrogate half that has no low half
+   after it, so the line is not read at all. *)
+let a_high_surrogate_half_is_not_json () =
+  expect_decode_error
+    ~head:R.genesis
+    (resign (replace_once ~line:first_line ~old:{|"x":1|} ~by:{|"x":"\ud800"|}))
+    R.Not_json
+;;
+
+(* The characters of an identifier are written as they are, so the author text
+   is the identifier between quotes. *)
+let no_identifier_character_needs_an_escape () =
+  let accepted = ref 0 in
+  for byte = 0 to 255 do
+    let text = "x" ^ String.make 1 (Char.chr byte) in
+    match User_id.of_string text, Service_id.of_string text with
+    | Ok _, Ok _ ->
+      incr accepted;
+      Alcotest.(check string)
+        (Printf.sprintf "byte %d" byte)
+        ("\"" ^ text ^ "\"")
+        (Authz_body.string_literal text)
+    | Error _, Error _ -> ()
+    | Ok _, Error _ | Error _, Ok _ -> Alcotest.failf "byte %d: the two id types disagree" byte
+  done;
+  Alcotest.(check bool) "some bytes are accepted" true (!accepted > 0)
 ;;
 
 let () =
@@ -531,8 +553,16 @@ let () =
     ; ( "a body that is plain JSON"
       , [ Alcotest.test_case "accepted and read back" `Quick plain_bodies_are_accepted
         ; Alcotest.test_case "resigning changes nothing" `Quick resigning_an_untouched_line_changes_nothing
+        ; Alcotest.test_case
+            "no identifier character needs an escape"
+            `Quick
+            no_identifier_character_needs_an_escape
         ] )
-    ; "make refuses a body that is not plain", make_refuses_a_body_that_is_not_plain
-    ; "a signed line with a body that is not plain", not_plain_line_tests
+    ; ( "a signed line with a body that is not plain"
+      , Alcotest.test_case
+          "half of a surrogate pair that cannot be read"
+          `Quick
+          a_high_surrogate_half_is_not_json
+        :: invalid_body_line_tests )
     ]
 ;;

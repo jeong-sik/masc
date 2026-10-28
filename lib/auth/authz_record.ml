@@ -100,20 +100,23 @@ let writers : Kind.t -> writer list = function
 
 let admits kind author = List.mem (writer_of author) (writers kind)
 
-let principal_to_json = function
+(* The text of an author. Every string goes through [Authz_body.string_literal],
+   the one escape function of the log, even though an identifier has no
+   character that needs one. *)
+let principal_text = function
   | Principal.Human id ->
-    `Assoc [ "type", `String "human"; "id", `String (User_id.to_string id) ]
+    {|{"type":"human","id":|} ^ Authz_body.string_literal (User_id.to_string id) ^ "}"
   | Principal.Service id ->
-    `Assoc [ "type", `String "service"; "id", `String (Service_id.to_string id) ]
+    {|{"type":"service","id":|} ^ Authz_body.string_literal (Service_id.to_string id) ^ "}"
 ;;
 
-let author_to_json = function
+let author_text = function
   | Author.Authenticated principal ->
-    `Assoc [ "type", `String "authenticated"; "principal", principal_to_json principal ]
-  | Author.Local_operator -> `Assoc [ "type", `String "local_operator" ]
-  | Author.System_cron -> `Assoc [ "type", `String "system_cron" ]
-  | Author.System_maintenance -> `Assoc [ "type", `String "system_maintenance" ]
-  | Author.System_migration -> `Assoc [ "type", `String "system_migration" ]
+    {|{"type":"authenticated","principal":|} ^ principal_text principal ^ "}"
+  | Author.Local_operator -> {|{"type":"local_operator"}|}
+  | Author.System_cron -> {|{"type":"system_cron"}|}
+  | Author.System_maintenance -> {|{"type":"system_maintenance"}|}
+  | Author.System_migration -> {|{"type":"system_migration"}|}
 ;;
 
 let principal_of_json = function
@@ -149,49 +152,38 @@ type t =
   ; at_ms : int
   ; author : Author.t
   ; kind : Kind.t
-  ; body : Yojson.Safe.t
+  ; body : Authz_body.t
   ; hash : Hash.t
   }
 
 let head_after record = { next_seq = record.seq + 1; head_hash = record.hash }
 
-(* Everything the hash covers, in the order the line carries it. *)
-let unsigned_fields ~seq ~previous_hash ~at_ms ~author ~kind ~body =
-  [ "seq", `Int seq
-  ; "previous_hash", `String (Hash.to_hex previous_hash)
-  ; "at_ms", `Int at_ms
-  ; "author", author_to_json author
-  ; "kind", `String (Kind.to_string kind)
-  ; "body", body
-  ]
+(* The line without its last member and its closing brace. The hash covers this
+   text with the closing brace added back, so a line is this text, then
+   [,"hash":"<hex>"}]. *)
+let unsigned_text ~seq ~previous_hash ~at_ms ~author ~kind ~body =
+  String.concat
+    ""
+    [ {|{"seq":|}
+    ; string_of_int seq
+    ; {|,"previous_hash":|}
+    ; Authz_body.string_literal (Hash.to_hex previous_hash)
+    ; {|,"at_ms":|}
+    ; string_of_int at_ms
+    ; {|,"author":|}
+    ; author_text author
+    ; {|,"kind":|}
+    ; Authz_body.string_literal (Kind.to_string kind)
+    ; {|,"body":|}
+    ; Authz_body.to_string body
+    ]
 ;;
 
 (* Keeps a record hash from being valid as a digest in any other protocol. *)
 let hash_domain = "masc-authz-record-v1\n"
 
-let hash_of fields : Hash.t =
-  Agent_core_sha256.to_hex
-    (Agent_core_sha256.digest_string (hash_domain ^ Yojson.Safe.to_string (`Assoc fields)))
-;;
-
-(* The shape of a body belongs to the layer that owns the kind, but every body
-   is read back by tools that disagree on the corners of JSON. A body is plain
-   when it holds only what they agree on: null, booleans, integers that fit an
-   OCaml int, strings that are valid UTF-8, lists, and objects whose member
-   names are valid UTF-8 and unique. A float is out because its text is the
-   printer's choice and nan has none. A repeated member name is out because
-   readers disagree on which value wins (RFC 8259 section 4). *)
-let rec is_plain (json : Yojson.Safe.t) =
-  match json with
-  | `Null | `Bool _ | `Int _ -> true
-  | `String text -> String.is_valid_utf_8 text
-  | `List items -> List.for_all is_plain items
-  | `Assoc members ->
-    let names = List.map fst members in
-    List.for_all String.is_valid_utf_8 names
-    && List.compare_lengths (List.sort_uniq String.compare names) names = 0
-    && List.for_all (fun (_, value) -> is_plain value) members
-  | `Intlit _ | `Float _ -> false
+let hash_of unsigned : Hash.t =
+  Agent_core_sha256.to_hex (Agent_core_sha256.digest_string (hash_domain ^ unsigned ^ "}"))
 ;;
 
 type make_error =
@@ -199,17 +191,14 @@ type make_error =
       { kind : Kind.t
       ; author : Author.t
       }
-  | Body_not_plain
 
 let make ~head ~at_ms ~author ~kind ~body =
   if not (admits kind author)
   then Error (Author_not_admitted { kind; author })
-  else if not (is_plain body)
-  then Error Body_not_plain
   else (
     let seq = head.next_seq in
     let previous_hash = head.head_hash in
-    let hash = hash_of (unsigned_fields ~seq ~previous_hash ~at_ms ~author ~kind ~body) in
+    let hash = hash_of (unsigned_text ~seq ~previous_hash ~at_ms ~author ~kind ~body) in
     Ok { seq; previous_hash; at_ms; author; kind; body; hash })
 ;;
 
@@ -222,7 +211,7 @@ type decode_error =
   | Seq_mismatch of { expected : int; actual : int }
   | Previous_hash_mismatch
   | Author_not_admitted_to_write of { kind : Kind.t; author : Author.t }
-  | Body_not_plain
+  | Invalid_body of Authz_body.error
   | Hash_mismatch
   | Non_canonical
 
@@ -237,22 +226,22 @@ let decode_error_to_string = function
   | Previous_hash_mismatch -> "previous_hash is not the hash of the line before"
   | Author_not_admitted_to_write { kind; author = _ } ->
     Printf.sprintf "the author may not write %s records" (Kind.to_string kind)
-  | Body_not_plain -> "body is not plain JSON"
+  | Invalid_body error -> Printf.sprintf "body: %s" (Authz_body.error_to_string error)
   | Hash_mismatch -> "hash does not match the content"
   | Non_canonical -> "valid record, but not the line this module writes for it"
 ;;
 
 let to_line record =
-  let fields =
-    unsigned_fields
-      ~seq:record.seq
-      ~previous_hash:record.previous_hash
-      ~at_ms:record.at_ms
-      ~author:record.author
-      ~kind:record.kind
-      ~body:record.body
-  in
-  Yojson.Safe.to_string (`Assoc (fields @ [ "hash", `String (Hash.to_hex record.hash) ]))
+  unsigned_text
+    ~seq:record.seq
+    ~previous_hash:record.previous_hash
+    ~at_ms:record.at_ms
+    ~author:record.author
+    ~kind:record.kind
+    ~body:record.body
+  ^ {|,"hash":|}
+  ^ Authz_body.string_literal (Hash.to_hex record.hash)
+  ^ "}"
 ;;
 
 let of_line ~head line =
@@ -290,8 +279,8 @@ let of_line ~head line =
   let* () =
     if admits kind author then Ok () else Error (Author_not_admitted_to_write { kind; author })
   in
-  let* () = if is_plain body then Ok () else Error Body_not_plain in
-  let expected = hash_of (unsigned_fields ~seq ~previous_hash ~at_ms ~author ~kind ~body) in
+  let* body = Result.map_error (fun error -> Invalid_body error) (Authz_body.of_yojson body) in
+  let expected = hash_of (unsigned_text ~seq ~previous_hash ~at_ms ~author ~kind ~body) in
   let* () = if Hash.equal expected hash then Ok () else Error Hash_mismatch in
   let record = { seq; previous_hash; at_ms; author; kind; body; hash } in
   if String.equal (to_line record) line then Ok record else Error Non_canonical

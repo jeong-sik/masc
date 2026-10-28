@@ -11,17 +11,17 @@
     both refuse when the author may not write the kind (design 6.3). A value of
     type {!t} is therefore a record with a valid hash and an admitted author.
 
-    The shape of the body is the business of the layer that owns the kind. This
-    module reads it only to check that it is plain JSON: null, booleans,
-    integers that fit an OCaml [int], strings that are valid UTF-8, lists, and
-    objects whose member names are valid UTF-8 and unique. A float is refused
-    because its text is the printer's choice and [nan] has none. A repeated
-    member name is refused because readers disagree on which value wins
-    (RFC 8259 section 4).
+    The body is an {!Authz_body.t}: plain JSON that every reader reads the same
+    way. The shape of the body is the business of the layer that owns the kind.
 
-    The line and the hash are made with [Yojson.Safe.to_string], so the bytes of
-    a line depend on that library. [test_authz_record] pins one line and its
-    hash. *)
+    This module writes every byte of a line itself, so what it writes does not
+    depend on the version of any library. A line holds [seq], [previous_hash],
+    [at_ms], [author], [kind], [body], and [hash], in that order and with no
+    spaces. [seq] and [at_ms] are decimal digits and are not range-checked:
+    [seq] comes from the head, and [at_ms] from the caller's clock. The hash is
+    the SHA-256 of ["masc-authz-record-v1\n"] followed by the line with its
+    [hash] member cut out, closing brace kept. [test_authz_record] pins one line
+    and its hash. *)
 
 open Authz_records
 
@@ -37,7 +37,7 @@ module Hash : sig
   val equal : t -> t -> bool
 end
 
-(** What a record is about. Each kind names the authors who may write it; see
+(** What a record is about. Each kind admits only certain authors; see
     {!admits}. A layer that needs a new kind adds a constructor here, and the
     compiler stops at {!admits} until that layer has decided who may write it. *)
 module Kind : sig
@@ -78,7 +78,7 @@ type t = private
   ; at_ms : int  (** Wall clock in milliseconds. For audit, never for ordering. *)
   ; author : Author.t
   ; kind : Kind.t
-  ; body : Yojson.Safe.t
+  ; body : Authz_body.t
   ; hash : Hash.t
   }
 
@@ -90,14 +90,13 @@ type make_error =
       { kind : Kind.t
       ; author : Author.t
       }
-  | Body_not_plain  (** The body is not plain JSON, see the top of this file. *)
 
 val make
   :  head:head
   -> at_ms:int
   -> author:Author.t
   -> kind:Kind.t
-  -> body:Yojson.Safe.t
+  -> body:Authz_body.t
   -> (t, make_error) result
 
 type decode_error =
@@ -109,7 +108,7 @@ type decode_error =
   | Seq_mismatch of { expected : int; actual : int }
   | Previous_hash_mismatch
   | Author_not_admitted_to_write of { kind : Kind.t; author : Author.t }
-  | Body_not_plain  (** The body is not plain JSON, see the top of this file. *)
+  | Invalid_body of Authz_body.error  (** The body is not what {!Authz_body} accepts. *)
   | Hash_mismatch
   | Non_canonical  (** Parses to a valid record but is not the line {!to_line} writes. *)
 

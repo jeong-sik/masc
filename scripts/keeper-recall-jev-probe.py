@@ -52,12 +52,12 @@ LABEL_MEANINGS = {
     "maybe_needed": "The memory may matter but the evidence is unclear.",
     "not_needed": "The memory is clearly unrelated to this turn.",
 }
-# Jev counts the state plus any one question against 32k tokens. Input tokens
-# were a median 2.04 bytes each in the small requests already sent and 2.97 in a
-# recall-sized request (evidence/keeper-recall-jev-probe-2026-10-28), so 32k
-# tokens is between 65 KB and 95 KB. 60 KB is the cautious end until more
-# Keepers have been measured.
-DEFAULT_PIECE_KB = 60
+# Jev counts the state plus any one question against 32k tokens. Recall-sized
+# requests came to about 3.0 bytes per input token for two Keepers
+# (evidence/keeper-recall-jev-probe-2026-10-28), so 32k tokens is about 95 KB.
+# 80 KB stays under the largest state Jev accepted so far (82.1 KB). A 159.7 KB
+# state was refused.
+DEFAULT_PIECE_KB = 80
 DEFAULT_TURN_INPUT = (
     "A reviewer asks for a verdict on an open pull request. Check the current head, the review list and the "
     "comments, then record a verdict line."
@@ -195,9 +195,10 @@ def judge(
     request = build_request(model, turn_input, candidates)
     status, body, elapsed = post(request, timeout)
     usage = as_dict(body.get("usage"))
+    refused = "" if status == 200 else f", detail {json.dumps(body.get('detail'), ensure_ascii=False)[:160]}"
     trace.append(
         f"  {len(candidates)} candidates, {size_report(request)}: HTTP {status}, {elapsed:.2f} s, "
-        f"input tokens {usage.get('input_tokens', '-')}, answered by {as_str(body.get('model')) or '-'}"
+        f"input tokens {usage.get('input_tokens', '-')}, answered by {as_str(body.get('model')) or '-'}{refused}"
     )
     if status == 200:
         return {key: as_dict(value) for key, value in as_dict(body.get("answers")).items()}

@@ -1,6 +1,6 @@
-; RFC keeper-volume-filesystem-repair §3.3: when the volume sweep starts a
-; repair, with the lane and the fiber faked.
+; The server volume sweep records and reports observations without scheduling
+; repair when cross-workspace ownership is unverified.
 (test
  (name test_server_keeper_volume_maintenance)
  (modules test_server_keeper_volume_maintenance)
- (libraries alcotest masc masc.server yojson))
+ (libraries alcotest astring eio masc masc.server yojson))

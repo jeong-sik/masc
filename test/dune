@@ -6707,6 +6707,7 @@
 (include stanzas/test_keeper_volume_filesystem_watch.inc)
 (include stanzas/test_keeper_volume_repair.inc)
 (include stanzas/test_server_keeper_volume_maintenance.inc)
+(include stanzas/test_server_keeper_volume_maintenance_integration.inc)
 
 (test
  (name test_run_tool_workflow)

@@ -130,7 +130,7 @@ L3 을 한 PR 로 쓰지 않고 아래로 나눠 L2(#46568) 위에 쌓는다.
 | L3a | 바닥의 규칙을 입출력 없는 상태기계 `Keeper_librarian_message_floor.Machine` 으로 뽑는다. Runtime 바닥(`Floor.infer`)은 이 기계에 답을 넣어 주는 쪽이 된다. 각 답을 기록해 두었다가 다시 넣으면 같은 다음 질문이 나온다 | #46577 |
 | L3b | Runtime 이 durable 단계를 준비·복원·검증하고, 보관된 답과 gate 판정으로 `memory_step` 을 찍는 입구 | #46580 |
 | L3c | 단계 request: 일반 history original 과 다른 scope·ID·kind. 자기 입력(메시지 하나, 그 시점의 facts, 이어받는 상태)을 담아 record 하나로 복원한다. 거절된 범위 original 과 앞 단계를 ID 와 digest 로 가리킨다. 호스트 증명과 질문 코덱은 history 요청과 같은 모듈을 쓴다 | #46587 |
-| L3d | 단계 gate 저널(`Keeper_librarian_original_gate.Make`)과, 기계에 답을 넣어 주는 쪽: 사슬 찾기·검증·복구, `Submit.resume` 로 실행 | 예정 |
+| L3d | 단계를 worker 로 돌리는 층(#46596: 단계 owner, host 의 Exact 권한 검사와 wake 가 단계를 알아봄)과, 단계 gate 저널(`Keeper_librarian_original_gate.Make`)에 기계에 답을 넣어 주며 단계를 잇는 구동(사슬 찾기·복구) | #46596 + 예정 |
 | L3e | `consume_one` 진입: 거절된 한 턴 범위 + L2 증거 → 사슬. 하강 시험(한 번만 하강, `Invalid_request`·열린 기록은 하강 없음)을 이 층에 둔다 | 예정 |
 
 확정한 것.

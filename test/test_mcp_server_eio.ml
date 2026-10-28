@@ -10,6 +10,7 @@ module Mcp_eio = Masc.Mcp_server_eio
 module Mcp = Masc.Mcp_server
 module Mcp_server = Masc.Mcp_server
 module Config = Masc.Config
+module Client_registry_eio = Masc.Client_registry_eio
 module Tool_result = Tool_result
 module Keeper_types = Keeper_types
 module Keeper_identity = Masc.Keeper_identity

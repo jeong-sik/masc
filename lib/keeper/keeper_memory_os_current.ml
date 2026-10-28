@@ -1576,7 +1576,7 @@ let write_publication ~keepers_dir ~keeper_id receipt =
     (Yojson.Safe.to_string json)
 
 let remove_publication ~keepers_dir ~keeper_id =
-  Domain_pool_ref.submit_io_or_inline (fun () ->
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     try
       (try Unix.unlink (publication_receipt_path ~keepers_dir ~keeper_id)
        with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
@@ -2028,7 +2028,7 @@ let find_removal ~keepers_dir ~keeper_id target =
   then No_removal_recorded
   else (
     match
-      Domain_pool_ref.submit_io_or_inline (fun () ->
+      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         Dated_jsonl.find_latest_entry_in_file_result path mention)
     with
     | Ok (Some (Mentioned_as_removed removal)) -> Removed removal
@@ -2044,7 +2044,7 @@ type archived_fact =
 
 let read_dropped ~keepers_dir ~keeper_id ~current_facts =
   let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  Domain_pool_ref.submit_io_or_inline (fun () ->
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     let* receipt = read_retraction_plan_receipt ~keepers_dir ~keeper_id in
     let* () =
       match receipt with
@@ -2391,7 +2391,7 @@ let update_locked_with_output
            | None -> Ok (None, None)
            | Some content ->
              (match
-                Domain_pool_ref.submit_cpu_or_inline (fun () ->
+                Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
                   parse snapshot_path content)
               with
               | Ok snapshot -> Ok (Some snapshot, Some content)
@@ -2569,7 +2569,7 @@ let update_locked_with_output
                 serializing; only a different value or count needs the bytes. *)
              let same_facts =
                Int.equal (List.compare_lengths current.facts next.facts) 0
-               && Domain_pool_ref.submit_cpu_or_inline (fun () ->
+               && Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
                  List.equal
                    (fun left right ->
                       left == right
@@ -2625,7 +2625,7 @@ let update_locked_with_output
             in pool jobs. The locks are held across the wait, which delays
             another writer of this same keeper's memory and nothing else. *)
          let content =
-           Domain_pool_ref.submit_cpu_or_inline (fun () ->
+           Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
              Snapshot_codec.snapshot_bytes next)
          in
          (* Last before the replace, after the pool wait: a write made here and
@@ -2931,7 +2931,7 @@ let read_with_revision_evidence_for_keepers_dir ~keepers_dir ~keeper_id ~after_r
                    | Error detail, _ | _, Error detail -> Some (Error detail))
                 | _ -> Some (Error "revision evidence exceeds the current snapshot") in
         let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-        let* result = Domain_pool_ref.submit_io_or_inline (fun () ->
+        let* result = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           Dated_jsonl.find_latest_entry_in_file_result path visit)
           |> Result.map_error Dated_jsonl.read_error_to_string in
         let+ () = match result with None -> Ok () | Some result -> result in
@@ -2995,7 +2995,7 @@ let live_admission_bindings ~keepers_dir ~keeper_id (snapshot : t) bindings =
     snapshot.revision applicable in
   if oldest = snapshot.revision then Ok (List.map snd applicable)
   else
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
       let* projection = read_recall_journal_projection ~path ~oldest in
       let* () = match projection.invalid with None -> Ok () | Some detail -> Error detail in
@@ -3064,7 +3064,7 @@ let read_recall_transitions ~keepers_dir ~keeper_id ~after_revision ~through_rev
   match pending with
   | Some _ -> Error "successor recall journal finalization is pending"
   | None ->
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
       let* projection = read_recall_journal_projection ~path ~oldest:after_revision in
       let* () = match projection.invalid with None -> Ok () | Some detail -> Error detail in

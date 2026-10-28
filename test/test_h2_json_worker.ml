@@ -130,7 +130,7 @@ let test_timeout_status_on_wire () =
        waiting on a wall-clock deadline. The HTTP response must expose it. *)
     let envelope = Dashboard_cache.get_or_compute_with_timeout key ~ttl:1.
         ~clock:(Eio.Stdenv.clock env) ~timeout_sec:1.
-        (Pool_work.cpu (fun () ->
+        (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
           raise (Dashboard_cache.Compute_timeout { key; role = Dashboard_cache.Compute_owner }))) in
     check bool "cache produced a timeout envelope" true
       (Dashboard_cache.is_timeout_envelope envelope);

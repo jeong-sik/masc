@@ -31,21 +31,21 @@ let domain_count t = t.domain_count
    one-domain pool, or whenever every worker held such a job, nothing was
    left to run the second job, and the workers waited forever. Entering
    the mark also gives the domain the tuned minor heap ([Minor_heap]). *)
-let submit ~weight t f =
-  Executor_pool_submission.submit t.pool ~weight (fun () ->
+let submit ~weight ~name t f =
+  Executor_pool_submission.submit t.pool ~weight ~name (fun () ->
     Executor_pool_ref.with_worker_context f)
 ;;
 
-let submit_io t f = submit ~weight:weight_io t f
+let submit_io ~name t f = submit ~weight:weight_io ~name t f
 ;;
 
-let submit_cpu t f = submit ~weight:weight_cpu t f
+let submit_cpu ~name t f = submit ~weight:weight_cpu ~name t f
 ;;
 
-let submit_io_async ~sw t f =
-  Eio.Fiber.fork_promise ~sw (fun () -> submit_io t f)
+let submit_io_async ~sw ~name t f =
+  Eio.Fiber.fork_promise ~sw (fun () -> submit_io ~name t f)
 
-let submit_cpu_async ~sw t f =
-  Eio.Fiber.fork_promise ~sw (fun () -> submit_cpu t f)
+let submit_cpu_async ~sw ~name t f =
+  Eio.Fiber.fork_promise ~sw (fun () -> submit_cpu ~name t f)
 
 let executor_pool t = t.pool

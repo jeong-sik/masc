@@ -196,7 +196,7 @@ let test_shared_pool_and_nested_worker_round_trip () =
       let caller_domain = (Domain.self () :> int) in
       (* Occupy the one worker's full capacity. Both snapshot pool adapters
          must run inline here instead of submitting back to that worker. *)
-      Domain_pool.submit_cpu pool (fun () ->
+      Domain_pool.submit_cpu ~name:__FUNCTION__ pool (fun () ->
         check bool "the enclosing job runs on the worker" true
           ((Domain.self () :> int) <> caller_domain);
         Snapshot.write_best_effort

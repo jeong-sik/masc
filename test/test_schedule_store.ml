@@ -1838,7 +1838,7 @@ let test_a_mutation_encodes_the_ledger_once_on_the_pool () =
   let occupied, occupied_u = Eio.Promise.create () in
   let release, release_u = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
-    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
       Eio.Promise.resolve occupied_u ();
       Eio.Promise.await release));
   Eio.Promise.await occupied;
@@ -1937,7 +1937,7 @@ let test_a_read_that_misses_decodes_on_the_pool () =
   let occupied, occupied_u = Eio.Promise.create () in
   let release, release_u = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
-    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
       Eio.Promise.resolve occupied_u ();
       Eio.Promise.await release));
   Eio.Promise.await occupied;
@@ -2247,7 +2247,7 @@ let test_concurrent_notes_keep_both_accepted_appends () =
     | Some () -> ()
   in
   let blocker =
-    Domain_pool.submit_cpu_async ~sw:jobs_sw pool (fun () ->
+    Domain_pool.submit_cpu_async ~name:__FUNCTION__ ~sw:jobs_sw pool (fun () ->
       Eio.Promise.resolve occupied_u ();
       Eio.Promise.await release)
   in

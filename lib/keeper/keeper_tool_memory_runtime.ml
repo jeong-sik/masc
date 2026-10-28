@@ -115,7 +115,7 @@ let durable_search_error_detail = function
 
 let read_current_facts ~keepers_dir ~keeper_id =
   match
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id)
   with
   | Ok None -> Ok []
@@ -319,7 +319,7 @@ let successor_candidates_for_query ~query candidates =
 let search_current_with_successors ~clock ~config ~keepers_dir ~(meta : keeper_meta) ~query ~limit =
   let module Current = Keeper_memory_os_current in
   let module Selector = Keeper_memory_successor_selection in
-  match Domain_pool_ref.submit_io_or_inline (fun () ->
+  match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Current.read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id:meta.name) with
   | Error detail -> Error (Snapshot_read_failed detail)
   | Ok state ->
@@ -329,7 +329,7 @@ let search_current_with_successors ~clock ~config ~keepers_dir ~(meta : keeper_m
     let judged = Selector.run ~clock ~config ~keepers_dir ~keeper_id:meta.name ~query
       ~snapshot:state.snapshot candidates in
     let fresh = if candidates=[] then Ok state else
-      Domain_pool_ref.submit_io_or_inline (fun () ->
+      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         Current.read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id:meta.name) in
     (match fresh with
     | Error detail -> Error (Snapshot_read_failed detail)
@@ -473,7 +473,7 @@ let current_memory_ids facts =
    No row says which of its passes committed. *)
 let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~answered_by ~query ~limit =
   match
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Keeper_memory_absorbed.read ~keepers_dir ~keeper_id)
   with
   | Error detail -> Error (Absorbed_read_failed detail)
@@ -564,7 +564,7 @@ let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~answered_by ~que
       then Ok (statements, answered_by_rows, [])
       else (
         match
-          Domain_pool_ref.submit_io_or_inline (fun () ->
+          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
             Keeper_memory_os_events.read ~keepers_dir ~keeper_id)
         with
         | Error error ->
@@ -803,7 +803,7 @@ let ordinary_memory_id_of_all_match = function
    reported in the log and does not change it. *)
 let record_memory_events ~keepers_dir ~(meta : keeper_meta) ~now ~kind memory_ids =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-  Domain_pool_ref.submit_io_or_inline (fun () ->
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     Keeper_memory_os_events.append_all
       ~keepers_dir
       ~keeper_id:meta.name

@@ -190,7 +190,7 @@ let compress_body_on_cpu ?(level = 3) ?(compress = true) ~accept_encoding body =
       if String.length body < Compression_codec.min_size then
         body, [ vary_accept_encoding ]
       else
-        Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
           compress_encoded_body ~level encoding body)
 
 (* Immutable representations of one published response. Preparation belongs

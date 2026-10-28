@@ -129,7 +129,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
           ~sw
           ~clock
           ~config
-          ~kind:Pool_work.Cpu
+          ~kind:Pool_work.Cpu ~name:__FUNCTION__
           (fun ~config ~sw ->
              let ctx : _ Operator_control.context =
                { config
@@ -171,6 +171,6 @@ let operator_digest_http_json ~state ~sw ~clock request =
          ~ttl:standard_cache_ttl_s
          ~clock
          ~timeout_sec:Core_cache.dashboard_request_timeout_s
-         (Pool_work.cpu compute)
+         (Pool_work.cpu ~name:__FUNCTION__ compute)
        |> Core_operator_query.with_operator_digest_metadata ~config ~query))
 ;;

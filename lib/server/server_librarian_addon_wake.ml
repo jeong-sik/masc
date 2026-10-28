@@ -105,7 +105,7 @@ let install ~sw ~config =
   let rescan_state=Atomic.make Idle in
   let run_discovery event =
     if not (Atomic.get stopped) then
-      match Domain_pool_ref.submit_io_or_inline (fun () ->
+      match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         discover ~fold_originals:Owner.fold_all ~config ~store event) with
       | Error detail -> Log.Server.warn "Librarian Addon wake discovery: %s" detail
       | Ok found ->

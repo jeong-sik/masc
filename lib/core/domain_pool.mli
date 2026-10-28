@@ -62,9 +62,10 @@ val weight_io : float
 val weight_cpu : float
 (** [1.0]: the weight {!submit_cpu} gives a job. *)
 
-val submit_io : t -> (unit -> 'a) -> 'a
+val submit_io : name:string -> t -> (unit -> 'a) -> 'a
 (** Blocking submit for IO-bound work (HTTP calls, disk I/O, network
-    syscalls).
+    syscalls). [name] names the work in {!Pool_wait} and the trace
+    (callers pass [__FUNCTION__]; RFC-0474 L4c).
 
     Uses [~weight:0.05], so each worker domain admits ~20
     concurrently-running IO-bound jobs before queueing. Re-raises exceptions
@@ -77,7 +78,7 @@ val submit_io : t -> (unit -> 'a) -> 'a
     work, blocking system calls and protected cleanup may delay settlement.
     Other submissions and the pool remain independent. *)
 
-val submit_cpu : t -> (unit -> 'a) -> 'a
+val submit_cpu : name:string -> t -> (unit -> 'a) -> 'a
 (** Blocking submit for CPU-bound work (JSON encode/decode, hashing,
     text similarity, embedding compute).
 
@@ -86,7 +87,7 @@ val submit_cpu : t -> (unit -> 'a) -> 'a
     A CPU loop must reach an Eio cancellation point to stop early. *)
 
 val submit_io_async :
-  sw:Eio.Switch.t -> t -> (unit -> 'a) -> 'a Eio.Promise.or_exn
+  sw:Eio.Switch.t -> name:string -> t -> (unit -> 'a) -> 'a Eio.Promise.or_exn
 (** Async variant of {!submit_io}. Returns immediately with a promise.
     [sw] owns the submitting fiber: cancelling [sw] relays cancellation to
     accepted work and waits for entered worker cleanup under the same
@@ -94,7 +95,7 @@ val submit_io_async :
     awaits this promise does not cancel the submission owned by [sw]. *)
 
 val submit_cpu_async :
-  sw:Eio.Switch.t -> t -> (unit -> 'a) -> 'a Eio.Promise.or_exn
+  sw:Eio.Switch.t -> name:string -> t -> (unit -> 'a) -> 'a Eio.Promise.or_exn
 (** Async variant of {!submit_cpu}. *)
 
 val executor_pool : t -> Eio.Executor_pool.t

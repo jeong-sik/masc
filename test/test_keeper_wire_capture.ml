@@ -627,14 +627,14 @@ let digest_worker_and_nested_worker_preserve_bytes () =
   with_digest_pool (fun _sw ->
     List.iter check_history_digest (digest_histories ());
     (* A one-domain pool would deadlock if the digest resubmitted from its worker. *)
-    Executor_pool_ref.submit_or_inline (fun () ->
+    Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
       List.iter check_history_digest (digest_histories ())))
 
 let with_occupied_digest_worker ~sw f =
   let entered, mark_entered = Eio.Promise.create () in
   let release, allow_worker = Eio.Promise.create () in
   let occupying = Eio.Fiber.fork_promise ~sw (fun () ->
-    Executor_pool_ref.submit_or_inline (fun () ->
+    Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
       Eio.Promise.resolve mark_entered ();
       Eio.Promise.await release))
   in

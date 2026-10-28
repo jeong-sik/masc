@@ -191,7 +191,7 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
              (Eio.Stdenv.domain_mgr env) in
          Domain_pool_ref.set pool);
        let refused = try
-           Domain_pool_ref.submit_io_or_inline (fun () -> ()); false
+           Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () -> ()); false
          with Invalid_argument _ -> true in
        Alcotest.(check bool) "fixture executor no longer accepts work" true refused);
      Eio.Cancel.cancel cc Operator_cancelled

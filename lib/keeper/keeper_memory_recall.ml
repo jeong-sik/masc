@@ -174,7 +174,7 @@ let load_history_user_messages_result ~path ~limit ~accept =
     else
       try
         let exists =
-          Domain_pool_ref.submit_io_or_inline (fun () ->
+          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
             match Unix.lstat path with
             | _ -> true
             | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false)

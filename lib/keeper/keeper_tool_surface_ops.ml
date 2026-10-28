@@ -914,7 +914,7 @@ let operation_is_owned_by ~caller (operation : Keeper_owner.Chat_operation.t) =
 ;;
 
 let completed_delegate_reply ~base_dir ~keeper_name ~delivery_key ~outcome_ref =
-  Executor_pool_ref.submit_or_inline (fun () ->
+  Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
   let unavailable reason =
     `Assoc [ "status", `String "unavailable"; "reason", `String reason ]
   in

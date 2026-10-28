@@ -959,7 +959,7 @@ let offload_model_input_cpu f =
     Agent_core.Base.Schema_observation.measure ~site:Worker_work f)
   in
   Agent_core.Base.Schema_observation.measure ~site:Worker_queue_and_await
-    (fun () -> Domain_pool_ref.submit_cpu_or_inline work)
+    (fun () -> Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ work)
 
 (* The request bytes that are not conversation history, measured with the
    same encoder as the history: tool schemas and the system prompt. Charged
@@ -2358,7 +2358,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                main-domain-scheduler-latency section 8.8). The pool runs it; the
                closure reads immutable request values only. *)
           ; serialization_executor =
-              Some { Agent_core.Agent.run = Domain_pool_ref.submit_cpu_or_inline }
+              Some { Agent_core.Agent.run = (fun f -> Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ f) }
           ; pre_dispatch_serialization_observer =
               Some
                 (fun observation ->

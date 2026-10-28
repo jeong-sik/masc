@@ -336,7 +336,7 @@ let prepare_startup_read ~sw ~base_path =
   let started_ns = Mtime_clock.elapsed_ns () in
   startup_read_event ~started_ns ~phase:"requested";
   let read () =
-    match Domain_pool_ref.submit_io_or_inline (fun () ->
+    match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       let reader_entered_ns = Mtime_clock.elapsed_ns () in
       startup_read_event ~started_ns ~phase:"reader_entered";
       match load ~base_path with

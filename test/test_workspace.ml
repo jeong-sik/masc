@@ -2939,7 +2939,7 @@ let test_queued_backlog_encode_refused_after_lease_loss () =
     Eio.Fiber.all
       [ (fun () ->
           Eio.Promise.await snapshot_read;
-          Domain_pool.submit_cpu pool (fun () ->
+          Domain_pool.submit_cpu ~name:__FUNCTION__ pool (fun () ->
             Eio.Promise.resolve worker_busy_r ();
             Eio.Promise.await release_worker))
       ; (fun () ->
@@ -3010,7 +3010,7 @@ let test_queued_backlog_encode_stamps_after_the_wait () =
     Eio.Fiber.all
       [ (fun () ->
           Eio.Promise.await snapshot_read;
-          Domain_pool.submit_cpu pool (fun () ->
+          Domain_pool.submit_cpu ~name:__FUNCTION__ pool (fun () ->
             Eio.Promise.resolve worker_busy_r ();
             Eio.Promise.await release_worker))
       ; (fun () ->

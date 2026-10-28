@@ -42,18 +42,18 @@ let read_domain_count_opt () =
    every caller that runs in both contexts the inline fallback once, instead
    of each call site carrying its own [is_eio_fiber] check (#25158). *)
 
-let submit_io_or_inline f =
+let submit_io_or_inline ~name f =
   match selected (), Eio_guard.execution_context () with
   | Some _, _ when Executor_pool_ref.in_worker_context () -> f ()
-  | Some p, Eio_guard.Eio_fiber -> Domain_pool.submit_io p f
+  | Some p, Eio_guard.Eio_fiber -> Domain_pool.submit_io ~name p f
   | Some _, Eio_guard.Non_eio
   | None, (Eio_guard.Eio_fiber | Eio_guard.Non_eio) -> f ()
 ;;
 
-let submit_cpu_or_inline f =
+let submit_cpu_or_inline ~name f =
   match selected (), Eio_guard.execution_context () with
   | Some _, _ when Executor_pool_ref.in_worker_context () -> f ()
-  | Some p, Eio_guard.Eio_fiber -> Domain_pool.submit_cpu p f
+  | Some p, Eio_guard.Eio_fiber -> Domain_pool.submit_cpu ~name p f
   | Some _, Eio_guard.Non_eio
   | None, (Eio_guard.Eio_fiber | Eio_guard.Non_eio) -> f ()
 ;;

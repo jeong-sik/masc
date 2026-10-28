@@ -206,7 +206,7 @@ let cached_file_activity_json ~base_path ~codebase ~repo_id ~file_path ~window_h
     ])
   in
   Dashboard_cache.get_or_compute cache_key ~ttl:file_activity_cache_ttl_sec
-    (Pool_work.cpu (fun () ->
+    (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
        file_activity_json ~codebase ~repo_id ~file_path ~window_hours))
 ;;
 
@@ -496,7 +496,7 @@ let add_routes router =
           | Error (`Ambiguous detail) ->
             Http.Response.json_value ~status:`Conflict ~request (json_error detail) reqd
           | Ok _ ->
-            let data = Domain_pool_ref.submit_io_or_inline (fun () ->
+            let data = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
               repository_activity_json ~repo_id ~window_hours) in
             Http.Response.json_value ~compress:true ~request (json_ok data) reqd)
       request reqd)

@@ -3011,7 +3011,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
       Runtime_official_client_write.report ~label:"Claude Code system prompt file"
         on_context_submission
         { frame = System_prompt_file
-        ; write = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        ; write = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
             Runtime_official_client_write.raw contents) })
       system_prompt;
     Eio.Flow.close stdin_r;
@@ -3039,7 +3039,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     let send_context selection json =
       with_optional_idle_timeout clock (current_timeout_s ()) (fun () ->
         let payload, write =
-          Domain_pool_ref.submit_cpu_or_inline (fun () ->
+          Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
             let payload = Yojson.Safe.to_string json in
             payload, Runtime_official_client_write.json_line selection json payload)
         in

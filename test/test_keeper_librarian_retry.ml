@@ -1941,7 +1941,7 @@ let test_keeper_memory_io_offload_fallback_and_domain_safety env () =
         Domain_pool_ref.clear_for_tests ();
         let caller_dom = (Domain.self () :> int) in
         let inline_dom =
-          Domain_pool_ref.submit_io_or_inline (fun () -> (Domain.self () :> int))
+          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () -> (Domain.self () :> int))
         in
         check int "inline fallback on caller domain" caller_dom inline_dom;
 
@@ -1987,7 +1987,7 @@ let test_keeper_memory_io_offload_fallback_and_domain_safety env () =
         Domain_pool_ref.set pool;
 
         let offloaded_dom =
-          Domain_pool_ref.submit_io_or_inline (fun () -> (Domain.self () :> int))
+          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () -> (Domain.self () :> int))
         in
         check bool "pool submit runs off main domain" true (offloaded_dom <> caller_dom);
 
@@ -2051,7 +2051,7 @@ let test_keeper_memory_io_offload_fallback_and_domain_safety env () =
           ]
         in
         let append_errors =
-          Domain_pool_ref.submit_io_or_inline (fun () ->
+          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
             Events.append_all ~keepers_dir ~keeper_id events_to_append)
         in
         check (list string) "no append errors" []

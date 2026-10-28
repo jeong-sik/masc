@@ -933,7 +933,7 @@ beanie = %d
     let snapshot_computations = ref 0 in
     let dashboard_portrait () =
       let snapshot = Dashboard_projection_cache.get_or_compute_snapshot_json
-        ~config ~actor:(Some "portrait-fixture") (fun _ -> Pool_work.cpu (fun () ->
+        ~config ~actor:(Some "portrait-fixture") (fun _ -> Pool_work.cpu ~name:__FUNCTION__ (fun () ->
           incr snapshot_computations;
           `Assoc ["keepers", `Assoc ["items", `List [`Assoc ["name", `String keeper]]]])) in
       let rows = Yojson.Safe.Util.(snapshot |> member "keepers" |> member "items" |> to_list) in

@@ -1639,7 +1639,7 @@ let test_delivery_evidence_pool_preserves_authority () =
 
 let test_delivery_evidence_nested_worker_and_raw_domain () =
   with_delivery_evidence_pool (fun pool ->
-    Domain_pool.submit_cpu pool test_delivery_evidence_follows_the_ledger_after_it_was_read;
+    Domain_pool.submit_cpu ~name:__FUNCTION__ pool test_delivery_evidence_follows_the_ledger_after_it_was_read;
     with_consumed_delivery_source (fun ~base_path ~keeper_name ~source ->
       let since = Unix.gettimeofday () -. 86400. in
       let seen () = delivery_seen_strict ~not_before:since ~base_path ~keeper_name source in

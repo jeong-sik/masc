@@ -6,7 +6,7 @@ type outcome = Keeper_librarian_admission_owner.outcome =
   | Disabled | Idle | Recheck_new_input | Settled of {has_more : bool}
   | Pending of string | Addon_unattached of {pending : int} | Unavailable of string
 
-let io = Domain_pool_ref.submit_io_or_inline
+let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 
 (* The runtime's typed capacity evidence, not a candidate-count threshold or a
    prose error match. A walk that also met a failure a smaller range meets the

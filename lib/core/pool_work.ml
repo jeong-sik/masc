@@ -6,17 +6,19 @@ type kind =
 
 type 'a t = {
   kind : kind;
+  name : string;
   body : unit -> 'a;
 }
 
-let cpu body = { kind = Cpu; body }
-let io body = { kind = Io; body }
+let cpu ~name body = { kind = Cpu; name; body }
+let io ~name body = { kind = Io; name; body }
 
 let weight = function
   | Cpu -> Domain_pool.weight_cpu
   | Io -> Domain_pool.weight_io
 ;;
 
-let wrap w f = { kind = w.kind; body = (fun () -> f w.body) }
+let wrap w f = { kind = w.kind; name = w.name; body = (fun () -> f w.body) }
 
-let submit w = Executor_pool_ref.submit_or_inline ~weight:(weight w.kind) w.body
+let submit w =
+  Executor_pool_ref.submit_or_inline ~weight:(weight w.kind) ~name:w.name w.body

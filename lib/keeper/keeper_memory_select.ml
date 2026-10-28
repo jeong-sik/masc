@@ -29,7 +29,7 @@ let collect ~config ~meta ~keepers_dir =
   (* File verification may perform endpoint I/O. Read ordinary state after it,
      without holding either store's lock across the other read. *)
   let source=Source.revalidate ~scope:Source.All_sources ~config ~meta ~keepers_dir ~now:(Time_compat.now ()) () in
-  let ordinary=Domain_pool_ref.submit_io_or_inline (fun () ->
+  let ordinary=Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     Current.read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id:meta.Keeper_meta_contract.name) in
   let ordinary_rows,ordinary_errors=match ordinary with
     | Error detail -> [],[issue "current_store_unavailable" detail]
@@ -161,7 +161,7 @@ let handle ?turn_ref ~clock ~config ~(meta : Keeper_meta_contract.keeper_meta) ~
           Some {Keeper_memory_os_events.recorded_at=Time_compat.now ();memory_id=row.choice.id;
             trace_id=Keeper_id.Trace_id.to_string meta.runtime.trace_id;
             kind=Keeper_memory_os_events.Retrieved {query}}) delivered in
-        Domain_pool_ref.submit_io_or_inline (fun () -> Keeper_memory_os_events.append_all
+        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () -> Keeper_memory_os_events.append_all
           ~keepers_dir ~keeper_id:meta.name events) |> List.iter (fun error ->
             Log.Keeper.warn "memory select retrieval event unavailable: %s" (Keeper_memory_os_events.append_error_to_string error));
         Keeper_tool_execution.success_data output

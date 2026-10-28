@@ -439,7 +439,7 @@ let carried_start_range_on_source
     | Some read -> read ()
   in
   let digest_at, history_atom_count =
-    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
       ( Runtime_model_input_tail_window.atom_opening_digest source_messages
       , snd (Runtime_model_input_tail_window.annotate source_messages) ))
   in
@@ -570,7 +570,7 @@ let carried_start_range_on_source
      held, and the preamble says the range opens mid-conversation, which is
      still true. The Agent Core lane sends both as well. *)
   let projection, transmitted_bytes =
-    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
       Runtime_model_input_tail_window.project_from_atom
         ~allow_empty_history:(first_atom = history_atom_count)
         ~measure_message_bytes
@@ -659,7 +659,7 @@ let window_carried_range
     | _ :: _ | [] -> None, carried.messages
   in
   let* projection =
-    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
       Runtime_model_input_tail_window.project_with_drop
         ~allow_empty_history:true
         ~measure_message_bytes
@@ -893,7 +893,7 @@ let plan_arguments argument_projection ~measure_message_bytes messages =
       let arguments = match source.binding with
         | Arguments_bound arguments -> arguments
         | Arguments_unbound ->
-          let arguments = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+          let arguments = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
             Keeper_model_input_demotion.bind_completed_arguments
               ~completed_before:source.completed_before ~seed:source.raw_seed
               ~replay_prefix:source.replay_prefix history) in
@@ -905,7 +905,7 @@ let plan_arguments argument_projection ~measure_message_bytes messages =
               None in
           source.binding <- Arguments_bound arguments;
           arguments in
-      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         let completed_arguments = Option.map
           (Keeper_model_input_demotion.prepend_argument_messages ~prefix:history_prefix) arguments in
         Keeper_model_input_demotion.plan ?completed_arguments
@@ -953,7 +953,7 @@ let start_range_projection ~input_source ?argument_projection
     let* capacity_cut =
     if capacity_bytes = unbounded_capacity_bytes then Ok None
     else
-      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         Runtime_model_input_tail_window.project_with_drop
           ~allow_empty_history:true ~measure_message_bytes ~capacity_bytes
           ~reserved_bytes messages)
@@ -999,7 +999,7 @@ let start_range_projection ~input_source ?argument_projection
       if outcome.reverted>0 then
         Log.Keeper.warn ~keeper_name:source.keeper_name
           "official input restored %d arguments after blob storage failure" outcome.reverted;
-      let actual_messages = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      let actual_messages = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         let captured = Keeper_model_input_demotion.capture_materialized
           ~pending:plan.pending ~before:selected.selected_messages ~after:outcome.messages in
         Keeper_model_input_demotion.replay_materialized captured
@@ -1683,7 +1683,7 @@ type original_capture =
 
 let retain_original_result producer ~invocation ~call_id ~tool_name ~input
     (original : dynamic_tool_result) =
-  let* content_blocks = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+  let* content_blocks = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
     match original.content_blocks with
     | None -> Ok `Null
     | Some blocks ->

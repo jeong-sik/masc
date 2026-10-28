@@ -2670,7 +2670,7 @@ let test_history_listing_waits_for_the_shared_pool () =
   let worker_entered = Atomic.make false in
   let busy_done, busy_done_u = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
-    Domain_pool.submit_cpu pool (fun () ->
+    Domain_pool.submit_cpu ~name:__FUNCTION__ pool (fun () ->
       Atomic.set worker_entered true;
       Mutex.lock gate;
       Mutex.unlock gate);

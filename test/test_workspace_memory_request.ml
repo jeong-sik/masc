@@ -327,7 +327,7 @@ let test_preparation_owns_its_cpu_domain () =
     let record target =
       let worker = (Domain.self () :> int) in
       (* A nested submit on a one-worker pool must finish on that worker. *)
-      let nested = Domain_pool_ref.submit_cpu_or_inline (fun () -> (Domain.self () :> int)) in
+      let nested = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () -> (Domain.self () :> int)) in
       Atomic.set target ((worker, nested) :: Atomic.get target) in
     let actual = get (prepare_with
       ~render:(fun input -> record rendered_on; render input)

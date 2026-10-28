@@ -1208,7 +1208,7 @@ let read_delivery_evidence ~keeper_name store ~not_before =
      cancellation. Its system thread belongs to the worker domain, so set
      unions do not share the main scheduler's runtime lock. Queue ownership
      and the durable enqueue transaction remain on the calling fiber. *)
-  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+  Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
     Eio_guard.run_in_systhread ~label:"keeper-delivery-evidence" (fun () ->
       if not_before <= 0.
       then read_delivery_evidence_uncached ~keeper_name store ~not_before

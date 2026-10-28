@@ -408,7 +408,7 @@ let store_artifact store ~reusable ~mime { payload_bytes = bytes; payload_sha256
   | Some artifact when artifact.art_bytes = bytes_length -> artifact, reusable
   | Some _ | None ->
     let reference =
-      Domain_pool_ref.submit_io_or_inline (fun () ->
+      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         Tool_blob_store.put_durable_reuse store ~bytes ~mime)
     in
     let reference = Tool_output.with_preview reference "" in
@@ -445,7 +445,7 @@ let write_best_effort
     in
     let system_payload, message_payloads, tool_payloads =
       Agent_core.Base.Schema_observation.measure ~site:Worker_queue_and_await
-        (fun () -> Domain_pool_ref.submit_cpu_or_inline work)
+        (fun () -> Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ work)
     in
     let blob_store = Tool_blob_store.create ~base_path:config.base_path in
     let reusable =

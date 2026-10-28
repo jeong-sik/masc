@@ -2637,7 +2637,7 @@ let load_transcript_fully ~path ~redaction =
       ; _
       } ->
     let messages =
-      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         parse_transcript_rows ~path ~redaction rows)
     in
     (* Register only when the file the rows came from is the one statted
@@ -2692,7 +2692,7 @@ let load_all ~base_dir ~keeper_name : chat_message list =
            if String.equal bytes ""
            then []
            else
-             Domain_pool_ref.submit_cpu_or_inline (fun () ->
+             Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
                parse_transcript_rows ~path ~redaction bytes)
          in
          let messages_rev = List.rev_append fresh cache.messages_rev in

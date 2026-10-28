@@ -950,7 +950,7 @@ let test_board_list_timeout_cannot_be_not_modified () =
     let envelope = `Assoc
       ["error", `String Dashboard_cache.timeout_error_code; "message", `String detail] in
     let payload = Dashboard_cache.get_or_compute_payload key ~ttl:3600.
-      (Pool_work.cpu (fun () -> envelope)) in
+      (Pool_work.cpu ~name:__FUNCTION__ (fun () -> envelope)) in
     check bool "the timeout is a computed builder result" true
       (payload.origin = Dashboard_cache.Computed);
     let status, body = read () in

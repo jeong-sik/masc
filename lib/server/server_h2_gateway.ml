@@ -1247,7 +1247,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | `GET, "/api/v1/dashboard/tasks/search-text" ->
           with_h2_public_read h2_reqd (fun state ->
             let config = Mcp_server.workspace_config state in
-            let status, json = Domain_pool_ref.submit_io_or_inline (fun () ->
+            let status, json = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
               Server_dashboard_task_search_text.read ~config)
               |> Server_dashboard_task_search_text.response in
             h2_respond_json_value h2_reqd json
@@ -1257,7 +1257,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
           with_h2_public_read h2_reqd (fun state ->
             let task_id = Server_utils.query_param httpun_request "task_id" in
             let config = Mcp_server.workspace_config state in
-            let status, json = Domain_pool_ref.submit_io_or_inline (fun () ->
+            let status, json = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
               Server_dashboard_task_detail.read ~config ~task_id)
               |> Server_dashboard_task_detail.response in
             h2_respond_json_value h2_reqd json
@@ -1265,7 +1265,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
 
       | `GET, "/api/v1/dashboard/tasks/history/page" ->
           with_h2_public_read h2_reqd (fun state ->
-            let status,json=Domain_pool_ref.submit_io_or_inline (fun () ->
+            let status,json=Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
               Server_dashboard_task_history_page.read ~config:(Mcp_server.workspace_config state)
                 ~task_id:(Server_utils.query_param httpun_request "task_id")
                 ~limit:(Server_utils.query_param httpun_request "limit")

@@ -78,7 +78,7 @@ let infer ?cli_runner ~base_path ~keepers_dir ~keeper_name ~sources ~unread_mess
     if Keeper_identity.Keeper_id.to_string input.keeper_id = keeper_name then Ok ()
     else refused "message floor Keeper differs from its Memory store" [] in
   let* unread_messages = Unread.merge unread_messages [] |> lift in
-  let* anchor = Domain_pool_ref.submit_io_or_inline (fun () ->
+  let* anchor = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     Current.capture_program_anchor ~keepers_dir ~keeper_id:keeper_name) |> lift in
   let initial = Current.program_anchor_snapshot anchor in
   let* plan = Plan.create ~keeper_id:input.keeper_id ~turn_ref:input.turn_ref ~snapshot:initial

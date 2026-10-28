@@ -446,7 +446,7 @@ let respond_keeper_tool_json ?config ?(project = Fun.id) ~sw ~clock state reques
   let status, body =
     Server_dashboard_http_runtime_support.run_dashboard_compute
       ~mode:Server_dashboard_http_runtime_support.Offloaded_readonly
-      ~sw ~clock ~config ~kind:Pool_work.Cpu
+      ~sw ~clock ~config ~kind:Pool_work.Cpu ~name:__FUNCTION__
       (fun ~config ~sw ->
         let status, json =
           keeper_tool_response ~config ~project ~sw ~clock state ~tool_name ~args

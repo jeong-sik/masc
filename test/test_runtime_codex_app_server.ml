@@ -3535,7 +3535,7 @@ let test_worker_encoding_wait_is_bounded () =
         Domain_pool_ref.set pool;
         let started, announce_started = Eio.Promise.create () in
         let release, release_worker = Eio.Promise.create () in
-        let held = Domain_pool.submit_cpu_async ~sw pool (fun () ->
+        let held = Domain_pool.submit_cpu_async ~name:__FUNCTION__ ~sw pool (fun () ->
           Eio.Promise.resolve announce_started ();
           Eio.Promise.await release) in
         (* Release before the switch joins the held job, including on a

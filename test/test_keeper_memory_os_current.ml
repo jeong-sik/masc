@@ -4426,7 +4426,7 @@ let test_a_commit_parses_and_prints_on_the_pool () =
   let occupied, occupied_u = Eio.Promise.create () in
   let release, release_u = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
-    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
       Eio.Promise.resolve occupied_u ();
       Eio.Promise.await release));
   Eio.Promise.await occupied;

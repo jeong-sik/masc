@@ -2930,7 +2930,7 @@ let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd 
              bound. Await the immutable payload before the
              owner writes, preserving protocol order and callback ownership. *)
           let payload, observation =
-            Domain_pool_ref.submit_cpu_or_inline (fun () ->
+            Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
               let payload = Yojson.Safe.to_string json in
               (* The child decodes stdin as UTF-8 and exits on an invalid sequence,
                  which loses every in-flight turn and leaves the producer unnamed.

@@ -1197,7 +1197,7 @@ let record_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
 ;;
 
 let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
-  Domain_pool_ref.submit_io_or_inline (fun () ->
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     record_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail)
 ;;
 
@@ -1207,7 +1207,7 @@ let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
    counts as not within, so the pass takes the full lane. *)
 let current_memory_within_budget ~keepers_dir ~keeper_id (inp : Keeper_librarian.input) =
   match
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Keeper_memory_source_current.read_for_keepers_dir ~keepers_dir ~keeper_id)
   with
   | Error detail ->
@@ -1379,7 +1379,7 @@ let commit_continuity ~commit ~observe =
      not run past a detached writer after cancellation of the await. *)
   let observed =
     Eio.Cancel.protect (fun () ->
-      observe (Domain_pool_ref.submit_io_or_inline commit))
+      observe (Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ commit))
   in
   Eio.Fiber.check ();
   observed
@@ -1442,7 +1442,7 @@ let run_pass
         "librarian inference failed source_trace=%s; %s" trace_id detail
   in
   let record_pass_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       record_pass_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail)
   in
   let admission_mode_valid =
@@ -1826,7 +1826,7 @@ let run_pass
                  (List.length proposed))
              else (
              context_write := Outcome_unconfirmed;
-             (try match Domain_pool_ref.submit_io_or_inline (fun () ->
+             (try match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                 Keeper_librarian_context.commit ~keepers_dir ~keeper_id
                   ~expected_version:(Option.map Keeper_librarian_context.version inp.working_context.previous)
                   ?execution_basis:inp.working_context.execution_basis
@@ -1840,7 +1840,7 @@ let run_pass
               | Ok working ->
                 context_write := Committed (Keeper_librarian_context.version working);
                 on_context_committed (Keeper_librarian_context.version working);
-                (match Domain_pool_ref.submit_io_or_inline (fun () ->
+                (match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                    Keeper_librarian_context_recall.publish ~base_path ~keepers_dir ~keeper_name:keeper_id working) with
                  | Ok () -> ()
                  | Error detail -> Log.Keeper.warn ~keeper_name:keeper_id
@@ -2073,7 +2073,7 @@ let run_pass
                 and gets no event, so the old id keeps the one successor the
                 keeper gave it. A sidecar that cannot be written is said here
                 and does not undo the pass. *)
-             Domain_pool_ref.submit_io_or_inline (fun () ->
+             Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                Keeper_memory_os_events.append_all
                  ~keepers_dir
                  ~keeper_id

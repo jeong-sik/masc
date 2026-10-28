@@ -137,7 +137,7 @@ let force_cached_payload = function
              | Eio_guard.Eio_fiber ->
                  (* Claim the lazy only inside the worker. Claiming it before
                     queueing deadlocks if that worker requests the same value. *)
-                 Executor_pool_ref.submit_or_inline (fun () ->
+                 Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
                    match Atomic.get value.prepared with
                    | Some payload -> payload
                    | None -> Eio.Lazy.force value.identity)

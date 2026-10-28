@@ -552,7 +552,11 @@ let tail_lines rows = List.map (fun row -> row.line) rows
    these reads were about a tenth of the main thread's busy time and the
    longest runs outside turn spans (RFC main-domain-scheduler-latency
    section 8.8). *)
-let off_fiber f = Domain_pool_ref.submit_io_or_inline f
+let off_fiber ~name f = Domain_pool_ref.submit_io_or_inline ~name f
+
+(* The pool job's name for a read of [t]'s store (RFC-0474 L4c). A read given
+   only a path is named by the function that reads it. *)
+let job_name t = "dated_jsonl:" ^ Store.pool_job_name (Store.of_location t.location)
 
 (* A file removed between the existence check and the open is a missing file,
    which reads as an empty tail. *)
@@ -572,8 +576,10 @@ let load_tail_lines_inline path ~max_lines =
   tail_lines (load_tail_rows_inline path ~max_lines)
 ;;
 
-let map_tail_rows path ~max_lines ~f =
-  off_fiber (fun () -> List.map f (load_tail_rows_inline path ~max_lines))
+let map_tail_rows_as ~name path ~max_lines ~f =
+  off_fiber ~name (fun () -> List.map f (load_tail_rows_inline path ~max_lines))
+
+let map_tail_rows path ~max_lines ~f = map_tail_rows_as ~name:__FUNCTION__ path ~max_lines ~f
 ;;
 
 let load_tail_rows path ~max_lines = map_tail_rows path ~max_lines ~f:Fun.id
@@ -691,7 +697,7 @@ let find_latest_decoded_from_channel input ~decode f =
   let chunk_size = 8192 in
   let rec drive state =
     let decoded_newest_first, next =
-      off_fiber (fun () -> scan_step input ~chunk_size ~decode state)
+      off_fiber ~name:__FUNCTION__ (fun () -> scan_step input ~chunk_size ~decode state)
     in
     match List.find_map f decoded_newest_first with
     | Some _ as found -> found
@@ -874,7 +880,7 @@ let filter_map_recent ?(offset=0) t n ~f =
               runs out of lines. A file with no malformed rows settles on
               the first round, which is every call this had before. *)
            let parsed_newest_first =
-             off_fiber (fun () ->
+             off_fiber ~name:(job_name t) (fun () ->
                let rec read_widening window =
                  let lines = load_tail_lines_inline path ~max_lines:window in
                  let parsed =
@@ -1045,7 +1051,7 @@ let read_recent_result ?(offset=0) t n =
       | day :: rest ->
         let path = Filename.concat month_path day in
         let* entries_newest_first =
-          off_fiber (fun () ->
+          off_fiber ~name:(job_name t) (fun () ->
             load_tail_lines_result_inline path ~max_lines:(requested_line_count ())
             |> Result.map (List.rev_map (fun line -> recent_entry_of_line ~path line)))
         in
@@ -1119,7 +1125,8 @@ let read_recent_lines ?(offset=0) t n =
            if !count >= n then raise_notrace Done;
            let path = Filename.concat month_path d in
            let need = n - !count + !skip in
-           let lines = load_tail_lines path ~max_lines:need in
+           let lines = map_tail_rows_as ~name:(job_name t) path ~max_lines:need
+                         ~f:(fun row -> row.line) in
            let rev_lines = List.rev lines in
            List.iter (fun line ->
              if !count >= n then raise_notrace Done;
@@ -1853,7 +1860,8 @@ let filter_map_range_recent ?(offset = 0) t ~since ~until n ~f =
                      then begin
                        let path = Filename.concat month_path d in
                        let need = n - !count + !skip in
-                       let lines = load_tail_lines path ~max_lines:need in
+                       let lines = map_tail_rows_as ~name:(job_name t) path ~max_lines:need
+                         ~f:(fun row -> row.line) in
                        let rev_lines = List.rev lines in
                        List.iter
                          (fun line ->

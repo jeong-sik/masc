@@ -21,7 +21,7 @@ let with_connection ?streams dispatch handler run =
             if not (Eio.Promise.is_resolved released) then Eio.Promise.resolve release_worker () in
           Eio.Switch.on_release sw release;
           Eio.Fiber.fork ~sw (fun () ->
-            Domain_pool_ref.submit_cpu_or_inline (fun () ->
+            Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
               Eio.Promise.resolve occupy ();
               Eio.Promise.await released));
           Eio.Promise.await occupied;

@@ -64,7 +64,7 @@ let to_json (result : receipt) =
     "arguments", result.arguments; "response", result.response]
 
 let filename json =
-  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+  Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
     Agent_core_sha256.(digest_string (Yojson.Safe.to_string json) |> to_hex) ^ ".json")
 
 let decode path body = Safe_ops.parse_json_off_fiber ~context:path body

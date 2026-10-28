@@ -400,7 +400,7 @@ let decoded_primary : state File_version_cache.t = File_version_cache.create ()
 let load_primary config : (state, primary_failure) Result.t =
   let path = schedules_path config in
   let decode () =
-    Domain_pool_ref.submit_cpu_or_inline (fun () -> decode_primary config path) in
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () -> decode_primary config path) in
   match config.Workspace_utils.backend with
   | Workspace_utils.FileSystem _ -> File_version_cache.load decoded_primary path ~decode
   | Workspace_utils.Memory _ -> decode ()
@@ -516,7 +516,7 @@ let write_state config state =
      Yojson prints that document compact in 15 ms where the pretty printer
      takes 107 ms. *)
   let* content =
-    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
       Workspace_utils.encode_json_compact (state_to_yojson state))
     |> Result.map_error (fun msg -> Persistence_failed ("ledger encoding failed: " ^ msg))
   in

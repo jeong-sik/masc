@@ -94,7 +94,7 @@ let io f =
   | Eio.Io _ -> Error (Authority_unavailable "filesystem I/O failed")
 
 let blocking f = Eio_guard.run_in_systhread ~label:"endpoint-registry-authority" (fun () -> io f)
-let cpu f = Domain_pool_ref.submit_cpu_or_inline f
+let cpu f = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ f
 let identity_of_stat (s : Eio.File.Stat.t) = {device=s.dev;inode=s.ino}
 let unix_identity (s : Unix.stats) = {device=Int64.of_int s.st_dev;inode=Int64.of_int s.st_ino}
 let check_policy ~controller_uid ~payload_uid =

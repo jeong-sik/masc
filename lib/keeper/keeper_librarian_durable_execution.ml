@@ -470,7 +470,10 @@ let rec consume_one ~config ~keeper_name ~wake =
                   The next pass starts the chain again from the Memory then. *)
                (match Floor_cleanup.settle_chain ~store ~owner candidate with
                 | Error detail -> stop detail
-                | Ok _ -> wake ();Consumer.Memory_pending)) in
+                | Ok moved ->
+                  Log.Keeper.info ~keeper_name
+                    "durable Librarian message floor dropped its chain after Memory changed: records=%d" moved;
+                  wake ();Consumer.Memory_pending)) in
         let commit source =
           match List.find_opt (fun candidate -> Descent.covers candidate source) candidates with
           | Some candidate -> floor candidate

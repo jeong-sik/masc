@@ -24,10 +24,10 @@ TUI 키퍼 목록 화면은 2초마다 `GET /health?full=1` 을 받는다. 본�
 이 RFC 는 이 화면에서 폴링을 없앤다. 결정은 다섯 가지다.
 
 1. 서버와 TUI 가 같은 모듈의 타입과 엄격한 코덱을 쓴다(§3.1). 새 모듈 `Fleet_stream`(`lib/fleet_stream/`)이다.
-2. 연결하면 전체 상태(`Snapshot`)를 한 번 받고, 그 뒤로는 바뀐 것만 받는다. 이벤트마다 번호(`revision`)가 있고, 번호가 건너뛰면 다시 연결해서 `Snapshot` 을 받는다. 이어받기용 재생 버퍼는 만들지 않는다(§3.2).
+2. 연결하면 현재 상태(`Snapshot` 또는 `Unavailable_snapshot`)를 한 번 받고, 그 뒤로는 바뀐 것만 받는다. 이벤트마다 번호(`revision`)가 있고, 번호가 건너뛰면 다시 연결해서 현재 상태를 받는다. 이어받기용 재생 버퍼는 만들지 않는다(§3.2).
 3. 만드는 쪽은 새 스캔을 만들지 않는다. 기존 `full_health_snapshot` 갱신 루프의 결과를 이전 값과 비교해서 달라진 것만 내보낸다(§3.3).
 4. 전송은 SSE 다. gRPC 도 같은 하네스로 재 봤지만 고르지 않았다(§2, 부록 B).
-5. TUI 는 이 화면의 읽기를 지운다. 폴링으로 되돌아가는 길을 남기지 않는다. 연결이 끊기면 끊겼다고 보이고, 돌아오면 `Snapshot` 을 받는다(§3.5).
+5. TUI 는 이 화면의 읽기를 지운다. 폴링으로 되돌아가는 길을 남기지 않는다. 연결이 끊기면 끊겼다고 보이고, 돌아오면 현재 상태를 받는다(§3.5).
 
 이 RFC 가 고치지 않는 것: 서버가 간헐적으로 3~10초 멈추는 문제(RFC-0474), 스캔 한 번이 87 ms~5.7초 걸리는 것(§1.4), 다른 화면의 폴링. 범위는 §3.6 에 적는다.
 
@@ -139,11 +139,13 @@ type fleet = {
 }
 
 type degraded_reason = Scan_timed_out | Scan_failed
+type degradation = { since : float; reason : degraded_reason }
 
 type event =
-  | Snapshot of { revision : Revision.t; measured_at : float; fleet : fleet }
+  | Unavailable_snapshot of { revision : Revision.t; degradation : degradation }
+  | Snapshot of { revision : Revision.t; measured_at : float; fleet : fleet; degraded : degradation option }
   | Changed of { revision : Revision.t; measured_at : float; fleet : fleet }
-  | Degraded of { revision : Revision.t; since : float; reason : degraded_reason }
+  | Degraded of { revision : Revision.t; degradation : degradation }
 
 val encode : event -> Yojson.Safe.t
 val decode : Yojson.Safe.t -> (event, decode_error) result
@@ -153,9 +155,10 @@ val decode : Yojson.Safe.t -> (event, decode_error) result
 
 - 정확히 읽는다. 모르는 이벤트 이름, 빠진 필드, 모르는 필드, 범위 밖 값은 `decode_error` 다. 기본값으로 채우지 않는다(constitution 의 `strict_parse_no_default`).
 - 나이를 싣지 않는다. `measured_at`(epoch 초)만 싣고 화면이 나이를 계산한다. 나이를 싣는 값은 읽을 때마다 달라져서 §1.3 의 비교를 못 하게 된다.
-- `schema` 는 상수 `schema_version` 이고 `Snapshot` 에만 실린다. 값이 다르면 다른 필드를 읽기 전에 `Schema_mismatch` 로 멈춘다. 화면은 "서버 버전이 다르다"를 띄운다(화면에 이미 있는 빌드 비교와 같은 자리).
+- `schema` 는 상수 `schema_version` 이고 최초 상태인 `Snapshot` 또는 `Unavailable_snapshot` 에 실린다. 값이 다르면 다른 필드를 읽기 전에 `Schema_mismatch` 로 멈춘다. 화면은 "서버 버전이 다르다"를 띄운다(화면에 이미 있는 빌드 비교와 같은 자리).
 - `Changed` 는 fleet 값 전체를 바꿔 끼운다. 필드 단위 차이는 보내지 않는다. fleet 값은 크기가 작고(키퍼 40개에서 `Snapshot` 이 2,203 B) 바뀌는 횟수가 적다.
 - `Snapshot` 은 읽기 한 번이 말해 주는 상태 전부다. 스캔이 실패한 중이면 `degraded`(시작 시각과 이유)도 싣는다. 별도 `Degraded` 이벤트로 보내면 `Snapshot` 과 번호가 겹치거나 건너뛰기 때문이다.
+- 첫 읽기 전에 스캔이 실패하면 실제 fleet 값을 만들지 않고 `Unavailable_snapshot` 으로 첫 실패의 시각과 이유를 보낸다. 재연결에도 같은 상태를 보내고, 첫 유효 읽기는 다음 번호의 `Changed` 로 복구한다. 준비 중(`warming`)은 실패가 아니다.
 - 이름 목록은 `Names.t` 라서 정렬되고 중복이 없는 채로만 만들어진다. 같은 값이 다른 순서로 와서 다른 이벤트가 되는 일이 없다. 읽을 때 정렬되지 않은 목록은 `Not_canonical` 이다.
 - 필드 이름은 지금 TUI 가 쓰는 `fs_*` 를 그대로 둔다. L4 에서 TUI 가 바꾸는 것은 타입의 출처뿐이다. 선로 위의 이름은 `fs_` 를 뗀 이름이다(`bootable_count`, `running_names`). 이름을 고정하는 시험이 있다.
 
@@ -163,10 +166,10 @@ val decode : Yojson.Safe.t -> (event, decode_error) result
 
 ### 3.2 번호와 이어짐
 
-- 허브는 이벤트마다 `revision` 을 1씩 올리고, `Snapshot` 은 현재 `revision` 을 싣는다. 클라이언트는 `Snapshot` 을 받을 때마다 자기 번호를 그 값으로 다시 시작한다. 서버를 다시 켜서 번호가 처음부터 시작해도 새 연결은 새 `Snapshot` 으로 시작하므로 섞이지 않는다.
-- 클라이언트는 `revision` 이 `last + 1` 이 아니면 연결을 닫고 다시 연다. 그러면 새 `Snapshot` 을 받는다. 이벤트가 하나라도 빠지면 번호가 건너뛰어서 알 수 있다.
-- 이어받기용 재생 버퍼를 만들지 않는다. fleet 은 값을 통째로 바꾸는 상태라서 최신 `Snapshot` 이 곧 이어받기다. `Last-Event-Id` 와 `since_seq` 를 쓰지 않는다.
-- 연결할 때 `Snapshot` 을 보내는 일과 구독자 등록은 한 번에 일어나야 한다. 사이에 이벤트가 끼면 번호가 건너뛴 것처럼 보인다.
+- 허브는 이벤트마다 `revision` 을 1씩 올리고, `Snapshot` 과 `Unavailable_snapshot` 은 현재 `revision` 을 싣는다. 클라이언트는 첫 상태를 받을 때마다 자기 번호를 그 값으로 다시 시작한다. 서버를 다시 켜서 번호가 처음부터 시작해도 새 연결은 새 상태로 시작하므로 섞이지 않는다.
+- 클라이언트는 `revision` 이 `last + 1` 이 아니면 연결을 닫고 다시 연다. 그러면 새로운 현재 상태를 받는다. 이벤트가 하나라도 빠지면 번호가 건너뛰어서 알 수 있다.
+- 이어받기용 재생 버퍼를 만들지 않는다. 최신 `Snapshot` 또는 `Unavailable_snapshot` 이 곧 이어받기다. `Last-Event-Id` 와 `since_seq` 를 쓰지 않는다.
+- 연결할 때 첫 상태를 보내는 일과 구독자 등록은 한 번에 일어나야 한다. 사이에 이벤트가 끼면 번호가 건너뛴 것처럼 보인다.
 
 ### 3.3 만드는 쪽
 
@@ -174,8 +177,8 @@ val decode : Yojson.Safe.t -> (event, decode_error) result
 
 - 입력은 기존 `full_health_snapshot` 갱신 루프가 결과를 저장하는 두 함수다. 성공은 `store_successful_full_health_snapshot_locked`, 실패와 시간 초과는 `mark_full_health_snapshot_failure_locked` 이고, 동기 갱신·worker·기다리는 쪽의 시간 초과가 모두 이 둘을 지난다(`lib/server/server_routes_http_runtime.ml:958`, `:965`). 허브는 자기 락만 잡고 서버 락을 부르지 않으므로 서버 락 안에서 불러도 순서가 뒤집히지 않는다. 새 스캔, 새 타이머, 새 무효화 신호를 만들지 않는다.
 - 새 값이 지금 값과 같으면(`measured_at` 제외) 이벤트를 내지 않는다. 무효화가 9번이어도 값이 같으면 0건이다.
-- 갱신이 시간 안에 끝나지 않거나 실패하면 `Degraded` 를 한 번만 낸다(처음 실패한 순간, `since` 는 그 시각으로 고정). 다음에 성공하면 값이 같아도 `Changed` 가 나가면서 풀린다. 연결 중인 구독자는 이 이벤트로, 그 뒤에 연결하는 구독자는 `Snapshot` 의 `degraded` 로 안다. 첫 읽기 전의 실패는 아직 말할 상태가 없어서 이벤트가 없다.
-- 값이 `fleet_safety` 로 만들어지지 못하면(`Fleet_not_measured`, 준비 중) 이벤트를 내지 않고 기다린다. "아직 값이 없다"는 상태를 만들지 않는다. 구독자는 값이 생길 때까지 `Snapshot` 을 받지 못한다.
+- 갱신이 시간 안에 끝나지 않거나 실패하면 첫 읽기 전에는 `Unavailable_snapshot`, 읽은 뒤에는 `Degraded` 를 한 번만 낸다(처음 실패한 순간, `since` 는 그 시각으로 고정). 다음에 성공하면 값이 같아도 `Changed` 가 나가면서 풀린다. 그 뒤에 연결하는 구독자는 읽은 값이 있으면 `Snapshot` 의 `degraded` 로, 없으면 `Unavailable_snapshot` 으로 안다.
+- 값이 `fleet_safety` 로 만들어지지 못했을 때 준비 중이면 기다린다. section 의 오류·시간 초과나 읽을 수 없는 결과는 실패로 전달하고, 처음 실패하면 `Unavailable_snapshot` 을 보낸다.
 - 지금 스캔은 JSON 으로 값을 내므로, 서버가 그 JSON 구간을 `Fleet_stream_health_section.fleet_of_health_fields`(코덱과 다른 모듈, 한 함수)로 읽어서 허브에 넘긴다. 이 함수는 스캔의 필드 이름과 스트림의 필드 이름을 둘 다 아는 유일한 곳이다. 스캔이 타입 있는 값을 직접 내게 바꾸는 일은 이 RFC 밖이고, 바뀌면 이 함수가 사라진다.
 
 읽기 모델 규칙과의 관계: 스트림이 싣는 값은 서버 저장소에서 계산한 `full_health_snapshot` 의 투영이다. 권위는 저장소와 HTTP 읽기에 있고 스트림은 그 값을 전하는 길이다. `Snapshot` 한 번이 HTTP 읽기 한 번과 같은 값을 준다.
@@ -204,8 +207,8 @@ SSE 어댑터는 이벤트를 받아 공용 코덱으로 인코딩해서 쓴다.
 ### 3.5 TUI
 
 - 연결은 job 하나가 소유한다(`launch_fleet_stream`, `bin/masc_tui.ml`). 관찰자 피드와 같은 방식으로 `fork_workspace_job ~observation:true` 로 띄우고 메일박스로 보고한다. 서버가 한 번 답하고 workspace 를 확인한 뒤(`Workspace_identity_match`) 시작하고, 끝나면 이름 붙은 상수 `fleet_stream_reconnect_s`(2초, 기본 새로고침과 같다) 뒤에 다시 연결한다. workspace 가 걸어 내리기 전에는 끝나지 않는다. 요청에 `expected_base_path`·`expected_masc_root` 를 붙여서, 같은 포트에 다른 workspace 가 답하면 서버가 409 로 거절한다. 옛 `/health?full=1` 읽기가 `Health_identity` 로 하던 일을 이어받는 것이고, 관찰자 피드와 달리 workspace 가 맞지 않는 동안에는 시작하지 않는다.
-- 받은 바이트를 화면용 상태로 바꾸는 일은 순수 모듈 `Masc_tui_fleet_stream`(`bin/`)이 한다. 값(`view`)은 닫힌 타입이다: `Awaiting_first_reading`, `Reading { reading; trouble }`(`trouble` 은 없음, `Scans_failing`, `Disconnected { since }`), `Cannot_read`(`Refused`, `Schema_mismatch`, `Frame_rejected`). 시도 횟수 같은 숫자로 동작을 바꾸지 않는다.
-- `Snapshot` 은 번호와 상관없이 받는다(서버를 다시 켜면 번호가 1부터다). 그 밖의 이벤트는 바로 앞 번호 다음이어야 받고, 아니면 연결을 닫고 다시 연다. 읽을 수 없는 프레임과 다른 `schema` 도 같다. 거절하고 나면 `Snapshot` 이 올 때까지 아무것도 따르지 않는다.
+- 받은 바이트를 화면용 상태로 바꾸는 일은 순수 모듈 `Masc_tui_fleet_stream`(`bin/`)이 한다. 값(`view`)은 닫힌 타입이다: `Awaiting_first_reading`, 첫 읽기 없는 실패와 연결 종료 시각을 담는 `Unavailable`, `Reading { reading; trouble }`(`trouble` 은 없음, `Scans_failing`, `Disconnected { since }`), `Cannot_read`(`Refused`, `Schema_mismatch`, `Frame_rejected`). 시도 횟수 같은 숫자로 동작을 바꾸지 않는다.
+- `Snapshot` 과 `Unavailable_snapshot` 은 번호와 상관없이 받는다(서버를 다시 켜면 번호가 1부터다). 그 밖의 이벤트는 바로 앞 번호 다음이어야 받고, 아니면 연결을 닫고 다시 연다. 읽을 수 없는 프레임과 다른 `schema` 도 같다. 거절하고 나면 첫 상태가 올 때까지 아무것도 따르지 않는다.
 - 키퍼 화면, Metrics 의 fleet 읽기(`needs_fleet_safety`, `load_fleet_safety`, `fetch_fleet_safety`, `Dataset_fleet_safety`)와 `Tui_decode` 의 fleet 타입·디코더를 지웠다. 이 화면들은 더 이상 `/health?full=1` 을 읽지 않는다. 그래서 헤더 배지의 `· reading …` 에서도 fleet 읽기가 사라진다.
 - `fleet reading: stale …` 줄은 서버 스캔이 실패하는 중이거나 연결이 끊긴 동안만 그린다. 값이 있는 동안 줄이 없다. 끊긴 동안은 마지막 값을 끊긴 뒤 지난 시간과 함께 그린다. 값을 못 읽는 이유(HTTP 거절, 다른 `schema`)는 `fleet:` 줄에 한 줄로 쓴다.
 - 연결되지 않는 동안 HTTP 로 읽는 길을 두지 않는다(hard cut).

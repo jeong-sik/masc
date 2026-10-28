@@ -137,6 +137,12 @@ type violation =
 
 val violation_to_string : violation -> string
 
+(** The state after one more entry, or the rule that the entry breaks. These are
+    the rules that {!append} and {!of_line} apply, without a file: a caller that
+    replays entries into a {!State.t}, and a test that needs a state of a given
+    shape, fold them with it. *)
+val apply : State.t -> entry -> (State.t, violation) result
+
 (** Why a line is not the next line of the file. *)
 type line_error =
   | Not_json

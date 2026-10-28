@@ -545,6 +545,71 @@ let a_second_writer_that_starts_from_a_missing_file_is_refused () =
     Alcotest.(check string) "the file holds the first line only" written (read_file path))
 ;;
 
+(* [apply] is the rule set that [append] and [of_line] use, without a file. It
+   refuses with the same rule, and the state it gives is the state that a file
+   holding the same entries adds up to. *)
+let apply_refuses_with_the_rule_of_the_file () =
+  let booted_state = List.fold_left (fun state entry ->
+    match S.apply state entry with
+    | Ok state -> state
+    | Error violation -> Alcotest.failf "the fixture breaks a rule: %s" (violation_name violation))
+    S.State.empty
+    bootstrap_entries
+  in
+  List.iter
+    (fun (label, state, entry, expected) ->
+      match S.apply state entry with
+      | Ok _ -> Alcotest.failf "%s: the entry was taken" label
+      | Error violation -> Alcotest.(check string) label expected (violation_name violation))
+    [ "an answer needs an intent", S.State.empty, committed digest, "Committed_without_intent"
+    ; "an abort needs an intent", S.State.empty, aborted revoke_grant, "Aborted_without_intent"
+    ; "a store starts with a bootstrap", S.State.empty, pending revoke_grant, "Intent_before_bootstrap"
+    ; ( "a second bootstrap"
+      , booted_state
+      , pending ~digest:other_digest (mode C.Fresh_bootstrap other_workspace)
+      , "Bootstrap_already_committed" )
+    ; ( "a switch off for another workspace"
+      , booted_state
+      , pending ~digest:other_digest (mode C.Off other_workspace)
+      , "Workspace_mismatch" )
+    ]
+;;
+
+let apply_gives_the_state_of_the_file () =
+  with_path (fun path ->
+    let store, _, _ = open_ok ~path in
+    let entries =
+      bootstrap_entries
+      @ [ pending revoke_grant
+        ; aborted revoke_grant
+        ; pending ~digest:other_digest block_runtime
+        ; committed other_digest
+        ; pending ~previous:other_digest ~digest:(hash_of 'd') (mode C.Off workspace)
+        ]
+    in
+    let from_file = append_ok store entries in
+    let from_apply =
+      List.fold_left
+        (fun state entry ->
+          match S.apply state entry with
+          | Ok state -> state
+          | Error violation ->
+            Alcotest.failf "the fixture breaks a rule: %s" (violation_name violation))
+        S.State.empty
+        entries
+    in
+    check_pending "the pending intent" (S.State.pending from_file) from_apply;
+    check_hash "the last commit" (S.State.last_committed from_file) (S.State.last_committed from_apply);
+    check_intents "the given-up intents" (S.State.aborted from_file) (S.State.aborted from_apply);
+    let workspace_name state =
+      Option.map Workspace_id.to_string (S.State.workspace_id state)
+    in
+    Alcotest.(check (option string))
+      "the workspace"
+      (workspace_name from_file)
+      (workspace_name from_apply))
+;;
+
 (* ---- what the lines add up to ---- *)
 
 let state_follows_the_lines () =
@@ -805,6 +870,8 @@ let () =
       , [ Alcotest.test_case "appending" `Quick rules_when_appending
         ; Alcotest.test_case "a store starts with a bootstrap" `Quick a_store_starts_with_a_bootstrap
         ; Alcotest.test_case "mode events in any order" `Quick mode_events_may_repeat_and_come_in_any_order
+        ; Alcotest.test_case "apply refuses as the file does" `Quick apply_refuses_with_the_rule_of_the_file
+        ; Alcotest.test_case "apply gives the state of the file" `Quick apply_gives_the_state_of_the_file
         ] )
     ; ( "state"
       , [ Alcotest.test_case "follows the lines" `Quick state_follows_the_lines

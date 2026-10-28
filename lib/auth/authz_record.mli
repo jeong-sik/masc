@@ -127,3 +127,10 @@ val to_line : t -> string
     of the constructors of {!decode_error}, and the first failure is the
     result. *)
 val of_line : head:head -> string -> (t, decode_error) result
+
+(** The JSON of a principal as {!to_line} writes it inside an author, and how
+    {!of_line} reads it back. Other files of the authorization layer name a
+    principal the same way, so the two functions are shared. *)
+val principal_text : Authz_types.Principal.t -> string
+
+val principal_of_json : Yojson.Safe.t -> Authz_types.Principal.t option

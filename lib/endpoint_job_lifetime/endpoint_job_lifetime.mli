@@ -10,6 +10,7 @@ module R = Endpoint_job_registry
 module L = Endpoint_job_launch
 module S = Endpoint_job_supervisor
 module D = Endpoint_job_result
+module O = Endpoint_job_output
 type t
 type error =
   | Registry_error of R.error
@@ -39,6 +40,27 @@ val await_startup : t -> (S.launch_outcome,error) result
     release and supervisor initialization. A returned owner can still be held
     or unavailable; this is not payload exec or result readiness. Cancelling
     the observer leaves startup alive and never retries the original launch. *)
+type progress =
+  | Startup_pending
+  | No_supervisor of S.error
+  | Supervised of S.progress
+  | Publication_known of P.Sha256.t
+type snapshot = private { record : R.record; progress : progress }
+val snapshot : t -> (snapshot,error) result
+(** Refresh original authority and inspect already available startup/result
+    futures. Never wait for startup, child exit, input, EOF or publication.
+    No_supervisor retains the actual startup error; it proves neither child
+    absence nor permission to retry. Publication_known is a historical digest,
+    not fresh Result_ready. Source/capture failure remains an error. *)
+val read_output :
+  sw:Eio.Switch.t -> t -> stream:P.stream -> offset:int64 -> max_bytes:int ->
+  (O.chunk option,error) result
+(** Read the current original capture, or a fully verified published
+    result. None means no capture/result is available yet, never empty output,
+    EOF or completion. No startup/result future is awaited. Live reads validate
+    captured source and spool attachment before/after the bounded range.
+    Published reads verify actual complete storage under the observer Switch.
+    Cancelling the reader leaves the original job and capture alive. *)
 val await_result : t -> (P.Sha256.t,error) result
 (** Event-driven historical publication digest, never a fresh integrity check.
     A startup that lost the registry to this job's own pending cancellation

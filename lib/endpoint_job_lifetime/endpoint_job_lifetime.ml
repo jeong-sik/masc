@@ -3,6 +3,7 @@ module R = Endpoint_job_registry
 module L = Endpoint_job_launch
 module S = Endpoint_job_supervisor
 module D = Endpoint_job_result
+module O = Endpoint_job_output
 let ( let* ) = Result.bind
 type error =
   | Registry_error of R.error
@@ -71,6 +72,28 @@ type t = {
 let original t=P.original ~binding:(R.binding t.source) ~admission_id:(R.admission_id t.source)
 let await_startup t=Eio.Promise.await t.startup.value
 let await_result t=Eio.Promise.await t.result.value
+type progress =
+  | Startup_pending
+  | No_supervisor of S.error
+  | Supervised of S.progress
+  | Publication_known of P.Sha256.t
+type snapshot = { record : R.record; progress : progress }
+let snapshot t =
+  let* record=R.refresh t.source |> Result.map_error (fun e -> Registry_error e) in
+  match Eio.Promise.peek t.result.value with
+  | Some (Error error) -> Error error
+  | Some (Ok digest) -> Ok {record;progress=Publication_known digest}
+  | None ->
+    match Eio.Promise.peek t.startup.value with
+    | None -> Ok {record;progress=Startup_pending}
+    | Some (Error error) -> Error error
+    | Some (Ok outcome) ->
+      match outcome with
+      | S.Not_performed {error;pipe_cleanup_errors=_} -> Ok {record;progress=No_supervisor error}
+      | S.Performed {value;registry_release_error=_;pipe_cleanup_errors=_} ->
+        let* native=value |> Result.map_error (fun error -> Supervisor_error error) in
+        let* observed=S.snapshot native |> Result.map_error (fun error -> Supervisor_error error) in
+        Ok {record=observed.record;progress=Supervised observed.progress}
 let stop t error = finish t.startup (Error error);finish t.result (Error error)
 (* A startup attempt can lose the registry to this job's own cancellation.
    Only that cancellation's completion is awaited; its outcome is not the
@@ -125,10 +148,41 @@ let start_effect_workspace ~sw ~fs ~cgroup_parent_path ~execution intent =
     `Stop_daemon);
   Eio.Switch.check sw;
   t
-let load_result ~sw t =
-  let* digest=await_result t in
+let load_published ~sw t digest =
   let* storage=R.open_storage ~sw t.source |> Result.map_error (fun e -> Registry_error e) in
   D.load ~sw ~storage ~expected_sha256:(Some digest) |> Result.map_error (fun e -> Result_error e)
+let load_result ~sw t =
+  let* digest=await_result t in
+  load_published ~sw t digest
+let read_output ~sw t ~stream ~offset ~max_bytes =
+  if offset<0L || max_bytes<=0 then
+    Error (Supervisor_error (S.Output_error {stream;cause=O.Invalid_range}))
+  else
+    let published digest =
+      let* loaded=load_published ~sw t digest in
+      D.read_output loaded ~stream ~offset ~max_bytes
+      |> Result.map Option.some |> Result.map_error (fun error -> Result_error error)
+    in
+    let non_native () =
+      let* _=R.refresh t.source |> Result.map_error (fun error -> Registry_error error) in
+      match Eio.Promise.peek t.result.value with
+      | None -> Ok None
+      | Some (Error error) -> Error error
+      | Some (Ok digest) -> published digest
+    in
+    match Eio.Promise.peek t.result.value with
+    | Some (Ok digest) -> published digest
+    | Some (Error _) | None ->
+      match Eio.Promise.peek t.startup.value with
+      | None -> non_native ()
+      | Some (Error error) -> Error error
+      | Some (Ok outcome) ->
+        match outcome with
+        | S.Not_performed _ -> non_native ()
+        | S.Performed {value;registry_release_error=_;pipe_cleanup_errors=_} ->
+          let* native=value |> Result.map_error (fun error -> Supervisor_error error) in
+          S.read_output native ~stream ~offset ~max_bytes
+          |> Result.map Option.some |> Result.map_error (fun error -> Supervisor_error error)
 let cancel_original t =
   let request ()=R.request_cancel t.source ~confirmed_admission_id:(R.admission_id t.source) in
   let confirm ()=request () |> Result.map_error (fun e -> Registry_error e) in

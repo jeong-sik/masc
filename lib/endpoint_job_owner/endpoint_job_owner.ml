@@ -3,6 +3,7 @@ module R = Endpoint_job_registry
 module L = Endpoint_job_launch
 module C = Endpoint_job_lifetime
 module D = Endpoint_job_result
+module O = Endpoint_job_output
 
 let ( let* ) = Result.bind
 
@@ -559,6 +560,27 @@ let original operation =
   P.original ~binding:(R.binding source) ~admission_id:(R.admission_id source)
 
 let inspect_original operation = refresh operation
+type progress =
+  | Registered
+  | Activation_pending
+  | Owned_lifetime of C.progress
+  | Publication_known of P.Sha256.t
+  | Ownership_unknown
+type snapshot = { record : R.record; progress : progress }
+let snapshot operation =
+  let* record=refresh operation in
+  match Atomic.get operation.execution with
+  | Committing_launch -> Ok {record;progress=Activation_pending}
+  | Unknown_launch -> Ok {record;progress=Ownership_unknown}
+  | Awaiting_activation ->
+    (match Eio.Promise.peek (current_result operation).value with
+     | None -> Ok {record;progress=Registered}
+     | Some (Error error) -> Error error
+     | Some (Ok digest) -> Ok {record;progress=Publication_known digest})
+  | Owned job ->
+    let* observed=C.snapshot job |> Result.map_error map_lifetime_error in
+    let* record=update_source operation ~previous:record observed.record in
+    Ok {record;progress=Owned_lifetime observed.progress}
 let activate operation = enqueue operation Activation
 let cancel operation = enqueue operation Cancellation
 let await_request (request : request) = Eio.Promise.await request.completion.value
@@ -569,6 +591,11 @@ let await_result operation =
   | Owned job -> C.await_result job |> Result.map_error map_lifetime_error
   | Awaiting_activation | Committing_launch -> Eio.Promise.await (current_result operation).value
 
+let load_published ~sw ~expected_sha256 operation =
+  let* storage=R.open_storage ~sw (Atomic.get operation.source)
+    |> Result.map_error (fun error -> Registry_error error) in
+  D.load ~sw ~storage ~expected_sha256 |> Result.map_error (fun error -> Result_error error)
+
 let load_result ~sw ~expected_sha256 operation =
   let* expected=match Atomic.get operation.execution with
     | Unknown_launch -> Ok expected_sha256
@@ -578,9 +605,27 @@ let load_result ~sw ~expected_sha256 operation =
        | Some expected when expected<>digest -> Error Result_digest_mismatch
        | Some _ | None -> Ok (Some digest))
   in
-  let* storage=R.open_storage ~sw (Atomic.get operation.source)
-    |> Result.map_error (fun error -> Registry_error error) in
-  D.load ~sw ~storage ~expected_sha256:expected |> Result.map_error (fun error -> Result_error error)
+  load_published ~sw ~expected_sha256:expected operation
+
+let read_output ~sw operation ~stream ~offset ~max_bytes =
+  if offset<0L || max_bytes<=0 then Error (Result_error (D.Output_error {stream;cause=O.Invalid_range}))
+  else
+    let* _=refresh operation in
+    let retained expected_sha256 =
+      let* loaded=load_published ~sw ~expected_sha256 operation in
+      D.read_output loaded ~stream ~offset ~max_bytes
+      |> Result.map Option.some |> Result.map_error (fun error -> Result_error error)
+    in
+    match Atomic.get operation.execution with
+    | Committing_launch -> Ok None
+    | Unknown_launch -> retained None
+    | Awaiting_activation ->
+      (match Eio.Promise.peek (current_result operation).value with
+       | None -> Ok None
+       | Some (Error error) -> Error error
+       | Some (Ok digest) -> retained (Some digest))
+    | Owned job ->
+      C.read_output ~sw job ~stream ~offset ~max_bytes |> Result.map_error map_lifetime_error
 
 module For_testing = struct
   let create = create_with_hooks

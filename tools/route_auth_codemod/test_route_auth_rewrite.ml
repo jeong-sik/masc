@@ -392,6 +392,36 @@ let left_alone_cases =
 |}
     , "/api/x"
     , "the handler has an attribute" )
+  ; ( "an attribute on the wrapper function"
+    , {|let routes = Router.get "/api/x" (fun request reqd ->
+  (with_public_read [@instrument.wrapper]) (fun state req reqd -> h state req reqd) request reqd)
+|}
+    , "/api/x"
+    , "handler body is not a wrapper call" )
+  ; ( "an attribute on the forwarded request"
+    , {|let routes = Router.get "/api/x" (fun request reqd ->
+  with_public_read (fun state req reqd -> h state req reqd) (request [@instrument.request]) reqd)
+|}
+    , "/api/x"
+    , "the wrapper is not applied to the request and reqd of the handler" )
+  ; ( "an attribute on the forwarded reqd"
+    , {|let routes = Router.get "/api/x" (fun request reqd ->
+  with_public_read (fun state req reqd -> h state req reqd) request (reqd [@instrument.reqd]))
+|}
+    , "/api/x"
+    , "the wrapper is not applied to the request and reqd of the handler" )
+  ; ( "an attribute on the registration function"
+    , {|let routes = (Router.get [@instrument.router]) "/api/x" (fun request reqd ->
+  with_public_read (fun state req reqd -> h state req reqd) request reqd)
+|}
+    , "/api/x"
+    , "registration function has an attribute" )
+  ; ( "a comment inside the registration function"
+    , {|let routes = Router.(* retain-route-comment *)get "/api/x" (fun request reqd ->
+  with_public_read (fun state req reqd -> h state req reqd) request reqd)
+|}
+    , "/api/x"
+    , "registration function contains a comment" )
   ; ( "an attribute on an outer parameter"
     , {|let routes routes =
   routes |> Http.Router.get "/api/x" (fun (request [@some_attribute]) reqd ->
@@ -847,6 +877,36 @@ let get_x request reqd =
   ]
 ;;
 
+let test_named_registration_function_attribute () =
+  let source = {|let handle request reqd =
+  with_public_read (fun state req reqd -> h state req reqd) request reqd
+let routes = Router.get "/a" handle
+let more = (Router.get [@instrument.router]) "/b" handle
+|} in
+  let rewritten, report = rewrite ~allow_named:true source in
+  Alcotest.(check string) "preserve definition and all registrations" source rewritten;
+  Alcotest.(check int) "definitions" 0 report.definitions;
+  Alcotest.(check int) "registrations" 0 report.converted;
+  Alcotest.(check (list (pair string string))) "both left alone"
+    [ "/a", "registration function has an attribute"
+    ; "/b", "registration function has an attribute" ] (sites report)
+;;
+
+let test_named_registration_function_comment () =
+  let source = {|let handle request reqd =
+  with_public_read (fun state req reqd -> h state req reqd) request reqd
+let routes = Router.get "/a" handle
+let more = Router.(* retain-route-comment *)get "/b" handle
+|} in
+  let rewritten, report = rewrite ~allow_named:true source in
+  Alcotest.(check string) "preserve definition and all registrations" source rewritten;
+  Alcotest.(check int) "definitions" 0 report.definitions;
+  Alcotest.(check int) "registrations" 0 report.converted;
+  Alcotest.(check (list (pair string string))) "both left alone"
+    [ "/a", "registration function contains a comment"
+    ; "/b", "registration function contains a comment" ] (sites report)
+;;
+
 let test_shadowed_named_definitions () =
   let source =
     {|let h request reqd =
@@ -1069,7 +1129,9 @@ let () =
     ; "named handlers", List.map check_named named_cases
     ; ( "named handlers left alone"
       , List.map check_left_alone named_left_alone_cases
-        @ [ Alcotest.test_case "a computed argument converts the definition when allowed" `Quick test_named_early
+        @ [ Alcotest.test_case "attributed registration keeps its named definition" `Quick test_named_registration_function_attribute
+          ; Alcotest.test_case "commented registration keeps its named definition" `Quick test_named_registration_function_comment
+          ; Alcotest.test_case "a computed argument converts the definition when allowed" `Quick test_named_early
           ; Alcotest.test_case "shadowed named definitions stay unchanged" `Quick test_shadowed_named_definitions
           ; Alcotest.test_case "same named definitions in modules stay unchanged" `Quick test_shadowed_named_module_definitions
           ; Alcotest.test_case "early argument cannot change modules" `Quick test_named_early_shadowed_module ] )

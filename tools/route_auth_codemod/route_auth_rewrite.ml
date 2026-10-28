@@ -164,6 +164,17 @@ let comments_between source ~start ~stop =
   | Lexer.Error _ -> None
 ;;
 
+(* Replacing the registration function discards its exact source range. *)
+let registration_function_issue source (fn : expression) =
+  if has_attributes fn then Some "registration function has an attribute"
+  else
+    match comments_between source ~start:fn.pexp_loc.loc_start.pos_cnum
+            ~stop:fn.pexp_loc.loc_end.pos_cnum with
+    | Some [] -> None
+    | Some (_ :: _) -> Some "registration function contains a comment"
+    | None -> Some "registration function contains unreadable text or a doc comment"
+;;
+
 (* A comment as a line of its own, indented like the registration it moves to. *)
 let hoisted source ~indent (offset, text) =
   let from_column = offset - line_start source offset in
@@ -181,8 +192,8 @@ type call =
 
 let wrapper_call (e : expression) =
   match e.pexp_desc with
-  | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, args)
-    when List.mem_assoc (last_component txt) kinds ->
+  | Pexp_apply (({ pexp_desc = Pexp_ident { txt; _ }; _ } as fn), args)
+    when not (has_attributes fn) && List.mem_assoc (last_component txt) kinds ->
     let labeled =
       List.filter_map
         (function
@@ -320,7 +331,7 @@ let has_parameter_attributes params =
 
 let ident_name (e : expression) =
   match e.pexp_desc with
-  | Pexp_ident { txt = Longident.Lident name; _ } -> Some name
+  | Pexp_ident { txt = Longident.Lident name; _ } when not (has_attributes e) -> Some name
   | _ -> None
 ;;
 
@@ -733,13 +744,14 @@ let handler_ident (e : expression) =
 (* How many registrations take the bare name [name] as their handler, and how
    many times the name appears at all. A definition may lose its wrapper only
    when the two are equal. *)
-let uses_of_name structure (definition : definition) =
+let uses_of_name source structure (definition : definition) =
   let name = definition.name in
   let registrations = ref 0 in
   let occurrences = ref 0 in
   let bindings = ref 0 in
   let earliest_registration = ref max_int in
   let latest_registration = ref min_int in
+  let unsafe_registration = ref None in
   let scopes = ref [] in
   let outside_scope = ref false in
   let iterator =
@@ -774,6 +786,9 @@ let uses_of_name structure (definition : definition) =
                  match Option.bind (handler_expression function_name args) handler_ident with
                  | Some n when String.equal n name ->
                    incr registrations;
+                   (match registration_function_issue source fn with
+                    | Some reason -> unsafe_registration := Some reason
+                    | None -> ());
                    if not (List.exists (fun scope -> scope == definition.scope) !scopes)
                    then outside_scope := true;
                    earliest_registration := min !earliest_registration e.pexp_loc.loc_start.pos_cnum;
@@ -790,7 +805,8 @@ let uses_of_name structure (definition : definition) =
   , !bindings
   , !earliest_registration
   , !latest_registration
-  , !outside_scope )
+  , !outside_scope
+  , !unsafe_registration )
 ;;
 
 (* Moving a wrapper argument from a named definition to a registration also
@@ -909,12 +925,14 @@ let rewrite ?(early = false) ?(allow_named = false) ~file source =
     collector.structure collector structure;
     List.iter
       (fun (definition : definition) ->
-        let registrations, occurrences, bindings, earliest_registration, latest_registration, outside_scope =
-          uses_of_name structure definition in
+        let registrations, occurrences, bindings, earliest_registration, latest_registration, outside_scope, unsafe_registration =
+          uses_of_name source structure definition in
         (* The name may be used nowhere else: a handler that other code calls
            with a request and a reqd cannot lose its wrapper. *)
         if registrations > 0 && bindings > 1
         then Hashtbl.replace unsafe_definitions definition.name "named handler has multiple bindings"
+        else if registrations > 0 && Option.is_some unsafe_registration
+        then Option.iter (Hashtbl.replace unsafe_definitions definition.name) unsafe_registration
         else if registrations > 0 && outside_scope
         then Hashtbl.replace unsafe_definitions definition.name "named handler registration is outside its definition scope"
         else if registrations > 0 && earliest_registration < definition.binding_stop
@@ -958,6 +976,9 @@ let rewrite ?(early = false) ?(allow_named = false) ~file source =
                 | None -> ()
                 | Some name ->
                   let site = site_of e (route_path args) in
+                  (match registration_function_issue source fn with
+                  | Some reason -> unhandled := site reason :: !unhandled
+                  | None ->
                   let named_definition =
                     match handler_arg source name args with
                     | Ok (handler, handler_start) ->
@@ -1002,7 +1023,7 @@ let rewrite ?(early = false) ?(allow_named = false) ~file source =
                         Option.iter
                           (fun text -> evaluated_early := site text :: !evaluated_early)
                           conversion.evaluated_once
-                      | Error reason -> unhandled := site reason :: !unhandled))))
+                      | Error reason -> unhandled := site reason :: !unhandled)))))
              | _ -> ());
             Ast_iterator.default_iterator.expr self e)
       }

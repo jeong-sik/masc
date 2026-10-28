@@ -275,12 +275,12 @@ let reopen_with_hook ~after_chunk ~after_stat ~sw ~storage ~stream =
     let* file_offset=offset position in
     let* ()=io (fun () -> reader_pread_exact file ~file_offset [part]) in
     let bytes=Cstruct.to_string part in
-    let context=cpu (fun () -> Digestif.SHA256.feed_string context bytes) in
+    let context=cpu (fun () -> Agent_core_sha256.feed_string context bytes) in
     after_chunk ();
     hash (Int64.add position (Int64.of_int count)) context in
   let* ()=validate () in
-  let* context=hash 0L Digestif.SHA256.empty in
-  let actual=cpu (fun () -> Digestif.SHA256.(to_hex (get context))) in
+  let* context=hash 0L Agent_core_sha256.empty in
+  let actual=cpu (fun () -> Agent_core_sha256.(to_hex (get context))) in
   let* ()=if actual=P.Sha256.to_string seal.sha256 then Ok () else Error Invalid_storage in
   let* ()=validate () in
   Eio.Switch.check sw;

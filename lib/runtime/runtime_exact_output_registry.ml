@@ -226,7 +226,7 @@ let notify_lane_changes subscriptions =
         subscription.lane_id (Printexc.to_string exn)) subscriptions
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let admit_lane_slots resolver_snapshot admitted_by_id
     (lane : Runtime_schema.exact_output_lane_decl) =

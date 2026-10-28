@@ -34,7 +34,7 @@ type origin =
   ; task_id : string; run_id : string }
 type t = { origin : origin; uuid : string; event : event; boundary : boundary }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let validate_integer ~field value =
   Runtime_json_integer.of_json (`Int value)

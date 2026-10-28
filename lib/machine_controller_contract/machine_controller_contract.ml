@@ -20,7 +20,7 @@ let admission_to_json admission =
       | Some No_credential -> `String "no_credential"
       | Some Participant_departed -> `String "participant_departed");
     "handoff_target", nullable_name admission.handoff_target]
-let ( let* ) = Result.bind
+open Result.Syntax
 let name = function
   | `Null -> Ok None
   | `String name when name <> "" && String.equal name (String.trim name) -> Ok (Some name)

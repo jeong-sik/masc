@@ -38,7 +38,7 @@ type message =
   ; params : Yojson.Safe.t
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let error stage detail = Error { stage; detail }
 
 let create_session () =

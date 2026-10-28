@@ -327,7 +327,7 @@ let latency_histogram (entries : raw_entry list) : latency_bucket list =
 
 (* ── Public compute functions ───────────────────────────── *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let compute ~base_path ~window_minutes =
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in

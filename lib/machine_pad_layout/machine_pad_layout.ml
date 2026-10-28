@@ -67,7 +67,7 @@ let to_json ~saves_name ~source layout =
         "keys", `List (List.map (fun key -> `String key) keys)]) (bindings layout))]
 
 let of_json json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let fields expected = function
     | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare expected -> Ok fields
     | _ -> Error "invalid or duplicate pad layout fields" in

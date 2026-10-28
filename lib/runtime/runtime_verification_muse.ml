@@ -5,7 +5,7 @@ type error =
 
 let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account_home ~quota_scope ~config
     ~reasoning_effort ~tool ~prompt =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match Runtime_muse_home.prepare ~account_home with
   | Error error -> Error (Home_error error)
   | Ok home ->

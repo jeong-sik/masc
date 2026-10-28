@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 let encode = function
   | `Assoc packet ->
       let* rows = match List.assoc_opt "rows" packet with

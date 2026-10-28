@@ -24,7 +24,7 @@ let error_message = function
 exception Revision_changed
 exception Removal_refused of R.error
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* An object with exactly [keys], no key twice. *)
 let exactly keys = function

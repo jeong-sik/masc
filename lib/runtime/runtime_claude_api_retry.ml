@@ -8,7 +8,7 @@ type t =
 
 type error = Invalid_field of string | Conflicting_field of string | Other_session
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let field fields key =
   match List.filter_map (fun (name, value) -> if name = key then Some value else None) fields with

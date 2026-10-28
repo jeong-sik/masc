@@ -112,7 +112,7 @@ let get_id req = match req.id with Some id -> id | None -> `Null
 let is_valid_request_id value = Result.is_ok (request_id_of_yojson value)
 
 let initialize_protocol_version params =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let require_string label = function
     | Some (`String value) -> Ok value
     | None | Some `Null -> Error ("Missing " ^ label)

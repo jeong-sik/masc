@@ -33,7 +33,7 @@ type error =
   | Unsupported_layout of string
   | Rejected of Runtime_toml.parse_error list
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let error_message = function
   | Unparsable detail -> detail

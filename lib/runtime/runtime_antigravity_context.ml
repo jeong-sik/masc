@@ -94,7 +94,7 @@ let error_message = function
      version."
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let parse_records ~model ~cli_version rows =
   List.fold_left
@@ -273,7 +273,7 @@ let observe ~python_path ~cli_path ~timeout_s ~oauth_source ~model =
       (command_failed ~phase:(Observation_deadline timeout_s) ~status:None ~stderr:"")
   else (
     try
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* python_path = executable_path python_path in
       let* cli_path = executable_path cli_path in
       let runtime_root =

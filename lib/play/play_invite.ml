@@ -223,7 +223,7 @@ let resolve_keeper_name ~keepers name =
   | _ -> None
 
 let issue ~base_path ~public_base_url ~keeper_names ~name ~hours =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* base =
     readiness ~auth_config:(Auth.load_auth_config base_path) ~public_base_url
     |> Result.map_error (fun gaps -> Not_ready gaps)
@@ -266,7 +266,7 @@ type list_error =
   | Invalid_expiry of Masc_domain.Credential_expiry.error
 
 let list ~base_path ~now =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let rec collect invites = function
     | [] -> Ok (List.sort (fun a b -> String.compare a.invite_name b.invite_name) invites)
     | (cred : Masc_domain.agent_credential) :: rest ->
@@ -332,7 +332,7 @@ let revoke ~base_path ~name ~after_revoke =
        | Some { Masc_domain.agent_name; _ } when not (String.equal agent_name name) ->
          Error (Credential_identity_mismatch agent_name)
        | Some { Masc_domain.role = Masc_domain.Player; _ } ->
-         let ( let* ) = Result.bind in
+         let open Result.Syntax in
          let* current = Auth.current_credential_in_transaction transaction name
            |> Result.map_error (fun error -> Credential_not_deleted error) in
          let* () = match current with

@@ -278,7 +278,7 @@ let failure_of_code ~code ~detail =
   | code, (None | Some _) -> Error (Printf.sprintf "unknown failure code %S" code)
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let of_json json =
   let object_fields ~name = function

@@ -95,7 +95,7 @@ let spawn_path client ~command =
 ;;
 
 let install ~run client =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   try
     let directory = Filename.temp_dir "masc-official-client-install-" "" in
     Fun.protect ~finally:(fun () -> Fs_compat.remove_tree directory) (fun () ->

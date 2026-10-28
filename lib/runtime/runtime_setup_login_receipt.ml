@@ -7,7 +7,7 @@ type t = {
   status : status;
 }
 type error = Not_found | Unavailable
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let observation_name = function
   | Runtime_setup_login_client.Authenticated -> "authenticated"

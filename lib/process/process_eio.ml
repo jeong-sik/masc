@@ -1092,7 +1092,7 @@ let run_argv_with_redirects ?timeout_sec ?env ?cwd ~stdin ~stdout ~stderr
       let phase_ref = ref Timeout_origin.Spawn in
       (try
          Eio.Switch.run (fun sw ->
-           let ( let* ) = Result.bind in
+           let open Result.Syntax in
            let* stdin_source =
              match stdin with
              | Inherited -> Ok None

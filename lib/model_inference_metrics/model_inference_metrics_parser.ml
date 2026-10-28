@@ -16,7 +16,7 @@
 
 open Model_inference_metrics_entry
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* ── Model attribution helpers ──────────────────────────── *)
 

@@ -259,7 +259,7 @@ let complete_sum add field = function
 ;;
 
 let compute_cost_latency_json ~base_path ~window_minutes =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
   let* entries, cost_read = read_complete_entries ~base_path ~since_unix in
   let samples_by_model = List.fold_left

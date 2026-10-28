@@ -11,7 +11,7 @@ type t = {choice:choice; model:string; context:int; tools:bool; streaming:bool;
   existing_inline : (string * string) option}
 type error = Invalid_spec of string
 let error_message (Invalid_spec field) = "Invalid runtime setup specification: " ^ field
-let ( let* ) = Result.bind
+open Result.Syntax
 let invalid field = Error (Invalid_spec field)
 let choice_name = function Ollama -> "ollama" | Llama_cpp -> "llama_cpp" | Vllm -> "vllm"
   | Openai_compatible -> "openai_compatible" | Messages -> "messages" | Claude_code -> "claude_code"

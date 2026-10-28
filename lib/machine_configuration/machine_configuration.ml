@@ -3,7 +3,7 @@ type t = { msx_enabled : bool; dos_enabled : bool }
 type activity = Enabled | Disabled | Unobserved
 let default = { msx_enabled = true; dos_enabled = true }
 let activity_to_wire = function Enabled -> "on" | Disabled -> "off" | Unobserved -> "unobserved"
-let ( let* ) = Result.bind
+open Result.Syntax
 let table ~path ~keys = function
   | None -> Ok []
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->

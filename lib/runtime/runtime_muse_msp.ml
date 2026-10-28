@@ -4,7 +4,7 @@ type error =
   }
 
 let error_to_string { stage; detail } = Printf.sprintf "MSP %s: %s" stage detail
-let ( let* ) = Result.bind
+open Result.Syntax
 let fail stage detail = Error { stage; detail }
 
 module Json = Runtime_official_client_json.Make (struct

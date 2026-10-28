@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 type speaker = Keeper | Participant
 type message = {
   id : int; at : float; who : string; speaker : speaker;

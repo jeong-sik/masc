@@ -8,7 +8,7 @@ let error_message = function
   | Command_failed -> "The official Antigravity account command did not complete."
   | Invalid_catalog -> "The official Antigravity model catalog has an unsupported response format."
   | Keychain_unavailable -> "The selected Antigravity keychain could not be read or its private account could not be switched. Unlock that account and retry; no fallback account was selected."
-let ( let* ) = Result.bind
+open Result.Syntax
 let prepare ~runtime_root ~account_id =
   Runtime_antigravity_home.prepare_for_login ~runtime_root ~owner_leaf:account_id
   |> Result.map_error (fun _ -> Private_home_unavailable)

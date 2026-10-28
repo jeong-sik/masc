@@ -27,7 +27,7 @@ let encode ?code message : Yojson.Safe.t =
   `Assoc (code @ [ "ok", `Bool false; "message", `String message ])
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let decode : Yojson.Safe.t -> (refusal, string) result = function
   | `Assoc fields ->

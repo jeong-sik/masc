@@ -78,7 +78,7 @@ let progress_of_json = function
       if List.length keys <> List.length (List.sort_uniq String.compare keys)
       then Error "duplicate native progress field"
       else
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let string key = match List.assoc_opt key fields with
           | Some (`String value) when String.trim value <> "" -> Ok value
           | Some _ | None -> Error ("native retry " ^ key ^ " must be a nonblank string") in
@@ -152,7 +152,7 @@ let completion_to_json {outcome; exit_code} =
 
 let completion_of_json = function
   | `Assoc fields ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let rec unique seen = function
         | [] -> Ok ()
         | (key, _) :: rest ->

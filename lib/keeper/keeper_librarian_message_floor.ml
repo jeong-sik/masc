@@ -166,10 +166,10 @@ module Machine = struct
 
   let stage t ~served_by (step : Runtime.memory_step) =
     let* plan = Plan.append t.plan step |> Result.map_error Plan.error_to_string in
-    Ok {t with plan; state = Some step.working_state; served = Some served_by;
+    Ok {t with plan; state = Some step.working_state; served = served_by;
                tools = []; counterparts = []}
 
-  let answered t ~served_by step =
+  let answered t ?served_by step =
     match t.sources, t.messages with
     | source :: sources, _ :: messages ->
       let* staged = stage t ~served_by step in

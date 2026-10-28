@@ -59,15 +59,19 @@ let selection_payloads = function
   | Some (selection : Keeper_librarian.current_selection) ->
     payloads selection.facts |> Result.map Option.some
 
-let create ~keeper_id ~turn_ref ~snapshot =
-  let selection =
-    Option.map
-      (fun (snapshot : Current.t) ->
-         ({facts=snapshot.facts} : Keeper_librarian.current_selection))
-      snapshot
-  in
+let make ~keeper_id ~turn_ref ~snapshot ~selection =
   let* _ = selection_payloads selection in
   Ok {keeper_id; turn_ref; snapshot; selection; stages_rev=[]; run_ids=Id_set.empty}
+
+let create ~keeper_id ~turn_ref ~snapshot =
+  make ~keeper_id ~turn_ref ~snapshot
+    ~selection:(Option.map
+      (fun (snapshot : Current.t) ->
+         ({facts=snapshot.facts} : Keeper_librarian.current_selection))
+      snapshot)
+
+let create_over ~keeper_id ~turn_ref ~current =
+  make ~keeper_id ~turn_ref ~snapshot:None ~selection:current
 
 let initial_snapshot plan = plan.snapshot
 let current plan = plan.selection

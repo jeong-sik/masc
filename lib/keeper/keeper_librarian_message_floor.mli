@@ -52,7 +52,9 @@ module Machine : sig
     ; served_by : Keeper_librarian_runtime.served_slot option
     }
   (** [working_state] and [served_by] are the last accepted step's, or the
-      caller's [previous_state] and [None] when no step was accepted. *)
+      caller's [previous_state] and [None] when no step was accepted.
+      [served_by] is also [None] when that step's answer named no slot, as a
+      durable step's answer does not. *)
 
   type next = Ask of question | Finished of finished
 
@@ -61,11 +63,12 @@ module Machine : sig
       ordered program against the frozen manifest. *)
 
   val answered :
-    t -> served_by:Keeper_librarian_runtime.served_slot ->
+    t -> ?served_by:Keeper_librarian_runtime.served_slot ->
     Keeper_librarian_runtime.memory_step -> (t, string) result
   (** The gated decision for the pending question. It stages its facts for the
       next message, hands on its working state, and takes the host
-      observations that rode with the question. *)
+      observations that rode with the question. [served_by] is the slot whose
+      answer it was, when the caller has real evidence of one. *)
 
   val unreadable :
     t -> reasons:Keeper_librarian_input_refusal.t list ->

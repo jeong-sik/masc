@@ -1589,7 +1589,14 @@ let test_recall_edits_and_drafts_follow_workspace_and_keeper () =
   let _, a = preflight_input () in
   state.msg_queued <- Q.restore_unsent Q.empty a;
   Tui_types.set_recall_edit state a;
-  Masc_tui_message_input.insert state.msg_input "editing A";
+  let paste_text = String.make 9000 'x' in
+  let spill = Option.get (Masc_tui_paste_spill.of_paste
+      ~now_iso:"20261029-0100" ~nonce:"snapshot" paste_text) in
+  let placeholder = "editing A " ^ Masc_tui_paste_spill.draft_line spill in
+  let snapshot = Option.get (Masc_tui_paste_spill.substituted spill
+      ~replacement:paste_text placeholder) in
+  state.msg_spill <- Some spill;
+  Masc_tui_message_input.insert state.msg_input placeholder;
   state.msg_attachments <- a.request.attachments;
   state.msg_references <- a.request.references;
   let observation : Tui_types.image_observation =
@@ -1605,7 +1612,11 @@ let test_recall_edits_and_drafts_follow_workspace_and_keeper () =
   let a_workspace = Tui_types.chat_input_workspace state in
   (* Identity changes before withdrawal saves A's composer. *)
   state.server_identity <- Some (identity "/workspace/b-root");
-  Tui_types.save_message_draft ~workspace:a_workspace state;
+  Tui_types.save_message_draft_snapshot ~workspace:a_workspace state ~text:snapshot;
+  check string "saving the captured text does not replace the live composer"
+    placeholder (Masc_tui_message_input.contents state.msg_input);
+  check bool "saving alone does not consume the spill" true (state.msg_spill = Some spill);
+  state.msg_spill <- None;
   let b = {a with Q.request={a.request with Keeper_chat.message="B input"}} in
   state.msg_queued <- Q.restore_unsent Q.empty b;
   Tui_types.restore_message_draft state "alpha";
@@ -1626,7 +1637,7 @@ let test_recall_edits_and_drafts_follow_workspace_and_keeper () =
   check bool "A's exact edit returns with its queue" true
     (Tui_types.current_recall_edit state = Some a
      && Tui_types.recalling_for_keeper state "alpha");
-  check string "A's edited text returns" "editing A"
+  check string "A's captured text returns" snapshot
     (Masc_tui_message_input.contents state.msg_input);
   check bool "A's staged payload and source recency return" true
     (state.msg_attachments = a.request.attachments

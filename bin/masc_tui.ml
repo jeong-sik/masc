@@ -14320,7 +14320,7 @@ let withdraw_currency_authority state =
    workspace follows the reading in the same step: a mismatch clears it, a
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
-let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigation =
+let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigation ~draft =
   state.followed_from <- None;
   state.usage_scope_id <- None;
   withdraw_voice_capture state;
@@ -14495,10 +14495,10 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.msg_journal_wanted <- [];
   state.msg_journal_unavailable <- [];
   state.msg_journal_reads_refused <- false;
-  let draft = materialise_spilled_paste state (Masc_tui_message_input.contents state.msg_input) in
-  Masc_tui_message_input.clear state.msg_input;
-  Masc_tui_message_input.insert state.msg_input draft;
-  save_message_draft ~workspace:previous state;
+  (* Save the captured text before releasing the spill. If an earlier
+     withdrawal effect fails, the original composer still owns the paste. *)
+  save_message_draft_snapshot ~workspace:previous state ~text:draft;
+  state.msg_spill <- None;
   Masc_tui_message_input.clear state.msg_input;
   (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- []);
   (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- []);
@@ -15069,7 +15069,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
     in
     let target = state.msg_target_keeper_name in
     let draft =
-      materialise_spilled_paste state (Masc_tui_message_input.contents state.msg_input)
+      inline_spilled_paste state (Masc_tui_message_input.contents state.msg_input)
     in
     let attachments = state.msg_attachments and references = state.msg_references in
     let since = state.msg_attachments_since and queue = state.msg_queued in
@@ -15106,7 +15106,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
               ; psd_source = state.preset_save_draft_source }, origin)
     in
     withdraw_keeper_workspace_presentation state ~previous:withdrawn_workspace
-      ~keep_detail_navigation;
+      ~keep_detail_navigation ~draft;
     let restore_preset_draft = match preserved_preset_draft, current_preset_workspace with
       | Some _ as kept, _ -> kept
       | None, None -> None

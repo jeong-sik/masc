@@ -13,6 +13,8 @@ module Refusal = Masc.Keeper_librarian_input_refusal
 module Runtime = Masc.Keeper_librarian_runtime
 module Plan = Masc.Keeper_librarian_memory_plan
 module Machine = Floor.Machine
+module Memory = Masc.Keeper_memory_os_types
+module Memory_program = Masc.Keeper_librarian_memory_program
 module Fixture = Exact_output_fixture
 
 let () = Masc.Prompt_defaults.init ()
@@ -387,6 +389,149 @@ let test_an_outcome_that_does_not_fit_the_question_is_refused () =
   refused "a floor started from a staged plan"
     (Machine.start ~transaction_id:"floor-machine-test" ~plan:staged_plan read)
 
+(* {1 Durable steps}
+
+   A durable floor step must ask the question the Runtime floor asks and give
+   the plan the decision the Runtime floor would. The Runtime side of each
+   comparison is the production inference path against the fixture provider. *)
+
+let current_fact = Memory.observed ~claim:"a fact already in Memory" ~category:Memory.Fact ~now:1_000_000.
+  ~origin:{ Memory.kind = Memory.Authored; trace_id = "" }
+
+let earlier_hole () =
+  let earlier = message "an earlier message nobody could read" in
+  unread_message [ earlier; message "the message in question" ] (source_of 0 earlier)
+    ~reasons:[ Refusal.Request_body_refused ] |> ok
+
+(* What the fixture provider answers to its first request. *)
+let first_answer = answer_for ~claim:"claim number 1" ~state:"state number 1"
+
+let step_context () : Runtime.durable_step_context =
+  { previous_state = Some "carried-in state"; unread_messages = [ earlier_hole () ] }
+
+let question_input ?(current = None) () =
+  { (input ~tools:[ tool "tool-in-the-question" ] [ message "the message in question" ]) with current }
+
+let runtime_step ~base_path ~keepers_dir (context : Runtime.durable_step_context) question =
+  match Runtime.infer_memory_step ~base_path ~keepers_dir ~keeper_id:keeper
+          ~previous_state:context.previous_state ~unread_messages:context.unread_messages question with
+  | Runtime.Memory_inferred { step; _ } -> step
+  | Runtime.Memory_not_inferred _ -> fail "the Runtime floor refused the question"
+
+let test_a_durable_step_asks_the_runtime_floors_question () =
+  with_floor @@ fun ~base_path ~keepers_dir ~server:_ ->
+  let context = step_context () in
+  let question = question_input ~current:(Some { Librarian.facts = [ current_fact ] }) () in
+  let prepared = Runtime.prepare_durable_step ~now:1_000_000. ~context question |> ok in
+  let runtime = runtime_step ~base_path ~keepers_dir context question in
+  check string "the rendered prompt is the Runtime floor's" runtime.rendered_prompt
+    prepared.preparation.rendered_prompt;
+  check bool "so are its variables and the input they were rendered from" true
+    (runtime.prompt_variables = prepared.preparation.variables
+     && runtime.source_input = prepared.preparation.source_input);
+  check bool "the continuity slot carries the working state and the unread message" true
+    (contains prepared.preparation.rendered_prompt "carried-in state"
+     && contains prepared.preparation.rendered_prompt
+          (Unread.message_digest (message "an earlier message nobody could read")));
+  check bool "the schema asks for a working state" true
+    (Yojson.Safe.equal prepared.preparation.output_schema
+       Masc.Keeper_structured_output_schema.librarian_continuity_output_schema)
+
+let test_a_retained_step_makes_the_decision_the_runtime_floor_makes () =
+  with_floor @@ fun ~base_path ~keepers_dir ~server:_ ->
+  let context = step_context () in
+  let question = question_input () in
+  let prepared = Runtime.prepare_durable_step ~now:1_000_000. ~context question |> ok in
+  let runtime = runtime_step ~base_path ~keepers_dir context question in
+  let proposal =
+    Runtime.validate_durable_step_proposal prepared first_answer
+    |> Result.map_error (fun _ -> "the step proposal was refused") |> ok in
+  let retained =
+    Runtime.durable_memory_step ~run_id:"retained-step-1" prepared proposal
+      ~absorb_gate:runtime.absorb_gate |> ok in
+  let claims (step : Runtime.memory_step) =
+    List.map (fun (fact : Memory.fact) -> fact.claim, fact.category) step.new_claims in
+  check bool "the gated decision carries the same input, prompt and judgment" true
+    (retained.source_input = runtime.source_input && retained.prompt_variables = runtime.prompt_variables
+     && retained.rendered_prompt = runtime.rendered_prompt && retained.absorb_gate = runtime.absorb_gate);
+  check bool "and the same Memory change" true
+    (claims retained = claims runtime && retained.dropped = runtime.dropped
+     && retained.absorbed = runtime.absorbed && retained.revisions = runtime.revisions
+     && retained.working_state = runtime.working_state);
+  (* The plan and the program take it exactly as they take the Runtime's. *)
+  let plan =
+    Plan.create ~keeper_id:retained.source_input.keeper_id ~turn_ref:retained.source_input.turn_ref
+      ~snapshot:None |> Result.map_error Plan.error_to_string |> ok in
+  let staged = Plan.append plan retained |> Result.map_error Plan.error_to_string |> ok in
+  check bool "the plan stages its facts" true
+    (match Plan.current staged with Some current -> List.length current.facts = 1 | None -> false);
+  let sources = sources_of retained.source_input.messages in
+  check bool "the program binds it to the message it judged" true
+    (match Memory_program.decision ~sources retained with Ok _ -> true | Error _ -> false);
+  check bool "a blank run identity is no decision" true
+    (match Runtime.durable_memory_step ~run_id:"  " prepared proposal ~absorb_gate:runtime.absorb_gate with
+     | Error _ -> true | Ok _ -> false)
+
+let test_a_step_preparation_restores_and_refuses_tampering () =
+  with_floor @@ fun ~base_path:_ ~keepers_dir:_ ~server:_ ->
+  let context = step_context () in
+  let prepared = Runtime.prepare_durable_step ~now:1_000_000. ~context (question_input ()) |> ok in
+  let restored =
+    Runtime.restore_durable_step_preparation ~context ~source_input:prepared.preparation.source_input
+      ~parsing_now:prepared.preparation.parsing_now ~policy:prepared.preparation.policy
+      ~rule_prompt:prepared.preparation.rule_prompt ~prompt:prepared.preparation.prompt
+      ~output_schema:prepared.preparation.output_schema |> ok in
+  check bool "restoring from the frozen parts renders the same step" true (restored = prepared);
+  let refused label step =
+    match Runtime.validate_durable_step_preparation step with
+    | Ok () -> failf "%s was accepted" label
+    | Error (_ : string) -> () in
+  refused "another working state than the prompt was rendered with"
+    { prepared with context = { context with previous_state = Some "another state" } };
+  refused "another unread list than the prompt was rendered with"
+    { prepared with context = { context with unread_messages = [] } };
+  refused "the schema of a pass that asks for no working state"
+    { prepared with preparation =
+        { prepared.preparation with
+          output_schema = Masc.Keeper_structured_output_schema.librarian_current_output_schema } };
+  refused "an input that still holds a working context"
+    { prepared with preparation =
+        { prepared.preparation with
+          source_input =
+            { prepared.preparation.source_input with
+              working_context = { Masc.Keeper_librarian_context.empty with unavailable = [ "pending" ] } } } };
+  refused "a rendered prompt that is not the substitution of its input"
+    { prepared with preparation = { prepared.preparation with rendered_prompt = "tampered" } };
+  (* The substitutions can agree with an input that still holds a working
+     context: restoring from one re-renders consistently, so only the rule that
+     a floor question carries none refuses it. *)
+  check bool "a restore from an input that still holds a working context is refused" true
+    (match
+       Runtime.restore_durable_step_preparation ~context
+         ~source_input:
+           { prepared.preparation.source_input with
+             working_context = { Masc.Keeper_librarian_context.empty with unavailable = [ "pending" ] } }
+         ~parsing_now:prepared.preparation.parsing_now ~policy:prepared.preparation.policy
+         ~rule_prompt:prepared.preparation.rule_prompt ~prompt:prepared.preparation.prompt
+         ~output_schema:prepared.preparation.output_schema
+     with
+     | Error (_ : string) -> true
+     | Ok _ -> false)
+
+let test_a_step_answer_needs_a_working_state () =
+  with_floor @@ fun ~base_path:_ ~keepers_dir:_ ~server:_ ->
+  let prepared = Runtime.prepare_durable_step ~now:1_000_000. ~context:(step_context ()) (question_input ()) |> ok in
+  let with_state state = `Assoc
+    [ "new_claims", `List []; "dropped", `List []; "working_contexts", `List []; "working_state", state ] in
+  let verdict answer = match Runtime.validate_durable_step_proposal prepared answer with
+    | Ok proposal -> Ok proposal.working_state
+    | Error (_ : Runtime.durable_proposal_error) -> Error () in
+  check bool "a nonblank working state is read" true (verdict (with_state (`String "kept")) = Ok "kept");
+  check bool "a null working state is refused" true (verdict (with_state `Null) = Error ());
+  check bool "a blank working state is refused" true (verdict (with_state (`String "  ")) = Error ());
+  check bool "an answer with no working state is refused" true
+    (verdict (`Assoc [ "new_claims", `List []; "dropped", `List []; "working_contexts", `List [] ]) = Error ())
+
 let () =
   run "keeper_librarian_message_floor"
     [ ( "message floor"
@@ -402,6 +547,16 @@ let () =
             test_observations_without_a_message_get_their_own_step
         ; test_case "a source manifest that disagrees is refused before any call" `Quick
             test_a_source_manifest_that_disagrees_is_refused_before_any_call
+        ] )
+    ; ( "durable step"
+      , [ test_case "a durable step asks the question the Runtime floor asks" `Quick
+            test_a_durable_step_asks_the_runtime_floors_question
+        ; test_case "a retained step makes the decision the Runtime floor makes" `Quick
+            test_a_retained_step_makes_the_decision_the_runtime_floor_makes
+        ; test_case "a step preparation restores from its frozen parts and refuses tampering" `Quick
+            test_a_step_preparation_restores_and_refuses_tampering
+        ; test_case "a step answer needs a nonblank working state" `Quick
+            test_a_step_answer_needs_a_working_state
         ] )
     ; ( "machine"
       , [ test_case "a machine rebuilt from its outcomes asks the same questions" `Quick

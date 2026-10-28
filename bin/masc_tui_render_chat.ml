@@ -4319,7 +4319,7 @@ let queue_context_lines (state : state) ~keeper_name ~cols ~height =
   List.iter (render_chat_row ~theme ~origin:state.msg_origin_display buf chat_cols) window.rows;
   (* The preview has no interactive chat controls, including any marks a
      shared row renderer may acquire later. Queue remains the input owner. *)
-  let rows, _ = Masc_tui_hit.extract press_marks (frame_lines buf) in
+  let rows, _ = Masc_tui_hit.extract Masc_tui_press.press_marks (frame_lines buf) in
   List.map (fun row -> row
       |> fun text -> Message_layout.drop_cells text Masc_tui_frame.content_column
       |> fun text -> Message_layout.take_cells text cols) rows

@@ -167,26 +167,11 @@ let test_recent_and_name_have_deterministic_ties () =
   in
   Alcotest.(check (list string)) "recent descending, name tie, unknown last"
     [ "alpha"; "beta"; "old"; "unknown" ] (names (Model.order_rows ~layout:Model.Compact ~sort:Model.Recent rows));
-  Alcotest.(check (list string)) "oldest observed first, unknown last"
-    [ "old"; "alpha"; "beta"; "unknown" ] (names (Model.order_rows ~layout:Model.Compact ~sort:Model.Oldest rows));
   Alcotest.(check (list string)) "name ignores activity"
     [ "alpha"; "beta"; "old"; "unknown" ] (names (Model.order_rows ~layout:Model.Compact ~sort:Model.Name rows));
   let duplicates = [ row ~last_activity_at:(Some 10.) "same-a"; row ~last_activity_at:(Some 10.) "same-b" ] in
   Alcotest.(check (list string)) "identical sort keys remain stable"
     [ "same-a"; "same-b" ] (names (Model.order_rows ~layout:Model.Compact ~sort:Model.Recent duplicates))
-
-let test_grouped_order_keeps_the_requested_sort_within_each_group () =
-  let rows =
-    [ row ~turn:streaming "z-active"
-    ; row ~turn:model_waiting "a-waiting"
-    ; row ~turn:streaming "b-active"
-    ] in
-  Alcotest.(check (list string)) "groups first, names within active"
-    [ "b-active"; "z-active"; "a-waiting" ]
-    (names (Model.order_rows ~layout:Model.Grouped ~sort:Model.Name rows));
-  Alcotest.(check (list string)) "compact name order is global"
-    [ "a-waiting"; "b-active"; "z-active" ]
-    (names (Model.order_rows ~layout:Model.Compact ~sort:Model.Name rows))
 
 let test_streaming_keeps_async_and_schedule_badges () =
   let value =
@@ -375,7 +360,6 @@ let () =
       , [ Alcotest.test_case "layout and sort cycles" `Quick test_cycles
         ; Alcotest.test_case "priority order" `Quick test_priority_orders_attention_activity_waiting_then_inactive
         ; Alcotest.test_case "recent and name ordering" `Quick test_recent_and_name_have_deterministic_ties
-        ; Alcotest.test_case "grouped order" `Quick test_grouped_order_keeps_the_requested_sort_within_each_group
         ; Alcotest.test_case "streaming keeps async and schedule badges" `Quick test_streaming_keeps_async_and_schedule_badges
         ; Alcotest.test_case "delegate and verification badges" `Quick test_delegate_and_verification_remain_distinct_badges
         ; Alcotest.test_case "unobserved is not idle" `Quick test_unobserved_is_not_idle

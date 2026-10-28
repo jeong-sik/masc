@@ -2058,6 +2058,8 @@
   masc.embedded_config
   masc.skill_config
   masc.skill_reference
+  ; test_mcp_server_eio supplies a controlled partial-output Eio sink
+  cstruct
   ; test_tui_decode names the schedule runner status the TUI decodes into
   masc.masc_schedule
   bigstringaf

@@ -131,6 +131,8 @@ val clear_resource_subscriptions_for_session : string -> unit
 
     Reads JSON-RPC requests from stdin, writes responses to stdout.
     Accepts newline-delimited messages and legacy length-prefixed framing.
+    Call [Eio_guard.enable ()] before entry and keep it enabled through return;
+    a disabled guard at entry raises [Invalid_argument].
     [auth_token] is the external caller's bearer, verified by the same
     per-request authorization gate as HTTP; it is never an internal token.
 

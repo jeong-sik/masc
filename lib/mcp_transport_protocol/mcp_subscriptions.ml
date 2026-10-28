@@ -17,11 +17,12 @@ type entry =
   ; active : bool Atomic.t
   }
 
-type token = int
+type token = { id : int; entry : entry }
+type retired = entry
 
 let mutex = Eio.Mutex.create ()
 let with_lock f = Eio_guard.with_mutex mutex f
-let entries : (token, entry) Hashtbl.t = Hashtbl.create 16
+let entries : (int, entry) Hashtbl.t = Hashtbl.create 16
 let next_token = ref 0
 
 let make_entry ~subscription_id ~filter ~send =
@@ -32,7 +33,7 @@ let register_unlocked entry =
     let token = !next_token in
     incr next_token;
     Hashtbl.replace entries token entry;
-    token
+    { id = token; entry }
 
 let register ~subscription_id ~filter ~send =
   let entry = make_entry ~subscription_id ~filter ~send in
@@ -41,11 +42,11 @@ let register ~subscription_id ~filter ~send =
 
 let remove token =
   with_lock (fun () ->
-    match Hashtbl.find_opt entries token with
+    match Hashtbl.find_opt entries token.id with
     | None -> None
     | Some entry ->
       Atomic.set entry.active false;
-      Hashtbl.remove entries token;
+      Hashtbl.remove entries token.id;
       Some entry)
 ;;
 
@@ -76,13 +77,17 @@ let register_after_ack ~subscription_id ~filter ~send ~acknowledge =
   match outcome with Ok result -> result | Error exn -> raise exn
 ;;
 
+let retire token =
+  ignore (remove token : entry option);
+  token.entry
+
+let await_retired entry =
+  (* A snapshot may already be writing this subscriber. Wait for that
+     delivery without retaining the shared registry mutex. *)
+  Eio_guard.with_mutex entry.send_mutex (fun () -> ())
+
 let unregister token =
-  match remove token with
-  | None -> ()
-  | Some entry ->
-    (* A snapshot may already be writing this subscriber. Wait for that
-       delivery without retaining the shared registry mutex. *)
-    Eio_guard.with_mutex entry.send_mutex (fun () -> ())
+  await_retired (retire token)
 let count () = with_lock (fun () -> Hashtbl.length entries)
 
 (* A send that fails means the peer is gone. Dropping the entry here keeps a
@@ -96,7 +101,7 @@ let deliver ~wants notification =
         (fun token entry targets ->
            if not (wants entry.filter)
            then targets
-           else (token, entry) :: targets)
+           else ({ id = token; entry }, entry) :: targets)
         entries
         [])
   in

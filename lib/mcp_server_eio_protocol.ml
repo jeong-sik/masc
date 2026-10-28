@@ -1458,6 +1458,7 @@ type stdio_request_control =
   }
 
 exception Stdio_request_cancelled
+exception Stdio_output_failed
 
 let detect_mode first_line =
   let lower = String.lowercase_ascii first_line in
@@ -1487,6 +1488,8 @@ let write_line_message flow json =
 
 (** Run MCP server in stdio mode with Eio *)
 let run_stdio ~handle_request ~sw ~env state =
+  if not (Eio_guard.is_ready ()) then
+    invalid_arg "run_stdio requires Eio_guard.enable () for its entire lifetime";
   let stdin = Eio.Stdenv.stdin env in
   let stdout = Eio.Stdenv.stdout env in
   let clock = Eio.Stdenv.clock env in
@@ -1522,26 +1525,63 @@ let run_stdio ~handle_request ~sw ~env state =
      happened on. Two interleaved writes would splice one message into another,
      so every write to stdout goes through here. *)
   let write_mutex = Eio.Mutex.create () in
+  let output_failed = Atomic.make false in
+  let output_error = Atomic.make None in
+  let output_failure, signal_output_failure = Eio.Promise.create () in
   let write_json_unlocked ~mode json =
-    match mode with
-    | Framed -> write_framed_message stdout json
-    | LineDelimited -> write_line_message stdout json
+    if Atomic.get output_failed then raise Stdio_output_failed;
+    try
+      match mode with
+      | Framed -> write_framed_message stdout json
+      | LineDelimited -> write_line_message stdout json
+    with exn ->
+      (* Some bytes may already be visible. No later writer may append to an
+         unknown partial frame, even if this sink later becomes writable. *)
+      let backtrace = Printexc.get_raw_backtrace () in
+      ignore (Atomic.compare_and_set output_error None (Some (exn, backtrace)));
+      Atomic.set output_failed true;
+      ignore (Eio.Promise.try_resolve signal_output_failure ());
+      Printexc.raise_with_backtrace exn backtrace
   in
   let with_output_lock f =
-    match Eio_guard.is_ready (), Eio_guard.execution_context () with
-    | false, _ -> f ()
-    | true, Eio_guard.Non_eio ->
-      raise (Eio_guard.Non_eio_mutex_context Eio_guard.Read_write)
-    | true, Eio_guard.Eio_fiber ->
-      (* A blocked stdout must not keep EOF shutdown alive forever. Catch
-         exceptions inside the lock so cancellation does not poison it. *)
-      (match Eio.Mutex.use_rw ~protect:false write_mutex (fun () ->
-         try Ok (f ()) with exn -> Error exn) with
-       | Ok result -> result
-       | Error exn -> raise exn)
+    (* Parent cancellation and write errors must not poison the output lock. *)
+    match Eio.Mutex.use_rw ~protect:false write_mutex (fun () ->
+      try Ok (f ()) with exn -> Error exn) with
+    | Ok result -> result
+    | Error exn -> raise exn
   in
   let write_json ~mode json =
     with_output_lock (fun () -> write_json_unlocked ~mode json)
+  in
+  (* A subscription publisher can be a fiber outside this stdio switch. Keep
+     a cancellation scope for each send so a cancelled owner can stop and
+     physically drain those sends without cancelling their whole publisher. *)
+  let output_stopping = Atomic.make false in
+  let active_sends = Atomic.make [] in
+  let rec update_sends f =
+    let old = Atomic.get active_sends in
+    if not (Atomic.compare_and_set active_sends old (f old)) then update_sends f
+  in
+  let track_send f =
+    let key = ref () in
+    let stop, signal_stop = Eio.Promise.create () in
+    let finished, finish = Eio.Promise.create () in
+    update_sends (fun sends -> (key, signal_stop, finished) :: sends);
+    Fun.protect
+      ~finally:(fun () ->
+        update_sends (List.filter (fun (other, _, _) -> other != key));
+        Eio.Promise.resolve finish ())
+      (fun () ->
+        (* A send that entered concurrently with retirement must not escape
+           the stopping owner's snapshot. Promises are safe across domains;
+           cancellation contexts belong to their original domain. *)
+        if Atomic.get output_stopping then false
+        else
+          (* Start the stop watcher first: if shutdown already signalled this
+             send, it must not start a new write before observing that signal. *)
+          Eio.Fiber.first
+            (fun () -> Eio.Promise.await stop; false)
+            (fun () -> if Atomic.get output_stopping then false else f ()))
   in
   let respond ~mode response =
     match response with `Null -> () | json -> write_json ~mode json
@@ -1553,9 +1593,21 @@ let run_stdio ~handle_request ~sw ~env state =
   let listen_tokens : (string, Mcp_subscriptions.token) Hashtbl.t =
     Hashtbl.create 4
   in
+  (* Retirements remain owned here until their in-flight send has left its
+     lock, including when cancellation interrupts a previous drain. *)
+  let retired_listens = ref [] in
+  let retire_listen token =
+    let entry = Mcp_subscriptions.retire token in
+    retired_listens := entry :: !retired_listens;
+    entry
+  in
+  let await_listen entry =
+    Mcp_subscriptions.await_retired entry;
+    retired_listens := List.filter (fun other -> other != entry) !retired_listens
+  in
   let active_requests : (string, stdio_request_control) Hashtbl.t = Hashtbl.create 8 in
-  let cancel_request ?(shutdown = false) control =
-    if not control.cancelled && (shutdown || not control.response_committed) then (
+  let cancel_request control =
+    if not control.cancelled && not control.response_committed then (
       control.cancelled <- true;
       Option.iter (fun cancel -> cancel ()) control.cancel)
   in
@@ -1565,7 +1617,7 @@ let run_stdio ~handle_request ~sw ~env state =
     | Some control -> cancel_request control; true
   in
   let cancel_all_active () =
-    Hashtbl.iter (fun _ control -> cancel_request ~shutdown:true control) active_requests
+    Hashtbl.iter (fun _ control -> cancel_request control) active_requests
   in
   (* Legacy initialization belongs to this stdio process. Modern requests
      remain stateless even when the process also serves a legacy client. *)
@@ -1585,8 +1637,10 @@ let run_stdio ~handle_request ~sw ~env state =
     match Hashtbl.find_opt listen_tokens key with
     | None -> false
     | Some token ->
-      Hashtbl.remove listen_tokens key;
-      Mcp_subscriptions.unregister token;
+      let retired = Eio.Cancel.protect (fun () ->
+        Hashtbl.remove listen_tokens key;
+        retire_listen token) in
+      await_listen retired;
       true
   in
   let serve_stdio_listen ~mode ~subscription_id ~params =
@@ -1595,7 +1649,7 @@ let run_stdio ~handle_request ~sw ~env state =
         Mcp_subscriptions.honoured_filter
           (Mcp_transport_protocol.subscription_filter_of_params params)
       in
-      let send json = write_json ~mode json; true in
+      let send json = track_send (fun () -> write_json ~mode json; true) in
       (match
          Mcp_subscriptions.register_after_ack ~subscription_id ~filter ~send
            ~acknowledge:(fun () ->
@@ -1605,10 +1659,19 @@ let run_stdio ~handle_request ~sw ~env state =
        | None -> ())
   in
   let close_all_listens () =
-    Hashtbl.iter
-      (fun _ token -> Mcp_subscriptions.unregister token)
-      listen_tokens;
-    Hashtbl.reset listen_tokens
+    Eio.Cancel.protect (fun () ->
+      Hashtbl.iter (fun _ token -> ignore (retire_listen token)) listen_tokens;
+      Hashtbl.reset listen_tokens;
+    );
+    try List.iter await_listen !retired_listens with
+    | Eio.Cancel.Cancelled _ as cancelled ->
+      Eio.Cancel.protect (fun () ->
+        Atomic.set output_stopping true;
+        let sends = Atomic.get active_sends in
+        List.iter (fun (_, stop, _) -> ignore (Eio.Promise.try_resolve stop ())) sends;
+        List.iter (fun (_, _, finished) -> Eio.Promise.await finished) sends;
+        List.iter await_listen !retired_listens);
+      raise cancelled
   in
   let start_request ~request_sw ~mode ~mcp_session_id ~id request_str =
     let key = Yojson.Safe.to_string id in
@@ -1646,7 +1709,8 @@ let run_stdio ~handle_request ~sw ~env state =
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
             Log.Mcp.error "Stdio request failed: %s" (Printexc.to_string exn);
-            respond_if_live
+            if control.response_committed then raise exn
+            else respond_if_live
               (make_error_typed ~id Mcp_error_code.Internal_error "Internal error")))
   in
   let rec loop request_sw mode_opt =
@@ -1792,18 +1856,42 @@ let run_stdio ~handle_request ~sw ~env state =
                | (Some _ | None), _ -> respond ~mode response));
               loop request_sw (Some mode))))
   in
-  Fun.protect
-    ~finally:(fun () -> Eio.Cancel.protect (fun () ->
-      close_all_listens ();
-      clear_resource_subscriptions_for_session transport_session_id;
-      Client_registry_eio.unregister_mcp_session transport_session_id))
-    (fun () ->
+  let result =
+    try Ok (
       Eio.Switch.run (fun request_sw ->
         Fun.protect
           ~finally:(fun () -> Eio.Cancel.protect cancel_all_active)
           (fun () ->
-            try loop request_sw None with
+            try Eio.Fiber.first
+              (fun () -> loop request_sw None)
+              (fun () -> Eio.Promise.await output_failure; raise Stdio_output_failed)
+            with
             | End_of_file -> Log.Mcp.info "Connection closed"
             | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | exn -> Log.Mcp.error "Server error: %s" (Printexc.to_string exn))))
+            | Stdio_output_failed as exn -> raise exn
+            | exn ->
+              if Atomic.get output_failed then raise exn
+              else Log.Mcp.error "Server error: %s" (Printexc.to_string exn))))
+    with exn -> Error (exn, Printexc.get_raw_backtrace ())
+  in
+  let close_result =
+    try Ok (close_all_listens ())
+    with exn -> Error (exn, Printexc.get_raw_backtrace ())
+  in
+  let clear_result =
+    try Ok (Eio.Cancel.protect (fun () ->
+      clear_resource_subscriptions_for_session transport_session_id;
+      Client_registry_eio.unregister_mcp_session transport_session_id))
+    with exn -> Error (exn, Printexc.get_raw_backtrace ())
+  in
+  (* Keep the original parent cancellation; a drain failure must not wrap it
+     in Fun.Finally_raised or hide it. Session cleanup still runs. *)
+  match result, close_result, clear_result, Atomic.get output_error with
+  | Error (Stdio_output_failed, _), _, _, Some (exn, bt) ->
+    Printexc.raise_with_backtrace exn bt
+  | Error (exn, bt), _, _, _
+  | Ok (), Error (exn, bt), _, _
+  | Ok (), Ok (), Error (exn, bt), _
+  | Ok (), Ok (), Ok (), Some (exn, bt) -> Printexc.raise_with_backtrace exn bt
+  | Ok (), Ok (), Ok (), None -> Eio.Fiber.check ()
 ;;

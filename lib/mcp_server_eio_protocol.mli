@@ -195,7 +195,12 @@ val run_stdio :
       ; .. > ->
   Mcp_server.server_state ->
   unit
-(** Stdio entry point.  Reads from [Eio.Stdenv.stdin env]
+(** Stdio entry point. Call [Eio_guard.enable ()] before entering and keep it
+    enabled until this function returns, including during cleanup. Otherwise
+    shared subscription operations do not serialize. This function raises
+    [Invalid_argument] immediately if the guard is disabled at entry. Before
+    enablement, registry operations are only safe without concurrent access.
+    Reads from [Eio.Stdenv.stdin env]
     (max 16 MiB buffer), detects {!transport_mode} from the
     first line, then loops feeding messages through the
     injected [handle_request] and writing the response
@@ -204,9 +209,18 @@ val run_stdio :
     receive [None] so caller identity cannot carry over from an earlier call.
     Long-running calls execute in request-scoped fibers, allowing later
     messages and cancellation to be read while they run. Responses are
-    serialized on stdout. Closing stdin cancels outstanding calls before
-    connection-scoped state is released; cancellation cannot undo an effect
-    already sent to an external service. *)
+    serialized on stdout. Closing stdin cancels calls whose response has not
+    committed to stdout, then waits for committed response writes before releasing
+    connection-scoped state. The commit occurs under the output lock immediately
+    before the first write; it does not prove that any byte was delivered.
+    A peer that stops reading stdout can delay a graceful exit; the client may
+    terminate the process. Subscription delivery is retired before its
+    in-flight send is drained. Parent cancellation stops tracked subscription
+    sends, drains them and propagates to the caller unless the main loop has
+    already failed, in which case that original failure takes precedence.
+    Process termination or a failed stdout can still interrupt a frame. Once
+    a write fails, the output is unusable and no later message is written.
+    Cancellation cannot undo an effect already sent to an external service. *)
 
 val register_dashboard_ws_handlers :
   hello:(base_path:string -> session_id:string -> ?token:string -> unit -> (Yojson.Safe.t, string) result) ->

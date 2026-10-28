@@ -896,6 +896,520 @@ let test_stdio_cancellation_stops_a_running_tool_call () =
         (Yojson.Safe.Util.member "id" next = `Int 2
          && Yojson.Safe.Util.member "result" next = `Assoc [])))
 
+(* A sink that pauses either before or after its first byte. In both cases the
+   response has committed under the output lock; the second response is still
+   waiting for that lock. No wall-clock delay decides the ordering. *)
+module Stdio_partial_sink = struct
+  type t =
+    { output : Buffer.t
+    ; first_byte : unit Eio.Promise.u
+    ; release : unit Eio.Promise.t
+    ; write_first_byte : bool
+    ; mutable began : bool
+    }
+
+  let single_write t bufs =
+    let bytes = String.concat "" (List.map Cstruct.to_string bufs) in
+    if not t.began then (
+      t.began <- true;
+      Eio.Promise.resolve t.first_byte ();
+      if t.write_first_byte then (Buffer.add_char t.output bytes.[0]; 1)
+      else (
+        Eio.Promise.await t.release;
+        Buffer.add_string t.output bytes;
+        String.length bytes))
+    else (
+      Eio.Promise.await t.release;
+      Buffer.add_string t.output bytes;
+      String.length bytes)
+
+  let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
+end
+
+let test_stdio_requires_enabled_guard () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let was_ready = Eio_guard.is_ready () in
+  Fun.protect
+    ~finally:(fun () ->
+      if was_ready then Eio_guard.enable () else Eio_guard.disable ();
+      cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.For_testing.create_state ~base_path () in
+      Eio_guard.disable ();
+      let handle_request ~clock:_ ~sw:_ ~mcp_session_id:_ _ _ =
+        Alcotest.fail "request handler must not run" in
+      Alcotest.check_raises "guard checked before reading stdin"
+        (Invalid_argument "run_stdio requires Eio_guard.enable () for its entire lifetime")
+        (fun () -> Masc.Mcp_server_eio_protocol.run_stdio
+          ~handle_request ~sw ~env state))
+
+let test_stdio_eof_drains_committed_response () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
+    let was_ready = Eio_guard.is_ready () in
+    Fun.protect ~finally:(fun () -> if was_ready then Eio_guard.enable () else Eio_guard.disable ()) (fun () ->
+      Eio_guard.enable ();
+        List.iter (fun (framed, write_first_byte) ->
+        let input, input_writer = Eio_unix.pipe sw in
+        let first_byte, signal_first = Eio.Promise.create () in
+        let release, signal_release = Eio.Promise.create () in
+        let parked, signal_parked = Eio.Promise.create () in
+        let waiting_output, signal_waiting_output = Eio.Promise.create () in
+        let cancelled, signal_cancelled = Eio.Promise.create () in
+        let finished, signal_finished = Eio.Promise.create () in
+        let output = Buffer.create 128 in
+        let sink_state : Stdio_partial_sink.t =
+          { output; first_byte = signal_first; release; write_first_byte; began = false } in
+        let stdout = Eio.Resource.T (sink_state, Eio.Flow.Pi.sink (module Stdio_partial_sink)) in
+        let stdio_env = object
+          method clock = clock
+          method stdin = input
+          method stdout = stdout
+        end in
+        let response = `Assoc
+          [ "jsonrpc", `String "2.0"; "id", `Int 1; "result", `Assoc [] ] in
+        let handle_request ~clock:_ ~sw:_ ~mcp_session_id:_ _state request =
+          let id = Yojson.Safe.Util.member "id" (Yojson.Safe.from_string request) in
+          match id with
+          | `Int 1 -> response
+          | `Int 3 ->
+            Eio.Promise.resolve signal_waiting_output ();
+            `Assoc [ "jsonrpc", `String "2.0"; "id", `Int 3; "result", `Assoc [] ]
+          | `Int 2 ->
+            Eio.Promise.resolve signal_parked ();
+            (try Eio.Promise.await (fst (Eio.Promise.create ())) with
+             | Eio.Cancel.Cancelled _ as exn ->
+               Eio.Promise.resolve signal_cancelled ();
+               raise exn)
+          | _ -> Alcotest.fail "unexpected test request" in
+        Eio.Fiber.fork ~sw (fun () ->
+          Fun.protect ~finally:(fun () -> Eio.Promise.resolve signal_finished ())
+            (fun () -> Masc.Mcp_server_eio_protocol.run_stdio
+              ~handle_request ~sw ~env:stdio_env state));
+        let send id =
+          let request = stdio_request ~id:(`Int id) ~params:(stdio_modern_params ()) "tools/call"
+            |> Yojson.Safe.to_string in
+          let message = if framed then
+              Printf.sprintf "Content-Length: %d\r\n\r\n%s" (String.length request) request
+            else request ^ "\n" in
+          Eio.Flow.copy_string message input_writer in
+        send 1;
+        Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await first_byte);
+        (* This handler is done, but its response is waiting for the first
+           writer's output lock and has not committed. *)
+        send 3;
+        Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await waiting_output);
+        send 2;
+        Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await parked);
+        Eio.Flow.close input_writer;
+        Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await cancelled);
+        Alcotest.(check bool) "committed output keeps shutdown pending" false
+          (Eio.Promise.is_resolved finished);
+        Eio.Promise.resolve signal_release ();
+        Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await finished);
+        let body = Yojson.Safe.to_string response in
+        let expected = if framed then
+            Printf.sprintf "Content-Length: %d\r\n\r\n%s" (String.length body) body
+          else body ^ "\n" in
+        Alcotest.(check string) "committed response is whole; parked call emits nothing"
+          expected (Buffer.contents output))
+        [ false, false; false, true; true, false; true, true ]))
+
+(* A sink that fails once after accepting one byte, but would accept later
+   writes. This detects attempts to append a second frame after corruption. *)
+module Stdio_failing_sink = struct
+  type t =
+    { output : Buffer.t
+    ; first_byte : unit Eio.Promise.u
+    ; fail_now : unit Eio.Promise.t
+    ; mutable writes : int
+    }
+
+  let single_write t bufs =
+    let bytes = String.concat "" (List.map Cstruct.to_string bufs) in
+    t.writes <- t.writes + 1;
+    match t.writes with
+    | 1 ->
+      Buffer.add_char t.output bytes.[0];
+      Eio.Promise.resolve t.first_byte ();
+      1
+    | 2 -> Eio.Promise.await t.fail_now; failwith "injected stdout failure"
+    | _ -> Buffer.add_string t.output bytes; String.length bytes
+
+  let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
+end
+
+let test_stdio_write_failure_never_appends_another_frame () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
+    let was_ready = Eio_guard.is_ready () in
+    Eio_guard.enable ();
+    Fun.protect ~finally:(fun () -> if not was_ready then Eio_guard.disable ()) (fun () ->
+      List.iter (fun (framed, synchronous) ->
+        let input, input_writer = Eio_unix.pipe sw in
+        let started, signal_started = Eio.Promise.create () in
+        let fail_now, signal_failure = Eio.Promise.create () in
+        let second, signal_second = Eio.Promise.create () in
+        let finished, signal_finished = Eio.Promise.create () in
+        let output = Buffer.create 128 in
+        let sink_state : Stdio_failing_sink.t =
+          { output; first_byte = signal_started; fail_now; writes = 0 } in
+        let stdout = Eio.Resource.T (sink_state, Eio.Flow.Pi.sink (module Stdio_failing_sink)) in
+        let stdio_env = object
+          method clock = clock
+          method stdin = input
+          method stdout = stdout
+        end in
+        let handle_request ~clock:_ ~sw:_ ~mcp_session_id:_ _state request =
+          let id = Yojson.Safe.Util.member "id" (Yojson.Safe.from_string request) in
+          if id = `Int 2 then Eio.Promise.resolve signal_second ();
+          `Assoc [ "jsonrpc", `String "2.0"; "id", id; "result", `Assoc [] ] in
+        Eio.Fiber.fork ~sw (fun () ->
+          let error =
+            try Masc.Mcp_server_eio_protocol.run_stdio ~handle_request ~sw ~env:stdio_env state; None
+            with Eio.Cancel.Cancelled _ as exn -> raise exn | exn -> Some exn in
+          Eio.Promise.resolve signal_finished error);
+        let send id =
+          let method_ = if synchronous then "server/discover" else "tools/call" in
+          let request = stdio_request ~id:(`Int id) ~params:(stdio_modern_params ()) method_
+            |> Yojson.Safe.to_string in
+          let message = if framed then
+              Printf.sprintf "Content-Length: %d\r\n\r\n%s" (String.length request) request
+            else request ^ "\n" in
+          Eio.Flow.copy_string message input_writer in
+        send 1;
+        Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await started);
+        if not synchronous then (
+          send 2;
+          Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await second));
+        Eio.Promise.resolve signal_failure ();
+        let error = Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await finished) in
+        Eio.Flow.close input_writer;
+        let rec contains_sink_failure = function
+          | Failure message -> String.equal message "injected stdout failure"
+          | Eio.Exn.Multiple failures -> List.exists (fun (exn, _) -> contains_sink_failure exn) failures
+          | _ -> false in
+        Alcotest.(check bool) "transport retains the original sink failure" true
+          (Option.fold ~none:false ~some:contains_sink_failure error);
+        Alcotest.(check int) "no later sink write was attempted" 2 sink_state.writes;
+        Alcotest.(check int) "no second frame was appended" 1 (Buffer.length output))
+        [ false, false; false, true; true, false; true, true ]))
+
+(* The acknowledgement goes through first. Once armed, a notification writes
+   one byte and blocks, modelling a publisher owned by another request fiber. *)
+module Stdio_subscription_sink = struct
+  type t =
+    { output : Buffer.t
+    ; acknowledged : unit Eio.Promise.u
+    ; notification_started : unit Eio.Promise.u
+    ; release : unit Eio.Promise.t
+    ; fail_after_release : bool
+    ; armed : bool Atomic.t
+    ; mutable began : bool
+    }
+
+  let single_write t bufs =
+    let bytes = String.concat "" (List.map Cstruct.to_string bufs) in
+    if not (Atomic.get t.armed) then (
+      Buffer.add_string t.output bytes;
+      if String.contains bytes '\n' then ignore (Eio.Promise.try_resolve t.acknowledged ());
+      String.length bytes)
+    else if not t.began then (
+      t.began <- true;
+      Buffer.add_char t.output bytes.[0];
+      Eio.Promise.resolve t.notification_started ();
+      1)
+    else (
+      Eio.Promise.await t.release;
+      if t.fail_after_release then failwith "injected subscription stdout failure";
+      Buffer.add_string t.output bytes;
+      String.length bytes)
+
+  let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
+end
+
+exception Test_stdio_parent_cancel
+
+let test_stdio_parent_cancel_drains_external_subscription_send () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
+    let was_ready = Eio_guard.is_ready () in
+    Fun.protect ~finally:(fun () -> if was_ready then Eio_guard.enable () else Eio_guard.disable ()) (fun () ->
+      Eio_guard.enable ();
+      let other_deliveries = Atomic.make 0 in
+      let filter = { Mcp_transport_protocol.empty_subscription_filter with tools_list_changed = true } in
+      let other = Mcp_subscriptions.register ~subscription_id:(`Int 43) ~filter
+          ~send:(fun _ -> ignore (Atomic.fetch_and_add other_deliveries 1); true) in
+      Fun.protect ~finally:(fun () -> Mcp_subscriptions.unregister other) (fun () ->
+      let before = Mcp_subscriptions.count () in
+      let input, input_writer = Eio_unix.pipe sw in
+      let ack, signal_ack = Eio.Promise.create () in
+      let started, signal_started = Eio.Promise.create () in
+      let never_release, _ = Eio.Promise.create () in
+      let owner, signal_owner = Eio.Promise.create () in
+      let stopped, signal_stopped = Eio.Promise.create () in
+      let published, signal_published = Eio.Promise.create () in
+      let sink_state : Stdio_subscription_sink.t =
+        { output = Buffer.create 128; acknowledged = signal_ack;
+          notification_started = signal_started; release = never_release;
+          fail_after_release = false; armed = Atomic.make false; began = false } in
+      let stdout = Eio.Resource.T (sink_state, Eio.Flow.Pi.sink (module Stdio_subscription_sink)) in
+      let stdio_env = object
+        method clock = clock
+        method stdin = input
+        method stdout = stdout
+      end in
+      let handle_request ~clock ~sw ~mcp_session_id state request =
+        Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request in
+      Eio.Fiber.fork ~sw (fun () ->
+        let cancelled =
+          try Eio.Cancel.sub (fun context ->
+            Eio.Promise.resolve signal_owner context;
+            Masc.Mcp_server_eio_protocol.run_stdio ~handle_request ~sw ~env:stdio_env state);
+            false
+          with Eio.Cancel.Cancelled Test_stdio_parent_cancel -> true in
+        Eio.Promise.resolve signal_stopped cancelled);
+      let params = match stdio_modern_params () with
+        | `Assoc fields -> `Assoc (("notifications", `Assoc [ "toolsListChanged", `Bool true ]) :: fields)
+        | _ -> assert false in
+      let request = stdio_request ~id:(`Int 42) ~params "subscriptions/listen" in
+      Eio.Flow.copy_string (Yojson.Safe.to_string request ^ "\n") input_writer;
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await ack);
+      Atomic.set sink_state.armed true;
+      let owner_domain = Domain.self () in
+      Eio.Fiber.fork ~sw (fun () ->
+        let ran_elsewhere = Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () ->
+          let ran_elsewhere = Domain.self () <> owner_domain in
+          Mcp_subscriptions.notify_tools_list_changed (`Assoc []);
+          ran_elsewhere) in
+        Eio.Promise.resolve signal_published ran_elsewhere);
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await started);
+      Eio.Flow.close input_writer;
+      let rec wait_until_retired () =
+        if Mcp_subscriptions.count () <> before then (Eio.Fiber.yield (); wait_until_retired ()) in
+      Eio.Time.with_timeout_exn clock 5. wait_until_retired;
+      Alcotest.(check bool) "EOF waits for the committed external send" false
+        (Eio.Promise.is_resolved stopped);
+      Eio.Cancel.cancel (Eio.Promise.await owner) Test_stdio_parent_cancel;
+      let cancelled = Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await stopped) in
+      Alcotest.(check bool) "original parent cancellation propagates" true cancelled;
+      let ran_elsewhere = Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await published) in
+      Alcotest.(check bool) "publisher ran on another domain" true ran_elsewhere;
+      Alcotest.(check int) "other subscribers still receive the event" 1 (Atomic.get other_deliveries);
+      Alcotest.(check int) "the subscriber is retired and drained" before (Mcp_subscriptions.count ())))
+      )
+
+exception Test_stdio_earlier_cancel
+
+module Stdio_early_failure_source = struct
+  type t =
+    { request : string
+    ; fail_now : unit Eio.Promise.t
+    ; waiting : unit Eio.Promise.u
+    ; mutable offset : int
+    }
+
+  let read_methods = []
+  let single_read t target =
+    let remaining = String.length t.request - t.offset in
+    if remaining > 0 then (
+      let n = min remaining (Cstruct.length target) in
+      Cstruct.blit_from_string t.request t.offset target 0 n;
+      t.offset <- t.offset + n;
+      n)
+    else (
+      ignore (Eio.Promise.try_resolve t.waiting ());
+      Eio.Promise.await t.fail_now;
+      raise (Eio.Cancel.Cancelled Test_stdio_earlier_cancel))
+end
+
+let test_stdio_prior_failure_precedes_drain_cancellation () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
+    let was_ready = Eio_guard.is_ready () in
+    Eio_guard.enable ();
+    Fun.protect ~finally:(fun () -> if not was_ready then Eio_guard.disable ()) (fun () ->
+      let before = Mcp_subscriptions.count () in
+      let params = match stdio_modern_params () with
+        | `Assoc fields -> `Assoc (("notifications", `Assoc [ "toolsListChanged", `Bool true ]) :: fields)
+        | _ -> assert false in
+      let request = stdio_request ~id:(`Int 42) ~params "subscriptions/listen"
+        |> Yojson.Safe.to_string in
+      let fail_now, signal_failure = Eio.Promise.create () in
+      let waiting, signal_waiting = Eio.Promise.create () in
+      let source : Stdio_early_failure_source.t =
+        { request = request ^ "\n"; fail_now; waiting = signal_waiting; offset = 0 } in
+      let stdin = Eio.Resource.T (source, Eio.Flow.Pi.source (module Stdio_early_failure_source)) in
+      let ack, signal_ack = Eio.Promise.create () in
+      let started, signal_started = Eio.Promise.create () in
+      let never_release, _ = Eio.Promise.create () in
+      let owner, signal_owner = Eio.Promise.create () in
+      let finished, signal_finished = Eio.Promise.create () in
+      let published, signal_published = Eio.Promise.create () in
+      let sink : Stdio_subscription_sink.t =
+        { output = Buffer.create 128; acknowledged = signal_ack;
+          notification_started = signal_started; release = never_release;
+          fail_after_release = false; armed = Atomic.make false; began = false } in
+      let stdout = Eio.Resource.T (sink, Eio.Flow.Pi.sink (module Stdio_subscription_sink)) in
+      let stdio_env = object
+        method clock = clock
+        method stdin = stdin
+        method stdout = stdout
+      end in
+      let handle_request ~clock ~sw ~mcp_session_id state request =
+        Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request in
+      Eio.Fiber.fork ~sw (fun () ->
+        let error =
+          try Eio.Cancel.sub (fun context ->
+            Eio.Promise.resolve signal_owner context;
+            Masc.Mcp_server_eio_protocol.run_stdio ~handle_request ~sw ~env:stdio_env state); None
+          with exn -> Some exn in
+        Eio.Promise.resolve signal_finished error);
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await ack);
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await waiting);
+      Atomic.set sink.armed true;
+      Eio.Fiber.fork ~sw (fun () ->
+        Mcp_subscriptions.notify_tools_list_changed (`Assoc []);
+        Eio.Promise.resolve signal_published ());
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await started);
+      Eio.Promise.resolve signal_failure ();
+      let rec wait_until_retired () =
+        if Mcp_subscriptions.count () <> before then (Eio.Fiber.yield (); wait_until_retired ()) in
+      Eio.Time.with_timeout_exn clock 5. wait_until_retired;
+      Eio.Cancel.cancel (Eio.Promise.await owner) Test_stdio_parent_cancel;
+      let error = Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await finished) in
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await published);
+      Alcotest.(check bool) "earlier failure takes precedence over drain cancellation" true
+        (match error with Some (Eio.Cancel.Cancelled Test_stdio_earlier_cancel) -> true
+         | Some _ | None -> false)))
+
+let test_stdio_eof_reports_external_send_failure () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    Auth.disable_auth base_path;
+    let was_ready = Eio_guard.is_ready () in
+    Eio_guard.enable ();
+    Fun.protect ~finally:(fun () -> if not was_ready then Eio_guard.disable ()) (fun () ->
+      let before = Mcp_subscriptions.count () in
+      let input, input_writer = Eio_unix.pipe sw in
+      let ack, signal_ack = Eio.Promise.create () in
+      let started, signal_started = Eio.Promise.create () in
+      let release, signal_release = Eio.Promise.create () in
+      let finished, signal_finished = Eio.Promise.create () in
+      let published, signal_published = Eio.Promise.create () in
+      let sink_state : Stdio_subscription_sink.t =
+        { output = Buffer.create 128; acknowledged = signal_ack;
+          notification_started = signal_started; release;
+          fail_after_release = true; armed = Atomic.make false; began = false } in
+      let stdout = Eio.Resource.T (sink_state, Eio.Flow.Pi.sink (module Stdio_subscription_sink)) in
+      let stdio_env = object
+        method clock = clock
+        method stdin = input
+        method stdout = stdout
+      end in
+      let handle_request ~clock ~sw ~mcp_session_id state request =
+        Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request in
+      Eio.Fiber.fork ~sw (fun () ->
+        let error =
+          try Masc.Mcp_server_eio_protocol.run_stdio ~handle_request ~sw ~env:stdio_env state; None
+          with Eio.Cancel.Cancelled _ as exn -> raise exn | exn -> Some exn in
+        Eio.Promise.resolve signal_finished error);
+      let params = match stdio_modern_params () with
+        | `Assoc fields -> `Assoc (("notifications", `Assoc [ "toolsListChanged", `Bool true ]) :: fields)
+        | _ -> assert false in
+      let request = stdio_request ~id:(`Int 42) ~params "subscriptions/listen" in
+      Eio.Flow.copy_string (Yojson.Safe.to_string request ^ "\n") input_writer;
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await ack);
+      Atomic.set sink_state.armed true;
+      Eio.Fiber.fork ~sw (fun () ->
+        Mcp_subscriptions.notify_tools_list_changed (`Assoc []);
+        Eio.Promise.resolve signal_published ());
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await started);
+      Eio.Flow.close input_writer;
+      let rec wait_until_retired () =
+        if Mcp_subscriptions.count () <> before then (Eio.Fiber.yield (); wait_until_retired ()) in
+      Eio.Time.with_timeout_exn clock 5. wait_until_retired;
+      Eio.Promise.resolve signal_release ();
+      let error = Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await finished) in
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await published);
+      Alcotest.(check bool) "owner retains the original sink failure after EOF" true
+        (match error with Some (Failure message) ->
+           String.equal message "injected subscription stdout failure"
+         | Some _ | None -> false)))
+
+let test_subscription_retirement_keeps_drain_authority () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let was_ready = Eio_guard.is_ready () in
+  Eio_guard.enable ();
+  Fun.protect ~finally:(fun () -> if not was_ready then Eio_guard.disable ()) (fun () ->
+    let before = Mcp_subscriptions.count () in
+    let started, signal_started = Eio.Promise.create () in
+    let release, signal_release = Eio.Promise.create () in
+    let removed, signal_removed = Eio.Promise.create () in
+    let owner_drained, signal_owner_drained = Eio.Promise.create () in
+    let published, signal_published = Eio.Promise.create () in
+    let filter = { Mcp_transport_protocol.empty_subscription_filter with tools_list_changed = true } in
+    let token = Mcp_subscriptions.register ~subscription_id:(`Int 44) ~filter
+        ~send:(fun _ -> Eio.Promise.resolve signal_started (); Eio.Promise.await release; true) in
+    Eio.Fiber.fork ~sw (fun () ->
+      Mcp_subscriptions.notify_tools_list_changed (`Assoc []);
+      Eio.Promise.resolve signal_published ());
+    Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await started);
+    Eio.Fiber.fork ~sw (fun () ->
+      Mcp_subscriptions.unregister token;
+      Eio.Promise.resolve signal_removed ());
+    let rec wait_until_removed () =
+      if Mcp_subscriptions.count () <> before then (Eio.Fiber.yield (); wait_until_removed ()) in
+    Eio.Time.with_timeout_exn clock 5. wait_until_removed;
+    (* Another publisher already removed the registry entry. The owner token
+       must still name the same send lock and not falsely report a drain. *)
+    let retired = Mcp_subscriptions.retire token in
+    Eio.Fiber.fork ~sw (fun () ->
+      Mcp_subscriptions.await_retired retired;
+      Eio.Promise.resolve signal_owner_drained ());
+    Alcotest.(check bool) "owner drain waits for the removed entry" false
+      (Eio.Promise.is_resolved owner_drained);
+    Alcotest.(check bool) "other unregister also waits" false (Eio.Promise.is_resolved removed);
+    Eio.Promise.resolve signal_release ();
+    Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await owner_drained);
+    Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await removed);
+    Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await published);
+    Alcotest.(check int) "entry remains absent" before (Mcp_subscriptions.count ()))
+
 let test_stdio_subscription_requires_auth () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1056,7 +1570,11 @@ let test_stdio_forwards_external_credential () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+  let was_ready = Eio_guard.is_ready () in
+  Eio_guard.enable ();
+  Fun.protect ~finally:(fun () ->
+    if not was_ready then Eio_guard.disable ();
+    cleanup_dir base_path) (fun () ->
     let state = Mcp_eio.For_testing.create_state ~base_path () in
     ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"test-admin");
     let token = match Auth.create_token base_path ~agent_name:"stdio-client" ~role:Masc_domain.Worker with
@@ -3685,6 +4203,19 @@ let eio_tests = [
     test_stdio_ping_is_answered_during_a_long_tool_call;
   "stdio cancellation stops a running tool call", `Quick,
     test_stdio_cancellation_stops_a_running_tool_call;
+  "stdio requires enabled guard", `Quick, test_stdio_requires_enabled_guard;
+  "stdio EOF drains committed response", `Quick,
+    test_stdio_eof_drains_committed_response;
+  "stdio parent cancel drains external subscription send", `Quick,
+    test_stdio_parent_cancel_drains_external_subscription_send;
+  "stdio write failure never appends another frame", `Quick,
+    test_stdio_write_failure_never_appends_another_frame;
+  "subscription retirement keeps drain authority", `Quick,
+    test_subscription_retirement_keeps_drain_authority;
+  "stdio EOF reports external send failure", `Quick,
+    test_stdio_eof_reports_external_send_failure;
+  "stdio prior failure precedes drain cancellation", `Quick,
+    test_stdio_prior_failure_precedes_drain_cancellation;
   "stdio subscription requires authentication", `Quick,
     test_stdio_subscription_requires_auth;
   "stdio legacy ping and modern removal", `Quick,

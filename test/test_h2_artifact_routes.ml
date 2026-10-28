@@ -322,6 +322,32 @@ let test_access_and_preconditions () = with_gateway (fun ~base_path ~worker ~pla
       check bool "bound response exposes workspace admission" true
         (header_has_token "access-control-expose-headers" "x-masc-workspace-read" reply))
       [bound_h1; bound_h2];
+    let check_ingress_refusal label ~status ~code ~retry_after headers =
+      List.iter (fun (origin, allowed) ->
+        let replies = both gateway ~token:worker ~meth:`POST ~body:update
+          ~headers:(("origin", origin) :: headers) list in
+        pair_status label status replies;
+        pair_code label code replies;
+        let h1, h2 = replies in
+        List.iter (fun reply ->
+          check (option string) (label ^ " admitted Origin")
+            (if allowed then Some origin else None) (header "access-control-allow-origin" reply);
+          check (option string) (label ^ " admitted credentials")
+            (if allowed then Some "true" else None) (header "access-control-allow-credentials" reply);
+          check (option string) (label ^ " varies by Origin") (Some "Origin") (header "vary" reply);
+          check (option string) (label ^ " retry-after") retry_after (header "retry-after" reply))
+          [h1; h2])
+        [dev_origin, true; "https://untrusted.example", false] in
+    check_ingress_refusal "mismatched workspace headers" ~status:409
+      ~code:"workspace_precondition_failed" ~retry_after:None foreign_headers;
+    check_ingress_refusal "incomplete workspace headers" ~status:400
+      ~code:"invalid_workspace_precondition" ~retry_after:None
+      ["x-masc-expected-base-path", expected.base_path];
+    let startup = Server_startup_state.snapshot () in
+    Fun.protect ~finally:(fun () -> Server_startup_state.For_testing.restore startup) (fun () ->
+      Server_startup_state.For_testing.restore { startup with state_ready = false };
+      check_ingress_refusal "workspace admission while booting" ~status:503
+        ~code:"server_booting" ~retry_after:(Some "1") h2_headers);
     List.iter (fun path ->
       let h1, h2 = both gateway ~token:worker ~headers:["origin", dev_origin]
         (path ^ query "/foreign-workspace" expected.masc_root) in

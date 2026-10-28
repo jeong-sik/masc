@@ -60,7 +60,8 @@ let guard_http1 ~path request reqd ~admitted =
   | Precondition.Refused refusal ->
     Http_server_eio.Response.json_value
       ~status:(refusal_status refusal)
-      ~extra_headers:(refusal_headers refusal)
+      (* Use the same admitted-origin policy as other early refusals. *)
+      ~extra_headers:(refusal_headers refusal @ Server_auth.auth_error_cors_headers request)
       (refusal_body refusal)
       reqd
   | Precondition.No_precondition | Precondition.Precondition_met -> admitted ()

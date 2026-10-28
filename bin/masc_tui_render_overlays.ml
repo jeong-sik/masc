@@ -940,7 +940,8 @@ let render_queue_panel (state : state) (panel : queue_panel) =
          c.push ("  " ^ Terminal_text.single_line text)
        | Some (Queue_action_receipt (Queue_error text)) when budget > 2 ->
          c.push ("  " ^ Theme.warn () ^ Terminal_text.single_line text ^ Ansi.reset)
-       | Some _ | None -> ());
+       | Some (Queue_action_receipt (Queue_info _ | Queue_error _) | Queue_read_receipt _)
+       | None -> ());
       let height = max 0 (budget - queue_panel_fixed_rows panel) in
       let count = List.length items in
       let scroll = Masc_tui_scroll.normalize ~count ~height panel.qp_scroll in

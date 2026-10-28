@@ -91,7 +91,13 @@ val open_space
 
 val space_id : t -> int
 
-(** Answers one live verb the way the BiDi peer answers it. Reads fail
+(** Answers one live verb the way the BiDi peer answers it. [hand_off] returns
+    [action], [spaceId] and [spaceName], captured from the same TaskSpace before
+    handing it to the operator. This identifies the space for a human request;
+    it does not prove that its window is visible or that login succeeded.
+    After handing off, ask the operator what is needed and await their explicit
+    completion before [take_over]. The peer does not create an Ask or verify an
+    operator answer itself. Reads fail
     before any effect. [open_tab], [goto], [back], [forward], [reload] and
     [close_tab] act only on pages an agent opened in the space, and so does
     [page.interact]. [back] and [forward] move one entry in the tab's own

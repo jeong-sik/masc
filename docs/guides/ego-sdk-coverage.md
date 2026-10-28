@@ -46,7 +46,7 @@ Neither means fully supported.
 | `TaskSpace.adopt` | None; unmanaged pages refused | Explicitly authorized adoption with conservative ownership |
 | `TaskSpace.release` | None | Return an unknown-origin managed page without closing it |
 | `TaskSpace.waitForControl` | None | SDK wait without taking control away from the operator |
-| `TaskSpace.handOff` | `page.act` hand_off | Per-goal scope and UI control-state projection |
+| `TaskSpace.handOff` | `page.act` hand_off returns same-Space ID/name; Keeper guidance composes `masc_ask` and explicit-confirmation resume | Real Keeper login handoff, per-goal scope and UI control-state projection |
 | `TaskSpace.finish` | Internal connection teardown uses `keep:[]` | Goal completion with explicit keep policy and retained-page receipt |
 | `TaskSpace.cdp` | None | Explicit Target/Browser protocol boundary and lifecycle reconciliation |
 | `Page.label` | Internal permanent labels | Tool/UI provenance and resume identity |

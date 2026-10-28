@@ -1331,13 +1331,25 @@ let interact ?actor t args =
 
 (* The whole space goes to the operator for a step only a person can take;
    from then on the frame refuses every step until take_over. A handOff that
-   failed may still have happened, and the next step says who holds it. *)
+   failed may still have happened; do not probe or replay it without the
+   operator's explicit confirmation. *)
 let hand_off t =
-  let unknown = "the operator may hold the space now; the next step on it says who does" in
+  let unknown = Printf.sprintf
+    "control of ego Space #%d is unconfirmed; ask the operator and wait for explicit confirmation before any further command"
+    t.space_id in
   match run_step t ~window_s:(window_s (Browser_lane.Page_act (Browser_lane.Action.Control Browser_lane.Action.Hand_off)))
-          ~step:"space.hand_off" ~args:`Null "    await task.handOff();\n    emit({ok: true, value: null});" with
+          ~step:"space.hand_off" ~args:`Null (String.concat "\n" [
+            "    const space = {spaceId: task.spaceId, spaceName: task.name};";
+            "    await task.handOff();";
+            "    emit({ok: true, value: space});" ]) with
   | Error failure -> Error (effect_failure ~unknown failure)
-  | Ok _ -> Ok (obj ["action",str "hand_off"])
+  | Ok (`Assoc fields) when List.length fields = 2 ->
+    (match List.assoc_opt "spaceId" fields,List.assoc_opt "spaceName" fields with
+     | Some (`Int id),Some (`String name) when id=t.space_id && String.trim name<>"" ->
+       Ok (obj ["action",str "hand_off";"spaceId",`Int id;"spaceName",str name])
+     | (None|Some _),(None|Some _) ->
+       Error (Live.Outcome_unknown ("ego answered the hand-off without this space's identity; " ^ unknown)))
+  | Ok _ -> Error (Live.Outcome_unknown ("ego answered the hand-off without this space's identity; " ^ unknown))
 
 (* The Keeper takes the space back on the operator's word, which neither ego
    nor masc checks. ego names the tab that was active then; a tab the

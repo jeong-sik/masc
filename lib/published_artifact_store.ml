@@ -287,11 +287,18 @@ let recover_pending_share ~base_path ~id ~artifact =
 let with_share_lock ~base_path ~id f =
   if not (valid_id id) then Error (Share_invalid "invalid artifact id")
   else protect_share (fun () ->
-    let* entries = directory_entries ~base_path |> Result.map_error share_artifact_error in
-    let* () = match entries with None -> Error Share_missing | Some _ -> Ok () in
     (* Do not create a lock file for every unauthenticated guessed ID. The
+       owned-file read validates the directory chain without listing it; the
        locked reload below remains the authority for the actual operation. *)
-    let* _ = load ~base_path id |> Result.map_error share_artifact_error in
+    let* _ = match load ~base_path id with
+      | Error Missing ->
+        (match Unix.stat base_path with
+         | stat when stat.Unix.st_kind = Unix.S_DIR -> Error Share_missing
+         | _ -> Error (Share_unavailable "workspace root is not a directory")
+         | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Error (Share_unavailable "workspace root is missing"))
+      | Ok artifact -> Ok artifact
+      | Error ((Invalid _ | Conflict _ | Unavailable _ | Commit_uncertain _) as error) ->
+        Error (share_artifact_error error) in
     match File_lock_eio.with_durable_lock_observed
       ~lock_path:(lock_path ~base_path id) (fun () ->
         let* artifact = load ~base_path id |> Result.map_error share_artifact_error in

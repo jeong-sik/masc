@@ -144,14 +144,23 @@ that a Keeper is currently viewing or editing a document.
   try an anonymous view. A failed refresh retains an existing operator document
   and draft instead of replacing them with the public view. Retained drafts
   from an earlier authority stay accessible before a new reader dialog opens.
-- The Dashboard captures both workspace roots before reading an operator
-  document and requires the server's matched workspace-read receipt before
-  using that document to change sharing. If the workspace cannot be captured,
-  the document can still be viewed but sharing cannot be changed from that read.
+- The Dashboard can show a document read-only while workspace identity is
+  pending. Before enabling edits or sharing, it captures both roots, rereads
+  the document against them and requires the server's matched workspace-read
+  receipt. If identity cannot be confirmed, editing and sharing stay disabled.
+  Temporary HTML previews are inert and cannot run scripts; documents whose
+  display is generated entirely by scripts may therefore appear blank until
+  the workspace-bound read succeeds. Public HTML readers remain interactive.
+  The editor and HTML app retain the roots of the admitted document, and their
+  writes carry the pair in the body as well as request headers. Relevant draft,
+  app-data and publication reads require the workspace-read receipt, including
+  the shared-draft event stream.
   The share action requires a known sharing version and rechecks the selected
   revision and latest publication against the original roots.
   Before sending, it retains the exact operation in browser storage; if storage
-  is unavailable, it does not send. An unconfirmed operation can be checked
+  is unavailable, this tab does not send. If storage readback fails after a
+  write attempt, another tab may have seen the request; this tab retains it in
+  memory as unconfirmed, which may be lost on reload. An unconfirmed operation can be checked
   again with its original identity and preconditions, including after a page
   reload in the same browser origin. Checking may apply the original request;
   the recovery row shows its direction and original document. Separate tabs
@@ -165,6 +174,11 @@ that a Keeper is currently viewing or editing a document.
   displayed revision and uses the origin currently open in the browser, which
   may be a local address; it is not evidence that the link is reachable from
   elsewhere.
+  Root pairs identify paths, not a durable store incarnation. Replacing a
+  workspace with another store at the same canonical paths can satisfy these
+  checks; do not replay an uncertain operation across such a replacement.
+  Document-check requests have a separate existing workspace contract and are
+  not protected by the new artifact share or edit body guards.
 - Share snapshots, the migration guard, and per-operation receipts form one
   storage authority; back up and restore them together. Receipts use disk space
   as operations accumulate. A missing historical receipt cannot be distinguished

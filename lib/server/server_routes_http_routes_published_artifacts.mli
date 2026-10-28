@@ -1,5 +1,9 @@
 val error_response : Published_artifact_store.error -> Yojson.Safe.t * Httpun.Status.t
 val check_error_response : Published_artifact_check_store.error -> Yojson.Safe.t * Httpun.Status.t
+val validate_body_workspace : config:Workspace.config -> Yojson.Safe.t ->
+  (Yojson.Safe.t, Yojson.Safe.t * Httpun.Status.t) result
+val decode_publication_request : config:Workspace.config -> body:string ->
+  (Published_artifact.request, Yojson.Safe.t * Httpun.Status.t) result
 val decode_check_request : config:Workspace.config -> body:string ->
   (Published_artifact_check.request, Yojson.Safe.t * Httpun.Status.t) result
 (** Validate and strip an optional expected workspace before strict operation

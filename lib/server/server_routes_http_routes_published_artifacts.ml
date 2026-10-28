@@ -59,6 +59,25 @@ let check_error_response error =
 let refuse_check request reqd error =
   let json, status = check_error_response error in respond ~status request reqd json
 
+let validate_body_workspace ~config json =
+  match Workspace.validate_expected_workspace ~config json with
+  | Ok json -> Ok json
+  | Error Workspace.Invalid_workspace_precondition ->
+    Error (Server_refusal.json ~code:"invalid_workspace_precondition"
+      "invalid expected_workspace precondition", `Bad_request)
+  | Error Workspace.Workspace_precondition_failed ->
+    Error (Server_refusal.json ~code:"workspace_precondition_failed"
+      "workspace precondition failed", `Conflict)
+
+let decode_publication_request ~config ~body =
+  let open Result.Syntax in
+  let* json = match Yojson.Safe.from_string body with
+    | json -> Ok json
+    | exception Yojson.Json_error _ -> Error (error_response (Store.Invalid "invalid JSON body")) in
+  let* json = validate_body_workspace ~config json in
+  Published_artifact.request_of_json json
+  |> Result.map_error (fun message -> error_response (Store.Invalid message))
+
 let decode_check_request ~config ~body =
   let open Result.Syntax in
   let* json = match Yojson.Safe.from_string body with
@@ -177,13 +196,11 @@ let add_routes router =
            "revisions", `List (List.map Published_artifact.revision_to_json artifact.revisions);
            "shared", `Bool snapshot.shared; "share_version", `Int snapshot.version])))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/published-artifacts" (fun state actor request reqd ->
-    let base_path = (Mcp_server.workspace_config state).base_path in
+    let config = Mcp_server.workspace_config state in
+    let base_path = config.base_path in
     Http.Request.read_body_async reqd (fun body ->
-      let parsed = match Yojson.Safe.from_string body with
-        | json -> Published_artifact.request_of_json json
-        | exception Yojson.Json_error _ -> Error "invalid JSON body" in
-      match parsed with
-      | Error message -> refuse request reqd (Store.Invalid message)
+      match decode_publication_request ~config ~body with
+      | Error (json, status) -> respond ~status request reqd json
       | Ok publication ->
         match Eio_unix.run_in_systhread (fun () -> Store.publish ~base_path ~author:actor publication) with
         | Error error -> refuse request reqd error

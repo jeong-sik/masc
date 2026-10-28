@@ -93,6 +93,11 @@ let test_shared_read_pins_revision () = with_base (fun base_path ->
    | Error (`Artifact _) -> Alcotest.fail "missing artifact read was not refused");
   Alcotest.(check bool) "unknown read did not create a lock file" false
     (Sys.file_exists (Filename.concat (catalog_dir base_path) (guessed ^ ".lock")));
+  (match S.read_with_share ~base_path:(Filename.concat base_path "missing-root") ~id:guessed ~revision:None ~allow_private:false with
+   | Error (`Share (S.Share_unavailable _)) -> ()
+   | Ok (`Private | `Allowed _)
+   | Error (`Share (S.Share_invalid _ | S.Share_missing | S.Share_operation_reused | S.Share_commit_uncertain _))
+   | Error (`Artifact _) -> Alcotest.fail "missing workspace root was not unavailable");
   let read ~allow_private = S.read_with_share ~base_path ~id ~revision:None ~allow_private in
   (match read ~allow_private:false with
    | Ok `Private -> ()
@@ -271,6 +276,32 @@ let test_share_http_preconditions () = with_base (fun base_path ->
   expect 400 (("expected_workspace", workspace) :: ("expected_artifact_sha256", `String "invalid") :: List.remove_assoc "expected_artifact_sha256" fields);
   let wrong_workspace = `Assoc ["base_path", `String "/another/workspace"; "masc_root", `String "/another/workspace/.masc"] in
   expect 409 (("expected_workspace", wrong_workspace) :: fields))
+
+let test_edit_http_workspace_preconditions () = with_base (fun base_path ->
+  let module Publication = Server_routes_http_routes_published_artifacts in
+  let module Draft = Server_routes_http_routes_artifact_drafts in
+  let artifact, _ = publish ~base_path (request "original") in
+  let config = Masc.Workspace.default_config base_path in
+  let workspace = `Assoc ["base_path", `String (Unix.realpath base_path);
+    "masc_root", `String (Unix.realpath (masc_dir base_path))] in
+  let wrong = `Assoc ["base_path", `String "/other"; "masc_root", `String "/other/.masc"] in
+  let fields = match request_json ~id:artifact.id ~expected_revision:1 "new" with
+    | `Assoc fields -> fields | _ -> Alcotest.fail "fixture" in
+  let publication workspace = Publication.decode_publication_request ~config ~body:
+    (Yojson.Safe.to_string (`Assoc (("expected_workspace", workspace) :: fields))) in
+  let draft workspace = Draft.decode_request ~config ~body:(Yojson.Safe.to_string (`Assoc
+    ["expected_workspace", workspace; "action", `String "open";
+     "artifact_id", `String artifact.id; "revision", `Int 1])) in
+  let refusal = function
+    | Error (json, status) ->
+      Alcotest.(check int) "different workspace refused" 409 (Httpun.Status.to_code status);
+      Alcotest.(check bool) "refusal is machine-readable" true
+        (Yojson.Safe.Util.member "code" json = `String "workspace_precondition_failed")
+    | Ok _ -> Alcotest.fail "different workspace was accepted" in
+  (match publication workspace with Ok _ -> () | Error _ -> Alcotest.fail "bound publication refused");
+  (match draft workspace with Ok _ -> () | Error _ -> Alcotest.fail "bound draft refused");
+  refusal (publication wrong);
+  refusal (draft wrong))
 
 let test_create_and_revise () = with_base (fun base_path ->
   let empty = S.list ~base_path |> store_ok in
@@ -621,6 +652,7 @@ let () = Eio_main.run (fun _ ->
       Alcotest.test_case "publication revision is bound to share request" `Quick test_share_publication_precondition;
       Alcotest.test_case "HTTP workspace and share version preconditions" `Quick test_share_http_preconditions];
      "Keeper and HTTP publication", [
+      Alcotest.test_case "HTTP edit body is bound to its workspace" `Quick test_edit_http_workspace_preconditions;
       Alcotest.test_case "producer persists exact content, identity and CAS" `Quick test_keeper_publication;
       Alcotest.test_case "model-facing receipt preserves links and durable manifests" `Quick test_keeper_model_publication_receipt;
       Alcotest.test_case "manifest failure preserves committed publication recovery" `Quick test_publication_manifest_failure_recovery;

@@ -25,6 +25,14 @@ let respond ?(status = `OK) request reqd json =
   Http.Response.json_value ~status
     ~extra_headers:(["cache-control", "private, no-store"] @ cors_headers (get_origin request)) json reqd
 let refuse request reqd error = let json, status = error_response error in respond ~status request reqd json
+let decode_request ~config ~body =
+  let open Result.Syntax in
+  let* json = match Yojson.Safe.from_string body with
+    | json -> Ok json
+    | exception Yojson.Json_error _ -> Error (error_response (Store.Invalid "invalid shared draft JSON")) in
+  let* json = Server_routes_http_routes_published_artifacts.validate_body_workspace ~config json in
+  Artifact_draft.command_of_json json
+  |> Result.map_error (fun message -> error_response (Store.Invalid message))
 let add_routes router = router
   |> Server_route.prefix_get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/artifact-drafts/" (fun state _actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
@@ -35,13 +43,11 @@ let add_routes router = router
       | Error error -> refuse request reqd error
       | Ok view -> respond request reqd (Store.view_to_json view))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/artifact-drafts" (fun state actor request reqd ->
-    let base_path = (Mcp_server.workspace_config state).base_path in
+    let config = Mcp_server.workspace_config state in
+    let base_path = config.base_path in
     Http.Request.read_body_async reqd (fun body ->
-      let parsed = match Yojson.Safe.from_string body with
-        | json -> Artifact_draft.command_of_json json
-        | exception Yojson.Json_error _ -> Error "invalid shared draft JSON" in
-      match parsed with
-      | Error message -> refuse request reqd (Store.Invalid message)
+      match decode_request ~config ~body with
+      | Error (json, status) -> respond ~status request reqd json
       | Ok command ->
         match Store.execute ~base_path ~actor command with
         | Error error -> refuse request reqd error

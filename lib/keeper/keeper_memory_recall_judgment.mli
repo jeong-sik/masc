@@ -17,8 +17,10 @@ type candidate_decision =
 val candidate_decision_label : candidate_decision -> string
 (** The label the question offers and the answer returns. *)
 
-val all_candidate_decisions : candidate_decision list
-(** In the order the question lists them. *)
+val all_of_candidate_decision : candidate_decision list
+(** Every constructor, in the order the type declares them and the question
+    lists them. The list is derived, so a constructor added later reaches the
+    question without a second edit. *)
 
 (** Question (b), asked once per turn without candidates: does the turn need
     stored knowledge at all. *)
@@ -28,7 +30,7 @@ type turn_need =
   | Unsure
 
 val turn_need_label : turn_need -> string
-val all_turn_needs : turn_need list
+val all_of_turn_need : turn_need list
 
 (** Question (c), asked for the candidates question (a) carried: whether the
     memory holds a value tied to a moment (a number, a SHA, a head, a verdict,
@@ -38,7 +40,7 @@ type time_nature =
   | Time_bound
 
 val time_nature_label : time_nature -> string
-val all_time_natures : time_nature list
+val all_of_time_nature : time_nature list
 
 (** A carried memory is [Marked] only when question (c) answered for it.
     [Time_unjudged] is never read as [Standing]. *)
@@ -51,20 +53,25 @@ type time_mark =
 (** Why a candidate has no decision. [Capacity]: a request holding it was
     refused for size and no smaller request was left to try. [Too_large]: a
     request holding only this candidate was refused while question (b) was
-    accepted. [Invalid_answer] covers an answer that does not decode, an
-    answer that is missing, and a response with duplicate or unknown ids. *)
+    accepted. [Provider_failed] covers every other failure of the request,
+    a timeout among them: the client reports a timeout as text, so the reason
+    cannot tell it from another transport failure. [Invalid_answer] covers a
+    response that does not decode, and an answer that does not decode, is
+    missing, or arrives in a response with duplicate or unknown ids. A
+    cancelled request is not a reason: the cancellation is raised again and no
+    status is built. *)
 type unjudged_reason =
   | Capacity
   | Too_large
   | Rate_limited
-  | Timeout
   | Provider_failed
-  | Cancelled
   | Invalid_answer
 
+val all_of_unjudged_reason : unjudged_reason list
+
 val unjudged_reason_token : unjudged_reason -> string
-(** [capacity], [too_large], [rate_limited], [timeout], [provider_failed],
-    [cancelled], [invalid_answer]. *)
+(** [capacity], [too_large], [rate_limited], [provider_failed],
+    [invalid_answer]. *)
 
 type candidate_result =
   | Decided of { id : string; decision : candidate_decision }
@@ -78,23 +85,12 @@ type turn_answer =
 
 (** {1 What the turn gets} *)
 
-(** Why nothing was judged or the turn could not be settled. *)
-type unavailable_reason =
-  | Candidates_unjudged of unjudged_reason
-  | Turn_question
-
-val unavailable_reason_token : unavailable_reason -> string
-(** The token the status line shows: [capacity], [rate_limited], [timeout],
-    [provider_failed], [cancelled], [invalid_answer] or [turn_question].
-    [Too_large] shows as [capacity]. *)
-
 (** How many of the candidates got a decision, out of all of them. *)
 type coverage
 
-(** A coverage in which at least one candidate got a decision. Only
-    [Selected], [None_found] and [None_needed] carry this type, so a
-    "judged and found nothing" status with no judged candidate cannot be
-    built. *)
+(** A coverage in which at least one candidate got a decision. Every status
+    that says candidates were judged carries this type, so such a status with
+    no judged candidate cannot be built. *)
 type judged_coverage
 
 val coverage_judged : coverage -> int
@@ -109,31 +105,47 @@ type selection
 
 val selection_ids : selection -> string list
 
+(** Why the status is [Unavailable]. [Nothing_judged]: no candidate got a
+    decision, so nothing was looked at; [reason] is the one of the first
+    undecided candidate in candidate order, whatever question (b) said, and
+    [total] counts the candidates. [Turn_unanswered]: candidates were judged,
+    none was carried and question (b) produced no answer. *)
+type unavailable =
+  | Nothing_judged of { reason : unjudged_reason; total : int }
+  | Turn_unanswered of judged_coverage
+
+val unavailable_reason_token : unavailable -> string
+(** The token the status line shows: [capacity], [rate_limited],
+    [provider_failed], [invalid_answer] or [turn_question]. [Too_large] shows
+    as [capacity]. *)
+
 type status =
-  | Selected of { selection : selection; coverage : judged_coverage }
+  | Selected of
+      { selection : selection
+      ; coverage : judged_coverage
+      ; turn_question_contradicted : bool
+        (** Question (b) answered [Needs_no_knowledge] while question (a)
+            carried at least one candidate. The carried side wins and the
+            evaluation record notes the contradiction. *)
+      }
   | None_found of judged_coverage
   | None_needed of judged_coverage
-  | Unavailable of { reason : unavailable_reason; coverage : coverage }
+  | Unavailable of unavailable
 
 val status_token : status -> string
 (** [selected], [none_found], [none_needed] or [unavailable]. *)
 
 val status_coverage : status -> coverage
+(** [Nothing_judged] has no judged candidate: its coverage is 0 of [total]. *)
 
-type verdict =
-  { status : status
-  ; turn_question_contradicted : bool
-        (** Question (b) answered [Needs_no_knowledge] while question (a)
-            carried at least one candidate. The carried side wins and the
-            evaluation record notes the contradiction. *)
-  }
-
-val reduce : candidates:candidate_result list -> turn:turn_answer -> verdict option
+val reduce : candidates:candidate_result list -> turn:turn_answer -> status option
 (** [None] for no candidates: a Keeper without candidates has no judgment and
     no block. Otherwise:
     - a carried candidate gives [Selected], whatever question (b) said;
-    - nothing decided gives [Unavailable] with the reason of the first
-      undecided candidate in candidate order, whatever question (b) said;
+    - nothing decided gives [Unavailable (Nothing_judged _)] with the reason
+      of the first undecided candidate in candidate order, whatever question
+      (b) said;
     - decided candidates with none carried give [None_found] when question (b)
       answered [Needs_knowledge] or [Unsure], [None_needed] when it answered
-      [Needs_no_knowledge], and [Unavailable Turn_question] when it failed. *)
+      [Needs_no_knowledge], and [Unavailable (Turn_unanswered _)] when it
+      failed. *)

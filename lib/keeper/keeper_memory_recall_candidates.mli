@@ -6,6 +6,8 @@
 type t
 
 val of_fact : Keeper_memory_os_types.fact -> t
+(** The claim is taken as the store holds it. It is not checked to be valid
+    UTF-8, and the JSON writer does not check it either. *)
 
 val id : t -> string
 (** The memory id of the fact. It is the key the judge answers under. *)
@@ -20,10 +22,13 @@ val line_bytes : t -> int
 (** Bytes of the compact UTF-8 serialization of {!line}. *)
 
 val state_bytes_per_piece : int
-(** Most candidate bytes in one request. Jev refused a 159.7 KB [state] and
-    accepted 77.9 KB and 82.1 KB ones, so the starting value stays below the
-    largest accepted one (scripts/keeper-recall-jev-probe.py, evidence in
-    docs/evidence/keeper-recall-jev-probe-2026-10-28). A KB is 1000 bytes. *)
+(** Most bytes of candidate lines in one request. Jev refused a 159.7 KB
+    [state] and accepted 77.9 KB and 82.1 KB ones, so the starting value is
+    below the largest accepted [state] (scripts/keeper-recall-jev-probe.py,
+    evidence in docs/evidence/keeper-recall-jev-probe-2026-10-28). A [state]
+    is a little larger than its lines (separators, wrapper, purpose) and the
+    request adds one question per candidate, so the lines are only part of
+    what a request weighs. A KB is 1000 bytes. *)
 
 (** Candidates sent in one request. Never empty. *)
 type piece

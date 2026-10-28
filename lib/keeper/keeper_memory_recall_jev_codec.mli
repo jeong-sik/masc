@@ -43,7 +43,16 @@ val decode_candidates :
     duplicate or an unknown answer id leaves every candidate of the piece
     [Not_decoded]. A missing answer or an answer that does not decode leaves
     that candidate [Not_decoded]. The client rejects an answer whose label is
-    not the most probable option; such a candidate is [Not_decoded] too. *)
+    not the most probable option; such a candidate is [Not_decoded] too.
+
+    What the client has already refused never reaches this function. A
+    response whose answers are malformed in structure (a repeated answer key,
+    a confidence outside 0 to 1, an empty probability map, an unknown answer
+    type) fails as a whole in the client and comes back as a failed request
+    with status 200. A caller that counts failures by reason maps that status
+    to [Invalid_answer]; otherwise those pieces count as [Provider_failed].
+    The duplicate check here serves responses that were not built by the
+    client. *)
 
 val candidate_result :
   id:string -> Keeper_memory_recall_judgment.candidate_decision answer ->
@@ -63,10 +72,10 @@ val turn_answer :
   Keeper_memory_recall_judgment.turn_answer
 
 val time_request :
-  purpose:Yojson.Safe.t -> Keeper_memory_recall_candidates.piece ->
-  (request, build_error) result
+  Keeper_memory_recall_candidates.piece -> (request, build_error) result
 (** Question (c), for candidates question (a) carried. Same shape as
-    {!candidate_request}. *)
+    {!candidate_request} except that [state] holds no purpose: the question is
+    about the memory alone, so the turn input is not sent. *)
 
 val decode_time :
   Keeper_memory_recall_candidates.piece -> Typesafeai_types.eval_response ->

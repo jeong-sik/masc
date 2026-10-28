@@ -408,6 +408,13 @@ let stage_release_mirror base_path =
     (Unix.realpath
        (Filename.concat (source_root ()) "scripts/check-runtime-deployment-preflight.sh"))
     gate;
+  (* The installer stages the SSH bootstrap companion unconditionally, and the
+     server allowlist accepts exactly this asset name. It is a separate release
+     asset from the guest shim above: the shim keeps its per-arch runtime name
+     while this companion shares the platform suffix of the other mirrors. *)
+  let ssh_bootstrap = Filename.concat dir ("masc-exec-ssh-bootstrap-" ^ suffix) in
+  unlink_if_exists ssh_bootstrap;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) ssh_bootstrap;
   (* The installer places but does not execute the guest shim. As with the
      companion fixtures, reuse the test binary bytes and retain the production
      asset name so missing-shim failures cannot hide wizard behavior. *)
@@ -486,7 +493,8 @@ with tarfile.open(archive, 'w:gz') as output:
       (fun (name, path) -> [ "--companion"; name; path ])
       [ "masc-tui", tui; "masc-browser-host", browser_host
       ; "masc-deployment-preflight-helper", helper
-      ; "masc-check-runtime-deployment-preflight", gate ]
+      ; "masc-check-runtime-deployment-preflight", gate
+      ; "masc-exec-ssh-bootstrap", ssh_bootstrap ]
   in
   let package_command =
     String.concat " "

@@ -36,9 +36,14 @@
       [let name request reqd = wrapper ... request reqd] (or [let name = wrapper
       ...]). The wrapper moves to the registrations: the definition becomes
       [let name = <inner handler>] and each registration takes the kind. This
-      is done only when every use of the name in the file is the handler of a
-      registration; a name that other code calls with a request and a reqd is
-      left alone, and so is a use in another file, which the tool cannot see.
+      is done only when the file has one binding of the name, all its uses are
+      later registration handlers within the definition's lexical structure,
+      and the moved wrapper arguments have no intervening lexical ambiguity. The
+      source-only check conservatively
+      skips later shadowing, opens, includes, extensions and unsupported argument
+      forms. A name that other code calls with a request and a reqd is left
+      alone. The caller must separately check for uses in other files, which
+      this file-local analysis cannot see.
     - The wrapper's argument ([~permission], [~tool_name]) is a computation, not a
       constant. A typed route records it at registration, where before it was
       evaluated on every request. The registration is left alone unless

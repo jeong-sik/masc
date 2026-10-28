@@ -261,15 +261,15 @@ let kind_text source call ~outer_params ~allow_early =
         (match outer_params with
          | None -> Ok (build text, None)
          | Some outer_params ->
-           if is_constant value
-           then Ok (build text, None)
-           else if List.exists (mentions value) outer_params
+           if List.exists (mentions value) outer_params
            then
              Error
                (Printf.sprintf
                   "~%s of %s reads the request of the outer function"
                   name
                   call.wrapper)
+           else if is_constant value
+           then Ok (build text, None)
            else if allow_early
            then Ok (build text, Some text)
            else
@@ -298,13 +298,23 @@ type shape =
 let simple_params params =
   let name = function
     | { pparam_desc =
-          Pparam_val (Asttypes.Nolabel, None, { ppat_desc = Ppat_var { txt; _ }; _ })
+          Pparam_val
+            (Asttypes.Nolabel, None, { ppat_desc = Ppat_var { txt; _ }; ppat_attributes = []; _ })
       ; _
       } -> Some txt
     | _ -> None
   in
   let names = List.map name params in
   if List.for_all Option.is_some names then Some (List.filter_map Fun.id names) else None
+;;
+
+let has_parameter_attributes params =
+  List.exists
+    (fun param ->
+      match param.pparam_desc with
+      | Pparam_val (_, _, pattern) -> pattern.ppat_attributes <> []
+      | Pparam_newtype _ -> false)
+    params
 ;;
 
 let ident_name (e : expression) =
@@ -327,7 +337,9 @@ let classify source (handler : expression) =
   else (
     match handler.pexp_desc with
     | Pexp_function (params, None, Pfunction_body body) ->
-      (match simple_params params, wrapper_call body with
+      if has_parameter_attributes params
+      then Other "the outer handler parameter has an attribute"
+      else (match simple_params params, wrapper_call body with
        | Some [ request; reqd ], Some call ->
          if call.optional > 0 || has_attributes body
          then Other "the wrapper call has optional arguments or attributes"
@@ -422,7 +434,9 @@ type binding =
 let binding_for inner name (param : function_param) =
   match param.pparam_desc with
   | Pparam_val (Asttypes.Nolabel, None, pattern) ->
-    (match pattern.ppat_desc with
+    if pattern.ppat_attributes <> []
+    then Error "the wrapped handler parameter has an attribute"
+    else (match pattern.ppat_desc with
      | Ppat_any -> Ok (Rename (pattern, name))
      | Ppat_var { txt; _ } when mentions inner txt -> Ok (Alias (name, txt))
      | Ppat_var _ -> Ok (Rename (pattern, name))
@@ -558,6 +572,7 @@ type unwrapped =
   ; inner_text : string
   ; evaluated_once : string option
   ; hoisted : (int * string) list
+  ; scope_arguments : expression list
   }
 
 (* [handler] is a wrapped handler. The text from [before] to [after] goes away
@@ -607,6 +622,7 @@ let unwrap ~allow_early source (handler : expression) ~before ~after =
     ; inner_text
     ; evaluated_once
     ; hoisted = List.filter (fun comment -> not (copied comment)) (comments_before @ comments_after)
+    ; scope_arguments = List.map snd call.labeled
     }
 ;;
 
@@ -667,13 +683,14 @@ let rewrite_registration ~allow_early source (fn : expression) name args =
 type definition =
   { name : string
   ; line : int
+  ; scope : structure
   ; unwrapped : unwrapped
   ; binding_start : int
   ; name_stop : int
   ; binding_stop : int
   }
 
-let definition ~allow_early source (item : structure_item) =
+let definition ~allow_early ~scope source (item : structure_item) =
   match item.pstr_desc with
   | Pstr_value
       ( Asttypes.Nonrecursive
@@ -695,6 +712,7 @@ let definition ~allow_early source (item : structure_item) =
        Some
          { name
          ; line = ppat_loc.loc_start.pos_lnum
+         ; scope
          ; unwrapped
          ; binding_start = pvb_loc.loc_start.pos_cnum
          ; name_stop
@@ -712,11 +730,36 @@ let handler_ident (e : expression) =
 (* How many registrations take the bare name [name] as their handler, and how
    many times the name appears at all. A definition may lose its wrapper only
    when the two are equal. *)
-let uses_of_name structure name =
+let uses_of_name structure (definition : definition) =
+  let name = definition.name in
   let registrations = ref 0 in
   let occurrences = ref 0 in
+  let bindings = ref 0 in
+  let earliest_registration = ref max_int in
+  let latest_registration = ref min_int in
+  let scopes = ref [] in
+  let outside_scope = ref false in
   let iterator =
     { Ast_iterator.default_iterator with
+      structure =
+        (fun self items ->
+          scopes := items :: !scopes;
+          Fun.protect ~finally:(fun () -> scopes := List.tl !scopes) (fun () ->
+            Ast_iterator.default_iterator.structure self items))
+    ; pat =
+        (fun self (p : pattern) ->
+          (match p.ppat_desc with
+           | Ppat_var { txt; _ } | Ppat_alias (_, { txt; _ }) when String.equal txt name ->
+             incr bindings
+           | _ -> ());
+          Ast_iterator.default_iterator.pat self p)
+    ; structure_item =
+        (fun self (item : structure_item) ->
+          (match item.pstr_desc with
+           | Pstr_primitive value when String.equal value.pval_name.txt name -> incr bindings
+           | _ -> ());
+          Ast_iterator.default_iterator.structure_item self item)
+    ;
       expr =
         (fun self (e : expression) ->
           (match e.pexp_desc with
@@ -726,7 +769,12 @@ let uses_of_name structure name =
              Option.iter
                (fun function_name ->
                  match Option.bind (handler_expression function_name args) handler_ident with
-                 | Some n when String.equal n name -> incr registrations
+                 | Some n when String.equal n name ->
+                   incr registrations;
+                   if not (List.exists (fun scope -> scope == definition.scope) !scopes)
+                   then outside_scope := true;
+                   earliest_registration := min !earliest_registration e.pexp_loc.loc_start.pos_cnum;
+                   latest_registration := max !latest_registration e.pexp_loc.loc_end.pos_cnum
                  | _ -> ())
                (registration_function fn)
            | _ -> ());
@@ -734,7 +782,88 @@ let uses_of_name structure name =
     }
   in
   iterator.structure iterator structure;
-  !registrations, !occurrences
+  ( !registrations
+  , !occurrences
+  , !bindings
+  , !earliest_registration
+  , !latest_registration
+  , !outside_scope )
+;;
+
+(* Moving a wrapper argument from a named definition to a registration also
+   moves its lexical scope. Prove the names in the supported expression remain
+   unobscured; unknown expression forms and scope-opening constructs are left
+   for a manual conversion. This intentionally over-approximates later scopes. *)
+let scope_safe_arguments structure (definition : definition) ~last_registration =
+  let names = ref [] in
+  let add_name lid =
+    match flatten lid with
+    | first :: _ -> names := first :: !names; true
+    | [] -> false
+  in
+  let rec supported (e : expression) =
+    match e.pexp_attributes, e.pexp_desc with
+    | _ :: _, _ -> false
+    | [], Pexp_constant _ -> true
+    | [], Pexp_ident { txt; _ } -> add_name txt
+    | [], Pexp_construct ({ txt; _ }, argument) ->
+      add_name txt && Option.fold ~none:true ~some:supported argument
+    | [], Pexp_apply (fn, args) -> supported fn && List.for_all (fun (_, arg) -> supported arg) args
+    | [], _ -> false
+  in
+  if not (List.for_all supported definition.unwrapped.scope_arguments)
+  then false
+  else (
+    let changed = ref false in
+    let after loc =
+      let position = loc.Location.loc_start.pos_cnum in
+      position >= definition.binding_stop && position <= last_registration in
+    let named name loc = if after loc && List.mem name !names then changed := true in
+    let iterator =
+      { Ast_iterator.default_iterator with
+        pat =
+          (fun self (p : pattern) ->
+            (match p.ppat_desc with
+             | Ppat_var { txt; loc } | Ppat_alias (_, { txt; loc }) -> named txt loc
+             | Ppat_unpack ({ txt; loc }, _) -> Option.iter (fun name -> named name loc) txt
+             | Ppat_extension _ when after p.ppat_loc -> changed := true
+             | _ -> ());
+            Ast_iterator.default_iterator.pat self p)
+      ; module_binding =
+          (fun self binding ->
+            Option.iter (fun name -> named name binding.pmb_name.loc) binding.pmb_name.txt;
+            Ast_iterator.default_iterator.module_binding self binding)
+      ; constructor_declaration =
+          (fun self constructor ->
+            named constructor.pcd_name.txt constructor.pcd_name.loc;
+            Ast_iterator.default_iterator.constructor_declaration self constructor)
+      ; extension_constructor =
+          (fun self constructor ->
+            named constructor.pext_name.txt constructor.pext_name.loc;
+            Ast_iterator.default_iterator.extension_constructor self constructor)
+      ; module_expr =
+          (fun self (module_expr : module_expr) ->
+            (match module_expr.pmod_desc with
+             | Pmod_functor (Named (name, _), _) -> Option.iter (fun n -> named n name.loc) name.txt
+             | _ -> ());
+            Ast_iterator.default_iterator.module_expr self module_expr)
+      ; structure_item =
+          (fun self (item : structure_item) ->
+            (match item.pstr_desc with
+             | Pstr_open _ | Pstr_include _ | Pstr_extension _ when after item.pstr_loc -> changed := true
+             | Pstr_primitive value -> named value.pval_name.txt value.pval_name.loc
+             | _ -> ());
+            Ast_iterator.default_iterator.structure_item self item)
+      ; expr =
+          (fun self (e : expression) ->
+            (match e.pexp_desc with
+             | Pexp_extension _ when after e.pexp_loc -> changed := true
+             | _ -> ());
+            Ast_iterator.default_iterator.expr self e)
+      }
+    in
+    iterator.structure iterator structure;
+    not !changed)
 ;;
 
 (* ---- the file ---- *)
@@ -758,24 +887,38 @@ let rewrite ?(early = false) ~file source =
     in
     (* Named handlers first: a registration that uses one takes its kind. *)
     let converted_definitions = Hashtbl.create 8 in
+    let unsafe_definitions = Hashtbl.create 8 in
     let candidates = ref [] in
     let collector =
       { Ast_iterator.default_iterator with
-        structure_item =
-          (fun self item ->
-            Option.iter
-              (fun candidate -> candidates := candidate :: !candidates)
-              (definition ~allow_early:early source item);
-            Ast_iterator.default_iterator.structure_item self item)
+        structure =
+          (fun self items ->
+            List.iter
+              (fun item ->
+                Option.iter
+                  (fun candidate -> candidates := candidate :: !candidates)
+                  (definition ~allow_early:early ~scope:items source item);
+                self.structure_item self item)
+              items)
       }
     in
     collector.structure collector structure;
     List.iter
       (fun (definition : definition) ->
-        let registrations, occurrences = uses_of_name structure definition.name in
+        let registrations, occurrences, bindings, earliest_registration, latest_registration, outside_scope =
+          uses_of_name structure definition in
         (* The name may be used nowhere else: a handler that other code calls
            with a request and a reqd cannot lose its wrapper. *)
-        if registrations > 0 && registrations = occurrences
+        if registrations > 0 && bindings > 1
+        then Hashtbl.replace unsafe_definitions definition.name "named handler has multiple bindings"
+        else if registrations > 0 && outside_scope
+        then Hashtbl.replace unsafe_definitions definition.name "named handler registration is outside its definition scope"
+        else if registrations > 0 && earliest_registration < definition.binding_stop
+        then Hashtbl.replace unsafe_definitions definition.name "named handler is registered before its definition"
+        else if registrations > 0
+                && not (scope_safe_arguments structure definition ~last_registration:latest_registration)
+        then Hashtbl.replace unsafe_definitions definition.name "named handler or wrapper argument may resolve differently at registration"
+        else if registrations > 0 && registrations = occurrences && bindings = 1
         then (
           Hashtbl.replace converted_definitions definition.name definition;
           incr definitions;
@@ -836,14 +979,19 @@ let rewrite ?(early = false) ~file source =
                        }
                        :: (label @ !edits)
                    | None ->
-                     (match rewrite_registration ~allow_early:early source fn name args with
+                     let unsafe =
+                       Option.bind (handler_expression name args) (fun handler ->
+                         Option.bind (handler_ident handler) (Hashtbl.find_opt unsafe_definitions)) in
+                     (match unsafe with
+                      | Some reason -> unhandled := site reason :: !unhandled
+                      | None -> (match rewrite_registration ~allow_early:early source fn name args with
                       | Ok conversion ->
                         incr converted;
                         edits := conversion.edits @ !edits;
                         Option.iter
                           (fun text -> evaluated_early := site text :: !evaluated_early)
                           conversion.evaluated_once
-                      | Error reason -> unhandled := site reason :: !unhandled)))
+                      | Error reason -> unhandled := site reason :: !unhandled))))
              | _ -> ());
             Ast_iterator.default_iterator.expr self e)
       }

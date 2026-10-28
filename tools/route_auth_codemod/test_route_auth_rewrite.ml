@@ -353,6 +353,13 @@ let left_alone_cases =
 |}
     , "/api/x"
     , "~permission of with_permission_auth is computed, so it would be evaluated at registration instead of on every request" )
+  ; ( "a direct outer argument is not a constant permission"
+    , {|let routes routes =
+  routes |> Http.Router.get "/api/x" (fun request reqd ->
+    with_permission_auth ~permission:request (fun state req reqd -> handle state req reqd) request reqd)
+|}
+    , "/api/x"
+    , "~permission of with_permission_auth reads the request of the outer function" )
   ; ( "a doc comment inside the wrapper"
     , {|let routes routes =
   routes
@@ -378,6 +385,20 @@ let left_alone_cases =
 |}
     , "/api/x"
     , "the handler has an attribute" )
+  ; ( "an attribute on an outer parameter"
+    , {|let routes routes =
+  routes |> Http.Router.get "/api/x" (fun (request [@some_attribute]) reqd ->
+    with_public_read (fun _state req reqd -> handle req reqd) request reqd)
+|}
+    , "/api/x"
+    , "the outer handler parameter has an attribute" )
+  ; ( "an attribute on an inner parameter that would be renamed"
+    , {|let routes routes =
+  routes |> Http.Router.get "/api/x" (fun request reqd ->
+    with_public_read (fun state (_ [@some_attribute]) reqd -> handle state request reqd) request reqd)
+|}
+    , "/api/x"
+    , "the wrapped handler parameter has an attribute" )
   ; ( "an annotated parameter"
     , {|let routes routes =
   routes
@@ -617,6 +638,44 @@ let routes routes =
 |}
     , 1
     , 1 )
+  ; ( "an unchanged local permission retains its binding"
+    , {|let permission = Masc_domain.CanAdmin
+let drop request reqd =
+  with_permission_auth ~permission (fun state req reqd -> handle state req reqd) request reqd
+let routes routes = routes |> Http.Router.post "/api/drop" drop
+|}
+    , {|let permission = Masc_domain.CanAdmin
+let drop = (fun state req reqd -> handle state req reqd)
+let routes routes = routes |> Server_route.post (Server_route.Permission permission) "/api/drop" drop
+|}
+    , 1
+    , 1 )
+  ; ( "an open after the last registration is harmless"
+    , {|let get_x request reqd =
+  with_read_auth (fun state req reqd -> handle state req reqd) request reqd
+let routes routes = routes |> Http.Router.get "/api/x" get_x
+open Later
+|}
+    , {|let get_x = (fun state req reqd -> handle state req reqd)
+let routes routes = routes |> Server_route.get Server_route.Read_auth "/api/x" get_x
+open Later
+|}
+    , 1
+    , 1 )
+  ; ( "a nested registration can use an enclosing handler"
+    , {|let get_x request reqd =
+  with_read_auth (fun state req reqd -> handle state req reqd) request reqd
+module Routes = struct
+  let routes routes = routes |> Http.Router.get "/api/x" get_x
+end
+|}
+    , {|let get_x = (fun state req reqd -> handle state req reqd)
+module Routes = struct
+  let routes routes = routes |> Server_route.get Server_route.Read_auth "/api/x" get_x
+end
+|}
+    , 1
+    , 1 )
   ]
 ;;
 
@@ -689,7 +748,155 @@ let routes routes =
 |}
     , "/api/x"
     , "named handler get_x" )
+  ; ( "an attributed parameter on a named handler"
+    , {|let get_x (request [@some_attribute]) reqd =
+  with_public_read (fun state req reqd -> handle state req reqd) request reqd
+let routes routes = routes |> Http.Router.get "/api/x" get_x
+|}
+    , "/api/x"
+    , "named handler get_x" )
+  ; ( "a named handler uses an outer parameter as permission"
+    , {|let get_x request reqd =
+  with_permission_auth ~permission:request (fun state req reqd -> handle state req reqd) request reqd
+let routes routes = routes |> Http.Router.get "/api/x" get_x
+|}
+    , "/api/x"
+    , "named handler get_x" )
+  ; ( "a permission is rebound before registration"
+    , {|let permission = Masc_domain.CanAdmin
+let get_x request reqd =
+  with_permission_auth ~permission (fun state req reqd -> handle state req reqd) request reqd
+let permission = Masc_domain.CanAddTask
+let routes routes = routes |> Http.Router.get "/api/x" get_x
+|}
+    , "/api/x"
+    , "named handler or wrapper argument may resolve differently at registration" )
+  ; ( "a registration parameter shadows the permission"
+    , {|let permission = Masc_domain.CanAdmin
+let get_x request reqd =
+  with_permission_auth ~permission (fun state req reqd -> handle state req reqd) request reqd
+let routes permission routes = routes |> Http.Router.get "/api/x" get_x
+|}
+    , "/api/x"
+    , "named handler or wrapper argument may resolve differently at registration" )
+  ; ( "a module shadows the qualified permission"
+    , {|let get_x request reqd =
+  with_permission_auth ~permission:Masc_domain.CanAdmin
+    (fun state req reqd -> handle state req reqd) request reqd
+module Masc_domain = Other_domain
+let routes routes = routes |> Http.Router.get "/api/x" get_x
+|}
+    , "/api/x"
+    , "named handler or wrapper argument may resolve differently at registration" )
+  ; ( "an opened scope can change a named handler"
+    , {|let get_x request reqd =
+  with_public_read (fun state req reqd -> handle state req reqd) request reqd
+open Other_handlers
+let routes routes = routes |> Http.Router.get "/api/x" get_x
+|}
+    , "/api/x"
+    , "named handler or wrapper argument may resolve differently at registration" )
+  ; ( "a local open can shadow a permission"
+    , {|let permission = Masc_domain.CanAdmin
+let get_x request reqd =
+  with_permission_auth ~permission (fun state req reqd -> handle state req reqd) request reqd
+let routes routes = let open Other in routes |> Http.Router.get "/api/x" get_x
+|}
+    , "/api/x"
+    , "named handler or wrapper argument may resolve differently at registration" )
+  ; ( "a local open can shadow the handler"
+    , {|let get_x request reqd =
+  with_public_read (fun state req reqd -> handle state req reqd) request reqd
+let routes routes = let open Other in routes |> Http.Router.get "/api/x" get_x
+|}
+    , "/api/x"
+    , "named handler or wrapper argument may resolve differently at registration" )
+  ; ( "a first-class module parameter shadows the permission module"
+    , {|let get_x request reqd =
+  with_permission_auth ~permission:Masc_domain.CanAdmin
+    (fun state req reqd -> handle state req reqd) request reqd
+let routes (module Masc_domain : S) routes = routes |> Http.Router.get "/api/x" get_x
+|}
+    , "/api/x"
+    , "named handler or wrapper argument may resolve differently at registration" )
+  ; ( "the registration is outside the definition module"
+    , {|open Other_handlers
+module M = struct
+  let get_x request reqd =
+    with_public_read (fun state req reqd -> handle state req reqd) request reqd
+end
+let routes routes = routes |> Http.Router.get "/api/x" get_x
+|}
+    , "/api/x"
+    , "named handler registration is outside its definition scope" )
+  ; ( "a registration before the local definition"
+    , {|let routes routes = routes |> Http.Router.get "/api/x" get_x
+let get_x request reqd =
+  with_public_read (fun state req reqd -> handle state req reqd) request reqd
+|}
+    , "/api/x"
+    , "named handler is registered before its definition" )
   ]
+;;
+
+let test_shadowed_named_definitions () =
+  let source =
+    {|let h request reqd =
+  with_permission_auth ~permission:Masc_domain.CanAdmin
+    (fun state req reqd -> handle state req reqd) request reqd
+let admin routes = routes |> Http.Router.get "/admin" h
+let h request reqd =
+  with_public_read (fun state req reqd -> handle state req reqd) request reqd
+let public routes = routes |> Http.Router.get "/public" h
+|}
+  in
+  let rewritten, report = rewrite source in
+  Alcotest.(check string) "both definitions and registrations remain unchanged" source rewritten;
+  Alcotest.(check int) "no ambiguous registration was converted" 0 report.converted;
+  Alcotest.(check int) "no ambiguous definition lost its wrapper" 0 report.definitions;
+  Alcotest.(check (list (pair string string))) "both ambiguous routes are reported"
+    [ "/admin", "named handler has multiple bindings"
+    ; "/public", "named handler has multiple bindings" ]
+    (sites report)
+;;
+
+let test_shadowed_named_module_definitions () =
+  let source =
+    {|module Admin = struct
+  let h request reqd = with_permission_auth ~permission:Masc_domain.CanAdmin
+    (fun state req reqd -> handle state req reqd) request reqd
+  let routes routes = routes |> Http.Router.get "/admin" h
+end
+module Public = struct
+  let h request reqd = with_public_read (fun state req reqd -> handle state req reqd) request reqd
+  let routes routes = routes |> Http.Router.get "/public" h
+end
+|}
+  in
+  let rewritten, report = rewrite source in
+  Alcotest.(check string) "same spelling in separate modules remains unchanged" source rewritten;
+  Alcotest.(check int) "no ambiguous definition was rewritten" 0 report.definitions;
+  Alcotest.(check (list (pair string string))) "both module routes are reported"
+    [ "/admin", "named handler has multiple bindings"
+    ; "/public", "named handler has multiple bindings" ]
+    (sites report)
+;;
+
+let test_named_early_shadowed_module () =
+  let source =
+    {|let press request reqd =
+  with_tool_auth ~tool_name:(Msx_tool.name Msx_tool.Press)
+    (fun state req reqd -> handle state req reqd) request reqd
+module Msx_tool = Other_tool
+let routes routes = routes |> Http.Router.post "/api/press" press
+|}
+  in
+  let rewritten, report = Route_auth_rewrite.rewrite ~early:true ~file:"test.ml" source |> Result.get_ok in
+  Alcotest.(check string) "early evaluation does not permit a different binding" source rewritten;
+  Alcotest.(check int) "the handler wrapper is retained" 0 report.definitions;
+  Alcotest.(check (list (pair string string))) "the unsafe registration is reported"
+    [ "/api/press", "named handler or wrapper argument may resolve differently at registration" ]
+    (sites report)
 ;;
 
 let test_named_early () =
@@ -812,7 +1019,10 @@ let () =
     ; "named handlers", List.map check_named named_cases
     ; ( "named handlers left alone"
       , List.map check_left_alone named_left_alone_cases
-        @ [ Alcotest.test_case "a computed argument converts the definition when allowed" `Quick test_named_early ] )
+        @ [ Alcotest.test_case "a computed argument converts the definition when allowed" `Quick test_named_early
+          ; Alcotest.test_case "shadowed named definitions stay unchanged" `Quick test_shadowed_named_definitions
+          ; Alcotest.test_case "same named definitions in modules stay unchanged" `Quick test_shadowed_named_module_definitions
+          ; Alcotest.test_case "early argument cannot change modules" `Quick test_named_early_shadowed_module ] )
     ; ( "evaluation at registration"
       , [ Alcotest.test_case "refused unless allowed" `Quick test_early_refused_by_default
         ; Alcotest.test_case "converted and listed when allowed" `Quick test_early_allowed

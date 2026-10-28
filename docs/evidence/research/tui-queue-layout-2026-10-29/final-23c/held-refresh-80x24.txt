@@ -1,0 +1,24 @@
+ 대시보드  작업  ▸키퍼  사용량  보드  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ MASC Queue  fixture · automatic                                              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│Partial conversation · Esc:full chat                                          │
+│✗  HTTP 503 refused Child read                                                │
+│○  0 observed · provider completeness unknown · liveness unknown              │
+│✗  HTTP 503 refused native-task read                                          │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  Reading or sending…                                                         │
+│  Event urgency is not exact ordering                                         │
+│  Local unsent messages · 0                                                   │
+│  Queue open · busy · 1 pending · 1 running · 1 scheduled                     │
+│  Events wait while the current chat holds the turn                           │
+│  Pending events may already be in the current turn                           │
+│    15:46  현재 PR 검토 · running                                             │
+│›   15:46  대기 이벤트 01 · 변경 사항과 리뷰 내용을 확인 · unacknowledged 11h…│
+│    15:46  가상 예약 작업 · scheduled for 2026-10-29T07:46:40Z                │
+│  Server queued messages · 0                                                  │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+  ↑/↓ / j/k:select  Enter:read  f:prefer full  PgUp/PgDn:page  Esc:back  …?
+ › to fixture   (i to write)

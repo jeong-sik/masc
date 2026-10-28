@@ -1,0 +1,24 @@
+{
+  "at": "2026-10-28T18:04:06.986164+00:00",
+  "fixture_pid": 41616,
+  "port": 54384,
+  "fixture_sha256": "017aa45118a86c84fa14e22a1243b8ca5ae5d4d2d3ba8221da163c10abb1149e",
+  "workspace": "/Users/dancer/me/workspace/yousleepwhen/masc-tui-queue-layout-20261029/artifacts/queue-layout-observation-20261029/final-23c/workspace",
+  "home": "/Users/dancer/me/workspace/yousleepwhen/masc-tui-queue-layout-20261029/artifacts/queue-layout-observation-20261029/final-23c/home",
+  "synthetic_server_commit_claim": "23c5ea834f89a0988c02ffe3e492980152869179",
+  "initial_control": {
+    "pending_events": 1,
+    "hold_inventory": false
+  },
+  "scope": "Real compiled TUI with synthetic count/health fixture; no real-server effects",
+  "source_sha": "23c5ea834f89a0988c02ffe3e492980152869179",
+  "binary_sha256": "38e081df1926332e59e5f8edcfed8cad76c40e21afda8cde4b4fc428f9c48bab",
+  "workflow": "Minimal manual checks",
+  "run": 40739146379,
+  "workflow_ref": "main",
+  "workflow_sha": "00559066e16f85e397786d64312b0a4b8f874dc2",
+  "workflow_conclusion": "success",
+  "native_job_conclusion": "success",
+  "session": "final-23c",
+  "initial_viewport": "80x24"
+}

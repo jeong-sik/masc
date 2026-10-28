@@ -97,3 +97,10 @@ Follow-up bundles independently retain an
 [MASC c2bdd3c placement/footer observation](revised-placement/README.md).
 Their manifests do not extend the 38b6 captures above to the
 final viewport-input repair.
+
+The separate [final-source bundle](final-23c/README.md) records a successful
+native build and actual terminal observations on `23c5ea834f89a0988c02ffe3e492980152869179`,
+including revised placement, selected-action hints, layers/drafts, repeated
+event requests, acknowledged-result/read-failure separation and discarded
+pointer tails. Its own manifest identifies the earlier baseline captures used
+in the paired notice probe; it does not relabel the 38b6 evidence above.

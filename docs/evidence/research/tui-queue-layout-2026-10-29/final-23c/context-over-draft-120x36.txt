@@ -1,0 +1,36 @@
+ 대시보드  작업  ▸키퍼  사용량  보드  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Context  fixture  read 0s ago  ▸stack  request  proof  response                                                 │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  Composition unavailable: turn-records: HTTP 503: fixture unavailable                                                │
+│                                                                                                                      │
+│  ── NEXT REQUEST ────────────────────────────────────── what the next Agent Core request would carry, computed now ──│
+│  Next request not forecast: next-request: HTTP 503: fixture unavailable                                              │
+│  ≈ tok is bytes at 3.39 bytes per provider-counted token, the fleet median measured 2026-09-13..15; this screen has  │
+│  no turn record to take a ratio from. An estimate, not a count.                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  1/2/3/4 or Tab:switch  [ / ]:turn  j/k:scroll  r:refresh  Esc:close  ?:help
+ › to fixture ORIGINAL-DRAFT

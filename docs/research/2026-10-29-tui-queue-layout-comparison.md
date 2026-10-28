@@ -1,6 +1,7 @@
 # Queue layout comparison: candidate and observation protocol
 
-Status: candidate observed; narrow placement revised from that observation.
+Status: final source compiled and manually observed with synthetic data;
+conditional placement revised from actual same-data comparisons.
 This follows the
 [information-priority study](2026-10-29-tui-panel-input-observation.md) and
 [retained baseline observations](../evidence/research/tui-panel-input-2026-10-29/README.md).
@@ -155,8 +156,8 @@ This supports Side as the wide default for the observed work, and Full for a
 narrow overflowing queue. The revised source therefore allows Bottom only if
 the entire Queue document, including reserved status/receipt/action-note rows,
 still fits. It retains Bottom where it consumes spare space rather than list
-capacity. Placement was subsequently observed on c2 as recorded below; final
-viewport-input revisions still need native confirmation. A small preview may still
+capacity. Placement was subsequently observed on c2 and on final source as
+recorded below. A small preview may still
 show only diagnostics; the partial caption and Esc to full chat make that limit
 explicit rather than selecting content by guessed importance.
 
@@ -174,8 +175,8 @@ layout and size changes, `n` then `l` sent `immediate` and `low` for the same
 `fixture-event-01`, incarnation `1`. The fixture acknowledged the requests but
 did not apply or execute them. These observations establish targeting in this
 sequence, not real-server urgency semantics, physical IME/chord delivery or
-human task time. Final-head native execution and browser
-pixel comparison remain open; no user preference or general comprehension
+human task time. Browser pixel comparison remains unperformed;
+no user preference or general comprehension
 improvement has been measured.
 
 Synthetic SGR mouse reports also produced two OSC 52 copy requests: one
@@ -185,3 +186,51 @@ one Queue drag contained only the right document. A third drag, held while
 copy request. These are injected protocol observations of `38b6edd`, not a
 physical pointer study or proof that an operating-system clipboard accepted
 the requests.
+
+## Final-source confirmation and decision boundary
+
+The [final-source observation](../evidence/research/tui-queue-layout-2026-10-29/final-23c/README.md)
+uses source `23c5ea834f89a0988c02ffe3e492980152869179` and an actual macOS
+executable from **Minimal manual checks**
+[40739146379](https://github.com/jeong-sik/masc/actions/runs/40739146379), workflow
+ref `main` / `00559066e16f85e397786d64312b0a4b8f874dc2`.
+Both the overall run and native job succeeded. Its source includes the later
+viewport, footer and orphan-pointer repairs. Subsequent branch commits at
+retention contain documentation/evidence/changelog only. The native receipt's
+three suites are separate from this manual Queue observation and from full
+regression, which was not run for this candidate.
+
+At 80×24 final source kept the one-event queue in Bottom and showed ten pending
+events in Full for the 18-event queue. At 120×36 and 160×40, Side and Full both
+showed all 18; Side also retained the eight authored conversation messages.
+The ordinary footer exposed n/l for a selected event even at 80×16. That
+footer condition uses a synthetic matching health claim, not a matching real
+server binary; warnings retain priority over those hints.
+
+Help/detail return and repeated n/l targeted the same exact synthetic event.
+Queue, Context and Help consumed their pastes while the covered draft survived.
+Two single delivered jamo selected running then first-event rows; a composed
+syllable did not replay multiple commands. The same target received n/l after
+that sequence. These are delivered protocol inputs, not physical IME/chord or
+human repeated-task measurements. A confirmed synthetic response remained
+visible after deliberately stopping the fixture made both subsequent reads
+unavailable: result and read failure retained separate meanings.
+
+The paired orphan-pointer probe reproduced a lost paste notice on `38b6edd`
+and retained it on final source. Positive pane-copy requests and a held
+layout-changing gesture were also observed on final source. The replacement
+frame's late drag/release did not clear the new paste-loss notice or issue a
+third copy request. This covers the observed protocol sequence, not every
+input/output interleaving or OS clipboard acceptance. The focused
+`test_tui_server_identity_refresh` run
+[40735405483](https://github.com/jeong-sik/masc/actions/runs/40735405483), ref
+`feat/tui-queue-layout-20261029` / `b4f1466a3eb5236195694f903ae59f128fa5e4bb`,
+passed 128 state/decision cases including viewport admission. It predates the
+later root-loop pointer repairs and does not execute that loop.
+
+For the observed queue-management task, the resulting choice is Side when
+both documents have reading width, Bottom only when every Queue item still
+fits, and Full for overflow or explicit detail. The active panel owns keys;
+Help/detail form explicit children and the conversation preview stays read
+only. This is a supported engineering choice under these conditions, not a
+universal best layout or a measured improvement in human comprehension.

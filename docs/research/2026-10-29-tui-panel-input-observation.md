@@ -3,9 +3,11 @@
 This follows the [information-layer study](2026-10-28-tui-information-layers.md).
 The [retained observations](../evidence/research/tui-panel-input-2026-10-29/README.md)
 use an actual candidate TUI with synthetic data. The repaired candidate has
-independent source review and focused pure-state checks. Final-code native
-and UI validation have not been performed. Source review, compiled artifact and rendered behavior
-are separate evidence.
+independent source review and focused pure-state checks. A subsequent
+[final-source study](2026-10-29-tui-queue-layout-comparison.md#final-source-confirmation-and-decision-boundary)
+records successful native compilation and manual terminal observations of
+Queue/Context/Help ownership. The rows below retain the earlier baseline's
+scope. Source review, compiled artifact and rendered behavior are separate evidence.
 
 ## What the comparison established
 
@@ -81,11 +83,11 @@ candidate `c48c88d` failed on interface/identifier errors; those were fixed.
 Its failure is not runtime proof of the new candidate. Current validation and
 exact source are recorded in the PR.
 
-The placement hypothesis remains: preserve chat with a side pane when both
-documents have enough cells, try a bottom sheet at smaller widths, and retain
-a full reader for long detail. The present measurements do not choose a
-winning responsive layout. A fair next comparison must use the same source,
-data, selection and viewport, measure visible selected action/result and chat
-context, then observe repeated tasks and mistaken actions. A browser sketch
-alone cannot establish the best TUI layout. No claim of faster operation,
-better user readability or production deployment follows from this study.
+At this baseline stage, placement was a hypothesis: preserve chat with a side
+pane, try a bottom sheet at smaller widths and retain a full reader. The later
+same-source/data/selection/viewport comparison led to a conditional decision:
+Side when both documents have reading width, Bottom only when every Queue
+item still fits, and Full for overflow/detail. See the linked follow-up for
+the actual capacity, ownership and request observations. No claim of faster
+human operation, better comprehension or production deployment follows from
+either study.

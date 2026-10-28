@@ -1,0 +1,24 @@
+ 대시보드  작업  ▸키퍼  사용량  보드  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ MASC Queue  fixture · automatic                                              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│Partial conversation · Esc:full chat                                          │
+│✗  HTTP 503 refused Child read                                                │
+│○  0 observed · provider completeness unknown · liveness unknown              │
+│✗  HTTP 503 refused native-task read                                          │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  Select a waiting item with ↑/↓                                              │
+│  Local unsent messages · 0                                                   │
+│  Queue open · busy · 0 pending                                               │
+│  Server queued messages · 0                                                  │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+  TUI 23c5ea8 ≠ server fixture (generations differ)  Enter:read  Esc:back  …?
+ › to fixture   (i to write)

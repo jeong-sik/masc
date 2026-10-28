@@ -52,15 +52,14 @@ Apple 빌드 볼륨은 새 게스트 부팅 때 재생성되므로 같은 이름
 게스트는 아무도 못 치웠다. 지금은 부팅이 선언된 런타임을 그대로 따라가고, 조건을
 만족하지 못하면 부팅을 거절한다.
 
-이 문서의 나머지는 `apple_container` 기준이다 — `container` 자리에 그 백엔드의
-CLI 를 놓고 읽으면 된다. 아래 계약 표의 항목 1·2 는 백엔드마다 다르고, 3·4(shim
-과 작업 볼륨)는 공통이다.
+이 문서의 나머지 명령과 볼륨 절차는 `apple_container` 기준이다. 다른 백엔드는
+CLI 문법과 볼륨 동작이 다르므로 `container` 만 다른 이름으로 바꿔 실행하지 않는다.
 
 ---
 
 아래는 Apple `container` 게스트 기준의 운영
-절차. 게스트는 호스트 playground 를 마운트하지 않는다. 트리는 게스트마다
-하나씩 있는 ext4 볼륨(`/masc-work`)에 있고, 명령은 호스트가 게스트 안의
+절차. 게스트는 호스트 playground 를 마운트하지 않는다. 트리는 게스트가
+마운트한 ext4 볼륨(`/masc-work`)에 있고, 명령은 호스트가 게스트 안의
 `masc-exec-shim` 에 `container exec` 로 넣어 준다. OpenSSH 엔드포인트와 같은
 프로토콜, 다른 전송이다.
 
@@ -186,6 +185,10 @@ Docker 없이 Apple container 로 빌드할 때: 빌드 컨테이너에 `--dns` 
 재시작하기 전에 트리를 볼륨으로 복사한다. 옛 게스트는 둘 다
 마운트하고 있으므로 게스트 안에서 `cp` 하면 된다.
 
+복사나 소유권 변경 전에 대상 볼륨을 쓰는 모든 작업 공간의 소유자를 확인한다.
+볼륨 이름에는 작업 공간이 없으므로 다른 작업 공간의 중지된 Keeper가 같은 경로를
+쓸 수도 있다. 소유권이나 대상의 기존 내용이 불명확하면 아래 복사를 진행하지 않는다.
+
 ```bash
 # 1. 옛 게스트 이름 확인
 container list --format json | jq -r '.[].configuration.id' | grep masc-keeper-vm
@@ -200,9 +203,7 @@ container exec --user 0:0 masc-keeper-vm-<keeper>-<hash> \
 container exec --user $U:20 masc-keeper-vm-<keeper>-<hash> \
   sh -c 'cp -a /home/keeper/playground/<keeper>/. /masc-work/<keeper>/'
 
-# 3. 옛 _build 심볼릭 링크 제거 (볼륨에 실제 _build 를 dune 이 만든다)
-container exec --user $U:20 masc-keeper-vm-<keeper>-<hash> \
-  sh -c 'find /masc-work/<keeper> -maxdepth 4 -name _build -type l -delete'
+# 3. _build 링크는 일괄 삭제하지 않는다. 관리 대상과 다른 링크를 구별해 확인한다.
 
 # 3b. 게스트가 이미 없으면 호스트 디렉터리와 볼륨을 같이 붙인 일회용 컨테이너로
 container run --rm --user 0:0 \
@@ -210,7 +211,8 @@ container run --rm --user 0:0 \
   <Keeper 이미지의 reference> sh -c "mkdir -p -m 0777 /masc-work/<keeper> \
     && cp -a /src/. /masc-work/<keeper>/ && chown -R $U:20 /masc-work/<keeper>"
 
-# 3c. 옮긴 뒤 검증은 서버와 같은 uid 로 실제 쓰기를 해 본다
+# 3c. 옛 게스트가 아직 있을 때 서버와 같은 uid 로 쓰기 가능 여부를 확인한다.
+#     게스트가 없으면 볼륨을 붙인 별도 검증 환경에서 확인한다.
 container exec --user $U:20 masc-keeper-vm-<keeper>-<hash> \
   sh -c 't=$(mktemp /masc-work/<keeper>/.probe.XXXXXX) && unlink "$t" && echo ok'
 
@@ -220,9 +222,9 @@ container exec --user $U:20 masc-keeper-vm-<keeper>-<hash> \
 #    같은 이름의 Keeper가 다른 작업 공간에서 쓰고 있을 수 있다.
 ```
 
-호스트의 `.masc/playground/microvm/<keeper>/` 는 더 이상 읽히지 않는다.
-복사가 확인되면 지운다. 서버는 이후 `.masc/playground/<keeper>/` 를
-장부(telemetry, workspace view)로만 쓴다.
+쓰기 검사는 내용이 모두 복사됐다는 증거가 아니다. 호스트 원본을 보존하고 숨김
+파일·심볼릭 링크와 필요한 메타데이터까지 실제 대상과 비교한다. 서버는 이후
+`.masc/playground/<keeper>/` 를 장부(telemetry, workspace view)로만 쓴다.
 
 ## 확인
 

@@ -10,6 +10,12 @@ related: ["0399", "0400", "0122", "keeper-boot-runs-no-one-shot-container"]
 
 # RFC — Keeper build output returns to a disposable volume
 
+> Operational correction, 2026-10-29: this RFC's historical `container volume
+> prune` measurements do not establish workspace ownership. A stopped Keeper
+> in another workspace may still need an unreferenced volume with the same
+> name. Do not use unscoped pruning as a Keeper volume cleanup procedure;
+> preserve volumes until their owners are established.
+
 - Status: Draft
 - Decision driver: measured 2026-09-24 on the live fleet (14 running microVM
   keepers). Host free space on `/` dropped to 42 GiB (of 3.6 TiB) while
@@ -428,13 +434,8 @@ that doesn't.
   this RFC has measurements for. A generic disk-pressure sweep across
   arbitrary guest paths is a different, larger RFC — RFC-0122 already flags
   "purge 정책" for later work explicitly, and this is that work, narrowly.
-- **Deleting the build volume on keeper purge/decommission.** Checked, not
-  assumed: `git grep` for a `container volume` delete call across `lib/`
-  returns zero hits today — the work volume is not explicitly deleted on
-  purge either. It relies on `container volume prune`, which removes any
-  volume with no container reference, run either manually or on whatever
-  cadence an operator chooses (measured this session: 6 orphaned volumes,
-  147 GB, reclaimed by one `container volume prune` call). The build volume
-  is the same kind of object as the work volume to that command, so it is
-  swept the same way once its container is gone; no new cleanup path is
-  added by this RFC, and none is needed.
+- **Deleting the build volume on keeper purge/decommission.** The historical
+  session reclaimed 147 GB from six volumes with no container references.
+  That observation did not establish ownership for stopped Keepers in other
+  workspaces. Current cleanup must preserve volumes until ownership is known;
+  the former suggestion to prune by absence of a container is superseded.

@@ -121,7 +121,7 @@ helper 의 `-trim` 이름은 `Keeper_sandbox_container_name.Micro_vm_work_volume
   1. `container volume inspect <volume>` 의 `source` 를 읽기만 해서 확인한다. `xxd -s 1080 -l 2 -p` 가 `53ef` 이고 `xxd -s 1280 -l 4 -p` 의 둘째 바이트에서 `0x04` 비트가 켜져 있으면 flag 가 있다. 지금 34개는 모두 `00040000` 이다.
   2. flag 만 없으면 helper 와 같은 argv 를 손으로 한 번 돌린다. `tune2fs` 가 있는 이미지(`masc-sandbox:general` 은 있다)를 쓴다. 볼륨을 붙인 게스트가 있으면 helper 가 시작하지 못하므로, 그 Keeper 의 게스트를 먼저 멈춘다. 잃는 것은 없고, 40~65초 막힘이 한 번 생긴다.
   3. superblock 을 못 읽거나 파일 시스템이 깨졌으면, 먼저 이미지를 복사해 둔다(`cp -c <source> <백업>`, APFS clone 이라 바로 끝난다). 그다음 일회용 컨테이너에서 `e2fsck` 를 돌리고, 고쳐지면 2로 간다.
-  4. 그래도 안 되면 `container volume delete <volume>` 뒤 `masc_keeper_sandbox_start` 를 부른다. 다음 부팅이 새 볼륨을 만들고 helper 를 띄운다. 이때 `/masc-work/<keeper>` 전체를 잃는다. checkout, push 하지 않은 커밋, 커밋하지 않은 변경, Keeper 가 쓴 task·문서 파일이 다 사라진다. 3의 복사본이 남는 유일한 자료다. 복사본에서 파일을 꺼내는 방법은 이 RFC 범위 밖이다(Q7).
+  4. 그래도 안 되면 볼륨을 보존한다. 이름은 작업 공간을 구별하지 않으므로 삭제 전에 해당 런타임을 쓰는 모든 작업 공간의 소유권과 복구 가능한 백업을 확인해야 한다. 기존의 무조건 삭제·재생성 제안은 더 이상 안전한 절차가 아니다.
 
 `Created` 결과(`ensure_work_volume_for`)에만 helper 를 띄우는 방법도 있다. 이 방법은 superblock 을 읽지 않는다. 대신 만든 직후 서버가 죽으면 기본값 없는 볼륨이 남고 아무도 고치지 않는다. 그래서 확인을 고른다(§10 Q1).
 

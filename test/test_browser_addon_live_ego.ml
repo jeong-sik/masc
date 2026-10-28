@@ -313,7 +313,7 @@ def run(script,answer):
         for level in (folder.parent,folder):level.mkdir(mode=0o700,exist_ok=True)
         ident='1b000000-0000-4000-8000-0000000000d1';saved=folder/ident
         saved.write_text('report');(root/'downloaded').write_text(str(saved))
-        answer({'since':'2026-10-23T09:00:00.000Z','rows':[{'id':ident,'label':'p1','url':'https://fixture.test/report.txt',
+        answer({'since':'2026-10-23T09:00:00.000Z','rows':[{'id':ident,'label':'p1','source':'native_download','url':'https://fixture.test/report.txt',
             'suggestedFilename':'report.txt','state':'completed','path':str(saved),'reason':None}]})
     elif step=='page.upload':
         # Ego receives the worker's copies; the peer records staged metadata.

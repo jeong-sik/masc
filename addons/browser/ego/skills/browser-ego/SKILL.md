@@ -30,6 +30,26 @@ host must first authorize and snapshot the requested files through the
 Keeper's file-read context. A raw path is not that authority. Never invent an
 `uploadId` or reuse a grant from another call.
 
+For Ego downloads, read `page.downloads` with the observed live client and tab
+ID, or use BrowserRead with `mode = "downloads"`. Read completed files only when
+their row contains a finalized artifact; invoke its returned
+`keeper_artifact_read` reader and arguments. Completion without that reference
+does not prove that bytes were retained. Pending or failed downloads are not
+completed artifacts; worker paths are not file-read grants.
+
+An Ego workflow `fetch` step can set `options.saveAs` to an artifact filename
+such as `report.pdf`, without a directory or control characters. Ego performs
+the browser-context fetch and binary save to a fresh private path. The step
+receipt returns `source: "fetch"`, `downloadId` and the requested
+`suggestedFilename`; it exposes no saved host path. Retrieve that ID through
+the same connection/tab's download reader and use only its finalized artifact.
+A saved HTTP error response still has `ok: false`; inspect the HTTP status.
+If a later step or final snapshot fails, an already completed save remains in
+that SDK process's download inventory. Read it without repeating fetch.
+An interrupted save has no completed artifact. Registry recovery after SDK
+process/worker replacement is not implemented; retained files alone are not
+proof of completion or permission to adopt them.
+
 To inspect who owns the already bound Ego Space, send `page.act` with
 `{"action":"space_status"}` on that exact live client. It reads native Space
 metadata only, even when delegated to the operator, without Page calls, claim,

@@ -188,7 +188,17 @@ HTTP(S) absolute or page-relative URLs and returns its native response receipt.
 A scheme-relative URL such as `//api.example/path` is also accepted: the
 browser inherits the page's HTTP(S) scheme and uses the specified host, with
 its normal credentials policy and CORS checks.
-`saveAs` requires a brokered download path and is not exposed here.
+`options.saveAs` accepts an artifact filename such as `report.pdf`, with no
+directories or control characters. Ego saves binary bytes to a fresh private
+UUID path; the step receipt returns `source="fetch"`, `downloadId` and the
+requested `suggestedFilename`, without a host path. Retrieve that ID through
+BrowserRead `mode=downloads` on the same client/tab and use only its finalized
+artifact reader. Native download events have `source="native_download"`.
+HTTP errors can still produce a completed save; inspect response `ok`/`status`.
+If a later step or snapshot fails, a completed save remains in the living SDK
+process's inventory. Read it without repeating Fetch. A lost or malformed save
+receipt cannot be replaced by file-existence inference. Registry recovery
+across worker/SDK-process replacement remains unimplemented.
 
 These methods are integrated in source with standalone codec and forwarding
 checks. The new Page observations, event drain, timeout and step-snapshot

@@ -90,7 +90,14 @@ selectOption의 `selectionJson` 예시는 `"{\"label\":\"Beta\"}"`이며 `{value
 돌아온다. HTTP 오류 상태도 반환된 데이터이므로 호출자가 status와 본문을 확인한다.
 fetch의 `options`는 timeout, method, 문자열 값의 headers 객체, body, cache, credentials,
 integrity, keepalive, mode, redirect, referrer, referrerPolicy를 받는다.
-호스트 파일 경로인 `saveAs`는 아직 다운로드 broker 연결이 필요해 받지 않는다.
+`options.saveAs`에는 디렉터리나 제어 문자가 없는 artifact 파일명(예: `report.pdf`)을
+넣는다. Ego가 새 비공개 UUID 경로에 바이너리를 저장하며, receipt에는 호스트 경로 대신
+`source="fetch"`, `downloadId`, 요청한 `suggestedFilename`이 돌아온다.
+같은 client/tab의 BrowserRead `mode=downloads`에서 해당 ID를 읽고 최종 artifact의
+reader를 사용한다. HTTP 오류 응답도 파일 저장은 완료될 수 있으므로 status를 확인한다.
+이후 step이나 snapshot이 실패해도 같은 SDK 프로세스가 살아 있다면 완료된 저장을
+회수할 수 있다. 회수를 위해 Fetch를 반복하지 않는다. 중단된 저장이나 파일 존재만으로
+완료를 추정하지 않으며, SDK 프로세스·worker 교체 후 registry 자동 복구는 구현되지 않았다.
 step `snapshot`의 scope는 SDK의 `full_page`, `only_within_viewport`, `subtree`다.
 subtree에만 같은 Page에서 관측한 현재 `root` ref를 넣고, subtree이면 root가 필수다.
 두 inclusion 옵션의 false도 그대로 전달된다. step snapshot의 원문은 해당 receipt에

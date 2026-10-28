@@ -278,7 +278,10 @@ let not_regular_detail path = path ^ ": not a regular file"
 type change =
   | Unchanged
   | Unobservable of string
-  | Changed of file option  (** The file as last read, if it was. *)
+  | Changed of
+      { prior : file option  (** The file as last read, if it was. *)
+      ; seen : observation  (** What [lstat] said just now. *)
+      }
 
 let classify index (file : day_file) =
   match Unix.lstat file.file_path with
@@ -287,11 +290,11 @@ let classify index (file : day_file) =
   | stats when stats.Unix.st_kind <> Unix.S_REG ->
     Unobservable (not_regular_detail file.file_path)
   | stats ->
+    let seen = observation_of_stats stats in
     let prior = SMap.find_opt file.file_path index.files in
     (match prior with
-     | Some prior when equal_observation prior.observed (observation_of_stats stats) ->
-       Unchanged
-     | Some _ | None -> Changed prior)
+     | Some prior when equal_observation prior.observed seen -> Unchanged
+     | Some _ | None -> Changed { prior; seen })
 ;;
 
 type read =
@@ -303,8 +306,10 @@ let read_chunk_bytes = 65_536
 
 (* Read [file] from its first byte to the size its open handle has. The bytes
    [prior] decoded are only checked against its digests; the complete lines
-   after them are decoded into [index] and digested as they are. *)
-let read_changed index (file : day_file) ~prior =
+   after them are decoded into [index] and digested as they are. The open
+   follows a symbolic link, so a handle that is not the file [lstat] saw as
+   [seen] is refused for this read, as the backward scan refuses a link. *)
+let read_changed index (file : day_file) ~prior ~seen =
   let path = file.file_path in
   let at row = { month = file.file_month; day = Day file.file_day; row } in
   let expected, first_row =
@@ -323,6 +328,9 @@ let read_changed index (file : day_file) ~prior =
          match Unix.fstat descriptor with
          | exception Unix.Unix_error (error, _, _) -> Read_refused (unix_detail path error)
          | stats when stats.Unix.st_kind <> Unix.S_REG -> Read_refused (not_regular_detail path)
+         | stats
+           when stats.Unix.st_ino <> seen.inode || stats.Unix.st_dev <> seen.device ->
+           Read_refused (path ^ ": replaced while it was opened")
          | stats when stats.Unix.st_size < expected.length -> Rewritten
          | stats ->
            let size = stats.Unix.st_size in
@@ -413,8 +421,8 @@ let read_files index listing_refused newest_first =
       (match classify index file with
        | Unchanged -> read index refused rest
        | Unobservable detail -> read index (refuse file detail refused) rest
-       | Changed prior ->
-         (match read_changed index file ~prior with
+       | Changed { prior; seen } ->
+         (match read_changed index file ~prior ~seen with
           | Read index -> read index refused rest
           | Read_refused detail -> read index (refuse file detail refused) rest
           | Rewritten -> Rebuild_needed))
@@ -472,10 +480,18 @@ let advance store index =
     let listed path =
       List.exists (fun (file : day_file) -> String.equal file.file_path path) newest_first
     in
-    let removed = SMap.filter (fun path _ -> not (listed path)) index.files in
-    (* An unreadable month listing hides that month's files; they are not
-       removed. *)
-    if Option.is_some listing_refused || SMap.is_empty removed
+    (* The listing stops at an unreadable month, as the backward scan does.
+       Files of that month and older ones are hidden, not removed; a file
+       missing from a newer month, which was listed whole, is removed. *)
+    let hidden (file : file) =
+      match listing_refused with
+      | Some refusal -> String.compare file.first_row.month refusal.at.month <= 0
+      | None -> false
+    in
+    let removed =
+      SMap.filter (fun path file -> not (listed path || hidden file)) index.files
+    in
+    if SMap.is_empty removed
     then Ok (read_files index listing_refused newest_first)
     else (
       match without_oldest_files index ~removed with

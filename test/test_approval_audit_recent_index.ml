@@ -249,6 +249,34 @@ let test_removed_day_files () =
   agrees_with_scan ~base_path "a file written again"
 ;;
 
+(* An unreadable month stops the listing, as it stops the scan. A file
+   removed from a newer month, which is still listed whole, must not keep its
+   rows. *)
+let test_unreadable_month () =
+  let base_path = temp_dir () in
+  let september = Filename.concat (audit_dir base_path) "2026-09" in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists september then Unix.chmod september 0o755;
+      cleanup_dir base_path)
+  @@ fun () ->
+  append_lines (day_path ~base_path ~month:"2026-09" ~day:"30.jsonl") (rows "gamma" 1);
+  append_lines (day_path ~base_path ~month:"2026-10" ~day:"01.jsonl") (rows "alpha" 1);
+  let oct02 = day_path ~base_path ~month:"2026-10" ~day:"02.jsonl" in
+  append_lines oct02 (rows "alpha" 1);
+  agrees_with_scan ~base_path "every month readable";
+  Unix.chmod september 0o000;
+  check bool "the month cannot be listed" true
+    (match Sys.readdir september with
+     | _ -> false
+     | exception Sys_error _ -> true);
+  agrees_with_scan ~base_path "an older month unreadable";
+  Sys.remove oct02;
+  agrees_with_scan ~base_path "an older month unreadable, a newer file removed";
+  Unix.chmod september 0o755;
+  agrees_with_scan ~base_path "the month readable again"
+;;
+
 (* A row about 1 KB long, so a test file passes a 1 MiB digest block with
    few rows. *)
 let padded_row keeper =
@@ -431,6 +459,93 @@ let test_a_read_sees_rows_appended_before_it () =
   check bool "some reads answered while rows were appended" true (Atomic.get answered > 0)
 ;;
 
+(* The same rule without racing: a read that arrives while a long first
+   build runs must not take that build's answer, because the build opened the
+   file before the row it wants was appended. One domain starts building
+   from a 30 MB file; 20 ms later a row is appended and another read starts.
+   The test fails rather than proves nothing if the build is already over. *)
+let test_a_read_during_a_build_sees_a_row_appended_before_it () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  let file = day_path ~base_path ~month:"2026-10" ~day:"01.jsonl" in
+  append_lines file (List.init 30_000 (fun _ -> padded_row "beta"));
+  let build_done = Atomic.make false in
+  Eio_main.run @@ fun env ->
+  let domain_mgr = Eio.Stdenv.domain_mgr env in
+  Eio.Switch.run @@ fun sw ->
+  let build =
+    Eio.Fiber.fork_promise ~sw (fun () ->
+      Eio.Domain_manager.run domain_mgr (fun () ->
+        let answer = Audit.read_recent ~base_path ~keeper_name:"alpha" ~n:1 () in
+        Atomic.set build_done true;
+        answer))
+  in
+  Eio.Time.sleep (Eio.Stdenv.clock env) 0.02;
+  append_lines file [ row "alpha" ];
+  let appended = Printf.sprintf "approval-%d" !serial in
+  check bool "the build still runs when the row is appended" false (Atomic.get build_done);
+  let later = Audit.read_recent ~base_path ~keeper_name:"alpha" ~n:1 () in
+  ignore (Eio.Promise.await_exn build);
+  check bool "the later read has the appended row" true
+    (match later with
+     | Ok [ `Assoc fields ] -> List.assoc_opt "id" fields = Some (`String appended)
+     | Ok _ | Error _ -> false)
+;;
+
+(* With a pool, a read outside it must not run an advance another read is
+   waiting for inside a pool job. One worker: a pool job holds it, a read
+   outside the pool arrives, then the pool job reads. If the outside read ran
+   the advance, it would wait for the worker the job holds while the job
+   waits for that advance. *)
+let test_reads_inside_and_outside_a_one_worker_pool () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  append_lines (day_path ~base_path ~month:"2026-10" ~day:"01.jsonl")
+    (rows "alpha" 5 @ rows "beta" 2);
+  let expected = scan ~base_path ~keeper_name:"alpha" ~n:3 () in
+  let read () =
+    Audit.read_recent ~base_path ~keeper_name:"alpha" ~n:3 ()
+    |> Result.map_error Audit.read_error_to_string
+  in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  Domain_pool_ref.set pool;
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
+  let started, job_started = Eio.Promise.create () in
+  let go, release_job = Eio.Promise.create () in
+  let answers =
+    Eio.Time.with_timeout (Eio.Stdenv.clock env) 30.0 (fun () ->
+      Eio.Fiber.pair
+        (fun () ->
+           Domain_pool.submit_cpu ~name:"holds the worker" pool (fun () ->
+             Eio.Promise.resolve job_started ();
+             Eio.Promise.await go;
+             read ()))
+        (fun () ->
+           Eio.Promise.await started;
+           Eio.Fiber.both
+             (fun () -> ignore (read ()))
+             (fun () -> Eio.Promise.resolve release_job ());
+           read ())
+      |> Result.ok)
+  in
+  match answers with
+  | Error `Timeout -> fail "the reads waited for each other"
+  | Ok (inside, outside) ->
+    let agrees label answer =
+      match answer, expected with
+      | Ok rows, Ok scanned ->
+        check int (label ^ " count") (List.length scanned) (List.length rows);
+        check bool (label ^ " rows") true (List.for_all2 Yojson.Safe.equal rows scanned)
+      | Error _, Error _ -> ()
+      | Ok _, Error detail -> failf "%s: index answered, scan refused (%s)" label detail
+      | Error detail, Ok _ -> failf "%s: index refused (%s)" label detail
+    in
+    agrees "the read inside the pool job" inside;
+    agrees "the read outside the pool" outside
+;;
+
 let test_bounds () =
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
@@ -454,6 +569,7 @@ let () =
             test_index_answers_as_the_backward_scan
         ; test_case "a row without a final newline" `Quick test_row_without_a_final_newline
         ; test_case "removed day files" `Quick test_removed_day_files
+        ; test_case "an unreadable month" `Quick test_unreadable_month
         ; test_case "a file rewritten in place and grown" `Quick
             test_file_rewritten_in_place_and_grown
         ; test_case "a rewrite that keeps the bytes before the boundary" `Quick
@@ -462,6 +578,10 @@ let () =
             test_concurrent_reads_agree_with_the_scan
         ; test_case "a read sees rows appended before it" `Quick
             test_a_read_sees_rows_appended_before_it
+        ; test_case "a read during a build sees a row appended before it" `Quick
+            test_a_read_during_a_build_sees_a_row_appended_before_it
+        ; test_case "reads inside and outside a one-worker pool" `Quick
+            test_reads_inside_and_outside_a_one_worker_pool
         ; test_case "bounds" `Quick test_bounds
         ] )
     ]

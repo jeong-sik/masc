@@ -523,10 +523,15 @@ let read_recent_max_rows = Audit_recent_index.max_rows
    advance began after the read arrived. Reads that arrive while an advance
    runs wait for the next one instead of each reading the changed files:
    the first of them runs it, the rest await its promise. The mutex guards
-   only the slot. The advance runs outside it, as a job on the domain pool
-   (inline when the read is itself a pool job), and a waiting read suspends
-   its fiber instead of blocking its domain on a lock. A read made inside a
-   pool job still holds that job's place while it waits. *)
+   only the slot; the advance runs outside it, and a waiting read suspends
+   its fiber instead of blocking its domain on a lock.
+
+   The whole of a read, arrival included, is one job on the domain pool
+   (inline when the read is already a pool job). So whoever runs an advance
+   already holds a worker. A read outside the pool that ran the advance
+   itself would submit it as a job and wait for a worker, while reads inside
+   pool jobs held every worker waiting for that advance. A read inside a pool
+   job still holds that job's place while it waits. *)
 type recent_flight_result =
   | Finished of (Audit_recent_index.t * Audit_recent_index.refusal option, string) result
   | Abandoned  (** Its runner was cancelled or raised. Its waiters arrive again. *)
@@ -561,15 +566,10 @@ let advance_recent_index store = function
      | Ok Audit_recent_index.Rebuild_needed -> Audit_recent_index.rebuild store)
 ;;
 
-let advance_on_pool store index =
-  Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-    advance_recent_index store index)
-;;
-
 (* The caller has made [flight] the slot's running one. *)
 let run_recent_flight store slot ((_, resolver) as flight) =
   let index = Stdlib.Mutex.protect recent_slots_mu (fun () -> slot.index) in
-  match advance_on_pool store index with
+  match advance_recent_index store index with
   | result ->
     Stdlib.Mutex.protect recent_slots_mu (fun () ->
       (match result with
@@ -623,7 +623,7 @@ let rec current_recent_index ~base_path store =
   let slot, arrival = arrive_at_recent_slot ~base_path in
   match arrival with
   | Run flight -> run_recent_flight store slot flight
-  | Read_alone index -> advance_on_pool store index
+  | Read_alone index -> advance_recent_index store index
   | Await queued ->
     (match Eio.Promise.await queued with
      | Finished result -> result
@@ -657,7 +657,10 @@ let read_recent ~base_path ?keeper_name ?(n = 20) ()
     match get_audit_store ~base_path () with
     | Error detail -> refused detail
     | Ok store ->
-      (match current_recent_index ~base_path store with
+      (match
+         Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+           current_recent_index ~base_path store)
+       with
        | Error detail -> refused detail
        | Ok (index, refused_at) ->
          (match Audit_recent_index.select index ~refused:refused_at ~keeper_name ~n with

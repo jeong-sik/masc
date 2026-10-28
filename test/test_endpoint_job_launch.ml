@@ -899,7 +899,7 @@ let terminal_result_reopens_after_owner_exit_and_boot_change = fixture (fun ~env
       (D.sha256 restored=receipt.sha256 && D.input_delivery restored=D.Accepted 0L);
     let gate=D.gate restored in
     check "raw gate evidence survives without reconstructing a kernel handle"
-      (gate.preparation=D.Ready && gate.decision=G.Activate_requested && gate.control=G.Ended);
+      (gate.preparation=D.Ready && gate.decision=G.Activate_requested && gate.control=D.Ended);
     (match D.inspect restored |> result_read with
      | P.Status {original;revision;phase=P.Termination_observed (P.Exited 7);cancel_requested=true;
          result=P.Result_ready hash;stdout=P.Sealed stdout;stderr=P.Sealed stderr} ->
@@ -1154,6 +1154,22 @@ let digest_package_matches_known_sha256 () =
   Alcotest.(check string) "short ASCII" "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" (hex "abc");
   Alcotest.(check string) "4 KiB of every byte value" "c8f5d0341d54d951a71b136e6e2afcb14d11ed8489a7ae126a8fee0df6ecf193"
     (hex (String.init 4096 (fun i -> Char.chr (i land 0xff))))
+let failed_gate_channel_is_written_to_the_receipt () =
+  let binding=P.binding ~route ~owner ~operation_id:(id "05") ~invocation_sha256:(digest "original invocation")
+      ~spec_sha256:(digest "original spec") |> require in
+  let sealed=P.Sealed {byte_length=0L;sha256=digest ""} in
+  let status=P.Status {original=P.original ~binding ~admission_id:(id "04");revision=1L;
+      phase=P.Termination_observed (P.Signaled 9);cancel_requested=false;result=P.Result_pending;
+      stdout=sealed;stderr=sealed} in
+  let gate : D.gate={preparation=D.Ready;decision=G.Activate_requested;
+      control=D.Failed {diagnostic="control IO: Connection reset by peer"}} in
+  (* encode reads its payload back, so Ok means the failed state decodes. *)
+  let content=D.encode ~status ~launch_id:(id "06") ~input:(D.Accepted 0L) ~gate
+    |> Result.map_error D.error_to_string |> require in
+  let control=Yojson.Safe.Util.(Yojson.Safe.from_string content |> member "payload" |> member "gate" |> member "control") in
+  (* The second value is the base64 of the diagnostic above. *)
+  check "failed channel and its diagnostic are written"
+    (control=`Assoc ["state",`String "failed";"diagnostic_b64",`String "Y29udHJvbCBJTzogQ29ubmVjdGlvbiByZXNldCBieSBwZWVy"])
 let () =
   if G.For_testing.linux_build && Unix.geteuid ()<>0 && Sys.getenv_opt "GITHUB_ACTIONS"=Some "true" then (
     let executable=Unix.realpath Sys.executable_name in
@@ -1161,13 +1177,15 @@ let () =
   let cases=if not G.For_testing.linux_build || Unix.geteuid ()<>0 then
       ["platform/controller refusal (kernel integration not run)",refusal;
        "digest package matches known SHA-256 values",digest_package_matches_known_sha256;
-       "unavailable boundaries never fall back to workspace execution",unavailable_boundaries]
+       "unavailable boundaries never fall back to workspace execution",unavailable_boundaries;
+       "failed gate channel is written to the receipt",failed_gate_channel_is_written_to_the_receipt]
     else ["digest package matches known SHA-256 values",digest_package_matches_known_sha256;
       "durable original rendezvous before activation",durable_before_activation;
       "publication failure preserves paused owner without replay",publication_failure_retains_paused_owner;
       "busy original startup leaves another actual job executable",busy_startup_leaves_other_job_executable;
       "wait cancellation and original authority before tree kill",wait_and_cancel_require_original_authority;
       "unavailable boundaries never fall back to workspace execution",unavailable_boundaries;
+      "failed gate channel is written to the receipt",failed_gate_channel_is_written_to_the_receipt;
       "complete binary output is durably sealed and not overwritten",complete_binary_output_is_durably_sealed;
       "output metadata queues by actual owner and survives waiter cancellation",output_metadata_waits_only_for_its_original_owner;
       "output observer cancellation preserves later original bytes",output_observer_cancel_preserves_capture_and_child;

@@ -19,8 +19,10 @@ val error_to_string : error -> string
 type input_delivery = Accepted of int64 | Incomplete of { confirmed_prefix : int64 }
 (** Accepted bytes entered the original pipe, never proof of consumption. *)
 type preparation = Pending | Ready | Rejected of { diagnostic : string }
-type gate = { preparation : preparation; decision : G.decision; control : G.control }
-(** Rejection diagnostics are display evidence only; never parse them to infer
+type control = Open | Ended | Failed of { diagnostic : string }
+type gate = { preparation : preparation; decision : G.decision; control : control }
+(** Failed is a broken private gate channel; its other gate fields may be cut
+    short. Rejection and failure diagnostics are display evidence only; never parse them to infer
     exec, non-start, retry, signalling or cleanup permission. *)
 val encode :
   status:P.response -> launch_id:P.Id.t -> input:input_delivery -> gate:gate ->

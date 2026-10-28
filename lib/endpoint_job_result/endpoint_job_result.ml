@@ -19,7 +19,8 @@ let error_to_string = function
   | Sync_failed e -> Fs_compat.owned_regular_file_read_error_to_string e
 type input_delivery = Accepted of int64 | Incomplete of { confirmed_prefix : int64 }
 type preparation = Pending | Ready | Rejected of { diagnostic : string }
-type gate = { preparation : preparation; decision : G.decision; control : G.control }
+type control = Open | Ended | Failed of { diagnostic : string }
+type gate = { preparation : preparation; decision : G.decision; control : control }
 type seal = { byte_length : int64; sha256 : P.Sha256.t }
 type frozen = {
   original : P.original; revision : int64; cancel_requested : bool;
@@ -65,17 +66,25 @@ let read_input value =
   | "write_failed" -> let* values=fields ["state";"confirmed_prefix"] value in
     let* confirmed_prefix=count (List.assoc "confirmed_prefix" values) in Ok (Incomplete {confirmed_prefix})
   | _ -> invalid ()
+let read_diagnostic value =
+  let* values=fields ["state";"diagnostic_b64"] value in
+  let* encoded=text (List.assoc "diagnostic_b64" values) in
+  match Base64.decode encoded with
+  | Ok diagnostic when Base64.encode_string diagnostic=encoded -> Ok diagnostic
+  | Ok _ | Error _ -> invalid ()
 let read_preparation value =
   let* state=object_state value in
   match state with
   | "pending" -> let* _=fields ["state"] value in Ok Pending
   | "ready" -> let* _=fields ["state"] value in Ok Ready
-  | "rejected" ->
-    let* values=fields ["state";"diagnostic_b64"] value in
-    let* encoded=text (List.assoc "diagnostic_b64" values) in
-    (match Base64.decode encoded with
-     | Ok diagnostic when Base64.encode_string diagnostic=encoded -> Ok (Rejected {diagnostic})
-     | Ok _ | Error _ -> invalid ())
+  | "rejected" -> let* diagnostic=read_diagnostic value in Ok (Rejected {diagnostic})
+  | _ -> invalid ()
+let read_control value =
+  let* state=object_state value in
+  match state with
+  | "open" -> let* _=fields ["state"] value in Ok Open
+  | "ended" -> let* _=fields ["state"] value in Ok Ended
+  | "failed" -> let* diagnostic=read_diagnostic value in Ok (Failed {diagnostic})
   | _ -> invalid ()
 let read_gate value =
   let* values=fields ["preparation";"decision";"control"] value in
@@ -84,8 +93,7 @@ let read_gate value =
   let* decision=match decision with
     | "undecided" -> Ok G.Undecided | "activate_requested" -> Ok G.Activate_requested
     | "abort_requested" -> Ok G.Abort_requested | _ -> invalid () in
-  let* control=text (List.assoc "control" values) in
-  let* control=match control with "open" -> Ok G.Open | "ended" -> Ok G.Ended | _ -> invalid () in
+  let* control=read_control (List.assoc "control" values) in
   Ok {preparation;decision;control}
 let decode_payload json =
   let* values=fields ["status";"launch_id";"stdin";"gate"] json in
@@ -131,9 +139,11 @@ let encode ~status ~launch_id ~input ~(gate : gate) =
     | Rejected {diagnostic} -> `Assoc ["state",`String "rejected";"diagnostic_b64",`String (Base64.encode_string diagnostic)] in
   let decision=match gate.decision with
     | G.Undecided -> "undecided" | Activate_requested -> "activate_requested" | Abort_requested -> "abort_requested" in
-  let control=match gate.control with G.Open -> "open" | Ended -> "ended" in
+  let control=match gate.control with
+    | Open -> `Assoc ["state",`String "open"] | Ended -> `Assoc ["state",`String "ended"]
+    | Failed {diagnostic} -> `Assoc ["state",`String "failed";"diagnostic_b64",`String (Base64.encode_string diagnostic)] in
   let payload=`Assoc ["status",status;"launch_id",`String (P.Id.to_string launch_id);"stdin",input;
-    "gate",`Assoc ["preparation",preparation;"decision",`String decision;"control",`String control]] in
+    "gate",`Assoc ["preparation",preparation;"decision",`String decision;"control",control]] in
   let* _=decode_payload payload in
   Ok (Yojson.Safe.to_string (`Assoc ["version",`Int 1;"payload",payload;"payload_sha256",`String (payload_digest payload)]))
 let source frozen record =

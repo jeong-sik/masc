@@ -91,7 +91,13 @@ let result_content (observation : observation) launch_id =
       Rejected {diagnostic=G.error_to_string (G.Child_rejected {stage;error})} in
   let input : Endpoint_job_result.input_delivery=match observation.settled.stdin with
     | Written bytes -> Accepted bytes | Write_failed {confirmed_prefix} -> Incomplete {confirmed_prefix} in
-  let gate : Endpoint_job_result.gate={preparation;decision=boundary.decision;control=boundary.control} in
+  let control : Endpoint_job_result.control=match boundary.control with
+    | G.Open -> Open
+    | G.Ended -> Ended
+    | G.Failed failure ->
+      (* Display evidence only, like a rejection diagnostic. *)
+      Failed {diagnostic=G.error_to_string (G.control_failure_error failure)} in
+  let gate : Endpoint_job_result.gate={preparation;decision=boundary.decision;control} in
   Endpoint_job_result.encode ~status:observation.status ~launch_id ~input ~gate
   |> Result.map_error (fun e -> Result_encoding_failed e)
 

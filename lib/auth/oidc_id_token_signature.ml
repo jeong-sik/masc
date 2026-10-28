@@ -4,24 +4,26 @@
 
 type error =
   | Malformed_token
-  | Malformed_jwks
   | Algorithm_not_allowed
   | Unsupported_critical_header
   | Missing_key_id
+  | Malformed_jwks
   | Unknown_key_id
   | Key_not_rs256
+  | Key_too_short
   | Invalid_signature
   | Invalid_expiry
   | Expired
 
 let error_to_string = function
   | Malformed_token -> "malformed_token"
-  | Malformed_jwks -> "malformed_jwks"
   | Algorithm_not_allowed -> "algorithm_not_allowed"
   | Unsupported_critical_header -> "unsupported_critical_header"
   | Missing_key_id -> "missing_key_id"
+  | Malformed_jwks -> "malformed_jwks"
   | Unknown_key_id -> "unknown_key_id"
   | Key_not_rs256 -> "key_not_rs256"
+  | Key_too_short -> "key_too_short"
   | Invalid_signature -> "invalid_signature"
   | Invalid_expiry -> "invalid_expiry"
   | Expired -> "expired"
@@ -29,11 +31,20 @@ let error_to_string = function
 
 let ( let* ) = Result.bind
 
+(* RFC 7518 section 3.3: a key used with RS256 must be 2048 bits or longer. *)
+let min_rsa_bits = 2048
+
 let is_rs256 (alg : Jose.Jwa.alg) =
   match alg with
   | `RS256 -> true
   | `HS256 | `ES256 | `ES384 | `ES512 | `EdDSA | `Ed25519 | `RSA_OAEP | `RSA1_5 | `None
   | `Unsupported _ -> false
+;;
+
+let is_signature_use (use : Jose.Jwk.use) =
+  match use with
+  | `Sig -> true
+  | `Enc | `Unsupported _ -> false
 ;;
 
 (* RFC 7515 4.1.11 makes a token invalid when its [crit] header names an
@@ -50,19 +61,53 @@ let base64url_encode bytes =
 ;;
 
 (* jose decodes a segment with [Base64.decode ~pad:false]. That accepts a
-   trailing "=", ignores a dangling last character, and ignores nonzero padding
-   bits, so one token has many spellings. RFC 7515 section 2 allows one: the
-   unpadded base64url encoding of the bytes. A segment is canonical when
-   encoding what it decodes to gives the segment back. A token in JSON form,
-   which jose reads when the text starts with '{', has characters outside the
-   alphabet and is not canonical. *)
-let is_canonical_segment segment =
+   trailing "=", ignores a dangling last character, and ignores nonzero
+   padding bits, so one token has many spellings. RFC 7515 section 2 allows one:
+   the unpadded base64url encoding of the bytes. A segment is canonical when
+   encoding what it decodes to gives the segment back. The bytes come back for
+   a canonical segment. *)
+let decode_canonical segment =
   match base64url_decode segment with
-  | Ok bytes -> String.equal (base64url_encode bytes) segment
-  | Error (`Msg _) -> false
+  | Ok bytes -> if String.equal (base64url_encode bytes) segment then Some bytes else None
+  | Error (`Msg _) -> None
 ;;
 
-let is_canonical token = List.for_all is_canonical_segment (String.split_on_char '.' token)
+(* RFC 7515 section 4 and RFC 7519 section 4 require the member names of a
+   header and of a claims set to be unique. A parser must reject a repeated
+   name or keep the last value. jose keeps the first, so a reader that keeps
+   the last would see another token. Only the top-level names count: nothing
+   here reads deeper. A value that is not an object has no names to repeat. *)
+let has_repeated_member (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc members ->
+    let names = List.map fst members in
+    List.length (List.sort_uniq String.compare names) <> List.length names
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
+;;
+
+(* The segment is canonical base64url of JSON text, and the JSON does not
+   repeat a member name. *)
+let is_plain_json_segment segment =
+  match decode_canonical segment with
+  | None -> false
+  | Some text ->
+    (match Yojson.Safe.from_string text with
+     | json -> not (has_repeated_member json)
+     | exception Yojson.Json_error _ -> false)
+;;
+
+(* The compact form of RFC 7515 section 7.1: three canonical segments, the
+   first two of them JSON without a repeated member name. A token in JSON
+   form, which jose reads when the text starts with '{', has characters
+   outside the alphabet and is not accepted. *)
+let is_plain_compact_token token =
+  match String.split_on_char '.' token with
+  | [ header; payload; signature ] ->
+    is_plain_json_segment header
+    && is_plain_json_segment payload
+    && Option.is_some (decode_canonical signature)
+  | [] | [ _ ] | [ _; _ ] | _ :: _ :: _ :: _ :: _ -> false
+;;
 
 (* jose reports some input it cannot read by raising instead of returning an
    error. These are the four it raises, read from the 0.11.0 sources:
@@ -97,35 +142,30 @@ let parse_token token =
 let parse_jwks text = guard Malformed_jwks (fun () -> Jose.Jwks.of_string text)
 ;;
 
-let is_rsa key =
-  match Jose.Jwk.get_kty key with
-  | `RSA -> true
-  | `oct | `EC | `OKP | `Unsupported _ -> false
-;;
-
-let declares_rs256 key = Option.fold ~none:false ~some:is_rs256 (Jose.Jwk.get_alg key)
-
-(* jose fills [use] in from [alg] when only [alg] is given, so a key that
-   declares RS256 has a [use] here. [Jwk] has no accessor for it, but the JSON
-   form of the key carries it. *)
-let declares_signature_use key =
-  match Yojson.Safe.Util.member "use" (Jose.Jwk.to_pub_json key) with
-  | `String "sig" -> true
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> false
-  | exception Yojson.Safe.Util.Type_error _ -> false
-;;
-
 (* jose verifies with whatever kind of key the JWKS names, so an HMAC key would
    verify an RS256 header. It takes the hash from the key's own [alg], and a key
    with none accepts SHA-256, SHA-384 and SHA-512 under an RS256 header. It
    also ignores [use] once [alg] is given, so an entry with alg RS256 and use
    enc verifies. Requiring an RSA key that says RS256 and [use] = [sig] closes
    all three and leaves SHA-256 as the one hash. jose fills in [alg] from [use]
-   when only that is given. *)
-let require_rs256_rsa_key key =
-  if is_rsa key && declares_rs256 key && declares_signature_use key
-  then Ok ()
-  else Error Key_not_rs256
+   when only that is given, and [use] from [alg]. Matching on the key itself
+   keeps these conditions, and the size, in one place, and a new kind of key
+   in a later jose release does not compile until it is placed here. *)
+let check_key (jwk : Jose.Jwk.public Jose.Jwk.t) =
+  match jwk with
+  | Jose.Jwk.Rsa_pub { Jose.Jwk.alg; use; key; kty = _; kid = _ } ->
+    let says_rs256 = Option.fold ~none:false ~some:is_rs256 alg in
+    let says_signature = Option.fold ~none:false ~some:is_signature_use use in
+    if not (says_rs256 && says_signature)
+    then Error Key_not_rs256
+    else if Mirage_crypto_pk.Rsa.pub_bits key < min_rsa_bits
+    then Error Key_too_short
+    else Ok ()
+  | Jose.Jwk.Oct _
+  | Jose.Jwk.Es256_pub _
+  | Jose.Jwk.Es384_pub _
+  | Jose.Jwk.Es512_pub _
+  | Jose.Jwk.Ed25519_pub _ -> Error Key_not_rs256
 ;;
 
 (* jose's own expiry check passes a payload without [exp], or with a null one,
@@ -148,13 +188,16 @@ let check_expiry ~now payload =
      | Some deadline -> if Ptime.is_earlier now ~than:deadline then Ok () else Error Expired)
 ;;
 
-let check_signature key jwt =
-  let* checked = guard Invalid_signature (fun () -> Jose.Jwt.validate_signature ~jwk:key jwt) in
+let check_signature jwk jwt =
+  let* checked = guard Invalid_signature (fun () -> Jose.Jwt.validate_signature ~jwk jwt) in
   Result.map_error (fun _ -> Invalid_signature) checked
 ;;
 
-let verify ~jwks ~now token =
-  let* () = if is_canonical token then Ok () else Error Malformed_token in
+(* The checks run in the order of the constructors of [error]. [exp] is read
+   after the signature, so only a payload some key of the provider signed is
+   believed. *)
+let verify_signature_and_expiry ~jwks ~now token =
+  let* () = if is_plain_compact_token token then Ok () else Error Malformed_token in
   let* jwt = parse_token token in
   let header = jwt.Jose.Jwt.header in
   let* () =
@@ -163,9 +206,9 @@ let verify ~jwks ~now token =
   let* () = if has_critical_header header then Error Unsupported_critical_header else Ok () in
   let* kid = Option.to_result ~none:Missing_key_id header.Jose.Header.kid in
   let* jwks = parse_jwks jwks in
-  let* key = Option.to_result ~none:Unknown_key_id (Jose.Jwks.find_key jwks kid) in
-  let* () = require_rs256_rsa_key key in
-  let* verified = check_signature key jwt in
+  let* jwk = Option.to_result ~none:Unknown_key_id (Jose.Jwks.find_key jwks kid) in
+  let* () = check_key jwk in
+  let* verified = check_signature jwk jwt in
   let payload = verified.Jose.Jwt.payload in
   let* () = check_expiry ~now payload in
   Ok payload

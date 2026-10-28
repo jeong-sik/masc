@@ -3,17 +3,18 @@
 
 usage: python3 scripts/gen-oidc-test-vectors.py > test/oidc_id_token_vectors.ml
 
-Makes three throwaway RSA keys and one EC key with openssl, signs tokens with
+Makes four throwaway RSA keys and one EC key with openssl, signs tokens with
 them, and prints OCaml string bindings. The private keys live in a temporary
 directory that is deleted at the end; only public JWKS entries and signed
 tokens are printed. The third RSA key is never listed in a JWKS: it stands for
-an attacker. Every run makes new keys, so regenerate the whole file.
+an attacker. The fourth has a 2047-bit modulus, one bit under the limit the
+tests expect. Every run makes new keys, so regenerate the whole file.
 
 Before printing, each token is checked by a verifier written in this file
 (RSA PKCS#1 v1.5 with SHA-256 or SHA-384, and HMAC-SHA-256). It shares no code
 with openssl or with the library under test. The run fails when a token
-verifies under a different key or hash than EXPECTED_VERIFIES says, so a test
-comment such as "signed by the other key" stays true.
+verifies under a different key or hash than EXPECTED_VERIFIES says, so a claim
+in the tests such as "signed by another listed key" stays true.
 """
 
 import base64
@@ -35,7 +36,11 @@ KEY_1 = "test-key-1"
 KEY_2 = "test-key-2"
 OCT_KEY = "oct-key"
 PUBLIC_PEM_SECRET = "public-key-pem"
+SHORT_KEY = "short-key"
 RSA_BITS = "2048"
+RSA_BITS_ONE_SHORT = "2047"
+REPEATED_ALG = '"alg":"none"'  # a second alg member, after the RS256 one
+REPEATED_EXP = f'"exp":{LONG_PAST}'  # a second exp member, in the past
 NOT_JSON = b"this is not json"
 NOT_AN_OBJECT = b"[1,2,3]"
 EC_COORDINATE_BYTES = 32  # P-256; the point (0, 0) is not on the curve
@@ -91,6 +96,11 @@ EXPECTED_VERIFIES: dict[str, set[str]] = {
     "token_header_not_json": {"sha256@test-key-1"},
     "token_unknown_enc": {"sha256@test-key-1"},
     "token_alg_not_a_string": {"sha256@test-key-1"},
+    # Signed correctly; the JSON repeats a member name, which a strict parser refuses.
+    "token_header_repeats_alg": {"sha256@test-key-1"},
+    "token_payload_repeats_exp": {"sha256@test-key-1"},
+    # The only token the 2047-bit key signed.
+    "token_signed_by_2047_bit_key": {"sha256@short-key"},
 }
 
 
@@ -110,9 +120,9 @@ def run(*args: str, stdin: bytes | None = None) -> bytes:
     return subprocess.run(list(args), input=stdin, capture_output=True, check=True).stdout
 
 
-def rsa_key(directory: str, name: str) -> str:
+def rsa_key(directory: str, name: str, bits: str = RSA_BITS) -> str:
     path = f"{directory}/{name}.pem"
-    run("openssl", "genrsa", "-out", path, RSA_BITS)
+    run("openssl", "genrsa", "-out", path, bits)
     return path
 
 
@@ -136,6 +146,11 @@ def without(jwk: dict, *names: str) -> dict:
 
 def compact_json(value: object) -> str:
     return json.dumps(value, separators=(",", ":"))
+
+
+def with_repeated_member(value: dict, member: str) -> str:
+    """Compact JSON of an object plus one more member, given as JSON text, that repeats a name."""
+    return compact_json(value)[:-1] + "," + member + "}"
 
 
 def encode_part(value: dict) -> str:
@@ -274,9 +289,11 @@ def main() -> None:
         key1 = rsa_key(directory, "k1")
         key2 = rsa_key(directory, "k2")
         attacker = rsa_key(directory, "attacker")
+        short = rsa_key(directory, "short", RSA_BITS_ONE_SHORT)
         jwk1 = rsa_jwk(key1, KEY_1)
         jwk2 = rsa_jwk(key2, KEY_2)
         attacker_jwk = rsa_jwk(attacker, KEY_1)
+        short_jwk = rsa_jwk(short, KEY_1)
         ec = ec_jwk(directory, "ec-key")
         off_curve = {
             "kty": "EC",
@@ -312,6 +329,7 @@ def main() -> None:
             "jwks_key_declared_rs256_for_encryption": jwks({**jwk1, "use": "enc"}),
             "jwks_key_declared_rs384": jwks({**jwk1, "alg": "RS384"}),
             "jwks_with_an_ec_key_off_the_curve": jwks(jwk1, off_curve),
+            "jwks_key_2047_bits": jwks(short_jwk),
         }
         tokens = {
             "token_valid_key_1": valid,
@@ -364,10 +382,21 @@ def main() -> None:
             "token_alg_not_a_string": rs256(
                 key1, {"alg": 5, "typ": "JWT", "kid": KEY_1}, claims()
             ),
+            "token_header_repeats_alg": sign_parts(
+                key1,
+                b64u(with_repeated_member(header(), REPEATED_ALG).encode()),
+                payload_part,
+            ),
+            "token_payload_repeats_exp": sign_parts(
+                key1,
+                header_part,
+                b64u(with_repeated_member(claims(), REPEATED_EXP).encode()),
+            ),
+            "token_signed_by_2047_bit_key": rs256(short, header(), claims()),
         }
         check_expectations(
             tokens,
-            {KEY_1: jwk1, KEY_2: jwk2},
+            {KEY_1: jwk1, KEY_2: jwk2, SHORT_KEY: short_jwk},
             {OCT_KEY: oct_secret, PUBLIC_PEM_SECRET: public_pem_1},
         )
 

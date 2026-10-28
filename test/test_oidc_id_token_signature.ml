@@ -23,7 +23,7 @@ let subject payload =
 ;;
 
 let outcome ~jwks token =
-  match Verify.verify ~jwks ~now token with
+  match Verify.verify_signature_and_expiry ~jwks ~now token with
   | Ok payload -> "ok:" ^ subject payload
   | Error error -> Verify.error_to_string error
 ;;
@@ -126,6 +126,12 @@ let key_choice =
     , V.jwks_key_declared_rs384
     , V.token_signed_with_sha384
     , "key_not_rs256" )
+  ; (* RS256, [use] = [sig], and the key signed the token. Its modulus is 2047
+       bits. Every 2048-bit key above is accepted, so this pins the limit. *)
+    ( "a key one bit short of 2048"
+    , V.jwks_key_2047_bits
+    , V.token_signed_by_2047_bit_key
+    , "key_too_short" )
   ]
 ;;
 
@@ -159,6 +165,12 @@ let malformed_token =
     , "malformed_token" )
   ; (* The library finds out only when it checks the signature. *)
     "signature that is not base64url", V.jwks_both, V.token_signature_not_base64url, "malformed_token"
+  ; (* The next two are signed correctly. The library takes the first value of a
+       repeated name. A reader that takes the last one, as RFC 7515 section 4 and
+       RFC 7519 section 4 allow, would read the header as alg none and the payload
+       as expired. *)
+    "header that repeats alg", V.jwks_both, V.token_header_repeats_alg, "malformed_token"
+  ; "payload that repeats exp", V.jwks_both, V.token_payload_repeats_exp, "malformed_token"
   ]
 ;;
 
@@ -198,8 +210,9 @@ let to_tests cases =
     cases
 ;;
 
-(* Every token against every JWKS text above. Whatever the pair is, [verify]
-   returns an outcome. An exception would fail the test. *)
+(* Every token against every JWKS text above. Whatever the pair is,
+   [verify_signature_and_expiry] returns an outcome. An exception would fail the
+   test. *)
 let never_raises () =
   let distinct select = List.sort_uniq String.compare (List.map select every_case) in
   let tokens = distinct (fun (_, _, token, _) -> token) in

@@ -91,7 +91,7 @@ the actual emulator.
 | Open this Keeper's queue | Ctrl-T, or `/queue` then Enter | One chord versus six typed characters and Enter; delivery of the chord depends on the terminal. |
 | Find an item | ↑/↓ or `j/k`; Page Up/Down to browse | One key per selection step; paging and selecting are distinct actions. |
 | Read an item | Enter, then Esc | Detail is a reader above the list; this count does not include reading or scrolling. |
-| Change a selected item's priority | `n` or `l` | One key submits a supported action. A server message waits for the current turn; event urgency does not promise exact order. |
+| Change a selected item's priority | `n` or `l` | One key submits a supported action. Server message priority does not interrupt the current turn; event urgency does not promise exact order. |
 | Read help and return | `?`, then Esc | Queue and Agenda support is a source change, not yet observed in a candidate binary. |
 
 These are key counts and source contracts, not measured task duration or

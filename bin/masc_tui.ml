@@ -26278,6 +26278,8 @@ and is loaded on demand through keeper_skill.
             | (Some _ | None), (Masc_tui_pane_selection.Idle | Pressed _
                 | Selecting _ | Drag_without_pane) -> false) in
       let input = if orphan_pointer_tail then None else input in
+      if orphan_pointer_tail then
+        Render_schedule.request render_schedule Render_schedule.Background;
       (* A rejected gesture has no target, but it still interrupts any armed
          confirmation. Never send its key or payload to another surface. *)
       let decision_rejected = function

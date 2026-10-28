@@ -2147,9 +2147,9 @@ let test_execute_preserves_large_docker_output ~exit_code ~private_output ~stora
   Eio.Switch.run @@ fun sw ->
   Eio.Switch.on_release sw (fun () ->
     Masc.Keeper_keepalive_signal.register_record_execute_stream_chunk
-      (fun ~keeper_name:_ ~stream:_ _ -> ()));
+      (fun ~keeper_name:_ ~stream_id:_ ~stream:_ _ -> ()));
   Masc.Keeper_keepalive_signal.register_record_execute_stream_chunk
-    (fun ~keeper_name:_ ~stream chunk ->
+    (fun ~keeper_name:_ ~stream_id:_ ~stream chunk ->
       (match private_token with
        | Some token when String_util.contains_substring chunk token -> leaked := true
        | Some _ | None -> ());

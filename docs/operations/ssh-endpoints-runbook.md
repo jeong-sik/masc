@@ -385,3 +385,27 @@ Four things this costs, none of them obvious from the CLI's help:
 - **The session belongs to the host process that started it.** When that process
   exits the guest goes with it. Decide who owns the session before running
   anything durable on it.
+
+## Watching Keeper commands and output
+
+In the MASC TUI, select a Keeper and press `l` for its logs. The Execute
+section shows the most recently observed, redacted commands and stdout/stderr;
+it refreshes with the TUI's normal cadence. Each row carries the stream and
+Task identifiers. A failed read is shown as unavailable, and a missing earlier
+sequence means the in-memory server history has already been truncated.
+
+For a terminal tail of several Keepers, from a MASC checkout use:
+
+```sh
+MASC_TOKEN="$(cat /path/to/operator-token)" python3 scripts/masc-keeper-output.py \
+  --server http://127.0.0.1:8935 --agent masc-tui \
+  --jsonl ./keeper-output.jsonl wkbl-data wkbl-front
+```
+
+Use an agent name matching the credential. `MASC_TOKEN` is optional when the
+server accepts an unauthenticated read. `--jsonl` is optional; it appends the
+server's redacted events to a private 0600 file. The live event ring is held
+in the MASC server process and is bounded; it is not a durable transcript. A
+reconnect reads a new snapshot and may show retained lines again. A disconnect
+or an unknown result is not proof that a remote command did or did not run;
+inspect its effects before deciding whether to execute it again.

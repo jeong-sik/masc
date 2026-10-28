@@ -100,31 +100,31 @@ let test_keepalive_signal_callbacks () =
   let stream_chunk = ref false in
   let stream_end = ref false in
   Keeper_keepalive_signal.register_record_execute_stream_start
-    (fun ~keeper_name:_ ~task_id:_ -> stream_start := true);
+    (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~command:_ -> stream_start := true);
   Keeper_keepalive_signal.register_record_execute_stream_chunk
-    (fun ~keeper_name:_ ~stream:_ _chunk -> stream_chunk := true);
+    (fun ~keeper_name:_ ~stream_id:_ ~stream:_ _chunk -> stream_chunk := true);
   Keeper_keepalive_signal.register_record_execute_stream_end
-    (fun ~keeper_name:_ ~task_id:_ ~status:_ -> stream_end := true);
+    (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~status:_ -> stream_end := true);
   Keeper_keepalive_signal.record_execute_stream_start
-    ~keeper_name:"k"
+    ~keeper_name:"k" ~stream_id:1 ~command:"fixture"
     ~task_id:None;
   Keeper_keepalive_signal.record_execute_stream_chunk
-    ~keeper_name:"k"
+    ~keeper_name:"k" ~stream_id:1
     ~stream:`Stdout
     "x";
   Keeper_keepalive_signal.record_execute_stream_end
-    ~keeper_name:"k"
+    ~keeper_name:"k" ~stream_id:1
     ~task_id:None
     ~status:(`Assoc []);
   check bool "stream start callback invoked" true !stream_start;
   check bool "stream chunk callback invoked" true !stream_chunk;
   check bool "stream end callback invoked" true !stream_end;
   Keeper_keepalive_signal.register_record_execute_stream_start
-    (fun ~keeper_name:_ ~task_id:_ -> ());
+    (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~command:_ -> ());
   Keeper_keepalive_signal.register_record_execute_stream_chunk
-    (fun ~keeper_name:_ ~stream:_ _chunk -> ());
+    (fun ~keeper_name:_ ~stream_id:_ ~stream:_ _chunk -> ());
   Keeper_keepalive_signal.register_record_execute_stream_end
-    (fun ~keeper_name:_ ~task_id:_ ~status:_ -> ())
+    (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~status:_ -> ())
 ;;
 
 let test_turn_lifecycle_callback () =

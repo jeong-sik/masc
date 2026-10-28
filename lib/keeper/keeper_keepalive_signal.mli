@@ -63,24 +63,24 @@ val register_record_execute_output :
   unit
 
 val record_execute_stream_chunk :
-  keeper_name:string -> stream:[ `Stdout | `Stderr ] -> string -> unit
+  keeper_name:string -> stream_id:int -> stream:[ `Stdout | `Stderr ] -> string -> unit
 
 val register_record_execute_stream_chunk :
-  (keeper_name:string -> stream:[ `Stdout | `Stderr ] -> string -> unit) ->
+  (keeper_name:string -> stream_id:int -> stream:[ `Stdout | `Stderr ] -> string -> unit) ->
   unit
 
 val record_execute_stream_start :
-  keeper_name:string -> task_id:string option -> unit
+  keeper_name:string -> stream_id:int -> task_id:string option -> command:string -> unit
 
 val register_record_execute_stream_start :
-  (keeper_name:string -> task_id:string option -> unit) ->
+  (keeper_name:string -> stream_id:int -> task_id:string option -> command:string -> unit) ->
   unit
 
 val record_execute_stream_end :
-  keeper_name:string -> task_id:string option -> status:Yojson.Safe.t -> unit
+  keeper_name:string -> stream_id:int -> task_id:string option -> status:Yojson.Safe.t -> unit
 
 val register_record_execute_stream_end :
-  (keeper_name:string -> task_id:string option -> status:Yojson.Safe.t -> unit) ->
+  (keeper_name:string -> stream_id:int -> task_id:string option -> status:Yojson.Safe.t -> unit) ->
   unit
 
 (** FSM guard identity helpers (Cycle 43).

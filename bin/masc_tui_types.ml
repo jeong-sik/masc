@@ -4605,6 +4605,55 @@ type keeper_log_request = {
 
 type keeper_log_admission = { kla_followup : bool }
 
+type keeper_execute_line = {
+  kel_seq : int;
+  kel_stream_id : int option;
+  kel_task_id : string option;
+  kel_stream : string;
+  kel_text : string;
+}
+
+type keeper_execute_reading =
+  | Keeper_execute_none
+  | Keeper_execute_snapshot of {
+      kes_lines : keeper_execute_line list;
+      kes_first_seq : int;
+      kes_active_count : int;
+      kes_closed : bool;
+      kes_status : Yojson.Safe.t;
+      kes_observed_at : float;
+    }
+
+(* Decode this observation before it reaches the pane. An incomplete response
+   is unavailable, not an empty log or a claim that the command stopped. *)
+let decode_keeper_execute_output ~keeper json =
+  let open Yojson.Safe.Util in
+  try
+    let observed_keeper = json |> member "keeper" |> to_string in
+    if not (String.equal (String.lowercase_ascii (String.trim keeper)) observed_keeper)
+    then Error "Execute output belongs to another Keeper"
+    else match json |> member "type" |> to_string with
+    | "no_task" -> Ok Keeper_execute_none
+    | "snapshot" ->
+      let option_int = function `Int value -> Some value | `Null -> None | _ -> raise (Type_error ("stream_id", json)) in
+      let option_string = function `String value -> Some value | `Null -> None | _ -> raise (Type_error ("task_id", json)) in
+      let lines = json |> member "lines" |> to_list |> List.map (fun line ->
+        { kel_seq = line |> member "seq" |> to_int;
+          kel_stream_id = option_int (line |> member "stream_id");
+          kel_task_id = option_string (line |> member "task_id");
+          kel_stream = line |> member "stream" |> to_string;
+          kel_text = line |> member "text" |> to_string }) in
+      let observed_at = match json |> member "generated_at" with
+        | `Float value -> value | `Int value -> float_of_int value
+        | _ -> raise (Type_error ("generated_at", json)) in
+      Ok (Keeper_execute_snapshot {
+        kes_lines = lines; kes_first_seq = json |> member "first_retained_seq" |> to_int;
+        kes_active_count = json |> member "active_count" |> to_int;
+        kes_closed = json |> member "closed" |> to_bool;
+        kes_status = json |> member "status"; kes_observed_at = observed_at })
+    | _ -> Error "Execute output returned an unknown observation"
+  with Yojson.Safe.Util.Type_error _ -> Error "Execute output response is incomplete or malformed"
+
 (* An explicit edit intent owns its readonly preparation separately from the
    external editor and the later guarded write. *)
 type keeper_settings_key = {
@@ -9294,6 +9343,7 @@ type state = {
   mutable keeper_calls_generation: int;
   mutable keeper_calls_scroll: int;
   mutable keeper_logs: (keeper_log_key, Metrics_tail.snapshot) Masc_tui_fetched.t;
+  mutable keeper_execute_output: (keeper_log_key * (keeper_execute_reading, string) result) option;
   mutable keeper_log_read: keeper_log_request option;
   mutable keeper_log_cancel: (unit ref * (unit -> unit)) option;
   mutable keeper_log_refresh_pending: bool;
@@ -10914,12 +10964,14 @@ let finish_keeper_log_read state request =
 
 let clear_keeper_logs state =
   state.keeper_logs <- Masc_tui_fetched.clear state.keeper_logs;
+  state.keeper_execute_output <- None;
   state.keeper_log_read <- None;
   state.keeper_log_refresh_pending <- false;
   supersede_keeper_log_read state None
 
 let suspend_keeper_logs state =
   state.keeper_logs <- Masc_tui_fetched.suspend state.keeper_logs;
+  state.keeper_execute_output <- None;
   state.keeper_log_read <- None;
   state.keeper_log_refresh_pending <- false;
   supersede_keeper_log_read state None
@@ -16645,6 +16697,7 @@ let create_state
   keeper_calls_generation = 0;
   keeper_calls_scroll = 0;
   keeper_logs = Masc_tui_fetched.initial;
+  keeper_execute_output = None;
   keeper_log_read = None;
   keeper_log_cancel = None;
   keeper_log_refresh_pending = false;
@@ -18407,6 +18460,46 @@ let keeper_log_diagnostics state =
 (* Count after wrapping; drawing and paging share rows and source diagnostics. *)
 let keeper_log_rows (state : state) ~cols =
   let width = Masc_tui_frame.inner_width ~cols in
+  let execute_rows =
+    let reading = match state.workspace_identity, state.view, keeper_log_target state,
+                        state.keeper_execute_output with
+      | Workspace_identity_match, Keepers Keeper_logs, Some keeper, Some (key, reading)
+        when keeper_log_equal_key key (keeper_log_key state ~limit:key.klk_limit keeper) -> Some reading
+      | _ -> None in
+    let text_rows tone text =
+      Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
+        (Masc.Tui_terminal_text.sanitize_terminal_text text)
+      |> List.map (fun line -> tone, "  " ^ line) in
+    match reading with
+    | None -> text_rows Keeper_log_notice "Execute output: awaiting a workspace-bound observation."
+    | Some (Error detail) -> text_rows Keeper_log_failure ("Execute output unavailable: " ^ detail)
+    | Some (Ok Keeper_execute_none) -> text_rows Keeper_log_notice "No Execute output observed in this server process."
+    | Some (Ok (Keeper_execute_snapshot reading)) ->
+      let state_text =
+        if reading.kes_active_count > 0 then
+          Printf.sprintf "%d active" reading.kes_active_count
+        else if reading.kes_closed then "closed"
+        else "state unknown" in
+      let status = match reading.kes_status with
+        | `Null -> "" | status -> " · " ^ Yojson.Safe.to_string status in
+      let header = text_rows Keeper_log_notice ("Execute output · " ^ state_text ^ status) in
+      let truncated = if reading.kes_first_seq > 1 then
+        text_rows Keeper_log_warning (Printf.sprintf
+          "Earlier output events are no longer retained (before sequence %d)." reading.kes_first_seq)
+        else [] in
+      let newest = List.rev reading.kes_lines in
+      let limit = 200 in
+      let rec take n = function [] -> [] | _ when n = 0 -> [] | x :: xs -> x :: take (n - 1) xs in
+      let lines = take limit newest in
+      let visible_note = if List.length newest > limit then
+        text_rows Keeper_log_notice (Printf.sprintf "Showing the newest %d output rows." limit)
+        else [] in
+      header @ truncated @ visible_note @ List.concat_map (fun line ->
+        let id = match line.kel_stream_id with None -> "?" | Some id -> string_of_int id in
+        let task = match line.kel_task_id with None -> "" | Some id -> " task=" ^ id in
+        text_rows Keeper_log_fact (Printf.sprintf "#%d [%s %s%s] %s"
+          line.kel_seq id line.kel_stream task line.kel_text)) lines
+  in
   let diagnostics = keeper_log_diagnostics state
     |> List.concat_map (fun (tone, text) ->
       Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
@@ -18419,7 +18512,7 @@ let keeper_log_rows (state : state) ~cols =
         ~time:(Masc.Tui_terminal_text.clock_timestamp_for_terminal ~localtime:Unix.localtime entry.le_ts)
         entry
       |> List.map (fun line -> Keeper_log_fact, line)) in
-  diagnostics @ entries
+  execute_rows @ diagnostics @ entries
 
 (* The three layouts the Board read surface draws in. Both the pane split and
    the [z] key read this one answer: spelled as a pair of booleans it admitted

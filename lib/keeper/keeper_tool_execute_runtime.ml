@@ -10,6 +10,9 @@ open Keeper_tool_shared_runtime
    outputs differing only here). *)
 let execution_time_field = "execution_time_ms"
 
+(* Process-local observation identity. It is not a durable tool-call ID. *)
+let execute_stream_counter = Atomic.make 0
+
 let answer_of_output output_text =
   match Yojson.Safe.from_string output_text with
   | `Assoc fields ->
@@ -713,6 +716,12 @@ let handle_tool_execute_typed
           let task_id =
             Option.map Keeper_id.Task_id.to_string meta.current_task_id
           in
+          let stream_id = Atomic.fetch_and_add execute_stream_counter 1 in
+          let command =
+            Exec_policy.sanitize_command_for_log_of_ir ~fallback_cmd:cmd ir
+            |> redact_execute_text output_redaction
+            |> Exec_policy.truncate_for_log
+          in
           let stdout_stream_redaction =
             Keeper_secret_redaction.create_stream_state output_redaction
           in
@@ -725,10 +734,32 @@ let handle_tool_execute_typed
              repository, shell config, or deployment scripts ever set it,
              and its parse accepted every value except the exact string
              "false" (RFC-0371 B7). *)
+          let stream_ended = ref false in
+          let finish_stream status =
+            if not !stream_ended then Eio.Cancel.protect (fun () ->
+              stream_ended := true;
+              try
+                Keeper_keepalive_signal.record_execute_stream_end
+                  ~keeper_name:meta.name ~stream_id ~task_id ~status
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Dashboard.warn
+                  "execute stream end callback failed keeper=%s: %s"
+                  meta.name (Printexc.to_string exn))
+          in
+          Fun.protect
+            ~finally:(fun () ->
+              (* A cancelled or exceptional observer has no trustworthy exit
+                 status. This closes observation, not the remote effect. *)
+              finish_stream (`Assoc [ "outcome", `String "unknown" ]))
+            (fun () ->
           (try
              Keeper_keepalive_signal.record_execute_stream_start
                ~keeper_name:meta.name
+               ~stream_id
                ~task_id
+               ~command
            with
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
@@ -742,6 +773,7 @@ let handle_tool_execute_typed
               try
                 Keeper_keepalive_signal.record_execute_stream_chunk
                   ~keeper_name:meta.name
+                  ~stream_id
                   ~stream
                   data
               with
@@ -885,18 +917,7 @@ let handle_tool_execute_typed
               meta.name
               cmd_for_log
               (message_for_log diagnostic);
-            (try
-               Keeper_keepalive_signal.record_execute_stream_end
-                 ~keeper_name:meta.name
-                 ~task_id
-                 ~status:(`Assoc [ "rejected", `String "gate_reject" ])
-             with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.Dashboard.warn
-                  "execute stream end callback failed keeper=%s: %s"
-                  meta.name
-                  (Printexc.to_string exn));
+            finish_stream (`Assoc [ "rejected", `String "gate_reject" ]);
             (* The gate, parser and complexity checks judge only the Shell IR
                masc builds. An argv command is a Simple node with literal
                arguments; a script is an opaque [-c] argument of its shell.
@@ -915,20 +936,8 @@ let handle_tool_execute_typed
               meta.name
               cmd_for_log
               reason_tag;
-            (try
-               Keeper_keepalive_signal.record_execute_stream_end
-                 ~keeper_name:meta.name
-                 ~task_id
-                 ~status:
-                   (`Assoc
-                      [ "rejected", `String "cannot_parse"; "reason", `String reason_tag ])
-             with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.Dashboard.warn
-                  "execute stream end callback failed keeper=%s: %s"
-                  meta.name
-                  (Printexc.to_string exn));
+            finish_stream
+              (`Assoc [ "rejected", `String "cannot_parse"; "reason", `String reason_tag ]);
             authorized
               (typed_error_json
                  ~class_:Tool_result.Runtime_failure
@@ -943,20 +952,8 @@ let handle_tool_execute_typed
               meta.name
               cmd_for_log
               reason_tag;
-            (try
-               Keeper_keepalive_signal.record_execute_stream_end
-                 ~keeper_name:meta.name
-                 ~task_id
-                 ~status:
-                   (`Assoc
-                      [ "rejected", `String "too_complex"; "reason", `String reason_tag ])
-             with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.Dashboard.warn
-                  "execute stream end callback failed keeper=%s: %s"
-                  meta.name
-                  (Printexc.to_string exn));
+            finish_stream
+              (`Assoc [ "rejected", `String "too_complex"; "reason", `String reason_tag ]);
             authorized
               (typed_error_json
                  ~class_:Tool_result.Runtime_failure
@@ -972,18 +969,7 @@ let handle_tool_execute_typed
               meta.name
               cmd_for_log
               (message_for_log e);
-            (try
-               Keeper_keepalive_signal.record_execute_stream_end
-                 ~keeper_name:meta.name
-                 ~task_id
-                 ~status:(`Assoc [ "rejected", `String "path_reject" ])
-             with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.Dashboard.warn
-                  "execute stream end callback failed keeper=%s: %s"
-                  meta.name
-                  (Printexc.to_string exn));
+            finish_stream (`Assoc [ "rejected", `String "path_reject" ]);
             authorized
               (typed_error_json
                  ~class_:Tool_result.Policy_rejection
@@ -1015,7 +1001,20 @@ let handle_tool_execute_typed
                 ~status:result.status
                 ~timeout_budget
             in
-            let status_json = exit_report.Keeper_tool_execute_exit_report.status in
+            (* A failed transport is converted to a synthetic Unix status by
+               the shell dispatcher. It is not the remote child's exit. *)
+            let outcome_unknown =
+              List.exists
+                (function
+                  | Keeper_sandbox_remote.Execution_unavailable Transport_unavailable -> true
+                  | Execution_unavailable (Request_not_sent | Peer_receipt_missing | Invalid_receipt _)
+                  | Execution_observed _ -> false)
+                (current_shim_receipts ())
+            in
+            let status_json =
+              if outcome_unknown then `Assoc [ "outcome", `String "unknown" ]
+              else exit_report.Keeper_tool_execute_exit_report.status
+            in
             (* The line-buffered redactor holds a partial trailing line, so the
                stream is flushed here before the end marker. *)
             record_stream_chunk
@@ -1024,18 +1023,7 @@ let handle_tool_execute_typed
             record_stream_chunk
               `Stderr
               (Keeper_secret_redaction.redact_stream_finish stderr_stream_redaction);
-            (try
-               Keeper_keepalive_signal.record_execute_stream_end
-                 ~keeper_name:meta.name
-                 ~task_id
-                 ~status:status_json
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               Log.Dashboard.warn
-                 "execute stream end callback failed keeper=%s: %s"
-                 meta.name
-                 (Printexc.to_string exn));
+            finish_stream status_json;
             (try
                Keeper_keepalive_signal.record_execute_output
                  ~keeper_name:meta.name
@@ -1051,7 +1039,7 @@ let handle_tool_execute_typed
                  "execute output callback failed keeper=%s: %s"
                  meta.name
                  (Printexc.to_string exn));
-            let succeeded = exit_report.Keeper_tool_execute_exit_report.ok in
+            let succeeded = not outcome_unknown && exit_report.Keeper_tool_execute_exit_report.ok in
             let output_fields =
               match result.output_files with
               | Some files ->
@@ -1151,12 +1139,20 @@ let handle_tool_execute_typed
                     Tool_bridge.attach_artifact_manifest
                       ~base_path:config.base_path
                       (let answered =
-                         Tool_result.make_ok
-                           ~tool_name:"tool_execute"
-                           ~start_time:t0
-                           ~data:payload
-                           ~metadata:execution_evidence
-                           ()
+                         if outcome_unknown then
+                           Tool_result.make_err
+                             ~tool_name:"tool_execute"
+                             ~class_:Tool_result.Dependency_unavailable
+                             ~effect_disposition:Tool_result.Effect_outcome_unknown
+                             ~start_time:t0 ~data:payload ~metadata:execution_evidence
+                             "The execution transport disconnected before a trustworthy result. The remote effect may have happened; inspect its state before deciding whether to run it again."
+                         else
+                           Tool_result.make_ok
+                             ~tool_name:"tool_execute"
+                             ~start_time:t0
+                             ~data:payload
+                             ~metadata:execution_evidence
+                             ()
                        in
                        answered)
                   with
@@ -1177,7 +1173,7 @@ let handle_tool_execute_typed
                             ]
                             @ dispatched_model_location_fields ())
                          "Execute completed, but its result manifest could not be persisted.")))
-        )))))
+        ))))))
 
 let handle_tool_execute_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)

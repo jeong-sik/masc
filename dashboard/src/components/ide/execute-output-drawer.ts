@@ -103,6 +103,9 @@ export function linesFromExecuteOutputEvent(event: ExecuteOutputStreamEvent): Ou
     usedStructuredLines = true
     for (const line of event.lines) lines.push(outputLineFromExecuteLine(line))
   }
+  if ((event.first_retained_seq ?? 1) > 1) {
+    lines.unshift({ text: `earlier output events are no longer retained (before seq ${event.first_retained_seq})`, stream: 'meta' })
+  }
   if (!usedStructuredLines) {
     for (const line of splitChunkLines(event.stdout_since ?? '')) {
       lines.push({ text: line, stream: 'stdout' })
@@ -304,7 +307,7 @@ export function ExecuteOutputDrawer({
     setLines([])
     setStatus('streaming')
     setTaskId(null)
-    // Whether any event already said how the task ended.
+    // Whether the latest observation says all executions are closed.
     let settled = false
 
     void streamExecuteOutput(keeper, {
@@ -314,8 +317,7 @@ export function ExecuteOutputDrawer({
         // A gap names missed log entries only; it says nothing about which
         // task is running or whether it closed.
         if (event.type === 'gap') return
-        // Sticky: once the task said how it ended, a later event cannot unsay it.
-        if (event.type === 'error' || event.closed === true) settled = true
+        settled = event.type === 'error' || event.closed === true
         setTaskId(typeof event.task_id === 'string' ? event.task_id : null)
         if (event.type === 'error') setStatus('error')
         else if (event.closed) setStatus('closed')

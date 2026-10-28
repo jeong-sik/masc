@@ -14822,7 +14822,14 @@ let launch_keeper_log_read state ~mailbox ~intent keeper =
       supersede_keeper_log_read state
         (Some (request.klr_owner, fun () -> ignore (Eio.Promise.try_resolve supersede ())));
       let enqueue_async = workspace_enqueue state in
-      let deliver result = enqueue_async mailbox (Keeper_logs_loaded (request, result)) in
+      let include_execute = state.view = Keepers Keeper_logs in
+      let host = server_peer_host and port = state.port in
+      let read_execute = capture_workspace_json_read state (fun () ->
+        let path = "/api/v1/dashboard/execute-output-snapshot/" ^ Uri.pct_encode key.klk_keeper in
+        Result.bind (Masc_tui_http.get_json ~host ~port ~path)
+          (decode_keeper_execute_output ~keeper:key.klk_keeper)) in
+      let deliver result execute =
+        enqueue_async mailbox (Keeper_logs_loaded (request, result, execute)) in
       log_keeper_log_read ~phase:"started" request ~outcome:"pending";
       let run () = Fun.protect
         ~finally:(fun () -> finish_keeper_log_read state request)
@@ -14834,24 +14841,28 @@ let launch_keeper_log_read state ~mailbox ~intent keeper =
               with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Error (Printexc.to_string exn) in
+            let execute = if include_execute then Some (
+              try read_execute () with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn -> Error (Printexc.to_string exn)) else None in
             log_keeper_log_read ~phase:"read_completed" request
               ~outcome:(match result with Ok _ -> "received" | Error _ -> "failed");
             finish_keeper_log_read state request;
-            deliver result)
+            deliver result execute)
           (fun () ->
             Eio.Promise.await superseded;
             log_keeper_log_read ~phase:"superseded" request ~outcome:"cancel_requested")) in
       (match Eio_context.get_switch_opt () with
        | None ->
            finish_keeper_log_read state request;
-           deliver (Error "Eio switch is unavailable for Keeper metrics reading")
+           deliver (Error "Eio switch is unavailable for Keeper metrics reading") None
        | Some sw ->
            (match fork_workspace_job ~observation:true state ~sw run with
             | () -> ()
             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
             | exception exn ->
                 finish_keeper_log_read state request;
-                deliver (Error (Printexc.to_string exn))));
+                deliver (Error (Printexc.to_string exn)) None));
       true
 
 let launch_current_keeper_logs state ~mailbox ~intent =
@@ -22922,12 +22933,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                 drain_queued_message state ~base_path ~mailbox;
                 ignore (launch_current_live_context state ~mailbox));
            launch_local_source_followup state ~mailbox Local_keepers)
-  | Keeper_logs_loaded (request, result) ->
+  | Keeper_logs_loaded (request, result, execute) ->
       let admission = take_keeper_log_read state request result in
       log_keeper_log_read ~phase:"observed" request
         ~outcome:(if Option.is_none admission then "discarded" else
           match result with Ok _ -> "received" | Error _ -> "failed");
       Option.iter (fun admitted ->
+        Option.iter (fun reading ->
+          state.keeper_execute_output <- Some (Masc_tui_fetched.request_key request.klr_request, reading)) execute;
         let _, cols = Masc_tui_render_prim.get_terminal_size () in
         state.log_scroll <- min state.log_scroll (max 0 (List.length (keeper_log_rows state ~cols) - 1));
         if admitted.kla_followup then ignore (launch_current_keeper_logs state ~mailbox ~intent:Snapshot_read.Poll)) admission

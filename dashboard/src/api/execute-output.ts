@@ -3,6 +3,8 @@ import { authHeaders, fetchControlPlane } from './core'
 export interface ExecuteOutputLine {
   /** This line's number in the keeper's output log. */
   seq?: number
+  stream_id?: number | null
+  task_id?: string | null
   ts_ms?: number
   stream: 'stdout' | 'stderr' | 'cmd' | 'system' | string
   text: string
@@ -22,6 +24,10 @@ export interface ExecuteOutputStreamEvent {
   seq?: number
   /** `snapshot`: newest log number the snapshot covers; live events continue after it. */
   last_seq?: number
+  /** Earlier events have already left the bounded server log when this exceeds 1. */
+  first_retained_seq?: number
+  active_count?: number
+  stream_id?: number | null
   /** `gap`: log numbers this viewer missed because the server no longer keeps them. */
   missing_from_seq?: number
   missing_to_seq?: number

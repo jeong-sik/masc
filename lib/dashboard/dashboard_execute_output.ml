@@ -10,10 +10,19 @@ type entry = {
 
 type output_line = {
   seq : int;
+  stream_id : int option;
+  task_id : string option;
   ts_ms : int;
   stream : string;
   text : string;
   ansi : bool;
+}
+
+type active_stream = {
+  stream_id : int;
+  task_id : string option;
+  command : string;
+  started_at : float;
 }
 
 type snapshot = {
@@ -21,6 +30,8 @@ type snapshot = {
   task_id : string option;
   task_count : int;
   lines : output_line list;
+  active_streams : active_stream list;
+  first_retained_seq : int;
   last_seq : int;
   stdout_since : string;
   stderr_since : string;
@@ -39,6 +50,7 @@ type logged_event =
   | Task_opened_event of {
       keeper : string;
       seq : int;
+      stream_id : int;
       task_id : string option;
       generated_at : float;
     }
@@ -51,8 +63,10 @@ type logged_event =
   | Task_closed_event of {
       keeper : string;
       seq : int;
+      stream_id : int option;
       task_id : string option;
       status : Yojson.Safe.t;
+      active_count : int;
       generated_at : float;
     }
 
@@ -97,10 +111,17 @@ let logs : (string, keeper_log) Hashtbl.t = Hashtbl.create 16
 let subscribers : (string, subscriber list) Hashtbl.t = Hashtbl.create 16
 let next_subscriber_id = ref 0
 
-(* Open stream tracking so that live chunks carry the same task_id as the
-   execution that produced them. *)
-type open_stream_state = { task_id : string option; started_at : float }
-let open_streams : (string, open_stream_state) Hashtbl.t = Hashtbl.create 16
+(* The producer owns the ID for the lifetime of one invocation. Task IDs may
+   be absent or shared, so neither the keeper nor task alone identifies it. *)
+type open_stream_state = { active : active_stream; opened_seq : int }
+let open_streams : ((string * int), open_stream_state) Hashtbl.t = Hashtbl.create 16
+
+let active_streams_locked keeper =
+  Hashtbl.fold (fun (name, _) state acc ->
+    if String.equal name keeper then state :: acc else acc) open_streams []
+  |> List.sort (fun a b -> Int.compare a.opened_seq b.opened_seq)
+
+let active_count_locked keeper = List.length (active_streams_locked keeper)
 
 let normalize_keeper keeper_name =
   keeper_name |> String.trim |> String.lowercase_ascii
@@ -192,7 +213,7 @@ let append_logged_locked ~keeper (make : int -> logged_event) =
       keeper
       { slots = Array.make event_log_capacity first; next_seq = first_seq + 1 }
 
-let append_lines_locked ~keeper ~task_id ~generated_at ~stream texts =
+let append_lines_locked ~keeper ~stream_id ~task_id ~generated_at ~stream texts =
   let ts_ms = ts_ms_of_unix generated_at in
   List.iter
     (fun text ->
@@ -200,7 +221,7 @@ let append_lines_locked ~keeper ~task_id ~generated_at ~stream texts =
          Line_event
            { keeper
            ; task_id
-           ; line = { seq; ts_ms; stream; text; ansi = false }
+           ; line = { seq; stream_id; task_id; ts_ms; stream; text; ansi = false }
            ; generated_at
            }))
     texts
@@ -242,11 +263,12 @@ let append_completed ~streamed ~keeper_name (entry : entry) =
     let generated_at = entry.generated_at in
     with_lock (fun () ->
       append_entry_locked ~keeper entry;
-      append_lines_locked ~keeper ~task_id ~generated_at ~stream:"stdout" stdout_texts;
-      append_lines_locked ~keeper ~task_id ~generated_at ~stream:"stderr" stderr_texts;
+      append_lines_locked ~keeper ~stream_id:None ~task_id ~generated_at ~stream:"stdout" stdout_texts;
+      append_lines_locked ~keeper ~stream_id:None ~task_id ~generated_at ~stream:"stderr" stderr_texts;
+      let active_count = active_count_locked keeper in
       append_logged_locked ~keeper (fun seq ->
         Task_closed_event
-          { keeper; seq; task_id; status = entry.status; generated_at });
+          { keeper; seq; stream_id = None; task_id; status = entry.status; active_count; generated_at });
       wake_subscribers_locked keeper))
 
 let record_failure exn =
@@ -262,19 +284,23 @@ let record_completed ~keeper_name ~task_id ~stdout ~stderr ~status ?(streamed = 
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> record_failure exn
 
-let record_stream_start ~keeper_name ~task_id =
+let record_stream_start ~keeper_name ~stream_id ~task_id ~command =
   let keeper = normalize_keeper keeper_name in
   if keeper = ""
   then ()
   else (
     let generated_at = now_unix () in
     with_lock (fun () ->
-      Hashtbl.replace open_streams keeper { task_id; started_at = generated_at };
+      let opened_seq = last_logged_seq_locked keeper + 1 in
+      let active = { stream_id; task_id; command; started_at = generated_at } in
+      Hashtbl.replace open_streams (keeper, stream_id) { active; opened_seq };
       append_logged_locked ~keeper (fun seq ->
-        Task_opened_event { keeper; seq; task_id; generated_at });
+        Task_opened_event { keeper; seq; stream_id; task_id; generated_at });
+      append_lines_locked ~keeper ~stream_id:(Some stream_id) ~task_id
+        ~generated_at ~stream:"cmd" (line_texts command);
       wake_subscribers_locked keeper))
 
-let append_stream_chunk ~keeper_name ~stream chunk =
+let append_stream_chunk ~keeper_name ~stream_id ~stream chunk =
   let keeper = normalize_keeper keeper_name in
   if keeper = "" || String.equal chunk ""
   then ()
@@ -288,23 +314,24 @@ let append_stream_chunk ~keeper_name ~stream chunk =
     let texts = line_texts chunk in
     with_lock (fun () ->
       let task_id =
-        match Hashtbl.find_opt open_streams keeper with
-        | Some state -> state.task_id
+        match Hashtbl.find_opt open_streams (keeper, stream_id) with
+        | Some state -> state.active.task_id
         | None -> None
       in
-      append_lines_locked ~keeper ~task_id ~generated_at ~stream:stream_label texts;
+      append_lines_locked ~keeper ~stream_id:(Some stream_id) ~task_id ~generated_at ~stream:stream_label texts;
       wake_subscribers_locked keeper))
 
-let record_stream_end ~keeper_name ~task_id ~status =
+let record_stream_end ~keeper_name ~stream_id ~task_id ~status =
   let keeper = normalize_keeper keeper_name in
   if keeper = ""
   then ()
   else (
     let generated_at = now_unix () in
     with_lock (fun () ->
-      Hashtbl.remove open_streams keeper;
+      Hashtbl.remove open_streams (keeper, stream_id);
+      let active_count = active_count_locked keeper in
       append_logged_locked ~keeper (fun seq ->
-        Task_closed_event { keeper; seq; task_id; status; generated_at });
+        Task_closed_event { keeper; seq; stream_id = Some stream_id; task_id; status; active_count; generated_at });
       wake_subscribers_locked keeper))
 
 let retained_lines_locked keeper =
@@ -340,7 +367,7 @@ let last_transition_locked keeper =
 let snapshot_state keeper_name =
   let keeper = normalize_keeper keeper_name in
   if keeper = ""
-  then "", [], [], first_seq - 1, None, None
+  then "", [], [], first_seq - 1, [], None, first_seq
   else
     with_lock (fun () ->
       let entries =
@@ -348,8 +375,11 @@ let snapshot_state keeper_name =
         | None -> []
         | Some q -> queue_to_list q
       in
+      let first_retained_seq = match Hashtbl.find_opt logs keeper with
+        | None -> first_seq | Some log -> oldest_retained_seq log in
       keeper, entries, retained_lines_locked keeper, last_logged_seq_locked keeper,
-      Hashtbl.find_opt open_streams keeper, last_transition_locked keeper)
+      List.map (fun state -> state.active) (active_streams_locked keeper),
+      last_transition_locked keeper, first_retained_seq)
 
 let add_stream_chunks entries select =
   let buffer =
@@ -368,19 +398,19 @@ let add_stream_chunks entries select =
   , Exec_buffer.bytes_dropped buffer + (String.length ring_tail - String.length tail) )
 
 let snapshot ~keeper_name =
-  let keeper, entries, lines, last_seq, open_stream, transition =
+  let keeper, entries, lines, last_seq, active_streams, transition, first_retained_seq =
     snapshot_state keeper_name
   in
   let latest = match List.rev entries with [] -> None | entry :: _ -> Some entry in
   let lifecycle =
-    match open_stream, transition, latest with
-    | Some open_stream, _, _ ->
-      Some (open_stream.task_id, false, None, open_stream.started_at)
-    | None, Some (Task_closed_event { task_id; status; generated_at; _ }), _ ->
+    match List.rev active_streams, transition, latest with
+    | active :: _, _, _ ->
+      Some (active.task_id, false, None, active.started_at)
+    | [], Some (Task_closed_event { task_id; status; generated_at; _ }), _ ->
       Some (task_id, true, Some status, generated_at)
-    | None, (Some (Task_opened_event _ | Line_event _) | None), Some entry ->
+    | [], (Some (Task_opened_event _ | Line_event _) | None), Some entry ->
       Some (entry.task_id, true, Some entry.status, entry.generated_at)
-    | None, (Some (Task_opened_event _ | Line_event _) | None), None -> None
+    | [], (Some (Task_opened_event _ | Line_event _) | None), None -> None
   in
   match lifecycle with
   | None -> None
@@ -396,6 +426,8 @@ let snapshot ~keeper_name =
       ; task_id
       ; task_count = List.length entries
       ; lines
+      ; active_streams
+      ; first_retained_seq
       ; last_seq
       ; stdout_since
       ; stderr_since
@@ -415,6 +447,8 @@ let option_json f = function
 let output_line_json line =
   `Assoc
     [ "seq", `Int line.seq
+    ; "stream_id", option_json (fun value -> `Int value) line.stream_id
+    ; "task_id", option_json (fun value -> `String value) line.task_id
     ; "ts_ms", `Int line.ts_ms
     ; "stream", `String line.stream
     ; "text", `String (String_util.sanitize_utf8 line.text)
@@ -432,6 +466,14 @@ let snapshot_json (s : snapshot) =
     ; "task_id", option_json (fun value -> `String value) s.task_id
     ; "task_count", `Int s.task_count
     ; "lines", `List (List.map output_line_json s.lines)
+    ; ( "active_streams"
+      , `List (List.map (fun (stream : active_stream) ->
+          `Assoc [ "stream_id", `Int stream.stream_id
+                 ; "task_id", option_json (fun value -> `String value) stream.task_id
+                 ; "command", `String (String_util.sanitize_utf8 stream.command)
+                 ; "started_at", `Float stream.started_at ]) s.active_streams) )
+    ; "active_count", `Int (List.length s.active_streams)
+    ; "first_retained_seq", `Int s.first_retained_seq
     ; "last_seq", `Int s.last_seq
     ; "since_stdout", `Int s.since_stdout
     ; "since_stderr", `Int s.since_stderr
@@ -462,13 +504,14 @@ let event_json ~keeper_name =
   | None -> no_task_json keeper_name
 
 let logged_event_json = function
-  | Task_opened_event { keeper; seq; task_id; generated_at } ->
+  | Task_opened_event { keeper; seq; stream_id; task_id; generated_at } ->
     `Assoc
       [ "type", `String "task_opened"
       ; "kind", `String "task_opened"
       ; "keeper", `String keeper
       ; "keeper_id", `String keeper
       ; "seq", `Int seq
+      ; "stream_id", `Int stream_id
       ; "task_id", option_json (fun value -> `String value) task_id
       ; "closed", `Bool false
       ; "generated_at", `Float generated_at
@@ -480,20 +523,23 @@ let logged_event_json = function
       ; "keeper", `String keeper
       ; "keeper_id", `String keeper
       ; "seq", `Int line.seq
+      ; "stream_id", option_json (fun value -> `Int value) line.stream_id
       ; "task_id", option_json (fun value -> `String value) task_id
       ; "line", output_line_json line
       ; "closed", `Bool false
       ; "generated_at", `Float generated_at
       ]
-  | Task_closed_event { keeper; seq; task_id; status; generated_at } ->
+  | Task_closed_event { keeper; seq; stream_id; task_id; status; active_count; generated_at } ->
     `Assoc
       [ "type", `String "task_closed"
       ; "kind", `String "task_closed"
       ; "keeper", `String keeper
       ; "keeper_id", `String keeper
       ; "seq", `Int seq
+      ; "stream_id", option_json (fun value -> `Int value) stream_id
       ; "task_id", option_json (fun value -> `String value) task_id
-      ; "closed", `Bool true
+      ; "closed", `Bool (active_count = 0)
+      ; "active_count", `Int active_count
       ; "status", status
       ; "generated_at", `Float generated_at
       ]
@@ -622,16 +668,18 @@ let () =
 
 let () =
   Keeper_keepalive_signal.register_record_execute_stream_chunk
-    (fun ~keeper_name ~stream chunk ->
-       append_stream_chunk ~keeper_name ~stream chunk)
+    (fun ~keeper_name ~stream_id ~stream chunk ->
+       append_stream_chunk ~keeper_name ~stream_id ~stream chunk)
 ;;
 
 let () =
   Keeper_keepalive_signal.register_record_execute_stream_start
-    (fun ~keeper_name ~task_id -> record_stream_start ~keeper_name ~task_id)
+    (fun ~keeper_name ~stream_id ~task_id ~command ->
+       record_stream_start ~keeper_name ~stream_id ~task_id ~command)
 ;;
 
 let () =
   Keeper_keepalive_signal.register_record_execute_stream_end
-    (fun ~keeper_name ~task_id ~status -> record_stream_end ~keeper_name ~task_id ~status)
+    (fun ~keeper_name ~stream_id ~task_id ~status ->
+       record_stream_end ~keeper_name ~stream_id ~task_id ~status)
 ;;

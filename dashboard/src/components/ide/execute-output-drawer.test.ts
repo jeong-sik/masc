@@ -242,6 +242,17 @@ describe('ExecuteOutputDrawer event mapping', () => {
     expect(mounted.textContent).not.toContain('output stream ended before the task closed')
   })
 
+  it('reports an interrupted new execution after an earlier one closed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      'event: output\ndata: {"type":"snapshot","keeper":"sangsu","closed":true,"lines":[]}\n\n' +
+      'event: output\ndata: {"type":"task_opened","keeper":"sangsu","stream_id":7,"closed":false}\n\n',
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    )))
+    mounted = document.createElement('div')
+    render(h(ExecuteOutputDrawer, { keeperName: 'sangsu' }), mounted)
+    await waitFor(() => expect(mounted?.textContent).toContain('output stream ended before the task closed'))
+  })
+
   it('offers Stop only while live output is on', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(openStream(''), {
       status: 200,
@@ -269,11 +280,11 @@ describe('ExecuteOutputDrawer event mapping', () => {
     render(h(ExecuteOutputDrawer, { keeperName: 'sangsu' }), mounted)
 
     resolveFetch(new Response(
-      [
+      openStream([
         'event: output\ndata: {"type":"snapshot","keeper":"sangsu","task_id":"task-123","lines":[{"seq":1,"ts_ms":1000,"stream":"stdout","text":"first","ansi":false}],"last_seq":1,"closed":true}\n\n',
         'event: output\ndata: {"type":"line","keeper":"sangsu","seq":2,"task_id":"task-123","line":{"seq":2,"ts_ms":1001,"stream":"stdout","text":"second","ansi":false},"closed":false}\n\n',
         'event: output\ndata: {"type":"gap","keeper":"sangsu","missing_from_seq":3,"missing_to_seq":9,"missing_count":7}\n\n',
-      ].join(''),
+      ].join('')),
       {
         status: 200,
         headers: { 'Content-Type': 'text/event-stream' },

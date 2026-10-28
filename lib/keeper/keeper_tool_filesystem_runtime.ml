@@ -175,6 +175,7 @@ let resolve_read_file_target
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
       ~(raw_path : string)
+      ()
   =
   let args, raw_path = match read_authority with
     | None -> args, raw_path
@@ -249,7 +250,7 @@ let read_complete_sandbox_bytes ?read_authority ?turn_sandbox_factory ~config ~m
   let* read_authority = read_authority_for_call ~config ~meta read_authority in
   let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
   let* read_target =
-    resolve_read_file_target ~read_authority ~config ~meta ~args ~raw_path:path
+    resolve_read_file_target ~read_authority ~config ~meta ~args ~raw_path:path ()
     |> Result.map_error (function Read_path_error refusal -> refusal.Keeper_alerting_path.message)
   in
   let* () =
@@ -267,13 +268,13 @@ let read_sandbox_raw_prefix ?read_authority ?turn_sandbox_factory ~config ~meta 
     match read_authority_for_call ~config ~meta read_authority with
     | Ok _ as authority -> authority
     | Error detail ->
-      (match resolve_read_file_target ~endpoint_error:detail ~read_authority:None ~config ~meta ~args ~raw_path:path with
+      (match resolve_read_file_target ~endpoint_error:detail ~read_authority:None ~config ~meta ~args ~raw_path:path () with
        | Error (Read_path_error refusal) ->
          Error (Keeper_sandbox_read_backend.Read_refused refusal.Keeper_alerting_path.message)
        | Ok _ -> Error (Keeper_sandbox_read_backend.Read_failed detail))
   in
   let* read_target =
-    resolve_read_file_target ~read_authority ~config ~meta ~args ~raw_path:path
+    resolve_read_file_target ~read_authority ~config ~meta ~args ~raw_path:path ()
     |> Result.map_error (fun (Read_path_error refusal) ->
            Keeper_sandbox_read_backend.Read_refused refusal.Keeper_alerting_path.message)
   in
@@ -306,7 +307,7 @@ let prepared_read_confined ~config ~(meta : Keeper_meta_contract.keeper_meta) ~a
 
 let prepare_read ~sw ~config ~meta ~args =
   let path = Safe_ops.json_string ~default:"" "path" args in
-  let* target = resolve_read_file_target ~read_authority:None ~config ~meta ~args ~raw_path:path
+  let* target = resolve_read_file_target ~read_authority:None ~config ~meta ~args ~raw_path:path ()
     |> Result.map_error (fun (Read_path_error refusal) -> refusal.message) in
   let* () = check_read_file_target ~config ~meta target
     |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) -> refusal.message) in
@@ -376,7 +377,7 @@ let handle_read_file_with_preparation
   let cwd = string_opt_nonempty "cwd" args in
   let read_target =
     let* window = read_line_window_of_args args |> Result.map_error (fun e -> `Window e) in
-    let* target = resolve_read_file_target ~read_authority ~config ~meta ~args ~raw_path:path
+    let* target = resolve_read_file_target ~read_authority ~config ~meta ~args ~raw_path:path ()
       |> Result.map_error (fun (Read_path_error refusal) -> `Path refusal) in
     Ok (window, target)
   in

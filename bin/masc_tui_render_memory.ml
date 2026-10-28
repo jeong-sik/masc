@@ -1078,15 +1078,16 @@ let fold_memory_context_rows ~ko ~max_rows context =
     @ tail
 
 let memory_refused_keeper_lines (state : state) =
+  let ko = state.ui_language = Lang_ko in
   match state.memory_health with
   | Some { mhs_refused_keepers = []; _ } | None -> []
   | Some { mhs_refused_keepers = refused; _ } ->
     List.map
       (fun refusal ->
-        Printf.sprintf "  %s · row not read: %s"
+        Printf.sprintf (if ko then "  행 읽기 실패 · %s: %s" else "  row not read · %s: %s")
           (match refusal.mkr_keeper_id with
            | Some keeper_id -> Terminal_text.single_line keeper_id
-           | None -> "(keeper id not read)")
+           | None -> if ko then "키퍼 ID 미확인" else "keeper id not read")
           (Terminal_text.single_line refusal.mkr_reason))
       refused
 
@@ -1155,7 +1156,10 @@ let memory_compact_fleet_row ~cols (state : state) =
     | None -> (if ko then "메모리 관측 없음" else "no memory observation"), false
     | Some snapshot ->
         let attention =
-          (if snapshot.mhs_total_read_errors > 0 then
+          (if snapshot.mhs_refused_keepers <> [] then
+             [Printf.sprintf (if ko then "읽지 못한 키퍼 행 %d개" else "%d Keeper rows not read")
+                (List.length snapshot.mhs_refused_keepers)] else [])
+          @ (if snapshot.mhs_total_read_errors > 0 then
              [Printf.sprintf (if ko then "일반 읽기 실패 %d명" else "ordinary read errors: %d keepers") snapshot.mhs_total_read_errors] else [])
           @ (if snapshot.mhs_total_source_read_errors > 0 then
                [Printf.sprintf (if ko then "원본 읽기 실패 %d명" else "source read errors: %d keepers") snapshot.mhs_total_source_read_errors] else [])
@@ -1355,7 +1359,9 @@ let render_memory_body ~cols ~budget (state : state)
       ~context_rows:(List.length projection.context) state in
   let rows = budget + Masc_tui_frame.chrome_rows in
   let available = max 1 (rows - layout.sc_chrome) in
-  let overflowing = shown > available in
+  (* With only one row there is room for the selection but not a separate
+     window label. Drawing both would hide the selection behind the cut. *)
+  let overflowing = available > 1 && shown > available in
   let content_height =
     Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
       ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep

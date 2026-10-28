@@ -1,0 +1,24 @@
+ 대시보드  작업  ▸키퍼  사용량  보드  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ MASC Queue  fixture                                                          │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  Queue read · r refreshes                                                    │
+│  Local unsent messages · 0                                                   │
+│  Queue open · busy · 1 pending                                               │
+│  Pending events may already be in the current turn                           │
+│    15:46  대기 이벤트 01 · 변경 사항과 리뷰 내용을 확인 · unacknowledged 10h…│
+│  Server queued messages · 0                                                  │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+  TUI 38b6edd ≠ server fixture (generations differ)  Enter:read  Esc:back  …?
+ › to fixture   (i to write)

@@ -1,0 +1,36 @@
+ 대시보드  작업  ▸키퍼  사용량  보드  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  hints on                                                                                           │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  MASC · Multi-Agent Shared Context                                                                                   │
+│                                                                                                                      │
+│Candle details                                             ◆ Context                                                  │
+│Candle unavailable: live keeper status unavailable:          1/2/3/4 or Tab   switch                                  │
+│fixture unavailable                                          [ / ]            turn                                    │
+│                                                             j/k              scroll                                  │
+│                                                             r                refresh                                 │
+│                                                             Esc              close                                   │
+│                                                             ?                help                                    │
+│                                                                                                                      │
+│◇ Slash commands                                           ◇ Global                                                   │
+│  /login [client]  sign in to an official client and         Tab / Shift-Tab  next / previous surface                 │
+│                  verify a model connection                  3                jump to Keepers when the active field   │
+│  /task-inspect   inspect this session's Task creations                       or panel does not use 3                 │
+│                  without repeating them                     r                refresh the current surface             │
+│  /task-recover   restore a retained Task command for        i                focus the composer; on Dashboard,       │
+│                  this Keeper; inspect Tasks before                           choose a Keeper                         │
+│                  repeating an unconfirmed creation          :                command palette                         │
+│  /task <title>   create a task for this keeper (lines       ;                agenda: what is coming, and who is      │
+│                  below become the body)                                      waiting on you; Enter opens a row       │
+│  /keeper <name>  switch this pane to another keeper         @                answering: who is mid-turn or just      │
+│  /addons [inspect|attach JSON|observe ID|detach ID|slice                     finished; Enter opens their chat        │
+│  JSON|evidence JSON]                                        ?                this help                               │
+│                  open optional cross-lane observations      &                Collab: watch MSX/DOS and manage play   │
+│                  and package actions                                         links (also `:` go Collab)              │
+│  /play [invites|invite <name> <hours>|link [name]|revoke    Ctrl-B           show or hide the Keeper roster; it      │
+│  <name>]                                                                     starts hidden and the choice persists   │
+│                  list, issue or revoke shared DOS play                       across navigation and resizing          │
+│  [lines 1-28/805]                                                                                                    │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  TUI 38b6edd ≠ server fixture (generations differ)  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close
+ › to fixture iORIGINAL-DRAFT

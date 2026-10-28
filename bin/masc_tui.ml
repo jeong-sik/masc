@@ -16881,7 +16881,10 @@ let handle_goal_confirmation_key state ~mailbox =
        | Goal_confirmation.Inspecting read ->
       match Goal_confirmation_read.view_for ~equal:String.equal read ~key:goal_id with
        | Ready confirmation when state.goal_confirmation_presented <> Some confirmation ->
-           report_action state "system" "Read through the proof binding before confirming"
+           report_action state "system"
+             (ui_text state
+                ~ko:"증거를 끝까지 읽은 뒤 [a]를 눌러 주세요"
+                ~en:"Read through the proof binding before confirming")
        | Ready confirmation ->
            supersede_home_decision_receipt state;
            state.goal_confirmation <- Goal_confirmation.Submitting

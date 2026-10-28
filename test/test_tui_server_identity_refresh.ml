@@ -526,7 +526,7 @@ let test_uncertain_identity_retires_reads_not_admitted_operations () =
   state.keeper_queue_inflight <- ["reading"; "writing"; "mutation-observation"];
   state.keeper_queue_readings <- ["reading"; "mutation-observation"];
   state.keeper_queue_inspections <- ["reading", state.workspace_read_authority];
-  state.queue_panel <- Some {qp_keeper="writing"; qp_reading=Queue_current;
+  state.queue_panel <- Some {qp_keeper="writing"; qp_layout=Masc_tui_queue_layout.Adaptive; qp_reading=Queue_current;
     qp_observation=None; qp_notice=None; qp_receipt=Some (Queue_action_receipt (Queue_info "change accepted"));
     qp_selected=None; qp_scroll=0; qp_detail=None; qp_detail_scroll=0;
     qp_refresh_after_priority=false};
@@ -4887,7 +4887,7 @@ let test_queue_play_input_authority () =
   let module Press = Masc_tui_press in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
       ~port:0 ~refresh_interval:0. () in
-  let panel = {qp_keeper="keeper"; qp_reading=Queue_current; qp_observation=None;
+  let panel = {qp_keeper="keeper"; qp_layout=Masc_tui_queue_layout.Adaptive; qp_reading=Queue_current; qp_observation=None;
     qp_notice=None; qp_receipt=None; qp_selected=None; qp_scroll=0; qp_detail=None;
     qp_detail_scroll=0; qp_refresh_after_priority=false} in
   let queue_owner panel = Some (queue_panel_owner state panel) in
@@ -4913,6 +4913,11 @@ let test_queue_play_input_authority () =
   check_queue "pinned Queue detail owns input" detail
     (queue_decision ~beneath:(Some detail) (queue_owner detail));
   check_wait "list owner does not authorize a detail" (queue_decision ~beneath:(Some detail) shown_queue);
+  let expanded = {panel with qp_layout=Masc_tui_queue_layout.Expanded} in
+  check_wait "layout change waits for its replacement frame"
+    (queue_decision ~beneath:(Some expanded) shown_queue);
+  check_queue "expanded Queue owns input after presentation" expanded
+    (queue_decision ~beneath:(Some expanded) (queue_owner expanded));
   check_wait "a higher overlay prevents Queue input" (queue_decision ~beneath:None shown_queue);
   check_wait "unpresented Queue does not own input" (queue_decision None);
   check_wait "closed Queue does not expose its underlying surface"
@@ -4990,7 +4995,7 @@ let test_queue_presented_selection_authority () =
   let id = Inbox.Server_message "message-a" in
   let row = {Inbox.id=Some id; text="visible prefix\noriginal content"} in
   let observation = {Inbox.waiting=Ok []; operations=Ok [row]} in
-  let panel = {qp_keeper="keeper-a"; qp_reading=Queue_current;
+  let panel = {qp_keeper="keeper-a"; qp_layout=Masc_tui_queue_layout.Adaptive; qp_reading=Queue_current;
     qp_observation=Some observation; qp_notice=None; qp_receipt=None;
     qp_selected=Some id; qp_scroll=0; qp_detail=None; qp_detail_scroll=0;
     qp_refresh_after_priority=false} in
@@ -5065,7 +5070,7 @@ let test_queue_detail_respects_source_reading () =
   let items = [local_row; server_row; event_row] in
   let observation = {Inbox.waiting=Ok [event_row]; operations=Ok [server_row]} in
   let receipt = Some (Queue_action_receipt (Queue_info "action accepted")) in
-  let panel = {qp_keeper="keeper"; qp_reading=Queue_unavailable;
+  let panel = {qp_keeper="keeper"; qp_layout=Masc_tui_queue_layout.Adaptive; qp_reading=Queue_unavailable;
     qp_observation=Some observation; qp_notice=Some (Queue_error "read failed");
     qp_receipt=receipt; qp_selected=None; qp_scroll=0; qp_detail=Some server;
     qp_detail_scroll=0; qp_refresh_after_priority=false} in

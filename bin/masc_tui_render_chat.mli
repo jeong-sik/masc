@@ -61,6 +61,11 @@ val render_keeper_message :
   Masc_tui_render_prim.Frame_presenter.frame *
   Masc_tui_types.clamped_scroll option
 
+val queue_context_lines :
+  Masc_tui_types.state -> keeper_name:string -> cols:int -> height:int -> string list
+(** Read-only rows from the same conversation projection and wrapping as chat.
+    This does not install chat click targets or change its scroll/draft. *)
+
 val native_task_entries :
   Masc_tui_types.state -> keeper_name:string -> role_label_column:int ->
   Message_layout.entry list

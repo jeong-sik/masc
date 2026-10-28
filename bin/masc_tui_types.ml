@@ -8623,6 +8623,7 @@ type queue_panel_reading = Queue_loading | Queue_current | Queue_unavailable
 
 type queue_panel = {
   qp_keeper : string;
+  qp_layout : Masc_tui_queue_layout.preference;
   qp_reading : queue_panel_reading;
   qp_observation : Masc_tui_queue_inspection.observation option;
   qp_notice : queue_panel_notice option;
@@ -8639,6 +8640,7 @@ type queue_panel_owner = {
   qo_read_authority : unit ref;
   qo_keeper : string;
   qo_detail : Masc_tui_queue_inspection.item_id option;
+  qo_layout : Masc_tui_queue_layout.preference;
 }
 
 type state = {
@@ -10538,13 +10540,14 @@ let queue_panel_items (state : state) (panel : queue_panel) =
 
 let queue_panel_owner state panel =
   {qo_workspace=state.workspace_authority; qo_read_authority=state.workspace_read_authority;
-   qo_keeper=panel.qp_keeper; qo_detail=panel.qp_detail}
+   qo_keeper=panel.qp_keeper; qo_detail=panel.qp_detail; qo_layout=panel.qp_layout}
 
 let same_queue_panel_owner left right =
   left.qo_workspace = right.qo_workspace
   && left.qo_read_authority == right.qo_read_authority
   && String.equal left.qo_keeper right.qo_keeper
   && left.qo_detail = right.qo_detail
+  && left.qo_layout = right.qo_layout
 
 type queue_panel_detail_reading =
   | Queue_detail_none
@@ -10596,6 +10599,21 @@ let queue_panel_selected_id ~items panel =
   match queue_panel_selected_index ~items panel with
   | Some _ -> panel.qp_selected
   | None -> None
+
+type queue_panel_priority =
+  | Queue_no_priority | Queue_local_order | Queue_server_order | Queue_event_urgency
+
+let queue_panel_priority state ~items panel =
+  match queue_panel_selected_id ~items panel with
+  | Some (Masc_tui_queue_inspection.Local_message id) ->
+      (match List.find_opt (fun (item : Masc_tui_keeper_chat_queue.item) ->
+          String.equal item.request.request_id id)
+          (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name:panel.qp_keeper) with
+       | Some {intent=Next; _} -> Queue_local_order
+       | Some {intent=Steer_after_interrupt; _} | None -> Queue_no_priority)
+  | Some (Server_message _) -> Queue_server_order
+  | Some (Event _) -> Queue_event_urgency
+  | Some (Running_message _ | Schedule _) | None -> Queue_no_priority
 
 let reconcile_queue_panel_selection ~items panel =
   {panel with qp_selected=queue_panel_selected_id ~items panel}

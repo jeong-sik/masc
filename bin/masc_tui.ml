@@ -10220,7 +10220,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
 
 let open_keeper_queue_panel state ~mailbox ~keeper_name =
   state.queue_panel <- Some
-    { qp_keeper=keeper_name; qp_reading=Queue_unavailable;
+    { qp_keeper=keeper_name; qp_layout=Masc_tui_queue_layout.Adaptive; qp_reading=Queue_unavailable;
       qp_observation=None; qp_notice=None; qp_receipt=None; qp_selected=None; qp_scroll=0;
       qp_detail=None; qp_detail_scroll=0; qp_refresh_after_priority=false };
   launch_keeper_queue state ~mailbox ~keeper_name Masc_tui_queue_inspection.Inspect
@@ -10247,13 +10247,11 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
   let items () = queue_panel_items state panel in
   let move direction =
     let rows = items () in
-    let terminal_rows, _ = get_terminal_size () in
-    let budget = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+    let budget = Masc_tui_render_overlays.queue_panel_list_budget state panel in
     update (queue_panel_move ~items:rows ~budget ~direction) in
   let selected () = queue_panel_selected_id ~items:(items ()) panel in
   let act command =
-    let terminal_rows, _ = get_terminal_size () in
-    if Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows <= queue_panel_fixed_rows ~items:(items ()) panel then ()
+    if Masc_tui_render_overlays.queue_panel_list_budget state panel <= queue_panel_fixed_rows ~items:(items ()) panel then ()
     else if panel.qp_reading = Queue_loading then notice "Wait for the current queue request"
     else if panel.qp_reading <> Queue_current || not (server_authority_ready state) then
       notice ~failure:true "Queue observation is unavailable; refresh before changing it"
@@ -10310,6 +10308,7 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
      | _ -> ())
   else match key with
   | "esc" -> state.queue_panel <- None
+  | "f" -> update (fun panel -> {panel with qp_layout=Masc_tui_queue_layout.toggle panel.qp_layout})
   | "j" | "down" -> move `Down
   | "k" | "up" -> move `Up
   | "\r" | "\n" | "enter" ->
@@ -10321,8 +10320,7 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
         | Some id -> update (fun panel -> {panel with qp_detail=Some id; qp_detail_scroll=0})
         | None -> notice ~failure:true "Queue selection changed or has not been shown; review the selected row and retry"))
   | "pageup" | "pagedown" | "home" | "end" ->
-    let terminal_rows, _ = get_terminal_size () in
-    let budget = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+    let budget = Masc_tui_render_overlays.queue_panel_list_budget state panel in
     let rows = items () in
     let count = List.length rows in
     update (fun panel ->

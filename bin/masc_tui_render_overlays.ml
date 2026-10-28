@@ -872,6 +872,20 @@ let queue_panel_detail_viewport state panel =
   let height = if count > budget then max 0 (budget - 1) else budget in
   count, height
 
+let queue_panel_layout state (panel : queue_panel) =
+  let terminal_rows, cols = get_terminal_size () in
+  let has_context = view_is_chat state.view
+      && state.msg_target_keeper_name = Some panel.qp_keeper
+      && Option.is_none panel.qp_detail in
+  Masc_tui_queue_layout.choose panel.qp_layout ~has_context ~cols
+    ~body_rows:(surface_chrome_budget state ~terminal_rows)
+    ~queue_fixed_rows:(queue_panel_fixed_rows ~items:(queue_panel_items state panel) panel)
+
+let queue_panel_list_budget state panel =
+  let terminal_rows, _ = get_terminal_size () in
+  Masc_tui_queue_layout.queue_rows
+    ~body_rows:(surface_chrome_budget state ~terminal_rows) (queue_panel_layout state panel)
+
 let render_queue_panel (state : state) (panel : queue_panel) =
   let terminal_rows, cols = get_terminal_size () in
   let title label = screen_title label ^ "  " ^ Terminal_text.single_line panel.qp_keeper in
@@ -890,6 +904,28 @@ let render_queue_panel (state : state) (panel : queue_panel) =
           if index >= scroll && index < scroll + height then c.push ("  " ^ line)) lines;
         Option.iter c.push (overlay_window_row ~scroll ~height count))
   else
+  let placement = queue_panel_layout state panel in
+  let context_caption =
+    match state.msg_loaded_error with
+    | Some _ -> "Conversation · cached; history read failed"
+    | None -> "Conversation · Esc returns to chat" in
+  let context_lines ~cols ~height =
+    Masc_tui_render_chat.queue_context_lines state ~keeper_name:panel.qp_keeper ~cols ~height in
+  let sidebar = match placement with
+    | Masc_tui_queue_layout.Side {context_cols; queue_cols=_} ->
+        Some (context_cols, fun ~rows buf ->
+          framed_top buf context_cols;
+          framed_line buf context_cols context_caption;
+          framed_divider buf context_cols;
+          let height = max 0 (rows - 4) in
+          let lines = context_lines ~cols:(framed_inner_width context_cols) ~height in
+          List.iter (framed_line buf context_cols) lines;
+          for _ = List.length lines to height - 1 do framed_empty buf context_cols done;
+          framed_bottom buf context_cols)
+    | Full | Bottom _ -> None in
+  let queue_cols = match placement with
+    | Masc_tui_queue_layout.Side {queue_cols; context_cols=_} -> queue_cols
+    | Full | Bottom _ -> cols in
   let items = queue_panel_items state panel in
   let status = if not (server_authority_ready state) then
     "Workspace unconfirmed; any receipt is from the previous observation"
@@ -904,20 +940,22 @@ let render_queue_panel (state : state) (panel : queue_panel) =
        | Some {waiting=Error _; operations=Error _} -> "Both server reads unavailable · r retries"
        | None -> "Queue observation unavailable · r retries")
     | Queue_unavailable, None -> "Snapshot unavailable · r retries" in
-  let hints = match queue_panel_selected_id ~items panel with
-    | Some (Masc_tui_queue_inspection.Local_message _) ->
-      "↑/↓:select  Enter:read  n:first locally  l:last locally  r:refresh  Esc:close"
-    | Some (Masc_tui_queue_inspection.Server_message _) ->
-      "↑/↓:select  Enter:read  n:run next  l:move last  r:refresh  Esc:close"
-    | Some (Masc_tui_queue_inspection.Event _) ->
-      "↑/↓:select  Enter:read  n:immediate priority  l:low priority  r:refresh  Esc:close"
-    | Some (Masc_tui_queue_inspection.Running_message _ | Schedule _) | None ->
-      "↑/↓:select  Enter:read  PgUp/PgDn:page  r:refresh  Esc:close" in
+  let hints = Masc_tui_keys.footer_hints_queue state panel in
   surface_chrome ~overflow:(Self_scrolled owner) state ~terminal_rows ~cols
+    ?sidebar
     ~surface_key:"keeper-queue" ~frame:Chrome_overlay
     ~title:(title " MASC Queue")
-    ~hints:(hints ^ "  ?:help")
+    ~hints
     ~body:(fun ~budget c ->
+      (match placement with
+       | Masc_tui_queue_layout.Bottom {context_rows; queue_rows=_} ->
+           c.push context_caption;
+           let lines = context_lines ~cols:(framed_inner_width cols) ~height:(context_rows-1) in
+           List.iter c.push lines;
+           for _ = List.length lines to context_rows - 2 do c.push_empty () done;
+           c.push_divider ()
+       | Full | Side _ -> ());
+      let budget = Masc_tui_queue_layout.queue_rows ~body_rows:budget placement in
       if budget > 0 then c.push ("  " ^ status);
       (match panel.qp_receipt with
        | Some (Queue_action_receipt (Queue_info text) | Queue_read_receipt text) when budget > 1 ->
@@ -947,7 +985,7 @@ let render_queue_panel (state : state) (panel : queue_panel) =
             else text in
           let row = marker ^ (if selected then Theme.info () else "") ^ text ^ Ansi.reset in
           let row = if selected && queue_selection_visible
-              ~inner_width:(framed_inner_width cols) ~marker ~text then
+              ~inner_width:(framed_inner_width queue_cols) ~marker ~text then
               match queue_selection_for_item state panel item with
               | Some authority -> pressable (Press_queue_selected authority) row
               | None -> row

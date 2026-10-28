@@ -11,6 +11,8 @@ directory) and prints these tables:
 2. What happened to the facts that Keepers wrote themselves (journal rows whose
    source is ``explicit_write``): still current as written, rewritten, retracted
    or gone from the current set without a recorded event.
+   The source-bound claim store and the admission queues are counted next to
+   them.
 3. Librarian commits against failures per UTC day.
 4. How facts left the current set: revised and retracted events, absorptions
    (``.memory-absorbed.jsonl``) and the facts that committed journal rows
@@ -164,6 +166,10 @@ def table_write_fate(memory_dir: str, current: dict[str, list[dict[str, object]]
         by_id = {memory_id_of(as_str(fact.get("claim"))): fact for fact in facts}
         revised: set[str] = set()
         retracted: set[str] = set()
+        absorbed = {
+            as_str(row.get("memory_id"))
+            for row in read_jsonl(os.path.join(memory_dir, f"{keeper}.memory-absorbed.jsonl"))
+        }
         for event in read_jsonl(os.path.join(memory_dir, f"{keeper}.memory-events.jsonl")):
             kind = event.get("kind")
             if kind == "revised":
@@ -190,8 +196,10 @@ def table_write_fate(memory_dir: str, current: dict[str, list[dict[str, object]]
                     fate = "rewritten (a revised event)"
                 elif memory_id in retracted:
                     fate = "retracted"
+                elif memory_id in absorbed:
+                    fate = "absorbed into another fact"
                 else:
-                    fate = "gone from the current set, no revised or retracted event"
+                    fate = "gone from the current set, no revised, retracted or absorbed record"
                 written.append((keeper, as_str(source.get("trace_id")), fate))
     print(f"\nfacts that Keepers wrote and the journal committed (explicit_write): {len(written)}")
     print(f"category: {dict(categories)}; commits that also dropped an older fact: {replaced}")
@@ -210,6 +218,43 @@ def table_write_fate(memory_dir: str, current: dict[str, list[dict[str, object]]
         print(f"  {title}: {len(rows)} facts in {len({keeper for keeper, _, _ in rows})} Keepers")
         for label, count in fates.most_common():
             print(f"    {label}: {count} ({100 * count / len(rows):.1f}%)")
+
+
+def table_source_bound(memory_dir: str, excluded: set[str]) -> None:
+    """Claims bound to a source file live in their own store, apart from the facts above."""
+    claims = 0
+    claim_bytes = 0
+    keepers = 0
+    for path in sorted(glob.glob(os.path.join(memory_dir, "*.memory-source-current.json"))):
+        if keeper_of(path, ".memory-source-current") in excluded:
+            continue
+        try:
+            with open(path, encoding="utf-8") as handle:
+                facts = as_list(as_dict(json.load(handle)).get("facts"))
+        except (OSError, ValueError):
+            continue
+        rows = [as_dict(fact) for fact in facts]
+        claims += len(rows)
+        claim_bytes += sum(len(as_str(row.get("claim")).encode("utf-8")) for row in rows)
+        keepers += int(bool(rows))
+    print(f"\nsource-bound claims (separate store, not in the facts above): {claims} claims, {claim_bytes / 1000:.0f} KB, in {keepers} Keepers")
+
+
+def table_admission_queues(memory_dir: str, excluded: set[str]) -> None:
+    """Explicit writes wait in a per-Keeper admission queue until the worker admits them."""
+    files = 0
+    waiting = 0
+    for path in sorted(glob.glob(os.path.join(memory_dir, "*.memory-admission.json"))):
+        if keeper_of(path, ".memory-admission") in excluded:
+            continue
+        try:
+            with open(path, encoding="utf-8") as handle:
+                pending = as_list(as_dict(json.load(handle)).get("pending"))
+        except (OSError, ValueError):
+            continue
+        files += 1
+        waiting += int(bool(pending))
+    print(f"\nadmission queues: {files} Keepers, {waiting} with a pending write")
 
 
 def table_librarian_outcomes(memory_dir: str, excluded: set[str], since: float) -> None:
@@ -381,6 +426,8 @@ def main() -> int:
     excluded = set(args.exclude)
     current = load_current(args.memory_dir, excluded)
     table_current_facts(current, now)
+    table_source_bound(args.memory_dir, excluded)
+    table_admission_queues(args.memory_dir, excluded)
     table_write_fate(args.memory_dir, current, since)
     table_librarian_outcomes(args.memory_dir, excluded, since)
     table_removals(args.memory_dir, excluded, since)

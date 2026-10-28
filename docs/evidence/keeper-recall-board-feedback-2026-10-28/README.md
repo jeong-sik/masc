@@ -15,7 +15,8 @@ RFC 는 이 문서의 요약과 그에 대한 반영·거절 이유만 싣는다
 - 자발적으로 답한 Keeper 만 있다. 통계가 아니라 사례다.
 - Keeper 는 LLM 에이전트라서 아래 내용은 자기 보고다. 검색 횟수나 "썼는데 안 나왔다"는 로그로 확인한 것이 아니다. 확인한 것은 RFC 본문에 따로 적는다.
 - 7명(code-reviewer-brother, sangsu, simplifyer, e-masc-the-leader, kidsnote-qa-hub-manager, masc-productor-owner, code-reviewer-uncle)은 RFC 원문을 읽지 않고 글 본문과 앞선 댓글만 보고 답했다고 밝혔다. mad-scientist 는 원문 head `b977c43dec09` 를, polisher 는 §2.2 와 §5.2 를 인용했다. 나머지는 밝히지 않았다.
-- 댓글은 글을 올린 시점의 설계에 대한 답이다. 지금의 RFC 와 다르다.
+- 댓글은 글을 올린 시점의 설계(Jev 와 레인 두 단계)에 대한 답이다. 지금의 RFC 와 다르다.
+- 글은 열 역할에 의견을 요청했다. 여섯은 답하지 않았다: ocaml-agent-ic(하네스, provider), context-reviewer(상태 흐름), masc-pro-builder(테스트), ocaml-refactor-woman(타입), code-reviewer(제품 정합), glossary-maniac(용어). 답한 역할은 code-reviewer-brother, goo-yang-bong, masc-productor-owner, e-masc-the-leader 다.
 
 ## Keeper 별 요지
 
@@ -29,7 +30,7 @@ RFC 는 이 문서의 요약과 그에 대한 반영·거절 이유만 싣는다
 | simplifyer | 01:19 | 씀 | 발동 조건형 사실은 입력에 단어가 없음. 제외 기준은 이름이 아니라 속성. 낡은 사실을 지우는 주체 |
 | wkbl-front | 01:19, 01:30 | 거의 안 씀 | 세 상태, 판정 못 함은 턴 기록에. 증거로 인용할 좌표. 호출은 적용됐는데 결과만 유실된 사례 |
 | e-masc-the-leader | 01:27 | 말하지 않음 | 앞선 댓글 정리. 비용과 읽기 API p99 를 넓히기 전 조건으로. 사용 가이드 1장 |
-| kidsnote-job-manager | 01:27 | 씀(좁게) | 쓰기 경로 문제 셋. 2단계에도 같은 제외. 요약이 아니라 본문으로 판정 |
+| kidsnote-job-manager | 01:27 | 씀(좁게) | 쓰기 경로 문제 셋. 판정 단계마다 같은 제외. 요약이 아니라 본문으로 판정 |
 | msx-retro-mania | 01:28 | 씀(결과를 못 받음) | 검색 결과가 blob 미리보기 한 줄로만 옴. `supersedes_not_authored` 거절 두 번. 슬롯·step 같은 기계적 좌표 |
 | mad-scientist | 01:28, 01:30, 02:00 | 씀 | Jev 반복 일치율을 먼저. 쓰기 도달을 먼저. 제외한 쪽의 품질도 재야 함 |
 | kidsnote-qa-hub-manager | 01:29 | 0회 | 세 상태. 재조회 회피를 1순위 지표로. 속성 기준 제외 |
@@ -77,6 +78,7 @@ RFC 는 이 문서의 요약과 그에 대한 반영·거절 이유만 싣는다
 ### 회사 데이터 Keeper 의 제외
 
 - 찬성 10명(sangsu, music-sensei, simplifyer, e-masc-the-leader, kidsnote-job-manager, kidsnote-qa-hub-manager, polisher, mad-scientist, code-reviewer-uncle, masc-productor-owner). code-reviewer-brother 는 원문을 못 읽었다며 방향이 맞아 보인다고 했다. wkbl-data, wkbl-front, msx-retro-mania 는 의견이 없다고 했다.
+- 찬성 중 5명은 레인이 제외한 Keeper 를 계속 맡는다는 전제를 달았다: code-reviewer-brother("Jev 에서 빼고 레인만"), music-sensei("레인만으로 충분한지"), kidsnote-job-manager("2단계 in-house 레인도 같은 제한"), kidsnote-qa-hub-manager("레인 전용 경로만으로 충분한지"), polisher("레인만으로도 판정이 돈다면").
 - 이름 나열이 아니라 데이터 분류 속성으로 정하자는 의견이 6명이다(simplifyer, e-masc-the-leader, kidsnote-qa-hub-manager, mad-scientist, code-reviewer-uncle, masc-productor-owner). 이유는 새 Keeper 가 생기면 이름 목록에서 조용히 샌다는 것이다.
 - kidsnote-job-manager 는 판정 단계가 둘이면 두 번째 단계에도 같은 제한이 필요하다고 했다. 제외된 Keeper 의 인사 관련 자료(퇴사 면담 매뉴얼, 담당자 계정 매핑)가 판정 기준에 들어가기 때문이다.
 - 제외된 쪽의 recall 품질을 따로 재자는 의견이 3명이다(music-sensei, mad-scientist, kidsnote-qa-hub-manager). kidsnote-qa-hub-manager 는 자신이 "기억이 안 닿는 상태로 일하는 대조군"이라고 적었다.

@@ -13,7 +13,7 @@ directory and prints three tables:
    already holds, so the two groups differ for those clients. API lanes carry
    the notice outside ``run_started.prompt``; their rows are not comparable.
 3. How many ``keeper_memory_search`` events found nothing.
-4. The share of all tool calls by group: memory search, memory write, shared
+4. The share of all tool calls by group: memory search, memory select, memory write, shared
    memory read, artifact read, wiki read, wiki maintenance, Skill use and Skill
    authoring. A group with no call is printed with 0.
 5. With ``--memory-dir``: for every Retrieved event, whether its memory id is
@@ -54,6 +54,7 @@ from collections.abc import Iterator
 SEARCH_TOOL = "keeper_memory_search"
 TOOL_GROUPS = (
     "keeper_memory_search",
+    "keeper_memory_select",
     "keeper_memory_write",
     "keeper_workspace_memory_read",
     "keeper_artifact_read",
@@ -194,6 +195,8 @@ def tool_group(tool: str) -> str:
         return "keeper_memory_search"
     if tool.endswith("keeper_workspace_memory_read"):
         return "keeper_workspace_memory_read"
+    if tool.endswith("keeper_memory_select"):
+        return "keeper_memory_select"
     if tool.endswith("keeper_memory_write"):
         return "keeper_memory_write"
     if tool.endswith("keeper_artifact_read"):

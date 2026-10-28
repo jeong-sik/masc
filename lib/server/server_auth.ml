@@ -819,11 +819,16 @@ let public_read_cors_origin_opt ~request_authority (request : Httpun.Request.t) 
 
 (** CORS headers *)
 let cors_allow_headers_value =
-  "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, \
-   Mcp-Protocol-Version, Last-Event-Id, X-Gate-Agent, X-MASC-Agent, X-MASC-Agent-Name"
+  String.concat ", "
+    [ "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, \
+       Mcp-Protocol-Version, Last-Event-Id, X-Gate-Agent, X-MASC-Agent, X-MASC-Agent-Name"
+    ; Request_workspace_precondition.expected_base_path_header
+    ; Request_workspace_precondition.expected_masc_root_header ]
 
 let cors_expose_headers_value =
-  "Mcp-Session-Id, Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining"
+  String.concat ", "
+    [ "Mcp-Session-Id, Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining"
+    ; fst Workspace.read_precondition_admission_header ]
 
 let cors_headers origin =
   let base = [

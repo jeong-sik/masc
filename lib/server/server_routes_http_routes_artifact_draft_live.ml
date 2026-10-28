@@ -17,7 +17,8 @@ let refuse request reqd error =
    a commit between observe and await cannot be lost. *)
 let stream ~sw ~clock ~session request reqd =
   let headers = Httpun.Headers.of_list
-    (["content-type", "text/event-stream"; "cache-control", "private, no-store";
+    (Http.Response.scoped_headers () @
+     ["content-type", "text/event-stream"; "cache-control", "private, no-store";
       "x-accel-buffering", "no"] @ public_read_cors_headers request) in
   let writer = Httpun.Reqd.respond_with_streaming reqd (Httpun.Response.create ~headers `OK) in
   let mutex = Eio.Mutex.create () in

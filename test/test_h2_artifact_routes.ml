@@ -25,6 +25,12 @@ let header name reply =
   List.find_map (fun (key, value) ->
     if String.equal (String.lowercase_ascii key) (String.lowercase_ascii name)
     then Some value else None) reply.headers
+let header_has_token name token reply =
+  match header name reply with
+  | None -> false
+  | Some value ->
+    String.split_on_char ',' value
+    |> List.exists (fun part -> String.equal (String.lowercase_ascii (String.trim part)) token)
 let check_status label expected reply = check int label expected reply.status
 let check_code label expected reply = check string label expected (field_string "code" (json reply))
 let check_json label expected actual =
@@ -122,7 +128,9 @@ let h1_request gateway ~meth ~path ~headers ~body =
     let request = Httpun.Reqd.request reqd in
     Server_request_authority.with_current gateway.authority (fun () ->
       Server_workspace_precondition.guard_http1 ~path:(Http.Request.path request) request reqd
-        ~admitted:(fun () -> Http.Router.dispatch gateway.router request reqd))) in
+        ~admitted:(fun () -> match request.Httpun.Request.meth with
+          | `OPTIONS -> Server_routes_http_runtime.options_handler request reqd
+          | _ -> Http.Router.dispatch gateway.router request reqd))) in
   let fields = List.map (fun (key, value) -> key ^ ": " ^ value ^ "\r\n") headers |> String.concat "" in
   let head = Printf.sprintf "%s %s HTTP/1.1\r\nHost: localhost:8935\r\n%sContent-Length: %d\r\n\r\n"
     (Httpun.Method.to_string meth) path fields (String.length body) in
@@ -290,6 +298,30 @@ let test_access_and_preconditions () = with_gateway (fun ~base_path ~worker ~pla
     | Ok config -> config | Error error -> fail (Server_auth_config.resolve_error_to_string error) in
   Server_auth.For_testing.restore_auth_config (Some dev_config);
   Fun.protect ~finally:(fun () -> Server_auth.For_testing.restore_auth_config None) (fun () ->
+    let requested_headers = "authorization, x-masc-expected-base-path, x-masc-expected-masc-root" in
+    let preflight origin = both gateway ~meth:`OPTIONS
+      ~headers:["origin", origin; "access-control-request-method", "GET";
+        "access-control-request-headers", requested_headers] doc in
+    let h1_preflight, h2_preflight = preflight dev_origin in
+    List.iter (fun reply ->
+      check_status "allowed development Origin gets a preflight" 204 reply;
+      check (option string) "preflight reflects allowed Origin" (Some dev_origin)
+        (header "access-control-allow-origin" reply);
+      List.iter (fun name -> check bool "workspace request header allowed by preflight" true
+        (header_has_token "access-control-allow-headers" name reply))
+        ["authorization"; "x-masc-expected-base-path"; "x-masc-expected-masc-root"])
+      [h1_preflight; h2_preflight];
+    let denied_h1, denied_h2 = preflight "https://untrusted.example" in
+    List.iter (fun reply ->
+      check (option string) "untrusted preflight does not gain CORS admission" None
+        (header "access-control-allow-origin" reply)) [denied_h1; denied_h2];
+    let bound_h1, bound_h2 = both gateway ~token:worker ~headers:["origin", dev_origin]
+      (doc ^ query expected.base_path expected.masc_root) in
+    List.iter (fun reply ->
+      check_status "allowed development Origin reads a bound document" 200 reply;
+      check bool "bound response exposes workspace admission" true
+        (header_has_token "access-control-expose-headers" "x-masc-workspace-read" reply))
+      [bound_h1; bound_h2];
     List.iter (fun path ->
       let h1, h2 = both gateway ~token:worker ~headers:["origin", dev_origin]
         (path ^ query "/foreign-workspace" expected.masc_root) in
@@ -448,13 +480,14 @@ let reset_frame stream_id =
   Bytes.set_int32_be frame 5 (Int32.of_int stream_id);
   Bytes.to_string frame
 
-let open_draft_stream gateway ~worker ~path =
+let open_draft_stream gateway ~worker ~headers ~path =
   let stream_id = gateway.next_stream in
   gateway.next_stream <- stream_id + 2;
   let first, resolve = Eio.Promise.create () in
   let buffer = Buffer.create 1024 in
   let request = H2.Request.create ~scheme:"http" `GET path
-    ~headers:(H2.Headers.of_list [":authority", "localhost:8935"; "authorization", "Bearer " ^ worker]) in
+    ~headers:(H2.Headers.of_list ((":authority", "localhost:8935") ::
+      ("authorization", "Bearer " ^ worker) :: headers)) in
   let writer = H2_eio.Client.request gateway.client ~flush_headers_immediately:true request
     ~error_handler:(fun _ -> if not (Eio.Promise.is_resolved first) then Eio.Promise.resolve resolve (Error "SSE stream failed"))
     ~response_handler:(fun response reader ->
@@ -503,7 +536,60 @@ let test_live_checkpoint () = with_gateway ~runtime:true (fun ~base_path ~worker
   let observer = Live.join ~base_path ~actor:"other-worker" ~source:Live.Dashboard_connection ~target in
   Fun.protect ~finally:(fun () -> Live.leave observer) (fun () ->
     let path = "/api/v1/artifact-draft-events/" ^ id ^ "?generation=" ^ target.generation in
-    let stream_id, response, frame = open_draft_stream gateway ~worker ~path in
+    let expected = match Server_workspace_precondition.served_workspace () with
+      | Some value -> value | None -> fail "workspace unavailable" in
+    let encode = Uri.pct_encode ~component:`Query_value in
+    let bound base root = path ^ "&expected_base_path=" ^ encode base
+      ^ "&expected_masc_root=" ^ encode root in
+    let receipt = "x-masc-workspace-read" in
+    let origin_headers = ["origin", "http://localhost:8935"] in
+    let leave_h1_session () =
+      let peers = match Live.observe observer with
+        | None -> fail "observer unexpectedly closed"
+        | Some (frame, _) -> member "peers" frame |> Yojson.Safe.Util.to_list in
+      let workers = List.filter (fun peer -> field_string "actor" peer = "worker") peers in
+      check int "one H1 session to clean up" 1 (List.length workers);
+      let session_id = field_string "session_id" (List.hd workers) in
+      (match Live.find ~base_path ~actor:"worker" ~target ~session_id with
+       | Error _ -> fail "H1 session missing before cleanup"
+       | Ok session -> Live.leave session);
+      Eio.Fiber.yield ();
+      let remaining = match Live.observe observer with
+        | None -> fail "observer unexpectedly closed"
+        | Some (frame, _) -> member "peers" frame |> Yojson.Safe.Util.to_list in
+      check bool "H1 session left before the next request" false
+        (List.exists (fun peer -> field_string "actor" peer = "worker") remaining) in
+    let unbound_h1 = request H1 gateway ~token:worker path in
+    check_status "unbound H1 SSE" 200 unbound_h1;
+    check (option string) "unbound H1 SSE has no admission receipt" None (header receipt unbound_h1);
+    leave_h1_session ();
+    let bound_h1 = request H1 gateway ~token:worker ~headers:origin_headers
+      (bound expected.base_path expected.masc_root) in
+    check_status "workspace-bound H1 SSE" 200 bound_h1;
+    check (option string) "H1 SSE carries its workspace admission" (Some "matched-v1") (header receipt bound_h1);
+    check int "H1 SSE admission is not duplicated" 1
+      (List.length (List.filter (fun (name, _) -> String.lowercase_ascii name = receipt) bound_h1.headers));
+    check bool "H1 SSE exposes workspace admission to allowed Origin" true
+      (header_has_token "access-control-expose-headers" receipt bound_h1);
+    leave_h1_session ();
+    pair_status "foreign workspace cannot open SSE" 409
+      (both gateway ~token:worker (bound "/foreign-workspace" expected.masc_root));
+    let unbound_id, unbound_response, _ = open_draft_stream gateway ~worker ~headers:[] ~path in
+    check (option string) "unbound H2 SSE has no admission receipt" None
+      (H2.Headers.get unbound_response.headers receipt);
+    Eio.Flow.copy_string (reset_frame unbound_id) gateway.flow;
+    let stream_id, response, frame = open_draft_stream gateway ~worker ~headers:origin_headers
+      ~path:(bound expected.base_path expected.masc_root) in
+    check (option string) "H2 SSE carries its workspace admission" (Some "matched-v1")
+      (H2.Headers.get response.headers receipt);
+    check int "H2 SSE admission is not duplicated" 1
+      (List.length (List.filter (fun (name, _) -> String.lowercase_ascii name = receipt)
+        (H2.Headers.to_list response.headers)));
+    check bool "H2 SSE exposes workspace admission to allowed Origin" true
+      (H2.Headers.to_list response.headers |> List.exists (fun (name, value) ->
+        String.lowercase_ascii name = "access-control-expose-headers"
+        && (String.split_on_char ',' value |> List.exists (fun part ->
+          String.lowercase_ascii (String.trim part) = receipt))));
     check (option string) "SSE type" (Some "text/event-stream") (H2.Headers.get response.headers "content-type");
     check (option string) "SSE is not cached" (Some "private, no-store") (H2.Headers.get response.headers "cache-control");
     check string "SSE frame schema" "masc.artifact_draft_live.v1" (field_string "schema" frame);

@@ -50,9 +50,10 @@ let write_stream_frame writer frame =
     Fun.protect ~finally:(fun () -> Resources.release lease)
       (fun () -> send_chunks ~chunk_size writer frame)
 
-let stream ~request_sw ~clock ~session ~cors h2_reqd =
+let stream ~request_sw ~clock ~session ~cors ~admission_headers h2_reqd =
   let headers = H2.Headers.of_list
-    (["content-type", "text/event-stream"; "cache-control", "private, no-store";
+    (admission_headers @
+     ["content-type", "text/event-stream"; "cache-control", "private, no-store";
       "x-accel-buffering", "no"] @ cors) in
   let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd
     (H2.Response.create ~headers `OK) in
@@ -179,7 +180,7 @@ let dispatch ~request_sw ~h2_reqd ~request ~path ~cors ~admission meth =
         (match Draft_live.join ~base_path:(base state) ~actor ~target with
          | Error error -> respond headers (Draft.error_response error)
          | Ok session ->
-           (try stream ~request_sw ~clock ~session ~cors h2_reqd
+           (try stream ~request_sw ~clock ~session ~cors ~admission_headers:headers h2_reqd
             with exn -> Live.leave session; raise exn)));
     true
   | (`GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD | `CONNECT | `TRACE | `Other _), _ -> false

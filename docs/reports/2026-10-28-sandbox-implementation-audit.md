@@ -63,7 +63,11 @@ silently losing slow-reader output (`lib/dashboard/dashboard_execute_output.ml:2
 `GET /api/dashboard/execute-output/<keeper>` and its `/api/v1` alias carry those
 events as SSE. The Dashboard terminal subscribes and appends them while the task
 is open (`dashboard/src/api/execute-output.ts:66-116`,
-`dashboard/src/components/ide/execute-output-drawer.ts:289-350`).
+`dashboard/src/components/ide/execute-output-drawer.ts:289-350`). In the
+Dashboard IDE, opening **Terminal** for a Keeper enables this subscription
+(`dashboard/src/components/ide/ide-shell.ts:935-968,1208-1215`). The endpoint
+requires control-plane authentication: an unauthenticated read-only local probe
+returned `missing_token`, so no authenticated live event or paint was observed.
 
 This is a real-time **web Dashboard terminal**, not a separate interactive PTY
 or a native-TUI stream viewer. The native TUI has no consumer for this endpoint
@@ -145,8 +149,17 @@ not mark unrelated open defects as resolved.
   compilation because the fixture was referenced before its definition. This
   was not a behavioral test result. The ordering was repaired and a
   valid-declaration/failing-preflight regression was added as `59de2f991df`.
-  Run `40696542466` targets that test-only head; its result is pending. The
-  final production head still needs its own focused run.
+- **Preflight diagnostic RED:** run `40696542466` completed/failure at that
+  test-only head. The new case lost the original preflight marker as intended;
+  `read_backend` had two failures in total, while `microvm` passed 114/114.
+  The unresolved-endpoint and attached-guest cases passed. The production fix
+  now passes the original capture error into target resolution rather than
+  substituting a later resolution error.
+- **First final-stack run:** run `40697855534`, head
+  `be25646e1d31475d755bd0f5faf652b073873f4c`: completed/failure during OCaml
+  compilation (warning 16: the new optional resolver argument needed a final
+  `()`). No behavioral result was inferred. That application is now complete;
+  a new five-suite run is required at the resulting stack head.
 - **Real-time output:** run `40692203058`, head
   `6de3f330662f2f35e939bbd04a3e7d5c8e2a64d7`: completed/success.
   `test_dashboard_execute_output` 17/17, `test_keeper_sandbox_remote` 22/22,

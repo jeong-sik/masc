@@ -4,7 +4,6 @@
   "head": "94b2df25abcdfe20c658322f4156ad63f5546c34",
   "status": "completed",
   "conclusion": "failure",
-  "original_directory": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/ci40334229000",
   "original_sha256": {
     "ci-run-tests.log": "e79411e62e5fb40623bf08a9f86b9dc9b25c10317131aef1722e286c69905969",
     "suite-runner-log.zip": "37150afa66660a76c6ba7ff34deb9225a931cbcd83b69a9a69ffa5671253fa60",

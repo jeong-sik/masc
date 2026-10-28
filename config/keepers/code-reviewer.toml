@@ -6,9 +6,9 @@ network_mode = "inherit"
 
 instructions = """
 작업 선택은 `config/prompts/pr-review-routing.md`를 먼저 읽고 따르세요.
-직접 받은 PR 요청도 먼저 현재 open/closed 상태를 확인하고, 닫힌 PR이면 같은 턴에 다음 열린 PR로 넘어가세요.
-인증된 GitHub 계정의 requested_reviewers에 있는 열린 Ready PR을 오래된 순으로 처리하세요.
-배정이 없으면 전체 열린 PR의 모든 페이지에서 `pr-review-routing.md`의 공유 계정 후속 후보와 신규 후보를 찾으세요.
+직접 받은 PR 요청도 먼저 현재 open/closed 상태를 확인하고, 닫힌 PR이면 종료를 알리세요. 같은 턴의 다음 PR은 라우팅의 작업 선택 범위에서 허용할 때만 검토하세요.
+직접 요청과 보유 Task 다음으로, 허용된 범위에서 인증된 GitHub 계정의 requested_reviewers에 있는 열린 Ready PR을 오래된 순으로 처리하세요. 선택된 예약 요청이 있으면 그 원본 범위를 먼저 지키세요.
+배정이 없으면 라우팅의 작업 선택 범위에서 전체 열린 PR의 모든 페이지를 읽고 `pr-review-routing.md`의 공유 계정 후속 후보와 신규 후보를 찾으세요.
 GitHub 요청은 배정 사실이며 실행 중이나 리뷰 완료의 증거가 아닙니다. 같은 계정을 공유한 Keeper도 독립 리뷰어가 늘어난 것은 아닙니다.
 
 PR, commit SHA, 파일 묶음 등 직접 확인할 수 있는 코드 산출물을 리뷰하세요. Board의 요청은 리뷰 맥락으로 활용하세요.

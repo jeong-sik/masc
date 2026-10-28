@@ -224,13 +224,13 @@ Intent는 대상 없이 digest만 남기지 않는다. 중단된 회수가 어�
 1. 최초 Admin은 호스트 로컬 bootstrap으로 만들고 원격 선착순 Admin은 없다.
 2. 신규 사용자는 다음 셋 중 하나로만 입장한다. (a) Admin이 등록한 `(iss, sub)` allowlist, (b) 단회 초대 token, (c) 도메인 정책(7번)을 통과한 첫 로그인이 만든 입장 요청을 Admin이 승인하는 것. 어느 경로든 입장은 첫 OIDC 로그인의 `(iss, sub)` 결속으로 끝난다.
 3. 초대 소비·sub 결속·User 생성은 writer lock 안의 unique 검사와 한 append로 완료한다. 동시 소비나 sub 재결속은 409다.
-4. 초대 token은 URL fragment에만 두고 폼 POST로 전달한다. QueryString·Referer·로그에 싣지 않는다. email과 handle은 신원 키가 아니다.
+4. 초대 token은 URL fragment에만 두고 폼 POST로 전달한다. QueryString·Referer·로그에 싣지 않는다. 초대 token은 만료 시각을 갖고 Admin이 발급을 취소할 수 있다. 만료 시간은 구현 계획에서 정한다. token을 가진 사람은 도메인 정책과 무관하게 입장하므로 만료와 취소가 그 범위를 닫는다. email과 handle은 신원 키가 아니다.
 5. 계정 링크·병합은 초기에 금지하고, 마지막 Admin의 삭제·강등·비활성화는 거부한다.
-6. 등록하거나 소비하는 `(iss, sub)`에 삭제된 principal의 `Delete` 사건(§4.1)이 있으면 Admin 화면과 감사 기록에 `previously_deleted`로 보인다. 입장을 막지 않는다. 입장은 Admin의 새 결정이고, 새 principal은 새 ID를 받아 옛 몫을 이어받지 않는다. 이 표시는 `authz.jsonl`을 읽어 만드는 projection이며 principal 레코드에 저장하지 않는다.
-7. **도메인 정책과 입장 요청.** 설정 `oidc.allowed_hosted_domains`(소문자 도메인 목록)가 비어 있지 않으면 도메인 정책이 있다. 비어 있으면 도메인 필터가 없고 입장은 (a), (b)뿐이다.
-   - 도메인 정책은 (c)의 입장 조건일 뿐이다. 로그인한 `(iss, sub)`가 (a)나 (b)로 이미 등록됐거나 이미 입장한 principal이면 정책을 보지 않는다. Admin이 `(iss, sub)`를 직접 등록한 것이 그 사람에 대한 명시적 허가이기 때문이다. 그래서 개인 Gmail의 외부 협력자도 (a)나 (b)로 들어올 수 있다. 정책에서 도메인을 빼도 이미 입장한 사용자는 막히지 않는다.
+6. 등록하거나 소비하거나 입장 요청으로 올라온 `(iss, sub)`에 삭제된 principal의 `Delete` 사건(§4.1)이 있으면 Admin 화면(입장 요청 목록 포함)과 감사 기록에 `previously_deleted`로 보인다. 입장을 막지 않는다. 입장은 Admin의 새 결정이고, 새 principal은 새 ID를 받아 옛 몫을 이어받지 않는다. 이 표시는 `authz.jsonl`을 읽어 만드는 projection이며 principal 레코드에 저장하지 않는다.
+7. **도메인 정책과 입장 요청.** 설정 `oidc.admission_request_domains`(입장 요청을 만들 수 있는 `hd`의 소문자 도메인 목록)가 비어 있지 않으면 도메인 정책이 있다. 비어 있으면 도메인 필터가 없고 입장은 (a), (b)뿐이다.
+   - 도메인 정책은 (c)의 입장 조건일 뿐이다. 로그인한 `(iss, sub)`가 (a)로 등록돼 있거나, (b)의 초대 token을 소비하는 로그인이거나, 이미 입장한 principal이면 정책을 보지 않는다. Admin이 등록하거나 초대한 것이 그 사람에 대한 명시적 허가이기 때문이다. 그래서 개인 Gmail의 외부 협력자도 (a)나 (b)로 들어올 수 있다. 정책에서 도메인을 빼도 이미 입장한 사용자는 막히지 않는다. 정책을 보지 않는다는 말은 도메인 검사를 건너뛴다는 뜻일 뿐이다. principal이 `Disabled`이면 §4.1의 Disabled 규칙이 정책 면제와 무관하게 그대로 적용된다.
    - 미등록 `(iss, sub)`가 정책 아래에서 로그인하면 callback은 ID token의 `hd` claim이 목록과 정확히 같고 `email_verified = true`일 때만 입장 요청을 만든다. `hd`가 없거나(일반 Gmail 등) 다르거나 `email_verified`가 아니면 어떤 상태도 만들지 않고 거절한다. email 문자열의 접미사나 부분 일치는 쓰지 않는다.
-   - 입장 요청(`(iss, sub)`, 표시용 email과 이름, 요청 시각)은 권한도 session도 주지 않는다. Admin 화면에 보이고, Admin이 승인하면 초대 소비와 같은 원자 단계(writer lock 안의 unique 검사와 한 append)로 User를 만든다.
+   - 입장 요청(`(iss, sub)`, 표시용 `hd`·email·이름, 요청 시각)은 권한도 session도 주지 않는다. Admin 화면에 보이고, Admin이 승인하면 초대 소비와 같은 원자 단계(writer lock 안의 unique 검사와 한 append)로 User를 만든다. 승인은 요청을 만든 시점의 판정을 따르고 승인 때 정책을 다시 보지 않는다. 요청을 만든 뒤 정책에서 도메인을 빼도 이미 만든 요청은 남고, 입장 여부는 Admin의 승인이 정한다.
    - email과 이름은 Admin이 판단하는 표시 자료이고 신원 키가 아니다. 입장 요청의 개수 상한과 만료 시간은 구현 계획에서 정한다.
    - 퇴사와 회수는 도메인 정책이 대신하지 않는다. Admin의 명시적 `Disable`·`Delete`(§4.1)가 한다. Google이 계정을 정지하거나 삭제하면 그 계정은 새 ID token을 받지 못해 로그인할 수 없다.
 

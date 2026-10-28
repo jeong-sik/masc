@@ -13,9 +13,7 @@ val json_of_report : Keeper_sandbox_remote.lane_report -> Yojson.Safe.t
     or the answered probe's release provenance, else null. A matching reported
     release needs no action; an unequal reported release and an unreported
     release have distinct guidance. An unreported release means provenance
-    cannot be compared, not that a mismatch was established. A local timeout
-    does not establish whether the payload started or what effects occurred;
-    a remote timeout is the shim's report of its own payload timeout. *)
+    cannot be compared, not that a mismatch was established. *)
 
 val handle :
   config:Workspace.config

@@ -99,13 +99,6 @@ VM을 보존합니다. 턴은 실제 부팅 정보와 요청한 plan을 대조�
 않습니다. 서버 프로세스의 첫 소유 턴 접속은 보존 표시가 없는 실제 `_build`를 별도
 디렉토리로 옮긴 뒤 삭제합니다. `.masc-keep-build`가 있으면 해당 출력을 보존합니다.
 
-작업 볼륨 확인은 guest가 마운트 부재를 직접 보고한 경우
-(`microvm_work_volume_not_mounted`)와 확인 명령이 실패하거나 시간 초과된 경우
-(`microvm_work_volume_probe_unverified`)를 구분합니다. 후자는 마운트 상태를
-모르는 것이므로 guest와 실행 경로를 살펴본 뒤 복구 방법을 정하세요. 어느 결과도
-그 자체로 GitHub 인증 정보가 잘못됐다는 뜻은 아닙니다. 두 경우 모두 guest 사용은
-거부합니다.
-
 Sandbox 상태는 work volume의 현재 discard 기본값을 `set`, `absent`, `unreadable`로
 보여 줍니다. 새 부팅은 실제 superblock에서 기본값이 없음을 확인한 경우에만 helper를
 실행합니다. 읽기 실패를 수리 허가로 쓰지 않습니다. build volume은 새 부팅 때 다시

@@ -79,6 +79,21 @@ accept an option `label`; MASC prefixes it with the actor's identity.
 `waitForSelector` takes step `state`. `waitForLoadState` has an optional step
 `state`, whose omission uses the SDK default.
 
+`waitForURL` accepts exactly one of a string/glob `url` or a `urlRegex` object:
+
+```json
+{"method":"waitForURL","urlRegex":{"source":"^https://example\\.test/(done|ready)$","flags":"i"},"options":{"timeout":5000}}
+```
+
+The fixed adapter creates a native `RegExp` and passes it to `page.waitForURL`;
+the [SDK owns URL matching and polling](https://github.com/citrolabs/ego-lite/blob/v2.1.0/package/ego-browser/src/driver/page-waits.ts#L217).
+`source` is a string, including an empty pattern. Optional `flags` is a string;
+omission keeps the JavaScript default. Invalid syntax or flags stop this step
+before entering the wait and preserve any earlier completed effects. MASC does
+not implement a second matcher or evaluate caller function source on the host.
+The SDK's function matcher form is not exposed by this workflow. Real installed
+SDK/Keeper execution of regex waits remains unverified.
+
 `mouse.click` and `mouse.move` take observed CSS-pixel `x`/`y` coordinates.
 `mouse.wheel` uses `x`/`y` as horizontal/vertical deltas: first move or click
 over the observed scroll container within this same workflow invocation.

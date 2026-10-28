@@ -5,6 +5,7 @@ type option_choice = Text of string | Match of option_match
 type selection = Clear | One of option_choice | Many of option_choice list
 type clipboard_content = { text : string; html : string option }
 type page_code = Expression of string | Call of { source : string; argument : Yojson.Safe.t }
+type url_matcher = Glob of string | Regexp of { source : string; flags : string option }
 type native_options = Yojson.Safe.t
 type action =
   | Click of string | Double_click of string | Hover of string
@@ -18,7 +19,7 @@ type action =
   | Keyboard_type of string | Keyboard_insert_text of string
   | Keyboard_paste of clipboard_content | Keyboard_press of string
   | Select_option of { selector : string; selection : selection }
-  | Goto of string | Wait_for_url of string
+  | Goto of string | Wait_for_url of url_matcher
   | Wait_for_selector of { selector : string; state : element_state }
   | Wait_for_load_state of load_state option
   | Evaluate of page_code
@@ -82,6 +83,18 @@ let page_code fields =
   match List.assoc_opt "argumentJson" fields with
   | None -> Ok (Expression source)
   | Some _ -> let* argument=json_field "argumentJson" fields in Ok (Call {source;argument})
+let url_matcher fields =
+  match List.assoc_opt "url" fields, List.assoc_opt "urlRegex" fields with
+  | Some _, None -> let* value=text "url" fields in Ok (Glob value)
+  | None, Some raw ->
+    let* fields=object_fields ["source";"flags"] raw in
+    let* source=string_field "source" fields in
+    let* flags=match List.assoc_opt "flags" fields with
+      | None -> Ok None
+      | Some (`String flags) -> Ok (Some flags)
+      | Some _ -> Error "URL regex flags must be a string" in
+    Ok (Regexp {source;flags})
+  | Some _, Some _ | None, None -> Error "waitForURL requires exactly one of url or urlRegex"
 let option_choice = function
   | `String value -> Ok (Text value)
   | (`Assoc _ as raw) ->
@@ -173,7 +186,7 @@ let fetch_save_name step = match step.action,step.options with
   | Fetch _,(None|Some (`Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _)) -> None
 let step_of_json value =
   let* fields = object_fields ["method";"selector";"destination";"x";"y";"text";"html";"key";"url";
-    "selectionJson";"state";"source";"argumentJson";"milliseconds";"options"] value in
+    "selectionJson";"state";"source";"argumentJson";"milliseconds";"options";"urlRegex"] value in
   let* method_ = text "method" fields in
   let arguments names = object_fields ("method" :: "options" :: names) value in
   let selector () = text "selector" fields in
@@ -224,7 +237,8 @@ let step_of_json value =
       Ok (Select_option {selector;selection})
     | "goto" -> let* _ = arguments ["url"] in let* raw = text "url" fields in
       let* url = url raw in Ok (Goto url)
-    | "waitForURL" -> let* _ = arguments ["url"] in let* url = text "url" fields in Ok (Wait_for_url url)
+    | "waitForURL" -> let* _ = arguments ["url";"urlRegex"] in
+      let* matcher = url_matcher fields in Ok (Wait_for_url matcher)
     | "waitForSelector" -> let* _ = arguments ["selector";"state"] in
       let* selector = selector () in let* raw = text "state" fields in let* state = element_state raw in
       Ok (Wait_for_selector {selector;state})
@@ -327,7 +341,9 @@ let step_to_json {action;options} =
         @ Option.to_list (Option.map (fun html -> "html",string html) html)
     | Keyboard_press key -> ["key",string key]
     | Select_option {selector=s;selection} -> selector s @ ["selectionJson",string (Yojson.Safe.to_string (selection_to_json selection))]
-    | Goto url | Wait_for_url url -> ["url",string url]
+    | Goto url | Wait_for_url (Glob url) -> ["url",string url]
+    | Wait_for_url (Regexp {source;flags}) -> ["urlRegex",`Assoc (["source",string source]
+        @ Option.to_list (Option.map (fun flags -> "flags",string flags) flags))]
     | Wait_for_selector {selector=s;state} -> selector s @ ["state",string (element_state_name state)]
     | Wait_for_load_state state -> Option.to_list (Option.map (fun state -> "state",string (load_state_name state)) state)
     | Evaluate code -> code_fields code

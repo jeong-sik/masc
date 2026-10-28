@@ -580,16 +580,30 @@ let queue_read_error_rows ~keeper_name errors =
     errors
 ;;
 
-let event_queue_rows ~base_path ~keeper_name =
+(* One read of the Keeper's durable queue yields both the rows and how long the
+   oldest entry has been queued. A row's [since] is the source's own arrival
+   time (for an answered ask, the answer time), so it cannot say how long the
+   entry has waited in the queue; the residence comes from the durable first
+   admission time instead. *)
+let event_queue_observation ~now ~base_path ~keeper_name =
   let snapshot =
     Keeper_event_queue_persistence.load_selections_with_errors ~base_path ~keeper_name
   in
-  rows_for_queue_snapshot
-    ~keeper_name
-    ~source:Event_queue_pending
-    ~next_action:"keeper_drain_event_queue"
-    snapshot.pending
-  @ queue_read_error_rows ~keeper_name snapshot.read_errors
+  let rows =
+    rows_for_queue_snapshot
+      ~keeper_name
+      ~source:Event_queue_pending
+      ~next_action:"keeper_drain_event_queue"
+      snapshot.pending
+    @ queue_read_error_rows ~keeper_name snapshot.read_errors
+  in
+  let queue_residence =
+    Keeper_event_queue_persistence.queue_residence_of_selections
+      ~now
+      ~complete:(snapshot.read_errors = [])
+      snapshot.pending
+  in
+  rows, queue_residence
 ;;
 
 let schedule_read_error_detail = function
@@ -1035,7 +1049,7 @@ let record_keeper_state_metrics per_keeper =
        let count =
          per_keeper
          |> List.fold_left
-              (fun total (_keeper_name, busy, rows) ->
+              (fun total (_keeper_name, busy, _queue_residence, rows) ->
                  if keeper_state ~busy rows = state then total + 1 else total)
               0
        in
@@ -1050,7 +1064,7 @@ let record_metrics ~now ~per_keeper ~global_rows =
   let all_keeper_rows =
     List.flatten
       (List.map
-         (fun (_keeper_name, _busy, rows) -> rows)
+         (fun (_keeper_name, _busy, _queue_residence, rows) -> rows)
          per_keeper)
   in
   record_scope_metrics ~now ~scope:"keeper" all_keeper_rows;
@@ -1111,7 +1125,7 @@ let source_next_actions rows =
     source, `List (List.map (fun action -> `String action) actions))
 ;;
 
-let keeper_json ~base_path keeper_name ~busy rows =
+let keeper_json ~base_path keeper_name ~busy ~queue_residence rows =
   let paused =
     match Keeper_owner_registry.get ~base_path ~keeper_name with
     | Error _ -> None
@@ -1141,15 +1155,20 @@ let keeper_json ~base_path keeper_name ~busy rows =
     ; "due_at", Json_util.float_opt_to_json due_at
     ; "due_at_iso", unix_iso_json due_at
     ; "source_next_actions", `Assoc (source_next_actions rows)
+    ; ( "queue_residence"
+      , Keeper_event_queue_persistence.queue_residence_to_yojson queue_residence )
     ; "current_execution", current_execution_json ~base_path keeper_name
     ]
 ;;
 
-let keeper_rows ~base_path ~pending_approvals ~fusion_runs ~pending_confirms keeper_names =
+let keeper_rows ~now ~base_path ~pending_approvals ~fusion_runs ~pending_confirms keeper_names =
   keeper_names
   |> List.map (fun keeper_name ->
+    let queue_rows, queue_residence =
+      event_queue_observation ~now ~base_path ~keeper_name
+    in
     let rows =
-      event_queue_rows ~base_path ~keeper_name
+      queue_rows
       @ chat_operation_rows ~base_path keeper_name
       @ owner_shutdown_rows ~base_path keeper_name
       @ hitl_rows keeper_name pending_approvals
@@ -1157,7 +1176,7 @@ let keeper_rows ~base_path ~pending_approvals ~fusion_runs ~pending_confirms kee
       @ fusion_rows keeper_name fusion_runs
       @ pending_confirm_rows [ keeper_name ] pending_confirms
     in
-    keeper_name, rows)
+    keeper_name, queue_residence, rows)
 ;;
 
 let rows_for_keeper keeper_name rows =
@@ -1198,7 +1217,8 @@ type inventory_snapshot =
   ; pending_approval_state : Yojson.Safe.t
   ; pending_confirm_count_known : bool
   ; global_confirm_count : int
-  ; per_keeper : (string * bool * waiting_row list) list
+  ; per_keeper :
+      (string * bool * Keeper_event_queue_persistence.queue_residence * waiting_row list) list
   ; global_rows : waiting_row list
   ; schedule_observation :
       ((Schedule_store.state * Schedule_store.read_source), Schedule_store.read_error) result
@@ -1235,11 +1255,11 @@ let read_inventory_snapshot ?keeper_name ~read_pending config =
   in
   let busy_names = busy_keeper_names ~base_path:config.Workspace.base_path in
   let per_keeper =
-    keeper_rows ~base_path:config.Workspace.base_path ~pending_approvals ~fusion_runs
+    keeper_rows ~now ~base_path:config.Workspace.base_path ~pending_approvals ~fusion_runs
       ~pending_confirms keeper_names
-    |> List.map (fun (keeper_name, rows) ->
+    |> List.map (fun (keeper_name, queue_residence, rows) ->
       let rows = rows @ rows_for_keeper keeper_name schedule_rows in
-      keeper_name, keeper_is_busy busy_names keeper_name, rows)
+      keeper_name, keeper_is_busy busy_names keeper_name, queue_residence, rows)
   in
   let global_confirm_rows = global_pending_confirm_rows ?keeper_name keeper_names pending_confirms in
   let global_rows =
@@ -1266,14 +1286,15 @@ let read_inventory_snapshot ?keeper_name ~read_pending config =
 ;;
 
 let inventory_rows snapshot =
-  List.concat_map (fun (_name, _busy, rows) -> rows) snapshot.per_keeper
+  List.concat_map (fun (_name, _busy, _queue_residence, rows) -> rows) snapshot.per_keeper
   @ snapshot.global_rows
 ;;
 
 let keeper_json_by_name_snapshot snapshot =
   List.map
-    (fun (keeper_name, busy, rows) ->
-      keeper_name, keeper_json ~base_path:snapshot.base_path keeper_name ~busy rows)
+    (fun (keeper_name, busy, queue_residence, rows) ->
+      ( keeper_name
+      , keeper_json ~base_path:snapshot.base_path keeper_name ~busy ~queue_residence rows ))
     snapshot.per_keeper
 ;;
 
@@ -1310,7 +1331,7 @@ let dashboard_json_of_snapshot snapshot =
   let all_keeper_rows =
     List.flatten
       (List.map
-         (fun (_keeper_name, _busy, rows) -> rows)
+         (fun (_keeper_name, _busy, _queue_residence, rows) -> rows)
          per_keeper)
   in
   (* One flat list of every pending row across the fleet, so an operator can
@@ -1333,7 +1354,7 @@ let dashboard_json_of_snapshot snapshot =
   let waiting_keeper_count =
     per_keeper
     |> List.fold_left
-         (fun count (_keeper_name, busy, rows) ->
+         (fun count (_keeper_name, busy, _queue_residence, rows) ->
             match keeper_state ~busy rows with
             | Idle -> count
             | Busy | Waiting | Deferred -> count + 1)

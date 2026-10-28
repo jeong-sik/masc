@@ -597,6 +597,10 @@ let profile_label = function
   | Server_mcp_transport_http_types.Operator_remote -> "/mcp/operator"
   | Server_mcp_transport_http_types.Seat -> "/mcp/play"
 
+module For_testing = struct
+  let profile_count () = SMap.cardinal (Atomic.get session_registry).profiles
+end
+
 let validate_mcp_session_profile ~profile session_id =
   match SMap.find_opt session_id ((Atomic.get session_registry).profiles) with
   | None -> Ok ()
@@ -722,6 +726,33 @@ let protocol_version_rejection_body rejection =
       Mcp_error_code.jsonrpc_error_body
         (protocol_version_rejection_code rejection)
         ~message:(protocol_version_rejection_message rejection)
+
+let correlate_error_body_to_request ~request_body error_body =
+  let values name fields =
+    List.filter_map (fun (key, value) ->
+      if String.equal key name then Some value else None) fields
+  in
+  let id =
+    match Yojson.Safe.from_string request_body with
+    | `Assoc fields ->
+      (match values "jsonrpc" fields, values "method" fields, values "id" fields with
+       | [ `String "2.0" ], [ `String _ ], [] -> None
+       | [ `String "2.0" ], [ `String _ ], [ id ]
+         when Mcp_transport_protocol.is_valid_request_id id -> Some id
+       | _, _, _ -> Some `Null)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _
+    | exception Yojson.Json_error _ -> Some `Null
+  in
+  match Yojson.Safe.from_string error_body with
+  | `Assoc fields ->
+    let fields = List.remove_assoc "id" fields in
+    let fields = match id with Some value -> fields @ [ "id", value ] | None -> fields in
+    Yojson.Safe.to_string (`Assoc fields)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _
+  | exception Yojson.Json_error _ -> error_body
+
+let protocol_version_rejection_body_for_request ~request_body rejection =
+  correlate_error_body_to_request ~request_body (protocol_version_rejection_body rejection)
 
 let validate_protocol_version_continuity ~session_id request =
   let validate_supported version =

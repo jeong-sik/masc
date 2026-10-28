@@ -228,22 +228,29 @@ let serve_subscriptions_listen ~deps ~origin ~session_id ~protocol_version ~sw
         (Mcp_transport_protocol.subscription_filter_of_params
            (body_jsonrpc_params body_str))
     in
-    if send (Mcp_subscriptions.acknowledgement ~subscription_id filter) then (
-      let token = Mcp_subscriptions.register ~subscription_id ~filter ~send in
-      (* [close_sse_conn] is the one chokepoint every stop path resolves --
-         peer disconnect, eviction, shutdown -- so awaiting it here is how this
-         request stays open for the life of the subscription. *)
-      Eio.Promise.await info.stop_promise;
-      Mcp_subscriptions.unregister token;
-      (* fire-and-forget: the peer is usually already gone by then, so a closure
-         that does not land is the ordinary case rather than an error. *)
-      ignore
-        (send (Mcp_subscriptions.graceful_closure ~subscription_id) : bool))
+    (match
+       Mcp_subscriptions.register_after_ack ~subscription_id ~filter ~send
+         ~acknowledge:(fun () ->
+           send (Mcp_subscriptions.acknowledgement ~subscription_id filter))
+     with
+     | None -> ()
+     | Some token ->
+       (* [stop_promise] is resolved when the stream closes. A cancelled
+          request must unregister without attempting a further response. *)
+       Fun.protect
+         ~finally:(fun () ->
+           Eio.Cancel.protect (fun () -> Mcp_subscriptions.unregister token))
+         (fun () -> Eio.Promise.await info.stop_promise))
 
 let should_stream_post_tools_call request body_str accept_mode =
   should_use_sse_for_body request body_str accept_mode
   && not force_json_response
   && not (request_force_json_response request)
+  && (not (request_uses_stateless_protocol request body_str)
+      || (not (Mcp_transport_protocol.request_has_continuation_fields
+                 (body_jsonrpc_params body_str))
+          && Result.is_ok
+               (Masc.Mcp_server_eio_call_request.decode (body_jsonrpc_params body_str))))
   &&
   match body_jsonrpc_method body_str with
   | Some ("tools/call", true) -> (
@@ -293,7 +300,11 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
   let expected_resource =
     Server_oauth_metadata.resource request_authority
   in
-  let session_id_opt = get_session_id_any request in
+  let session_id_opt =
+    if Server_mcp_transport_http_headers.header_selects_per_request_protocol request
+    then None
+    else get_session_id_any request
+  in
   let session_id =
     match session_id_opt with
     | Some sid -> sid
@@ -343,20 +354,6 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
           Error ()
     in
     let* () =
-      match validate_protocol_version_continuity ~session_id request with
-      | Ok () -> Ok ()
-      | Error rejection ->
-          let body = protocol_version_rejection_body rejection in
-          let headers =
-            Httpun.Headers.of_list
-              (("content-length", string_of_int (String.length body))
-              :: json_headers ~deps session_id protocol_version origin)
-          in
-          let response = Httpun.Response.create ~headers `Bad_request in
-          safe_respond_with_string reqd response body;
-          Error ()
-    in
-    let* () =
       match auth_result with
       | Ok () -> Ok ()
       | Error failure ->
@@ -371,10 +368,29 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
             failure;
           Error ()
     in
-    let otel_transport_context =
-      Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
+    let* () =
+      match validate_protocol_version_continuity ~session_id request with
+      | Ok () -> Ok ()
+      | Error rejection ->
+          Http.Request.read_body_async reqd (fun request_body ->
+            let body =
+              match Server_mcp_transport_http_headers.validate_2026_request_headers
+                      request request_body with
+              | Error header_error ->
+                Server_mcp_transport_http_headers.header_rejection_body
+                  request_body header_error
+              | Ok () ->
+                protocol_version_rejection_body_for_request ~request_body rejection
+            in
+            let headers =
+              Httpun.Headers.of_list
+                (("content-length", string_of_int (String.length body))
+                :: json_headers ~deps session_id protocol_version origin)
+            in
+            let response = Httpun.Response.create ~headers `Bad_request in
+            safe_respond_with_string reqd response body);
+          Error ()
     in
-    remember_mcp_profile ~otel_transport_context session_id profile;
     Ok (Http.Request.read_body_async reqd (fun body_str ->
       ignore (
       let* post_context =
@@ -387,6 +403,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
         | Error (Server_mcp_request_context.Session_required msg) ->
             let body =
               Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
+              |> correlate_error_body_to_request ~request_body:body_str
             in
             let headers =
               Httpun.Headers.of_list
@@ -402,6 +419,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
             let new_session_id = Mcp_session.generate () in
             let body =
               Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
+              |> correlate_error_body_to_request ~request_body:body_str
             in
             let headers =
               Httpun.Headers.of_list
@@ -415,17 +433,8 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
             Error ()
         | Error (Server_mcp_request_context.Invalid_accept msg) ->
             let body =
-              Yojson.Safe.to_string
-                (`Assoc
-                  [
-                    ("jsonrpc", `String "2.0");
-                    ( "error",
-                      `Assoc
-                        [
-                          ("code", `Int (Mcp_error_code.to_wire_code Invalid_request));
-                          ("message", `String msg);
-                        ] );
-                  ])
+              Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
+              |> correlate_error_body_to_request ~request_body:body_str
             in
             let headers =
               Httpun.Headers.of_list
@@ -449,6 +458,12 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
             safe_respond_with_string reqd response body;
             Error ()
       in
+      let stateless_request = request_uses_stateless_protocol request body_str in
+      if not stateless_request then (
+        let otel_transport_context =
+          Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
+        in
+        remember_mcp_profile ~otel_transport_context session_id profile);
       let accept_mode = post_context.accept_mode in
       let* runtime =
         match deps.get_runtime_result () with
@@ -483,12 +498,6 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                               should_stream_post_tools_call request body_str
                                 accept_mode
                             in
-                            if serves_subscriptions_listen ~profile body_str then
-                              serve_subscriptions_listen ~deps ~origin
-                                ~session_id
-                                ~protocol_version:response_protocol_version ~sw
-                                ~clock ~body_str reqd
-                            else
                             let response_id = body_jsonrpc_id body_str in
                             let inline_sse : sse_conn_info option ref = ref None in
                             try
@@ -517,7 +526,9 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     in
                                     Server_timing.measure timing Mcp_dispatch (fun () ->
                                       runtime.handle_request ?auth_token ~profile
-                                        ~mcp_session_id:session_id
+                                        ?mcp_session_id:
+                                          (if stateless_request then None
+                                           else Some session_id)
                                         ~otel_mcp_protocol_version:protocol_version
                                         ~otel_transport_context
                                         ~internal_keeper_runtime body_with_agent))
@@ -535,15 +546,39 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                 && not force_json_response
                                 && not (request_force_json_response request)
                               in
-                              if wants_streaming_post then
+                              if serves_subscriptions_listen ~profile body_str
+                                 && (match response_json with
+                                     | `Assoc fields -> List.mem_assoc "result" fields
+                                     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+                                     | `String _ | `List _ -> false)
+                              then
+                                serve_subscriptions_listen ~deps ~origin
+                                  ~session_id
+                                  ~protocol_version:response_protocol_version ~sw
+                                  ~clock ~body_str reqd
+                              else if wants_streaming_post then
                                 match !inline_sse with
                                 | Some info ->
                                     if response_json <> `Null then
                                       stream_post_sse_json info response_json;
                                     stream_post_sse_finish info
                                 | None -> ()
-                              else if wants_sse then
-                                match response_json with
+                              else match
+                                Server_mcp_transport_http_headers
+                                .modern_response_http_error_status
+                                  ~request ~body_str response_json
+                              with
+                              | Some status ->
+                                let body = Yojson.Safe.to_string response_json in
+                                let headers =
+                                  timed_headers
+                                    (("content-length", string_of_int (String.length body))
+                                     :: json_headers ~deps session_id protocol_version origin)
+                                in
+                                safe_respond_with_string reqd
+                                  (Httpun.Response.create ~headers status) body
+                              | None when wants_sse ->
+                                (match response_json with
                                 | `Null ->
                                     let headers =
                                       timed_headers
@@ -585,8 +620,8 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                       Httpun.Response.create ~headers `OK
                                     in
                                     safe_respond_with_string reqd response
-                                      body
-                              else
+                                      body)
+                              | None ->
                                 match response_json with
                                 | `Null ->
                                     let headers =

@@ -3,8 +3,8 @@
 This follows the [information-layer study](2026-10-28-tui-information-layers.md).
 The [retained observations](../evidence/research/tui-panel-input-2026-10-29/README.md)
 use an actual candidate TUI with synthetic data. The repaired candidate has
-independent source review and focused pure-state checks; its latest native
-observation is pending. Source review, compiled artifact and rendered behavior
+independent source review and focused pure-state checks. Final-code native
+and UI validation have not been performed. Source review, compiled artifact and rendered behavior
 are separate evidence.
 
 ## What the comparison established

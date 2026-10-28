@@ -23,7 +23,7 @@ Manual observations, without screen-text/layout pass-fail assertions:
 
 | Sequence | Retained capture | Observed result |
 | --- | --- | --- |
-| Type `ORIGINAL-DRAFT`; Ctrl-X; bracketed paste `CONTEXT-PASTE-MARKER`; Esc | [before](context-before-paste.txt), [returned chat](chat-after-context-paste.txt) | The covered chat draft contains the appended marker. Nothing was sent. |
+| Type `ORIGINAL-DRAFT`; Ctrl-X; bracketed paste `CONTEXT-PASTE-MARKER`; Esc | [before](context-before-paste.txt), [returned chat](chat-after-context-paste.txt) | The marker remains in the covered chat draft; the fixture rejects POSTs. |
 | Context, hints off; `?` | [after question](context-after-question.txt) | Context stays open; its footer offers `?:help`. |
 | `/about`, hints off; `?` | [before](about-before-question.txt), [after](about-after-question.txt) | About stays open; its footer offers `?:help`. |
 | Open Queue at 120×36; resize to 80×24 | [120×36](queue-120x36.txt), [80×24](queue-80x24.txt) | All 18 pending-event rows are visible at 120×36; 11 at 80×24. Neither frame displays chat history. |
@@ -34,6 +34,7 @@ performance measurement. The selected/read state, fixture and geometry must
 match before comparing it with another observation. This is not evidence of
 task completion time, user preference, arbitrary input timing, real IME,
 server reordering or the corrected candidate's behavior.
+Key sequences are manual observation notes, not a complete terminal event log.
 
 Scratch observations remain under
 `masc-tui-queue-research-20261028/artifacts/tui-observation-20261029`.

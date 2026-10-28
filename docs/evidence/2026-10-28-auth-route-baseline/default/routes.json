@@ -1,0 +1,2371 @@
+{
+  "route_count": 396,
+  "routes": [
+    {
+      "kind": "exact",
+      "path": "/health",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/health/live",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/health/ready",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/.well-known/agent.json",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/.well-known/agent-card.json",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    { "kind": "exact", "path": "/ws", "methods": [ "GET" ], "target": "ws" },
+    {
+      "kind": "exact",
+      "path": "/ag-ui/events",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/events/presence",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/favicon.ico",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/favicon.svg",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/dashboard/assets/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/dashboard",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/dashboard/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/dashboard/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/openapi.json",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/voice/config",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    { "kind": "exact", "path": "/", "methods": [ "GET" ], "target": "plain" },
+    {
+      "kind": "exact",
+      "path": "/static/css/middleware.css",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/static/js/middleware.js",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/graphiql/graphiql.min.css",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/graphiql/graphiql.min.js",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/graphiql/react.production.min.js",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/graphiql/react-dom.production.min.js",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/mcp",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/mcp/operator",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/mcp",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/mcp/managed",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/mcp/operator",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/mcp/play",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/mcp",
+      "methods": [ "DELETE" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/mcp/managed",
+      "methods": [ "DELETE" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/mcp/operator",
+      "methods": [ "DELETE" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/mcp/play",
+      "methods": [ "DELETE" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/graphql",
+      "methods": [ "GET", "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/.well-known/oauth-protected-resource",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/.well-known/oauth-protected-resource/mcp",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/mcp/.well-known/oauth-protected-resource",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/.well-known/oauth-authorization-server",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/oauth/authorize",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/oauth/authorize",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/oauth/register",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/oauth/token",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers/oauth/callback",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers/oauth/providers",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers/oauth/attached-tools",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers/oauth/attempt-status",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers/oauth/client",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers/oauth/disconnect",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/workspace/tree",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/workspace/files",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/git/status",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/workspace/children",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/workspace/file",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/workspace/file",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lsp/question",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/git/blame",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/git/log",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/git/diff",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/broadcast",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/broadcast",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/dashboard/execute-output/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/dashboard/execute-output/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/shell",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/fusion-runs",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/dashboard/fusion-runs/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/verification-runs",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/goal-verification-runs",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/standalone-lanes",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lanes",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/exact-lane-run-retention",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/exact-lane-runs",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/dashboard/exact-lane-runs/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/workspace",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/dev-token",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/setup/inventory",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/setup/account-emails",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/setup/models",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/setup/accounts/antigravity",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/setup/accounts/login",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/setup/accounts/login/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/setup/accounts/login/",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/setup/accounts/select",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/setup/accounts/removal",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/setup/accounts/remove",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/setup/context",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/setup/connections",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/setup/credential",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/setup/status",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/runtime-probe",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/runtime-defaults",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/runtime/resolved",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/runtime/sessions/official-client",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/runtime/official-client/probe",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/runtime/sessions/official-client/resolve",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/skills/editor/sources",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/skills/evidence",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/async-requests",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/async-requests/status",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/skills/editor/create",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/skills/editor",
+      "methods": [ "DELETE" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/skills/editor/read",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/skills/editor/preview",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/skills/editor/save",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/skills/refresh",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/runtime/config/raw",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/runtime/config/fusion",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/runtime/config/fusion",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/runtime/config/raw/preview",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/runtime/setup/resume",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/runtime/config/raw",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/runtime/config/routing",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/runtime/config/assignment",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/cache-stats",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/logs",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/provider-logs",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/provider-logs/tail",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/logs/tool-host-failures",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/nav-event",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/config",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/project-snapshot",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/execution",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/execution-trust",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/board",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/link-previews",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/workspace-memory-ledger",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/workspace-memory-context",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/keeper-memory-health",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/runtime-observables",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/gate",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/gate/tool-events",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/gate/mode",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/gate/keeper-settings",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/gate/keeper-mode",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/runtime/keeper-exact-lane",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/gate/external-mode",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/proof",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/gate/resolve",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/gate/retry",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/schedule/prune",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/gate/rules/delete",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/operator/pause-status",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/operator",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/operator/digest",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/operator/action",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/operator/confirm",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/planning",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/bootstrap",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/goals",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/goals/measurements",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/goals/detail",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/tasks/search-text",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/tasks/detail",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/tasks/inspection",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/tasks/history/page",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/tasks/history",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/briefing",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/tools",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/skill-activations",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/scheduled-automation",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/briefing/sections",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/tool-quality",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/diagnostics/memprof",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/diagnostics/heap-roots",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/transport-health",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/perf",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/clients",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/harness-health",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/harness-label",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/eval-feed",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/telemetry",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/telemetry/summary",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/agent_core/telemetry/recent",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/agent_core/telemetry/summary",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/keepers/configuration-deletions/retry",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/keepers/deletions/retry",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/keepers/deletions",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/keepers/purge-status",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/board/delete",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/board/pin",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/board/close",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/board/reopen",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/tasks/deletions",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/tasks/deletions/retry",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/tasks/delete",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/tasks/assign-goal",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/goals/delete",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/agents/purge",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers_bulk/directive",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers_bulk/event-queue",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers/chat/stream",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/keepers/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers/turn/run-next",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers/turn/interrupt",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers/tool-approval",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers/asks",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers/ask-answer",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers/tool-approvals",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers/turns",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers/tool-approval-mode",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/keepers/tool-approval-mode",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/keepers/",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/agent-activity",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/tool-metrics",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/agent-timeline",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/agent-relations",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/providers",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/models/metrics",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/runtime/metrics",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/keeper-costs",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/provider-usage-history",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/cost-latency",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/keeper-decisions",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/keeper-decisions-log",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/keeper-practice",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/goals/confirmation",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/goals/confirmation",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/verification/requests",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/verification/summary",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/verification/specs",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/verification/tlc-results",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/verification/evidence",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/tasks/cancel",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/verification/verdict",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/attribution/recent",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/attribution/summary",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/activity/events",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/activity/graph",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/activity/swimlane",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/runtime/params",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/runtime/params/audit",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/audit",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/board",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/board/reactions/catalog",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/board/reactions/batch",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/board/reactions",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/board/reactions",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/board/hearths",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/board/curation",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/board/flairs",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/board/sub-boards",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/board/context-inference",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/board/sub-boards",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/board/sub-boards/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/board/sub-boards/",
+      "methods": [ "DELETE" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/board/sub-boards/",
+      "methods": [ "PUT" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/board/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/tools/masc_board_vote",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/tools/masc_board_post",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/tools/masc_board_comment",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/tools/masc_board_comment_vote",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/tools/masc_goal_transition",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/tools/masc_schedule_create",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/tools/masc_schedule_update",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/tools/masc_schedule_cancel",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/karma",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/board/karma/ledger",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/prompts",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/skills",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/prompts",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/runtime/params/set",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/runtime/params/clear",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/presets",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/presets/show",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/presets",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/presets/create",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/presets/restore",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/presets/delete",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/browser-lane/command",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/browser-lane/clients",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/browser-lane/read",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/browser-lane/scene",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/browser-lane/screenshot",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/browser-lane/interact",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/browser-lane/session",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dashboard/browser-lane/goto",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/browser-lane/poll",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/browser-lane/result",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/browser-lane/ping",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/browser-lane/disconnect",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/broadcast-principal",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/package-catalog",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/package-preview",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/subscriptions",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/declaration",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/declaration",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/operator",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/addons/oauth/callback",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/slice",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/actions",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/live",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/asks",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/ask-answer",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/actions",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/attach",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/observe",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/detach",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/retain",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lane-addons/evidence",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/msx/activity",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/msx/carts",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/msx/checkpoint-operation",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/msx/press",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/msx/load",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/msx/save",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/msx/restore",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/msx/disk",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/msx/tick",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dos/press",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dos/type",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dos/step",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/dos/pass",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/play",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/play/seat",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/play/participants",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/play/session",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/play/room",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/play/room",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/play/agent.md",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/play/skills/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/play/pad",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/play/pad",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/play/invites",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/play/invites",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/play/invites/",
+      "methods": [ "DELETE" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/artifacts/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/artifact-bytes/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/artifacts",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/published-artifacts",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/published-artifacts/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/published-artifacts",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/published-artifact-checks",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/published-artifact-checks",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/published-artifact-shares",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/artifact-drafts/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/artifact-drafts",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/artifact-app-data/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/artifact-app-data",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/artifact-draft-events/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/artifact-draft-presence",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/voice/audio/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/media/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/voice/transcribe",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/voice/probe/tts",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/voice/probe/stt",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/voice/voices",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/voice/setup",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/voice/setup/preview",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/voice/setup",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/multimodal/list",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/multimodal/get/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/multimodal/provenance/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/play/screen.png",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/autonomous/phases",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/autonomous/transitions",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/gate/message",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/gate/health",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/gate/status",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/gate/connectors",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/gate/connector/names",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/gate/connector/status",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/gate/events",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/gate/keepers",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/gate/keeper-status",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/gate/keeper-sandbox-logs",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/gate/keeper-shims",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/gate/connector/bind",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/gate/connector/unbind",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/repositories",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/repositories/pulls",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/repositories/",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/repositories",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/repositories/discover",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/repositories/",
+      "methods": [ "DELETE" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/repositories/",
+      "methods": [ "PUT" ],
+      "target": "plain"
+    },
+    {
+      "kind": "prefix",
+      "path": "/api/v1/repositories/",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/workspace/tree",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/workspace/files",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/git/status",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/workspace/children",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/workspace/file",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/workspace/file",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/lsp/question",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/git/blame",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/git/log",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/git/diff",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/agents",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/status",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/ide/repository-activity",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/ide/file-activity",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/ide/events",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/ide/presence",
+      "methods": [ "GET" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/ide/asks",
+      "methods": [ "POST" ],
+      "target": "plain"
+    },
+    {
+      "kind": "exact",
+      "path": "/api/v1/ide/lsp",
+      "methods": [ "GET" ],
+      "target": "ws"
+    }
+  ]
+}

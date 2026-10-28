@@ -1991,6 +1991,23 @@ let test_metrics_cache_retains_last_good () =
       check bool "recovery clears the failure" true
         (recovered |> member "cache" |> member "last_error" = `Null)))
 
+(* RFC-0204 §3.1: the cold fill is the read the request waits on; the
+   refresh forked for a stale entry is not, so it must not take the read
+   pool. No pool is set here, so compute runs inline and sees its lane. *)
+let test_metrics_cache_refresh_runs_as_background () =
+  Eio_main.run (fun _env ->
+    let module Cache = Server_routes_http_routes_provider_runs.For_testing in
+    let cache = Cache.create_cache () and clock = ref 100. and lanes = ref [] in
+    let compute () = lanes := Pool_lane.current () :: !lanes; Ok (`Assoc []) in
+    let read () = Eio.Switch.run (fun sw -> Pool_lane.with_read (fun () ->
+      Cache.cached_json ~now:(fun () -> !clock) ~sync_first:true ~sw
+        ~cache ~key:"lane" ~placeholder:(`Assoc ["state", `String "loading"]) ~compute)) in
+    ignore (read () : Yojson.Safe.t);
+    clock := 200.;
+    ignore (read () : Yojson.Safe.t);
+    check (list string) "cold fill reads, stale refresh is background"
+      ["read"; "background"] (List.rev_map Pool_lane.to_string !lanes))
+
 let test_runtime_history_keeps_non_error_outcomes () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
@@ -2105,6 +2122,7 @@ let () =
     "basics", [
       test_case "existing projections propagate incomplete decision reads" `Quick test_existing_projections_refuse_partial_decisions;
       test_case "metrics cache preserves last-good data on a failed refresh" `Quick test_metrics_cache_retains_last_good;
+      test_case "metrics cache refresh runs as background work" `Quick test_metrics_cache_refresh_runs_as_background;
       test_case "runtime history preserves yielded non-error outcomes" `Quick test_runtime_history_keeps_non_error_outcomes;
       test_case "decision outcome validation" `Quick test_decision_outcome_validation;
       test_case "unrenderable timestamp is a typed invalid row" `Quick test_unrenderable_decision_timestamp;

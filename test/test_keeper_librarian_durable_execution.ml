@@ -1805,6 +1805,45 @@ let test_a_candidate_covers_only_the_range_it_read () = with_fixture (fun ~sw:_ 
   check bool "the candidate covers the range of its own original" true
     (Descent.covers candidate (Capture.source narrowed));
   check bool "and not a read of everything unread" false (Descent.covers candidate (Capture.source wide)))
+(* A pass takes the count of boundary lines when it selects, and the log has
+   grown since the original's pass: the count says when a range was read, not
+   which range it is. *)
+let append_a_later_turn fixture =
+  let later=selected_messages @ [message "A turn after the refused one";reply "Its answer"] in
+  save_checkpoint fixture.config ~trace_id later 3;
+  io (fun () -> append_boundary fixture.config ~turn:3 ~time:(Time_compat.now ())
+    ~history_at_start:(Boundary.history_at_start_of_messages selected_messages) later)
+let test_a_candidate_covers_its_range_after_the_log_grew () = with_fixture (fun ~sw:_ fixture ->
+  provider_refuses_the_read_twice fixture size_refusal;
+  let candidate,narrowed=candidate_and_request fixture in
+  append_a_later_turn fixture;
+  let selected=ref None in
+  (match memory_action fixture (fun () ->
+     Consumer.consume_one ~config:fixture.config ~keeper_name ~commit:(fun source ->
+       selected:=Some source;Consumer.Memory_pending)) with
+   | Ok Consumer.Pending -> ()
+   | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _) ->
+     fail "the pass must stop at the commit that asked to wait"
+   | Error error -> fail (Consumer.error_to_string error));
+  match !selected with
+  | None -> fail "the pass selected no range"
+  | Some source ->
+    let seen source = match Source.range_id source with
+      | Some range -> range.Current.boundary_lines_seen
+      | None -> fail "the range is not an atom range" in
+    check bool "the log grew since the original's pass" true (seen source>seen (Capture.source narrowed));
+    check bool "yet the candidate covers the range the pass selected" true (Descent.covers candidate source))
+let test_a_turn_that_ended_after_the_original_does_not_stop_the_pass () = with_fixture (fun ~sw:_ fixture ->
+  provider_refuses_the_read_twice fixture size_refusal;
+  append_a_later_turn fixture;
+  let posts=F.post_count fixture.server in
+  fixture.set_step_response (answering_steps ["Original question to retain";"Original completed answer"]);
+  check bool "the pass reads the refused turn message by message and moves the position" true
+    (advanced (run_until_done fixture));
+  check int "each message of that turn asked the provider once, the later turn none" 2
+    (F.post_count fixture.server-posts);
+  check (list string) "Memory holds a claim of each message" ["claim number 1";"claim number 2"]
+    (io (fun () -> claims fixture.keepers_dir)))
 (* A restart loses the consumer's mark that narrows its read. The candidate
    still says the range is too wide, so the pass reads one turn all the same. *)
 let test_a_message_the_frame_refused_is_published_as_a_hole () = with_fixture (fun ~sw:_ fixture ->
@@ -2006,4 +2045,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_a_pass_starts_the_chain_again_when_memory_changed_under_it;
   test_case "the steps of a published range are settled by the next pass" `Quick
     test_the_steps_of_a_published_range_are_settled_by_the_next_pass;
+  test_case "a candidate covers its range after the log grew" `Quick
+    test_a_candidate_covers_its_range_after_the_log_grew;
+  test_case "a turn that ended after the original does not stop the pass" `Quick
+    test_a_turn_that_ended_after_the_original_does_not_stop_the_pass;
 ]]

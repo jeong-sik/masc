@@ -44,9 +44,10 @@ val range : t -> Keeper_librarian_floor_step_request.link
 
 val covers : t -> Keeper_librarian_durable_capture.t -> bool
 (** Whether a pass that selected its range afresh selected the candidate's: the
-    same read extent and the same receipt identities. The pass's own capture is
-    not the candidate's original, and the chain of the candidate is the one that
-    reads the pass's range. *)
+    same read extent and the same receipt identities, except the count of
+    boundary lines the pass saw, which grows with the log and says when a range
+    was read, not which. The pass's own capture is not the candidate's original,
+    and the chain of the candidate is the one that reads the pass's range. *)
 
 val descend : store:Lane_addon_store.t -> config:Workspace.config -> reserved:string list ->
   t -> (Keeper_librarian_floor_chain.outcome, string) result

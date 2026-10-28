@@ -207,9 +207,62 @@ let test_confirmation_retains_the_displayed_proof () =
   let confirmed = confirmation_exn (confirmation_fixture ~confirmed:true ()) in
   check_bool "the server confirmed the same binding" true
     (Detail.same_confirmation_binding read confirmed);
-  let rendered = texts (Detail.confirmation_lines ~width:80 read) in
-  check_bool "operator sees exact run" true (List.mem "Verifier run: run-1" rendered);
-  check_bool "evidence keeps its second line" true (List.mem "Observed result retained" rendered)
+  let rendered = texts (Detail.confirmation_lines ~width:80 ~ko:false read) in
+  (* The binding wraps at narrow widths -- at 80 cells the break lands between
+     "run" and "run-1" -- so the exact run is asserted as content of the
+     fine-print rows rather than one whole row. *)
+  let contains needle text =
+    let n = String.length needle in
+    let rec from i =
+      if i + n > String.length text then false
+      else if String.sub text i n = needle then true
+      else from (i + 1)
+    in
+    from 0
+  in
+  check_bool "operator sees exact run" true
+    (List.exists (contains "run-1") rendered);
+  check_bool "evidence keeps its second line" true
+    (List.mem "  Observed result retained" rendered)
+
+(* The block is one decision read in layers: the instruction, the promise,
+   the binding fine print, then the evidence. The evidence stays the last
+   group because the presented-frame receipt that arms [a] means the whole
+   proof was scrolled through. *)
+let test_confirmation_reads_in_layers () =
+  let read = confirmation_exn (confirmation_fixture ()) in
+  let ko_rows = Detail.confirmation_lines ~width:80 ~ko:true read in
+  check_string "korean header names the decision"
+    "[ 판정 확인 ]" (List.hd (texts ko_rows));
+  (match List.find_opt (fun (row : Detail.line) -> row.Detail.tone = Detail.Waiting) ko_rows with
+   | None -> Alcotest.fail "no instruction row"
+   | Some row ->
+       check_bool "korean instruction leads with the action" true
+         (String.length row.Detail.text >= 10
+          && String.sub row.Detail.text 0 10 = "이 증명"));
+  check_bool "the instruction is the only warn row" true
+    (List.length
+       (List.filter (fun (row : Detail.line) -> row.Detail.tone = Detail.Waiting) ko_rows)
+     = 1);
+  check_bool "the promise reads at plain volume" true
+    (List.mem (Printf.sprintf "%-10s" "Title:" ^ "Harness") (texts ko_rows));
+  check_bool "the binding is fine print" true
+    (List.exists
+       (fun (row : Detail.line) ->
+          row.Detail.tone = Detail.Quiet && row.Detail.text <> ""
+          && String.sub row.Detail.text 0 10 = Printf.sprintf "%-10s" "Binding:")
+       ko_rows);
+  let en_rows = Detail.confirmation_lines ~width:80 ~ko:false read in
+  check_bool "english keeps its instruction" true
+    (List.exists
+       (fun (row : Detail.line) ->
+          String.length row.Detail.text >= 18
+          && String.sub row.Detail.text 0 18 = "CONFIRM THIS PROOF")
+       en_rows);
+  let last = List.nth ko_rows (List.length ko_rows - 1) in
+  check_bool "the evidence ends the block, so a presented frame proves it was read" true
+    (last.Detail.tone = Detail.Plain
+     && last.Detail.text = "  Observed result retained")
 
 (* The server records a confirmation before it runs the caller's step and saves
    the phase. If the step refuses, or the phase cannot be saved, the goal stays
@@ -280,6 +333,8 @@ let () =
             test_a_narrow_pane_still_produces_rows
         ; Alcotest.test_case "confirmation retains the displayed proof" `Quick
             test_confirmation_retains_the_displayed_proof
+        ; Alcotest.test_case "confirmation reads in layers" `Quick
+            test_confirmation_reads_in_layers
         ; Alcotest.test_case "a recorded confirmation that did not complete can be confirmed again" `Quick
             test_a_recorded_confirmation_that_did_not_complete_can_be_confirmed_again
         ; Alcotest.test_case "confirmation refuses unrelated or changed proof" `Quick

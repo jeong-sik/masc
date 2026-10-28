@@ -14,6 +14,11 @@ type tone =
   | Unreadable
   | Note
   | Quiet
+  (* The plain foreground: the rows the operator actually reads to decide --
+     the goal's promise and the evidence. Louder than the dim provenance,
+     quieter than the warn instruction, so a confirmation block keeps three
+     readable volumes instead of one flat shout. *)
+  | Plain
 
 type line =
   { tone : tone
@@ -107,22 +112,67 @@ let same_confirmation_binding left right =
   && String.equal left.verdict.request_id right.verdict.request_id
   && String.equal left.verdict.verification_run_id right.verdict.verification_run_id
 
-let confirmation_lines ~width { goal_id; verdict; _ } =
+(* The confirmation block is one decision the operator reads in layers: what
+   to do, what the goal promised, which proof binding is on the table, and
+   the evidence itself. It used to be one flat warn-coloured list, so the
+   instruction, the ids and the evidence all spoke at the same volume and the
+   pane gave the eye nowhere to land. Each layer now keeps its own tone --
+   warn for the instruction, plain for what is read, dim for the binding fine
+   print -- and the evidence stays the last group, so a presented frame still
+   proves the operator scrolled through the whole proof. *)
+let confirmation_lines ~width ~ko { goal_id; verdict; _ } =
   let Goal_store.Criterion criterion = verdict.Goal_verification.criterion in
-  [ "CONFIRM THIS PROOF — read through evidence, then [a]; Esc cancels"
-  ; "Goal: " ^ goal_id
-  ; "Title: " ^ criterion.title
-  ; "Target: " ^ Option.value criterion.metric ~default:"not declared"
-    ^ " = " ^ Option.value criterion.target_value ~default:"not declared"
-  ; "Criterion: " ^ criterion.revision
-  ; "Request: " ^ verdict.request_id
-  ; "Verifier run: " ^ verdict.verification_run_id
-  ; "Evidence: " ^ verdict.evidence
-  ]
-  |> List.concat_map (fun text ->
-       Message_layout.wrap_body ~max_cells:width
-         ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text text
-       |> List.map (fun text -> { tone = Waiting; text }))
+  let line_of tone text = { tone; text } in
+  let sanitize text =
+    Masc.Tui_terminal_text.sanitize_terminal_text (without_line_end_cr text)
+  in
+  (* Rows under a label align every continuation to the value column; the
+     column is one wider than the longest label ("Evidence:"), as the
+     timeline's field is. *)
+  let labelled ~tone label text =
+    let cells = 10 in
+    let prefix = Printf.sprintf "%-10s" (label ^ ":") in
+    String.split_on_char '\n' text
+    |> List.concat_map (fun text ->
+         Message_layout.wrap_words ~max_cells:(max 1 (width - cells))
+           (sanitize text))
+    |> List.mapi (fun index text ->
+         line_of tone ((if index = 0 then prefix else String.make cells ' ') ^ text))
+  in
+  let paragraph ~indent tone text =
+    String.split_on_char '\n' text
+    |> List.concat_map (fun text ->
+         Message_layout.wrap_words ~max_cells:(max 1 (width - indent))
+           (sanitize text))
+    |> List.map (fun text -> line_of tone (String.make indent ' ' ^ text))
+  in
+  let header =
+    line_of Note (if ko then "[ 판정 확인 ]" else "[ Confirm the proof ]")
+  in
+  let instruction =
+    paragraph ~indent:0 Waiting
+      (if ko
+       then "이 증명을 확인합니다 — 증거를 끝까지 읽은 뒤 [a], 그만두려면 Esc"
+       else "CONFIRM THIS PROOF — read through evidence, then [a]; Esc cancels")
+  in
+  let promise =
+    labelled ~tone:Plain "Title" criterion.title
+    @ labelled ~tone:Plain "Target"
+        (Option.value criterion.metric ~default:"not declared"
+         ^ " = " ^ Option.value criterion.target_value ~default:"not declared")
+  in
+  let binding =
+    labelled ~tone:Quiet "Binding"
+      (Printf.sprintf "goal %s · criterion %s · request %s · verifier run %s"
+         goal_id criterion.revision verdict.request_id
+         verdict.verification_run_id)
+  in
+  let evidence =
+    line_of Plain "Evidence:" :: paragraph ~indent:2 Plain verdict.evidence
+  in
+  let blank = [ line_of Quiet "" ] in
+  header
+  :: (instruction @ blank @ promise @ blank @ binding @ blank @ evidence)
 
 (* A verdict is a headline and, when the judge left one, the measurement it
    rests on. They are separate rows because the reason wraps and the headline

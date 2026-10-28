@@ -16,6 +16,7 @@ type tone =
   | Unreadable
   | Note
   | Quiet
+  | Plain
 
 type line =
   { tone : tone
@@ -37,10 +38,13 @@ type confirmation_state =
 val decode_confirmation : goal_id:string -> Yojson.Safe.t -> (confirmation, string) result
 val confirmation_body : confirmation -> Yojson.Safe.t
 val same_confirmation_binding : confirmation -> confirmation -> bool
-val confirmation_lines : width:int -> confirmation -> line list
-(** The exact proof displayed before the operator confirms. Its binding is
-    retained for the POST, so a newer proof cannot silently replace it. Confirmation
-    requires a presented reader frame containing the final proof-binding row. *)
+val confirmation_lines : width:int -> ko:bool -> confirmation -> line list
+(** The exact proof displayed before the operator confirms, in layers: the
+    instruction, the goal's promise, the binding fine print, then the
+    evidence. Its binding is retained for the POST, so a newer proof cannot
+    silently replace it. Confirmation requires a presented reader frame
+    containing the block's final row, which is why the evidence stays the
+    last group. *)
 
 val timestamp_line : label:string -> string -> string
 (** One timeline row of the detail pane. The field is one wider than the

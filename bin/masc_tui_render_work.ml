@@ -359,6 +359,7 @@ let planning_detail_tone (tone : Planning_detail.tone) =
   | Planning_detail.Refused -> (Theme.bad ())
   | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
   | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
+  | Planning_detail.Plain -> Ansi.default_fg
 
 (* What moves this goal next, in one sentence, from the pair the operator can
    see separately but had to combine themselves: the phase and the judge's
@@ -907,10 +908,13 @@ let planning_measurement_lines (state : state) (goal : planning_goal) =
                   [ line Planning_detail.Quiet "Actual measurement not recorded"; tasks ]
               | Goal_measurement_unavailable reason -> unavailable reason @ [ tasks ]
               | Goal_measurement_reported { value; evidence; actor; recorded_at } ->
+                  (* "Measured:", not "Evidence:": this row is the goal tree's
+                     measurement provenance, and on a confirmation screen the
+                     same label already names the proof's evidence. *)
                   [ line Planning_detail.Proven
                       ("Actual: " ^ Terminal_text.single_line value ^ " (reported)")
                   ; line Planning_detail.Note
-                      ("Evidence: " ^ Terminal_text.single_line evidence
+                      ("Measured: " ^ Terminal_text.single_line evidence
                        ^ " · " ^ Terminal_text.single_line actor
                        ^ " · " ^ Terminal_text.single_line recorded_at)
                   ; tasks ]))
@@ -1023,7 +1027,9 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
   let confirmation_rows =
     (match confirmation with
        | `Submitting -> [{Planning_detail.tone = Waiting; text = "Sending proof confirmation..."}]
-       | `Inspect (Masc_tui_fetched.Ready value) -> Planning_detail.confirmation_lines ~width value
+       | `Inspect (Masc_tui_fetched.Ready value) ->
+           Planning_detail.confirmation_lines ~width
+             ~ko:(state.ui_language = Lang_ko) value
        | `Inspect Loading -> [{Planning_detail.tone = Waiting; text = "Reading the proof to confirm..."}]
        | `Inspect (Stale (_, reason) | Failed reason) -> [{Planning_detail.tone = Unreadable; text = reason}]
        | `Inspect Masc_tui_fetched.Absent ->
@@ -1031,12 +1037,16 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
            @ Planning_detail.body ~width goal.pg_proof goal.pg_last_review_note)
   in
   let measurement = planning_measurement_lines state goal in
+  let timeline = Planning_detail.timeline ~width ~goal_id:goal.pg_id state.goal_timeline in
+  (* While a proof waits for confirmation, the decision block leads and the
+     timeline -- context, not decision input -- moves behind the goal's own
+     summary, so the promise and the metadata read adjacently instead of a
+     long event list wedging itself between them. *)
   let proof =
     (match confirmation with
-     | `Inspect Masc_tui_fetched.Absent -> measurement @ confirmation_rows
+     | `Inspect Masc_tui_fetched.Absent -> measurement @ confirmation_rows @ timeline
      | `Submitting | `Inspect (Masc_tui_fetched.Ready _ | Loading | Stale _ | Failed _) ->
-         confirmation_rows @ measurement)
-    @ Planning_detail.timeline ~width ~goal_id:goal.pg_id state.goal_timeline in
+         confirmation_rows @ measurement) in
   let wrapped_proof = planning_proof_rows ~width proof in
   (match confirmation with
    | `Inspect Masc_tui_fetched.Absent ->
@@ -1046,7 +1056,7 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
               ~en:"3. Verification & Measurement")
        @ wrapped_proof
    | `Submitting | `Inspect (Masc_tui_fetched.Ready _ | Loading | Stale _ | Failed _) ->
-       wrapped_proof @ gap @ metadata @ linked)
+       wrapped_proof @ gap @ metadata @ linked @ timeline)
 
 let planning_detail_header_rows (state : state) ~cols (goal : planning_goal) =
   let phase = "  " ^ bracketed ~max_cells:planning_phase_column
@@ -1120,7 +1130,8 @@ let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal 
     | `Inspect (Masc_tui_fetched.Ready proof) ->
         let width = max 1 (framed_inner_width cols - 2) in
         let last = List.length (planning_proof_rows ~width
-          (Planning_detail.confirmation_lines ~width proof)) - 1 in
+          (Planning_detail.confirmation_lines ~width
+             ~ko:(state.ui_language = Lang_ko) proof)) - 1 in
         if last >= scroll && last < scroll + height then Some proof else None
     | `Submitting | `Inspect (Masc_tui_fetched.Absent | Loading | Stale _ | Failed _) -> None in
   scroll, seen

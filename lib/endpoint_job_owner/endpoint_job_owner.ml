@@ -571,4 +571,7 @@ let load_result ~sw ~expected_sha256 operation =
 module For_testing = struct
   let create = create_with_hook
   let inspect_original = refresh_with_hook
+  let await_startup operation = match Atomic.get operation.execution with
+    | Awaiting_activation | Unknown_launch -> None
+    | Owned job -> Some (C.await_startup job |> Result.map_error map_lifetime_error)
 end

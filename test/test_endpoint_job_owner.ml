@@ -4,12 +4,29 @@ module R = Endpoint_job_registry
 module L = Endpoint_job_launch
 module D = Endpoint_job_result
 module G = Endpoint_process_gate
+module S = Endpoint_job_supervisor
 module Recovery_test = Fs_compat_test_support.Publication_recovery_for_testing
 
 let require = function Ok value -> value | Error error -> Alcotest.fail error
 let owner value = value |> Result.map_error Owner.error_to_string |> require
 let registry value = value |> Result.map_error R.error_to_string |> require
 let result_read value = value |> Result.map_error D.error_to_string |> require
+let await_native_startup operation =
+  let outcome=match Owner.For_testing.await_startup operation with
+    | Some outcome -> owner outcome
+    | None -> Alcotest.fail "native lifetime was not reserved"
+  in
+  match outcome with
+  | S.Not_performed {error;pipe_cleanup_errors=_} -> Alcotest.fail (S.error_to_string error)
+  | S.Performed {value;registry_release_error;pipe_cleanup_errors} ->
+      (match registry_release_error with
+       | None -> ()
+       | Some _ -> Alcotest.fail "native startup did not release original registry authority");
+      (match pipe_cleanup_errors with
+       | [] -> ()
+       | _::_ -> Alcotest.fail "native startup did not close its unused pipe ends");
+      let native=value |> Result.map_error S.error_to_string |> require in
+      S.availability native |> Result.map_error S.error_to_string |> require
 let check label value = Alcotest.(check bool) label true value
 let id n = P.Id.of_string (Printf.sprintf "019a0000-0000-7000-8000-%012x" n) |> require
 let digest value = P.Sha256.of_string Agent_core_sha256.(digest_string value |> to_hex) |> require
@@ -736,6 +753,7 @@ let failed_actor_keeps_native_cancellation_and_historical_result =
         let count=Eio_unix.run_in_systhread (fun () -> Unix.read ready ready_byte 0 1) in
         check "original native child is blocked on its first input"
           (count=1 && Bytes.to_string ready_byte="R");
+        await_native_startup operation;
         fail_next:=true;
         let failed=Owner.cancel operation in
         (match Owner.await_request failed with
@@ -818,6 +836,7 @@ let captured_original_survives_missing_or_replaced_files ~owned replacement =
         let byte=Bytes.create 1 in
         let length=Eio_unix.run_in_systhread (fun () -> Unix.read ready byte 0 1) in
         check "original native owner reached its actual blocking input" (length=1 && Bytes.to_string byte="R"));
+      if owned then await_native_startup operation;
       let captured=Owner.inspect_original operation |> owner in
       let original=Owner.original operation in
       let claim=claim_path fixture binding in

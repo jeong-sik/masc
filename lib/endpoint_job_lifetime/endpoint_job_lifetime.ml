@@ -51,6 +51,7 @@ type t = {
   cancellation : cancellation option Atomic.t;
 }
 let original t=P.original ~binding:(R.binding t.source) ~admission_id:(R.admission_id t.source)
+let await_startup t=Eio.Promise.await t.startup.value
 let await_result t=Eio.Promise.await t.result.value
 let stop t error = finish t.startup (Error error);finish t.result (Error error)
 (* A startup attempt can lose the registry to this job's own cancellation.

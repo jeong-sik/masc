@@ -92,4 +92,7 @@ module For_testing : sig
   val inspect_original : after_refresh:(unit -> unit) -> operation -> (R.record,error) result
   (** Interleave after the actual captured-source refresh and before adopting its
       result. A concurrently advanced source remains pinned; no retry occurs. *)
+  val await_startup : operation -> ((C.S.launch_outcome,error) result) option
+  (** Observe an owned native lifetime's actual startup future. None means no
+      native lifetime exists; this neither activates nor reconstructs one. *)
 end

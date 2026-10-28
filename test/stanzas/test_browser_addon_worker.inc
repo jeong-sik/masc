@@ -46,7 +46,7 @@
 (test
  (name test_browser_addon_service)
  (modules test_browser_addon_service)
- (libraries masc masc.time_compat alcotest eio eio_main yojson unix))
+ (libraries masc masc.browser_lane masc.time_compat alcotest eio eio.unix eio_main yojson unix))
 
 (test
  (name test_browser_addon_socket)

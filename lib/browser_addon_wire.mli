@@ -39,6 +39,9 @@ type command =
       only_if_idle : bool;
     }
 type request = { incarnation : string; command : command }
+val ends_with_caller : command -> bool
+(** Only selected live requests whose host waiter may be cancelled on caller
+    departure. This does not cancel or undo an already delivered browser effect. *)
 val changes_nothing : command -> bool
 (** The worker answers the command by reading its own state: a snapshot, a
     model listing or wait, or an idle document read, which the worker refuses

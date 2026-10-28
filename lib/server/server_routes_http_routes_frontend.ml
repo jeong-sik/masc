@@ -10,35 +10,9 @@ module Common = Server_routes_http_common
 module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 
-let respond_redirect ~location reqd =
-  let response =
-    Httpun.Response.create
-      ~headers:(Httpun.Headers.of_list [
-        ("location", location);
-        ("content-length", "0");
-      ])
-      `Found
-  in
-  Httpun.Reqd.respond_with_string reqd response ""
-
-let authority_host_port ~default_port request_authority =
-  ( Server_request_authority.host request_authority
-  , Option.value
-      ~default:default_port
-      (Server_request_authority.port request_authority) )
-;;
-
-let canonical_loopback_location
-    ~default_port
-    ~request_authority
-    (request : Httpun.Request.t)
-  =
-  let host, port = authority_host_port ~default_port request_authority in
-  let canonical_host = Transport_read_model.normalize_advertised_host host in
-  if String.equal canonical_host host then
-    None
-  else
-    Some (Printf.sprintf "http://%s:%d%s" canonical_host port request.target)
+let respond_redirect = Server_canonical_host.respond_redirect
+let authority_host_port = Server_canonical_host.authority_host_port
+let canonical_loopback_location = Server_canonical_host.canonical_loopback_location
 
 let canonical_root_dashboard_location ~default_port ~request_authority =
   let host, port = authority_host_port ~default_port request_authority in
@@ -47,14 +21,6 @@ let canonical_root_dashboard_location ~default_port ~request_authority =
     None
   else
     Some (Printf.sprintf "http://%s:%d/dashboard" canonical_host port)
-
-let with_canonical_loopback_host ~port handler request reqd =
-  let request_authority = Server_request_authority.current_exn () in
-  match
-    canonical_loopback_location ~default_port:port ~request_authority request
-  with
-  | Some location -> respond_redirect ~location reqd
-  | None -> handler request reqd
 
 let redirect_to_dashboard reqd =
   respond_redirect ~location:"/dashboard" reqd
@@ -191,30 +157,27 @@ let add_routes ?sw ?clock ~port router =
            serve_dashboard_static ("assets/" ^ filename) request reqd
          else
            Http.Response.not_found reqd)
-  (* Dashboard SPA: index.html *)
-  (* The host check runs inside the public read, not before it. A request for a
-     non-canonical host while the server is not ready now gets the 503 of
-     [with_public_read] instead of the redirect, and a malformed workspace
-     precondition on such a request gets its 400 instead of the redirect. For the
-     canonical host the answers are the same. *)
-  |> Server_route.get Server_route.Public_read "/dashboard" (fun _state req reqd ->
-       with_canonical_loopback_host ~port
-         (fun req reqd -> serve_dashboard_index req reqd)
-         req reqd)
-  |> Server_route.get Server_route.Public_read "/dashboard/" (fun _state req reqd ->
-       with_canonical_loopback_host ~port
-         (fun req reqd -> serve_dashboard_index req reqd)
-         req reqd)
-  |> Server_route.prefix_get Server_route.Public_read "/dashboard/"
+  (* Dashboard SPA: index.html. A request that names a loopback alias is
+     redirected before the public read looks at the server's readiness or at the
+     workspace precondition, which is the order these routes had before they
+     carried a kind. *)
+  |> Server_route.get
+       (Server_route.Public_read_on_canonical_host { port })
+       "/dashboard"
+       (fun _state req reqd -> serve_dashboard_index req reqd)
+  |> Server_route.get
+       (Server_route.Public_read_on_canonical_host { port })
+       "/dashboard/"
+       (fun _state req reqd -> serve_dashboard_index req reqd)
+  |> Server_route.prefix_get
+       (Server_route.Public_read_on_canonical_host { port })
+       "/dashboard/"
        (fun _state req reqd ->
-         with_canonical_loopback_host ~port
-           (fun req reqd ->
-             let req_path = Http.Request.path req in
-             if is_dashboard_spa_deep_link req_path then
-               serve_dashboard_index req reqd
-             else
-               Http.Response.not_found reqd)
-           req reqd)
+         let req_path = Http.Request.path req in
+         if is_dashboard_spa_deep_link req_path then
+           serve_dashboard_index req reqd
+         else
+           Http.Response.not_found reqd)
   |> Server_route.get Server_route.Public_read "/api/v1/openapi.json" (fun _state req reqd ->
          let request_authority = Server_request_authority.current_exn () in
          let resolved_host, resolved_port =

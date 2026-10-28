@@ -35,6 +35,12 @@ let kinds : (string * (Router.t -> Router.t) * Route_access.t) list =
   ; ( "public_read"
     , Server_route.get Server_route.Public_read "/x" state_handler
     , Route_access.Public_read )
+  ; ( "public_read_on_canonical_host"
+    , Server_route.get
+        (Server_route.Public_read_on_canonical_host { port = 8935 })
+        "/x"
+        state_handler
+    , Route_access.Public_read )
   ; ( "read_auth"
     , Server_route.get Server_route.Read_auth "/x" state_handler
     , Route_access.Read_auth )
@@ -168,10 +174,10 @@ let test_json_shape () =
 
 (* ---- dispatch ---- *)
 
-let loopback_authority () =
-  match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+let authority_of host =
+  match Server_request_authority.of_host_port ~host ~port:8935 with
   | Ok authority -> authority
-  | Error `Malformed -> fail "failed to construct loopback request authority"
+  | Error `Malformed -> failf "failed to construct the request authority of %s" host
 ;;
 
 type response =
@@ -230,8 +236,8 @@ let parse_response raw =
   | [] -> failf "empty response %S" raw
 ;;
 
-let dispatch ?token router path =
-  Server_request_authority.with_current (loopback_authority ()) (fun () ->
+let dispatch ?(host = "127.0.0.1") ?token router path =
+  Server_request_authority.with_current (authority_of host) (fun () ->
     let output = Buffer.create 256 in
     let connection =
       Httpun.Server_connection.create (fun reqd ->
@@ -242,8 +248,10 @@ let dispatch ?token router path =
     in
     let raw_request =
       Printf.sprintf
-        "GET %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\nOrigin: http://127.0.0.1:8935\r\n%s\r\n"
+        "GET %s HTTP/1.1\r\nHost: %s:8935\r\nOrigin: http://%s:8935\r\n%s\r\n"
         path
+        host
+        host
         authorization
     in
     let input =
@@ -325,6 +333,28 @@ let dispatch_kinds =
         Router.get
           public_path
           (Server_auth.with_public_read (on_state "public_read_on_public_path"))
+          r )
+  ; ( "public_read_on_canonical_host"
+    , (fun r ->
+        Server_route.get
+          (Server_route.Public_read_on_canonical_host { port = 8935 })
+          "/public_read_on_canonical_host"
+          (on_state "public_read_on_canonical_host")
+          r)
+    , fun r ->
+        (* The shape the dashboard pages had before they carried a kind. *)
+        Router.get
+          "/public_read_on_canonical_host"
+          (fun request reqd ->
+             Server_canonical_host.with_canonical_loopback_host
+               ~port:8935
+               (fun req reqd ->
+                  Server_auth.with_public_read
+                    (on_state "public_read_on_canonical_host")
+                    req
+                    reqd)
+               request
+               reqd)
           r )
   ; ( "read_auth"
     , (fun r -> Server_route.get Server_route.Read_auth "/read_auth" (on_state "read_auth") r)
@@ -497,6 +527,7 @@ let expected_status ~strict =
   ; "self_authenticated", (200, 200, 200)
   ; "public_read_on_public_path", (200, 200, 200)
   ; "public_read", if strict then 401, 200, 200 else 200, 200, 200
+  ; "public_read_on_canonical_host", if strict then 401, 200, 200 else 200, 200, 200
   ; "read_auth", (401, 200, 200)
   ; "permission", (401, 403, 200)
   ; "token_permission", (401, 403, 200)
@@ -532,6 +563,59 @@ let test_typed_routes_answer_like_the_wrapper_by_hand ~strict () =
          ; "an admin token", Some admin, admin_status
          ])
     dispatch_kinds
+;;
+
+(* ---- the canonical-host redirect runs before the public read ---- *)
+
+let location_of response = List.assoc_opt "location" response.headers
+
+let page_routes () =
+  Router.create ()
+  |> Server_route.get
+       (Server_route.Public_read_on_canonical_host { port = 8935 })
+       "/page"
+       (on_state "page")
+  |> Server_route.get Server_route.Public_read "/plain" (on_state "plain")
+;;
+
+let check_redirected label response ~target =
+  check int (label ^ ": status") 302 response.status;
+  check (option string) (label ^ ": location") (Some ("http://127.0.0.1:8935" ^ target)) (location_of response)
+;;
+
+(* A request that names [localhost] is redirected whatever state the server is in.
+   [Public_read] alone is not that: it answers 503 until the server is ready. *)
+let test_alias_host_is_redirected_while_the_server_is_not_ready () =
+  Eio_main.run @@ fun _env ->
+  Server_auth.clear_server_state ();
+  let routes = page_routes () in
+  check_redirected "alias host" (dispatch ~host:"localhost" routes "/page") ~target:"/page";
+  check int "canonical host" 503 (dispatch routes "/page").status;
+  check int "Public_read alone, alias host" 503 (dispatch ~host:"localhost" routes "/plain").status
+;;
+
+(* The same for the workspace precondition of a read: with one of its two
+   parameters, or with values that do not match, an alias host is redirected and
+   the canonical host gets the answer of the public read. *)
+let test_alias_host_is_redirected_before_the_workspace_precondition () =
+  with_authentication ~strict:false
+  @@ fun ~worker:_ ~admin:_ ->
+  let routes = page_routes () in
+  let one_parameter = "?expected_base_path=/x" in
+  let mismatch = "?expected_base_path=/nowhere&expected_masc_root=/nowhere/.masc" in
+  List.iter
+    (fun (label, query, canonical_status) ->
+       check_redirected
+         (label ^ ", alias host")
+         (dispatch ~host:"localhost" routes ("/page" ^ query))
+         ~target:("/page" ^ query);
+       check int (label ^ ", canonical host") canonical_status (dispatch routes ("/page" ^ query)).status;
+       check
+         int
+         (label ^ ", Public_read alone, alias host")
+         canonical_status
+         (dispatch ~host:"localhost" routes ("/plain" ^ query)).status)
+    [ "one parameter", one_parameter, 400; "values that do not match", mismatch, 409 ]
 ;;
 
 (* ---- one table: the log, the index and the effective routes ---- *)
@@ -693,6 +777,16 @@ let () =
             "loopback: each kind answers like its wrapper by hand"
             `Quick
             (test_typed_routes_answer_like_the_wrapper_by_hand ~strict:false)
+        ] )
+    ; ( "canonical host"
+      , [ test_case
+            "an alias host is redirected while the server is not ready"
+            `Quick
+            test_alias_host_is_redirected_while_the_server_is_not_ready
+        ; test_case
+            "an alias host is redirected before the workspace precondition"
+            `Quick
+            test_alias_host_is_redirected_before_the_workspace_precondition
         ] )
     ]
 ;;

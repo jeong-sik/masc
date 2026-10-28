@@ -523,6 +523,11 @@ module Router : sig
       :  tool_name:string
       -> (state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
       -> request_handler
+
+    (** Redirects a request that names a loopback alias to the canonical
+        loopback host, and hands any other request to the handler. It checks no
+        credential. [port] is the one to use when the request names none. *)
+    val with_canonical_loopback_host : port:int -> request_handler -> request_handler
   end
 
   (** HTTP route registration that names the authentication each route needs. *)
@@ -543,6 +548,12 @@ module Router : sig
     type _ auth =
       | Always_public : request_handler auth
       | Public_read : state_handler auth
+      | Public_read_on_canonical_host : { port : int } -> state_handler auth
+          (** [Public_read] behind the canonical-host redirect: a request for a
+              loopback alias is redirected before the server's readiness, the
+              workspace precondition or the credential is looked at. The route
+              records the same access as [Public_read]; only the order of the
+              two checks differs. *)
       | Read_auth : state_handler auth
       | Permission : Masc_domain.permission -> state_handler auth
       | Token_permission : Masc_domain.permission -> token_handler auth

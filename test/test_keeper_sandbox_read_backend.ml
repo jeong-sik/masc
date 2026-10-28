@@ -459,18 +459,67 @@ let test_microvm_without_a_turn_factory_routes_to_the_attached_guest () =
   | Error message ->
     Alcotest.failf "a running guest was reported unreachable: %s" message
 
+let initialize_apple_attached_read_fixture
+    ~base ~(config : Workspace.config) ~(meta : Masc.Keeper_meta_contract.keeper_meta) =
+  let shim_dir = Config_dir_resolver.microvm_shim_dir ~base_path:base in
+  Fs_compat.mkdir_p shim_dir;
+  let binary = Filename.concat shim_dir Keeper_sandbox_microvm.shim_binary_name in
+  write_file binary "#!/bin/sh\nexit 0\n";
+  Unix.chmod binary 0o700;
+  (match Masc.Keeper_microvm_shim_readiness.initialize ~base_path:base ~payload_path:"/usr/bin:/bin" with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_microvm_shim_readiness.error_message error));
+  let captured =
+    match Masc.Keeper_github_identity.capture_tool_identity ~config ~keeper_name:meta.name with
+    | Ok captured -> captured
+    | Error error -> Alcotest.fail error
+  in
+  let fs = match Fs_compat.get_fs_opt () with Some fs -> fs | None -> Alcotest.fail "fixture needs Eio FS" in
+  let module Lifecycle = Masc.Keeper_microvm_lifecycle in
+  let coordinator = Lifecycle.create () in
+  Lifecycle.with_keeper_scope coordinator ~keeper_name:meta.name (fun scope ->
+    match
+      Masc.Keeper_microvm_github_identity.publish_if_guest_absent
+        ~fs ~coordinator ~scope ~base_path:config.base_path ~keeper_name:meta.name
+        ~backend:Keeper_microvm_backend.Apple_container ~network_mode:meta.network_mode
+        ~timeout_sec:5. captured
+    with
+    | Ok _ -> ()
+    | Error error -> Alcotest.fail (Masc.Keeper_microvm_github_identity.error_message error))
+;;
+
 let test_attached_guest_endpoint_names_the_derived_guest () =
+  let context = Eio_context.snapshot_state () in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base, config, docker = setup_config "read-microvm-attach" in
   let microvm =
-    (* A backend, because attaching means building that runtime's exec argv.
-       This fixture predates the field and had been declaring a microvm
-       keeper with no runtime under it, which the endpoint now refuses. *)
     { docker with
       sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
     ; microvm_backend = Some Keeper_microvm_backend.Apple_container
     }
   in
-  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let bin_dir = temp_dir () in
+  let cli_path = Filename.concat bin_dir "container" in
+  write_file cli_path fake_ssh_success_script;
+  Unix.chmod cli_path 0o755;
+  let path = bin_dir ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH") in
+  Fun.protect
+    ~finally:(fun () ->
+      Eio_context.restore_state context;
+      let rec writable path =
+        if Sys.file_exists path then (
+          (try Unix.chmod path 0o700 with Unix.Unix_error _ -> ());
+          if (Unix.lstat path).Unix.st_kind = Unix.S_DIR
+          then Array.iter (fun name -> writable (Filename.concat path name)) (Sys.readdir path))
+      in
+      writable base;
+      cleanup_dir base;
+      cleanup_dir bin_dir)
+  @@ fun () ->
+  with_env "PATH" path (fun () -> initialize_apple_attached_read_fixture ~base ~config ~meta:microvm);
   match
     Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta:microvm ()
   with
@@ -539,11 +588,21 @@ let test_attached_guest_endpoint_refuses_docker () =
 let fake_ssh_success_script =
   Printf.sprintf
     {|#!/bin/sh
+case "$*" in
+  *--probe*) printf '%%s' '%s'; exit 0 ;;
+esac
+if [ "${1:-}" = list ]; then printf '[]\n'; exit 0; fi
 cat >/dev/null 2>/dev/null &
 printf 'remote-file-content'
 printf '%%s' '%s' >&2
 exit 0
 |}
+    (Exec_ssh_protocol.render_probe
+       { name = "masc-exec-shim"
+       ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
+       ; capabilities = [ Exec_ssh_protocol.observe_capability ]
+       ; release = None
+       })
     (Exec_ssh_protocol.render_trailer
        { v = Exec_ssh_protocol.newest
        ; exit = Some 0

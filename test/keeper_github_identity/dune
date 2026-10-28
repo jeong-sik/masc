@@ -3,6 +3,8 @@
 
 (test
  (name test_keeper_github_identity)
+ (preprocess
+  (pps ppx_enumerate))
  (modules
   common
   workspace

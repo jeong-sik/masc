@@ -573,7 +573,7 @@ let dispatch ?actor ?request_id t ~verb args =
     (match action with
      | Browser_lane.Action.Open_tab url -> open_tab t url
      | Browser_lane.Action.Open_window url -> open_tab ~kind:"window" t url
-     | Browser_lane.Action.Control (Browser_lane.Action.Hand_off | Browser_lane.Action.Take_over | Browser_lane.Action.Space_status | Browser_lane.Action.Wait_for_control _ | Browser_lane.Action.Adopt_tab _ | Browser_lane.Action.Release_tab _) ->
+     | Browser_lane.Action.Control (Browser_lane.Action.Hand_off | Browser_lane.Action.Take_over | Browser_lane.Action.Space_status | Browser_lane.Action.Finish_space _ | Browser_lane.Action.Wait_for_control _ | Browser_lane.Action.Adopt_tab _ | Browser_lane.Action.Release_tab _) ->
        Error (Before_effect Browser_lane.handoff_refused)
      | Browser_lane.Action.On_tab {tab_id; interaction; _} -> tab_action t ~tab_id interaction)
   | Browser_info ->

@@ -95,7 +95,8 @@ let test_the_space_opens_by_name_and_is_held_by_number () =
     match sent.step with
     | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
     | "tabs.list" -> answered (`List [])
-    | "space.finish" -> answered `Null
+    | "space.finish" -> answered (obj ["spaceId",`Int 51;"closedSpace",`Bool true;
+        "keptManagedLabels",`List [];"closedManagedLabels",`List [];"preservedUnmanagedCount",`Int 0])
     | other -> failf "unexpected step %s" other in
   let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "masc") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
@@ -766,7 +767,8 @@ let test_the_scripts_parse_as_modules () =
       let path = text (field "path" sent.args) in
       Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel png);
       answered (obj ["label",str "p1";"path",str path;"before",state ~url:"u" ~width:1;"after",state ~url:"u" ~width:1])
-    | "space.finish" -> answered `Null
+    | "space.finish" -> answered (obj ["spaceId",`Int 51;"closedSpace",`Bool true;
+        "keptManagedLabels",`List [];"closedManagedLabels",`List [];"preservedUnmanagedCount",`Int 0])
     | "page.target" -> answered resolved
     | "page.pointer" | "page.keyboard" | "page.drag" -> input_answer ()
     | "page.input" -> dom_answer (obj ["action",str "fill"])
@@ -1849,7 +1851,8 @@ let test_an_upload_keeps_its_files_until_the_space_ends () =
   let peer = opened (fun sent -> match sent.step with
     | "tabs.list" -> answered tabs
     | "page.upload" -> asked := sent.args :: !asked; !reply sent
-    | "space.finish" -> answered `Null
+    | "space.finish" -> answered (obj ["spaceId",`Int 51;"closedSpace",`Bool true;
+        "keptManagedLabels",`List [];"closedManagedLabels",`List [];"preservedUnmanagedCount",`Int 0])
     | other -> failf "unexpected step %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let upload ?(selector="#file") paths = dispatch peer Live.Page_act
@@ -1899,7 +1902,8 @@ let test_an_upload_through_a_file_chooser_answers_what_it_handed () =
   let peer = opened (fun sent -> match sent.step with
     | "tabs.list" -> answered tabs
     | "page.choose_files" -> asked := sent.args :: !asked; !reply sent
-    | "space.finish" -> answered `Null
+    | "space.finish" -> answered (obj ["spaceId",`Int 51;"closedSpace",`Bool true;
+        "keptManagedLabels",`List [];"closedManagedLabels",`List [];"preservedUnmanagedCount",`Int 0])
     | other -> failf "unexpected step %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let choose ?actor ?(opener="#attach") paths = dispatch ?actor peer Live.Page_act
@@ -2345,6 +2349,44 @@ const listTaskSpaces=async()=>{seen.push('listTaskSpaces');return [{id:%d,name:'
   ignore (dispatch peer Live.Page_act (obj ["action",str "hand_off"]));
   check bool "control changes invalidate cached owner metadata" true (Option.is_none (Peer.space_observation peer))
 
+let test_explicit_completion_is_terminal_and_never_replayed () =
+  let scenario reply keep =
+    let calls=ref 0 in
+    let run ~window_s script = let sent=sent_of ~window_s script in
+      match sent.step with
+      | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
+      | "space.finish" -> incr calls; reply sent
+      | other -> failf "unexpected post-completion SDK call %s" other in
+    let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
+        ~space:(Browser_configuration.Existing_space 51) ~version:"fixture" ~capture_directory:(capture_directory ()) with
+      | Ok peer -> peer | Error detail -> fail detail in
+    check bool "active Space cannot justify retirement deletion" true (Result.is_error (Peer.retirement_settlement peer));
+    let args=Browser_lane.Action.to_json (Control (Finish_space keep)) in
+    let first=dispatch peer Live.Page_act args in
+    let second=dispatch peer Live.Page_act args in
+    check int "finish dispatched exactly once" 1 !calls;
+    ignore (before_effect "former Page work" (dispatch peer Live.Tabs_list (obj [])));
+    ignore (before_effect "takeover after completion" (dispatch peer Live.Page_act (obj ["action",str "take_over"])));
+    peer,first,second in
+  let receipt ?(closed=true) ?(kept=[]) ()=obj ["spaceId",`Int 51;"closedSpace",`Bool closed;
+    "keptManagedLabels",`List (List.map str kept);"closedManagedLabels",`List [];"preservedUnmanagedCount",`Int 0] in
+  let peer,first,second=scenario (fun sent ->
+    check bool "empty retention forwarded to native SDK" true (field "keep" sent.args=`List []);
+    answered (receipt ())) [] in
+  check bool "confirmed receipt is returned without replay" true (Result.is_ok first && first=second);
+  check bool "confirmed closure settles files" true (Peer.retirement_settlement peer=Ok ());
+  let peer,first,second=scenario (fun _ -> answered (receipt ~closed:false ~kept:["p2"] ())) ["p2"] in
+  check bool "retained result has a stable native receipt" true (Result.is_ok first && first=second);
+  check bool "retained native tabs preserve file ownership" true (Result.is_error (Peer.retirement_settlement peer));
+  List.iter (fun reply ->
+    let peer,first,second=scenario reply [] in
+    check bool "lost or invalid completion is unknown" true (match first with Error (Live.Outcome_unknown _) -> true | _ -> false);
+    ignore (before_effect "uncertain completion replay" second);
+    check bool "unknown completion preserves files" true (Result.is_error (Peer.retirement_settlement peer)))
+    [(fun _ -> Error (Peer.Unobserved "lost completion"));(fun _ -> answered `Null);
+     (fun _ -> answered (obj ["spaceId",`Int 999;"closedSpace",`Bool true;"keptManagedLabels",`List [];
+       "closedManagedLabels",`List [];"preservedUnmanagedCount",`Int 0]))]
+
 let () =
   run "browser_ego_peer" [
     "ego", [
@@ -2354,6 +2396,7 @@ let () =
       test_case "operator input assertion resumes the same peer without replay" `Quick test_operator_input_recovery;
       test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;
       test_case "chooser upload respects uncertain input release" `Quick test_chooser_upload_respects_uncertain_pointer_release;
+      test_case "explicit completion is terminal and never replayed" `Quick test_explicit_completion_is_terminal_and_never_replayed;
       test_case "the space opens by name and is held by number" `Quick test_the_space_opens_by_name_and_is_held_by_number;
       test_case "the spaces of a name are listed without opening one" `Quick test_the_spaces_of_a_name_are_listed_without_opening_one;
       test_case "the listing script runs under node" `Quick test_the_listing_script_runs_under_node;

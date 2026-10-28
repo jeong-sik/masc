@@ -299,7 +299,8 @@ def run(script,answer):
         paths=[pathlib.Path(path) for path in args['paths']]
         (root/'uploaded').write_text(json.dumps([str(path) for path in paths]))
         answer({'error':None,'dialog':None,'tab':{'url':'https://fixture.test/','title':'Fixture'}})
-    elif step=='space.finish':answer(None)
+    elif step=='space.finish':answer({'spaceId':51,'closedSpace':True,'keptManagedLabels':[],
+        'closedManagedLabels':['p1','p2'],'preservedUnmanagedCount':0})
     else:answer(error='unexpected step '+step)
 for raw in stream:
     command=json.loads(raw);out=[]
@@ -353,6 +354,10 @@ let scenario mode =
           (Yojson.Safe.Util.member "egoPage" tab = `Assoc ["label",`String "p1";
             "targetId",`String "T1";"openedBy",`String "agent"]);
         let finished () = List.mem "space.finish" (lines (Filename.concat root "steps")) in
+        let retirement_unconfirmed () = match dispatch W.Retire with
+          | W.Service_refusal {disposition=W.Outcome_unknown;_} -> true
+          | W.Service_refusal {disposition=W.Not_started;_}
+          | W.Receipt|W.Issue_result _|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _ -> false in
         let clock = Eio.Stdenv.clock env in
         if mode = "late" then (
           check bool "the caller stops waiting for a slow read" true
@@ -362,16 +367,16 @@ let scenario mode =
              | Snapshot_result _ | Model_reply _|Extension_reply _ | Download_reply _ | Poll_result _ | Receipt | Service_refusal _ -> false);
           check string "its late result does not end the connection" (Yojson.Safe.to_string tab_list)
             (Yojson.Safe.to_string (answered (issue B.Tabs_list)));
-          check bool "retirement" true (dispatch W.Retire = W.Receipt);
-          check bool "retirement answers after the space ended" true (finished ()))
+          check bool "retirement reports retained backend" true (retirement_unconfirmed ());
+          check bool "retirement preserves the task" false (finished ()))
         else if mode = "retire" then Eio.Switch.run (fun sw ->
           let reading = Eio.Fiber.fork_promise ~sw (fun () ->
             issue ~timeout_sec:5. (B.Page_read {tab_id=Some 1;max_chars=None})) in
           Eio.Time.sleep clock 0.5;
           let started = Eio.Time.now clock in
-          check bool "retirement stops a running read" true (dispatch W.Retire = W.Receipt);
-          check bool "within the stop grace and the space's end" true (Eio.Time.now clock -. started < 10.);
-          check bool "retirement answers after the space ended" true (finished ());
+          check bool "retirement stops a running read and retains backend" true (retirement_unconfirmed ());
+          check bool "within the SDK stop grace" true (Eio.Time.now clock -. started < 10.);
+          check bool "retirement preserves the task" false (finished ());
           ignore (Eio.Promise.await_exn reading))
         else (
         let shot = answered (issue (B.Page_capture {tab_id=1})) in
@@ -435,14 +440,21 @@ let scenario mode =
            | W.Issue_result (Error (B.Transport_unsupported _)) -> true
            | W.Issue_result (Ok _ | Error _) | Snapshot_result _ | Model_reply _|Extension_reply _ | Download_reply _
            | Poll_result _ | Receipt | Service_refusal _ -> false);
-        check bool "retirement ends the task space" true (dispatch W.Retire = W.Receipt);
-        check bool "retirement answers after the space ended" true (finished ());
+        if mode="retained" then (
+          check bool "retirement reports unconfirmed file cleanup" true (retirement_unconfirmed ());
+          check bool "transport retirement never finishes the task" false (finished ()))
+        else (
+          let completed=answered (issue (B.Page_act (B.Action.Control (B.Action.Finish_space [])))) in
+          check bool "explicit completion observes native Space closure" true
+            Yojson.Safe.Util.(completed |> member "data" |> member "nativeReceipt" |> member "closedSpace" |> to_bool);
+          check bool "explicit completion ran" true (finished ());
+          check bool "retirement cleans a confirmed closed Space" true (dispatch W.Retire = W.Receipt));
         check bool "no client is left" true (B.connected_clients () = [])) in
       let failure = try Ego.run ~env ~owner ~downloads:(Broker.downloads_directory ~directory:root) {command; space=Browser_configuration.Named_space "masc"} work; None with
         | Invalid_argument detail | Sys_error detail -> Some detail in
       (match mode, failure with
-       | ("normal" | "late" | "retire"), None -> ()
-       | ("normal" | "late" | "retire"), Some detail -> failf "the connection failed: %s" detail
+       | ("normal" | "retained" | "late" | "retire"), None -> ()
+       | ("normal" | "retained" | "late" | "retire"), Some detail -> failf "the connection failed: %s" detail
        | ("no-version" | "in-use"), Some detail ->
          check bool "says why" true
            (String_util.contains_substring detail (if mode = "in-use" then "EGO_TASK_SPACE_NAME_IN_USE" else "not signed in"))
@@ -453,7 +465,7 @@ let scenario mode =
     let processes = List.length (lines (Filename.concat root "processes")) in
     check (array string) "nothing is left of the screenshot directory" [||] (Sys.readdir temporary);
     match mode with
-    | "normal" ->
+    | "normal"|"retained" ->
       check bool "caller work ran" true !entered;
       let dispatched name = List.length (List.filter (String.equal name) steps) in
       check int "the native selector input is dispatched once" 1 (dispatched "page.target_input");
@@ -461,21 +473,21 @@ let scenario mode =
       check int "selector input has no extra DOM target resolution" 0 (dispatched "page.target");
       check int "selector input has no MASC coordinate replay" 0 (dispatched "page.pointer");
       check int "one ego process ran them all" 1 processes;
-      check bool "retirement removed the published download" false
+      check bool "only confirmed closure removes the published download" (mode="retained")
         (Sys.file_exists (read (Filename.concat root "downloaded")));
-      check bool "and, once the space had ended, the upload copies" false
+      check bool "upload copies require confirmed closure" (mode="retained")
         (List.exists (fun copy -> Sys.file_exists (Yojson.Safe.Util.to_string copy))
            (Yojson.Safe.Util.to_list (Yojson.Safe.from_string (read (Filename.concat root "uploaded")))));
       check bool "the screenshot directory is removed, with what a stopped capture left" false
         (Sys.file_exists (read (Filename.concat root "captures")))
     | "late" ->
       check bool "caller work ran" true !entered;
-      check (list string) "steps" ["space.open"; "tabs.list"; "page.read"; "tabs.list"; "space.finish"] steps;
+      check (list string) "steps" ["space.open"; "tabs.list"; "page.read"; "tabs.list"] steps;
       check int "a late answer keeps the process" 1 processes
     | "retire" ->
       check bool "caller work ran" true !entered;
-      check (list string) "steps" ["space.open"; "tabs.list"; "page.read"; "space.finish"] steps;
-      check int "the stopped read's process, then the end's" 2 processes
+      check (list string) "steps" ["space.open"; "tabs.list"; "page.read"] steps;
+      check int "no process restarts merely to finish" 1 processes
     | "no-version" ->
       check bool "caller work never ran" false !entered;
       check (list string) "no script ran" [] steps;
@@ -502,8 +514,9 @@ let () =
       test_case "one process runs the connection's commands" `Quick test_one_process_runs_the_connections_commands;
       test_case "a cancelled start stops its process" `Quick test_a_cancelled_start_stops_its_process;
       test_case "a start on a cancelled connection starts nothing" `Quick test_a_start_on_a_cancelled_connection_starts_nothing;
-      test_case "the worker serves the space until retirement" `Quick (child "normal");
+      test_case "explicit completion permits worker file cleanup" `Quick (child "normal");
+      test_case "retirement preserves Space and browser-backed files" `Quick (child "retained");
       test_case "a result delivered after the caller stopped waiting does not end the connection" `Quick (child "late");
-      test_case "retirement stops a running command and ends the space" `Quick (child "retire");
+      test_case "retirement stops a running command and preserves the Space" `Quick (child "retire");
       test_case "an ego that names no version fails the start" `Quick (child "no-version");
       test_case "a space the operator holds fails the start" `Quick (child "in-use") ] ]

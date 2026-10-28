@@ -258,7 +258,9 @@ let print_ego ~runtime_config_path plan =
     "  Restart the MASC server to load runtime.toml. A browser Add-on that was attached \
      before keeps its old settings until it is detached; the server attaches its declaration \
      again on the next maintenance pass. The Add-on then opens the task space and lists it as \
-     ego lite among the live connections. Detaching ends the space.";
+     ego lite among the live connections. Detaching stops the SDK session without finishing \
+     the Space or discarding browser-backed files. Complete a successful task explicitly \
+     with the finish_space browser action.";
   let reference=match space with
     | Browser_configuration.Named_space name -> Printf.sprintf "named %S" name
     | Existing_space id -> Printf.sprintf "with ID %d" id in

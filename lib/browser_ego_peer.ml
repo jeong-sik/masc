@@ -69,9 +69,12 @@ module Input = Browser_ego_input
 
 type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) result }
 
+type finish_state = Active | Finish_uncertain | Finished of {
+  keep : string list; receipt : Yojson.Safe.t; settlement : (unit, string) result }
+
 type t = { run : runner; run_native : string -> (string, run_failure) result; now : unit -> float; space : Browser_lane.ego_space; version : string; capture_directory : string;
   downloads : downloads; published : (string, Yojson.Safe.t) Hashtbl.t; uploads : Browser_lane.Upload_lease.owner;
-  input : Input.t; mutable space_observation : Browser_ego_space_observation.t option;
+  input : Input.t; mutable finish_state : finish_state; mutable space_observation : Browser_ego_space_observation.t option;
   mutable pages : (page * int) list; mutable next_tab : int; mutable captures : int }
 
 let space_id t = t.space.id
@@ -247,19 +250,15 @@ let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloa
      | Some (Agent_owner | Handed_to_operator) ->
        Ok {run; run_native; now; space=bound_space; version; capture_directory; downloads; published = Hashtbl.create 16;
          uploads = Browser_lane.Upload_lease.create_owner ();
-         input=Input.create (); space_observation=Some observation; pages=[]; next_tab=0; captures=0}
+         input=Input.create (); finish_state=Active; space_observation=Some observation; pages=[]; next_tab=0; captures=0}
      | Some Operator_owner | None ->
        Error (Printf.sprintf "ego task space %s belongs to %s, not to an agent" (Yojson.Safe.to_string reference) ownership))
   | _ -> Error "ego answered the task space without its owner"
 
-(* The space's end closes its pages, so the files they were given are no
-   longer read; only then is their lease let go. A finish that failed keeps
-   them, as a Gecko session that did not confirm its end keeps its own. *)
-let finish t =
-  let* () = Result.map ignore (ask t ~step:"space.finish" ~args:`Null
-    "  await task.finish({keep: []});\n  emit({ok: true, value: null});") in
-  Browser_lane.Upload_lease.release_owner t.uploads;
-  Ok ()
+let retirement_settlement t = match t.finish_state with
+  | Active -> Error "ego Space retained; connection retirement is not task completion"
+  | Finish_uncertain -> Error "ego Space completion is unconfirmed; preserve files and never replay finish"
+  | Finished {settlement;_} -> settlement
 
 (* A page blocked on a JavaScript dialog runs no page script until the
    dialog is answered: ego 0.6.0.16 refuses page.evaluate then, and a move
@@ -612,6 +611,67 @@ let effect_failure ~unknown = function
   | Unanswered (Exited _ | Signaled _ | Timed_out | Output_exceeded | Unobserved _ as failure) ->
     Live.Outcome_unknown (run_failure_message failure ^ "; " ^ unknown)
   | Unreadable detail | Failed detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown)
+
+(* Native finish is terminal. Capture the returned receipt without reading
+   TaskSpace/Page properties afterward, including retained Pages' old labels. *)
+let finish_receipt ~space_id ~keep value =
+  let bad () = Error "invalid native Space completion receipt" in
+  let labels = function
+    | `List values ->
+      let rec collect acc = function
+        | [] when List.length acc=List.length (List.sort_uniq String.compare acc) -> Ok (List.rev acc)
+        | `String label::rest when String.trim label<>"" -> collect (label::acc) rest
+        | []|_::_ -> bad () in
+      collect [] values
+    | `Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`Assoc _ -> bad () in
+  let* ()=match value with
+    | `Assoc fields when List.sort String.compare (List.map fst fields)=
+        ["closedManagedLabels";"closedSpace";"keptManagedLabels";"preservedUnmanagedCount";"spaceId"] -> Ok ()
+    | `Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _|`Assoc _ -> bad () in
+  match field "spaceId" value,field "closedSpace" value,field "keptManagedLabels" value,
+      field "closedManagedLabels" value,field "preservedUnmanagedCount" value with
+  | Some (`Int id),Some (`Bool closed),Some kept,Some removed,Some (`Int count) when id=space_id && count>=0 ->
+    let* kept=labels kept in let* removed=labels removed in
+    if List.exists (fun label -> List.mem label removed) kept
+      || not (List.for_all (fun label -> List.mem label kept) keep)
+      || (closed && (kept<>[] || count<>0 || keep<>[])) then bad ()
+    else Ok closed
+  | _ -> bad ()
+
+let finish_space t keep =
+  let unknown="Space completion may have happened; reconcile through Space metadata and the operator; never replay finish" in
+  match t.finish_state with
+  | Finished {keep=previous;receipt;_} when previous=keep -> Ok receipt
+  | Finished _ -> Error (Live.Before_effect "this task already finished with a different keepPages policy")
+  | Finish_uncertain -> Error (Live.Before_effect unknown)
+  | Active ->
+    (* Record before a yielding runner: cancellation/lost output stays uncertain. *)
+    t.finish_state <- Finish_uncertain;
+    t.space_observation <- None;
+    let args=obj ["keep",`List (List.map str keep)] in
+    match run_native_step t ~step:"space.finish" ~args
+        "  const receipt = await task.finish({keep: args.keep});\n  emit({ok: true, value: receipt});" with
+    | Error failure ->
+      (match failure with
+       | Refused _|Unanswered (Unstarted _) -> t.finish_state <- Active
+       | Unreadable _|Failed _|Unanswered (Exited _|Signaled _|Timed_out|Output_exceeded|Unobserved _) -> ());
+      Error (effect_failure ~unknown failure)
+    | Ok value ->
+      let* closed=finish_receipt ~space_id:t.space.id ~keep value
+        |> Result.map_error (fun detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown)) in
+      let settlement=if closed then
+          (match Browser_lane.Upload_lease.release_owner t.uploads with
+           | () -> Ok ()
+           | exception ((Sys_error _|Unix.Unix_error _) as exn) -> Error ("upload cleanup unconfirmed: " ^ Printexc.to_string exn))
+        else Error "native task completed with retained tabs; browser-backed files remain owned" in
+      let receipt=obj ["action",str "finish_space";"spaceId",`Int t.space.id;"spaceName",str t.space.name;
+        "keepPages",`List (List.map str keep);"nativeReceipt",value] in
+      t.finish_state <- Finished {keep;receipt;settlement};
+      Ok receipt
+
+let finish t = finish_space t [] |> Result.map (fun _ -> ()) |> Result.map_error (function
+  | Live.Before_effect detail|Outcome_unknown detail -> detail
+  | Partial_failure {message;_} -> message)
 
 let label_of t id = match List.find_opt (fun (_, known) -> known = id) t.pages with
   | Some (Managed label, _) -> Ok label
@@ -1499,6 +1559,7 @@ let act ?actor t args =
   | Ok (Browser_lane.Action.Control Browser_lane.Action.Take_over) -> take_over t
   | Ok (Browser_lane.Action.Control (Browser_lane.Action.Wait_for_control options)) -> wait_for_control t options
   | Ok (Browser_lane.Action.Control Browser_lane.Action.Space_status) -> space_status t
+  | Ok (Browser_lane.Action.Control (Browser_lane.Action.Finish_space keep)) -> finish_space t keep
   | Ok (Browser_lane.Action.Control (Browser_lane.Action.Adopt_tab {tab_id;label})) -> manage_tab t ~tab_id (Adopt label)
   | Ok (Browser_lane.Action.Control (Browser_lane.Action.Release_tab tab_id)) -> manage_tab t ~tab_id Release
   | Ok (Browser_lane.Action.Open_window _) ->
@@ -1522,7 +1583,7 @@ let act ?actor t args =
   | Ok (Browser_lane.Action.On_tab {frame_path = []; interaction = (Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
       | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation
       | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests); _}) ->
-    Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, accept_dialog, dismiss_dialog, upload, hand_off, take_over, space_status, wait_for_control, adopt_tab and release_tab only")
+    Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, accept_dialog, dismiss_dialog, upload, hand_off, take_over, space_status, finish_space, wait_for_control, adopt_tab and release_tab only")
 
 let workflow ?actor t args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in
@@ -1584,6 +1645,20 @@ let dispatch_raw ?actor t ~verb args =
   | Page_interact -> interact ?actor t args
   | Page_native_workflow -> workflow ?actor t args
 
+let admit_after_finish t ~verb args =
+  match t.finish_state with
+  | Active -> Ok ()
+  | Finish_uncertain|Finished _ ->
+    match (verb : Live.verb) with
+    | Browser_info -> Ok ()
+    | Page_act -> (match Browser_lane.Action.parse args with
+        | Ok (Control (Space_status|Finish_space _)) -> Ok ()
+        | Ok (Open_tab _|Open_window _|Control (Hand_off|Take_over|Wait_for_control _|Adopt_tab _|Release_tab _)|On_tab _)
+        | Error _ -> Error (Live.Before_effect "Space completion is terminal or uncertain; former Page/control work is refused; use space_status to reconcile"))
+    | Tabs_list|Page_read|Page_elements|Page_scene|Page_capture|Page_goto|Page_context|Page_snapshot
+    | Page_downloads|Page_interact|Page_native_workflow ->
+      Error (Live.Before_effect "Space completion is terminal or uncertain; former Page work is refused; use space_status to reconcile")
+
 let dispatch ?command_id ?actor t ~verb args =
   let command_id=match command_id with Some id -> id
     | None -> Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
@@ -1593,7 +1668,7 @@ let dispatch ?command_id ?actor t ~verb args =
             `Assoc (("inputReadiness",str (Input.provenance t.input)) :: List.remove_assoc "inputReadiness" fields)
         | Ready Command_settled|Uncertain _ -> value)
     | value -> value in
-  match Input.within_command t.input ~command_id (fun () -> dispatch_raw ?actor t ~verb args) with
+  match Input.within_command t.input ~command_id (fun () -> let* ()=admit_after_finish t ~verb args in dispatch_raw ?actor t ~verb args) with
   | Error detail -> Error (Live.Before_effect detail)
   | Ok (Ok value) -> Ok (annotate value)
   | Ok (Error (Live.Partial_failure partial)) -> Error (Live.Partial_failure {partial with receipt=annotate partial.receipt})

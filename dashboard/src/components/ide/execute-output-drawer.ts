@@ -38,7 +38,7 @@ interface ExecuteOutputDrawerProps {
 
 /** [ended]: the stream stopped without the task saying it closed, so the
     output may be incomplete. */
-type ExecuteOutputStatus = 'idle' | 'streaming' | 'closed' | 'ended' | 'error'
+type ExecuteOutputStatus = 'idle' | 'streaming' | 'closed' | 'unknown' | 'ended' | 'error'
 
 export interface ExecuteOutputSummary {
   readonly total: number
@@ -168,7 +168,7 @@ function statusTone(status: ExecuteOutputStatus): StatusChipTone {
   if (status === 'streaming') return 'info'
   if (status === 'closed') return 'neutral'
   if (status === 'error') return 'bad'
-  if (status === 'ended') return 'warn'
+  if (status === 'ended' || status === 'unknown') return 'warn'
   return 'neutral'
 }
 
@@ -309,16 +309,59 @@ export function ExecuteOutputDrawer({
     setTaskId(null)
     // Whether the latest observation says all executions are closed.
     let settled = false
+    // A gap may contain opens or closes; only a snapshot can restore a full
+    // inventory after one. IDs are scoped to this server's observation stream.
+    let activeStreams: Map<number, string | null> | null = null
+    const taskOf = (value: unknown) => typeof value === 'string' ? value : null
+    const soleActiveTask = () => activeStreams?.size === 1
+      ? [...activeStreams.values()][0] ?? null
+      : null
 
     void streamExecuteOutput(keeper, {
       signal: controller.signal,
       onEvent: event => {
         setLines(current => appendLines(current, linesFromExecuteOutputEvent(event)))
-        // A gap names missed log entries only; it says nothing about which
-        // task is running or whether it closed.
-        if (event.type === 'gap') return
+        if (event.type === 'gap') {
+          activeStreams = null
+          settled = false
+          setTaskId(null)
+          setStatus('unknown')
+          return
+        }
         settled = event.type === 'error' || event.closed === true
-        setTaskId(typeof event.task_id === 'string' ? event.task_id : null)
+        if (event.type === 'snapshot' && Array.isArray(event.active_streams)) {
+          activeStreams = event.active_streams.every(stream =>
+            stream !== null && typeof stream === 'object' && Number.isInteger(stream.stream_id)
+            && (stream.task_id === null || typeof stream.task_id === 'string'))
+            ? new Map(event.active_streams.map(stream => [stream.stream_id, stream.task_id]))
+            : null
+          if (typeof event.active_count === 'number' && activeStreams?.size !== event.active_count) activeStreams = null
+          setTaskId(event.closed && activeStreams?.size === 0 ? taskOf(event.task_id) : soleActiveTask())
+        } else if (event.type === 'snapshot' || event.type === 'no_task') {
+          // Older servers do not send an inventory. A closed snapshot is a
+          // complete empty inventory; an open one cannot establish one.
+          activeStreams = event.closed ? new Map() : null
+          setTaskId(taskOf(event.task_id))
+        } else if (event.type === 'task_opened') {
+          if (activeStreams !== null && typeof event.stream_id === 'number') {
+            activeStreams.set(event.stream_id, taskOf(event.task_id))
+            setTaskId(soleActiveTask())
+          } else {
+            activeStreams = null
+            setTaskId(null)
+          }
+        } else if (event.type === 'task_closed') {
+          if (activeStreams !== null && typeof event.stream_id === 'number') activeStreams.delete(event.stream_id)
+          else activeStreams = null
+          if (typeof event.active_count === 'number' && activeStreams?.size !== event.active_count) activeStreams = null
+          if (event.active_count === 0) activeStreams = new Map()
+          setTaskId(event.closed ? taskOf(event.task_id) : soleActiveTask())
+        } else if (event.type === 'line' && activeStreams === null) {
+          // Legacy events lack stream IDs. Do not resurrect a task after a gap.
+          setTaskId(null)
+        } else if (event.type === 'error') {
+          setTaskId(null)
+        }
         if (event.type === 'error') setStatus('error')
         else if (event.closed) setStatus('closed')
         else setStatus('streaming')

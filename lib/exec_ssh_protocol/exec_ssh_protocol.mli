@@ -330,6 +330,10 @@ type probe =
           on the way in and an absent key is [None], so a v3 shim and a v3
           server disagree about this field without either refusing the
           other (RFC-0427 B-3). *)
+  ; boot_id : string option
+      (** Canonical kernel boot UUID when the shim can read one. This names a
+          kernel boot, not a physical host or a durable workspace. An old shim
+          or a platform without this observation returns [None]. *)
   }
 
 val render_probe : probe -> string

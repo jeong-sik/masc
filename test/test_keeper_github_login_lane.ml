@@ -76,6 +76,7 @@ let stub_main () =
          ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
          ; capabilities = []
          ; release = None
+         ; boot_id = None
          });
     exit 0);
   let header = read_exact Unix.stdin 8 in

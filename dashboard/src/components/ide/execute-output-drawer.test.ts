@@ -269,7 +269,7 @@ describe('ExecuteOutputDrawer event mapping', () => {
     expect(mounted.querySelector('[data-testid="execute-output-stop"]')).toBeNull()
   })
 
-  it('marks a stream gap in the terminal without dropping the running task state', async () => {
+  it('marks a gap and does not guess which task is active across missing events', async () => {
     let resolveFetch: (value: Response) => void = () => undefined
     const fetchPromise = new Promise<Response>(resolve => {
       resolveFetch = resolve
@@ -300,8 +300,40 @@ describe('ExecuteOutputDrawer event mapping', () => {
       'second',
       'missed 7 output entries the server no longer keeps (seq 3-9)',
     ])
-    expect(mounted.querySelector('.execute-output-drawer-header')?.textContent).toContain('task-123')
-    expect(mounted.querySelector('[data-status-chip-tone="info"]')?.textContent).toContain('streaming')
+    expect(mounted.querySelector('.execute-output-drawer-header')?.textContent).not.toContain('task-123')
+    expect(mounted.querySelector('[data-status-chip-tone="warn"]')?.textContent).toContain('unknown')
+  })
+
+  it('keeps the remaining task after another concurrent execution closes', async () => {
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined
+    const body = new ReadableStream<Uint8Array>({ start(value) { controller = value } })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, {
+      status: 200, headers: { 'Content-Type': 'text/event-stream' },
+    })))
+    mounted = document.createElement('div')
+    render(h(ExecuteOutputDrawer, { keeperName: 'sangsu' }), mounted)
+    const emit = (event: object) => controller!.enqueue(new TextEncoder().encode(
+      `event: output\ndata: ${JSON.stringify(event)}\n\n`,
+    ))
+    const header = () => mounted?.querySelector('.execute-output-drawer-header')?.textContent ?? ''
+    emit({ type: 'snapshot', keeper: 'sangsu', closed: false, active_count: 2,
+      task_id: 'task-b', lines: [], active_streams: [
+        { stream_id: 1, task_id: 'task-a', command: 'a', started_at: 1 },
+        { stream_id: 2, task_id: 'task-b', command: 'b', started_at: 2 },
+      ] })
+    await waitFor(() => expect(header()).not.toContain('task-b'))
+    emit({ type: 'line', keeper: 'sangsu', stream_id: 1, task_id: 'task-a', closed: false,
+      line: { stream: 'stdout', text: 'from a' } })
+    await waitFor(() => expect(mounted?.textContent).toContain('from a'))
+    expect(header()).not.toContain('task-a')
+    emit({ type: 'task_closed', keeper: 'sangsu', stream_id: 1, task_id: 'task-a',
+      closed: false, active_count: 1, status: { code: 0 } })
+    await waitFor(() => expect(header()).toContain('task-b'))
+    expect(header()).not.toContain('task-a')
+    emit({ type: 'line', keeper: 'sangsu', stream_id: 2, task_id: 'task-b', closed: false,
+      line: { stream: 'stdout', text: 'from b' } })
+    await waitFor(() => expect(mounted?.textContent).toContain('from b'))
+    expect(header()).toContain('task-b')
   })
 
   it('renders Execute output context links and routes back into task context', async () => {

@@ -83,6 +83,7 @@ let stub_main () =
            ; version = string_of_int major ^ ".0.0"
            ; capabilities
            ; release = None
+           ; boot_id = None
            });
     exit 0);
   let header = read_exact Unix.stdin 8 in
@@ -140,6 +141,22 @@ let stub_main () =
   | "shim-error" ->
     write_all Unix.stderr
       (trailer ~shim_error:"remote_ssh_path_jail_violation: outside root" ());
+    exit 1
+  | "shim-error-invalid" ->
+    write_all Unix.stderr
+      ("\x1e" ^ Yojson.Safe.to_string
+         (`Assoc ["masc_exec_result", `Assoc
+           ["v", `Int (Exec_ssh_protocol.int_of_major v); "exit", `Null;
+            "signal", `Null; "timed_out", `Bool false;
+            "shim_error", `String "fixture refusal"; "execution_receipt", `Null]]) ^ "\x1e");
+    exit 1
+  | "shim-error-receipt" ->
+    let execution_receipt : Exec_ssh_protocol.execution_receipt =
+      { mode = request.mode; boundary = Refused } in
+    write_all Unix.stderr
+      (Exec_ssh_protocol.render_trailer ~execution_receipt
+         { v; exit = None; signal = None; timed_out = false
+         ; shim_error = Some "fixture refusal"; observed_syscalls = [] });
     exit 1
   | "malformed" ->
     write_all Unix.stderr "guest-err\x1ebad\x1e";
@@ -627,6 +644,49 @@ let test_the_lane_report_is_what_the_last_dispatch_said () =
   | Some (Payload_finished _) | None -> fail "an unreadable trailer is a lane failure"
 ;;
 
+let test_fresh_probe_and_boot_comparison () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let response_path = Filename.concat base_path "probe-response.json" in
+  let cli = Filename.concat base_path "probe-cli" in
+  save cli ("#!/bin/sh\ncat " ^ shell_quote response_path ^ "\n");
+  Unix.chmod cli 0o700;
+  let state = make_state ~base_path ~cli in
+  let boot_a = "70d55243-7a2b-47bc-95b3-c133f134854e" in
+  let boot_b = "8c4c50be-d69a-497a-a5a8-d80e4848b0f3" in
+  let answer boot_id =
+    save response_path (Exec_ssh_protocol.render_probe
+      { name = "masc-exec-shim"; version = "3.0.0"; capabilities = [];
+        release = None; boot_id }) in
+  let ask () = Keeper_sandbox_remote.For_testing.run_probe state in
+  let observed expected_change expected_id =
+    match (Keeper_sandbox_remote.report state).probe with
+    | Probe_answered { boot; _ } ->
+      check bool "boot comparison" true (boot.change = expected_change);
+      check (option string) "boot observation" expected_id boot.boot_id;
+      boot.last_changed_at
+    | Probe_not_asked | Probe_failed _ -> fail "expected answered probe" in
+  answer (Some boot_a);
+  ignore (ask ());
+  ignore (observed Boot_first (Some boot_a));
+  ignore (ask ());
+  ignore (observed Boot_unchanged (Some boot_a));
+  Sys.remove response_path;
+  (match ask () with Error _ -> () | Ok _ -> fail "missing endpoint answer was accepted");
+  (match (Keeper_sandbox_remote.report state).probe with
+   | Probe_failed _ -> () | Probe_not_asked | Probe_answered _ -> fail "old success hid a newer failure");
+  answer None;
+  ignore (ask ());
+  ignore (observed Boot_unreported None);
+  answer (Some boot_b);
+  ignore (ask ());
+  let changed_at = observed Boot_changed (Some boot_b) in
+  check bool "change time retained" true (Option.is_some changed_at);
+  ignore (ask ());
+  check bool "last change remains visible" true
+    (observed Boot_unchanged (Some boot_b) = changed_at)
+;;
+
 (* The tool's JSON names the operator action from the failure's class. *)
 (* RFC-0427 B-3. The shim names the release it came from, so the keeper reading
    its own lane sees whether the endpoint runs this server's shim. A shim from
@@ -645,7 +705,8 @@ let test_the_lane_status_names_a_shim_from_another_release () =
   let answered release =
     report
       (Keeper_sandbox_remote.Probe_answered
-         { major = Exec_ssh_protocol.V3; capabilities = []; release; observed_at = 100.0 })
+         { major = Exec_ssh_protocol.V3; capabilities = []; release; observed_at = 100.0
+         ; boot = { boot_id = None; change = Boot_unreported; last_changed_at = None } })
   in
   let same = answered (Some Build_version.current) in
   check bool "a shim from this release asks nothing" true
@@ -685,21 +746,23 @@ let test_the_lane_status_names_who_acts () =
     report
       (Some
          (Keeper_sandbox_remote.Dispatch_failed
-            { at; failure = Transport_failed
+            { at = 101.0; failure = Transport_failed
             ; detail = "remote_ssh_version_error: trailer carries v=2, this build speaks v3" }))
       (Keeper_sandbox_remote.Probe_answered
-         { major = Exec_ssh_protocol.V3; capabilities = []; release = None; observed_at = 100.0 })
+         { major = Exec_ssh_protocol.V3; capabilities = []; release = None; observed_at = 100.0
+         ; boot = { boot_id = None; change = Boot_unreported; last_changed_at = None } })
   in
   check string "failure class" "transport_failed"
     (Yojson.Safe.Util.to_string (field "failure" (field "last_dispatch" version_skew)));
-  check bool "the action says who replaces the shim" true
-    (contains "operator has to replace the shim" (Yojson.Safe.Util.to_string (field "operator_action" version_skew)));
+  check bool "transport failure does not prove power state" true
+    (contains "does not establish" (Yojson.Safe.Util.to_string (field "operator_action" version_skew)));
   let timeout_action failure =
     report
       (Some (Keeper_sandbox_remote.Dispatch_failed { at; failure; detail = "timeout" }))
       (Keeper_sandbox_remote.Probe_answered
          { major = Exec_ssh_protocol.V3; capabilities = []; release = Some Build_version.current
-         ; observed_at = 0.5 })
+         ; observed_at = 0.5
+         ; boot = { boot_id = None; change = Boot_unreported; last_changed_at = None } })
     |> field "operator_action"
     |> Yojson.Safe.Util.to_string
   in
@@ -723,7 +786,17 @@ let test_the_lane_status_names_who_acts () =
   let probe_down = report None (Keeper_sandbox_remote.Probe_failed { at; detail = "endpoint_unreachable" }) in
   check string "probe state" "failed" (Yojson.Safe.Util.to_string (field "state" (field "probe" probe_down)));
   check bool "a failed probe is the operator's" true
-    (contains "operator" (Yojson.Safe.Util.to_string (field "operator_action" probe_down)))
+    (contains "operator" (Yojson.Safe.Util.to_string (field "operator_action" probe_down)));
+  let recovered = report
+      (Some (Keeper_sandbox_remote.Payload_finished { at = 2.0; status = Unix.WEXITED 0 }))
+      (Keeper_sandbox_remote.Probe_failed { at = 1.0; detail = "old failure" }) in
+  check bool "a later successful dispatch supersedes old probe advice" true
+    (field "operator_action" recovered = `Null);
+  let failed_again = report
+      (Some (Keeper_sandbox_remote.Payload_finished { at = 1.0; status = Unix.WEXITED 0 }))
+      (Keeper_sandbox_remote.Probe_failed { at = 2.0; detail = "new failure" }) in
+  check bool "a later failed probe is reported" true
+    (match field "operator_action" failed_again with `String _ -> true | _ -> false)
 ;;
 
 let test_lane_error_codes () =
@@ -798,6 +871,26 @@ let test_receipts_are_owned_by_each_transport_call () =
   check int "multiple stages preserve every receipt" 2 (List.length !effect_receipts)
 ;;
 
+let test_interrupted_wire_publishes_unknown_receipt () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, _ = make_stub ~dir:base_path ~mode:"exit3" in
+  let observations = ref [] in
+  let runner = Keeper_sandbox_remote.runner
+      ~on_receipt:(fun receipt -> observations := receipt :: !observations)
+      ~timeout_sec:2.0 (make_state ~base_path ~cli) in
+  let interrupted =
+    try
+      ignore (runner ~on_stdout_chunk:(Some (fun _ -> raise (Eio.Cancel.Cancelled Exit)))
+        ~on_stderr_chunk:None ~stdin_content:None ~argv:["/bin/true"] ~env:[||] ~cwd:None);
+      false
+    with Eio.Cancel.Cancelled Exit -> true in
+  check bool "original cancellation propagates" true interrupted;
+  match !observations with
+  | [Keeper_sandbox_remote.Execution_unavailable Transport_unavailable] -> ()
+  | _ -> fail "an interrupted wire did not publish its uncertain effect"
+;;
+
 let test_trusted_remote_timeout_retains_receipt () =
   with_eio @@ fun () ->
   let base_path = temp_dir () in
@@ -836,6 +929,28 @@ let test_missing_and_invalid_receipts_keep_actual_status () =
     | "bad-receipt", Some (Keeper_sandbox_remote.Execution_unavailable (Invalid_receipt _)) -> ()
     | _ -> fail "missing or malformed receipt became caller-inferred execution")
     ["exit3"; "bad-receipt"]
+;;
+
+let test_shim_refusal_preserves_its_distinct_observation () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  List.iter (fun fixture ->
+    let cli, _ = make_stub ~dir:base_path ~mode:fixture in
+    let observed = ref None in
+    let runner = Keeper_sandbox_remote.runner
+        ~on_receipt:(fun receipt -> observed := Some receipt)
+        ~timeout_sec:2.0 (make_state ~base_path ~cli) in
+    (match runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+             ~argv:["/bin/true"] ~env:[||] ~cwd:None with
+     | Masc_exec.Sandbox_target.Transport_failed _ -> ()
+     | Ran _ -> fail "shim refusal became a child result");
+    match fixture, !observed with
+    | ("shim-error" | "shim-error-invalid"),
+      Some (Keeper_sandbox_remote.Execution_unavailable Shim_refused_without_receipt) -> ()
+    | "shim-error-receipt", Some (Keeper_sandbox_remote.Execution_observed (_, outcome))
+      when Option.is_some outcome.shim_error -> ()
+    | _ -> fail "shim refusal lost the distinction from a child exit")
+    ["shim-error"; "shim-error-invalid"; "shim-error-receipt"]
 ;;
 
 let test_openssh_observation_reads_the_dispatch_cache () =
@@ -974,9 +1089,14 @@ let () =
               test_receipts_are_owned_by_each_transport_call
           ; test_case "missing and invalid receipts retain actual status" `Quick
               test_missing_and_invalid_receipts_keep_actual_status
+          ; test_case "shim refusals remain distinct from child exits" `Quick
+              test_shim_refusal_preserves_its_distinct_observation
           ; test_case "remote timeout retains its trusted receipt" `Quick
               test_trusted_remote_timeout_retains_receipt
+          ; test_case "interrupted wire retains unknown receipt" `Quick
+              test_interrupted_wire_publishes_unknown_receipt
           ; test_case "transport + probe argv" `Quick test_transport_and_probe_argv
+          ; test_case "latest probe and boot comparison" `Quick test_fresh_probe_and_boot_comparison
           ; test_case "caller cannot replace runner-owned env" `Quick
               test_caller_cannot_replace_runner_owned_env
           ; test_case "probe prefers probe_prefix when present" `Quick

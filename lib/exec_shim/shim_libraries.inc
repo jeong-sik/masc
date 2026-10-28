@@ -31,7 +31,7 @@
 (library
  (name exec_shim)
  (modules exec_shim shim_build_id)
- (libraries exec_ssh_protocol shim_clock shim_fdpass unix)
+ (libraries exec_ssh_protocol shim_clock shim_fdpass unix uuidm)
  (foreign_stubs
   (language c)
   (names prctl_stub observe_stub)))

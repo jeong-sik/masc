@@ -306,7 +306,7 @@ let major_int p = Result.map Exec_ssh_protocol.int_of_major (Exec_ssh_protocol.m
 
 let test_probe_roundtrip () =
   let p = Exec_ssh_protocol.{ name = "masc-exec-shim"; version = "3.0.0"
-                            ; capabilities = []; release = None } in
+                            ; capabilities = []; release = None; boot_id = None } in
   match Exec_ssh_protocol.parse_probe (Exec_ssh_protocol.render_probe p) with
   | Error e -> fail e
   | Ok p' ->
@@ -324,6 +324,7 @@ let test_probe_carries_the_release_it_was_built_from () =
       ; version = "3.0.0"
       ; capabilities = [ "observe" ]
       ; release = Some "0.33.0"
+      ; boot_id = None
       }
   in
   (match Exec_ssh_protocol.parse_probe (Exec_ssh_protocol.render_probe with_release) with
@@ -358,9 +359,23 @@ let test_probe_carries_the_release_it_was_built_from () =
 
 (* The probe decides which version the caller frames in: a spoken major is
    that version, anything else is a skew the caller names. *)
+let test_probe_boot_id_is_optional_and_validated () =
+  let boot_id = "70d55243-7a2b-47bc-95b3-c133f134854e" in
+  let probe = Exec_ssh_protocol.{ name = "masc-exec-shim"; version = "3.0.0";
+    capabilities = []; release = None; boot_id = Some boot_id } in
+  (match Exec_ssh_protocol.parse_probe (Exec_ssh_protocol.render_probe probe) with
+   | Ok parsed -> check (option string) "boot survives" (Some boot_id) parsed.boot_id
+   | Error detail -> fail detail);
+  List.iter (fun wire ->
+    match Exec_ssh_protocol.parse_probe wire with
+    | Ok parsed -> check (option string) "missing or invalid boot is unknown" None parsed.boot_id
+    | Error detail -> fail detail)
+    [ {|{"name":"masc-exec-shim","version":"3.0.0","capabilities":[]}|};
+      {|{"name":"masc-exec-shim","version":"3.0.0","capabilities":[],"boot_id":"bad"}|} ]
+
 let test_probe_major_is_spoken_or_a_skew () =
   let probe version =
-    Exec_ssh_protocol.{ name = "masc-exec-shim"; version; capabilities = []; release = None }
+    Exec_ssh_protocol.{ name = "masc-exec-shim"; version; capabilities = []; release = None; boot_id = None }
   in
   check (result int string) "v2 shim" (Ok 2) (major_int (probe "2.4.1"));
   check (result int string) "v3 shim" (Ok 3) (major_int (probe "3.0.0"));
@@ -447,6 +462,7 @@ let () =
                     ; test_case "the majors are closed" `Quick
                         test_the_majors_are_closed ]
     ; "probe", [ test_case "roundtrip" `Quick test_probe_roundtrip
+               ; test_case "boot identity is optional and validated" `Quick test_probe_boot_id_is_optional_and_validated
                ; test_case "carries the release it was built from" `Quick
                    test_probe_carries_the_release_it_was_built_from
                ; test_case "major is spoken or a skew" `Quick

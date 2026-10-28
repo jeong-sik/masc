@@ -60,6 +60,14 @@ type dispatch_record =
       ; detail : string
       }
 
+type boot_change = Boot_unreported | Boot_first | Boot_unchanged | Boot_changed
+
+type boot_observation =
+  { boot_id : string option
+  ; change : boot_change
+  ; last_changed_at : float option
+  }
+
 type probe_report =
   | Probe_not_asked
   | Probe_answered of
@@ -67,6 +75,7 @@ type probe_report =
       ; capabilities : string list
       ; release : string option
       ; observed_at : float
+      ; boot : boot_observation
       }
   | Probe_failed of
       { at : float
@@ -92,6 +101,13 @@ type probe_answer =
   ; capabilities : string list
   ; release : string option
   ; observed_at : float
+  ; boot_id : string option
+  }
+
+type probe_observations =
+  { latest : probe_report
+  ; previous_boot_id : string option
+  ; last_boot_change_at : float option
   }
 
 type shared_state =
@@ -108,9 +124,10 @@ type shared_state =
        through its host mount, reaches this endpoint's next request but not
        this cache: the answer is asked again only when the preflight cache is
        cleared or the process restarts. *)
-  ; last_probe_failure : (float * string) option Atomic.t
-    (* The most recent probe that did not answer, cleared by one that did.
-       [None] and no major means no probe has run yet. *)
+  ; probe_observations : probe_observations Atomic.t
+    (* One atomic latest result, plus the last comparable boot observation.
+       Failures do not erase the last boot, and cannot be hidden by the
+       separate protocol-negotiation cache. *)
   ; last_dispatches : (string * dispatch_record) list Atomic.t
     (* One most recent dispatch per Keeper, newest endpoint dispatch first. *)
   }
@@ -146,7 +163,8 @@ let shared_state ((_, _, _, _, _, max_concurrent_sessions) as identity : endpoin
         { semaphore = Eio.Semaphore.make max_concurrent_sessions
         ; first_dispatch_logged = Atomic.make false
         ; probe_answer = Atomic.make None
-        ; last_probe_failure = Atomic.make None
+        ; probe_observations = Atomic.make
+            { latest = Probe_not_asked; previous_boot_id = None; last_boot_change_at = None }
         ; last_dispatches = Atomic.make []
         }
       in
@@ -617,14 +635,44 @@ let warn_on_release_skew t release =
       t.name Build_version.current repair
 ;;
 
+let record_probe_answer shared (answer : probe_answer) =
+  Lockfree_atomic.update shared.probe_observations (fun previous ->
+    let change, previous_boot_id, last_boot_change_at =
+      match answer.boot_id, previous.previous_boot_id with
+      | None, last -> Boot_unreported, last, previous.last_boot_change_at
+      | Some current, None -> Boot_first, Some current, previous.last_boot_change_at
+      | Some current, Some old when String.equal current old ->
+        Boot_unchanged, Some current, previous.last_boot_change_at
+      | Some current, Some _ -> Boot_changed, Some current, Some answer.observed_at
+    in
+    let boot = { boot_id = answer.boot_id; change; last_changed_at = last_boot_change_at } in
+    { latest = Probe_answered
+        { major = answer.major; capabilities = answer.capabilities;
+          release = answer.release; observed_at = answer.observed_at; boot }
+    ; previous_boot_id
+    ; last_boot_change_at
+    })
+
+let record_probe_failure shared ~at ~detail =
+  Lockfree_atomic.update shared.probe_observations (fun previous ->
+    { previous with latest = Probe_failed { at; detail } })
+
 let run_probe t =
-  let status, stdout, stderr =
-    Process_eio.run_argv_with_stdin_and_status_split
+  let response =
+    try Ok (Process_eio.run_argv_with_stdin_and_status_split
       ~timeout_sec:(preflight_timeout_sec t)
       ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
       ~stdin_content:""
-      (probe_argv t)
+      (probe_argv t)) with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printf.sprintf "%s: endpoint %s: %s"
+        (code t "endpoint_unreachable") t.name (Printexc.to_string exn))
   in
+  match response with
+  | Error detail ->
+    record_probe_failure t.shared ~at:(Unix.gettimeofday ()) ~detail;
+    Error detail
+  | Ok (status, stdout, stderr) ->
   let outcome =
     match status with
   | Unix.WEXITED 0 ->
@@ -635,16 +683,16 @@ let run_probe t =
      | Ok probe ->
        (match Exec_ssh_protocol.major_of_probe probe with
         | Ok major ->
-          Atomic.set
-            t.shared.probe_answer
-            (Some
-               { major
-               ; capabilities = probe.capabilities
-               ; release = probe.release
-               (* NDT-OK: record when this external answer arrived; the timestamp
-                  is observation metadata, never a branch or retry deadline. *)
-               ; observed_at = Unix.gettimeofday ()
-               });
+          let answer =
+            { major
+            ; capabilities = probe.capabilities
+            ; release = probe.release
+            ; boot_id = probe.boot_id
+            (* NDT-OK: timestamp the received observation, never a retry deadline. *)
+            ; observed_at = Unix.gettimeofday ()
+            } in
+          Atomic.set t.shared.probe_answer (Some answer);
+          record_probe_answer t.shared answer;
           warn_on_release_skew t probe.release;
           Ok major
         | Error detail ->
@@ -665,9 +713,9 @@ let run_probe t =
          (code t "endpoint_unreachable") t.name (host_label t) signal)
   in
   (match outcome with
-   | Ok _ -> Atomic.set t.shared.last_probe_failure None
+   | Ok _ -> ()
    | Error detail ->
-     Atomic.set t.shared.last_probe_failure (Some (Unix.gettimeofday (), detail)));
+     record_probe_failure t.shared ~at:(Unix.gettimeofday ()) ~detail);
   outcome
 ;;
 
@@ -681,15 +729,7 @@ let rec record_dispatch (shared : shared_state) ~keeper_name record =
 ;;
 
 let report_shared ~scope ~lane ~endpoint (shared : shared_state) =
-  let probe =
-    match Atomic.get shared.probe_answer with
-    | Some { major; capabilities; release; observed_at } ->
-      Probe_answered { major; capabilities; release; observed_at }
-    | None ->
-      (match Atomic.get shared.last_probe_failure with
-       | Some (at, detail) -> Probe_failed { at; detail }
-       | None -> Probe_not_asked)
-  in
+  let probe = (Atomic.get shared.probe_observations).latest in
   let dispatches = Atomic.get shared.last_dispatches in
   let last_dispatch =
     match scope with
@@ -747,6 +787,7 @@ type receipt_unavailable =
   | Transport_unavailable
   | Peer_receipt_missing
   | Invalid_receipt of string
+  | Shim_refused_without_receipt
 
 type execution_observation =
   | Execution_observed of Exec_ssh_protocol.execution_receipt * Exec_ssh_protocol.trailer
@@ -759,6 +800,7 @@ let execution_observation_to_yojson = function
       | Transport_unavailable -> "transport_unavailable", []
       | Peer_receipt_missing -> "peer_receipt_missing", []
       | Invalid_receipt detail -> "invalid_receipt", ["detail", `String detail]
+      | Shim_refused_without_receipt -> "shim_refused_without_receipt", []
     in
     `Assoc (["status", `String "unavailable"; "reason", `String reason] @ detail)
   | Execution_observed (receipt, outcome) ->
@@ -770,6 +812,27 @@ let execution_observation_to_yojson = function
          ["exit", optional_int outcome.exit; "signal", optional_int outcome.signal;
           "timed_out", `Bool outcome.timed_out;
           "shim_error", `Bool (Option.is_some outcome.shim_error)]]
+;;
+
+(* A shim refusal and a child exit both may lack the optional receipt, but
+   only the latter supplies a child status. Preserve that distinction. *)
+let completed_execution_observation record raw_stderr =
+  match record with
+  | Payload_finished _
+  | Dispatch_failed { failure = (Shim_refused | Remote_timeout); _ } ->
+    Some
+      (match Exec_ssh_protocol.parse_trailer raw_stderr,
+             Exec_ssh_protocol.parse_execution_receipt raw_stderr with
+       | Ok outcome, Ok (Some receipt) -> Execution_observed (receipt, outcome)
+       | _ when
+           (match record with
+            | Dispatch_failed { failure = Shim_refused; _ } -> true
+            | Payload_finished _ | Dispatch_failed _ -> false) ->
+         Execution_unavailable Shim_refused_without_receipt
+       | Ok _, Ok None -> Execution_unavailable Peer_receipt_missing
+       | Error detail, _ | _, Error detail -> Execution_unavailable (Invalid_receipt detail))
+  | Dispatch_failed
+      { failure = Local_timeout | Transport_failed | Trailer_disagreement; _ } -> None
 ;;
 
 type stdout_mode = Text_paths | Binary_bytes
@@ -803,7 +866,16 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
   in
   fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd ->
     let observation = ref (Execution_unavailable Request_not_sent) in
-    let result =
+    (* The dispatch layer may catch a transport exception and turn it into a
+       synthetic status. Publish our last boundary even on that path, so an
+       interrupted wire can never masquerade as a remote process exit. *)
+    Fun.protect
+      ~finally:(fun () ->
+        Option.iter (fun notify ->
+          match Fs_compat.execution_context () with
+          | Fs_compat.Eio_fiber -> Eio.Cancel.protect (fun () -> notify !observation)
+          | Fs_compat.Non_eio -> notify !observation) on_receipt)
+      (fun () ->
     match (match t.transport, mode with
       | Docker_exec _, (Exec_ssh_protocol.Effect | Exec_ssh_protocol.Guest_local) ->
         Error "docker_observe_mode_required: Docker host mounts require the filesystem and network Observe box"
@@ -891,18 +963,8 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
              Process_eio.exit_reason_of_status status = Process_eio.Timed_out
            in
            let settle record triple =
-             (match record with
-              | Payload_finished _
-              | Dispatch_failed { failure = (Shim_refused | Remote_timeout); _ } ->
-                observation :=
-                  (match Exec_ssh_protocol.parse_trailer raw_stderr,
-                         Exec_ssh_protocol.parse_execution_receipt raw_stderr with
-                   | Ok outcome, Ok (Some receipt) -> Execution_observed (receipt, outcome)
-                   | Ok _, Ok None -> Execution_unavailable Peer_receipt_missing
-                   | Error detail, _ | _, Error detail -> Execution_unavailable (Invalid_receipt detail))
-              | Dispatch_failed
-                  { failure = Local_timeout | Transport_failed | Trailer_disagreement; _ }
-                -> ());
+             Option.iter (fun value -> observation := value)
+               (completed_execution_observation record raw_stderr);
              record_dispatch t.shared ~keeper_name:t.keeper_name record;
              triple
            in
@@ -974,10 +1036,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                      transport_error t "transport status and result trailer disagree"
                    in
                    settle (failed Trailer_disagreement error)
-                     (transport_failed ~failure:Trailer_disagreement ~stdout ~prefix_stderr:payload_stderr error))))))
-    in
-    Option.iter (fun notify -> notify !observation) on_receipt;
-    result
+                     (transport_failed ~failure:Trailer_disagreement ~stdout ~prefix_stderr:payload_stderr error)))))))
 ;;
 
 let runner ?stdout_mode ?mode ?on_receipt ~timeout_sec t =
@@ -1324,6 +1383,7 @@ let check_preflight ?(force = false) t =
 ;;
 
 module For_testing = struct
+  let run_probe = run_probe
   let clear_preflight_cache () =
     Stdlib.Mutex.protect preflight_cache_mu (fun () -> Hashtbl.clear preflight_cache)
 end

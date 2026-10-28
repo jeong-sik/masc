@@ -52,6 +52,7 @@ type probe =
   ; version : string
   ; capabilities : string list
   ; release : string option
+  ; boot_id : string option
   }
 
 let newest = V3
@@ -545,10 +546,8 @@ let render_probe (p : probe) : string =
        ; "version", `String p.version
        ; "capabilities", `List (List.map (fun c -> `String c) p.capabilities)
        ]
-       @
-       match p.release with
-       | None -> []
-       | Some release -> [ "release", `String release ]))
+       @ (match p.release with None -> [] | Some release -> [ "release", `String release ])
+       @ (match p.boot_id with None -> [] | Some boot_id -> [ "boot_id", `String boot_id ])))
 
 let parse_probe (s : string) : (probe, string) result =
   let what = "probe" in
@@ -564,4 +563,13 @@ let parse_probe (s : string) : (probe, string) result =
     | Some (`String release) when release <> "" -> Some release
     | Some _ | None -> None
   in
-  Ok { name; version; capabilities; release }
+  let boot_id =
+    match List.assoc_opt "boot_id" fields with
+    | Some (`String raw) ->
+      (match Uuidm.of_string raw with
+       | Some uuid when String.equal (String.lowercase_ascii raw) (Uuidm.to_string uuid) ->
+         Some (Uuidm.to_string uuid)
+       | Some _ | None -> None)
+    | Some _ | None -> None
+  in
+  Ok { name; version; capabilities; release; boot_id }

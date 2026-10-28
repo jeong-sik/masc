@@ -582,7 +582,7 @@ type async_msg =
           needs the chat request this path does not have. *)
   | Keeper_chat_dispatch_blocked of Masc_tui_keeper_chat_projection.request * string
   | Keeper_logs_loaded of keeper_log_request * (Masc_tui_metrics_tail.snapshot, string) result
-      * (keeper_execute_reading, string) result option
+  | Keeper_execute_loaded of keeper_execute_request * (keeper_execute_reading * float, string) result
   | Keeper_settings_save_changed of keeper_settings_save_request * keeper_settings_save_status * int64
   | Runtime_form_save_changed of runtime_form_save_request * runtime_form_save_status * int64
   | Keeper_creation_changed of keeper_creation_request * keeper_creation_status
@@ -878,7 +878,7 @@ end
 
 let rec workspace_message_is_read = function
   | Code_draft_saved _ | Board_attachment_saved _ | Resource_exported _ | Resource_share_changed _ | Verification_evidence_exported _ -> false
-  | Keeper_logs_loaded _ -> true
+  | (Keeper_logs_loaded _ | Keeper_execute_loaded _) -> true
   | Chat_search_finished _ -> true
   | Workspace_scoped (_, _, message)
   | Chat_command_read_completed (_, message) -> workspace_message_is_read message
@@ -1182,7 +1182,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Surface_tool_approval_answered (_, _, _, _, _)
     | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
     | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _)
-    | Keeper_logs_loaded _ | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_new_post_done _
+    | (Keeper_logs_loaded _ | Keeper_execute_loaded _) | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_new_post_done _
     | (Board_vote_done _ | Artifact_check_changed _) | Goal_transition_done _ | Goal_confirmation_submitted _
     | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
     | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
@@ -1319,7 +1319,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Surface_tool_approval_answered (_, _, _, _, _)
   | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
   | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _)
-  | Keeper_logs_loaded _ | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_new_post_done _ | (Board_vote_done _ | Artifact_check_changed _)
+  | (Keeper_logs_loaded _ | Keeper_execute_loaded _) | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_new_post_done _ | (Board_vote_done _ | Artifact_check_changed _)
   | Goal_transition_done _ | Goal_confirmation_submitted _
   | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
   | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)

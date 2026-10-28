@@ -170,6 +170,17 @@ type dispatch_record =
       ; detail : string
       }
 
+type boot_change = Boot_unreported | Boot_first | Boot_unchanged | Boot_changed
+
+type boot_observation =
+  { boot_id : string option
+  ; change : boot_change
+  ; last_changed_at : float option
+  }
+(** Comparison with the last known boot UUID in this server process, for the
+    same complete endpoint declaration. A change may be a reboot or endpoint
+    replacement. Neither result proves workspace continuity. *)
+
 type probe_report =
   | Probe_not_asked
   | Probe_answered of
@@ -184,6 +195,7 @@ type probe_report =
           (** Unix time this process got the probe's answer. The answer is
               kept for the life of the process, so it is the shim as of this
               moment and not necessarily the shim now. *)
+      ; boot : boot_observation
       }
   | Probe_failed of
       { at : float
@@ -229,6 +241,7 @@ type receipt_unavailable =
   | Transport_unavailable
   | Peer_receipt_missing
   | Invalid_receipt of string
+  | Shim_refused_without_receipt
 
 type execution_observation =
   | Execution_observed of Exec_ssh_protocol.execution_receipt * Exec_ssh_protocol.trailer
@@ -267,4 +280,5 @@ val bootstrap_keeper_control_root :
 
 module For_testing : sig
   val clear_preflight_cache : unit -> unit
+  val run_probe : t -> (Exec_ssh_protocol.major, string) result
 end

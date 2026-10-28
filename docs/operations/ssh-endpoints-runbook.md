@@ -409,3 +409,22 @@ in the MASC server process and is bounded; it is not a durable transcript. A
 reconnect reads a new snapshot and may show retained lines again. A disconnect
 or an unknown result is not proof that a remote command did or did not run;
 inspect its effects before deciding whether to execute it again.
+
+## Endpoint observations
+
+`keeper_lane_status` and the operator's `/api/v1/gate/keeper-shims` report the
+last probe and dispatch seen by this server process for the logical endpoint.
+An answered probe is evidence that its pinned transport and shim answered at
+that time; a failed probe does not distinguish a powered-off machine from a
+network, authentication, or protocol failure. The report does not initiate a
+probe. Preflight and normal dispatch acquire observations when they need them.
+
+A newer Linux shim can report its kernel boot UUID. The report compares it to
+the last comparable value for the same endpoint declaration during this MASC
+server process. A changed UUID can mean a reboot or a different endpoint; a
+matching UUID means the same observed kernel boot and may be shared by
+containers. Neither proves workspace continuity. The last change time is held
+in memory, so the first observation after a MASC restart is a new baseline.
+Older shims and systems without a kernel boot UUID report it as unavailable.
+This status neither starts the machine nor proves that any container was
+started automatically.

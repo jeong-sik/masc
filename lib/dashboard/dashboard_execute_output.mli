@@ -96,6 +96,10 @@ val event_json : keeper_name:string -> Yojson.Safe.t
     retained Execute output. Malformed stdout/stderr sequences are displayed
     as U+FFFD; retained bytes and byte counters remain the process output. *)
 
+val event_json_limited : keeper_name:string -> line_limit:int -> Yojson.Safe.t
+(** A bounded snapshot projection for polling clients. It omits completed
+    byte strings and reports how many retained rows were not requested. *)
+
 val stream_event_json : stream_event -> Yojson.Safe.t
 (** Build an SSE payload for a live tail event: [line], [task_opened] and
     [task_closed] carry their log number in [seq]; [gap] carries

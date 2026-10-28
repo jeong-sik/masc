@@ -577,6 +577,21 @@ let test_snapshot_discloses_evicted_live_history () =
   check int "completed byte counter does not pretend to count live evictions" 0
     (snapshot |> member "bytes_dropped_stdout" |> to_int)
 
+let test_limited_snapshot_retains_active_command () =
+  EO.record_stream_start ~keeper_name:"alpha" ~stream_id:8 ~task_id:(Some "task-a") ~command:"echo work";
+  EO.append_stream_chunk ~keeper_name:"alpha" ~stream_id:8 ~stream:`Stdout
+    (numbered_lines ~count:12);
+  let open Yojson.Safe.Util in
+  let snapshot = EO.event_json_limited ~keeper_name:"alpha" ~line_limit:4 in
+  check int "only the requested rows travel" 4 (snapshot |> member "lines" |> to_list |> List.length);
+  check int "older retained rows are disclosed" 9 (snapshot |> member "lines_omitted" |> to_int);
+  check bool "full completed captures are not sent" true (snapshot |> member "stdout_since" = `Null);
+  match snapshot |> member "active_streams" |> to_list with
+  | [active] ->
+    check string "active command survives the projection" "echo work"
+      (active |> member "command" |> to_string)
+  | _ -> fail "expected the active command"
+
 let test_sse_frame () =
   let frame = EO.sse_frame (`Assoc [ "type", `String "snapshot" ]) in
   check bool "event header" true (String.starts_with ~prefix:"event: output\n" frame);
@@ -707,6 +722,13 @@ let test_route_delivers_open_stream_and_releases_on_disconnect () =
                  "x-masc-workspace-read: matched-v1");
             check bool "snapshot contains retained output" true
               (String_util.contains_substring matched "after subscription");
+            let limited = wire_response (snapshot_path ^ "?limit=1&expected_base_path=" ^
+              encode base ^ "&expected_masc_root=" ^ encode root) in
+            check int "limited snapshot succeeds" 200 (status limited);
+            check bool "projection names omitted retained rows" true
+              (String_util.contains_substring limited "\"lines_omitted\":2");
+            let invalid_limit = wire_response (snapshot_path ^ "?limit=0") in
+            check int "invalid row limit is refused" 400 (status invalid_limit);
             let wrong = wire_response (snapshot_path ^ "?expected_base_path=" ^
               encode (base ^ "-other") ^ "&expected_masc_root=" ^ encode root) in
             check int "wrong workspace is refused" 409 (status wrong);
@@ -797,6 +819,8 @@ let () =
             (with_fresh test_overlapping_streams_keep_identity_and_open_state)
         ; test_case "snapshot discloses evicted live history" `Quick
             (with_fresh test_snapshot_discloses_evicted_live_history)
+        ; test_case "limited snapshot keeps the active command" `Quick
+            (with_fresh test_limited_snapshot_retains_active_command)
         ; test_case "sse frame" `Quick test_sse_frame
         ; test_case "HTTP stream delivers while open and stops on disconnect" `Quick
             (with_fresh test_route_delivers_open_stream_and_releases_on_disconnect)

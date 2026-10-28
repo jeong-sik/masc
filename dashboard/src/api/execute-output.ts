@@ -11,6 +11,13 @@ export interface ExecuteOutputLine {
   ansi?: boolean
 }
 
+export interface ExecuteOutputActiveStream {
+  stream_id: number
+  task_id: string | null
+  command: string
+  started_at: number
+}
+
 export interface ExecuteOutputStreamEvent {
   type: 'snapshot' | 'no_task' | 'line' | 'task_opened' | 'task_closed' | 'gap' | 'error' | string
   kind?: string
@@ -27,6 +34,7 @@ export interface ExecuteOutputStreamEvent {
   /** Earlier events have already left the bounded server log when this exceeds 1. */
   first_retained_seq?: number
   active_count?: number
+  active_streams?: ExecuteOutputActiveStream[]
   stream_id?: number | null
   /** `gap`: log numbers this viewer missed because the server no longer keeps them. */
   missing_from_seq?: number

@@ -134,10 +134,18 @@ let handle_execute_output_snapshot _state req inner_reqd =
     respond_dashboard_error ~status:`Bad_request ~request:req inner_reqd
       "keeper path parameter is required"
   | Some keeper_name ->
-    Http.Response.json_value ~request:req
-      ~extra_headers:[ "cache-control", "private, no-store" ]
-      (Dashboard_execute_output.event_json ~keeper_name)
-      inner_reqd
+    let limit = match Server_utils.query_param req "limit" with
+      | None -> Some Dashboard_execute_output.event_log_capacity
+      | Some raw -> int_of_string_opt raw in
+    (match limit with
+     | Some limit when limit > 0 && limit <= Dashboard_execute_output.event_log_capacity ->
+       Http.Response.json_value ~request:req
+         ~extra_headers:[ "cache-control", "private, no-store" ]
+         (Dashboard_execute_output.event_json_limited ~keeper_name ~line_limit:limit)
+         inner_reqd
+     | Some _ | None ->
+       respond_dashboard_error ~status:`Bad_request ~request:req inner_reqd
+         "limit must be between 1 and the output event capacity")
 ;;
 
 let handle_execute_output_stream ~sw ~clock _state req inner_reqd =

@@ -19,6 +19,13 @@ import urllib.parse
 import urllib.request
 
 
+class RefuseRedirect(urllib.request.HTTPRedirectHandler):
+    """Keep the credential bound to the server origin the operator selected."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def safe_text(value: object) -> str:
     text = str(value)
     return "".join(ch if not unicodedata.category(ch).startswith("C") else "�" for ch in text)
@@ -54,7 +61,17 @@ class Output:
                 active = event.get("active_count")
                 state = f"{active} active" if isinstance(active, int) and active else ("closed" if event.get("closed") else "open")
                 print(f"[{safe_text(keeper)}] snapshot: {state}", flush=True)
-                for line in event.get("lines", []):
+                lines = event.get("lines", [])
+                streams = event.get("active_streams", [])
+                if not isinstance(lines, list) or not isinstance(streams, list):
+                    raise ValueError("malformed output snapshot")
+                for stream in streams:
+                    if isinstance(stream, dict) and isinstance(stream.get("command"), str):
+                        present = any(isinstance(line, dict) and line.get("stream") == "cmd"
+                                      and line.get("stream_id") == stream.get("stream_id") for line in lines)
+                        if not present:
+                            print(f"[{safe_text(keeper)} #{safe_text(stream.get('stream_id', '?'))} active task={safe_text(stream.get('task_id'))}] {safe_text(stream['command'])}", flush=True)
+                for line in lines:
                     if isinstance(line, dict):
                         self._line(keeper, line)
             elif kind == "line" and isinstance(event.get("line"), dict):
@@ -102,10 +119,11 @@ def stream_events(response):
 
 def watch(keeper, server, headers, output, stop, reconnect, failed):
     url = server + "/api/v1/dashboard/execute-output/" + urllib.parse.quote(keeper, safe="")
+    opener = urllib.request.build_opener(RefuseRedirect())
     while not stop.is_set():
         try:
             request = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(request, timeout=45) as response:
+            with opener.open(request, timeout=45) as response:
                 if response.headers.get_content_type() != "text/event-stream":
                     raise ValueError("server did not return an event stream")
                 for event in stream_events(response):
@@ -116,7 +134,10 @@ def watch(keeper, server, headers, output, stop, reconnect, failed):
                     output.event(keeper, event)
             output.message(keeper, "connection ended; execution state is unconfirmed")
         except urllib.error.HTTPError as exc:
-            output.message(keeper, f"server refused output stream (HTTP {exc.code})")
+            if 300 <= exc.code < 400:
+                output.message(keeper, f"server redirected output stream (HTTP {exc.code}); redirects are not followed")
+            else:
+                output.message(keeper, f"server refused output stream (HTTP {exc.code})")
             failed.set()
             return
         except (OSError, ValueError, urllib.error.URLError) as exc:

@@ -13,6 +13,60 @@ let execution_time_field = "execution_time_ms"
 (* Process-local observation identity. It is not a durable tool-call ID. *)
 let execute_stream_counter = Atomic.make 0
 
+let start_execute_stream ~keeper_name ~stream_id ~task_id ~command =
+  try
+    Keeper_keepalive_signal.record_execute_stream_start
+      ~keeper_name ~stream_id ~task_id ~command
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Dashboard.warn "execute stream start callback failed keeper=%s: %s"
+      keeper_name (Printexc.to_string exn)
+;;
+
+let finish_execute_stream ~keeper_name ~stream_id ~task_id ~ended ~status =
+  if not !ended then (
+    let record () =
+      ended := true;
+      try
+        Keeper_keepalive_signal.record_execute_stream_end
+          ~keeper_name ~stream_id ~task_id ~status
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.Dashboard.warn "execute stream end callback failed keeper=%s: %s"
+          keeper_name (Printexc.to_string exn)
+    in
+    match Fs_compat.execution_context () with
+    | Fs_compat.Eio_fiber -> Eio.Cancel.protect record
+    | Fs_compat.Non_eio -> record ())
+;;
+
+type command_observation =
+  | Command_result_observed
+  | Command_request_not_sent
+  | Command_effect_unknown
+
+(* A failed stage that never sent its request is pre-effect only when no
+   other stage in this dispatch might have run. A missing optional receipt
+   can coexist with a valid process trailer and is not a transport failure. *)
+let command_observation receipts =
+  let not_sent, unknown, other =
+    List.fold_left (fun (not_sent, unknown, other) -> function
+      | Keeper_sandbox_remote.Execution_unavailable Request_not_sent -> true, unknown, other
+      | Execution_unavailable (Transport_unavailable | Shim_refused_without_receipt) ->
+        not_sent, true, other
+      | Execution_observed (_, { Exec_ssh_protocol.shim_error = Some _; _ }) ->
+        not_sent, true, other
+      | Execution_unavailable (Peer_receipt_missing | Invalid_receipt _)
+      | Execution_observed _ -> not_sent, unknown, true)
+      (false, false, false) receipts
+  in
+  if unknown || (not_sent && other) then Command_effect_unknown
+  else if not_sent then Command_request_not_sent
+  else Command_result_observed
+;;
+
 let answer_of_output output_text =
   match Yojson.Safe.from_string output_text with
   | `Assoc fields ->
@@ -62,7 +116,8 @@ let observation_is_ordinary_effect = function
       ( Keeper_sandbox_remote.Request_not_sent
       | Keeper_sandbox_remote.Transport_unavailable
       | Keeper_sandbox_remote.Peer_receipt_missing
-      | Keeper_sandbox_remote.Invalid_receipt _ ) -> false
+      | Keeper_sandbox_remote.Invalid_receipt _
+      | Keeper_sandbox_remote.Shim_refused_without_receipt ) -> false
   | Keeper_sandbox_remote.Execution_observed
       ({ Exec_ssh_protocol.mode; boundary }, trailer) ->
     let ran_as_effect =
@@ -624,12 +679,36 @@ let handle_tool_execute_typed
             ~execution_evidence:(fun () -> List.rev (Atomic.get shim_receipts))
             ~route:dispatch_bundle.observe_route
             ~dispatch:(fun sandbox ->
-              Keeper_tooling.Execute_shell_ir.dispatch
-                ~workdir:cwd
-                ~sandbox
-                ~timeout_sec
-                ?base_host_env
-                (Masc_exec.Shell_ir.with_sandbox sandbox ir))
+              (* Gate observations are not yet authorized for display. Show
+                 only their lifetime, without their command or output. *)
+              let stream_id = Atomic.fetch_and_add execute_stream_counter 1 in
+              let task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id in
+              let ended = ref false in
+              let finish outcome =
+                finish_execute_stream ~keeper_name:meta.name ~stream_id ~task_id ~ended
+                  ~status:(`Assoc [ "phase", `String "gate_observation"; "outcome", `String outcome ])
+              in
+              Fun.protect
+                ~finally:(fun () -> finish "unknown")
+                (fun () ->
+                  start_execute_stream ~keeper_name:meta.name ~stream_id ~task_id
+                    ~command:"[gate observation]";
+                  let prior_receipt_count = List.length (current_shim_receipts ()) in
+                  let result = Keeper_tooling.Execute_shell_ir.dispatch
+                    ~workdir:cwd
+                    ~sandbox
+                    ~timeout_sec
+                    ?base_host_env
+                    (Masc_exec.Shell_ir.with_sandbox sandbox ir)
+                  in
+                  let receipts = List.drop prior_receipt_count (current_shim_receipts ()) in
+                  let outcome = match command_observation receipts with
+                    | Command_result_observed -> "observation_ended"
+                    | Command_request_not_sent -> "request_not_sent"
+                    | Command_effect_unknown -> "unknown"
+                  in
+                  finish outcome;
+                  result))
         in
         let gate_decision =
           Keeper_gate.decide
@@ -736,17 +815,8 @@ let handle_tool_execute_typed
              "false" (RFC-0371 B7). *)
           let stream_ended = ref false in
           let finish_stream status =
-            if not !stream_ended then Eio.Cancel.protect (fun () ->
-              stream_ended := true;
-              try
-                Keeper_keepalive_signal.record_execute_stream_end
-                  ~keeper_name:meta.name ~stream_id ~task_id ~status
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.Dashboard.warn
-                  "execute stream end callback failed keeper=%s: %s"
-                  meta.name (Printexc.to_string exn))
+            finish_execute_stream ~keeper_name:meta.name ~stream_id ~task_id
+              ~ended:stream_ended ~status
           in
           Fun.protect
             ~finally:(fun () ->
@@ -754,19 +824,7 @@ let handle_tool_execute_typed
                  status. This closes observation, not the remote effect. *)
               finish_stream (`Assoc [ "outcome", `String "unknown" ]))
             (fun () ->
-          (try
-             Keeper_keepalive_signal.record_execute_stream_start
-               ~keeper_name:meta.name
-               ~stream_id
-               ~task_id
-               ~command
-           with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-              Log.Dashboard.warn
-                "execute stream start callback failed keeper=%s: %s"
-                meta.name
-                (Printexc.to_string exn));
+          start_execute_stream ~keeper_name:meta.name ~stream_id ~task_id ~command;
           let record_stream_chunk stream data =
             if not (String.equal data "")
             then (
@@ -901,6 +959,7 @@ let handle_tool_execute_typed
                 ~on_output_chunk
                 ~dispatch:dispatch_unboxed
           in
+          let prior_receipt_count = List.length (current_shim_receipts ()) in
           let dispatch_result =
             match dispatch_sandbox with
             | Masc_exec.Sandbox_target.Host ->
@@ -982,12 +1041,6 @@ let handle_tool_execute_typed
               elapsed_duration_ms ~start_time:(Tool_timing.started_at t0)
                 ~end_time:(Time_compat.now ())
             in
-            Log.Keeper.info
-              "shell_ir dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"
-              meta.name
-              sandbox_profile_label
-              (Keeper_sandbox_exec_failure.status_label result.status)
-              elapsed_ms;
             let stdout, stderr, output =
               redact_execute_output output_redaction
                 ~stdout:result.stdout
@@ -1002,19 +1055,39 @@ let handle_tool_execute_typed
                 ~timeout_budget
             in
             (* A failed transport is converted to a synthetic Unix status by
-               the shell dispatcher. It is not the remote child's exit. *)
-            let outcome_unknown =
-              List.exists
-                (function
-                  | Keeper_sandbox_remote.Execution_unavailable Transport_unavailable -> true
-                  | Execution_unavailable (Request_not_sent | Peer_receipt_missing | Invalid_receipt _)
-                  | Execution_observed _ -> false)
-                (current_shim_receipts ())
+               the shell dispatcher. It is not the remote child's exit. Only
+               this authorized dispatch's receipts apply: an earlier Observe
+               attempt is not the result of the later effect, unless the gate
+               explicitly reused that Observe result. *)
+            let receipts = current_shim_receipts () in
+            let dispatch_receipts = match authorization.source with
+              | Keeper_gate.Observed_in_box _ -> receipts
+              | One_shot_resolution _ | Exact_always_rule _ | Keeper_always_allow
+              | Workspace_always_allow | Readonly_sandbox | Local_output ->
+                List.drop prior_receipt_count receipts
+            in
+            let observation = command_observation dispatch_receipts in
+            let effect_disposition = match observation with
+              | Command_result_observed -> Tool_result.Proven_post_effect
+              | Command_request_not_sent -> Tool_result.Proven_pre_effect
+              | Command_effect_unknown -> Tool_result.Effect_outcome_unknown
+            in
+            let transport_failure = match observation with
+              | Command_result_observed -> None
+              | Command_request_not_sent -> Some
+                  "The execution request was not sent to the endpoint. No command effect was started by this request."
+              | Command_effect_unknown -> Some
+                  "The endpoint did not provide a trustworthy command result. The remote effect may have happened; inspect its state before deciding whether to run it again."
             in
             let status_json =
-              if outcome_unknown then `Assoc [ "outcome", `String "unknown" ]
-              else exit_report.Keeper_tool_execute_exit_report.status
+              match observation with
+              | Command_result_observed -> exit_report.Keeper_tool_execute_exit_report.status
+              | Command_request_not_sent -> `Assoc [ "outcome", `String "request_not_sent" ]
+              | Command_effect_unknown -> `Assoc [ "outcome", `String "unknown" ]
             in
+            Log.Keeper.info
+              "shell_ir dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"
+              meta.name sandbox_profile_label (Yojson.Safe.to_string status_json) elapsed_ms;
             (* The line-buffered redactor holds a partial trailing line, so the
                stream is flushed here before the end marker. *)
             record_stream_chunk
@@ -1039,7 +1112,7 @@ let handle_tool_execute_typed
                  "execute output callback failed keeper=%s: %s"
                  meta.name
                  (Printexc.to_string exn));
-            let succeeded = not outcome_unknown && exit_report.Keeper_tool_execute_exit_report.ok in
+            let succeeded = Option.is_none transport_failure && exit_report.Keeper_tool_execute_exit_report.ok in
             let output_fields =
               match result.output_files with
               | Some files ->
@@ -1069,12 +1142,20 @@ let handle_tool_execute_typed
              | Error detail ->
                Log.Keeper.warn
                  ~keeper_name:meta.name
-                 "execute output artifact persistence failed after process completion: %s"
+                 "execute output artifact persistence failed: %s"
                  (Keeper_execute_output_files.error_to_string detail);
+               let message = match observation with
+                 | Command_result_observed ->
+                   "Execute ran, but its complete output could not be preserved. The exit status and captured preview are retained; do not repeat the command to recover its output."
+                 | Command_request_not_sent ->
+                   "The request was not sent, and its captured output could not be preserved. No command effect was started by this request."
+                 | Command_effect_unknown ->
+                   "The remote effect is unconfirmed and its captured output could not be preserved. Inspect its state before deciding whether to run the command again."
+               in
                authorized
                  (Keeper_tool_execution.failure
                     ~class_:Tool_result.Runtime_failure
-                    ~effect_disposition:Tool_result.Proven_post_effect
+                    ~effect_disposition
                     (error_json
                        ~fields:
                          ([ "typed", `Bool true
@@ -1084,14 +1165,13 @@ let handle_tool_execute_typed
                           ; execution_time_field, `Int elapsed_ms
                           ]
                           @ dispatched_model_location_fields ())
-                       "Execute ran, but its complete output could not be preserved. The exit status and captured preview are retained; do not repeat the command to recover its output."))
+                       message))
              | Ok (publication, completeness_evidence) ->
                let output_fields = publication.Keeper_execute_output_files.fields in
                let handler_stored = List.mem_assoc "output_artifact" output_fields in
-               let timeout_fields =
-                 exit_report.Keeper_tool_execute_exit_report.timeout_fields
-               in
-               let receipts = current_shim_receipts () in
+               let timeout_fields = match observation with
+                 | Command_result_observed -> exit_report.Keeper_tool_execute_exit_report.timeout_fields
+                 | Command_request_not_sent | Command_effect_unknown -> [] in
                (* [execution_location] stays with the model: it is the
                   observation channel for where a call ran
                   (RFC-keeper-workspace-root-only §3.3, §3.6). *)
@@ -1139,14 +1219,15 @@ let handle_tool_execute_typed
                     Tool_bridge.attach_artifact_manifest
                       ~base_path:config.base_path
                       (let answered =
-                         if outcome_unknown then
+                         match transport_failure with
+                         | Some message ->
                            Tool_result.make_err
                              ~tool_name:"tool_execute"
                              ~class_:Tool_result.Dependency_unavailable
-                             ~effect_disposition:Tool_result.Effect_outcome_unknown
+                             ~effect_disposition
                              ~start_time:t0 ~data:payload ~metadata:execution_evidence
-                             "The execution transport disconnected before a trustworthy result. The remote effect may have happened; inspect its state before deciding whether to run it again."
-                         else
+                             message
+                         | None ->
                            Tool_result.make_ok
                              ~tool_name:"tool_execute"
                              ~start_time:t0
@@ -1160,9 +1241,17 @@ let handle_tool_execute_typed
                     publication.release_sources ();
                     Keeper_tool_execution.of_tool_result result
                   | Error _ ->
+                    let message = match observation with
+                      | Command_result_observed ->
+                        "Execute completed, but its result manifest could not be persisted."
+                      | Command_request_not_sent ->
+                        "The request was not sent and its result manifest could not be persisted. No command effect was started by this request."
+                      | Command_effect_unknown ->
+                        "The remote effect is unconfirmed and its result manifest could not be persisted. Inspect its state before deciding whether to run the command again."
+                    in
                     Keeper_tool_execution.failure
                       ~class_:Tool_result.Runtime_failure
-                      ~effect_disposition:Tool_result.Proven_post_effect
+                      ~effect_disposition
                       (error_json
                          ~fields:
                            ([ "typed", `Bool true
@@ -1172,7 +1261,7 @@ let handle_tool_execute_typed
                             ; execution_time_field, `Int elapsed_ms
                             ]
                             @ dispatched_model_location_fields ())
-                         "Execute completed, but its result manifest could not be persisted.")))
+                         message)))
         ))))))
 
 let handle_tool_execute_with_outcome

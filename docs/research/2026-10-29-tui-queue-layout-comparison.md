@@ -12,7 +12,7 @@ The open Queue retains keyboard ownership. Its conversation preview uses the
 same Keeper, chat projection, source-pin mapping and wrapping as chat, without
 writing the chat's draft, scroll or pin. A shorter preview does not promise to
 show every source row surrounding a pin. History/memory/older-page read errors
-and omitted rows are summarized before the preview caption; loading is a
+and omitted rows are summarized in the preview caption; loading is a
 different state. Full chat still owns detailed tool-evidence diagnostics.
 
 | Placement | Condition | Tradeoff to observe |
@@ -37,8 +37,10 @@ Korean IME/chord behavior needs an actual operator-terminal observation.
 
 Conversation and Queue have separate copy rectangles. Their headings,
 boundaries and shared footer remain copyable. Pane geometry changes and
-explicit layout changes retire the old presented interaction, so a drag or
-queued action cannot borrow the replacement screen's coordinates.
+explicit layout changes retire the old gesture and quarantine observed
+pending input through the existing presentation barrier. Terminal input and
+output observations are not atomic; these source boundaries still need the
+actual interaction comparison below.
 
 ## What the importance scores mean here
 

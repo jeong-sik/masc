@@ -115,9 +115,17 @@ say.
 
 Two flags, and both are the policy rather than a default:
 
-- `--network masc-egress-policy` — a host-only network. Measured on
-  container 1.3.1: a guest on it cannot reach `1.1.1.1:443` or a public
-  address by raw TCP, and can reach a listener on the host gateway.
+- `--network <keeper-specific-name>` — a host-only network owned by one
+  Keeper, not a network shared by the fleet. For example, Keeper `probe` uses
+  `masc-egress-policy-probe`. `Keeper_sandbox_microvm.policy_network_name`
+  supplies the same stable name to network creation, listing and inspection.
+  Already-valid lowercase names keep that spelling; names that need bounding
+  or owner disambiguation use a trimmed Keeper segment plus a 128-bit digest
+  of the original name, always within Apple's 63-byte and alphanumeric-edge
+  rules. Separate networks prevent one guest from reaching another Keeper's
+  proxy and using its allowlist. Measured on container 1.3.1: a guest on an
+  internal network cannot reach `1.1.1.1:443` or a public address by raw TCP,
+  and can reach a listener on its own network's host gateway.
 - `--no-dns` — no resolver in the guest, on purpose. The proxy speaks
   CONNECT, so the guest hands it a name and the proxy resolves that same
   name, after the allowlist has judged it. One resolver, downstream of the

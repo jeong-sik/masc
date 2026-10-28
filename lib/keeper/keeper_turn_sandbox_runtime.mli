@@ -230,6 +230,10 @@ module For_testing_microvm : sig
     -> container_name:string
     -> (unit, string) result
   (** Exercise the same guest mount admission used during boot and adoption. *)
+
+  val provision_guest
+    : t -> backend:Keeper_microvm_backend.t -> timeout_sec:float -> (unit, string) result
+  (** Exercise the boot provisioning path without exposing its private record. *)
 end
 
 val container_cwd_of_host :
@@ -342,11 +346,11 @@ val teardown_keeper_sandbox_by_name :
     typed backend -- shutdown finalization, which runs after the registry
     entry is gone. A remote-SSH Keeper owns no local container;
     Docker and microVM teardown target only their declared runtime.
-    Apple teardown also removes the stable trim helper and verifies absence.
-    An explicit [timeout_sec] applies to helper deletion and inventory too;
-    otherwise deletion uses the microVM removal budget and inventory uses I/O.
-    Every guest name is attempted after helper or guest failures; the first
-    guest error wins, otherwise the helper result is returned.
+    Apple teardown observes the stable trim and repair helper names but never
+    removes them without workspace ownership. Presence or unreadable inventory
+    is reported after all guest names are attempted. An explicit [timeout_sec]
+    also bounds the helper inventory; otherwise it uses the I/O budget. The
+    first guest error wins, otherwise the helper observation result is returned.
 
     A [Micro_vm] teardown with no [microvm_backend] is
     [microvm_teardown_backend_unresolved] rather than an assumed runtime:

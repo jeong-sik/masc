@@ -88,10 +88,11 @@ VM을 보존합니다. 턴은 실제 부팅 정보와 요청한 plan을 대조�
 검증한 뒤 실행 중인 guest를 재사용합니다. 사실을 읽을 수 없거나 같은 plan인데 실제
 설정이 다르면 guest를 보존하고 재사용을 거부합니다.
 
-명령 비교에는 이미지의 OCI entrypoint를 포함합니다. 읽기 전용 이미지 조회가 guest의
-이미지 descriptor와 정확한 platform에 일치해야 entrypoint와 요청 명령을 합성합니다.
-이미지 정보가 없거나 모호하면 guest를 보존하고 재사용을 거부하며, 교체를 허가하지
-않습니다. 요청이 같은 guest는 plan label을 바꾸지 않고 재사용할 수 있습니다.
+Apple 부팅은 이미지의 entrypoint를 요청한 실행 파일로 덮어씁니다. 재사용 시 읽기 전용
+이미지 조회는 guest의 이미지 descriptor와 정확한 platform에 일치해야 하고, 실제 명령은
+요청한 명령과 같아야 합니다. 이미지 정보가 없거나 모호하면 guest를 보존하고 재사용을
+거부하며, 교체를 허가하지 않습니다. 요청이 같은 guest는 plan label을 바꾸지 않고
+재사용할 수 있습니다.
 
 공유 exec shim 설정은 endpoint를 받기 전에 초기화합니다. 설치가 없거나 잘못되면
 오류를 표시합니다. 시작 시 초기화가 실패했다면 설치를 수리한 뒤 서버를 재시작하세요.
@@ -107,9 +108,17 @@ VM을 보존합니다. 턴은 실제 부팅 정보와 요청한 plan을 대조�
 거부합니다.
 
 Sandbox 상태는 work volume의 현재 discard 기본값을 `set`, `absent`, `unreadable`로
-보여 줍니다. 새 부팅은 실제 superblock에서 기본값이 없음을 확인한 경우에만 helper를
-실행합니다. 읽기 실패를 수리 허가로 쓰지 않습니다. build volume은 새 부팅 때 다시
-만들며 Nerdctl/Kata의 프로세스 소유 규칙은 유지합니다.
+보여 줍니다. 작업 공간별 소유권이 확인되기 전에는 새 부팅에서 discard 설정을 바꾸는
+helper를 자동 실행하지 않습니다. 기존 설정이 없다면 파일을 지워도 호스트 디스크가
+즉시 반환되지 않을 수 있습니다. 같은 이름의 trim 또는 repair helper가 있거나 목록을
+확인할 수 없으면 Apple guest의 새 부팅 또는 프로세스의 첫 인수 시 사용을 거부하고
+helper를 보존합니다. 이미 캐시된 연결과 연결된 파일 읽기는 이 검사를 다시 하지 않습니다.
+종료 시에도 helper를 삭제하지 않고 확인 결과를 알립니다. 이 확인은 한 시점의 관측이며 다른
+프로세스의 이후 실행을 막거나 볼륨 소유권을 증명하지는 않습니다. build volume은 새
+부팅 때 다시 만들며 Nerdctl/Kata의 프로세스 소유 규칙은 유지합니다.
+확인 가능한 경우 `container list --all --format json`과 `container inspect <helper-이름>`으로
+helper의 상태와 마운트를 읽어 책임 작업과 다른 작업 공간의 사용 여부를 조사하세요.
+목록이 응답하지 않거나 소유자·작업 종료를 확인하지 못하면 helper와 볼륨을 보존하세요.
 [guest 생존 RFC](rfc/RFC-keeper-guest-survives-restart.md)에 결정 배경이 있습니다.
 
 ### `mention_targets` 는 목록이고, 한 칸이 이름 하나입니다

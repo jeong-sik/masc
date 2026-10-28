@@ -2502,33 +2502,95 @@ let test_trim_names_fit_apple_and_distinguish_long_keepers () =
   Alcotest.(check bool) "run uses bounded name" true (adjacent ~flag:"--name" ~value:first argv)
 ;;
 
-let test_teardown_removes_or_reports_abandoned_trim_helper () =
+let test_apple_provision_refuses_unowned_volume_helpers () =
+  with_eio_fs @@ fun () ->
+  let module Turn = Masc.Keeper_turn_sandbox_runtime in
+  let context = Eio_context.snapshot_state () in
+  let dir = temp_dir "volume-helper-provision-" in
+  let cli = Filename.concat dir "container" in
+  let listing = Filename.concat dir "listing" in
+  let log = Filename.concat dir "calls" in
+  let keeper_name = "volume-helper-provision" in
+  let config = Masc.Workspace.default_config dir in
+  let meta = microvm_meta ~name:keeper_name in
+  Out_channel.with_open_bin cli (fun out ->
+    Printf.fprintf out {|#!/bin/sh
+listing=%s
+log=%s
+printf '%%s\n' "$*" >> "$log"
+case "$1:$2" in
+  list:--all) /bin/cat "$listing" ;;
+  volume:inspect) exit 2 ;;
+  *) exit 91 ;;
+esac
+|} (Filename.quote listing) (Filename.quote log));
+  Unix.chmod cli 0o755;
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
+  Fun.protect ~finally:(fun () ->
+    Eio_context.restore_state context;
+    Unix.putenv "PATH" previous_path;
+    Fs_compat.remove_tree dir)
+  @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let runtime = Turn.For_testing.create_minimal ~config ~meta ~state:Turn.Not_started in
+  let cases =
+    [ Yojson.Safe.to_string (`List [`Assoc ["id", `String (M.work_volume_trim_name ~keeper_name)]]),
+      Some "microvm_volume_helper_ownership_unverified"
+    ; Yojson.Safe.to_string (`List [`Assoc ["id", `String (M.volume_repair_name ~keeper_name)]]),
+      Some "microvm_volume_helper_ownership_unverified"
+    ; "[{}]", Some "microvm_volume_helper_inventory_unverified"
+    ; "[]", None ]
+  in
+  List.iter (fun (contents, expected_refusal) ->
+    Out_channel.with_open_bin listing (fun out -> output_string out contents);
+    Out_channel.with_open_bin log (fun _ -> ());
+    let result = Turn.For_testing_microvm.provision_guest runtime
+      ~backend:Backend.Apple_container ~timeout_sec:5. in
+    let calls = In_channel.with_open_bin log In_channel.input_all |> String.split_on_char '\n' in
+    (match expected_refusal, result with
+     | Some prefix, Error detail ->
+       Alcotest.(check bool) "helper refusal remains visible" true
+         (Astring.String.is_infix ~affix:prefix detail)
+     | None, Error _ -> () (* The fixture refuses the subsequent volume inspect. *)
+     | Some _, Ok () -> Alcotest.fail "unowned helper allowed provisioning"
+     | None, Ok () -> Alcotest.fail "the fixture unexpectedly provisioned a volume");
+    Alcotest.(check bool) "only verified absence reaches volume inspection"
+      (Option.is_none expected_refusal)
+      (List.mem ("volume inspect masc-keeper-work-" ^ keeper_name) calls);
+    Alcotest.(check bool) "no helper is deleted or started" false
+      (List.exists (fun call -> String.starts_with ~prefix:"delete " call
+        || String.starts_with ~prefix:"run " call) calls)) cases
+;;
+
+let test_teardown_preserves_unowned_volume_helpers () =
   with_eio_fs @@ fun () ->
   let context = Eio_context.snapshot_state () in
   let dir = temp_dir "trim-teardown-" in
   let cli = Filename.concat dir "container" in
   let log = Filename.concat dir "calls" in
   let marker = Filename.concat dir "helper-present" in
-  let keep = Filename.concat dir "delete-fails" in
   let keeper_name = String.make 128 'a' in
-  let name = M.work_volume_trim_name ~keeper_name in
+  let trim = M.work_volume_trim_name ~keeper_name in
+  let repair = M.volume_repair_name ~keeper_name in
   let previous_path = Sys.getenv "PATH" in
   let oc = open_out cli in
   Printf.fprintf oc {|#!/bin/sh
 marker=%s
 log=%s
 trim=%s
-keep=%s
+repair=%s
 printf '%%s\n' "$*" >> "$log"
 case "$*" in
-  "delete --force $trim") [ -e "$keep" ] || rm -f "$marker"; exit 1 ;;
+  "delete --force $trim"|"delete --force $repair") rm -f "$marker"; exit 0 ;;
   "list --all --format json")
-    if [ -e "$marker" ]; then printf '[{"id":"%%s"}]\n' "$trim"; else printf '[]\n'; fi ;;
+    if [ -e "$marker" ]; then /bin/cat "$marker"; else printf '[]\n'; fi ;;
   inspect\ *) exit 1 ;;
   stop\ *|delete\ --force\ *) exit 0 ;;
   *) exit 99 ;;
 esac
-|} (Filename.quote marker) (Filename.quote log) (Filename.quote name) (Filename.quote keep);
+|} (Filename.quote marker) (Filename.quote log) (Filename.quote trim) (Filename.quote repair);
   close_out oc;
   Unix.chmod cli 0o755;
   Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
@@ -2546,28 +2608,35 @@ esac
       ~timeout_sec:5. ~config ~keeper_name ~backend:Masc.Keeper_sandbox.Micro_vm
       ~microvm_backend:Backend.Apple_container ()
   in
-  close_out (open_out marker);
+  List.iter (fun name ->
+    Out_channel.with_open_bin marker (fun out ->
+      output_string out (Yojson.Safe.to_string (`List [`Assoc ["id", `String name]])));
+    Out_channel.with_open_bin log (fun _ -> ());
+    (match teardown () with
+     | Error detail ->
+       Alcotest.(check bool) "unknown helper owner is reported" true
+         (Astring.String.is_infix ~affix:"microvm_volume_helper_ownership_unverified" detail)
+     | Ok () -> Alcotest.fail "a present helper was reported absent");
+    Alcotest.(check bool) "unowned helper is preserved" true (Sys.file_exists marker);
+    let calls = In_channel.with_open_bin log In_channel.input_all |> String.split_on_char '\n' in
+    Alcotest.(check bool) "teardown never deletes this helper" false
+      (List.mem ("delete --force " ^ name) calls)) [ trim; repair ];
+  Out_channel.with_open_bin marker (fun out -> output_string out "[{}]");
+  (match teardown () with
+   | Error detail ->
+     Alcotest.(check bool) "malformed inventory also leaves guest teardown unknown" true
+       (Astring.String.is_infix ~affix:"microvm_teardown_failed" detail)
+   | Ok () -> Alcotest.fail "malformed helper inventory was accepted");
+  Sys.remove marker;
   (match teardown () with
    | Ok () -> ()
-   | Error detail -> Alcotest.failf "abandoned helper teardown failed: %s" detail);
-  Alcotest.(check bool) "helper was removed despite a nonzero delete status" false
-    (Sys.file_exists marker);
-  let calls = In_channel.with_open_bin log In_channel.input_all in
-  Alcotest.(check bool) "teardown addresses the same bounded helper name" true
-    (List.mem ("delete --force " ^ name) (String.split_on_char '\n' calls));
-  close_out (open_out marker);
-  close_out (open_out keep);
-  (match teardown () with
-   | Error _ -> ()
-   | Ok () -> Alcotest.fail "remaining helper was reported as removed");
-  Alcotest.(check bool) "failed deletion retains its evidence" true (Sys.file_exists marker)
+   | Error detail -> Alcotest.failf "absent helpers refused teardown: %s" detail)
 ;;
 
-(* A trim helper that outlives its removal must not spare the ordinary
-   guests: every name is attempted, and the trim error surfaces only when
-   all removals succeeded. The helper and the guests are read from the same
-   full listing. A guest that refuses deletion remains in that inventory. *)
-let test_teardown_removes_guests_despite_trim_cleanup_error () =
+(* An unowned helper must not spare ordinary guests: every guest name is
+   attempted, and the helper uncertainty surfaces only if guest removal
+   succeeds. A guest that refuses deletion remains in the inventory. *)
+let test_teardown_removes_guests_despite_unowned_helper () =
   with_eio_fs @@ fun () ->
   let module Turn = Masc.Keeper_turn_sandbox_runtime in
   let context = Eio_context.snapshot_state () in
@@ -2635,12 +2704,12 @@ esac
     List.mem ("stop " ^ name) lines && List.mem ("delete --force " ^ name) lines
   in
   (* The helper remains, guests removable: every guest is attempted and the
-     trim error is the result. *)
+     helper uncertainty is the result. *)
   (match teardown () with
    | Error detail ->
-     Alcotest.(check bool) "trim error surfaces when guests are removed" true
-       (Astring.String.is_infix ~affix:"remains after removal" detail)
-   | Ok () -> Alcotest.fail "unconfirmed helper absence was reported as removed");
+     Alcotest.(check bool) "helper uncertainty surfaces when guests are removed" true
+       (Astring.String.is_infix ~affix:"microvm_volume_helper_ownership_unverified" detail)
+     | Ok () -> Alcotest.fail "an unowned helper was reported absent");
   let first_calls = calls () in
   List.iter
     (fun guest ->
@@ -2653,7 +2722,7 @@ esac
   close_out (open_out log);
   (match teardown () with
    | Error detail ->
-     Alcotest.(check bool) "guest failure wins over the trim failure" true
+     Alcotest.(check bool) "guest failure wins over the helper observation" true
        (Astring.String.is_infix ~affix:"microvm_teardown_failed" detail)
    | Ok () -> Alcotest.fail "a stuck guest was reported as removed");
   Alcotest.(check bool) "stuck guest evidence remains after failed teardown" true
@@ -4285,10 +4354,12 @@ let () =
             test_volume_repair_script_refuses_a_mounted_volume
         ; Alcotest.test_case "trim names preserve existing helpers and bound long names" `Quick
             test_trim_names_fit_apple_and_distinguish_long_keepers
-        ; Alcotest.test_case "teardown removes or reports abandoned trim helper" `Quick
-            test_teardown_removes_or_reports_abandoned_trim_helper
+        ; Alcotest.test_case "Apple provisioning refuses unowned volume helpers" `Quick
+            test_apple_provision_refuses_unowned_volume_helpers
+        ; Alcotest.test_case "teardown preserves unowned volume helpers" `Quick
+            test_teardown_preserves_unowned_volume_helpers
         ; Alcotest.test_case "teardown attempts every guest after helper or guest errors" `Quick
-            test_teardown_removes_guests_despite_trim_cleanup_error
+            test_teardown_removes_guests_despite_unowned_helper
         ; Alcotest.test_case "boot confirms previous guests absent before provisioning" `Quick
             test_boot_confirms_previous_guests_absent_before_provisioning
         ; Alcotest.test_case "warm adoption does not remove other network modes" `Quick

@@ -1967,9 +1967,9 @@ let ensure_work_volume_for backend ~volume_name ~size ~timeout_sec =
    (2026-09-24) to keep its allocated size after the guest deletes
    everything inside it -- `fstrim` inside the guest, run as root, answers
    "Operation not permitted", because the guest's capability set is empty
-   (the disk itself accepts discard, measured 2026-09-26). The host reads the
-   work volume's ext4 discard default and configures it only when absent, so a delete there returns
-   its blocks; the build volume gets no such default, and what linked
+   (the disk itself accepts discard, measured 2026-09-26). Boot currently
+   leaves the work volume's ext4 discard default unchanged while ownership
+   is unverified; the build volume gets no such default, and what linked
    checkouts built on it is returned by deleting the volume and making a new
    one at every boot. *)
 

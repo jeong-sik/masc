@@ -1007,7 +1007,7 @@ let complete_cleanup
            | Error detail ->
              Log.Keeper.warn
                ~keeper_name:operation.keeper_name
-               "keeper removed but its sandbox container was not: %s"
+               "keeper removed but sandbox cleanup was not fully confirmed: %s"
                detail);
           (* A Keeper whose meta stays is let go by the next move, which reads
              it as stopped. One removed for good leaves only its credential,

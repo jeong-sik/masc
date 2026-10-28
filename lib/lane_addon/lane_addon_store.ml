@@ -744,7 +744,8 @@ let save_tool_request_body t ~scope ~request_digest bytes =
   protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
     write_with ~sync_parent:sync_parent_directory t (tool_request_body_path ~scope ~request_digest) bytes))
 (* Settled originals: each record and the body it names, under the date its
-   chain began. No pass lists or reads this namespace. *)
+   chain began. Only the startup body sweep lists and reads it, and only when a
+   live body is not protected by a live record. *)
 let tool_request_archive_directory = "tool-request-owners-settled"
 (* A day names a directory, so only [YYYY-MM-DD] is accepted. *)
 let settled_day date =

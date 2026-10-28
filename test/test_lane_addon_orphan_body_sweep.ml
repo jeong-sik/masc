@@ -55,6 +55,8 @@ let test_orphan_is_removed_but_active_successor_and_interrupted_archive_survive 
     stage_orphan store ~scope:"orphan-scope" orphan;
     let report = run store in
     Alcotest.(check int) "only the unreferenced body is removed" 1 report.removed;
+    Alcotest.(check bool) "an unprotected live body makes the archive read" true
+      (report.archive = Sweep.Archive_read);
     Alcotest.(check bool) "orphan is gone" false (exists (body_path root ~scope:"orphan-scope" ~request:orphan));
     Alcotest.(check bool) "active original still loads" true ((load store ~scope ~id:"parent-id").request = parent);
     Alcotest.(check bool) "intent in a different scope still restores its exact body" true
@@ -78,6 +80,25 @@ let test_bad_archive_refuses_before_any_removal () = with_store (fun root store 
    | Error (Sweep.Inventory_unavailable _) -> ()
    | Error (Sweep.Removal_incomplete _) | Ok _ -> Alcotest.fail "bad archive did not reject the inventory");
   Alcotest.(check bool) "unrelated body was not deleted" true (exists (body_path root ~scope:"orphan" ~request:orphan)))
+
+(* Archived records only add protection. When the live records protect every
+   live body, the archive is not read: a settled record that would refuse the
+   inventory changes nothing. *)
+let test_protected_live_bodies_leave_the_archive_unread () = with_store (fun root store ->
+  let active = `Assoc ["kind",`String "active"] and archived = `Assoc ["kind",`String "archive"] in
+  retain store ~scope:"active" ~id:"active-id" ~request:active;
+  retain store ~scope:"archived" ~id:"id" ~request:archived;
+  let record = Owner.listed (load store ~scope:"archived" ~id:"id") in
+  (match Owner.settle ~store ~date:"2026-10-27" record with
+   | Ok () -> () | Error error -> Alcotest.fail (Owner.settle_error_to_string error));
+  let path = Filename.concat root (Store.tool_request_archive_record_path ~scope:"archived"
+    ~date:"2026-10-27" ~request_id:"id") in
+  get (Fs_compat.save_file_atomic_strict path "{}");
+  let report = run store in
+  Alcotest.(check int) "nothing is removed" 0 report.removed;
+  Alcotest.(check bool) "the archive is not read" true (report.archive = Sweep.Archive_not_needed);
+  Alcotest.(check bool) "the active original still loads" true
+    ((load store ~scope:"active" ~id:"active-id").request = active))
 
 let test_hard_link_refuses_before_any_removal () = with_store (fun root store ->
   let first = `String "one" and second = `String "two" in
@@ -241,6 +262,7 @@ let test_inventory_errors_do_not_disclose_input () =
 let () = Alcotest.run "lane addon orphan body sweep" ["cleanup", [
   Alcotest.test_case "protect live, successor and archived requests" `Quick test_orphan_is_removed_but_active_successor_and_interrupted_archive_survive;
   Alcotest.test_case "archive corruption aborts before removal" `Quick test_bad_archive_refuses_before_any_removal;
+  Alcotest.test_case "protected live bodies leave the archive unread" `Quick test_protected_live_bodies_leave_the_archive_unread;
   Alcotest.test_case "hard linked body aborts before removal" `Quick test_hard_link_refuses_before_any_removal;
   Alcotest.test_case "changed body is retained" `Quick test_replaced_body_is_not_removed;
   Alcotest.test_case "missing body in one scope is not masked" `Quick test_missing_active_body_is_not_masked_by_another_scope;

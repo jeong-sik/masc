@@ -304,7 +304,9 @@ fi
 back_json=$(ci_gh_object "repos/$repo/pulls/$pr/reviews/$rid" '.') || {
   echo "approval review $rid was posted but readback failed; inspect it before retry" >&2; exit 1;
 }
-back_author=$(printf '%s' "$back_json" | jq -r '.user.login // ""')
+back_author=$(printf '%s' "$back_json" | jq -r '.user.login // ""') || {
+  echo "approval review $rid was posted but its author could not be read; inspect it before retry" >&2; exit 1;
+}
 [ "$back_author" = "$me" ] || {
   echo "approval review $rid was posted by ${back_author:-unknown}, expected $me; inspect it before retry" >&2; exit 1;
 }
@@ -317,6 +319,10 @@ admit_review "$back_json" >/dev/null || {
 check_review_scope "$back_json" || {
   echo "approval review $rid was posted but its scope readback is not admitted; inspect it before retry" >&2; exit 1;
 }
-back=$(printf '%s' "$back_json" | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["state"]+"\t"+r["commit_id"])')
-[ "$back" = "$(printf 'APPROVED\t%s' "$head")" ] || { echo "approval readback differs from submitted head" >&2; exit 1; }
+back=$(printf '%s' "$back_json" | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["state"]+"\t"+r["commit_id"])') || {
+  echo "approval review $rid was posted but its state or head could not be read; inspect it before retry" >&2; exit 1;
+}
+[ "$back" = "$(printf 'APPROVED\t%s' "$head")" ] || {
+  echo "approval review $rid was posted but readback differs from the submitted head; inspect it before retry" >&2; exit 1;
+}
 echo "APPROVED #$pr head $head review $rid"

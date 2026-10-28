@@ -620,6 +620,18 @@ print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
         self.assertIn("before retry", result.stderr)
         self.assertIn("POST repos/o/r/pulls/41487/reviews", (self.data / "calls.log").read_text())
 
+    def test_malformed_author_readback_reports_that_review_was_posted(self):
+        self.install_publication_fake()
+        post = self.tmp / "post.py"
+        post.write_text(post.read_text().replace(
+            "reviews.append(review)\n", "review['user'] = 'corrupt'\nreviews.append(review)\n"))
+        result = self.publish()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("APPROVED #41487", result.stdout)
+        self.assertIn("was posted", result.stderr)
+        self.assertIn("author could not be read", result.stderr)
+        self.assertIn("before retry", result.stderr)
+
     def test_pr_moving_after_publication_does_not_report_success(self):
         self.install_publication_fake()
         post = self.tmp / "post.py"

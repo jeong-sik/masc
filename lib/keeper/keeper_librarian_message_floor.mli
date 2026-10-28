@@ -96,6 +96,10 @@ type error = private
 (** Runtime failures preserve their actual reports in callback order.
     Structural, anchor and staging errors have no fabricated Runtime reports. *)
 
+val fresh_transaction_id : unit -> string
+(** A new name for the one Memory program a floor makes. The Runtime floor and
+    the durable chain both take theirs here. *)
+
 val infer :
   ?cli_runner:Keeper_lane_cli_oneshot.runner ->
   base_path:string -> keepers_dir:string -> keeper_name:string ->

@@ -25,24 +25,31 @@ let same_generation (checkpoint : Capture.Held.checkpoint) boundaries =
       require (Ids.Turn_ref.trace_id turn_ref<>trace_id) "Original checkpoint history generation started fresh"
     | Ok {Boundaries.event=Turn_ended {history_at_start=(Continued_history | Continued_history_from _);_};_} ->
       Ok ()) (Ok ()) boundaries
-let validate_state request =
+let positions_unchanged request =
   let source=Request.source request in
-  let owner=Request.physical_owner request in
-  let keeper_id=Request.keeper_id owner in
+  let keeper_id=Request.keeper_id (Request.physical_owner request) in
   let runtime_keepers_dir=Capture.runtime_keepers_dir source in
-  let* ()=Request.confirm_owner request in
   let* position=Progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id
     |> Result.map_error Progress.read_error_to_string in
   let* official=Official.read ~keepers_dir:runtime_keepers_dir ~keeper_id
     |> Result.map_error Official.read_error_to_string in
-  let* ()=require (position=(Capture.positions source).current
-    && official=(Capture.positions source).official)
-    "Original history read positions changed before Memory publication" in
+  Ok (position=(Capture.positions source).current && official=(Capture.positions source).official)
+let validate_state request =
+  let source=Request.source request in
+  let keeper_id=Request.keeper_id (Request.physical_owner request) in
+  let runtime_keepers_dir=Capture.runtime_keepers_dir source in
+  let* ()=Request.confirm_owner request in
+  let* unchanged=positions_unchanged request in
+  let* ()=require unchanged "Original history read positions changed before Memory publication" in
   let* external_cursor=Cursor.observe ~runtime_keepers_dir ~keeper_name:keeper_id in
   require (Yojson.Safe.equal (Cursor.observation_to_json external_cursor)
     (Cursor.observation_to_json (Capture.external_prepared source)))
     "Original external preparation changed before Memory publication"
-let with_original ~request publish =
+(* The external cursor is prepared again on every pass that selects the range,
+   so it moves between passes as admissions arrive. Only a publication of the
+   original's own preparation requires it to be as captured. *)
+type cursor = Prepared_as_captured | Moves
+let with_fence ~request ~cursor read =
   let source=Request.source request and owner=Request.physical_owner request in
   let checkpoint,traces=parts (Capture.source source) in
   let checkpoint_id=Option.map (fun (value : Capture.Held.checkpoint) ->
@@ -69,8 +76,12 @@ let with_original ~request publish =
     let* ()=Keeper_librarian_input_sources.validate_original_selection (Capture.counterparts source)
       ~base_dir:(Request.base_path owner) ~keeper_name:(Request.keeper_id owner)
       |> Result.map_error Keeper_librarian_input_sources.read_error_to_string in
-    let* ()=validate_state request in
-    publish () in
+    let* ()=match cursor with
+      | Prepared_as_captured -> validate_state request
+      | Moves ->
+        let* unchanged=positions_unchanged request in
+        require unchanged "Original history read positions changed before the floor read its source" in
+    read ~messages:(Option.map Checkpoint.exact_snapshot_messages snapshot) in
   let rec lock snapshot = function
     | [] -> validate snapshot
     | id::rest ->
@@ -83,3 +94,6 @@ let with_original ~request publish =
         Checkpoint.with_session_lock ~session_dir (fun _canonical -> lock snapshot rest)
         |> Result.join in
   lock None ids
+let with_original ~request publish =
+  with_fence ~request ~cursor:Prepared_as_captured (fun ~messages:_ -> publish ())
+let with_original_snapshot ~request read = with_fence ~request ~cursor:Moves read

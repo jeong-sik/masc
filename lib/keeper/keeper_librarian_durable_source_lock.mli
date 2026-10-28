@@ -17,3 +17,18 @@
     neither the caller's Memory-lane fence nor any source lock. *)
 val with_original : request:Keeper_librarian_durable_request.t ->
   (unit -> ('a, string) result) -> ('a, string) result
+val with_original_snapshot : request:Keeper_librarian_durable_request.t ->
+  (messages:Agent_core.Types.message list option -> ('a, string) result) -> ('a, string) result
+(** The same fence as [with_original], for a caller that reads the source
+    rather than publishes the original's own preparation. Two differences.
+    The callback gets the complete messages of the checkpoint the original
+    read, as the held lock sees them now, or [None] when the original read no
+    checkpoint. And the external cursor may differ from the one the original
+    captured: every pass that selects the range prepares it again, so it moves
+    as admissions arrive. The read positions must still be the captured ones.
+    Everything else above holds: blocking scope, no reentry of a selected lock,
+    and no authority beyond the call. *)
+val positions_unchanged : Keeper_librarian_durable_request.t -> (bool, string) result
+(** Whether the atom and official read positions are still the ones the
+    original captured. A position that cannot be read is an error, not [false].
+    Blocking reads; offload the call in an Eio caller. *)

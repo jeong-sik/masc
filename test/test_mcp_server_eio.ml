@@ -770,6 +770,114 @@ let test_stdio_admission_and_subscription_cancellation () =
     Alcotest.(check int) "removed 2026 method rejected" (-32601) (error_code_exn (nth 10));
     Alcotest.(check int) "no subscription remains after EOF" 0 (Mcp_subscriptions.count ()))
 
+(* A stdio server whose tools/call parks until [release] resolves; every other
+   request takes the real handler. [run_stdio_messages] sends one message and
+   reads its answer before the next, so it cannot show a ping answered while a
+   call is in flight. [with_concurrent_stdio] writes without waiting. *)
+let parked_tool_call ~release ~on_enter ~on_cancel ~clock ~sw ~mcp_session_id state request =
+  let json = Yojson.Safe.from_string request in
+  match Yojson.Safe.Util.member "method" json with
+  | `String "tools/call" ->
+    on_enter ();
+    (try Eio.Promise.await release
+     with Eio.Cancel.Cancelled _ as exn -> on_cancel (); raise exn);
+    `Assoc
+      [ "jsonrpc", `String "2.0"
+      ; "id", Yojson.Safe.Util.member "id" json
+      ; "result", `Assoc [] ]
+  | _ -> Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request
+
+let with_concurrent_stdio ~clock ~sw ~handle_request state f =
+  let was_ready = Eio_guard.is_ready () in
+  Eio_guard.enable ();
+  let input, input_writer = Eio_unix.pipe sw in
+  let output, output_writer = Eio_unix.pipe sw in
+  let env = object
+    method clock = clock
+    method stdin = input
+    method stdout = output_writer
+  end in
+  let finished, finish = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Fun.protect
+      ~finally:(fun () -> Eio.Flow.close output_writer; Eio.Promise.resolve finish ())
+      (fun () -> Masc.Mcp_server_eio_protocol.run_stdio ~handle_request ~sw ~env state));
+  let reader = Eio.Buf_read.of_flow output ~max_size:(1024 * 1024) in
+  let input_open = ref true in
+  let close_input () =
+    if !input_open then (input_open := false; Eio.Flow.close input_writer) in
+  let send message =
+    Eio.Flow.copy_string (Yojson.Safe.to_string message ^ "\n") input_writer in
+  let read_response () =
+    Eio.Time.with_timeout_exn clock 5. (fun () ->
+      Yojson.Safe.from_string (Eio.Buf_read.line reader)) in
+  Fun.protect
+    ~finally:(fun () -> close_input (); if not was_ready then Eio_guard.disable ())
+    (fun () ->
+      f ~send ~read_response;
+      close_input ();
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await finished);
+      (match Eio.Buf_read.line reader with
+       | exception End_of_file -> ()
+       | _ -> Alcotest.fail "unexpected trailing stdio response"))
+
+let test_stdio_ping_is_answered_during_a_long_tool_call () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    let modern = stdio_modern_params () in
+    let release, resolve_release = Eio.Promise.create () in
+    let entered, resolve_entered = Eio.Promise.create () in
+    let handle_request =
+      parked_tool_call ~release
+        ~on_enter:(fun () -> Eio.Promise.resolve resolve_entered ())
+        ~on_cancel:(fun () -> ()) in
+    with_concurrent_stdio ~clock ~sw ~handle_request state (fun ~send ~read_response ->
+      send (stdio_request ~id:(`Int 1) ~params:modern "tools/call");
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await entered);
+      send (stdio_request ~id:(`Int 2) ~params:modern "ping");
+      let ping = read_response () in
+      Alcotest.(check bool) "ping is answered while the call is parked" true
+        (Yojson.Safe.Util.member "id" ping = `Int 2);
+      Alcotest.(check bool) "the parked call has not been released" false
+        (Eio.Promise.is_resolved release);
+      Eio.Promise.resolve resolve_release ();
+      let call = read_response () in
+      Alcotest.(check bool) "the call answers once released" true
+        (Yojson.Safe.Util.member "id" call = `Int 1)))
+
+let test_stdio_cancellation_stops_a_running_tool_call () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    let modern = stdio_modern_params () in
+    let release, _ = Eio.Promise.create () in
+    let entered, resolve_entered = Eio.Promise.create () in
+    let cancelled, resolve_cancelled = Eio.Promise.create () in
+    let handle_request =
+      parked_tool_call ~release
+        ~on_enter:(fun () -> Eio.Promise.resolve resolve_entered ())
+        ~on_cancel:(fun () -> Eio.Promise.resolve resolve_cancelled ()) in
+    with_concurrent_stdio ~clock ~sw ~handle_request state (fun ~send ~read_response ->
+      send (stdio_request ~id:(`Int 1) ~params:modern "tools/call");
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await entered);
+      send (stdio_request ~params:(`Assoc [ "requestId", `Int 1 ]) "notifications/cancelled");
+      Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await cancelled);
+      send (stdio_request ~id:(`Int 2) ~params:modern "ping");
+      let next = read_response () in
+      Alcotest.(check bool) "the cancelled call wrote nothing and the loop still answers" true
+        (Yojson.Safe.Util.member "id" next = `Int 2);
+      Alcotest.(check bool) "the call ended by cancellation, not by release" false
+        (Eio.Promise.is_resolved release)))
+
 let test_stdio_subscription_requires_auth () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -3555,6 +3663,10 @@ let eio_tests = [
     test_handle_request_server_discover_2026;
   "stdio admission and subscription cancellation", `Quick,
     test_stdio_admission_and_subscription_cancellation;
+  "stdio ping is answered during a long tool call", `Quick,
+    test_stdio_ping_is_answered_during_a_long_tool_call;
+  "stdio cancellation stops a running tool call", `Quick,
+    test_stdio_cancellation_stops_a_running_tool_call;
   "stdio subscription requires authentication", `Quick,
     test_stdio_subscription_requires_auth;
   "stdio legacy ping and modern removal", `Quick,

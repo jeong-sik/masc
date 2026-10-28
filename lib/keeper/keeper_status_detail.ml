@@ -383,6 +383,40 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                   ]
                   @ byte_count_error)
          in
+         (* What the next request would carry, read from the same forecast the
+            dashboard serves. A Keeper whose request keeps failing at the
+            provider shows only the provider's refusal above; this says how many
+            atoms and bytes that request carries and where its range starts. *)
+         let next_request =
+           if not include_context then
+             `Assoc [ ("skipped", `Bool true); ("reason", `String "fast_or_disabled") ]
+           else
+             match Keeper_next_request_forecast.forecast ~config ~keeper_name:m.name with
+             | Error detail -> `Assoc [ ("error", `String detail) ]
+             | Ok forecast ->
+               (match Keeper_next_request_forecast.to_json forecast with
+                | `Assoc fields ->
+                  let field name = Option.value ~default:`Null (List.assoc_opt name fields) in
+                  let candidate = function
+                    | `Assoc candidate_fields ->
+                      `Assoc
+                        (List.filter
+                           (fun (name, _) ->
+                              List.mem name [ "runtime_id"; "lane"; "history_atoms"; "carried" ])
+                           candidate_fields)
+                    | json -> json
+                  in
+                  `Assoc
+                    [ ("schema", field "schema")
+                    ; ("checkpoint_messages", field "checkpoint_messages")
+                    ; ("walk", field "walk")
+                    ; ( "candidates"
+                      , match field "candidates" with
+                        | `List candidates -> `List (List.map candidate candidates)
+                        | json -> json )
+                    ]
+                | json -> json)
+         in
          let keepalive_running = runtime_keepalive_running config m in
          let now_ts = Time_compat.now () in
          let created_ts =
@@ -679,6 +713,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("workspace", workspace_surface_json m);
            ("sources", source_provenance_json config m);
            ("context", ctx_stats);
+           ("next_request", next_request);
            ("metrics_overview", metrics_summary_to_json metrics_overview);
            ("metrics_tail", metrics_tail);
            ("history_tail", history_tail);

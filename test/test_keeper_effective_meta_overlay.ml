@@ -1054,6 +1054,17 @@ let test_status_reports_normalized_options () =
     "disabled context is observable"
     (Some true)
     (json_assoc_field "context" context_disabled |> json_bool_field "skipped");
+  Alcotest.(check (option bool))
+    "disabled context skips the next request forecast"
+    (Some true)
+    (json_assoc_field "next_request" context_disabled |> json_bool_field "skipped");
+  (match Yojson.Safe.Util.member "next_request" context_enabled with
+   | `Assoc fields ->
+     Alcotest.(check bool)
+       "enabled context reports a forecast or why there is none"
+       true
+       (List.mem_assoc "candidates" fields || List.mem_assoc "error" fields)
+   | _ -> Alcotest.fail "next_request must be an object when the context is read");
   let first_window =
     status_json_with_args config
       (`Assoc

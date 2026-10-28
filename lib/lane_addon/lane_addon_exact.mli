@@ -112,6 +112,14 @@ type retained_final =
 
 val delivered : retained_final -> final
 (** Remove host-only cause evidence for worker delivery. *)
+val refused_before_host : final -> bool
+(** [true] only for [Call_final (Input_refused Request_body_refused)]. The
+    worker refuses a request no host listing reply can carry before the host
+    retains it ([submit] in addons/exact_worker.py, the [fits] check that
+    precedes [store.write accepted]). So no host terminal and no latest
+    execution proof can exist for this final, and it carries no answer.
+    Every consumer that confirms a worker final against the host store asks
+    this one question when the host holds no record. *)
 val retained_final_to_json : retained_final -> Yojson.Safe.t
 val retained_final_of_json : schema:Yojson.Safe.t -> Yojson.Safe.t -> (retained_final, string) result
 (** Strict host evidence codec. Unknown outcomes require one of [interrupted],

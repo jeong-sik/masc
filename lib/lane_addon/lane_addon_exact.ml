@@ -183,6 +183,13 @@ let input_refusal_to_string = function
 
 let input_refusal_of_string s = List.find_opt (fun v -> String.equal (input_refusal_to_string v) s) all_of_input_refusal
 
+let refused_before_host = function
+  | Call_final (Input_refused Request_body_refused) -> true
+  | Call_final
+      ( Answered _ | Invalid_output _ | Output_limit_reached _
+      | Input_refused (Input_capacity | Context_overflow | Invalid_request) )
+  | Outcome_unknown | Not_allowed _ | Request_id_reused -> false
+
 let usage_to_json { input_tokens; output_tokens } =
   `Assoc [ "input_tokens", `Int input_tokens; "output_tokens", `Int output_tokens ]
 

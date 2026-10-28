@@ -71,8 +71,8 @@ val confirm_final : store:Lane_addon_store.t -> t -> Lane_addon_exact.final ->
 (** Reobserve full physical owner/epoch, then require the original retained host
     terminal. Each Call_final additionally requires the matching latest completed
     original execution proof/schema/outcome. Worker Finished JSON grants nothing,
-    except the worker's [Input_refused Request_body_refused] for a request the
-    host never retained: the worker refuses a request no listing reply can carry
-    before the host sees it, and that final holds no answer. *)
+    except a final where {!Lane_addon_exact.refused_before_host} holds, for a
+    request the host never retained: the worker refuses a request no listing
+    reply can carry before the host sees it, and that final holds no answer. *)
 val validate_proposal : t -> Yojson.Safe.t ->
   (Keeper_librarian_runtime.durable_proposal, string) result

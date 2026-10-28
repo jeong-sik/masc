@@ -333,15 +333,12 @@ let confirm_final ~store capture final =
   let* observed=Exact.observe_retained ~store ~declaration_id ~schema exact in
   match observed with
   | Exact.Retained_absent ->
-    (match final with
-     (* The worker refuses a request no host listing reply can carry before
-        the host ever retains it (addons/exact_worker.py, #45200), so no host
-        terminal can exist. It is the only final taken without one: it carries
-        no answer and no model ran. *)
-     | Exact.Call_final (Exact.Input_refused Exact.Request_body_refused) -> Ok ()
-     | Call_final (Answered _ | Invalid_output _ | Output_limit_reached _
-       | Input_refused (Input_capacity | Context_overflow | Invalid_request))
-     | Outcome_unknown | Not_allowed _ | Request_id_reused -> Error "Original history host terminal is absent")
+    (* addons/exact_worker.py [submit] writes the refusal before the
+       [store.write accepted] line, so the host never retains this request.
+       The worker's deployed behavior is what makes this final the only one
+       taken without a host terminal. *)
+    if Exact.refused_before_host final then Ok ()
+    else Error "Original history host terminal is absent"
   | Retained_open -> Error "Original history host terminal is unresolved"
   | Retained_terminal actual ->
   let* ()=equal (Exact.final_to_json (Exact.delivered actual)) (Exact.final_to_json final)

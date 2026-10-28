@@ -84,8 +84,11 @@ val confirm_final : store:Lane_addon_store.t -> t -> Lane_addon_exact.final ->
     missing/open history and a different final refuse. Host Outcome_unknown,
     Not_allowed and Request_id_reused remain their original uncertainty/refusal
     and never borrow a call proof or authorize replay. No worker JSON, domain
-    answer or host progress record alone supplies this evidence. Offload the
-    complete operation in an Eio caller; no provider, write or ACK occurs. *)
+    answer or host progress record alone supplies this evidence, except for a
+    final where {!Lane_addon_exact.refused_before_host} holds: the host never
+    retained that request, so an absent host record confirms it and no proof is
+    read. Offload the complete operation in an Eio caller; no provider, write
+    or ACK occurs. *)
 val validate_proposal : t -> Yojson.Safe.t ->
   (Keeper_librarian_runtime.admission_proposal, string) result
 (** Full original admission validation, including every candidate, exact

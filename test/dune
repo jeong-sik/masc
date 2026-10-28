@@ -4585,7 +4585,7 @@
 (test
  (name test_tui_planning_detail)
  (modules test_tui_planning_detail)
- (libraries alcotest masc masc.masc_goal masc.masc_types masc_tui_planning_detail masc_tui_fetched))
+ (libraries alcotest masc masc.masc_goal masc.masc_types masc_tui_planning_detail masc_tui_fetched yojson))
 
 (test
  (name test_tui_roster_pane)

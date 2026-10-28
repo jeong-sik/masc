@@ -15,6 +15,15 @@ module Proof = Masc.Tui_decode
 let texts rows = List.map (fun (r : Detail.line) -> r.Detail.text) rows
 let tones rows = List.map (fun (r : Detail.line) -> r.Detail.tone) rows
 
+let contains needle text =
+  let n = String.length needle in
+  let rec from i =
+    if i + n > String.length text then false
+    else if String.sub text i n = needle then true
+    else from (i + 1)
+  in
+  from 0
+
 let check_bool = Alcotest.(check bool)
 let check_string = Alcotest.(check string)
 
@@ -159,7 +168,8 @@ let test_a_narrow_pane_still_produces_rows () =
   check_bool "width 0 does not loop or vanish" true (rows <> [])
 
 let confirmation_fixture ?(goal_id = "goal-1") ?(revision = "revision-1")
-    ?(metric = "passing scenarios") ?(run_id = "run-1") ?(confirmed = false) ?phase () =
+    ?(metric = "passing scenarios") ?(run_id = "run-1") ?(confirmed = false) ?phase
+    ?(submitted : Yojson.Safe.t list = []) () =
   let phase = match phase with
     | Some phase -> phase
     | None -> if confirmed then Goal_phase.Completed else Goal_phase.Awaiting_confirmation in
@@ -177,6 +187,17 @@ let confirmation_fixture ?(goal_id = "goal-1") ?(revision = "revision-1")
       (verdict, { operator_id = "operator"; confirmed_at = "2026-09-19T08:01:00Z" })
     else Goal_verification.Proof_proven verdict in
   let record = { (Goal_verification.default_record ~goal_id) with completion } in
+  (* The server answers with the metadata projection of the submitted
+     originals, never their contents, so the fixture rewrites the record's
+     full-form list into the projected items a real answer carries. *)
+  let verification =
+    match Goal_verification.record_to_yojson record with
+    | `Assoc fields ->
+        `Assoc (List.map (fun (key, value) ->
+            if String.equal key "submitted_evidence" then key, `List submitted
+            else key, value) fields)
+    | other -> other
+  in
   `Assoc
     [ "goal", `Assoc
         [ "id", `String goal_id
@@ -186,8 +207,29 @@ let confirmation_fixture ?(goal_id = "goal-1") ?(revision = "revision-1")
         ; "metric", `String metric
         ; "target_value", `String "10"
         ]
-    ; "verification", Goal_verification.record_to_yojson record
+    ; "verification", verification
     ]
+
+(* The metadata projection of every kind, plus one kind this build does not
+   know, in wire form. *)
+let submitted_originals_json =
+  [ `Assoc
+      [ "kind", `String "artifact"; "reference", `String "run.log"
+      ; "bytes", `Int 12_698; "truncated", `Bool true ]
+  ; `Assoc
+      [ "kind", `String "artifact_binary"; "reference", `String "screen.png"
+      ; "bytes", `Int 1_258_291; "sha256", `String (String.make 64 'a')
+      ; "format", `String "png" ]
+  ; `Assoc
+      [ "kind", `String "collaboration"; "reference", `String "board:p-1"
+      ; "sha256", `String (String.make 64 'b'); "bytes", `Int 987
+      ; "content_omitted", `Bool true ]
+  ; `Assoc [ "kind", `String "note"; "bytes", `Int 240 ]
+  ; `Assoc
+      [ "kind", `String "artifact_unreadable"; "reference", `String "gone.log"
+      ; "reason", `String "ev_read_error" ]
+  ; `Assoc [ "kind", `String "hologram"; "anything", `Bool true ]
+  ]
 
 let confirmation_exn json =
   match Detail.decode_confirmation ~goal_id:"goal-1" json with
@@ -211,15 +253,6 @@ let test_confirmation_retains_the_displayed_proof () =
   (* The binding wraps at narrow widths -- at 80 cells the break lands between
      "run" and "run-1" -- so the exact run is asserted as content of the
      fine-print rows rather than one whole row. *)
-  let contains needle text =
-    let n = String.length needle in
-    let rec from i =
-      if i + n > String.length text then false
-      else if String.sub text i n = needle then true
-      else from (i + 1)
-    in
-    from 0
-  in
   check_bool "operator sees exact run" true
     (List.exists (contains "run-1") rendered);
   check_bool "evidence keeps its second line" true
@@ -263,6 +296,57 @@ let test_confirmation_reads_in_layers () =
   check_bool "the evidence ends the block, so a presented frame proves it was read" true
     (last.Detail.tone = Detail.Plain
      && last.Detail.text = "  Observed result retained")
+
+(* The submitted originals arrive as metadata -- identity, size, integrity,
+   no contents. They draw as one labelled list under the evidence paragraph,
+   a kind this build does not know stays on screen, and the list ends the
+   block, so the presented-frame receipt still covers everything the operator
+   was shown. *)
+let test_confirmation_lists_submitted_originals () =
+  let read = confirmation_exn (confirmation_fixture ~submitted:submitted_originals_json ()) in
+  let rows = Detail.confirmation_lines ~width:80 ~ko:false read in
+  let rendered = texts rows in
+  check_bool "every original is on screen" true
+    (List.for_all (fun needle -> List.exists (contains needle) rendered)
+       [ "artifact run.log · 12.4 KB · truncated"
+       ; "binary screen.png · png · 1.2 MB · sha256 aaaaaaaaaaaa"
+       ; "collaboration board:p-1 · 987 B · sha256 bbbbbbbbbbbb"
+       ; "note · 240 B"
+       ; "unreadable gone.log · ev_read_error"
+       ; "unknown kind hologram" ]);
+  check_bool "the list starts at the Submitted label, at reading volume" true
+    (List.exists (fun (row : Detail.line) ->
+         String.length row.Detail.text >= 10
+         && String.sub row.Detail.text 0 10 = Printf.sprintf "%-10s" "Submitted:"
+         && row.Detail.tone = Detail.Plain) rows);
+  let last = List.nth rows (List.length rows - 1) in
+  check_bool "the list ends the block" true
+    (last.Detail.tone = Detail.Plain
+     && last.Detail.text = "          unknown kind hologram")
+
+(* No originals, no list: the group itself is absent and the evidence
+   paragraph still ends the block. *)
+let test_confirmation_without_originals_draws_no_list () =
+  let rows = Detail.confirmation_lines ~width:80 ~ko:false
+      (confirmation_exn (confirmation_fixture ())) in
+  check_bool "no Submitted label without originals" true
+    (List.for_all (fun (row : Detail.line) ->
+         String.length row.Detail.text < 10
+         || String.sub row.Detail.text 0 10 <> Printf.sprintf "%-10s" "Submitted:") rows);
+  let last = List.nth rows (List.length rows - 1) in
+  check_bool "the evidence paragraph still ends the block" true
+    (last.Detail.text = "  Observed result retained")
+
+(* A present-but-broken item fails the whole read: the projection is written
+   by the same server that wrote the proof, so half an item is a contract
+   break, not a formatting quirk. *)
+let test_confirmation_refuses_a_broken_original () =
+  let broken =
+    [ `Assoc [ "kind", `String "artifact"; "reference", `String "run.log" ] ] in
+  check_bool "a present-but-broken item fails the read" true
+    (Result.is_error
+       (Detail.decode_confirmation ~goal_id:"goal-1"
+          (confirmation_fixture ~submitted:broken ())))
 
 (* The server records a confirmation before it runs the caller's step and saves
    the phase. If the step refuses, or the phase cannot be saved, the goal stays
@@ -335,6 +419,12 @@ let () =
             test_confirmation_retains_the_displayed_proof
         ; Alcotest.test_case "confirmation reads in layers" `Quick
             test_confirmation_reads_in_layers
+        ; Alcotest.test_case "confirmation lists submitted originals" `Quick
+            test_confirmation_lists_submitted_originals
+        ; Alcotest.test_case "confirmation without originals draws no list" `Quick
+            test_confirmation_without_originals_draws_no_list
+        ; Alcotest.test_case "confirmation refuses a broken original" `Quick
+            test_confirmation_refuses_a_broken_original
         ; Alcotest.test_case "a recorded confirmation that did not complete can be confirmed again" `Quick
             test_a_recorded_confirmation_that_did_not_complete_can_be_confirmed_again
         ; Alcotest.test_case "confirmation refuses unrelated or changed proof" `Quick

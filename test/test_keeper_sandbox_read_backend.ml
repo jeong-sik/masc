@@ -1822,6 +1822,46 @@ let test_each_keeper_gets_its_own_policy_network () =
   Alcotest.(check bool) "and not to spruce's" false
     (String_util.contains_substring (args_for "alder") (name "spruce"))
 
+let apple_policy_network_name_valid name =
+  let length = String.length name in
+  let is_lower_alnum = function
+    | 'a' .. 'z' | '0' .. '9' -> true
+    | _ -> false
+  in
+  let is_interior c =
+    is_lower_alnum c || Char.equal c '.' || Char.equal c '-' || Char.equal c '_'
+  in
+  let rec interior_valid index =
+    index >= length - 1 || (is_interior name.[index] && interior_valid (index + 1))
+  in
+  length > 0
+  && length <= 63
+  && is_lower_alnum name.[0]
+  && is_lower_alnum name.[length - 1]
+  && interior_valid 1
+;;
+
+let test_policy_network_names_fit_apple_and_preserve_owner_identity () =
+  let name keeper = Masc.Keeper_sandbox_microvm.policy_network_name ~keeper_name:keeper in
+  Alcotest.(check string) "an already-valid name is preserved"
+    "masc-egress-policy-probe" (name "probe");
+  let long_a = String.make 128 'a' in
+  let long_b = String.make 127 'a' ^ "b" in
+  let digest_shaped = "foo-0123456789abcdef0123456789abcdef" in
+  List.iter
+    (fun keeper ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%S produces an Apple-valid network name" keeper)
+         true
+         (apple_policy_network_name_valid (name keeper)))
+    [ "Foo"; "foo"; String.make 45 'a'; long_a; "trailing-"; "trailing."; "trailing_"; digest_shaped ];
+  Alcotest.(check bool) "case-distinct keepers keep distinct networks" false
+    (String.equal (name "Foo") (name "foo"));
+  Alcotest.(check bool) "long names with a shared prefix stay distinct" false
+    (String.equal (name long_a) (name long_b));
+  Alcotest.(check bool) "a digest-shaped name cannot impersonate a hashed owner" false
+    (String.equal (name digest_shaped) ("masc-egress-policy-" ^ digest_shaped))
+
 (* The gateway is whatever container assigned the network, read rather than
    assumed: a compiled-in address is right until a host has a network on that
    subnet already. *)
@@ -3210,6 +3250,8 @@ let run_tests ~clock () =
             test_the_gateway_is_read_from_the_network;
           Alcotest.test_case "each keeper gets its own policy network" `Quick
             test_each_keeper_gets_its_own_policy_network;
+          Alcotest.test_case "policy names fit Apple and preserve owner identity" `Quick
+            test_policy_network_names_fit_apple_and_preserve_owner_identity;
           Alcotest.test_case "docker nofile args follow config" `Quick
             test_docker_nofile_args_follow_config;
           Alcotest.test_case "docker MASC config binding pins paths" `Quick

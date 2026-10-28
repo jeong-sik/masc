@@ -142,7 +142,7 @@ L3 을 한 PR 로 쓰지 않고 아래로 나눠 L2(#46568) 위에 쌓는다.
 
 **L3d 복구가 지켜야 할 조건.** 리뷰에서 나온 조건이다. #46607 이 아래 "맞춘 방법"으로 지킨다.
 
-- 재시작해 사슬을 다시 먹일 때는 처음의 `transaction_id` 와 초기 `Memory_plan` snapshot 을 복원해 같은 기계에서 시작한다. 현재 Memory 를 새 anchor 로 잡거나 새 ID 를 만들면 같은 단계 결과여도 질문이나 program 이 달라질 수 있다. 최초 사슬에서 이 두 값을 어떻게 내구성 있게 보존할지는 아래 `current` 와 함께 L3d 에서 정한다.
+- 재시작해 사슬을 다시 먹일 때는 처음의 `transaction_id` 와 초기 `Memory_plan` snapshot 을 복원해 같은 기계에서 시작한다. 현재 Memory 를 새 anchor 로 잡거나 새 ID 를 만들면 같은 단계 결과여도 질문이나 program 이 달라질 수 있다. 최초 사슬에서 이 두 값은 첫 단계 요청에 저장해 보존한다. 시작 `current` 는 아래 "L3d 에서 정한 것"에 있다.
 - 크기 거절로 만든 `unreadable` hole 은 처음 만든 동일한 값을 복원해 먹인다. 성공한 단계는 원래 `run_id` 와 gate 판정을 보존해 `durable_memory_step` 에 넘긴다. 복구 시점의 Memory 로 gate 를 다시 판정하거나 새 ID 를 만들지 않는다.
 - 사슬의 각 결과가 현재 기계의 질문에 속하는지 request ID·position 과 질문 내용으로 확인하고, 이미 반영한 결과를 다음 질문에 다시 먹이지 않는다. 같은 position 의 다른 질문도 구분해야 한다. `matches_question` 은 단계 request 를 대조하는 입구이고 결과 재생의 중복 방어 자체는 아니다.
 - 복구 시험에는 초기 anchor 가 바뀐 재시작, hole 값 보존, gate 판정 이후 Memory 가 달라진 재시작, 중복 결과와 다른 position·질문의 결과를 넣는다. 같은 근거로 복구할 때 원래 질문과 program 을 얻고, 맞지 않는 근거는 거절하는지 확인한다.
@@ -158,7 +158,7 @@ L3 을 한 PR 로 쓰지 않고 아래로 나눠 L2(#46568) 위에 쌓는다.
 L3d 에서 정한 것.
 
 - **served slot.** `Machine.answered` 의 `served_by` 는 선택 인자다. 슬롯 이름(`Runtime.served_slot`: API 슬롯 또는 CLI 슬롯, id 공간이 서로 다르다)이 있는 곳은 Runtime 경로뿐이고, 읽는 쪽도 Runtime 경로의 `queue_refresh` 뿐이다. durable 답은 호스트가 보증할 슬롯이 없다. 사슬은 이 값을 넣지 않는다. 지어낸 값을 넣으면 사슬이 거짓 근거를 갖는다(#46607).
-- **시작 `current`.** 사슬의 첫 단계가 시작 facts 를 입력에 담는다. 재시작한 구동은 호출자가 준 값을 버리고 첫 단계에서 읽는다. 처음 사슬을 시작할 때의 값은 범위 original 입력의 `current` 다(L3e). `Memory_plan.create_over` 가 facts 로 시작한다(#46607).
+- **시작 `current`.** 사슬의 첫 단계가 시작 facts 를 입력에 담는다. 재시작한 구동은 호출자가 준 값을 버리고 첫 단계에서 읽는다. 처음 사슬을 시작할 때의 값은 그 시점에 잡은 Memory 다. 범위 original 입력의 `current` 가 아니다(3.9 의 7번). 이 값은 첫 단계 요청에 저장되어 재시작이 같은 값에서 이어진다. `Memory_plan.create_over` 가 facts 로 시작한다(#46607).
 - **host 가 단계를 알아본다.** 요청 ID 분류를 `Keeper_librarian_request_namespace` 하나로 합쳐서, 새 종류가 두 곳 모두 컴파일 오류로 드러난다. host 의 Exact 권한 검사는 단계 요청을 record 하나로 복원해 답을 도메인 검증한다. wake 는 단계 결과 알림에서 단계의 Keeper 를 찾는다(#46596).
 - **gate 저널은 단계마다 돈다.** 단계 하나는 답 하나와 gate 저널 하나다. 결정은 gate 를 거친 뒤에만 `memory_step` 이 되어 program 에 들어간다. Runtime 바닥도 단계마다 gate 를 거친다(`Runtime.infer_memory_step`). 합친 program 을 gate 에 다시 보내지 않는다(#46607).
 

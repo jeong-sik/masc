@@ -166,7 +166,7 @@ let answer output =
       | _ -> Error (Unreadable "ego-browser nodejs answered outside its answer frame")
 
 type spaces_failure = Spaces_failed of string | Spaces_malformed of string
-let named_spaces ~space output =
+let matching_spaces ~space output =
   let* value = match answer output with
     | Ok value -> Ok value
     (* ego threw inside the frame, for one that could not reach ego lite. *)
@@ -177,7 +177,10 @@ let named_spaces ~space output =
     | `Assoc _ as listed ->
       (match field "spaceId" listed, field "name" listed, field "ownership" listed with
        | Some (`Int space_id), Some (`String name), Some (`String wire) ->
-         if not (String.equal name space) then Ok None
+         let matches=match space with
+           | Browser_configuration.Named_space wanted -> String.equal name wanted
+           | Existing_space id -> space_id=id in
+         if not matches then Ok None
          else (match space_owner_of_wire wire with
           | Some owner -> Ok (Some (space_id, owner))
           | None -> Error (Spaces_malformed (Printf.sprintf "ego named the owner of task space %d %S, which masc does not know" space_id wire)))
@@ -213,8 +216,9 @@ let ask t ~step ~args body =
   run_step t ~window_s:read_window_s ~step ~args body |> Result.map_error step_failure_message
 
 let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloads =
-  let* () = if String.trim space = "" then Error "the ego task space needs a name" else Ok () in
-  let* opened = asked run ~window_s:read_window_s ~step:"space.open" ~space:(str space) ~holder:Either_holds ~args:`Null
+  let* () = Browser_configuration.validate_ego_space space in
+  let reference=match space with Browser_configuration.Named_space name -> str name | Existing_space id -> `Int id in
+  let* opened = asked run ~window_s:read_window_s ~step:"space.open" ~space:reference ~holder:Either_holds ~args:`Null
       "  emit({ok: true, value: {spaceId: task.spaceId, name: task.name, ownership: task.ownership}});"
     |> Result.map_error step_failure_message in
   (* A space the agent handed to the operator is still the agent's: a
@@ -226,6 +230,9 @@ let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloa
   let* id=Option.to_result ~none:"ego answered a Space without its ID" (List.assoc_opt "spaceId" fields) in
   let* name=Option.to_result ~none:"ego answered a Space without its name" (List.assoc_opt "name" fields) in
   let* bound_space=Browser_lane.ego_space_of_json (obj ["id",id;"name",name]) in
+  let* ()=match space with
+    | Browser_configuration.Existing_space id when id<>bound_space.id -> Error "ego answered a different Space ID; no replacement or fallback is permitted"
+    | Existing_space _|Named_space _ -> Ok () in
   match List.assoc_opt "ownership" fields with
   | Some (`String ownership) ->
     (match space_owner_of_wire ownership with
@@ -234,7 +241,7 @@ let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloa
          uploads = Browser_lane.Upload_lease.create_owner ();
          input_state=Released; pages=[]; next_tab=0; captures=0}
      | Some Operator_owner | None ->
-       Error (Printf.sprintf "ego task space %S belongs to %s, not to an agent" space ownership))
+       Error (Printf.sprintf "ego task space %s belongs to %s, not to an agent" (Yojson.Safe.to_string reference) ownership))
   | _ -> Error "ego answered the task space without its owner"
 
 (* The space's end closes its pages, so the files they were given are no
@@ -1445,7 +1452,9 @@ let manage_tab t ~tab_id operation =
       | Adopt requested,Unmanaged target_id,{label=Some label;target_id=observed;opened_by=Unknown_origin}
         when target_id=observed && (match requested with None -> true | Some requested -> requested=label) -> Ok (Managed label)
       | Release,Managed _,{label=None;target_id;opened_by=Unknown_origin} -> Ok (Unmanaged target_id)
-      | (Adopt _|Release),(Managed _|Unmanaged _),_ -> Error (Live.Outcome_unknown ("invalid native Page management observation; " ^ unknown)) in
+      | (Adopt _|Release),(Managed _|Unmanaged _),
+          {label=(None|Some _);opened_by=(Agent_created|Unknown_origin);_} ->
+        Error (Live.Outcome_unknown ("invalid native Page management observation; " ^ unknown)) in
     t.pages <- List.map (fun (page,id) -> (if id=tab_id then next else page),id) t.pages;
     Ok (obj ["action",str action;"tabId",`Int tab_id;"spaceId",`Int t.space.id;
       "egoPage",Browser_surface.ego_page_to_json provenance])

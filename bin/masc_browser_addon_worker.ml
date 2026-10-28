@@ -1,11 +1,12 @@
 let () =
   let socket = ref None and incarnation = ref None and bound = ref None and backend = ref None and models = ref false
-    and live_ego_command = ref None and live_ego_space = ref None in
+    and live_ego_command = ref None and live_ego_space = ref None and live_ego_space_id = ref None in
   Arg.parse [
     "--backend",Arg.String (fun value -> backend:=Some value),
       "The one browser source this worker serves: " ^ Browser_lane.Backend.expected;
     "--live-ego-command",Arg.String (fun value -> live_ego_command:=Some value),"Serve an ego lite task space with this ego-browser";
     "--live-ego-space",Arg.String (fun value -> live_ego_space:=Some value),"The ego lite task space to serve";
+    "--live-ego-space-id",Arg.Int (fun value -> live_ego_space_id:=Some value),"An existing ego lite Space ID to resume exactly";
     "--models",Arg.Set models,"Attach the host-selected model request broker";
     "--socket",Arg.String (fun value -> socket:=Some value),"Host-selected private Unix socket";
     "--incarnation",Arg.String (fun value -> incarnation:=Some value),"Host-selected worker UUID";
@@ -17,12 +18,17 @@ let () =
   let backend = match Option.map Browser_lane.Backend.of_wire !backend with
     | Some (Some backend) -> backend
     | Some None | None -> raise (Arg.Bad ("--backend is required, one of " ^ Browser_lane.Backend.expected)) in
-  let live_ego = match backend,!live_ego_command,!live_ego_space with
+  let ego_reference=match !live_ego_space,!live_ego_space_id with
+    | Some name,None -> Some (Browser_configuration.Named_space name)
+    | None,Some id -> Some (Browser_configuration.Existing_space id)
+    | None,None -> None
+    | Some _,Some _ -> raise (Arg.Bad "--live-ego-space and --live-ego-space-id are mutually exclusive") in
+  let live_ego = match backend,!live_ego_command,ego_reference with
     | Browser_lane.Backend.Ego,Some command,Some space -> Some {Browser_configuration.command;space}
-    | Browser_lane.Backend.Ego,_,_ -> raise (Arg.Bad "the ego source needs --live-ego-command and --live-ego-space")
+    | Browser_lane.Backend.Ego,_,_ -> raise (Arg.Bad "the ego source needs --live-ego-command and one Space reference")
     | Browser_lane.Backend.(Automation|Stagehand|Owned_firefox|External_host),None,None -> None
     | Browser_lane.Backend.(Automation|Stagehand|Owned_firefox|External_host),_,_ ->
-      raise (Arg.Bad "--live-ego-command and --live-ego-space belong to the ego source") in
+      raise (Arg.Bad "--live-ego-command and the Space reference belong to the ego source") in
   (* The browsers that read upload copies and write downloads are the owned
      Gecko and ego lite; the other sources get neither broker. *)
   let transfers = match backend with

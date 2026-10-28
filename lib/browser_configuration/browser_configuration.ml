@@ -4,7 +4,14 @@ type stagehand = { chrome : string; extension : string; profile : string option 
 [@@deriving show, eq]
 type live_bidi = { firefox : string; profile : string; port : int }
 [@@deriving show, eq]
-type live_ego = { command : string; space : string }
+type ego_space = Named_space of string | Existing_space of int
+[@@deriving show, eq]
+let validate_ego_space = function
+  | Named_space name when String.trim name<>"" -> Ok ()
+  | Existing_space id when id>=0 && Int64.of_int id<=9007199254740991L -> Ok ()
+  | Named_space _|Existing_space _ ->
+      Error "must be a non-empty task space name or a nonnegative JavaScript-safe Space ID"
+type live_ego = { command : string; space : ego_space }
 [@@deriving show, eq]
 type t = {
   automation : automation option;
@@ -94,14 +101,21 @@ let parse_live_bidi ~path = function
 let space ~path entries =
   match List.assoc_opt "space" entries with
   | None -> Ok None
-  | Some (Otoml.TomlString value) when String.trim value <> "" -> Ok (Some value)
+  | Some (Otoml.TomlString value) ->
+      let space=Named_space value in
+      validate_ego_space space |> Result.map (fun () -> Some space)
+      |> Result.map_error (fun detail -> path ^ ".space " ^ detail)
+  | Some (Otoml.TomlInteger value) ->
+      let space=Existing_space value in
+      validate_ego_space space |> Result.map (fun () -> Some space)
+      |> Result.map_error (fun detail -> path ^ ".space " ^ detail)
   | Some
       Otoml.(
-        TomlString _ | TomlInteger _ | TomlFloat _ | TomlBoolean _
+        TomlFloat _ | TomlBoolean _
         | TomlOffsetDateTime _ | TomlLocalDateTime _ | TomlLocalDate _
         | TomlLocalTime _ | TomlArray _ | TomlTable _ | TomlInlineTable _
         | TomlTableArray _) ->
-    Error (path ^ ".space must be a non-empty task space name")
+    Error (path ^ ".space must be a non-empty task space name or a nonnegative JavaScript-safe Space ID")
 
 (* A table that is there names an ego-browser to run, so both keys are needed. *)
 let parse_live_ego ~path = function

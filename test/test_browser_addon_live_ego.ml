@@ -14,7 +14,7 @@ let configuration text = Browser_configuration.parse (Otoml.Parser.from_string t
 let test_the_table_names_a_command_and_a_space () =
   (match configuration "[browser.live.ego]\ncommand = \"/opt/ego-browser\"\nspace = \"masc\"\n" with
    | Ok {Browser_configuration.live_ego = Some {command; space}; _} ->
-     check string "command" "/opt/ego-browser" command; check string "space" "masc" space
+     check string "command" "/opt/ego-browser" command; check bool "space name" true (space=Browser_configuration.Named_space "masc")
    | Ok _ -> fail "the ego table was not read"
    | Error detail -> fail detail);
   (match configuration "[browser.live]\n" with
@@ -30,11 +30,20 @@ let test_the_table_names_a_command_and_a_space () =
       "no space", "[browser.live.ego]\ncommand = \"/opt/ego-browser\"\n",
       "browser.live.ego.space is required when the table is configured";
       "a blank space", "[browser.live.ego]\ncommand = \"/opt/ego-browser\"\nspace = \" \"\n",
-      "browser.live.ego.space must be a non-empty task space name";
+      "browser.live.ego.space must be a non-empty task space name or a nonnegative JavaScript-safe Space ID";
       "an unknown key", "[browser.live.ego]\ncommand = \"/opt/ego-browser\"\nspace = \"masc\"\nprofile = \"x\"\n",
       "browser.live.ego.profile is not a supported setting" ];
   check (list string) "the worker's arguments" ["--live-ego-command";"/opt/ego-browser";"--live-ego-space";"masc"]
-    (Ego.arguments {command="/opt/ego-browser";space="masc"})
+    (Ego.arguments {command="/opt/ego-browser";space=Browser_configuration.Named_space "masc"});
+  (match configuration "[browser.live.ego]\ncommand=\"/opt/ego-browser\"\nspace=32\n" with
+   | Ok {Browser_configuration.live_ego=Some table;_} ->
+     check bool "an integer pins an existing Space" true (table.space=Browser_configuration.Existing_space 32);
+     check (list string) "ID is never passed through the name flag"
+       ["--live-ego-command";"/opt/ego-browser";"--live-ego-space-id";"32"] (Ego.arguments table)
+   | Ok _|Error _ -> fail "numeric Space reference rejected");
+  List.iter (fun reference -> check bool "invalid numeric references cannot start the worker" true
+    (Result.is_error (configuration ("[browser.live.ego]\ncommand=\"/opt/ego-browser\"\nspace=" ^ reference ^ "\n"))))
+    ["-1";"9007199254740992";"32.0";"true"]
 
 let failure_name = function
   | Peer.Exited {code; _} -> Printf.sprintf "exited %d" code
@@ -429,7 +438,7 @@ let scenario mode =
         check bool "retirement ends the task space" true (dispatch W.Retire = W.Receipt);
         check bool "retirement answers after the space ended" true (finished ());
         check bool "no client is left" true (B.connected_clients () = [])) in
-      let failure = try Ego.run ~env ~owner ~downloads:(Broker.downloads_directory ~directory:root) {command; space="masc"} work; None with
+      let failure = try Ego.run ~env ~owner ~downloads:(Broker.downloads_directory ~directory:root) {command; space=Browser_configuration.Named_space "masc"} work; None with
         | Invalid_argument detail | Sys_error detail -> Some detail in
       (match mode, failure with
        | ("normal" | "late" | "retire"), None -> ()

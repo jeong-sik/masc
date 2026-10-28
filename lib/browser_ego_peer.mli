@@ -59,7 +59,8 @@ type spaces_failure = Spaces_failed of string | Spaces_malformed of string
 (** The spaces called [space] in what {!task_spaces_script} wrote, compared
     exactly. A row without its number, name or owner, and an owner of a space
     of that name that is not a {!space_owner}, are errors, not guesses. *)
-val named_spaces : space:string -> string -> ((int * space_owner) list, spaces_failure) result
+val matching_spaces : space:Browser_configuration.ego_space -> string ->
+  ((int * space_owner) list, spaces_failure) result
 
 type t
 
@@ -70,7 +71,9 @@ type t
 type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) result }
 
 (** Opens the agent task space called [space], or resumes it when this
-    space already exists, and holds it from then on by the number ego gave
+    space already exists, or resumes the exact configured numeric Space ID.
+    A missing ID is never retried by name or replaced with another Space.
+    Holds it from then on by the number ego gave
     it. A space of the same name that the operator owns is refused by ego.
     [version] is ego lite's version. Screenshots are written under
     [capture_directory], which this process owns, and removed once read.
@@ -83,7 +86,7 @@ val open_space
   :  run:runner
   -> run_native:(string -> (string, run_failure) result)
   -> now:(unit -> float)
-  -> space:string
+  -> space:Browser_configuration.ego_space
   -> version:string
   -> capture_directory:string
   -> downloads:downloads

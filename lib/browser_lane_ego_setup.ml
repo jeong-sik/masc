@@ -26,13 +26,18 @@ type error =
   | Ego_unusable of { path : string; detail : string }
   | Ego_unstartable of { path : string; detail : string }
   | Table_refused of string
-  | Space_held_by_operator of { space : string; space_id : int }
-  | Spaces_unanswered of { path : string; space : string; detail : string }
-  | Spaces_unreadable of { path : string; space : string; detail : string }
+  | Space_held_by_operator of { space : Browser_configuration.ego_space; space_id : int }
+  | Spaces_unanswered of { path : string; space : Browser_configuration.ego_space; detail : string }
+  | Spaces_unreadable of { path : string; space : Browser_configuration.ego_space; detail : string }
   | Configuration_changed
   | Not_written of string
 
 let table_path = "browser.live.ego"
+(* How a message names the configured Space: a name quoted, an exact ID as a
+   number, since a quoted number is a name (RFC-browser-live-ego). *)
+let space_label = function
+  | Browser_configuration.Named_space name -> Printf.sprintf "%S" name
+  | Existing_space id -> Printf.sprintf "id %d" id
 
 let error_message = function
   | Configuration_missing path ->
@@ -62,20 +67,20 @@ let error_message = function
       reason
   | Space_held_by_operator { space; space_id } ->
     Printf.sprintf
-      "The ego task space %S (id %d) belongs to the operator, and masc does not take over a \
+      "The ego task space %s (id %d) belongs to the operator, and masc does not take over a \
        space the operator made. Name another with --ego-space."
-      space space_id
+      (space_label space) space_id
   | Spaces_unanswered { path; space; detail } ->
     Printf.sprintf
       "The ego-browser at %s did not list ego lite's task spaces, so whether the operator \
-       holds %S is unknown: %s. Open ego lite and run this again."
-      path space detail
+       holds %s is unknown: %s. Open ego lite and run this again."
+      path (space_label space) detail
   | Spaces_unreadable { path; space; detail } ->
     Printf.sprintf
       "The ego-browser at %s answered the task space list in a form masc does not read, so \
        whether the operator holds %S is unknown: %s. Running this again will not help until \
        masc and ego lite agree; update the one that is older."
-      path space detail
+      path (space_label space) detail
   | Configuration_changed ->
     Printf.sprintf "runtime.toml changed while this ran, so [%s] was not written. Run this again."
       table_path
@@ -92,7 +97,10 @@ let set_key ~(table : Browser_configuration.live_ego) text = function
   | Command ->
     Toml_line_editor.edit_table_scalar text ~path:table_path ~key:"command" ~value:(Some table.command)
   | Space ->
-    Toml_line_editor.edit_table_scalar text ~path:table_path ~key:"space" ~value:(Some table.space)
+    (match table.space with
+     | Browser_configuration.Named_space name ->
+       Toml_line_editor.edit_table_scalar text ~path:table_path ~key:"space" ~value:(Some name)
+     | Existing_space id -> Toml_line_editor.edit_table_int text ~path:table_path ~key:"space" ~value:id)
 
 let edit_text ~table ~set text = List.fold_left (set_key ~table) text set
 
@@ -173,7 +181,7 @@ let space_is_free ~(table : Browser_configuration.live_ego) =
      (* [run_argv_with_status_split_or_refusal] synthesises 124 on its own timeout. *)
      | Unix.WEXITED 124 -> failed Browser_ego_peer.Timed_out
      | Unix.WEXITED 0 ->
-       (match Browser_ego_peer.named_spaces ~space:table.space output with
+       (match Browser_ego_peer.matching_spaces ~space:table.space output with
         | Error (Browser_ego_peer.Spaces_failed detail) -> unanswered detail
         | Error (Browser_ego_peer.Spaces_malformed detail) ->
           Error (Spaces_unreadable { path = table.command; space = table.space; detail })
@@ -203,16 +211,16 @@ let decide ~find_ego request = function
       | Some path -> let* versions = named path in Ok (path, versions)
       | None -> discovered ~find_ego
     in
-    let space = Option.value request.space ~default:default_space in
+    let space = Browser_configuration.Named_space (Option.value request.space ~default:default_space) in
     Ok ({ Browser_configuration.command; space }, [ Command; Space ], Created, Some versions)
   | Some (current : Browser_configuration.live_ego) ->
     let command = Option.value request.command ~default:current.command in
-    let space = Option.value request.space ~default:current.space in
+    let space = match request.space with None -> current.space | Some name -> Browser_configuration.Named_space name in
     let set =
       List.filter_map
         Fun.id
         [ (if String.equal command current.command then None else Some Command)
-        ; (if String.equal space current.space then None else Some Space)
+        ; (if Browser_configuration.equal_ego_space space current.space then None else Some Space)
         ]
     in
     let* versions = if List.mem Command set then Result.map Option.some (named command) else Ok None in

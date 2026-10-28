@@ -17,7 +17,9 @@ type request =
         (** An absolute path. Without one, the first [ego-browser] that
             answers [--version]
             ({!Browser_runtime_dependencies.candidates}). *)
-  ; space : string option  (** Without one, {!default_space}. *)
+  ; space : string option
+        (** A name when provided. Without one, keep the existing name or
+            numeric ID; a new table uses {!default_space}. *)
   }
 
 (** The task space a new table names. *)
@@ -51,14 +53,14 @@ type error =
       (** The text with the table would not load, or loads as another table.
           The sentence is the loader's, or says the table is written in a form
           this command cannot edit. *)
-  | Space_held_by_operator of { space : string; space_id : int }
+  | Space_held_by_operator of { space : Browser_configuration.ego_space; space_id : int }
       (** A task space of the name the table would write is the
           operator's: ego would refuse the worker that opens it by that
           name, and masc does not take it over. *)
-  | Spaces_unanswered of { path : string; space : string; detail : string }
+  | Spaces_unanswered of { path : string; space : Browser_configuration.ego_space; detail : string }
       (** The ego-browser at [path] did not list ego's task spaces, so
           whether the operator holds [space] is unknown. *)
-  | Spaces_unreadable of { path : string; space : string; detail : string }
+  | Spaces_unreadable of { path : string; space : Browser_configuration.ego_space; detail : string }
       (** It listed them in a form masc does not read. *)
   | Configuration_changed
       (** [runtime.toml] changed after the plan was made, or, for a plan

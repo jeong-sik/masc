@@ -38,6 +38,15 @@ val error_to_string : error -> string
 type activation = Requested | Held of error
 val activation : t -> activation
 val original : t -> P.original
+val storage : t -> Eio.Fs.dir_ty Eio.Path.t
+(** The same original capability owned by the job Switch, for the trusted
+    supervisor's output/result publication. Never reopen its pathname. *)
+val with_storage_publication : t -> (unit -> 'a) -> 'a
+(** Serialize bounded metadata publications under this actual owner's storage,
+    including publication-recovery setup. Acquisition and the callback remain
+    cancellable; exceptions unlock without poisoning future operations. Fs owns
+    transaction recovery, so there is no partial shared in-memory transaction.
+    Never hold this lock across source reads, capture, hashing or EOF waits. *)
 val rendezvous_leaf : string
 val activation_leaf : string
 

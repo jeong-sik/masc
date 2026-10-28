@@ -123,6 +123,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 
 - 모드 사건용 레코드 종류 `Mode_event`를 `Authz_record.Kind`에 더하고 작성자는 `Local_operator`로 정한다(`Authz_record.admits`가 컴파일을 멈춘다). 설계 §6.3은 `Fresh_bootstrap`만 `Local_operator`에게 주었고 `off`와 `reactivate`의 작성자는 F3이 정한다. 본문은 `event`와 `workspace_id` 두 멤버이고 이 순서가 아니면 거절한다. `event`는 `fresh_bootstrap`, `off`, `reactivate` 중 하나이고 외부 저장소의 `Change.Mode`와 같은 낱말이다. 모듈 `Authz_mode_event`가 본문을 읽고 쓴다. 사건이 만드는 모드(`Multi_account`, `off`)는 부팅을 판정하는 A2가 정한다. 설계 §8.4는 `Fresh_bootstrap`이 빈 Recovery_manifest와 초기 generation도 같은 append로 확인한다고 하는데, 그 둘은 아직 없는 층의 것이라 본문에 넣지 않는다. 필드가 늘면 하드 컷이다.
 - `Fresh_bootstrap`이 `Intent_pending`을 쓴 뒤 죽은 설치는 판정 3으로 닫고 `Fresh_bootstrap`을 다시 허용한다(설계 §5.1의 `없음`).
+- `Fresh_bootstrap`의 `Intent_pending`은 `previous_record_hash`로 genesis를 적고, 쓰기 전에 `authz.jsonl`이 비었는지 본다(설계 §8.4의 빈 `authz.jsonl`). 외부 저장소 파일의 규칙(B2a)은 이 값을 보지 않는다. `Fresh_bootstrap`을 처음 쓰는 층(B2d)이 보지 않으면, 비어 있지 않은 로그 위의 `Fresh_bootstrap` intent가 판정 3으로 닫혀 외부 고수위 `없음`으로 읽힌다.
 - 외부 저장소는 끝이 잘린 마지막 항목(마지막 줄바꿈 뒤의 바이트)을 열 때(판정 1~5를 돌리기 전에) 잘라 내고, 잘라 낸 바이트 수와 남긴 바이트 수를 경고로 남긴다(B1b의 `Cut` 경고와 같은 모양).
 - `Authz_log`가 멈추면(`Authz_log.stopped`) 새 쓰기를 거절하고 `AuthorizationUncertain`으로 다룬다.
 - 설치 기록(설계 §8.4)은 `$XDG_CONFIG_HOME/masc/`(없으면 `~/.config/masc/`) 아래에 있고, 파일 이름은 canonical base path(`Unix.realpath`)의 해시로 정한다. 같은 OS 사용자가 base path를 둘 쓰면 파일도 둘이다. 기록 안에도 canonical base path와 외부 저장소의 경로를 적고, 읽을 때 canonical base path를 대조한다(다르면 읽지 못함). 설정 디렉터리를 알 수 없으면 설치 기록이 없는 것으로 읽고, `Fresh_bootstrap`은 기록을 쓸 수 없어 거부한다.
@@ -141,6 +142,19 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - 한 줄의 바이트는 `Authz_external_store`가 직접 쓴다(`Authz_record`와 같다). 멤버 순서가 정해져 있고, 읽은 줄이 `to_line`이 쓰는 줄과 다르면 거절한다. `append`는 쓰기 전에 줄을 되읽어서 쓰려던 항목과 같은지 비교한다(`Authz_jsonl_file`의 `equal_record`). principal을 쓰는 방법은 `Authz_record`와 같은 것을 쓴다.
 - epoch 최고값과 `credential_generation` 항목은 이 층이 정하지 않는다. 설계 §8.2의 `Intent_pending` 필드에 epoch 값이 없고, epoch를 올리는 사건을 쓰는 코드는 B3 전에 없다. 그 사건을 처음 쓰는 층(B3의 principal 사건)이 항목과 비교 판정을 같이 더한다. 그전까지 외부 고수위의 `맞음`은 마지막 `Committed`가 replay에 있는지와 대기 중인 intent의 판정(B2c)으로 정한다. 하드 컷이라 이전 형식을 읽는 코드는 두지 않는다.
 - 시험은 줄의 바이트(모든 사건의 낱말 포함), 모든 `change`의 읽고 쓰기와 다시 열었을 때의 상태, 규칙을 어기는 파일과 줄(순서 규칙과 부트스트랩 규칙), 끝이 잘린 마지막 항목의 자름을 본다.
+
+**B2c 범위** (외부 고수위 판정)
+
+- 판정 1~5(설계 §8.2)와 외부 고수위 값(§5.1)을 순수 함수로 만든다. 입력은 외부 저장소의 상태(`Authz_external_store.State.t`)와 `authz.jsonl` 레코드의 열이고, 출력은 둘이다. 하나는 대기 중인 intent를 닫는 일(`settle`: `Promote`·`Abort`, 닫지 못하면 그 사유)이고, 다른 하나는 값(`Absent`·`Matches`·`Mismatch`)이다. §5.1이 판정을 먼저 돌리고 값을 읽으므로 둘은 서로 기다리지 않는다. 값이 `Mismatch`여도 `settle`은 같은 답을 준다. 판정 3이 서면 §8.3의 차단을 바로 세우기 때문이다. 이 층은 파일을 열지도 쓰지도 않는다. 쓰기와 그 성공 여부는 값을 바꾸지 않는다(§5.1). `Mismatch`일 때 어떤 쓰기를 하는지는 위 층이 정한다.
+- 로그에서 읽는 사실은 셋이다. 마지막 레코드의 해시, 대기 중인 intent의 `previous_record_hash` 바로 뒤 레코드의 해시, 마지막 `Committed`의 해시가 로그에 있는지. 해시 둘을 먼저 알아야 해서 외부 저장소를 먼저 열고 그 상태로 `Probe`를 만든 뒤 `Authz_log.open_at_start`의 접기 함수로 레코드를 먹인다. 메모리는 로그 길이와 상관없이 일정하다.
+- 판정 2·3·5는 `previous_record_hash` 뒤 레코드로 가른다. 그 레코드가 intent가 적은 해시이면 판정 2(`Promote`)다. 다른 해시이면 판정 2·5의 `Digest_differs`이고 `AuthorizationUncertain` 사유다. 뒤 레코드가 없고 로그가 `previous_record_hash`에서 끝나면 판정 3(`Abort`)이다. 뒤 레코드가 없는데 로그가 다른 곳에서 끝나면 `previous_record_hash`가 로그에 없는 것이고 판정 5(`Intent_unplaced`)다. 설계는 "intended record와 일치하는 record"라고 적었다. 레코드 해시는 seq와 이전 해시를 덮으므로, 쓰는 쪽이 제대로 만든 intent라면 해시로 찾으나 자리로 찾으나 같은 레코드다. 이 층은 자리로 찾고, 둘이 갈리는 intent(digest가 그 자리에 설 수 없는 레코드의 해시)는 `Digest_differs`로 읽는다. 로그의 head가 그 사이 lease 같은 로그 전용 레코드로 앞서 가도 판정 2는 선다.
+- `Abort`는 `previous_record_hash` 뒤에 레코드가 없는 동안만 선다. 뒤에 레코드(lease 포함)가 붙으면 같은 intent가 `Digest_differs`가 되고 닫히지 않는다. 그래서 구역에 들어올 때마다, 무엇을 붙이기 전에 판정해야 한다(§8.2-1). 그 순서는 B3가 정한다.
+- 판정 4는 마지막 `Committed`의 해시가 로그에 없을 때다(`Commit_not_in_log`). 마지막 `Committed`는 쓰기 전에 저장소가 가진 것이고, 승격될 intent가 대신하지 않는다. 대기 중인 intent의 판정과 따로 보고 `Mismatch`는 사유를 모두 돌려준다(§5.1).
+- 값은 §5.1의 `없음`·`맞음`·`안 맞음`에 대응한다. `읽지 못함`은 외부 저장소를 열지 못한 오류에서 나오므로 이 층이 아니라 A2가 만든다. `없음`은 `Committed`가 없고 남은 intent가 없거나 `Abort`로 닫히는 `Fresh_bootstrap`뿐인 저장소다. 저장소 규칙(B2a)상 첫 `Committed` 전의 intent는 `Fresh_bootstrap`뿐이다. 로그가 그 intent를 얻었으면(`Promote`) 승격되는 intent는 `Committed`에 든다는 §5.1에 따라 `맞음`이다. `맞음`은 마지막 `Committed`가 로그에 있고 남은 intent가 풀린 것이다. 외부 고수위와 replay의 epoch 값을 맞추는 일은 epoch 값을 처음 기록하는 층(B3)이 더한다.
+- `settlement_entry`는 `Promote`·`Abort`가 외부 저장소에 쓸 항목(`Committed`, `Aborted_intent`)을 한 곳에서 만든다. 부팅과 구역 진입이 같은 항목을 쓰게 한다. 그 항목을 `apply`한 상태가 쓰기 뒤의 저장소이고, 승격된 `Fresh_bootstrap`의 workspace는 그 상태에서 읽는다.
+- `Authz_external_store.apply`(한 항목을 상태에 접고 어긴 규칙을 돌려주는 순수 함수)를 공개한다. 판정 시험이 파일 없이 저장소 상태를 만들고, 열 때의 접기 함수가 쓸 수 있다.
+- 이 층이 하지 않는 것: 같은 writer lock 구역 안에서 `Intent_pending` 쓰기, 레코드 append, `Committed` 갱신을 잇는 순서(§8.2-1)와, 구역에 들어올 때마다 남은 intent를 다시 판정하는 일. 구역 안에서 판정에 쓸 사실(뒤 레코드, head)을 어디서 얻는지는 접힌 상태(`Authz_state.t`)가 생기는 B3가 사건을 처음 쓰면서 정한다. 이 층의 `Probe`는 열 때의 재생에 쓴다. 한 묶음의 append(설계 §10.1)에서 intent가 어느 레코드를 적는지도 묶음을 쓰는 층이 정한다. 이 층은 `previous_record_hash` 뒤 첫 레코드를 본다.
+- 시험은 저장소 상태와 로그의 조합마다 값과 닫는 일을 고정한다(없음, 맞음, 안 맞음의 갈래마다 한 건). 마지막 `Committed`가 로그에 없는데 intent가 닫히는 경우, head가 앞서 간 경우, 이미 포기한 intent를 다시 판정하지 않는 것, 사유가 둘인 경우의 순서도 본다. 닫는 항목을 저장소가 받아 intent가 비는 것과, 진짜 `authz.jsonl`을 `Authz_log.open_at_start`로 열어 먹인 결과가 목록으로 먹인 결과와 같은 것(끝이 잘린 마지막 줄 포함)도 본다.
 
 **B3 범위**
 

@@ -186,7 +186,7 @@ type rules =
   | Recorded_rules
 
 let validate_durable_candidates_internal ~rules (waiting : waiting) events =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* pass = match pass_of waiting events with
     | Some pass -> Ok pass
     | None -> Error "settlement requires the confirmed Snapshot" in
@@ -241,7 +241,7 @@ let validate_durable_candidates (waiting : waiting) events =
   Result.map ignore (validate_durable_candidates_internal ~rules:Current_rules waiting events)
 
 let validate_settlement_under ~rules (waiting : waiting) events body =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let matches goal_id request_id verification_run_id =
     goal_id = waiting.goal_id && request_id = waiting.request_id
     && verification_run_id = waiting.verification_run_id in

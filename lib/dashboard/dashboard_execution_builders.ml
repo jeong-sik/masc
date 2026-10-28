@@ -206,7 +206,7 @@ let worker_state_of_agent
 
 let continuity_row_of_keeper ~(now_ts : float) keeper
   : (continuity_context, string) result =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let name = string_field "name" keeper in
   let status = string_field "status" keeper in
   let context_ratio =

@@ -96,7 +96,7 @@ let error_to_string = function
       reason
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let activity_observer : (unit -> Machine_configuration.activity) option Atomic.t = Atomic.make None
 let install_activity_observer observer = Atomic.set activity_observer observer
 let activity () = match Atomic.get activity_observer with

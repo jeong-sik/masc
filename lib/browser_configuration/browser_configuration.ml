@@ -25,7 +25,7 @@ let browser_table = Runtime_toml_namespace.(key Browser)
 let default_live_bidi_port = 9222
 let max_port = 65535
 let none = { automation = None; stagehand = None; live_bidi = None; live_ego = None }
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let table ~path ~keys = function
   | None -> Ok None

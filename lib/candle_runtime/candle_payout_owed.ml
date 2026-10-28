@@ -1,6 +1,6 @@
 (* See candle_payout_owed.mli. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let row ~at ~(goal : Goal_store.goal) ~(verdict : Goal_verification.verdict)
   ~(confirmation : Goal_verification.confirmation) ~passed_at =

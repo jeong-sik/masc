@@ -211,7 +211,7 @@ let directory_presence_of_stat path (stat : Unix.stats) =
 ;;
 
 let inspect_directory_result ~missing_is_empty path =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let inspected =
     match Unix.lstat path with
     | stat -> Ok (Some stat)
@@ -234,7 +234,7 @@ let inspect_directory_result ~missing_is_empty path =
 ;;
 
 let list_directory_result ~missing_is_empty path =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* presence = inspect_directory_result ~missing_is_empty path in
   match presence with
   | Directory_missing -> Ok []
@@ -262,7 +262,7 @@ let validate_layout_entries ~parent ~expected ~is_valid entries =
 ;;
 
 let list_month_dirs_result base_dir =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* entries = list_directory_result ~missing_is_empty:true base_dir in
   validate_layout_entries
     ~parent:base_dir
@@ -272,7 +272,7 @@ let list_month_dirs_result base_dir =
 ;;
 
 let list_day_files_result month_path =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let month_entry = Filename.basename month_path in
   let* year, month =
     match year_and_month_of_directory_name month_entry with
@@ -386,7 +386,7 @@ let same_file_identity left right =
 ;;
 
 let open_regular_input_result path =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* initial_stats = inspect_path_result path in
   match non_regular_file_kind_of_stats initial_stats with
   | Some kind -> Error (Non_regular_file { path; kind })
@@ -1031,7 +1031,7 @@ let read_recent_result ?(offset=0) t n =
   else if n <= 0
   then Ok []
   else
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let skip = ref offset in
     let collected = ref [] in
     let count = ref 0 in
@@ -1076,7 +1076,7 @@ let read_recent_result ?(offset=0) t n =
 ;;
 
 let find_latest_entry_result t f =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let rec visit_days month_path = function
     | [] -> Ok None
     | day :: rest ->
@@ -1173,7 +1173,7 @@ let iter_json_file_entries_result path f =
 ;;
 
 let iter_all_entries_result t f =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let rec iter_days month_path = function
     | [] -> Ok ()
     | day :: rest ->
@@ -1195,7 +1195,7 @@ let iter_all_entries_result t f =
 ;;
 
 let fold_range_file_paths_result t ~since ~until ~init ~f =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match parse_date since, parse_date until with
   | None, _ | _, None -> Error (Invalid_date_range { since; until })
   | Some (since_month, since_day), Some (until_month, until_day)
@@ -1628,7 +1628,7 @@ type 'a appended_read =
   | Cursor_invalidated
 
 let append_snapshot_result t ~since ~until =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* paths = range_day_file_paths_result t ~since ~until in
   let rec inspect acc = function
     | [] -> Ok (List.rev acc)
@@ -1717,7 +1717,7 @@ let fold_captured_entries_result channel ~path ~from ~until ~init ~f =
 ;;
 
 let fold_range_appended_result t ~since ~until ~cursor ~init ~f =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* snapshot = append_snapshot_result t ~since ~until in
   let previous = match cursor with Some cursor -> cursor | None -> [] in
   let invalidated =
@@ -1777,7 +1777,7 @@ let fold_range_appended_result t ~since ~until ~cursor ~init ~f =
 ;;
 
 let fold_file_appended_entries_result path ~cursor ~init ~f =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* captured = inspect_path_result path in
   let* () = match non_regular_file_kind_of_stats captured with
     | Some kind -> Error (Non_regular_file {path;kind}) | None -> Ok () in

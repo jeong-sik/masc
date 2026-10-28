@@ -70,7 +70,7 @@ let read_verdict_json (json : Yojson.Safe.t)
                     "schema_version 1 report field %S has the wrong JSON type"
                     name))
     in
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* all_passed =
       required "all_passed" (function `Bool b -> Some b | _ -> None)
     in

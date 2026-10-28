@@ -1,7 +1,7 @@
 (** Firefox native messaging host. stdout belongs exclusively to the framed
     protocol; operational diagnostics must never include tokens or page data. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* Mozilla limits host-to-browser messages to 1 MiB. Browser-to-host frames
    have a separate 8 MiB resource bound: this admits a 5 MiB Vision PNG after

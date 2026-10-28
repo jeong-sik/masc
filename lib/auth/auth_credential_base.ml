@@ -87,7 +87,7 @@ let credential_path_exists file =
 ;;
 
 let read_regular_auth_file_with_open ~open_file path =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* result = credential_read_result (fun () -> run_blocking_io (fun () ->
     (* Following a regular-file symlink remains supported. Nonblocking open
        prevents a replacement FIFO from waiting for a writer before fstat. *)
@@ -663,7 +663,7 @@ let credential_revocation_targets config agent_name =
       Error (System (System_error.IoError
         (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
     | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn))) in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let require_owner = function
     | None -> Ok ()
     | Some (`Assoc fields) ->
@@ -713,7 +713,7 @@ let credential_revocation_targets config agent_name =
 (** Delete using the caller's admitted workspace. The public wrapper and
     multi-effect transactions share this implementation. *)
 let delete_credential_in_transaction (Credential_transaction config) agent_name =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* targets = credential_revocation_targets config agent_name in
   try
     Fun.protect ~finally:(fun () -> !credential_cache_invalidator_ref config)
@@ -782,7 +782,7 @@ type credential_listing = {
 (* [Error] only when the directory itself could not be read: no file name is
    known then, so there is nothing to keep apart. *)
 let scan_credentials config : (credential_listing, masc_error) result =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let dir = agents_dir config in
   let* dir_exists = credential_path_exists dir in
   if not dir_exists
@@ -817,7 +817,7 @@ let scan_credentials config : (credential_listing, masc_error) result =
 
 
 let read_owned_credential_text config path =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   (* Prune holds the shared publisher transaction: a FIFO must never wait for
      a writer here. This existing reader opens nonblocking, verifies the real
      FD and no-follow path identity, closes it, and propagates cancellation. *)
@@ -887,7 +887,7 @@ let list_credential_results config =
     | Eio.Io _ as exn -> unreadable path (Printexc.to_string exn)
   in
   let read path =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* json = read_json path in
     match json with
     | `Assoc fields ->
@@ -957,7 +957,7 @@ let read_regular_credential_file path =
 type credential_leaf_policy = Owned_regular_only | Follow_regular_symlink
 
 let read_stored_credential ?(leaf_policy = Owned_regular_only) config name path =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* content = match leaf_policy with
     | Owned_regular_only -> read_owned_credential_text config path
     | Follow_regular_symlink -> read_regular_credential_file path in
@@ -982,7 +982,7 @@ let resolve_stored_credential ?(leaf_policy = Owned_regular_only) config name = 
   | Stored_credential credential -> Ok (Some credential)
   | Unresolved_credential -> Ok None
   | Stored_redirect target ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* present = credential_path_exists target in
     if not present then Ok None
     else
@@ -1000,7 +1000,7 @@ type credential_prune_snapshot =
   ; orphaned_redirects : credential_prune_retirement list }
 
 let credential_prune_authority config name stored (credential : agent_credential) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let refused detail = Error (System (System_error.ValidationError
       (Printf.sprintf "cannot prune %s: %s" name detail))) in
   let uuid_path id =
@@ -1033,7 +1033,7 @@ let credential_prune_authority config name stored (credential : agent_credential
    redirect must name its embedded UUID. Missing direct UUID payloads are
    distinguishable from an owned existing target. *)
 let credential_owned_uuid_target ?(leaf_policy = Owned_regular_only) config name stored (credential : agent_credential) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let refused detail = Error (System (System_error.ValidationError
       (Printf.sprintf "credential storage authority for %s: %s" name detail))) in
   let uuid_path id =
@@ -1077,7 +1077,7 @@ let credential_owned_uuid_target ?(leaf_policy = Owned_regular_only) config name
 (* A file-backed publisher must distinguish true absence from an unreadable
    name or UUID binding before it authorizes replacement or recreation. *)
 let current_credential_in_transaction (Credential_transaction config) name =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let refused detail = Error (System (System_error.ValidationError
       (Printf.sprintf "credential storage authority for %s: %s" name detail))) in
   let* present = credential_path_exists (credential_file config name) in
@@ -1095,7 +1095,7 @@ let current_credential_in_transaction (Credential_transaction config) name =
 ;;
 
 let raw_token_in_transaction (Credential_transaction config) name =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let path = raw_token_file config name in
   let* present = credential_path_exists path in
   if not present then Ok None
@@ -1145,7 +1145,7 @@ let observe_credential_publication config (expected : agent_credential) =
     | Ok true -> Published
     | Ok false -> Not_published
     | Error error -> Publication_unreadable error in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let raw_token = observe (fun () ->
     let path = raw_token_file config expected.agent_name in
     let* present = credential_path_exists path in
@@ -1166,7 +1166,7 @@ let observe_credential_publication config (expected : agent_credential) =
 
 let publish_file_backed_credential_in_transaction
     ((Credential_transaction config) as transaction) credential ~raw_token =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let saved_bytes path =
     let* present = credential_path_exists path in
     if present then read_regular_credential_file path |> Result.map Option.some
@@ -1217,7 +1217,7 @@ type credential_store_snapshot =
   ; aliases : (string * string * agent_credential) list }
 
 let credential_store_snapshot_in_transaction ?(leaf_policy = Owned_regular_only) (Credential_transaction config) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* files = credential_read_result (fun () -> read_dir (agents_dir config)) in
   let files = Array.to_list files |> List.filter (fun file -> Filename.check_suffix file ".json")
       |> List.sort String.compare in
@@ -1279,7 +1279,7 @@ let credential_store_snapshot_in_transaction ?(leaf_policy = Owned_regular_only)
 ;;
 
 let credential_owner_discovery_in_transaction (Credential_transaction config) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* files = credential_read_result (fun () -> read_dir (agents_dir config)) in
   let files = Array.to_list files |> List.filter (fun file -> Filename.check_suffix file ".json")
       |> List.sort String.compare in
@@ -1309,7 +1309,7 @@ let credential_owner_discovery_in_transaction (Credential_transaction config) =
 
 
 let list_current_credentials_in_transaction transaction =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* names, _orphans = credential_owner_discovery_in_transaction transaction in
   let rec collect credentials = function
     | [] -> Ok (List.rev credentials)
@@ -1330,7 +1330,7 @@ let list_current_credentials config =
 (* Prune adds deletion authority only after current-store discovery. Rotation
    uses the same current records without inheriting a deletion manifest. *)
 let credential_prune_snapshot_in_transaction ((Credential_transaction config) as transaction) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* snapshot = credential_store_snapshot_in_transaction transaction in
   let rec validate acc = function
     | [] -> Ok (List.rev acc)
@@ -1559,7 +1559,7 @@ let cached_credential_index ~key ~now ~stamp =
    found while any file was unreadable is not a mismatch: callers answer a read
    failure for it ([unreadable_credentials_error]). *)
 let credential_token_index config : (credential_index, masc_error) result =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let key = agents_dir config in
   let now = Time_compat.now () in
   let count_hit () =

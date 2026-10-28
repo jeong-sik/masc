@@ -88,7 +88,7 @@ let prepare_process ~base_path ~executable_path ~argv ~before_exec =
   match plan with
   | Keep_process -> Ok ()
   | Reexec_with_directory { ownership_root; directory } ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* () = before_exec () |> Result.map_error (fun error -> Handoff_failed error) in
     let* () = prepare_directory ~ownership_root directory in
     let environment = Array.append (Unix.environment ()) [| directory_key ^ "=" ^ directory |] in

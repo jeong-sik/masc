@@ -1,6 +1,6 @@
 (* See candle_candidates.mli. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type outcome =
   | Wrote_candidates of { goal_id : string }

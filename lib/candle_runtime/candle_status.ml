@@ -61,7 +61,7 @@ let configured ~base_path =
      | Ok () -> Candle_config.Enabled policy)
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type prepared = {
   events : Candle_event.t list;

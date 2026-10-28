@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 type allocation = { keeper : string; weight : int; share_milli : int; amount_milli : int }
 type t = {
   identity : Candle_appraisal.identity;

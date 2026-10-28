@@ -1,5 +1,5 @@
 module A = Candle_appraisal
-let ( let* ) = Result.bind
+open Result.Syntax
 type t = { id : string; original : A.request; snapshot : Yojson.Safe.t }
 let non_blank name value =
   if String.trim value = "" then Error ("Candle appraisal intent requires " ^ name)

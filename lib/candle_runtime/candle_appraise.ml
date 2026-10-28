@@ -1,6 +1,6 @@
 module A = Candle_appraisal
 module E = Candle_event
-let ( let* ) = Result.bind
+open Result.Syntax
 type outcome = Settled of string | Superseded of string | Retry_later of { goal_id : string; detail : string } | Rejected of { goal_id : string; detail : string }
 let identity (w : Candle_payout.waiting) : A.identity =
   {goal_id=w.goal_id;request_id=w.request_id;verification_run_id=w.verification_run_id}

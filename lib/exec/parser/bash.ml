@@ -166,7 +166,7 @@ let to_shell_ir
         * (Shell_ir.connector * (Shell_ir.arg list * Redirect_scope.t list) list)
           list)
     : Shell_ir.t Parsed.t =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let parsed =
     let* head_ir = pipeline_to_ir head in
     let rec loop acc = function

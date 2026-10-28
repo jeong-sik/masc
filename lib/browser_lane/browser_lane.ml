@@ -256,7 +256,7 @@ let snapshot_target_to_json = function
   | Target_text {text;exact} -> `Assoc ["text",`String text;"exact",`Bool exact]
 let snapshot_target_of_json = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let exact () = match List.assoc_opt "exact" fields with
       | None -> Ok true
       | Some (`Bool exact) -> Ok exact

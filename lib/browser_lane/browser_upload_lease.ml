@@ -33,7 +33,7 @@ let release_owner owner =
     List.iter (fun lease -> lease.state <- Released) leases;
     leases) in
   List.iter (fun lease -> lease.cleanup ()) leases
-let ( let* ) = Result.bind
+open Result.Syntax
 type 'read_error staging_error =
   | Read_failed of 'read_error
   | Snapshot_failed of string

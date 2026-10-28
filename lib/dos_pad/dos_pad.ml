@@ -22,7 +22,7 @@ let parse_key ~button value =
   | (Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _) as other -> Error (Printf.sprintf "%s: keys holds %s, not a key name" button (kind_name other))
 
 let parse_binding ~button fields =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () =
     match List.find_opt (fun (field, _) -> not (List.mem field binding_fields)) fields with
     | Some (field, _) -> Error (Printf.sprintf "%s: unknown field %S (keys, label)" button field)
@@ -51,7 +51,7 @@ let parse_binding ~button fields =
   Ok { keys; label }
 
 let parse contents =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match Otoml.Parser.from_string_result contents with
   | Error message -> Error ("not TOML: " ^ message)
   | Ok (Otoml.TomlTable tables | Otoml.TomlInlineTable tables) ->

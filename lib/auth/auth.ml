@@ -10,7 +10,7 @@ include Auth_credential_token
 
 let keeper_credential_write_authority config ~credentials ~agent_name stored
     (credential : agent_credential) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let refused detail = Error (System (System_error.ValidationError
       (Printf.sprintf "Keeper credential storage authority for %s: %s" agent_name detail))) in
   if not (String.equal credential.agent_name agent_name) then
@@ -58,14 +58,14 @@ let ensure_keeper_credential_in_transaction
       ; expires_at = None
       }
     in
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* () = keeper_credential_write_authority config ~credentials ~agent_name
         (Stored_credential cred) cred in
     publish_file_backed_credential_in_transaction transaction cred ~raw_token
     |> Result.map_error file_backed_publication_error
     |> Result.map (fun () -> raw_token, cred)
   in
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* present = credential_path_exists (credential_file config agent_name) in
     let* () = if not present then Ok () else
       let* stored = read_stored_credential ~leaf_policy:Follow_regular_symlink config agent_name (credential_file config agent_name) in
@@ -95,7 +95,7 @@ let ensure_keeper_credential_in_transaction
 
 let ensure_keeper_credential config ~agent_name =
   with_credential_transaction config (fun transaction ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* snapshot = credential_store_snapshot_in_transaction ~leaf_policy:Follow_regular_symlink transaction in
     ensure_keeper_credential_in_transaction transaction ~agent_name
       ~credentials:snapshot.current_credentials
@@ -105,7 +105,7 @@ let ensure_keeper_credential config ~agent_name =
 
 let ensure_keeper_credentials config ~agent_names =
   with_credential_transaction config (fun transaction ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* snapshot = credential_store_snapshot_in_transaction ~leaf_policy:Follow_regular_symlink transaction in
     let credentials = List.map snd snapshot.current_credentials in
     let index = build_token_index credentials in

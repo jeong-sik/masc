@@ -43,7 +43,7 @@ type decode_error =
   ; expectation : string
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let decode_error_to_string error =
   Printf.sprintf "%s %s" error.field error.expectation

@@ -29,7 +29,7 @@ type t = Open_tab of string | Open_window of string | Control of control
   | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
 let reply_timeout_sec = function
   | Open_tab _ | Open_window _ | Control _ | On_tab _ -> 60.
-let ( let* ) = Result.bind
+open Result.Syntax
 let key_name = function
   | Enter -> "Enter" | Tab -> "Tab" | Escape -> "Escape" | Backspace -> "Backspace"
   | Delete -> "Delete" | ArrowUp -> "ArrowUp" | ArrowDown -> "ArrowDown"

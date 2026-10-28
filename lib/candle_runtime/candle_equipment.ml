@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let reader ~now ~base_path () =
   Candle_observe.equipment (Candle_observe.read ~now ~base_path)

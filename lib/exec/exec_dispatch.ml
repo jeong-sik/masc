@@ -12,7 +12,7 @@ type dispatch_result = {
   output_files : Process_output_capture.files option;
 }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* Naming the descriptors keeps their numbers out of the redirect fold. *)
 let stdin_fd = 0

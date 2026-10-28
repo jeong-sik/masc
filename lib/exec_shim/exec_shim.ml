@@ -312,7 +312,7 @@ let config_keys = [ "remote_root"; "env_allowlist"; "path"; "env_file"; "scratch
    text from the file: a line or a value in the wrong place may be a secret.
    The one key an error prints is a known one, a fixed name. *)
 let parse_config content =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let err fmt = Printf.ksprintf (fun m -> Error (config_error_code ^ ": " ^ m)) fmt in
   let absolute_path key = function
     | "" -> err "%s must not be empty" key

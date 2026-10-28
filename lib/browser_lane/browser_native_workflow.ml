@@ -31,7 +31,7 @@ type step = { action : action; options : native_options option }
 type snapshot_scope = Viewport | Full_page
 type t = { tab_id : int; expected_url : string; steps : step list;
   snapshot_scope : snapshot_scope; max_chars : int }
-let ( let* ) = Result.bind
+open Result.Syntax
 let object_fields allowed = function
   | `Assoc fields when List.for_all (fun (name, _) -> List.mem name allowed) fields
       && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok fields

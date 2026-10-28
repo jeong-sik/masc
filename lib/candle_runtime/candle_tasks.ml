@@ -1,6 +1,6 @@
 (* See candle_tasks.mli. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let backlog_tasks config =
   match Workspace_backlog.read_backlog_r config with

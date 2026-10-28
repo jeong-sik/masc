@@ -127,22 +127,22 @@ L3 을 한 PR 로 쓰지 않고 아래로 나눠 L2(#46568) 위에 쌓는다.
 
 | 층 | 내용 | PR |
 |---|---|---|
-| L3a | 바닥의 규칙을 입출력 없는 상태기계 `Keeper_librarian_message_floor.Machine` 으로 뽑는다. Runtime 바닥(`Floor.infer`)도 이 기계의 구동기가 된다. 결과를 기록해 두었다가 먹이면 같은 다음 질문이 나온다 | #46577 |
+| L3a | 바닥의 규칙을 입출력 없는 상태기계 `Keeper_librarian_message_floor.Machine` 으로 뽑는다. Runtime 바닥(`Floor.infer`)은 이 기계에 답을 넣어 주는 쪽이 된다. 각 답을 기록해 두었다가 다시 넣으면 같은 다음 질문이 나온다 | #46577 |
 | L3b | Runtime 이 durable 단계를 준비·복원·검증하고, 보관된 답과 gate 판정으로 `memory_step` 을 찍는 입구 | #46580 |
 | L3c | 단계 request: 일반 history original 과 다른 scope·kind, 부모(거절된 범위 original)와 앞 단계를 digest 로 가리킴 | 예정 |
-| L3d | 단계 gate 저널(`Keeper_librarian_original_gate.Make`)과 구동기: 사슬 발견·검증·복구, `Submit.resume` 로 실행 | 예정 |
+| L3d | 단계 gate 저널(`Keeper_librarian_original_gate.Make`)과, 기계에 답을 넣어 주는 쪽: 사슬 찾기·검증·복구, `Submit.resume` 로 실행 | 예정 |
 | L3e | `consume_one` 진입: 거절된 한 턴 범위 + L2 증거 → 사슬. 하강 시험(한 번만 하강, `Invalid_request`·열린 기록은 하강 없음)을 이 층에 둔다 | 예정 |
 
 확정한 것.
 
 - **Add-on 을 바꾸지 않는다.** `durable` 출력은 요청마다 스키마를 싣는 정책(`Consumer_request_schema`)이다. 단계는 같은 `durable` 출력에 연속성 스키마(working state 필수)를 싣는다.
-- **단계는 Runtime 바닥과 같은 질문이다.** 프롬프트의 continuity 칸에 앞 단계의 working state 와 읽지 못한 메시지를 싣는다. 이유는 프로그램 계약이다. `Keeper_memory_os_program.create` 가 결정마다 비지 않은 `working_state` 를 요구하므로, 단계가 모델에게서 실제 working state 를 받아야 한다. 빈 값으로 채우면 조용한 허용이 된다.
+- **단계는 Runtime 바닥과 같은 질문이다.** 프롬프트의 continuity 칸에 앞 단계의 working state 와 읽지 못한 메시지를 싣는다. 단계의 결정도 Runtime 바닥의 결정처럼 `Memory_plan`·`Memory_program` 검증을 지나야 하기 때문이다. `Keeper_memory_os_program.create` 는 결정마다 비지 않은 `working_state` 를 요구하므로, 단계가 모델에게서 실제 working state 를 받아야 한다. 빈 값으로 채우면 조용한 허용이 된다.
 - **`memory_step` 은 Runtime 이 찍는다.** 이 타입은 `private` 이다(게이트를 통과한 결정만 Runtime 이 만든다는 경계). durable 결과는 `Runtime.durable_memory_step` 입구로만 `memory_step` 이 되고, 그러면 `Memory_plan`·`Memory_program` 의 검증을 그대로 쓴다.
-- **단계의 `current` 는 plan 이 쌓은 가상 Memory 다.** durable 단계의 첫 `current` 는 거절된 범위 original 이 잡아 둔 `current` 이고, 게시 때 `Program.replay` 가 잠긴 실제 Memory 와 대조한다.
+- **단계가 보는 Memory 는 앞 단계까지 반영한 값이다.** `Machine` 은 단계가 끝날 때마다 그 결정의 결과를 다음 질문의 `current` 로 넘기고, 저장소에는 아무것도 쓰지 않는다. 사슬 전체를 게시할 때 `Program.replay` 가 이 결정들을 잠긴 실제 Memory 에 다시 적용해 본다. 그사이 관련 없는 항목이 더해진 것은 허용하고, 기대한 항목이 없어졌거나 결과가 달라지면 거절한다.
 
 열린 것.
 
-- **served slot.** `Machine.answered` 는 단계를 처리한 슬롯(`Runtime.served_slot`)을 받는다. durable 의 보관된 답에는 슬롯 id 문자열만 있고 API 인지 CLI 인지는 없다. 이 값을 어떻게 다룰지 L3d 에서 정한다.
+- **served slot.** `Machine.answered` 는 단계를 처리한 슬롯(`Runtime.served_slot`: API 슬롯 또는 CLI 슬롯, id 공간이 서로 다르다)을 받는다. `Runtime.durable_memory_step` 은 슬롯을 받지 않는다. durable 답에서 슬롯을 어떻게 얻을지, 사슬에 이 값이 꼭 필요한지를 L3d 에서 정한다.
 - **gate 저널이 단계마다 도는 비용.** 단계 하나는 답 하나와 gate 저널 하나다. L4 전에 저널이 단계들의 결정을 합친 program 하나를 받는지 확인한다.
 
 ## 4. 다른 안

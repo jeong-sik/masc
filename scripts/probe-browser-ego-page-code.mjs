@@ -26,8 +26,8 @@ try {
  const origin=`http://localhost:${server.address().port}`,url=origin+'/start';
  const request={tabId:1,expectedUrl:url,steps:[
   {method:'evaluate',source:'value => { document.querySelector("#state").textContent=value.text;setTimeout(()=>window.fixtureReady=true,25);return {text:value.text,host:typeof process,dialog:"application data"};}',argumentJson:JSON.stringify({text:'한글 😀 " ) ; globalThis.escape = true;//'})},
-  {method:'waitForFunction',source:'value => window.fixtureReady === value',argumentJson:'true',pollingMs:1,timeoutMs:3000},
-  {method:'fetch',url:origin+'/api',timeoutMs:3000,fetchOptions:{method:'POST',headers:{'Content-Type':'text/plain','X-Fixture':'native-page-fetch'},body:'한글 😀',credentials:'same-origin',cache:'no-store',mode:'cors',redirect:'error',keepalive:false,referrerPolicy:'no-referrer'}},
+  {method:'waitForFunction',source:'value => window.fixtureReady === value',argumentJson:'true',options:{polling:1,timeout:3000}},
+  {method:'fetch',url:'/api',options:{method:'POST',headers:{'Content-Type':'text/plain','X-Fixture':'native-page-fetch'},body:'한글 😀',credentials:'same-origin',cache:'no-store',mode:'cors',redirect:'error',keepalive:false,referrerPolicy:'no-referrer',timeout:3000}},
   {method:'evaluate',source:'({text:document.querySelector("#state").textContent,escaped:typeof escape,ready:window.fixtureReady})'},
   {method:'evaluate',source:'value => ({own:Object.hasOwn(value,"__proto__"),plain:Object.getPrototypeOf(value)===Object.prototype,data:value.__proto__.polluted})',argumentJson:'{"__proto__":{"polluted":true}}'},
  ],snapshotScope:'full_page',maxChars:10000};
@@ -48,7 +48,7 @@ assert.deepEqual(result.completed[4].receipt,{own:true,plain:true,data:true});
 assert(result.snapshot.includes('한글 😀'));
 await page.screenshot({path:${JSON.stringify(join(resolve(output),'page-sdk.png'))}});
 const blockedRequest={...request,steps:[
- {method:'fetch',url:${JSON.stringify(`http://127.0.0.1:${cors.address().port}/blocked`)},timeoutMs:3000},
+ {method:'fetch',url:${JSON.stringify(`http://127.0.0.1:${cors.address().port}/blocked`)},options:{timeout:3000}},
  {method:'evaluate',source:'window.shouldNotRun = true'},
 ]};
 const blocked=await nativeWorkflow(page,blockedRequest);
@@ -56,7 +56,7 @@ assert(blocked.failure,JSON.stringify(blocked));assert.equal(blocked.failure.met
 assert.equal(blocked.effectStarted,true);assert.equal(blocked.completed.length,0);
 assert.equal(await page.evaluate('typeof window.shouldNotRun'),'undefined');
 const timeoutRequest={...request,steps:[
- {method:'waitForFunction',source:'(() => {window.predicateVisits=(window.predicateVisits||0)+1;return false})()',timeoutMs:1,pollingMs:1},
+ {method:'waitForFunction',source:'(() => {window.predicateVisits=(window.predicateVisits||0)+1;return false})()',options:{timeout:1,polling:1}},
  {method:'evaluate',source:'window.shouldNotRun = true'},
 ]};
 const timedOut=await nativeWorkflow(page,timeoutRequest);

@@ -17,16 +17,135 @@ function fixture({fail,dialog,snapshot='native result'}={}) {
    return snapshot;
   },
  };
- for(const method of ['click','dblclick','hover','fill','press','selectOption','goto','waitForURL','waitForSelector','waitForLoadState'])page[method]=async(...args)=>{
+ for(const method of ['click','dblclick','hover','dragAndDrop','fill','press','selectOption','goto','waitForURL','waitForSelector','waitForLoadState'])page[method]=async(...args)=>{
   calls.push([method,...args]);if(method===fail)throw Error('native '+method+' failed');
   if(method==='fill')value=args[1];if(method==='goto'||method==='click')url=destination;
   if(method==='waitForURL')assert.equal(url,args[0]);
-  if(method==='waitForSelector')assert.equal(value,'changed');
+  if(method==='waitForSelector'&&args[1]?.state!=='attached')assert.equal(value,'changed');
   return dialog&&method==='click'?{dialog:{type:'alert',message:'hold'}}:method==='selectOption'?['b']:{};
  };
  return {page,calls};
 }
 const request=steps=>({expectedUrl:initial,steps,snapshotScope:'viewport',maxChars:100,cursor:'MASC · fixture · workflow'});
+test('native action, navigation, mouse and selection options survive unchanged',async()=>{
+ const f=fixture();const native=[];
+ f.page.mouse={};
+ for (const method of ['click','move','wheel','up'])
+  f.page.mouse[method]=async(...args)=>{native.push([method,...args]);return {};};
+ f.page.reload=async(options)=>{native.push(['reload',options]);return {};};
+ const result=await run(f.page,request([
+  {method:'click',selector:'#button',options:{button:'right',clickCount:2,delay:0.5,position:{x:2,y:3},force:false,label:'Open row context menu'}},
+  {method:'fill',selector:'#editor',text:'changed',options:{clearFirst:false}},
+  {method:'press',selector:'#editor',key:'Enter',options:{delay:2}},
+  {method:'selectOption',selector:'#select',selectionJson:'{"label":"Disabled B"}'},
+  {method:'selectOption',selector:'#select',selectionJson:'null'},
+  {method:'goto',url:destination,options:{referer:initial,waitUntil:'commit'}},
+  {method:'reload',options:{waitUntil:'domcontentloaded'}},
+  {method:'waitForLoadState',options:{idleMs:0}},
+  {method:'mouse.move',x:40,y:50,options:{steps:3,label:'Point at result panel'}},
+  {method:'mouse.click',x:40,y:50,options:{button:'middle',delay:3}},
+  {method:'mouse.wheel',x:0,y:120,options:{label:'Read next result rows'}},
+  {method:'dragAndDrop',selector:'#source',destination:'#target',options:{button:'right',sourcePosition:{x:1,y:2},targetPosition:{x:3,y:4},force:true,timeout:9000}},
+ ]));
+ assert.equal(result.failure,null);assert.equal(result.inputReleased,true);
+ const click=f.calls.find(call=>call[0]==='click');
+ assert.equal(click[2].button,'right');assert.equal(click[2].clickCount,2);assert.equal(click[2].delay,0.5);
+ assert.deepEqual(click[2].position,{x:2,y:3});assert.equal(click[2].force,false);
+ assert.equal(click[2].label,'MASC · fixture · workflow · Open row context menu');
+ assert.equal(f.calls.find(call=>call[0]==='fill')[3].clearFirst,false);
+ assert.equal(f.calls.find(call=>call[0]==='press')[3].delay,2);
+ const selections=f.calls.filter(call=>call[0]==='selectOption');
+ assert.equal(selections[0][2].label,'Disabled B');assert.equal(selections[1][2],null);
+ assert.equal(f.calls.find(call=>call[0]==='goto')[2].referer,initial);
+ assert.equal(f.calls.find(call=>call[0]==='goto')[2].waitUntil,'commit');
+ assert.equal(f.calls.find(call=>call[0]==='waitForLoadState')[1],undefined);
+ assert.equal(f.calls.find(call=>call[0]==='waitForLoadState')[2].idleMs,0);
+ assert.equal(native.find(call=>call[0]==='move')[3].steps,3);
+ assert.equal(native.find(call=>call[0]==='click')[3].button,'middle');
+ const drag=f.calls.find(call=>call[0]==='dragAndDrop');
+ assert.equal(drag[2],'#target');assert.equal(drag[3].button,'right');assert.equal(drag[3].timeout,9000);
+ assert.deepEqual(drag[3].sourcePosition,{x:1,y:2});
+});
+test('a drag interrupted by a dialog preserves uncertain input ownership',async()=>{
+ const f=fixture();let later=0;
+ f.page.dragAndDrop=async()=>({dialog:{type:'alert',message:'hold'}});
+ f.page.mouse={up:async()=>{later++;}};
+ const result=await run(f.page,request([
+  {method:'dragAndDrop',selector:'#source',destination:'#target'},
+  {method:'click',selector:'#submit'},
+ ]));
+ assert.equal(result.inputReleased,false);assert.equal(result.completedEffect,true);
+ assert.equal(result.completed.length,1);assert.equal(result.failure.dialog.type,'alert');
+ assert.equal(later,0,'a blocking dialog is handed back before further input');
+});
+test('lost pointer input never treats SDK cleanup void as a release acknowledgement',async()=>{
+ for (const method of ['click','dblclick','mouse.click','dragAndDrop']) {
+  const f=fixture();let down=false,releases=0,later=0;
+  const click=async()=>{down=true;throw Error('lost click response');};
+  f.page.mouse={click,up:async options=>{
+   releases++;assert.equal(options.button,'right');
+   // The actual SDK can return void after a dialog interrupted this release.
+  }};
+  if(method!=='mouse.click')f.page[method]=click;
+  f.page.fill=async()=>{later++;};
+  const result=await run(f.page,request([
+   {method,selector:'#source',destination:'#target',x:20,y:30,options:{button:'right',delay:25}},
+   {method:'fill',selector:'#editor',text:'never'},
+  ]));
+  assert.equal(releases,0);assert.equal(down,true);assert.equal(later,0);
+  assert.equal(result.inputReleased,false);assert.equal(result.completed.length,0);
+  assert.equal(result.failure.index,0);
+ }
+});
+test('lost key input preserves unconfirmed release without guessing which keys to send',async()=>{
+ for (const method of ['press','keyboard.press','keyboard.type','keyboard.paste']) {
+  const f=fixture();let entries=0,releases=0,later=0;
+  const input=async()=>{entries++;throw Error('lost key input response');};
+  f.page.keyboard={press:input,type:input,paste:input,up:async()=>{releases++;}};
+  f.page.press=input;f.page.mouse={up:async()=>{releases++;}};
+  f.page.fill=async()=>{later++;};
+  const result=await run(f.page,request([
+   {method,selector:'#editor',key:'ControlOrMeta+Enter',text:'x',options:{delay:25}},
+   {method:'fill',selector:'#editor',text:'never'},
+  ]));
+  assert.equal(entries,1);assert.equal(releases,0);assert.equal(later,0);
+  assert.equal(result.inputReleased,false);assert.equal(result.completed.length,0);
+ }
+});
+test('receipt-less holding input keeps release uncertain on dialog or failed observation',async()=>{
+ for (const method of ['keyboard.type','keyboard.press','keyboard.paste','press','click','dblclick','mouse.click','dragAndDrop']) {
+  for (const observationFails of [false,true]) {
+   const f=fixture();const input=async()=>{};
+   f.page.keyboard={type:input,press:input,paste:input};f.page.mouse={click:input};
+   if(!method.includes('.'))f.page[method]=input;
+   f.page.info=async()=>{if(observationFails)throw Error('lost observation');return {dialog:{type:'alert',message:'hold'}};};
+   const result=await run(f.page,request([{method,selector:'#editor',destination:'#target',key:'Enter',text:'x',x:20,y:30}]));
+   assert.equal(result.inputReleased,false,method);
+   assert.equal(result.completed.length,1);assert.equal(result.completedEffect,true);
+   assert.equal(result.failure.method,observationFails?'observation':method);
+  }
+ }
+});
+test('a missing press selector stops before input while a later press failure stays uncertain',async()=>{
+ for(const missing of [false,true]) {
+  const f=fixture();let pressed=0,later=0;
+  f.page.waitForSelector=async(selector,options)=>{
+   assert.equal(selector,'#editor');assert.equal(options.state,'attached');
+   assert.equal(options.timeout,37);assert.equal(Object.hasOwn(options,'delay'),false);
+   if(missing)throw Error('selector absent');
+  };
+  f.page.press=async()=>{pressed++;throw Error('press reply lost');};
+  f.page.fill=async()=>{later++;};
+  const result=await run(f.page,request([
+   {method:'press',selector:'#editor',key:'Enter',options:{timeout:37,delay:2}},
+   {method:'fill',selector:'#editor',text:'not sent'},
+  ]));
+  assert.equal(pressed,missing?0:1);assert.equal(later,0);
+  assert.equal(result.failure.method,missing?'inputPreflight':'press');
+  assert.equal(result.effectStarted,!missing);assert.equal(result.inputReleased,missing);
+  assert.equal(result.completed.length,0);
+ }
+});
 test('Page code receives JSON in the browser context and never runs as Node source',async()=>{
  const f=fixture();const browser=vm.createContext({document:{title:'browser only'}});
  f.page.evaluate=async function(expression){
@@ -40,7 +159,7 @@ test('Page code receives JSON in the browser context and never runs as Node sour
  const argument=JSON.stringify({text:'\");globalThis.hostEscaped=true;//\n한글 😀'});
  const result=await run(f.page,request([
   {method:'evaluate',source:'value => ({title:document.title,text:value.text,host:typeof process,dialog:"app data"})',argumentJson:argument},
-  {method:'waitForFunction',source:'value => document.title === value',argumentJson:'"browser only"',timeoutMs:300,pollingMs:7},
+  {method:'waitForFunction',source:'value => document.title === value',argumentJson:'"browser only"',options:{timeout:300,polling:7}},
   {method:'evaluate',source:'document.title'},
   {method:'evaluate',source:'value => ({own:Object.hasOwn(value,"__proto__"),plain:Object.getPrototypeOf(value)===Object.prototype,data:value.__proto__.polluted})',argumentJson:'{"__proto__":{"polluted":true}}'},
  ]));
@@ -59,7 +178,7 @@ test('native fetch forwards browser options and returns HTTP errors as data',asy
  const f=fixture();let observed;
  f.page.fetch=async(url,options)=>{observed={url,options};return {ok:false,status:409,body:'existing'};};
  const fetchOptions={method:'POST',headers:{'Content-Type':'text/plain'},body:'한글 😀',credentials:'same-origin',cache:'no-store'};
- const result=await run(f.page,request([{method:'fetch',url:'https://fixture.test/data',fetchOptions,timeoutMs:400}]));
+ const result=await run(f.page,request([{method:'fetch',url:'https://fixture.test/data',options:{...fetchOptions,timeout:400}}]));
  assert.equal(result.failure,null);assert.equal(result.completed[0].receipt.status,409);
  assert.equal(observed.url,'https://fixture.test/data');assert.equal(observed.options.timeout,400);
  assert.equal(observed.options.body,'한글 😀');assert.deepEqual(observed.options.headers,fetchOptions.headers);
@@ -83,7 +202,7 @@ test('known native sequence navigates, waits and returns one final snapshot',asy
   {method:'click',selector:'@12'},
   {method:'waitForURL',url:destination},
   {method:'fill',selector:'loc=css:#editor',text:'changed'},
-  {method:'waitForSelector',selector:'loc=css:#ready',state:'visible',timeoutMs:90},
+  {method:'waitForSelector',selector:'loc=css:#ready',state:'visible',options:{timeout:90}},
   {method:'waitForLoadState',state:'load'},
  ]));
  assert.equal(result.failure,null);assert.equal(result.url,destination);assert.equal(result.snapshot,'native result');
@@ -137,8 +256,8 @@ test('SDK owns omitted timeouts and settlement; explicit timeouts are unchanged'
  f.page.fill=async(...args)=>{f.calls.push(['fill',...args]);entered();await gate;return {};};
  const pending=run(f.page,request([
   {method:'fill',selector:'@1',text:'changed'},
-  {method:'hover',selector:'@2',timeoutMs:75000},
-  {method:'waitForLoadState',state:'load',timeoutMs:0},
+  {method:'hover',selector:'@2',options:{timeout:75000}},
+  {method:'waitForLoadState',state:'load',options:{timeout:0}},
  ]));
  await started;
  assert.deepEqual(f.calls.map(c=>typeof c==='string'?c:c[0]),['url','fill']);
@@ -153,19 +272,19 @@ test('native rich input keeps focus, clipboard content and keyboard signatures',
  const f=fixture();let focused=false,value='',html='';
  f.page.focus=async(selector,options)=>{assert.equal(selector,'#editor');assert.equal(options.timeout,0);focused=true;};
  f.page.keyboard={
-  async type(text){assert.equal(arguments.length,1);assert.ok(focused);value+=text;},
+  async type(text,options){assert.equal(arguments.length,2);assert.equal(options.delay,4);assert.ok(focused);value+=text;},
   async insertText(text){assert.equal(arguments.length,1);assert.ok(focused);value+=text;},
   async paste(content){assert.equal(arguments.length,1);assert.ok(focused);value+=content.text;html=content.html;},
-  async press(key){assert.equal(arguments.length,1);assert.equal(key,'ControlOrMeta+A');},
+  async press(key,options){assert.equal(arguments.length,2);assert.equal(options.delay,5);assert.equal(key,'ControlOrMeta+A');},
  };
  f.page.reload=async(options)=>{assert.equal(options.timeout,7000);return {};};
  const result=await run(f.page,request([
-  {method:'focus',selector:'#editor',timeoutMs:0},
-  {method:'keyboard.type',text:'hello '},
+  {method:'focus',selector:'#editor',options:{timeout:0}},
+  {method:'keyboard.type',text:'hello ',options:{delay:4}},
   {method:'keyboard.insertText',text:'한글 😀'},
   {method:'keyboard.paste',text:'Name\tStatus',html:'<table><tr><td>Name</td><td>Status</td></tr></table>'},
-  {method:'keyboard.press',key:'ControlOrMeta+A'},
-  {method:'reload',timeoutMs:7000},
+  {method:'keyboard.press',key:'ControlOrMeta+A',options:{delay:5}},
+  {method:'reload',options:{timeout:7000}},
  ]));
  assert.equal(result.failure,null);assert.equal(value,'hello 한글 😀Name\tStatus');
  assert.equal(html,'<table><tr><td>Name</td><td>Status</td></tr></table>');

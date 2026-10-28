@@ -65,13 +65,13 @@ let result_marker = "masc-ego-result "
    from one run to the next, so a managed page is known by its label alone. *)
 type page = Managed of string | Unmanaged of string
 
-type pointer_state = Released | Release_uncertain
+type input_state = Released | Release_uncertain
 
 type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) result }
 
 type t = { run : runner; run_native : string -> (string, run_failure) result; now : unit -> float; space_id : int; version : string; capture_directory : string;
   downloads : downloads; published : (string, Yojson.Safe.t) Hashtbl.t; uploads : Browser_lane.Upload_lease.owner;
-  mutable pointer_state : pointer_state; mutable pages : (page * int) list; mutable next_tab : int; mutable captures : int }
+  mutable input_state : input_state; mutable pages : (page * int) list; mutable next_tab : int; mutable captures : int }
 
 let space_id t = t.space_id
 
@@ -127,7 +127,7 @@ let held_by holder body = match holder with
 let frame ~step ~args lines = String.concat "\n" ([
   "// masc-ego: " ^ step;
   "const emit = answer => console.log(" ^ Yojson.Safe.to_string (str result_marker) ^ " + JSON.stringify(answer));";
-  "const args = " ^ Yojson.Safe.to_string args ^ ";";
+  "const args = JSON.parse(" ^ Yojson.Safe.to_string (str (Yojson.Safe.to_string args)) ^ ");";
   "try {" ]
   @ lines @ [
   "} catch (error) {";
@@ -225,7 +225,7 @@ let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloa
      | Some (Agent_owner | Handed_to_operator) ->
        Ok {run; run_native; now; space_id; version; capture_directory; downloads; published = Hashtbl.create 16;
          uploads = Browser_lane.Upload_lease.create_owner ();
-         pointer_state=Released; pages=[]; next_tab=0; captures=0}
+         input_state=Released; pages=[]; next_tab=0; captures=0}
      | Some Operator_owner | None ->
        Error (Printf.sprintf "ego task space %S belongs to %s, not to an agent" space ownership))
   | _ -> Error "ego answered the task space without its number and owner"
@@ -833,10 +833,10 @@ let upload t id ~selector ~paths =
    and one process serves this connection, so the run closes a chooser it
    does not fill with setFiles([]), which hands the page nothing. *)
 let choose_files ?actor t id ~opener ~paths =
-  let* () = match t.pointer_state with
+  let* () = match t.input_state with
     | Released -> Ok ()
     | Release_uncertain -> Error (Live.Before_effect
-        "ego pointer release is unconfirmed; read the browser, then end this task space before opening a fresh connection") in
+        "ego input release is unconfirmed; read the browser, then end this task space before opening a fresh connection") in
   let* label = label_of t id in
   let* chosen = chosen_files paths in
   Browser_lane.Upload_lease.claim ~owner:t.uploads ~paths;
@@ -998,7 +998,7 @@ let dialog_receipt ~id ~verb ~unknown value =
    reads where the page is. *)
 let guarded_input ?(holds_button=false) t ~id ~label ~deadline ~verb ~step ~guard ~input ~lines ~fields =
   let unknown = Printf.sprintf "read tab %d before another step" id in
-  if holds_button then t.pointer_state <- Release_uncertain;
+  if holds_button then t.input_state <- Release_uncertain;
   let response = run_step t ~window_s:(left t deadline) ~step
           ~args:(obj (["label",str label;"tabId",`Int id;"guard",str (page_function guard);
             "input",str (Yojson.Safe.to_string input);
@@ -1028,14 +1028,14 @@ let guarded_input ?(holds_button=false) t ~id ~label ~deadline ~verb ~step ~guar
       "    }";
       "  }" ])) in
   if holds_button then (match response with
-    | Ok value when field "pointerReleased" value = Some (`Bool true) -> t.pointer_state <- Released
-    | Error (Refused _ | Unanswered (Unstarted _)) -> t.pointer_state <- Released
+    | Ok value when field "pointerReleased" value = Some (`Bool true) -> t.input_state <- Released
+    | Error (Refused _ | Unanswered (Unstarted _)) -> t.input_state <- Released
     | Ok _ | Error (Unanswered (Exited _ | Signaled _ | Timed_out | Output_exceeded | Unobserved _)
         | Unreadable _ | Failed _) -> ());
   match response with
   | Error failure -> Error (effect_failure ~unknown failure)
   | Ok value when holds_button && field "pointerReleased" value <> Some (`Bool true) ->
-      Error (Live.Outcome_unknown ("ego drag did not confirm pointer release; " ^ unknown))
+      Error (Live.Outcome_unknown ("ego drag did not confirm input release; " ^ unknown))
   | Ok value when (match field "dialog" value with Some (`Assoc _) -> true | Some _ | None -> false) ->
     dialog_receipt ~id ~verb ~unknown value
   | Ok value ->
@@ -1144,7 +1144,7 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
     failure = reason(error);
     if (args.action === "drag_to") {
       try { await page.mouse.up(); pointerReleased = true; }
-      catch (releaseError) { failure += "; pointer release is unconfirmed: " + reason(releaseError); }
+      catch (releaseError) { failure += "; input release is unconfirmed: " + reason(releaseError); }
     }
   }
   return {urlBefore, receipt, error: failure, pointerReleased};
@@ -1164,7 +1164,7 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
   let unknown = Printf.sprintf "read tab %d before another step" id in
   let holds_button = match operation with Target_drag _ -> true
     | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_select _ -> false in
-  if holds_button then t.pointer_state <- Release_uncertain;
+  if holds_button then t.input_state <- Release_uncertain;
   let response = run_native_step t ~step:"page.target_input"
       ~args:(obj ["label",str label;"tabId",`Int id;"expectedUrl",(match expected_url with Some url -> str url | None -> `Null);"target",str locator;
         "action",str verb;"text",text;"selection",selection;"cursor",str cursor;
@@ -1181,8 +1181,8 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
         "    }";
         "  }" ]) in
   if holds_button then (match response with
-    | Ok value when field "pointerReleased" value = Some (`Bool true) -> t.pointer_state <- Released
-    | Error (Refused _ | Unanswered (Unstarted _)) -> t.pointer_state <- Released
+    | Ok value when field "pointerReleased" value = Some (`Bool true) -> t.input_state <- Released
+    | Error (Refused _ | Unanswered (Unstarted _)) -> t.input_state <- Released
     | Ok _ | Error (Unanswered (Exited _ | Signaled _ | Timed_out | Output_exceeded | Unobserved _) | Failed _ | Unreadable _) -> ());
   match response with
   | Error failure -> Error (effect_failure ~unknown failure)
@@ -1231,10 +1231,10 @@ let interact ?actor t args =
   let* label = label_of t id in
   let deadline = command_deadline t (Browser_lane.Page_interact {tab_id = id; frame_path = []; expected_url = request.expected_url; action = request.action}) in
   let input ~expected_url action = Browser_lane.interaction_args ~tab_id:id ~frame_path:[] ~expected_url action in
-  let* () = match t.pointer_state with
+  let* () = match t.input_state with
     | Released -> Ok ()
     | Release_uncertain -> Error (Live.Before_effect
-        "ego pointer release is unconfirmed; read the browser, then end this task space before opening a fresh connection") in
+        "ego input release is unconfirmed; read the browser, then end this task space before opening a fresh connection") in
   let* () = match request.action with
     | Browser_lane.Drag_to {duration_ms;_} | Browser_lane.Drag {duration_ms;_} when duration_ms <> 0 ->
         Error (Live.Before_effect "ego drag requires durationMs=0; movement timing is not exposed by its mouse API")
@@ -1391,26 +1391,36 @@ let workflow ?actor t args =
   let* request = pre (Browser_lane.Native_workflow.of_json args) in
   let* _ = pre (Browser_page_script.text_cap (Some request.max_chars)) in
   let* label = label_of t request.tab_id in
-  let* () = match t.pointer_state with Released -> Ok ()
-    | Release_uncertain -> Error (Live.Before_effect "ego pointer release is unconfirmed; inspect and end this task space before more input") in
+  let* () = match t.input_state with Released -> Ok ()
+    | Release_uncertain -> Error (Live.Before_effect "ego input release is unconfirmed; inspect and end this task space before more input") in
   let arguments = match Browser_lane.Native_workflow.to_json request with
     | `Assoc fields -> obj (("label",str label)::("cursor",str (cursor_label ~actor ~verb:"workflow"))::fields)
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> args in
+  let holds_input=List.exists (fun (step : Browser_lane.Native_workflow.step) ->
+    Browser_lane.Native_workflow.holds_input step.action) request.steps in
+  if holds_input then t.input_state <- Release_uncertain;
   let result = run_native_step t ~step:"page.native_workflow" ~args:arguments
       (String.concat "\n" [Browser_ego_workflow.script;unblocked_agent_page;
         "    const outcome = await nativeWorkflow(task.page(args.label), args);";
         "    emit({ok: true, value: outcome});";"  }"]) in
   match result with
-  | Error error -> Error (effect_failure ~unknown:"native workflow result is unknown; read the same tab before another step; never replay the workflow" error)
+  | Error error ->
+    (match error with
+     | Refused _|Unanswered (Unstarted _) -> if holds_input then t.input_state <- Released
+     | Unreadable _|Failed _|Unanswered (Exited _|Signaled _|Timed_out|Output_exceeded|Unobserved _) -> ());
+    Error (effect_failure ~unknown:"native workflow result is unknown; read the same tab before another step; never replay the workflow" error)
   | Ok value ->
     let unknown detail = Live.Outcome_unknown (detail ^ "; read the same tab and do not replay the workflow") in
     let* outcome=Browser_ego_workflow.decode request value |> Result.map_error unknown in
+    let input_released=match outcome with Browser_ego_workflow.Completed _ -> true
+      | Stopped {input_released;_} -> input_released in
+    if holds_input && input_released then t.input_state <- Released;
     let receipt_of value=match value with
       | `Assoc fields -> Ok (obj (("tabId",`Int request.tab_id)::("action",str "workflow")::fields))
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error (unknown "workflow receipt is not an object") in
     match outcome with
     | Browser_ego_workflow.Completed value -> receipt_of value
-    | Browser_ego_workflow.Stopped {receipt=value;message=detail;effect_started;completed_effect} ->
+    | Browser_ego_workflow.Stopped {receipt=value;message=detail;effect_started;completed_effect;input_released=_} ->
       let message=head detail ^ "; read the same tab before continuing; never replay the workflow" in
       if completed_effect then
         let* receipt=receipt_of value in Error (Live.Partial_failure {tab_id=request.tab_id;receipt;message})

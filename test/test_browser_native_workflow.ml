@@ -12,7 +12,7 @@ let wait = step "waitForURL" ["url",str "**/done"]
 let request steps = ok (W.of_json (obj (base steps)))
 let entry index method_ = obj ["index",`Int index;"method",str method_;"receipt",`Null]
 let result ~started ~completed_effect ~completed ~failure = [
-  "effectStarted",`Bool started;"completedEffect",`Bool completed_effect;
+  "effectStarted",`Bool started;"completedEffect",`Bool completed_effect;"inputReleased",`Bool true;
   "completed",`List completed;"failure",failure]
 let snapshot = ["urlBefore",str "https://example.test/start";"url",str "https://example.test/done";"title",str "Done";
   "snapshot",str "native snapshot";"chars",`Int 15;"truncated",`Bool false]
@@ -21,33 +21,46 @@ let roundtrip () =
   let calls=[click;step "dblclick" ["selector",str "loc=css:#row"];step "hover" ["selector",str "@3"];
     step "fill" ["selector",str "@4";"text",str ""];
     step "press" ["selector",str "@4";"key",str "Enter"];
-    step "focus" ["selector",str "#editor";"timeoutMs",`Int 0];
-    step "keyboard.type" ["text",str "typed"];
+    step "focus" ["selector",str "#editor";"options",obj ["timeout",`Int 0]];
+    step "keyboard.type" ["text",str "typed";"options",obj ["delay",`Float 1.5]];
     step "keyboard.insertText" ["text",str "한글 😀"];
     step "keyboard.paste" ["text",str "Name\tStatus";"html",str "<table><tr><td>Name</td><td>Status</td></tr></table>"];
     step "keyboard.paste" ["text",str ""];
-    step "keyboard.press" ["key",str "ControlOrMeta+A"];
+    step "keyboard.press" ["key",str "ControlOrMeta+A";"options",obj ["delay",`Int 0]];
     step "reload" [];
-    step "selectOption" ["selector",str "@5";"values",`List []];
-    step "goto" ["url",str "https://example.test/done"];wait;
-    step "waitForSelector" ["selector",str "@6";"state",str "hidden";"timeoutMs",`Int 0];
-    step "waitForLoadState" ["state",str "networkidle"];
+    step "selectOption" ["selector",str "@5";"selectionJson",str "[]"];
+    step "goto" ["url",str "https://example.test/done";"options",obj ["waitUntil",str "commit";
+      "referer",str "https://example.test/"]];wait;
+    step "waitForSelector" ["selector",str "@6";"state",str "hidden";"options",obj ["timeout",`Int 0]];
+    step "waitForLoadState" ["state",str "networkidle";"options",obj ["idleMs",`Int 0]];
+    step "waitForLoadState" [];
     step "evaluate" ["source",str "document.title"];
     step "evaluate" ["source",str "value => value";"argumentJson",str "null"];
     step "waitForFunction" ["source",str "arg => window.ready === arg";"argumentJson",str "true";
-      "pollingMs",`Int 0;"timeoutMs",`Int 120_000];
-    step "fetch" ["url",str "https://example.test/data";"fetchOptions",obj [
+      "options",obj ["polling",`Int 0;"timeout",`Int 120_000]];
+    step "fetch" ["url",str "/api/data";"options",obj [
       "method",str "POST";"headers",obj ["Content-Type",str "text/plain"];
       "body",str "한글 😀";"cache",str "no-store";"credentials",str "same-origin";
-      "keepalive",`Bool false;"mode",str "cors";"redirect",str "error";"referrerPolicy",str "no-referrer"]]] in
+      "keepalive",`Bool false;"mode",str "cors";"redirect",str "error";"referrerPolicy",str "no-referrer"]];
+    step "fetch" ["url",str ""];
+    step "click" ["selector",str "@1";"options",obj ["button",str "right";"clickCount",`Int 2;
+      "delay",`Float 0.5;"position",obj ["x",`Int (-1);"y",`Int 4];"force",`Bool false;"label",str "Open row menu"]];
+    step "dragAndDrop" ["selector",str "#source";"destination",str "#target";"options",obj ["button",str "middle";
+      "sourcePosition",obj ["x",`Int 2;"y",`Float 3.5];"targetPosition",obj ["x",`Int 6;"y",`Int 9];"force",`Bool false]];
+    step "mouse.click" ["x",`Float 0.5;"y",`Int 42;"options",obj ["button",str "left";"delay",`Int 0]];
+    step "mouse.move" ["x",`Int 3;"y",`Int 4;"options",obj ["steps",`Int 2;"label",str "Point at editor"]];
+    step "mouse.wheel" ["x",`Int 0;"y",`Int 120;"options",obj ["label",str "Read next rows"]]]
+    @ List.map (fun selection -> step "selectOption" ["selector",str "#select";"selectionJson",str selection])
+      ["null";"\"B\"";"{\"label\":\"B\"}";"{\"index\":0}";"[{\"value\":\"b\"},\"a\",\"a\"]"] in
   let parsed=request calls in
   check bool "native fields roundtrip unchanged" true (ok (W.of_json (W.to_json parsed))=parsed);
   check int "all methods preserved" (List.length calls) (List.length parsed.steps);
-  let explicit = step "hover" ["selector",str "@1";"timeoutMs",`Int 120_000] in
+  let explicit = step "hover" ["selector",str "@1";"options",obj ["timeout",`Int 120_000]] in
   let longer = request (List.init 20 (fun _ -> explicit)) in
   check int "known sequence has no invented step cap" 20 (List.length longer.steps);
   check bool "SDK timeout survives unchanged" true
-    (List.for_all (fun (step : W.step) -> step.timeout_ms = Some 120_000) longer.steps)
+    (List.for_all (fun step -> Yojson.Safe.Util.(step |> member "options" |> member "timeout")=`Int 120_000)
+      Yojson.Safe.Util.(W.to_json longer |> member "steps" |> to_list))
 let strict_inputs () =
   List.iter (fun value -> check bool "invalid caller input is rejected" true (Result.is_error (W.of_json value)))
     [obj (("steps",`List [])::base []);
@@ -65,10 +78,17 @@ let strict_inputs () =
      obj (base [step "evaluate" ["source",str "arg => arg";"argumentJson",str "{\"x\":1,\"x\":2}"]]);
      obj (base [step "waitForFunction" ["source",str "true";"pollingMs",`Int (-1)]]);
      obj (base [step "fetch" ["url",str "file:///private/data"]]);
-     obj (base [step "fetch" ["url",str "https://example.test/";"fetchOptions",obj ["saveAs",str "/tmp/leak"]]]);
-     obj (base [step "fetch" ["url",str "https://example.test/";"fetchOptions",obj ["mode",str "fallback"]]]);
-     obj (base [step "fetch" ["url",str "https://example.test/";"fetchOptions",obj ["headers",obj ["X",`Int 1]]]]);
-     obj (base [step "selectOption" ["selector",str "#x";"values",`List [str "a";str "a"]]])]
+     obj (base [step "fetch" ["url",str "/api";"options",obj ["saveAs",str "/tmp/leak"]]]);
+     obj (base [step "fetch" ["url",str "/api";"options",obj ["mode",str "fallback"]]]);
+     obj (base [step "fetch" ["url",str "/api";"options",obj ["headers",obj ["X",`Int 1]]]]);
+     obj (base [step "click" ["selector",str "@1";"options",obj ["force",`Int 1]]]);
+     obj (base [step "click" ["selector",str "@1";"options",obj ["timeout",`Int (-1)]]]);
+     obj (base [step "click" ["selector",str "@1";"options",obj ["position",obj ["x",`Float Float.nan;"y",`Int 0]]]]);
+     obj (base [step "keyboard.type" ["text",str "x";"options",obj ["label",str "not an SDK option"]]]);
+     obj (base [step "keyboard.insertText" ["text",str "x";"options",obj []]]);
+     obj (base [step "selectOption" ["selector",str "#x";"selectionJson",str "{}"]]);
+     obj (base [step "selectOption" ["selector",str "#x";"selectionJson",str "[1]"]]);
+     obj (base [step "selectOption" ["selector",str "#x";"selectionJson",str "{\"index\":-1}"]])]
 let complete () =
   let value=obj (snapshot @ result ~started:true ~completed_effect:true
     ~completed:[entry 0 "click";entry 1 "waitForURL"] ~failure:`Null) in
@@ -82,6 +102,13 @@ let progress_and_uncertainty () =
       check bool "started effect" started observed.effect_started;
       check bool "completed effect" completed_effect observed.completed_effect
     | R.Completed _ -> fail "failed sequence was called complete" in
+  let press=step "press" ["selector",str "#editor";"key",str "Enter"] in
+  assert_stopped (request [press])
+    (result ~started:false ~completed_effect:false ~completed:[] ~failure:(failure 0 "inputPreflight"))
+    ~started:false ~completed_effect:false;
+  assert_stopped (request [click;press])
+    (result ~started:true ~completed_effect:true ~completed:[entry 0 "click"] ~failure:(failure 1 "inputPreflight"))
+    ~started:true ~completed_effect:true;
   assert_stopped (request [wait]) (result ~started:false ~completed_effect:false ~completed:[] ~failure:(failure 0 "waitForURL"))
     ~started:false ~completed_effect:false;
   assert_stopped (request [click]) (result ~started:true ~completed_effect:false ~completed:[] ~failure:(failure 0 "click"))
@@ -105,10 +132,24 @@ let malformed_receipts () =
   let expected=request [click;wait] in
   List.iter (fun value -> check bool "incomplete/mismatched execution is not success" true (Result.is_error (R.decode expected value)))
     [`Null;
+     obj (result ~started:false ~completed_effect:false ~completed:[] ~failure:(failure 0 "inputPreflight"));
      obj (result ~started:true ~completed_effect:true ~completed:[entry 0 "click";entry 1 "waitForURL"] ~failure:`Null);
      obj (snapshot @ result ~started:true ~completed_effect:true ~completed:[entry 0 "click"] ~failure:`Null);
      obj (snapshot @ result ~started:true ~completed_effect:true ~completed:[entry 0 "waitForURL";entry 1 "click"] ~failure:`Null);
      obj (snapshot @ result ~started:false ~completed_effect:false ~completed:[entry 0 "click";entry 1 "waitForURL"] ~failure:`Null)]
+let pointer_release () =
+  let drag=step "dragAndDrop" ["selector",str "#source";"destination",str "#target"] in
+  let fields=result ~started:true ~completed_effect:false ~completed:[] ~failure:(failure 0 "dragAndDrop") in
+  let fields=("inputReleased",`Bool false)::List.remove_assoc "inputReleased" fields in
+  (match ok (R.decode (request [drag;click]) (obj fields)) with
+   | R.Stopped {input_released=false;_} -> ()
+   | R.Completed _|R.Stopped _ -> fail "lost release was called confirmed");
+  let paste_fields=("failure",failure 0 "keyboard.paste")::List.remove_assoc "failure" fields in
+  (match ok (R.decode (request [step "keyboard.paste" ["text",str "x"]]) (obj paste_fields)) with
+   | R.Stopped {input_released=false;_} -> ()
+   | R.Completed _|R.Stopped _ -> fail "paste lost its modifier release uncertainty");
+  check bool "held input is impossible without a holding operation" true
+    (Result.is_error (R.decode (request [step "fill" ["selector",str "#editor";"text",str "x"]]) (obj fields)))
 let proof path =
   let json=Yojson.Safe.from_file path in
   let request=ok (W.of_json (Yojson.Safe.Util.member "request" json)) in
@@ -132,4 +173,5 @@ let () = if Array.length Sys.argv=3 && Sys.argv.(1)="--proof" then proof Sys.arg
   test_case "invalid methods and fields are refused" `Quick strict_inputs;
   test_case "snapshot completes the exact requested sequence" `Quick complete;
   test_case "failed waits and uncertain effects retain progress" `Quick progress_and_uncertainty;
+  test_case "drag release is separate from effect completion" `Quick pointer_release;
   test_case "malformed execution never proves success" `Quick malformed_receipts]]

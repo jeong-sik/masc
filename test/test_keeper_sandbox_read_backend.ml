@@ -1497,8 +1497,9 @@ let test_read_and_grep_report_the_endpoint_profile () =
     let check tool body_field expected_body (result : Masc.Keeper_tool_execution.t) =
       let json = Yojson.Safe.from_string result.raw_output in
       let open Yojson.Safe.Util in
-      Alcotest.(check bool) (tool ^ " succeeds") true
-        (json |> member "ok" |> to_bool);
+      (match json |> member "ok" with
+       | `Bool true -> ()
+       | _ -> Alcotest.failf "%s did not succeed: %s" tool result.raw_output);
       Alcotest.(check string) (tool ^ " backend") expected
         (json |> member "via" |> to_string);
       Alcotest.(check bool) (tool ^ " endpoint output") true

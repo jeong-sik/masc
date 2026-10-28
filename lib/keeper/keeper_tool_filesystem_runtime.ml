@@ -169,6 +169,7 @@ let check_read_file_target ~config ~meta = function
 ;;
 
 let resolve_read_file_target
+      ?endpoint_error
       ~read_authority
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -214,8 +215,15 @@ let resolve_read_file_target
             Ok (Keeper_sandbox_remote_lane.read_authority_declared_path_of_args authority ~path:raw_path ~cwd))
        with
        | Ok (Some endpoint_path) -> Ok (Declared_endpoint_file endpoint_path)
-       | Ok None -> Error (Read_path_error refusal)
-       | Error endpoint_error ->
+       | Ok None ->
+         (match endpoint_error with
+          | Some endpoint_error ->
+            Error
+              (Read_path_error
+                 (Keeper_alerting_path.endpoint_unresolved ~tree_refusal:refusal ~endpoint_error))
+          | None -> Error (Read_path_error refusal))
+       | Error resolution_error ->
+         let endpoint_error = Option.value endpoint_error ~default:resolution_error in
          Error
            (Read_path_error
               (Keeper_alerting_path.endpoint_unresolved ~tree_refusal:refusal ~endpoint_error))))
@@ -259,7 +267,7 @@ let read_sandbox_raw_prefix ?read_authority ?turn_sandbox_factory ~config ~meta 
     match read_authority_for_call ~config ~meta read_authority with
     | Ok _ as authority -> authority
     | Error detail ->
-      (match resolve_read_file_target ~read_authority:None ~config ~meta ~args ~raw_path:path with
+      (match resolve_read_file_target ~endpoint_error:detail ~read_authority:None ~config ~meta ~args ~raw_path:path with
        | Error (Read_path_error refusal) ->
          Error (Keeper_sandbox_read_backend.Read_refused refusal.Keeper_alerting_path.message)
        | Ok _ -> Error (Keeper_sandbox_read_backend.Read_failed detail))

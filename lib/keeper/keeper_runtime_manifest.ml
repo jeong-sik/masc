@@ -19,6 +19,7 @@ type source_clock =
   | Monotonic
   | Logical
   | Event_bus
+[@@deriving enumerate]
 
 let source_clock_to_string = function
   | Wall -> "wall"
@@ -26,12 +27,7 @@ let source_clock_to_string = function
   | Logical -> "logical"
   | Event_bus -> "agent_core_event_bus"
 
-let source_clock_of_string = function
-  | "wall" -> Some Wall
-  | "monotonic" -> Some Monotonic
-  | "logical" -> Some Logical
-  | "agent_core_event_bus" -> Some Event_bus
-  | _ -> None
+let source_clock_of_string s = List.find_opt (fun v -> String.equal (source_clock_to_string v) s) all_of_source_clock
 
 let source_clock_of_event = function
   | Event_bus_correlated -> Event_bus

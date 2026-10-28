@@ -87,6 +87,7 @@ type wake_attempt_identity = Unidentified | Identified of wake_attempt_id
 type wake_settlement_kind =
   | Accepted | Schedule_rejected | Occurrence_rejected | Retryable_failure
   | Process_interrupted | Unsupported_payload | Cancelled_schedule | Orphaned_attempt
+[@@deriving enumerate]
 
 type wake_record =
   { schedule_instance_id : string
@@ -817,16 +818,10 @@ let wake_settlement_kind_to_string = function
   | Orphaned_attempt -> "orphaned_attempt"
 ;;
 
-let wake_settlement_kind_of_string = function
-  | "accepted" -> Ok Accepted
-  | "schedule_rejected" -> Ok Schedule_rejected
-  | "occurrence_rejected" -> Ok Occurrence_rejected
-  | "retryable_failure" -> Ok Retryable_failure
-  | "process_interrupted" -> Ok Process_interrupted
-  | "unsupported_payload" -> Ok Unsupported_payload
-  | "cancelled_schedule" -> Ok Cancelled_schedule
-  | "orphaned_attempt" -> Ok Orphaned_attempt
-  | word -> Error ("unknown wake settlement_kind: " ^ word)
+let wake_settlement_kind_of_string word =
+  match List.find_opt (fun v -> String.equal (wake_settlement_kind_to_string v) word) all_of_wake_settlement_kind with
+  | Some v -> Ok v
+  | None -> Error ("unknown wake settlement_kind: " ^ word)
 ;;
 
 let wake_record_to_yojson (wake : wake_record) =

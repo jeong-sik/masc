@@ -67,6 +67,7 @@ type urgency =
   | Direct_message
   | Ambient
   | System
+[@@deriving enumerate]
 
 type actor = {
   actor_id : string option;
@@ -106,12 +107,7 @@ let urgency_to_string = function
   | Ambient -> "ambient"
   | System -> "system"
 
-let urgency_of_string = function
-  | "mention" -> Some Mention
-  | "direct_message" -> Some Direct_message
-  | "ambient" -> Some Ambient
-  | "system" -> Some System
-  | _ -> None
+let urgency_of_string s = List.find_opt (fun v -> String.equal (urgency_to_string v) s) all_of_urgency
 
 let required_float key = function
   | `Assoc fields -> (

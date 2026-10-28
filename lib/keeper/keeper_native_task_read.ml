@@ -7,6 +7,7 @@ type error_code =
   | Store_corrupt | Conflicting_uuid | Sequence_exhausted | Io_failed
   | Directory_prepare_failed | Store_unavailable | Commit_unconfirmed
   | Invalid_query | Invalid_keeper
+[@@deriving enumerate]
 
 type decode_error =
   | Invalid_shape of string | Invalid_number of string | Invalid_observation of string
@@ -69,15 +70,10 @@ let error_name = function
   | Directory_prepare_failed -> "directory_prepare_failed"
   | Store_unavailable -> "store_unavailable" | Commit_unconfirmed -> "commit_unconfirmed"
   | Invalid_query -> "invalid_query" | Invalid_keeper -> "invalid_keeper"
-let error_of_name = function
-  | "store_missing" -> Ok Store_missing | "invalid_scope" -> Ok Invalid_scope
-  | "cursor_store_mismatch" -> Ok Cursor_store_mismatch | "cursor_ahead" -> Ok Cursor_ahead
-  | "store_corrupt" -> Ok Store_corrupt | "conflicting_uuid" -> Ok Conflicting_uuid
-  | "sequence_exhausted" -> Ok Sequence_exhausted | "io_failed" -> Ok Io_failed
-  | "directory_prepare_failed" -> Ok Directory_prepare_failed
-  | "store_unavailable" -> Ok Store_unavailable | "commit_unconfirmed" -> Ok Commit_unconfirmed
-  | "invalid_query" -> Ok Invalid_query | "invalid_keeper" -> Ok Invalid_keeper
-  | _ -> Error (Invalid_shape "unknown error code")
+let error_of_name s =
+  match List.find_opt (fun v -> String.equal (error_name v) s) all_of_error_code with
+  | Some v -> Ok v
+  | None -> Error (Invalid_shape "unknown error code")
 let failure ?health error = Failure {error;health}
 let cleanup_of_journal failures =
   List.map (fun (f:Journal.cleanup_failure) -> f.operation) failures

@@ -8,6 +8,7 @@ type t =
   | Terminal_effect_settled
   | Awaiting_gate_approval
   | No_visible_reply
+[@@deriving enumerate]
 
 let equal a b =
   match (a, b) with
@@ -31,13 +32,7 @@ let to_label = function
   | Awaiting_gate_approval -> "external_effect_pending"
   | No_visible_reply -> "no_visible_reply"
 
-let of_label = function
-  | "visible_reply" -> Some Visible_reply
-  | "continuation_checkpoint" -> Some Continuation_checkpoint
-  | "external_effect_completed" -> Some Terminal_effect_settled
-  | "external_effect_pending" -> Some Awaiting_gate_approval
-  | "no_visible_reply" -> Some No_visible_reply
-  | _ -> None
+let of_label s = List.find_opt (fun v -> String.equal (to_label v) s) all
 
 let wire_key = "turn_outcome"
 

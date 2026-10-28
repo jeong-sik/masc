@@ -32,6 +32,7 @@ type status =
   | Exact_cost_unavailable
   | Baseline_missing
   | Counter_regressed
+[@@deriving enumerate]
 
 type t =
   { observation : sample option
@@ -233,15 +234,10 @@ let cursor_of_json = function
   | _ -> Error "usage cursor fields are not exact"
 ;;
 
-let status_of_string = function
-  | "exact" -> Ok Exact
-  | "usage_missing" -> Ok Usage_missing
-  | "scope_unavailable" -> Ok Scope_unavailable
-  | "invalid_observation" -> Ok Invalid_observation
-  | "exact_cost_unavailable" -> Ok Exact_cost_unavailable
-  | "baseline_missing" -> Ok Baseline_missing
-  | "counter_regressed" -> Ok Counter_regressed
-  | value -> Error (Printf.sprintf "unknown usage resolution status %S" value)
+let status_of_string value =
+  match List.find_opt (fun v -> String.equal (status_to_string v) value) all_of_status with
+  | Some v -> Ok v
+  | None -> Error (Printf.sprintf "unknown usage resolution status %S" value)
 ;;
 
 let validate_resolution resolution =

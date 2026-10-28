@@ -9,6 +9,7 @@ type t =
   | Librarian_working_context
   | Operator_note
   | Skill_compositions
+[@@deriving enumerate]
 
 let equal a b =
   match a, b with
@@ -38,18 +39,10 @@ let to_string = function
   | Operator_note -> "operator_note"
   | Skill_compositions -> "skill_compositions"
 
-let of_string = function
-  | "keeper_instructions" -> Ok Keeper_instructions
-  | "dynamic_context" -> Ok Dynamic_context
-  | "active_goals" -> Ok Active_goals
-  | "admitted_scheduled_input" -> Ok Admitted_scheduled_input
-  | "completion_authority" -> Ok Completion_authority
-  | "temporal_summary" -> Ok Temporal_summary
-  | "memory_os_recall" -> Ok Memory_os_recall
-  | "librarian_working_context" -> Ok Librarian_working_context
-  | "operator_note" -> Ok Operator_note
-  | "skill_compositions" -> Ok Skill_compositions
-  | name -> Error (Printf.sprintf "unknown prompt block id %S" name)
+let of_string name =
+  match List.find_opt (fun v -> String.equal (to_string v) name) all with
+  | Some v -> Ok v
+  | None -> Error (Printf.sprintf "unknown prompt block id %S" name)
 
 let all_known =
   [ Keeper_instructions

@@ -574,6 +574,7 @@ type inventory_phase =
   | Inventory_requeue_unfinished
   | Inventory_requeued
   | Inventory_requeue_unreconciled
+[@@deriving enumerate]
 
 type inventory_item =
   { keeper_name : string
@@ -592,6 +593,7 @@ type inventory_item =
 type inventory_error_kind =
   | Inventory_candidate_ledger_unavailable
   | Inventory_partition_ledger_unavailable
+[@@deriving enumerate]
 
 type inventory_error =
   { keeper_name : string
@@ -805,19 +807,10 @@ let request_to_json (request : request) =
 (* Readers of [inventory_item_to_json] and the error rows beside it. They sit
    next to the writers so the two cannot drift: a field renamed on one side is
    a failing round trip in this module's own suite. *)
-let inventory_phase_of_string = function
-  | "quarantined" -> Some Inventory_quarantined
-  | "requeue_requested" -> Some Inventory_requeue_requested
-  | "requeue_unfinished" -> Some Inventory_requeue_unfinished
-  | "requeued" -> Some Inventory_requeued
-  | "requeue_unreconciled" -> Some Inventory_requeue_unreconciled
-  | _ -> None
+let inventory_phase_of_string s = List.find_opt (fun v -> String.equal (inventory_phase_to_string v) s) all_of_inventory_phase
 ;;
 
-let inventory_error_kind_of_string = function
-  | "candidate_ledger_unavailable" -> Some Inventory_candidate_ledger_unavailable
-  | "partition_ledger_unavailable" -> Some Inventory_partition_ledger_unavailable
-  | _ -> None
+let inventory_error_kind_of_string s = List.find_opt (fun v -> String.equal (inventory_error_kind_to_string v) s) all_of_inventory_error_kind
 ;;
 
 let json_field fields name =

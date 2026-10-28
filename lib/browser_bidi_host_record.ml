@@ -1,6 +1,6 @@
 let ( let* ) = Result.bind
 
-type session = No_session_left | Session_left | Session_unknown | Session_refused
+type session = No_session_left | Session_left | Session_unknown | Session_refused [@@deriving enumerate]
 
 type ended_because =
   | Profile_not_kept of { expected : string; found : string option }
@@ -8,9 +8,9 @@ type ended_because =
 
 type ending = { at : float; reason : string; session : session; because : ended_because }
 
-type outcome = Succeeded | Not_started | Failed | Unknown
+type outcome = Succeeded | Not_started | Failed | Unknown [@@deriving enumerate]
 
-type cause = Refused | Not_sent | Unconfirmed
+type cause = Refused | Not_sent | Unconfirmed [@@deriving enumerate]
 
 type unacknowledged =
   { request_id : Uuidm.t option
@@ -82,12 +82,7 @@ let session_to_wire = function
   | Session_unknown -> "unknown"
   | Session_refused -> "refused"
 
-let session_of_wire = function
-  | "none" -> Some No_session_left
-  | "left" -> Some Session_left
-  | "unknown" -> Some Session_unknown
-  | "refused" -> Some Session_refused
-  | _ -> None
+let session_of_wire s = List.find_opt (fun v -> String.equal (session_to_wire v) s) all_of_session
 
 let outcome_to_wire = function
   | Succeeded -> "succeeded"
@@ -95,23 +90,14 @@ let outcome_to_wire = function
   | Failed -> "failed"
   | Unknown -> "unknown"
 
-let outcome_of_wire = function
-  | "succeeded" -> Some Succeeded
-  | "not_started" -> Some Not_started
-  | "failed" -> Some Failed
-  | "unknown" -> Some Unknown
-  | _ -> None
+let outcome_of_wire s = List.find_opt (fun v -> String.equal (outcome_to_wire v) s) all_of_outcome
 
 let cause_to_wire = function
   | Refused -> "refused"
   | Not_sent -> "not_sent"
   | Unconfirmed -> "unconfirmed"
 
-let cause_of_wire = function
-  | "refused" -> Some Refused
-  | "not_sent" -> Some Not_sent
-  | "unconfirmed" -> Some Unconfirmed
-  | _ -> None
+let cause_of_wire s = List.find_opt (fun v -> String.equal (cause_to_wire v) s) all_of_cause
 
 (* The address as a reader may be shown it. [Browser_bidi_downloads.endpoint]
    has refused userinfo and a fragment; the query goes here. *)

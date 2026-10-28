@@ -3,6 +3,7 @@ type t =
   | Checkpoint
   | Input_required
   | Failed
+[@@deriving enumerate]
 
 let to_string = function
   | Success -> "success"
@@ -11,10 +12,5 @@ let to_string = function
   | Failed -> "error"
 ;;
 
-let of_string = function
-  | "success" -> Some Success
-  | "checkpoint" -> Some Checkpoint
-  | "input_required" -> Some Input_required
-  | "error" -> Some Failed
-  | _ -> None
+let of_string s = List.find_opt (fun v -> String.equal (to_string v) s) all
 ;;

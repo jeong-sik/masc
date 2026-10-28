@@ -39,6 +39,7 @@ type stream_protocol_error_kind =
   | Sse_unsupported_response
   | Sse_stream_incomplete
   | Sse_timeout
+[@@deriving enumerate]
 
 type runtime_attempt_scope_disposition =
   | Preserve_previous_scope
@@ -500,32 +501,7 @@ let stream_protocol_error_kind_to_string = function
   | Sse_stream_incomplete -> "sse_stream_incomplete"
   | Sse_timeout -> "sse_timeout"
 
-let stream_protocol_error_kind_of_string = function
-  | "tool_start_duplicate_index" -> Some Tool_start_duplicate_index
-  | "tool_start_missing_identity" -> Some Tool_start_missing_identity
-  | "tool_args_without_start" -> Some Tool_args_without_start
-  | "tool_stop_without_start" -> Some Tool_stop_without_start
-  | "tool_replay_mismatch" -> Some Tool_replay_mismatch
-  | "tool_delta_invalid_kind" -> Some Tool_delta_invalid_kind
-  | "tool_attempt_superseded" -> Some Tool_attempt_superseded
-  | "tool_message_start_conflict" -> Some Tool_message_start_conflict
-  | "stream_event_after_terminal" -> Some Stream_event_after_terminal
-  | "tool_occurrence_mapping_invalid" -> Some Tool_occurrence_mapping_invalid
-  | "media_delta_invalid_block" -> Some Media_delta_invalid_block
-  | "media_source_unsupported" -> Some Media_source_unsupported
-  | "media_decode_failed" -> Some Media_decode_failed
-  | "media_payload_too_large" -> Some Media_payload_too_large
-  | "media_persist_failed" -> Some Media_persist_failed
-  | "sse_error" -> Some Sse_error
-  | "ndjson_error" -> Some Ndjson_error
-  | "sse_parse_failed" -> Some Sse_parse_failed
-  | "ndjson_parse_failed" -> Some Ndjson_parse_failed
-  | "sse_unknown_event_type" -> Some Sse_unknown_event_type
-  | "sse_unsupported_part" -> Some Sse_unsupported_part
-  | "sse_unsupported_response" -> Some Sse_unsupported_response
-  | "sse_stream_incomplete" -> Some Sse_stream_incomplete
-  | "sse_timeout" -> Some Sse_timeout
-  | _ -> None
+let stream_protocol_error_kind_of_string s = List.find_opt (fun v -> String.equal (stream_protocol_error_kind_to_string v) s) all_of_stream_protocol_error_kind
 
 let stream_protocol_error_summary error =
   let parts =

@@ -11,6 +11,7 @@ type agent_state =
 type assertion_kind =
   | Task_claimed
   | Current_task_set
+[@@deriving enumerate]
 
 let assertion_kind_to_string = function
   | Task_claimed -> "task_claimed"
@@ -27,10 +28,7 @@ let valid_assertion_strings = List.map assertion_kind_to_string all_assertion_ki
    losing the element silently. *)
 let unreadable_assertion = "<non-string assertion>"
 
-let assertion_kind_of_string_lenient = function
-  | "task_claimed" -> Some Task_claimed
-  | "current_task_set" -> Some Current_task_set
-  | _ -> None
+let assertion_kind_of_string_lenient s = List.find_opt (fun v -> String.equal (assertion_kind_to_string v) s) all_of_assertion_kind
 ;;
 
 let assertion_passes st = function

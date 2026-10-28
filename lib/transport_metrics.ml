@@ -531,6 +531,7 @@ type primary_path_kind =
   | Websocket
   | Sse
   | Streamable_http
+[@@deriving enumerate]
 
 let primary_path_kind_to_string = function
   | Grpc_subscribe -> "grpc_subscribe"
@@ -538,12 +539,7 @@ let primary_path_kind_to_string = function
   | Sse -> "sse"
   | Streamable_http -> "streamable_http"
 
-let primary_path_kind_of_string = function
-  | "grpc_subscribe" -> Some Grpc_subscribe
-  | "websocket" -> Some Websocket
-  | "sse" -> Some Sse
-  | "streamable_http" -> Some Streamable_http
-  | _ -> None
+let primary_path_kind_of_string s = List.find_opt (fun v -> String.equal (primary_path_kind_to_string v) s) all_of_primary_path_kind
 
 let primary_path ~grpc_subscribers ~ws_sessions ~sse_sessions =
   if grpc_subscribers > 0
@@ -567,17 +563,14 @@ type queue_pressure_kind =
   | Steady
   | Watch
   | High
+[@@deriving enumerate]
 
 let queue_pressure_kind_to_string = function
   | Steady -> "steady"
   | Watch -> "watch"
   | High -> "high"
 
-let queue_pressure_kind_of_string = function
-  | "steady" -> Some Steady
-  | "watch" -> Some Watch
-  | "high" -> Some High
-  | _ -> None
+let queue_pressure_kind_of_string s = List.find_opt (fun v -> String.equal (queue_pressure_kind_to_string v) s) all_of_queue_pressure_kind
 
 let queue_pressure ~sse_queue_max ~relay_queue_depth =
   let max_queue_depth = max sse_queue_max relay_queue_depth in

@@ -13,6 +13,7 @@ type session_status =
   | Active
   | Idle
   | Suspended
+[@@deriving enumerate]
 
 type conversation_mode =
   | Turn_based
@@ -59,11 +60,7 @@ let string_of_status = function
    silently routed unknowns to [Idle], a *valid* downstream variant,
    which is silent JSON-decode miscategorization. Same anti-pattern
    class as #8605 (removed policy enum parsing) and #8607 (agent_health). *)
-let status_of_string_opt = function
-  | "active" -> Some Active
-  | "idle" -> Some Idle
-  | "suspended" -> Some Suspended
-  | _ -> None
+let status_of_string_opt s = List.find_opt (fun v -> String.equal (string_of_status v) s) all_of_session_status
 
 let string_of_conversation_mode = function
   | Turn_based -> "turn_based"

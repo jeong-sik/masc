@@ -39,7 +39,7 @@ let observe ~access ~base_path ~configuration =
   let lane = Launcher.observe ~base_path ~server:Launcher.Not_serving in
   { lane = { lane with server = Launcher.current_server ~access }; record; keeper }
 
-type launcher_standing = Launcher_installed | Launcher_not_installed | Launcher_needs_reinstall
+type launcher_standing = Launcher_installed | Launcher_not_installed | Launcher_needs_reinstall [@@deriving enumerate]
 
 type attach = { launcher : string; arguments : string; standing : launcher_standing }
 
@@ -418,11 +418,7 @@ let launcher_standing_to_wire = function
   | Launcher_not_installed -> "not_installed"
   | Launcher_needs_reinstall -> "needs_reinstall"
 
-let launcher_standing_of_wire = function
-  | "installed" -> Some Launcher_installed
-  | "not_installed" -> Some Launcher_not_installed
-  | "needs_reinstall" -> Some Launcher_needs_reinstall
-  | _ -> None
+let launcher_standing_of_wire s = List.find_opt (fun v -> String.equal (launcher_standing_to_wire v) s) all_of_launcher_standing
 
 let report_fields = [ "state"; "record"; "lock_held"; "detail"; "attach"; "keeper"; "message" ]
 

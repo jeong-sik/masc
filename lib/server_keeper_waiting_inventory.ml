@@ -8,6 +8,7 @@ type waiting_source =
   | Owner_shutdown
   | Operator_pending_confirm
   | Read_error
+[@@deriving enumerate]
 
 type keeper_state =
   | Idle
@@ -65,17 +66,10 @@ let source_to_string = function
   | Read_error -> "read_error"
 ;;
 
-let source_of_string = function
-  | "event_queue_pending" -> Ok Event_queue_pending
-  | "chat_operation_queued" -> Ok Chat_operation_queued
-  | "chat_operation_running" -> Ok Chat_operation_running
-  | "hitl_pending" -> Ok Hitl_pending
-  | "fusion_running" -> Ok Fusion_running
-  | "schedule_waiting" -> Ok Schedule_waiting
-  | "owner_shutdown" -> Ok Owner_shutdown
-  | "operator_pending_confirm" -> Ok Operator_pending_confirm
-  | "read_error" -> Ok Read_error
-  | value -> Error (Printf.sprintf "Unknown Keeper inventory source: %S" value)
+let source_of_string value =
+  match List.find_opt (fun v -> String.equal (source_to_string v) value) all_of_waiting_source with
+  | Some v -> Ok v
+  | None -> Error (Printf.sprintf "Unknown Keeper inventory source: %S" value)
 ;;
 
 let all_waiting_sources =

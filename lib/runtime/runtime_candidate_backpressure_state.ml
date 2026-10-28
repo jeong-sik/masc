@@ -6,6 +6,7 @@ type attempt_failure =
   | Provider_capacity
   | Network_transient
   | Provider_timeout
+[@@deriving enumerate]
 
 let attempt_failure_to_wire_name = function
   | Server_error -> "server_error"
@@ -13,12 +14,7 @@ let attempt_failure_to_wire_name = function
   | Network_transient -> "network_transient"
   | Provider_timeout -> "provider_timeout"
 
-let attempt_failure_of_wire_name = function
-  | "server_error" -> Some Server_error
-  | "provider_capacity" -> Some Provider_capacity
-  | "network_transient" -> Some Network_transient
-  | "provider_timeout" -> Some Provider_timeout
-  | _ -> None
+let attempt_failure_of_wire_name s = List.find_opt (fun v -> String.equal (attempt_failure_to_wire_name v) s) all_of_attempt_failure
 
 type recorder = Keeper_recorder of { keeper_name : string }
 

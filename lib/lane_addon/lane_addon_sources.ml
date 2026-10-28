@@ -28,6 +28,7 @@ type source =
       tab_id : int; target_id : string; environment : string; request_id : string }
 type kind = Snapshot_file_kind | Msx_capture_kind | Dos_capture_kind
   | Lane_output_kind | Browser_document_kind | Fusion_run_kind
+[@@deriving enumerate]
 
 let kind_to_string = function
   | Fusion_run_kind -> "fusion_run"
@@ -37,14 +38,7 @@ let kind_to_string = function
   | Lane_output_kind -> "lane_output"
   | Browser_document_kind -> "browser_document"
 
-let kind_of_string = function
-  | "fusion_run" -> Some Fusion_run_kind
-  | "snapshot_file" -> Some Snapshot_file_kind
-  | "msx_capture" -> Some Msx_capture_kind
-  | "dos_capture" -> Some Dos_capture_kind
-  | "lane_output" -> Some Lane_output_kind
-  | "browser_document" -> Some Browser_document_kind
-  | _ -> None
+let kind_of_string s = List.find_opt (fun v -> String.equal (kind_to_string v) s) all_of_kind
 
 (* Which Browser Lane backend can be read as a [browser_document] source, and
    how. [offers] and [parse] both read this one match. *)

@@ -126,6 +126,7 @@ type failure_stage =
   | Meta_remove
   | Session_remove
   | Registry_unregister
+[@@deriving enumerate]
 
 type failure =
   { stage : failure_stage
@@ -767,22 +768,8 @@ let failure_stage_to_string = function
   | Registry_unregister -> "registry_unregister"
 ;;
 
-let failure_stage_of_string = function
-  | "task_discovery" -> Ok Task_discovery
-  | "record_persist" -> Ok Record_persist
-  | "turn_cancel" -> Ok Turn_cancel
-  | "lane_cancel" -> Ok Lane_cancel
-  | "turn_join" -> Ok Turn_join
-  | "lane_join" -> Ok Lane_join
-  | "record_update" -> Ok Record_update
-  | "unhandled_worker" -> Ok Unhandled_worker
-  | "task_settlement" -> Ok Task_settlement
-  | "pending_confirm_cleanup" -> Ok Pending_confirm_cleanup
-  | "approval_summary_retirement" -> Ok Approval_summary_retirement
-  | "meta_read" -> Ok Meta_read
-  | "meta_update" -> Ok Meta_update
-  | "meta_remove" -> Ok Meta_remove
-  | "session_remove" -> Ok Session_remove
-  | "registry_unregister" -> Ok Registry_unregister
-  | value -> Error (Printf.sprintf "unknown Keeper shutdown failure stage: %S" value)
+let failure_stage_of_string value =
+  match List.find_opt (fun v -> String.equal (failure_stage_to_string v) value) all_of_failure_stage with
+  | Some v -> Ok v
+  | None -> Error (Printf.sprintf "unknown Keeper shutdown failure stage: %S" value)
 ;;

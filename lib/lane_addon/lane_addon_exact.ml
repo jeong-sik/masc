@@ -119,6 +119,7 @@ type input_refusal =
   | Context_overflow
   | Invalid_request
   | Request_body_refused
+[@@deriving enumerate]
 
 type usage = { input_tokens : int; output_tokens : int }
 
@@ -180,12 +181,7 @@ let input_refusal_to_string = function
   | Invalid_request -> "invalid_request"
   | Request_body_refused -> "request_body_refused"
 
-let input_refusal_of_string = function
-  | "input_capacity" -> Some Input_capacity
-  | "context_overflow" -> Some Context_overflow
-  | "invalid_request" -> Some Invalid_request
-  | "request_body_refused" -> Some Request_body_refused
-  | _ -> None
+let input_refusal_of_string s = List.find_opt (fun v -> String.equal (input_refusal_to_string v) s) all_of_input_refusal
 
 let usage_to_json { input_tokens; output_tokens } =
   `Assoc [ "input_tokens", `Int input_tokens; "output_tokens", `Int output_tokens ]

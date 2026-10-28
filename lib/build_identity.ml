@@ -410,15 +410,13 @@ let rec observe_runtime_repository () =
 type package_manager_kind =
   | Pnpm
   | Corepack
+[@@deriving enumerate]
 
 let package_manager_kind_to_string = function
   | Pnpm -> "pnpm"
   | Corepack -> "corepack"
 
-let package_manager_kind_of_string = function
-  | "pnpm" -> Some Pnpm
-  | "corepack" -> Some Corepack
-  | _ -> None
+let package_manager_kind_of_string s = List.find_opt (fun v -> String.equal (package_manager_kind_to_string v) s) all_of_package_manager_kind
 
 (* The one build mode and the one producer a dashboard build receipt may name.
    The receipt check refuses any other value, so a verified identity has no

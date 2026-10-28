@@ -1,10 +1,11 @@
-type transport = SSE | WS | GRPC
+type transport = SSE | WS | GRPC [@@deriving enumerate]
 
 type evict_reason =
   | Cap_exceeded
   | Idle_timeout
   | Backpressure
   | Policy_revoked
+[@@deriving enumerate]
 
 type close_reason =
   | Client_disconnected
@@ -41,11 +42,7 @@ let transport_to_string = function
   | WS -> "ws"
   | GRPC -> "grpc"
 
-let transport_of_string = function
-  | "sse" -> Some SSE
-  | "ws" -> Some WS
-  | "grpc" -> Some GRPC
-  | _ -> None
+let transport_of_string s = List.find_opt (fun v -> String.equal (transport_to_string v) s) all_of_transport
 
 let evict_reason_to_string = function
   | Cap_exceeded -> "cap_exceeded"
@@ -53,12 +50,7 @@ let evict_reason_to_string = function
   | Backpressure -> "backpressure"
   | Policy_revoked -> "policy_revoked"
 
-let evict_reason_of_string = function
-  | "cap_exceeded" -> Some Cap_exceeded
-  | "idle_timeout" -> Some Idle_timeout
-  | "backpressure" -> Some Backpressure
-  | "policy_revoked" -> Some Policy_revoked
-  | _ -> None
+let evict_reason_of_string s = List.find_opt (fun v -> String.equal (evict_reason_to_string v) s) all_of_evict_reason
 
 let close_reason_kind = function
   | Client_disconnected -> "client_disconnected"

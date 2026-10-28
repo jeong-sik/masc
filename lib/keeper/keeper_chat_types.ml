@@ -61,6 +61,7 @@ type stream_lifecycle_event =
   | Text_message_end
   | Run_finished
   | Run_error
+[@@deriving enumerate]
 
 type approval_lifecycle =
   { approval_id : string
@@ -85,29 +86,20 @@ let stream_lifecycle_event_to_label = function
   | Run_finished -> "RUN_FINISHED"
   | Run_error -> "RUN_ERROR"
 
-let stream_lifecycle_event_of_label = function
-  | "RUN_STARTED" -> Some Run_started
-  | "TEXT_MESSAGE_START" -> Some Text_message_start
-  | "TEXT_MESSAGE_END" -> Some Text_message_end
-  | "RUN_FINISHED" -> Some Run_finished
-  | "RUN_ERROR" -> Some Run_error
-  | _ -> None
+let stream_lifecycle_event_of_label s = List.find_opt (fun v -> String.equal (stream_lifecycle_event_to_label v) s) all_of_stream_lifecycle_event
 
 type speaker_authority =
   | Owner
   | External
   | Keeper
+[@@deriving enumerate]
 
 let authority_label = function
   | Owner -> "owner"
   | External -> "external"
   | Keeper -> "keeper"
 
-let authority_of_label = function
-  | "owner" -> Some Owner
-  | "external" -> Some External
-  | "keeper" -> Some Keeper
-  | _ -> None
+let authority_of_label s = List.find_opt (fun v -> String.equal (authority_label v) s) all_of_speaker_authority
 
 type chat_block = Keeper_chat_blocks.chat_block
 

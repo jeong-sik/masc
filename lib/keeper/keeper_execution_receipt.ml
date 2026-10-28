@@ -44,6 +44,7 @@ type operator_disposition_kind =
   | Disp_user_cancelled
   | Disp_skipped
   | Disp_unknown
+[@@deriving enumerate]
 
 let operator_disposition_kind_to_string = function
   | Disp_pass -> "pass"
@@ -57,17 +58,7 @@ let operator_disposition_kind_to_string = function
   | Disp_unknown -> "unknown"
 ;;
 
-let operator_disposition_kind_of_string = function
-  | "pass" -> Some Disp_pass
-  | "fail_open_next_runtime" -> Some Disp_fail_open_next_runtime
-  | "retry_later" -> Some Disp_retry_later
-  | "pass_next_model" -> Some Disp_pass_next_model
-  | "operator_action_required" -> Some Disp_operator_action_required
-  | "effect_review_required" -> Some Disp_effect_review_required
-  | "user_cancelled" -> Some Disp_user_cancelled
-  | "skipped" -> Some Disp_skipped
-  | "unknown" -> Some Disp_unknown
-  | _ -> None
+let operator_disposition_kind_of_string s = List.find_opt (fun v -> String.equal (operator_disposition_kind_to_string v) s) all_of_operator_disposition_kind
 ;;
 
 type operator_disposition_reason =

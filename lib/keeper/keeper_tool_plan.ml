@@ -976,6 +976,7 @@ let error_to_json error =
 type branch_failure_policy =
   | Fail_fast
   | Continue_independent
+[@@deriving enumerate]
 
 let default_branch_failure_policy = Fail_fast
 
@@ -984,10 +985,7 @@ let branch_failure_policy_to_string = function
   | Continue_independent -> "continue_independent"
 ;;
 
-let branch_failure_policy_of_string = function
-  | "fail_fast" -> Some Fail_fast
-  | "continue_independent" -> Some Continue_independent
-  | _ -> None
+let branch_failure_policy_of_string s = List.find_opt (fun v -> String.equal (branch_failure_policy_to_string v) s) all_of_branch_failure_policy
 ;;
 
 type inline_arguments =

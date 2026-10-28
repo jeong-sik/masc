@@ -1,15 +1,13 @@
 type decision =
   | Approve
   | Deny
+[@@deriving enumerate]
 
 let decision_to_string = function
   | Approve -> "approve"
   | Deny -> "deny"
 
-let decision_of_string = function
-  | "approve" -> Some Approve
-  | "deny" -> Some Deny
-  | _ -> None
+let decision_of_string s = List.find_opt (fun v -> String.equal (decision_to_string v) s) all_of_decision
 
 type outcome =
   | Answered of decision

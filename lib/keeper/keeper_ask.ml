@@ -30,6 +30,7 @@ let choice ~choice_id ~label ?description () =
 type answer_mode =
   | Single
   | Multi
+[@@deriving enumerate]
 
 type free_text =
   | Free_text_allowed of { hint : string option }
@@ -293,10 +294,7 @@ let open_asks events =
 
 let answer_mode_to_string = function Single -> "single" | Multi -> "multi"
 
-let answer_mode_of_string = function
-  | "single" -> Some Single
-  | "multi" -> Some Multi
-  | _ -> None
+let answer_mode_of_string s = List.find_opt (fun v -> String.equal (answer_mode_to_string v) s) all_of_answer_mode
 
 let invalid_choice_to_string = function
   | Choice_id_blank -> "choice_id is blank"

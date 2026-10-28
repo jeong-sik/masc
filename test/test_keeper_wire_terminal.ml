@@ -713,6 +713,38 @@ let test_persist_all_projects_each_failure_once () =
   check int "each journal keeps one terminal" 1
     (List.length (read_journal ~base_path ~keeper_name ~operation_id:"op-persist-later"))
 
+(* A transcript the batch cannot read fails each Failed operation's transcript
+   projection, and every journal is still recorded. *)
+let test_persist_all_records_journals_when_the_transcript_fails () =
+  with_workspace @@ fun base_path ->
+  let module Store = Keeper_chat_operation_store in
+  let module Projection = Keeper_chat_failure_projection in
+  let keeper_name = "persist-all-blocked" in
+  let store_ok = function Ok value -> value | Error error -> fail (Store.error_to_string error) in
+  let store = store_ok (Store.open_or_create ~path:(Filename.concat base_path "persist-all-blocked.sqlite3")) in
+  Fun.protect ~finally:(fun () -> ignore (Store.close store)) @@ fun () ->
+  let failed operation_id now =
+    let id = Keeper_chat_operation.Operation_id.of_string operation_id |> Result.get_ok in
+    ignore (store_ok (Store.submit store ~now ~operation_id:id
+      ~source:(operation_source keeper_name) ~input:(`Assoc ["message", `String operation_id])));
+    ignore (store_ok (Store.claim_next store ~now:(now +. 1.)));
+    store_ok (Store.fail_running store ~now:(now +. 2.) ~operation_id:id
+      ~kind:Keeper_chat_operation.Turn_cancelled ~detail:"owner shutdown" ~outcome_ref:None) in
+  let first = failed "op-blocked-first" 10. in
+  let second = failed "op-blocked-second" 20. in
+  let transcript_path = Keeper_chat_store.chat_path ~base_dir:base_path ~keeper_name in
+  (try Unix.mkdir (Filename.dirname transcript_path) 0o700 with
+   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Unix.mkdir transcript_path 0o700;
+  Projection.persist_all ~base_path ~keeper_name [first; second]
+  |> List.iter (fun ((operation : Keeper_chat_operation.t), outcome) ->
+    let operation_id = Keeper_chat_operation.Operation_id.to_string operation.operation_id in
+    match outcome with
+    | Ok (Projection.Projected {transcript=Error (Projection.Transcript_unavailable _); journal=Ok _}) ->
+      check int (operation_id ^ " keeps one journal terminal") 1
+        (List.length (read_journal ~base_path ~keeper_name ~operation_id))
+    | Ok _ | Error _ -> fail (operation_id ^ ": a failed transcript suppressed the journal"))
+
 (* Every settlement path without a live stream ends the journal through
    [record_terminal_error], so the helper itself carries the guarantees: one
    terminal per failure, never a second one, and a finished earlier segment
@@ -871,6 +903,8 @@ let () =
             test_transcript_failure_preserves_journal_and_live_terminal
         ; test_case "persist_all projects each failure once" `Quick
             test_persist_all_projects_each_failure_once
+        ; test_case "persist_all records journals when the transcript fails" `Quick
+            test_persist_all_records_journals_when_the_transcript_fails
         ; test_case "record_terminal_error writes once" `Quick
             test_record_terminal_error_writes_once
         ; test_case "record_terminal_error cuts a torn tail" `Quick

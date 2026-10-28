@@ -454,6 +454,8 @@ module Settled_failure : sig
     { delivery_key : Keeper_chat_delivery_identity.delivery_key
     ; content : string
     ; route : Row_route.t Lazy.t
+          (** Forced under the transcript lock in a systhread, so it must
+              belong to this one append and never be forced concurrently. *)
     }
 end
 
@@ -464,9 +466,11 @@ val append_settled_failures_once :
     read of the transcript under one lock, with every missing row appended in
     one durable write. Each failure is answered beside its caller's tag, so a
     quarantined key refuses only that failure. A key that appears twice answers
-    the second time with the row the first added. The outer [Error] is a
-    transcript that could not be read, indexed or written; then nothing was
-    appended. *)
+    the second time with the row the first added. Each row takes its own
+    time, as the single append does. The outer [Error] is a transcript that
+    could not be read, indexed or written, or an exception while building a
+    row; then nothing was appended, unless rolling back a failed write also
+    failed. *)
 
 (** Idempotently append the ordered tool-call rows for a durable request that
     has no assistant message. This is the only valid representation of a

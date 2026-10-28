@@ -251,6 +251,18 @@ let replace_request queue ~request_id request =
     replace [] queue.items
 ;;
 
+(* An editor owns the payload it recalled, not just an ID that another local
+   action may have reused or changed. Preserve later priority changes on the
+   queue item while refusing to overwrite a different request payload. *)
+let replace_recalled_request queue ~original request =
+  let request_id = original.request.Chat.request_id in
+  match find queue ~request_id with
+  | None -> Error "queued request is no longer waiting"
+  | Some current when current.request <> original.request ->
+      Error "queued request changed while it was being edited"
+  | Some _ -> replace_request queue ~request_id request
+;;
+
 (* Priority remains on the unsent item, so editing, cancellation, suspension,
    and a preflight refusal cannot leave a separate pending request behind. *)
 let mark_run_next queue ~request_id =

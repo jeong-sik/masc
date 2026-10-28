@@ -619,6 +619,11 @@ type workspace_input_identity =
   ; wi_masc_root : string
   }
 
+(* An unidentified workspace cannot share an edit with a later authority. *)
+type keeper_recall_workspace =
+  | Recall_identified of workspace_input_identity
+  | Recall_unidentified of workspace_authority
+
 (* Whether the rows kept from this workspace's own directory -- agents, tasks,
    keepers, their logs -- were read from it. They are read only once the server
    says it serves this workspace, and cleared again when it serves another, and
@@ -2307,6 +2312,12 @@ let msg_index_of_anchor entries anchor =
        if same_msg_anchor anchor entry then Some index else None)
     entries
 ;;
+
+(* Recall walks newest first, but remembers the row rather than an offset that
+   can change when another local or persisted message arrives. *)
+let recall_history_offset entries anchor =
+  Option.map (fun index -> List.length entries - index - 1)
+    (msg_index_of_anchor entries anchor)
 
 let msg_entries_after_anchor entries anchor =
   let rec walk found reversed_after = function
@@ -8293,11 +8304,18 @@ let retire_task_inspection_owner original ~reason =
   set_task_inspection_source original (Masc_tui_original_task_read.suspend ~reason (task_inspection_source original));
   set_task_inspection_pending original None
 
+type keeper_recall_walk = {
+  krw_anchor : msg_anchor;
+  krw_original : string * Masc_tui_keeper_chat_projection.attachment list
+    * Masc_tui_keeper_chat_projection.image_reference list * image_observation option;
+}
+
 type keeper_composer_draft = {
   kcd_text : string;
   kcd_attachments : Masc_tui_keeper_chat_projection.attachment list;
   kcd_references : Masc_tui_keeper_chat_projection.image_reference list;
   kcd_since : image_observation option;
+  kcd_recall : keeper_recall_walk option;
 }
 
 type quit_inflight_phase =
@@ -10376,21 +10394,12 @@ type state = {
      reads again; [None] once it does, or when no chat was open. *)
   mutable msg_unconfirmed_workspace: workspace_input_identity option;
   mutable msg_history: msg_entry list;
-  (* How far back the arrows have walked through what this pane sent, and the
-     draft they set aside to do it. [None] means the composer holds the
-     operator's own text, so pressing down has nothing to give back. *)
-  mutable msg_recall_at: int option;
-  mutable msg_recall_draft:
-    string * Masc_tui_keeper_chat_projection.attachment list
-    * Masc_tui_keeper_chat_projection.image_reference list * image_observation option;
-  (* The waiting line the composer is editing, if the walk stepped onto one.
-     [Some request_id] makes the next Enter replace that line instead of
-     queueing a second copy of it -- the arrows copy, and a copy of something
-     that has not been sent yet would be sent twice.
-
-     Not cleared by typing: editing is exactly typing over what was recalled,
-     and clearing it there would put the original back in play. *)
-  mutable msg_recall_replaces: Masc_tui_keeper_chat_queue.item option;
+  (* The row being recalled and the draft set aside for that walk move together. *)
+  mutable msg_recall_walk: keeper_recall_walk option;
+  (* A queued edit follows its workspace and Keeper while its draft is put
+     away. It holds that Keeper's original line until submitted or abandoned. *)
+  mutable msg_recall_edits:
+    ((keeper_recall_workspace * string) * Masc_tui_keeper_chat_queue.item) list;
   (* The selected Keeper's turn currently streaming, if any. The request-owned
      value lives in [msg_inflight]; this slot only chooses what the pane draws.
      Cleared when the turn settles; the settled value moves to
@@ -10853,6 +10862,71 @@ let queue_panel_move ~items ~budget ~direction panel =
         | `Down -> Masc_tui_scroll.down ~count ~height scroll
         | `Up -> Masc_tui_scroll.up ~count ~height scroll in
       {panel with qp_selected=None; qp_scroll=next_scroll}
+
+(* An unconfirmed chat retains the owner of its draft; a different server
+   cannot acquire an edit merely by reusing a Keeper name. *)
+let chat_input_workspace (state : state) =
+  match state.msg_unconfirmed_workspace with
+  | Some _ as workspace -> workspace
+  | None -> workspace_input_identity_of_server state.server_identity
+
+let keeper_recall_workspace (state : state) =
+  match chat_input_workspace state with
+  | Some workspace -> Recall_identified workspace
+  | None -> Recall_unidentified state.workspace_authority
+
+let recall_edit_for_keeper (state : state) keeper_name =
+  List.assoc_opt (keeper_recall_workspace state, keeper_name) state.msg_recall_edits
+
+let current_recall_edit (state : state) =
+  Option.bind state.msg_target_keeper_name (recall_edit_for_keeper state)
+
+let set_recall_edit (state : state) (item : Masc_tui_keeper_chat_queue.item) =
+  let key = keeper_recall_workspace state, item.request.keeper_name in
+  state.msg_recall_edits <- (key, item) :: List.remove_assoc key state.msg_recall_edits
+
+let clear_recall_edit_for_keeper (state : state) keeper_name =
+  let key = keeper_recall_workspace state, keeper_name in
+  state.msg_recall_edits <- List.remove_assoc key state.msg_recall_edits
+
+let clear_current_recall_edit (state : state) =
+  Option.iter (clear_recall_edit_for_keeper state) state.msg_target_keeper_name
+
+(* The draft and the line set aside while walking recall are one workspace
+   owned value. Saving either without the other loses the operator's text. *)
+let save_message_draft ?workspace (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> ()
+  | Some keeper_name ->
+      let workspace = match workspace with
+        | Some workspace -> workspace
+        | None -> chat_input_workspace state in
+      let key = workspace, keeper_name in
+      let others = List.remove_assoc key state.msg_drafts in
+      let draft = { kcd_text = Masc_tui_message_input.contents state.msg_input;
+        kcd_attachments = state.msg_attachments;
+        kcd_references = state.msg_references;
+        kcd_since = state.msg_attachments_since;
+        kcd_recall = state.msg_recall_walk } in
+      state.msg_drafts <-
+        if String.equal draft.kcd_text "" && draft.kcd_attachments = []
+           && draft.kcd_references = [] && Option.is_none draft.kcd_recall then others
+        else (key, draft) :: others
+
+let restore_message_draft (state : state) keeper_name =
+  Masc_tui_message_input.clear state.msg_input;
+  (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- []);
+  (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- []);
+  state.msg_attachments_since <- None;
+  state.msg_recall_walk <- None;
+  match List.assoc_opt (chat_input_workspace state, keeper_name) state.msg_drafts with
+  | None -> ()
+  | Some draft ->
+      Masc_tui_message_input.insert state.msg_input draft.kcd_text;
+      (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- draft.kcd_attachments);
+      (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- draft.kcd_references);
+      state.msg_attachments_since <- draft.kcd_since;
+      state.msg_recall_walk <- draft.kcd_recall
 
 (* A local draft survives peer reconfirmation but never a workspace/draft
    replacement. Peer images retain the exact reading that acquired them.
@@ -15306,7 +15380,7 @@ let retain_preflight_inputs (state : state) entries =
               ~keeper_name:request.keeper_name = []
          && Masc_tui_message_input.length state.msg_input = 0
          && state.msg_attachments = [] && state.msg_references = []
-         && Option.is_none state.msg_recall_replaces
+         && Option.is_none (current_recall_edit state)
       then begin
         state.msg_history <- List.filter (fun row ->
           not (String.equal row.me_keeper_name request.keeper_name
@@ -15610,10 +15684,10 @@ let keeper_chat_control_result_current state keeper_name ~generation =
       && not (List.mem_assoc keeper_name state.keeper_chat_control_pending))
 
 let send_disposition state ~keeper_name : send_disposition =
-  match state.msg_recall_replaces with
-  | Some item when String.equal item.request.keeper_name keeper_name ->
+  match recall_edit_for_keeper state keeper_name with
+  | Some item ->
       Masc_tui_send_disposition.Updates item.request
-  | Some _ | None ->
+  | None ->
   if List.exists (fun (name, id, intervention) ->
        String.equal name keeper_name
        && intervention = Retained_before_dispatch
@@ -16484,8 +16558,10 @@ let composing_for_keeper (state : state) keeper_name =
 (* Recall owns this Keeper's queued input until the edit is submitted or
    abandoned. Earlier Enter/control authorization cannot send its old body. *)
 let recalling_for_keeper (state : state) keeper_name =
-  match state.msg_recall_replaces with
-  | Some editing -> String.equal editing.request.keeper_name keeper_name
+  match recall_edit_for_keeper state keeper_name with
+  | Some editing ->
+      Masc_tui_keeper_chat_queue.holds state.msg_queued
+        ~request_id:editing.request.request_id
   | None -> false
 
 (* A fresh Enter may bypass input held by an explicit stop. A refused
@@ -17932,9 +18008,8 @@ let create_state
   msg_drafts = [];
   msg_unconfirmed_workspace = None;
   msg_history = [];
-  msg_recall_at = None;
-  msg_recall_draft = ("", [], [], None);
-  msg_recall_replaces = None;
+  msg_recall_walk = None;
+  msg_recall_edits = [];
   msg_live = None;
   msg_loaded_sources = empty_keeper_chat_sources;
   msg_loaded = [];
@@ -23012,7 +23087,7 @@ let keeper_message_command_window ?status_frame ?scroll state ~terminal_rows ~te
     | None -> keeper_message_frame_for_viewport ?scroll state ~now:(Unix.gettimeofday ())
                 ~terminal_rows ~terminal_cols) in
   match state.view, state.keeper_message_focus, state.voice_capture,
-        state.msg_recall_replaces with
+        current_recall_edit state with
   | Keepers Keeper_message, Right_pane, None, None
     when not (keeper_message_reading_back ?scroll state) ->
     let keeper_names = List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers in

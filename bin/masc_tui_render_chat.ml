@@ -4957,7 +4957,7 @@ let render_keeper_message (state : state) =
         (* Walking back onto a waiting line makes the next Enter a replacement
            rather than a second copy. The operator has to be told which of the
            two this Enter is: the composer looks identical either way. *)
-        match state.msg_recall_replaces with
+        match current_recall_edit state with
         | Some _ -> "Enter:replace the queued line  Ctrl-U:leave it queued"
         | None -> (
             match pending_count with
@@ -5030,7 +5030,7 @@ let render_keeper_message (state : state) =
        help sheet names both keys. *)
     let leave_hint =
       if state.keeper_message_focus = Right_pane
-         && Option.is_none state.msg_recall_replaces
+         && Option.is_none (current_recall_edit state)
          && Option.is_none state.voice_capture
       then
         if Masc_tui_keys.chat_quiet_leave ~input_supported:true
@@ -5118,7 +5118,7 @@ let render_keeper_message (state : state) =
       if state.keeper_message_focus = Left_pane then
         "Up/Down:move  Enter:open  Right/Esc:chat"
       else if state.msg_origin_display = Message_layout.Origin_bare then
-        let context_hints = match disposition, state.msg_recall_replaces with
+        let context_hints = match disposition, current_recall_edit state with
           | Updates _, Some _ -> ["Enter:replace"; "^U:leave queued"]
           | Updates _, None when pending_count > 0 ->
               ["Enter:update"; "^T:queue"; "^K:cancel"; "^P:edit"]
@@ -5138,7 +5138,7 @@ let render_keeper_message (state : state) =
         let compact_enter_hint =
           match disposition with
           | Updates _ -> (
-              match state.msg_recall_replaces with
+              match current_recall_edit state with
               | Some _ -> "Enter:replace queued  Ctrl-U:leave it"
               | None ->
                   Printf.sprintf "Enter:send (%d local)  Ctrl-T:queue  Ctrl-K:cancel"

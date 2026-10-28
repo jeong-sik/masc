@@ -1183,11 +1183,11 @@ let test_retained_input_footer_matches_coalescing_and_order () =
      Tui_types.Retained_after_stop, Masc_tui_send_disposition.Sends];
   state.keeper_interactive_waiting <- ["alpha", item.request.request_id,
     Tui_types.Retained_before_dispatch];
-  state.msg_recall_replaces <- Some item;
+  Tui_types.set_recall_edit state item;
   check bool "editing that queued item is described as replacement" true
     (Tui_types.send_disposition state ~keeper_name:"alpha"
      = Masc_tui_send_disposition.Updates item.request);
-  state.msg_recall_replaces <- None;
+  Tui_types.clear_recall_edit_for_keeper state "alpha";
   let later = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"later" () in
   (match Q.push state.msg_queued ~submitted_at:2. later with
    | Ok (queue, _) -> state.msg_queued <- queue | Error detail -> fail detail);
@@ -1496,10 +1496,10 @@ let test_unmarked_input_cannot_escape_composer_or_recall_ownership () =
   let _, item = preflight_input () in
   state.msg_queued <- Q.restore_unsent Q.empty item;
   state.msg_target_keeper_name <- Some "alpha";
-  state.msg_recall_replaces <- Some item;
+  Tui_types.set_recall_edit state item;
   check bool "background turn refresh cannot dispatch the recalled old body" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
-  state.msg_recall_replaces <- None;
+  Tui_types.clear_recall_edit_for_keeper state "alpha";
   state.view <- Tui_types.Keepers Tui_types.Keeper_message;
   state.composer_focused <- true;
   state.coalesce_queued_input <- true;
@@ -1530,7 +1530,7 @@ let test_recalled_marked_input_holds_admission_for_its_keeper () =
       [item.request; later; other];
     state.coalesce_queued_input <- coalesce;
     state.msg_target_keeper_name <- Some "beta";
-    state.msg_recall_replaces <- Some item;
+    Tui_types.set_recall_edit state item;
     let held_queue = Q.waiting state.msg_queued in
     check string "the emptied editor does not revoke recall ownership" ""
       (Masc_tui_message_input.contents state.msg_input);
@@ -1542,7 +1542,7 @@ let test_recalled_marked_input_holds_admission_for_its_keeper () =
      | None -> fail "another Keeper was held by the recall");
     check bool "waiting payloads and queue order remain owned locally" true
       (held_queue = Q.waiting state.msg_queued);
-    state.msg_recall_replaces <- None;
+    Tui_types.clear_recall_edit_for_keeper state "alpha";
     (match Tui_types.next_authorized_keeper_input state "alpha" with
      | Some (ready, _) -> check bool "abandoning edit releases the unchanged original payload" true
          (ready.request = item.request)
@@ -1554,7 +1554,7 @@ let test_recalled_admission_uses_the_explicitly_replaced_payload () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   let _, item = preflight_input () in
   state.msg_queued <- Q.restore_unsent Q.empty item;
-  state.msg_recall_replaces <- Some item;
+  Tui_types.set_recall_edit state item;
   state.keeper_interactive_waiting <- ["alpha", item.request.request_id,
     Tui_types.Awaiting_control {generation=Tui_types.keeper_chat_control_generation state "alpha";
       target=None}];
@@ -1564,13 +1564,135 @@ let test_recalled_admission_uses_the_explicitly_replaced_payload () =
    | Error detail -> fail detail);
   check bool "queue replacement alone does not release the editor's ownership" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
-  state.msg_recall_replaces <- None;
+  Tui_types.clear_recall_edit_for_keeper state "alpha";
   (match Tui_types.next_authorized_keeper_input state "alpha" with
    | Some (ready, _) ->
      check bool "explicit edit release dispatches the exact new text and image payload" true
        (ready.request = edited);
      check int "replacement preserves the original queue position" item.submission_seq ready.submission_seq
    | None -> fail "submitted edit did not release its input")
+;;
+
+let test_recall_edits_and_drafts_follow_workspace_and_keeper () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let path = Tui_decode.Canonical_path.of_path in
+  let identity root : Tui_decode.server_identity =
+    { sid_version="test"; sid_binary_commit="test"; sid_binary_commit_age_s=None;
+      sid_base_path=path "/workspace"; sid_masc_root=path root;
+      sid_executable_in_worktree=None; sid_state_ready=Some true; sid_uptime=None;
+      sid_sse_clients=None; sid_gc=None; sid_scheduler=None } in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+  state.msg_target_keeper_name <- Some "alpha";
+  state.server_identity <- Some (identity "/workspace/a-root");
+  state.workspace_identity <- Tui_types.Workspace_identity_match;
+  let _, a = preflight_input () in
+  state.msg_queued <- Q.restore_unsent Q.empty a;
+  Tui_types.set_recall_edit state a;
+  Masc_tui_message_input.insert state.msg_input "editing A";
+  state.msg_attachments <- a.request.attachments;
+  state.msg_references <- a.request.references;
+  let observation : Tui_types.image_observation =
+    {io_reading=ref (); io_keeper=Some "alpha"; io_history=None; io_logs=[]} in
+  state.msg_attachments_since <- Some observation;
+  let recalled = chat_entry ~request_id:a.request.request_id
+      ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
+      ~text:a.request.message ~at:1. () |> Tui_types.msg_anchor in
+  let original = ("draft before recall", a.request.attachments,
+    a.request.references, Some observation) in
+  let walk : Tui_types.keeper_recall_walk = {krw_anchor=recalled; krw_original=original} in
+  state.msg_recall_walk <- Some walk;
+  let a_workspace = Tui_types.chat_input_workspace state in
+  (* Identity changes before withdrawal saves A's composer. *)
+  state.server_identity <- Some (identity "/workspace/b-root");
+  Tui_types.save_message_draft ~workspace:a_workspace state;
+  let b = {a with Q.request={a.request with Keeper_chat.message="B input"}} in
+  state.msg_queued <- Q.restore_unsent Q.empty b;
+  Tui_types.restore_message_draft state "alpha";
+  check bool "same Keeper and request ID do not acquire A's edit in B" true
+    (Option.is_none (Tui_types.current_recall_edit state));
+  check string "B does not receive A's draft" ""
+    (Masc_tui_message_input.contents state.msg_input);
+  check bool "A's edit does not hold B's queue" false
+    (Tui_types.recalling_for_keeper state "alpha");
+  check bool "B's queued input is independently selectable" true
+    (Option.is_some (Tui_types.next_authorized_keeper_input state "alpha"));
+  Tui_types.set_recall_edit state b;
+  Masc_tui_message_input.insert state.msg_input "editing B";
+  Tui_types.save_message_draft state;
+  state.server_identity <- Some (identity "/workspace/a-root");
+  state.msg_queued <- Q.restore_unsent Q.empty a;
+  Tui_types.restore_message_draft state "alpha";
+  check bool "A's exact edit returns with its queue" true
+    (Tui_types.current_recall_edit state = Some a
+     && Tui_types.recalling_for_keeper state "alpha");
+  check string "A's edited text returns" "editing A"
+    (Masc_tui_message_input.contents state.msg_input);
+  check bool "A's staged payload and source recency return" true
+    (state.msg_attachments = a.request.attachments
+     && state.msg_references = a.request.references
+     && Option.exists (fun actual -> actual == observation
+       && actual.io_reading == observation.io_reading) state.msg_attachments_since);
+  check bool "the draft set aside before recall also returns" true
+    (Option.exists (fun actual -> actual == walk) state.msg_recall_walk);
+  state.msg_target_keeper_name <- Some "beta";
+  check bool "A's hidden edit still holds alpha" true
+    (Tui_types.recalling_for_keeper state "alpha");
+  check bool "A's hidden edit does not belong to beta" true
+    (Option.is_none (Tui_types.current_recall_edit state));
+  state.msg_target_keeper_name <- Some "alpha";
+  state.workspace_identity <- Tui_types.Workspace_identity_match_unconfirmed "health failed";
+  state.msg_unconfirmed_workspace <- a_workspace;
+  state.workspace_read_authority <- ref ();
+  check bool "failed health preserves the confirmed workspace's edit" true
+    (Tui_types.current_recall_edit state = Some a);
+  Tui_types.clear_current_recall_edit state;
+  check bool "abandoning A's edit releases only its own queue" false
+    (Tui_types.recalling_for_keeper state "alpha");
+  state.msg_unconfirmed_workspace <- None;
+  state.server_identity <- Some (identity "/workspace/b-root");
+  state.msg_queued <- Q.restore_unsent Q.empty b;
+  Tui_types.restore_message_draft state "alpha";
+  check bool "B's separate edit survived abandoning A's" true
+    (Tui_types.current_recall_edit state = Some b);
+  check string "B's own draft returns" "editing B"
+    (Masc_tui_message_input.contents state.msg_input);
+  Masc_tui_message_input.clear state.msg_input;
+  state.msg_attachments <- [];
+  state.msg_references <- [];
+  state.msg_recall_walk <- None;
+  Tui_types.save_message_draft state;
+  Tui_types.restore_message_draft state "alpha";
+  check bool "an empty editor still owns and holds its queued input" true
+    (Tui_types.current_recall_edit state = Some b
+     && Tui_types.recalling_for_keeper state "alpha"
+     && Masc_tui_message_input.contents state.msg_input = "");
+  state.server_identity <- None;
+  state.workspace_authority <- Tui_types.Workspace_authority 10;
+  Tui_types.set_recall_edit state b;
+  state.workspace_authority <- Tui_types.Workspace_authority 11;
+  check bool "unidentified authorities cannot adopt each other's edits" true
+    (Option.is_none (Tui_types.current_recall_edit state))
+;;
+
+let test_recall_anchor_tracks_the_original_history_row () =
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}) in
+  let row id at = chat_entry ~request_id:id ~role:user ~text:"same text" ~at () in
+  let first = row "first" 1. and current = row "current" 2.
+  and queued = row "queued" 3. and added = row "new handoff" 4. in
+  let anchor = Tui_types.msg_anchor current in
+  check (option int) "initial reverse offset" (Some 1)
+    (Tui_types.recall_history_offset [first; current; queued] anchor);
+  check (option int) "a newer row moves the offset but preserves the anchor" (Some 2)
+    (Tui_types.recall_history_offset [first; current; queued; added] anchor);
+  check (option int) "removing the row cannot select another identical text" None
+    (Tui_types.recall_history_offset [first; queued; added] anchor);
+  let session = {current with Tui_types.me_identity=
+    Tui_types.Session_row {request_id=current.me_request_id;
+      turn_phase=current.me_turn_phase; operation_seq=current.me_operation_seq}} in
+  let persisted = {current with Tui_types.me_identity=Tui_types.Persisted_row "stored-row"} in
+  check (option int) "a persisted replacement retains the same user turn slot" (Some 1)
+    (Tui_types.recall_history_offset [first; persisted; queued] (Tui_types.msg_anchor session))
 ;;
 
 let test_new_enter_can_bypass_an_explicitly_stopped_input () =
@@ -6818,6 +6940,8 @@ let () =
         ; test_case "unmarked input respects composer and recall ownership" `Quick test_unmarked_input_cannot_escape_composer_or_recall_ownership
         ; test_case "recalled marked input holds admission for its Keeper" `Quick test_recalled_marked_input_holds_admission_for_its_keeper
         ; test_case "recalled admission uses the explicitly replaced payload" `Quick test_recalled_admission_uses_the_explicitly_replaced_payload
+        ; test_case "recall edits and drafts follow workspace and Keeper" `Quick test_recall_edits_and_drafts_follow_workspace_and_keeper
+        ; test_case "recall anchor survives history changes" `Quick test_recall_anchor_tracks_the_original_history_row
         ; test_case "new Enter bypasses an explicit stop hold" `Quick test_new_enter_can_bypass_an_explicitly_stopped_input
         ; test_case "empty composer preserves already queued input order" `Quick test_empty_composer_cannot_reverse_already_queued_input
         ; test_case "preflight restoration preserves submission chronology" `Quick test_preflight_restoration_preserves_submission_chronology

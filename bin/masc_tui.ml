@@ -586,44 +586,6 @@ let parse_args () =
   , reasoning_visibility
   , tool_visibility )
 
-(* The workspace a chat draft is kept under: the one the open chat
-   remembered while the identity is unread, else the server's. *)
-let chat_input_workspace state =
-  match state.msg_unconfirmed_workspace with
-  | Some _ as workspace -> workspace
-  | None -> workspace_input_identity_of_server state.server_identity
-
-let save_message_draft ?workspace state =
-  match state.msg_target_keeper_name with
-  | None -> ()
-  | Some keeper_name ->
-      let workspace = match workspace with
-        | Some workspace -> workspace
-        | None -> chat_input_workspace state in
-      let key = workspace, keeper_name in
-      let others = List.remove_assoc key state.msg_drafts in
-      let draft = { kcd_text = Masc_tui_message_input.contents state.msg_input;
-        kcd_attachments = state.msg_attachments;
-        kcd_references = state.msg_references;
-        kcd_since = state.msg_attachments_since } in
-      state.msg_drafts <-
-        if String.equal draft.kcd_text "" && draft.kcd_attachments = []
-           && draft.kcd_references = [] then others
-        else (key, draft) :: others
-
-let restore_message_draft state keeper_name =
-  Masc_tui_message_input.clear state.msg_input;
-  (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- []);
-  (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- []);
-  state.msg_attachments_since <- None;
-  match List.assoc_opt (chat_input_workspace state, keeper_name) state.msg_drafts with
-  | None -> ()
-  | Some draft ->
-      Masc_tui_message_input.insert state.msg_input draft.kcd_text;
-      (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- draft.kcd_attachments);
-      (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- draft.kcd_references);
-      state.msg_attachments_since <- draft.kcd_since
-
 let recovered_paste_send_locked_for state keeper_name =
   match keeper_name with
   | Some target ->
@@ -836,8 +798,7 @@ let reset_message_file_changes state keeper_name =
    defined with the dispatch path, after this. *)
 let forget_recall (state : state) =
   state.msg_command_menu <- Masc_tui_command.Menu_idle;
-  state.msg_recall_at <- None;
-  state.msg_recall_draft <- ("", [], [], None)
+  state.msg_recall_walk <- None
 
 let clear_keeper_history_projection state =
   retire_keeper_message_search state;
@@ -1152,16 +1113,18 @@ let note_attachment_staged (state : state) =
    original from the queue and the copy from the composer. Recorded here and
    acted on at Enter, so the step itself stays what it always was: reversible,
    and costing nothing if the operator walks on past. *)
-let recall_land (state : state) entries at =
+let recall_land (state : state) ~original entries at =
   let count = List.length entries in
   let entry = List.nth entries (count - 1 - at) in
+  state.msg_recall_walk <- Some {krw_anchor=msg_anchor entry; krw_original=original};
   set_composer_text state entry.me_text;
-  state.msg_recall_replaces <-
-    Chat_queue.find state.msg_queued ~request_id:entry.me_request_id;
+  (match Chat_queue.find state.msg_queued ~request_id:entry.me_request_id with
+   | Some item -> set_recall_edit state item
+   | None -> clear_current_recall_edit state);
   (* A queued edit owns the complete request, not just its text. Never attach
      the draft's images to a different recalled line. *)
   let attachments, references =
-    match state.msg_recall_replaces with
+    match current_recall_edit state with
     | Some item -> item.request.attachments, item.request.references
     | None -> [], []
   in
@@ -1175,36 +1138,40 @@ let recall_older (state : state) =
   let count = List.length sent in
   if count = 0 then ()
   else begin
-    let at =
-      match state.msg_recall_at with
+    let at, original =
+      match state.msg_recall_walk with
       | None ->
-          state.msg_recall_draft <-
-            (Masc_tui_message_input.contents state.msg_input, state.msg_attachments,
-             state.msg_references, state.msg_attachments_since);
-          0
-      | Some at -> min (at + 1) (count - 1)
+          (* A spill belongs to the draft being set aside, not to the
+             recalled line that is about to replace the composer. *)
+          let text = materialise_spilled_paste state
+              (Masc_tui_message_input.contents state.msg_input) in
+          0, (text, state.msg_attachments,
+              state.msg_references, state.msg_attachments_since)
+      | Some walk ->
+          (match recall_history_offset sent walk.krw_anchor with
+           | Some at -> min (at + 1) (count - 1)
+           | None -> 0), walk.krw_original
     in
-    state.msg_recall_at <- Some at;
-    recall_land state sent at
+    recall_land state ~original sent at
   end
 
 let recall_newer (state : state) =
-  match state.msg_recall_at with
+  match state.msg_recall_walk with
   | None -> ()
-  | Some 0 ->
-      (* Back at the operator's own draft: it is not an edit of anything. *)
-      state.msg_recall_replaces <- None;
-      let text, attachments, references, since = state.msg_recall_draft in
-      forget_recall state;
-      set_composer_text state text;
-      (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- attachments);
-      (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- references);
-      state.msg_attachments_since <- since
-  | Some at ->
+  | Some walk ->
       let sent = own_typed_messages state in
-      let at = at - 1 in
-      state.msg_recall_at <- Some at;
-      if List.length sent > at then recall_land state sent at
+      (match recall_history_offset sent walk.krw_anchor with
+       | Some at when at > 0 ->
+           recall_land state ~original:walk.krw_original sent (at - 1)
+       | Some _ | None ->
+           (* Back at the operator's own draft: it is not an edit of anything. *)
+           clear_current_recall_edit state;
+           let text, attachments, references, since = walk.krw_original in
+           forget_recall state;
+           set_composer_text state text;
+           (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- attachments);
+           (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- references);
+           state.msg_attachments_since <- since)
 
 (* A queued line is drawn in the conversation, so cancelling one or pulling it
    back into the composer has to take its row with it. The row is found by the
@@ -1241,12 +1208,13 @@ let drop_unsent_request (state : state) (request : Keeper_chat.request) =
   | None -> false
   | Some (_, rest) ->
     state.msg_queued <- rest;
-    (match state.msg_recall_replaces with
+    (match recall_edit_for_keeper state request.Keeper_chat.keeper_name with
      | Some editing
        when String.equal editing.Chat_queue.request.request_id
               request.Keeper_chat.request_id ->
-         state.msg_recall_replaces <- None;
-         clear_staged_attachments state
+         clear_recall_edit_for_keeper state request.Keeper_chat.keeper_name;
+         if state.msg_target_keeper_name = Some request.Keeper_chat.keeper_name then
+           clear_staged_attachments state
      | Some _ | None -> ());
     forget_queued_history state request;
     true
@@ -1336,9 +1304,9 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     state.msg_command_menu <- Masc_tui_command.Menu_dismissed completed;
     true in
   let move_recall move =
-    let was_editing = Option.is_some state.msg_recall_replaces in
+    let was_editing = Option.is_some (current_recall_edit state) in
     move state;
-    if was_editing && Option.is_none state.msg_recall_replaces
+    if was_editing && Option.is_none (current_recall_edit state)
     then drain_queue ()
   in
   match key with
@@ -1351,9 +1319,9 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     request_voice_stop state Masc.Voice_bridge.Discard;
     set_last_action state (Some ("voice: discarding", Unix.gettimeofday ()));
     true
-  | "esc" when Option.is_some state.msg_recall_replaces ->
+  | "esc" when Option.is_some (current_recall_edit state) ->
     forget_recall state;
-    state.msg_recall_replaces <- None;
+    clear_current_recall_edit state;
     clear_staged_attachments state;
     Masc_tui_message_input.clear state.msg_input;
     discard_recovered_paste_lock state;
@@ -1395,7 +1363,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   | k
     when state.view = Keepers Keeper_message
          && state.keeper_message_focus = Right_pane
-         && Option.is_none state.msg_recall_replaces
+         && Option.is_none (current_recall_edit state)
          && Option.is_none state.voice_capture
          && Masc_tui_keys.chat_quiet_leave
               ~input_supported:(keeper_message_input_supported state)
@@ -1535,9 +1503,9 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       state.msg_spill <- None;
       forget_recall state;
       clear_staged_attachments state;
-      if Option.is_some state.msg_recall_replaces
+      if Option.is_some (current_recall_edit state)
       then begin
-        state.msg_recall_replaces <- None;
+        clear_current_recall_edit state;
         drain_queue ()
       end;
       Masc_tui_message_input.clear state.msg_input;
@@ -1588,7 +1556,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
        | Some (item, _rest) ->
          forget_recall state;
          let request = item.Chat_queue.request in
-         state.msg_recall_replaces <- Some item;
+         set_recall_edit state item;
          (* The attachments come back with the text. They were staged for this
             line and remain on the queued request while it is edited in place.
             The composer mirrors them so replacing the body retains the exact
@@ -9627,7 +9595,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
          "whose workspace", and a file in the wrong one is a message pointing
          at nothing. *)
       let text = place_spilled_paste state ~base_path ~keeper_name:target text in
-      match state.msg_recall_replaces with
+      match current_recall_edit state with
       | Some editing
         when String.equal editing.Chat_queue.request.Keeper_chat.keeper_name
                target ->
@@ -9641,14 +9609,14 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
             }
           in
           (match
-             Chat_queue.replace_request state.msg_queued
-               ~request_id:original.Keeper_chat.request_id request
+             Chat_queue.replace_recalled_request state.msg_queued
+               ~original:editing request
            with
            | Error detail -> report_action state "error" detail
            | Ok queue ->
                clear_staged_attachments state;
                state.msg_queued <- queue;
-               state.msg_recall_replaces <- None;
+               clear_current_recall_edit state;
                let safe_text =
                  Keeper_chat.terminal_safe_text ~preserve_newlines:true text
                in
@@ -12352,7 +12320,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   end else text in
   let command = Masc_tui_command.parse text in
   if
-    Option.is_some state.msg_recall_replaces
+    Option.is_some (current_recall_edit state)
     && match command with
       | Masc_tui_command.Say _ -> false
       | Masc_tui_command.Task_for_keeper _ | Task_recover | Task_inspect | Task_missing_title | Help | Features
@@ -14957,6 +14925,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
     in
     let attachments = state.msg_attachments and references = state.msg_references in
     let since = state.msg_attachments_since and queue = state.msg_queued in
+    let recall_walk = state.msg_recall_walk in
     let focused = state.composer_focused in
     let retained = retained_input_markers queue state.keeper_interactive_waiting in
     let withdrawn_workspace = match state.msg_unconfirmed_workspace with
@@ -15014,6 +14983,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
       (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- attachments);
       (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- references);
       state.msg_attachments_since <- since;
+      state.msg_recall_walk <- recall_walk;
       state.msg_queued <- queue;
       state.keeper_interactive_waiting <- retained;
       List.iter (fun (item : Chat_queue.item) ->
@@ -32559,19 +32529,10 @@ and is loaded on demand through keeper_skill.
              || scroll_recovery_key
            then
              if switch_key then begin
-               let released_recall = Option.is_some state.msg_recall_replaces in
-               if released_recall then begin
-                 state.msg_recall_replaces <- None;
-                 clear_staged_attachments state
-               end;
                switch_to_next_keeper_message state ~mailbox:async_messages
                  ~drain_queue:(fun () ->
                    drain_queued_message state ~base_path
-                     ~mailbox:async_messages);
-               (* Select the explicit target before released input can create
-                  an inflight owner and pin the previous conversation. *)
-               if released_recall then
-                 drain_queued_message state ~base_path ~mailbox:async_messages
+                     ~mailbox:async_messages)
              end else
                let (_handled : bool) =
                  handle_message_key state

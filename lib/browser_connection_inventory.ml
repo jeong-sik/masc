@@ -22,7 +22,7 @@ let issue_to_json issue =
       "clientId",`String (B.client_id_to_string client_id);
       "instances",`List (List.map (fun id -> `String id) instances)]
 let issues_to_json issues = `List (List.map issue_to_json issues)
-let ( let* ) = Result.bind
+open Result.Syntax
 let issue_of_json value =
   let* fields=match value with `Assoc fields -> Ok fields | _ -> Error "inventory issue must be an object" in
   let exact names=if List.sort String.compare (List.map fst fields)=List.sort String.compare names

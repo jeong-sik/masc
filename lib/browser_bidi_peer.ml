@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 let field name = function `Assoc xs -> List.assoc_opt name xs | _ -> None
 let string name json = match field name json with
   | Some (`String s) when s <> "" -> Ok s | _ -> Error ("BiDi missing " ^ name)

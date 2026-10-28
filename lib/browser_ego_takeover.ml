@@ -30,7 +30,7 @@ let script = {js|
 |js}
 
 type t = { space : Browser_lane.ego_space; page : Browser_surface.ego_page option }
-let ( let* ) = Result.bind
+open Result.Syntax
 let decode ~expected_id = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)=["page";"spaceId";"spaceName"] ->
       let get key=Option.to_result ~none:("takeover receipt lacks " ^ key) (List.assoc_opt key fields) in

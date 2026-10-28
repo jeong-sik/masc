@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 type configuration = { driver : string; binary : string option; profiles : string }
 let configuration_label = "automation configuration"
 let configuration_keys = ["binary";"driver";"profiles"]

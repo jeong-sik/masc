@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 module Requirement = Resource_requirement
 (* The one browser source an allocation's worker serves, with the browser it
    starts. Ego's settings ride the worker's arguments, and an external host

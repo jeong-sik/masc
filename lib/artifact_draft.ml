@@ -11,7 +11,7 @@ type command =
   | Resolve of selection
   | Edit of { selection : selection; expected : string; replacement : string }
   | Discuss of { target : target; request : Artifact_discussion.request }
-let ( let* ) = Result.bind
+open Result.Syntax
 let safe_integer value = value >= 0 && Int64.of_int value <= 9_007_199_254_740_991L
 let text value = String.trim value <> "" && String.is_valid_utf_8 value
 let fields allowed = function

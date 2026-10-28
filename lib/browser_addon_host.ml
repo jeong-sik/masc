@@ -10,7 +10,7 @@ type t = {
   reserved : string list;
   services : served list;
 }
-let ( let* ) = Result.bind
+open Result.Syntax
 (* Every browser service that serves now, each with its own export matched
    by instance and owner. No service at all is the only refusal here. *)
 let connect ~config ~access ~principal ~reserved =

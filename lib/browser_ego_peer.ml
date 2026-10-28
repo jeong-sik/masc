@@ -1,5 +1,5 @@
 module Live = Browser_live_peer
-let ( let* ) = Result.bind
+open Result.Syntax
 let field name = function `Assoc fields -> List.assoc_opt name fields | _ -> None
 let obj fields = `Assoc fields
 let str value = `String value

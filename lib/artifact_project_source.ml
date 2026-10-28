@@ -8,7 +8,7 @@ type t =
   { id : string; author : string; created_at : string; build : build
   ; install_scripts : bool; files : stored_file list }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let valid_id id =
   String.length id = 40 && String.starts_with ~prefix:"project-" id
   && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)

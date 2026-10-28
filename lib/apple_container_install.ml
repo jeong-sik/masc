@@ -4,7 +4,7 @@ type error = Unsupported_host | Invalid_release | Download_failed | Invalid_file
   | Digest_mismatch | Signature_rejected | Publisher_mismatch | Installer_failed
 type runner = string list -> (string, unit) result
 type terminal_runner = string list -> (unit, unit) result
-let ( let* ) = Result.bind
+open Result.Syntax
 let expected_publisher = "Developer ID Installer: Apple Inc. - Containerization (UPBK2H6LZM)"
 (* Publisher identity observed from Apple's official 1.4.1 signed package:
    GitHub asset digest c0d2716afefbb194c93fae662e9cae7cc186bcbcf746816608ec673dd648a6a4,

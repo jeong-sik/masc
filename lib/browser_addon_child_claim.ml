@@ -1,5 +1,5 @@
 module Lease = Native_addon_lease
-let ( let* ) = Result.bind
+open Result.Syntax
 let protect work = try work () with
   | (Unix.Unix_error _ | Sys_error _ | Yojson.Json_error _) as exn -> Error (Printexc.to_string exn)
 let lease result = Result.map_error Lease.error_to_string result

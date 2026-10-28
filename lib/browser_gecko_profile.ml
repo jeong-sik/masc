@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 module Requirement = Resource_requirement
 module Profile = Private_browser_profile
 

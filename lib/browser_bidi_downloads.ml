@@ -1,6 +1,6 @@
 module Endpoint = Ws_direct_core.Endpoint
 module Message = Ws_direct_core.Connection.Message
-let ( let* ) = Result.bind
+open Result.Syntax
 exception Stop
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let string key json = match field key json with

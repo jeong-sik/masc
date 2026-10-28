@@ -51,7 +51,7 @@ let script = {js|async function activateNativeTab(task, args) {
       stateAfter:stateOf(after), restored}};
 }|js}
 
-let ( let* ) = Result.bind
+open Result.Syntax
 (* JavaScript's Number.MAX_SAFE_INTEGER, the bound the script's
    Number.isSafeInteger check applies to the window id. *)
 let max_safe_integer = 9007199254740991L

@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 let before_request_sent = "network.beforeRequestSent"
 let response_completed = "network.responseCompleted"
 let fetch_error = "network.fetchError"

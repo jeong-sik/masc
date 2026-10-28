@@ -1,7 +1,7 @@
 module Model = Browser_stagehand_model
 module Exact = Lane_addon_exact
 module Wire = Browser_stagehand_wire
-let ( let* ) = Result.bind
+open Result.Syntax
 let output_name = "stagehand"
 let schema = `Assoc ["type",`String "object";"properties",`Assoc [];"additionalProperties",`Bool true]
 let refused message = {Wire.code=Wire.host_refused;message}

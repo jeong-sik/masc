@@ -10,7 +10,7 @@ type message = { id : string; actor : string; at : string; body : string }
 type decision = Pending | Applied of event | Rejected of event
 type thread = { id : string; position : Engine.selection; quote : string; messages : message list;
   proposal : string option; decision : decision; resolved : bool }
-let ( let* ) = Result.bind
+open Result.Syntax
 let nonblank text = String.is_valid_utf_8 text && String.trim text <> ""
 let uuid value = let* canonical = Random_id.parse_uuid_v7 value in
   if canonical = value then Ok () else Error "noncanonical discussion id"

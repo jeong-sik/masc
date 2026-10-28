@@ -196,7 +196,7 @@ type outcome =
   | Completed of { reply : Yojson.Safe.t; input : Release.settled }
   | Stopped of { receipt : Yojson.Safe.t; message : string;
       effect_started : bool; completed_effect : bool; input : Release.t }
-let ( let* ) = Result.bind
+open Result.Syntax
 let object_fields allowed = function
   | `Assoc fields when List.for_all (fun (key,_) -> List.mem key allowed) fields
       && List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok fields

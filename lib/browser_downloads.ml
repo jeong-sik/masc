@@ -10,7 +10,7 @@ type t = {
   mutable order : string list;
 }
 let create () = { downloads = Hashtbl.create 16; parents = Hashtbl.create 16; order = [] }
-let ( let* ) = Result.bind
+open Result.Syntax
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let string key json = match field key json with
   | Some (`String value) when value <> "" -> Ok value

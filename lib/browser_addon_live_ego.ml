@@ -1,7 +1,7 @@
 module B = Browser_lane
 module Peer = Browser_ego_peer
 module Live = Browser_live_peer
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let arguments (configuration : Browser_configuration.live_ego) =
   ["--live-ego-command";configuration.command] @ match configuration.space with

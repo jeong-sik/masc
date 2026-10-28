@@ -3,7 +3,7 @@ module Session = Browser_stagehand_session
 module Process = Browser_chromium_process
 module Profile = Browser_addon_chrome_profile
 module Requirement = Resource_requirement
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type configuration = { chrome : string; extension : string; launcher : string;
   guardian : string; claim_directory : string; profile:Profile.t }

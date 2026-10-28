@@ -1,6 +1,6 @@
 module Exact = Lane_addon_exact
 module Store = Lane_addon_store
-let ( let* ) = Result.bind
+open Result.Syntax
 type configuration = {store_root:string; outputs:Lane_addon_types.exact_output list}
 let configuration_to_json configuration = `Assoc ["store_root",`String configuration.store_root;
   "outputs",`Assoc (List.map (fun (output:Lane_addon_types.exact_output) -> output.name,

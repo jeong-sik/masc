@@ -1,7 +1,7 @@
 module C = Browser_cdp
 module B = Browser_stagehand_backend
 module P = Browser_extension_protocol
-let ( let* ) = Result.bind
+open Result.Syntax
 let field name = function `Assoc fields -> List.assoc_opt name fields | _ -> None
 let command cdp ?session name value = C.command cdp ?session name value |> Result.map_error (fun _ -> ())
 let evaluate cdp ~session ~program arguments =

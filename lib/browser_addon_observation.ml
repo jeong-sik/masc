@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type unavailable = Ego_user_owned_name of { space : string; observed_at : float }
 let unavailable_to_json = function

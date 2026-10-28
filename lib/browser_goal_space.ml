@@ -11,7 +11,7 @@ let error_message = function
   | Goal_reference (Goal_store.Goal_source_unavailable error) -> Goal_store.unavailable_to_string error
   | Goal_reference (Goal_lock_failed error) -> Masc_domain.masc_error_to_string error
   | Goal_reference (Goal_missing id) -> "Goal does not exist: " ^ id
-let ( let* ) = Result.bind
+open Result.Syntax
 let path config = Filename.concat (Workspace.masc_dir config) "browser_goal_spaces.json"
 let to_json binding = `Assoc ["goalId",`String binding.goal_id;
   "addonInstanceId",`String binding.addon_instance_id;

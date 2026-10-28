@@ -12,7 +12,7 @@ type error =
   | Unavailable of string
   | Commit_uncertain of Draft.t
 type view = { draft : Draft.t; content : string; selection : (Draft.selection * int * int) option }
-let ( let* ) = Result.bind
+open Result.Syntax
 let error_message = function
   | Invalid message | Unavailable message | Discussion_conflict message -> message
   | Missing -> "shared draft not found"

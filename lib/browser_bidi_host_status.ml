@@ -492,7 +492,7 @@ let kind_of ~what = function
   | _ -> Error (what ^ " is not an object")
 
 let keeper_of_json json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let what = "the BiDi host report's keeper" in
   let only keeper = Result.map (fun _ -> keeper) (exactly ~what ~names:[ "kind" ] json) in
   let* kind = kind_of ~what json in
@@ -512,7 +512,7 @@ let keeper_of_json json =
   | _ -> Error (what ^ " is of a kind this reader does not know")
 
 let report_of_json json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let text fields name =
     match List.assoc name fields with
     | `String text -> Ok text

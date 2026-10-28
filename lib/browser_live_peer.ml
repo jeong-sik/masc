@@ -10,7 +10,7 @@ let verb_to_wire = function
   | Page_interact -> "page.interact" | Page_act -> "page.act" | Page_goto -> "page.goto" | Page_context -> "page.context"
   | Page_snapshot -> "page.snapshot" | Page_downloads -> "page.downloads"
 let verb_of_wire s = List.find_opt (fun v -> String.equal (verb_to_wire v) s) all_of_verb
-let ( let* ) = Result.bind
+open Result.Syntax
 let decode (issued : Browser_lane.issued) =
   let* fields = match issued.verb_json with `Assoc fields -> Ok fields | _ -> Error "invalid live command" in
   let* () = if List.for_all (fun (name,_) -> List.mem name ["verb";"args";"actor"]) fields

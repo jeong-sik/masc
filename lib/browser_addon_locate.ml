@@ -1,5 +1,5 @@
 module Exact = Lane_addon_exact
-let ( let* ) = Result.bind
+open Result.Syntax
 let output_name = "locate"
 let schema = `Assoc ["type",`String "object";"additionalProperties",`Bool false;
   "properties",`Assoc ["matches",`Assoc ["type",`String "array";"items",`Assoc [

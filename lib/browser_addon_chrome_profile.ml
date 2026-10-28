@@ -3,7 +3,7 @@ type identity = Requirement.identity = { device:int; inode:int }
 type persistent = { path:string; root:identity; slot:identity; gate:identity;
   lease:identity; anchor:identity }
 type t = Private | Persistent of persistent
-let ( let* ) = Result.bind
+open Result.Syntax
 let path p = p.path
 let claim_directory p = Filename.concat p.path ".masc-browser-profile-claim"
 let anchor_path path = Filename.concat path ".masc-browser-profile.json"

@@ -1382,12 +1382,28 @@ let take_over t =
     | Some `Null -> Ok (obj ["action",str "take_over"])
     | Some _ | None -> Error (Live.Outcome_unknown ("ego answered the take over outside its answer frame; " ^ unknown))
 
+(* SDK-owned polling of this agent-owned Space only. It does not change the
+   owner or settle an earlier uncertain input, including after a dialog. *)
+let wait_for_control t options =
+  let args=obj ["controlOptions",Browser_lane.Action.control_wait_to_json options] in
+  match run_native_step t ~step:"space.wait_for_control" ~args (String.concat "\n" [
+    "    await task.waitForControl(args.controlOptions);";
+    "    emit({ok: true, value: {spaceId: task.spaceId, spaceName: task.name, controlAvailable: true}});" ]) with
+  | Error failure -> Error (Live.Before_effect (step_failure_message failure))
+  | Ok (`Assoc fields) when List.sort String.compare (List.map fst fields)=["controlAvailable";"spaceId";"spaceName"] ->
+    (match List.assoc_opt "spaceId" fields,List.assoc_opt "spaceName" fields,List.assoc_opt "controlAvailable" fields with
+     | Some (`Int id),Some (`String name),Some (`Bool true) when id=t.space.id && String.trim name<>"" ->
+       Ok (obj ["action",str "wait_for_control";"spaceId",`Int id;"spaceName",str name;"controlAvailable",`Bool true])
+     | (None|Some _),(None|Some _),(None|Some _) -> Error (Live.Before_effect "invalid native control wait observation"))
+  | Ok _ -> Error (Live.Before_effect "invalid native control wait observation")
+
 let act ?actor t args =
   match Browser_lane.Action.parse args with
   | Error detail -> Error (Live.Before_effect detail)
   | Ok (Browser_lane.Action.Open_tab url) -> open_tab t url
   | Ok (Browser_lane.Action.Control Browser_lane.Action.Hand_off) -> hand_off t
   | Ok (Browser_lane.Action.Control Browser_lane.Action.Take_over) -> take_over t
+  | Ok (Browser_lane.Action.Control (Browser_lane.Action.Wait_for_control options)) -> wait_for_control t options
   | Ok (Browser_lane.Action.Open_window _) ->
     Error (Live.Before_effect "an ego connection does not open windows")
   | Ok (Browser_lane.Action.On_tab {frame_path = _ :: _; _}) ->
@@ -1409,7 +1425,7 @@ let act ?actor t args =
   | Ok (Browser_lane.Action.On_tab {frame_path = []; interaction = (Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
       | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation
       | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests); _}) ->
-    Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, accept_dialog, dismiss_dialog, upload, hand_off and take_over only")
+    Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, accept_dialog, dismiss_dialog, upload, hand_off, take_over and wait_for_control only")
 
 let workflow ?actor t args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in

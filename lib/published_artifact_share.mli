@@ -1,14 +1,17 @@
 (** Pure, per-artifact external-sharing state.
 
-    A request carries the version it observed and a UUIDv7 operation identity.
+    A request carries the share and publication versions it observed, the
+    publication digest and a UUIDv7 operation identity.
     An accepted change advances the version even when the boolean value is
     unchanged. Each state carries its latest receipt. The store must archive
     that receipt before replacing it and consult archived identities as well. *)
 
 type snapshot = { version : int; shared : bool }
-type request = { operation_id : string; expected_version : int; requested : bool }
+type request =
+  { operation_id : string; expected_version : int; requested : bool
+  ; expected_artifact_revision : int; expected_artifact_sha256 : string }
 type outcome = Applied of snapshot | Conflict of snapshot
-type receipt = { request : request; outcome : outcome }
+type receipt = { request : request; outcome : outcome; publication_matches : bool }
 type t
 
 type error = Invalid of string | Operation_reused
@@ -20,8 +23,9 @@ val snapshot : t -> snapshot
 val latest : t -> receipt option
 val valid_operation_id : string -> bool
 val valid_version : int -> bool
+val valid_sha256 : string -> bool
 val receipt_snapshot : receipt -> snapshot
-val apply : t -> request -> (transition, error) result
+val apply : t -> publication_matches:bool -> request -> (transition, error) result
 (** This checks the latest identity only; the store owns earlier receipts. *)
 
 val snapshot_to_json : snapshot -> Yojson.Safe.t

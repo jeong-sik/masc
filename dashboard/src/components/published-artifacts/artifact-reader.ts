@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { v7 as uuidV7 } from 'uuid'
-import { artifactHref, captureArtifactWorkspace, fetchPublishedArtifact, setPublishedArtifactShared, type ArtifactDocument, type ArtifactPublication, type ArtifactWorkspace, type ArtifactShareResult } from '../../api/published-artifacts'
+import { artifactHref, captureArtifactWorkspace, fetchPublishedArtifact, latestArtifactRevision, setPublishedArtifactShared, type ArtifactDocument, type ArtifactPublication, type ArtifactWorkspace, type ArtifactShareResult } from '../../api/published-artifacts'
 import { artifactExternalSharing, type ShareObservation } from '../../lib/artifact-external-sharing'
 import { forgetPendingShare, retainPendingShare } from '../../lib/artifact-share-recovery'
 import { ExternalShareOutcomes } from './external-share-outcomes'
@@ -75,9 +75,10 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
   const selection = useRef({ doc, fixedRevision, readError })
   selection.current = { doc, fixedRevision, readError }
   const { artifact, content, revisions } = doc
-  const shareActivity = artifactExternalSharing.activity(artifact.id)
-  const sharedState = doc.share_version !== undefined && shareObservation && !readError && shareActivity === 'ready'
-    && shareObservation.id === artifact.id
+  const observedLatest = latestArtifactRevision(doc)
+  const shareActivity = artifactExternalSharing.activity(artifact.id, workspaceRoot)
+  const sharedState = doc.share_version !== undefined && observedLatest && shareObservation && !readError && shareActivity === 'ready'
+    && shareObservation.id === artifact.id && shareObservation.basePath === workspaceRoot
     && artifactExternalSharing.admits(shareObservation) ? doc.shared : undefined
   const current = () => active.current && isCurrent()
   useLayoutEffect(() => () => { active.current = false }, [])
@@ -105,13 +106,15 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
       && selection.current.doc.artifact.body._blob.sha256 === artifact.body._blob.sha256
     const canDispatch = () => stillSelected() && !selection.current.readError
       && selection.current.doc.shared === sharedState && selection.current.doc.share_version === doc.share_version
+      && latestArtifactRevision(selection.current.doc)?.revision === observedLatest?.revision
+      && latestArtifactRevision(selection.current.doc)?.body._blob.sha256 === observedLatest?.body._blob.sha256
     const nextShared = !sharedState
-    const owner = artifactExternalSharing.begin(artifact.id, shareObservation)
+    const owner = artifactExternalSharing.begin(artifact.id, workspaceRoot, shareObservation)
     if (!owner) return
     setCopyFeedback('')
     const notSent = (message: string) => {
       if (sameVisit()) setCopyFeedback(message)
-      artifactExternalSharing.finish(artifact.id, owner, 'not-sent')
+      artifactExternalSharing.finish(artifact.id, workspaceRoot, owner, 'not-sent')
     }
     const changed = '문서 또는 공유 상태가 달라졌거나 확인할 수 없어 요청을 보내지 않았습니다. 다시 확인해 주세요.'
     let workspace: ArtifactWorkspace
@@ -121,7 +124,9 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
       const fresh = await fetchPublishedArtifact(artifact.id, fixedRevision ? String(artifact.revision) : undefined, undefined, workspace)
       if (!canDispatch()) { notSent(changed); return }
       if (fresh.artifact.revision !== artifact.revision || fresh.shared !== sharedState || fresh.share_version !== doc.share_version
-        || fresh.artifact.body._blob.sha256 !== artifact.body._blob.sha256) {
+        || fresh.artifact.body._blob.sha256 !== artifact.body._blob.sha256
+        || latestArtifactRevision(fresh)?.revision !== observedLatest?.revision
+        || latestArtifactRevision(fresh)?.body._blob.sha256 !== observedLatest?.body._blob.sha256) {
         notSent(changed)
         return
       }
@@ -129,37 +134,56 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
       notSent(error instanceof Error ? `공유 상태를 확인하지 못해 요청을 보내지 않았습니다: ${error.message}` : '공유 상태를 확인하지 못해 요청을 보내지 않았습니다.')
       return
     }
-    if (doc.share_version === undefined) { notSent(changed); return }
-    const operation = { id: artifact.id, operationId: uuidV7(), expectedVersion: doc.share_version, shared: nextShared }
+    if (doc.share_version === undefined || !observedLatest) { notSent(changed); return }
+    const operation = { id: artifact.id, operationId: uuidV7(), expectedVersion: doc.share_version, shared: nextShared,
+      expectedArtifactRevision: observedLatest.revision, expectedArtifactSha256: observedLatest.body._blob.sha256 }
     const pending = { operation, workspace, title: artifact.title, revision: artifact.revision }
     try { retainPendingShare(pending) } catch (error) {
       notSent(error instanceof Error ? error.message : '공유 요청을 보관하지 못해 전송하지 않았습니다.')
       return
     }
     if (!canDispatch()) { forgetPendingShare(pending); notSent(changed); return }
+    artifactExternalSharing.attachPending(artifact.id, workspaceRoot, owner, pending)
     let updated: ArtifactShareResult
-    const receipt = { id: artifact.id, title: artifact.title, revision: artifact.revision, requested: nextShared, workspace }
+    const receipt = { id: artifact.id, title: artifact.title, revision: artifact.revision, requested: nextShared, workspace,
+      operationId: operation.operationId, expectedVersion: operation.expectedVersion, operation }
     try {
       updated = await setPublishedArtifactShared(operation, workspace)
     } catch (error) {
       const detail = error instanceof Error ? error.message : '외부 공유 변경 결과를 확인하지 못했습니다.'
-      artifactExternalSharing.finish(artifact.id, owner, { ...receipt, kind: 'unconfirmed', detail })
+      artifactExternalSharing.finish(artifact.id, workspaceRoot, owner, { ...receipt, kind: 'unconfirmed', detail, pending })
       if (!stillSelected()) return
       setCopyFeedback(`외부 공유 변경 결과 미확인: ${detail}`)
       return
     }
     forgetPendingShare(pending)
-    artifactExternalSharing.finish(artifact.id, owner, { ...receipt, kind: 'confirmed',
+    artifactExternalSharing.finish(artifact.id, workspaceRoot, owner, { ...receipt, kind: 'confirmed',
       outcome: updated.receipt.outcome, shared: updated.receipt.snapshot.shared, current: updated.current.shared })
     if (!stillSelected()) return
     if (updated.receipt.outcome === 'conflict') {
-      setCopyFeedback('공유 상태가 다른 요청으로 바뀌어 적용되지 않았습니다. 현재 상태를 다시 확인해 주세요.')
+      setCopyFeedback(updated.receipt.publication_matches
+        ? '공유 상태가 다른 요청으로 바뀌어 적용되지 않았습니다. 현재 상태를 다시 확인해 주세요.'
+        : '문서의 최신 버전이 바뀌어 공유 요청을 적용하지 않았습니다. 문서를 다시 확인해 주세요.')
     } else if (nextShared && updated.current.shared) {
+      const known = selection.current.doc
+      if (known.share_version !== undefined && (known.share_version > updated.current.version
+        || (known.share_version === updated.current.version && known.shared !== updated.current.shared))) {
+        setCopyFeedback('요청이 적용된 뒤 더 새로운 공유 상태를 읽었습니다. 다시 확인해 주세요.')
+        return
+      }
+      let verified: ArtifactDocument
+      try { verified = await fetchPublishedArtifact(artifact.id, fixedRevision ? String(artifact.revision) : undefined, undefined, workspace) }
+      catch { if (stillSelected()) setCopyFeedback('요청은 적용됐지만 현재 공유 상태를 확인하지 못했습니다.'); return }
+      if (!stillSelected()) return
+      if (verified.shared !== true || verified.share_version === undefined || verified.share_version < updated.current.version) {
+        setCopyFeedback('요청 이후 공유 상태가 바뀌었거나 확인되지 않아 링크를 복사하지 않았습니다.')
+        return
+      }
       const href = artifactHref(artifact.id, artifact.revision)
       const copied = await copyToClipboard(new URL(href, window.location.href).href, dialog.current ?? undefined)
-      if (stillSelected()) setCopyFeedback(copied ? `외부 공유를 켜고 현재 접속 주소 ${window.location.origin} 기준 링크를 복사했습니다.` : '외부 공유를 켰습니다.')
+      if (stillSelected()) setCopyFeedback(copied ? `공유 상태를 확인하고 현재 접속 주소 ${window.location.origin} 기준 링크를 복사했습니다.` : '공유 상태를 확인했지만 링크를 복사하지 못했습니다.')
     } else if (!nextShared && !updated.current.shared) {
-      setCopyFeedback('외부 공유를 해제했습니다.')
+      setCopyFeedback('외부 공유 해제 요청이 적용됐습니다. 응답 시점에는 공유가 꺼져 있었습니다.')
     } else {
       setCopyFeedback('요청은 적용됐지만 이후 공유 상태가 다시 변경됐습니다. 현재 상태를 확인해 주세요.')
     }

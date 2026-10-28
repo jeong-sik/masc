@@ -2084,11 +2084,14 @@ let launch_artifact_check_change state ~mailbox =
           ~host ~port ~request)
 
 let toggle_resource_external_share state ~mailbox =
-  match Masc_tui_resource_document.external_share_change state, state.server_identity, state.resource_share_version with
-  | Error detail, _, _ -> report_action state "error" detail
-  | Ok _, None, _ -> report_action state "error" "Workspace identity is unavailable"
-  | Ok _, Some _, None -> report_action state "error" "Share version is unavailable; refresh this report"
-  | Ok (report, next_shared), Some expected_workspace, Some expected_version ->
+  match Masc_tui_resource_document.external_share_change state, state.server_identity,
+        state.resource_share_version, state.resource_revision_history with
+  | Error detail, _, _, _ -> report_action state "error" detail
+  | Ok _, None, _, _ -> report_action state "error" "Workspace identity is unavailable"
+  | Ok _, Some _, None, _ | Ok _, Some _, Some _, [] ->
+      report_action state "error" "Share version or latest publication is unavailable; refresh this report"
+  | Ok (report, next_shared), Some expected_workspace, Some expected_version, latest :: _
+    when String.equal latest.id report.id ->
       let operation_id = Random_id.uuid_v7 () in
       let credential = Masc_tui_http.bind_credential () in
       let host = server_peer_host and port = state.port in
@@ -2103,7 +2106,13 @@ let toggle_resource_external_share state ~mailbox =
            ~deliver:(fun result -> Resource_share_changed (request, result))
            (fun () ->
              Masc_tui_http.post_artifact_share ~credential ~expected_workspace
-               ~host ~port ~id ~shared:next_shared ~operation_id ~expected_version))
+               ~host ~port ~id ~shared:next_shared ~operation_id ~expected_version
+               ~expected_artifact_revision:latest.revision.revision
+               ~expected_artifact_sha256:latest.revision.body.sha256
+             |> Result.map (function Masc_tui_http.Artifact_share_applied shared
+                  | Artifact_share_conflict shared -> shared)))
+  | Ok _, Some _, Some _, _ :: _ ->
+      report_action state "error" "Latest publication belongs to another artifact; refresh this report"
 
 let resource_share_is_owned state request =
   match state.resource_share_pending with

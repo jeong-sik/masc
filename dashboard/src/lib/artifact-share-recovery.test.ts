@@ -2,7 +2,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { forgetPendingShare, pendingShares, retainPendingShare, type PendingShare } from './artifact-share-recovery'
 
 const record: PendingShare = {
-  operation: { id: `artifact-${'a'.repeat(32)}`, operationId: '01890e2a-4c8e-7b21-9f3c-000000000031', expectedVersion: 3, shared: true },
+  operation: { id: `artifact-${'a'.repeat(32)}`, operationId: '01890e2a-4c8e-7b21-9f3c-000000000031', expectedVersion: 3, shared: true,
+    expectedArtifactRevision: 2, expectedArtifactSha256: 'a'.repeat(64) },
   workspace: { basePath: '/workspace', mascRoot: '/workspace/.masc' }, title: 'document', revision: 2,
 }
 

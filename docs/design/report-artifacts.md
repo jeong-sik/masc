@@ -116,9 +116,16 @@ that a Keeper is currently viewing or editing a document.
 - Existing dashboard token authentication and admin permission apply to the
   catalog list, check state and publication routes. Capability-addressed single
   artifact reads (`GET /api/v1/published-artifacts/<id>`) allow unauthenticated
-  read-only sharing only when external sharing is enabled for that artifact via
-  `POST /api/v1/published-artifact-shares` (`{"id": "<id>", "shared": true|false}`),
+  read-only sharing only when external sharing is enabled for that artifact,
   while still validating any presented token. Responses are private and uncached.
+  Enable or revoke sharing with
+  `POST /api/v1/published-artifact-shares`. A change supplies `id`, `shared`,
+  a UUIDv7 `operation_id`, the observed `expected_version`, the latest observed
+  `expected_artifact_revision` and `expected_artifact_sha256`, and both roots in
+  `expected_workspace`. A stale share or publication observation returns a
+  conflict receipt without applying the change. The receipt is the result of
+  that operation; the separately returned `current` snapshot is an observation
+  taken after it and can already have been superseded.
   The Dashboard does not substitute a static report snapshot when the live API
   refuses a read; the static asset route also rejects its report-snapshot
   namespace. Previously downloaded or independently copied content remains
@@ -134,18 +141,26 @@ that a Keeper is currently viewing or editing a document.
   try an anonymous view. A failed refresh retains an existing operator document
   and draft instead of replacing them with the public view. Retained drafts
   from an earlier authority stay accessible before a new reader dialog opens.
-- The Dashboard share action requires a known sharing state and rechecks the
-  selected revision and sharing state with both captured workspace roots before
-  sending a change. A missing state, a failed read, or a changed observation
-  does not become a private state or trigger a write. An interrupted or
-  otherwise unconfirmed dispatched change prevents another change for that ID
-  in the current browser tab; a later GET does not settle the interrupted write.
-  This guard does not survive a page reload or cover other clients. The share
-  API has no compare-and-set precondition, so changes from separate clients may
-  still race between the reread and the write. Dashboard link copying pins the
+- The Dashboard share action requires a known sharing version and rechecks the
+  selected revision and latest publication with both captured workspace roots.
+  Before sending, it retains the exact operation in browser storage; if storage
+  is unavailable, it does not send. An unconfirmed operation can be checked
+  again with its original identity and preconditions, including after a page
+  reload in the same browser origin. Checking may apply the original request;
+  the recovery row shows its direction and original document. Separate tabs
+  still rely on the server's version checks. Browser storage readback and UI
+  tests do not establish survival of a browser or operating-system crash.
+  A pending first change may also be settled by a subsequent read. Dashboard
+  link copying pins the
   displayed revision and uses the origin currently open in the browser, which
   may be a local address; it is not evidence that the link is reachable from
   elsewhere.
+- Share snapshots, the migration guard, and per-operation receipts form one
+  storage authority; back up and restore them together. Receipts use disk space
+  as operations accumulate. A missing historical receipt cannot be distinguished
+  from an unused ID. Once a share is migrated, older MASC binaries must not write
+  or serve that workspace: they cannot interpret the new state and may overwrite
+  it. A new server detects a legacy overwrite but cannot fence an old process.
 - `keeper_artifact_publish`: the same store operation using the Keeper's own
   identity. Publication is non-terminal: the Keeper can continue and report its
   durable link. No automatic duplicate Board/chat post is sent by the tool.

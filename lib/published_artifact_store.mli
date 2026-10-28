@@ -37,8 +37,9 @@ val find_share_receipt : base_path:string -> id:string -> operation_id:string ->
     that the directory entry survived a crash. *)
 val change_share : base_path:string -> id:string -> Published_artifact_share.request ->
   (Published_artifact_share.receipt, share_error) result
-(** The version check, sharing state and latest receipt commit in one file
-    while holding the publication lock. Before replacing that file, the store
+(** The share version and latest publication revision/digest are checked while
+    holding the publication lock. The sharing state and latest receipt commit
+    in one file. Before replacing that file, the store
     settles it and archives its receipt durably. Replaying an identical
     operation settles the current snapshot before returning the original
     receipt. A different request with the same operation ID is refused.

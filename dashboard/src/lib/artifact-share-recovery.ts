@@ -23,12 +23,15 @@ function decode(value: unknown): PendingShare | null {
   if (typeof operation.id !== 'string' || !artifactId.test(operation.id)
     || typeof operation.operationId !== 'string' || !operationId.test(operation.operationId)
     || typeof operation.expectedVersion !== 'number' || !Number.isSafeInteger(operation.expectedVersion) || operation.expectedVersion < 0
+    || typeof operation.expectedArtifactRevision !== 'number' || !Number.isSafeInteger(operation.expectedArtifactRevision) || operation.expectedArtifactRevision <= 0
+    || typeof operation.expectedArtifactSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(operation.expectedArtifactSha256)
     || typeof operation.shared !== 'boolean' || typeof record.title !== 'string'
     || typeof record.revision !== 'number' || !Number.isSafeInteger(record.revision) || record.revision <= 0
     || typeof workspace.basePath !== 'string' || !workspace.basePath.startsWith('/')
     || typeof workspace.mascRoot !== 'string' || !workspace.mascRoot.startsWith('/')) return null
   return { operation: { id: operation.id, operationId: operation.operationId,
-    expectedVersion: operation.expectedVersion, shared: operation.shared },
+    expectedVersion: operation.expectedVersion, shared: operation.shared,
+    expectedArtifactRevision: operation.expectedArtifactRevision, expectedArtifactSha256: operation.expectedArtifactSha256 },
   workspace: { basePath: workspace.basePath, mascRoot: workspace.mascRoot },
   title: record.title, revision: record.revision }
 }
@@ -50,6 +53,12 @@ function refresh(): void {
 
 export function pendingShares(): readonly PendingShare[] { return pending.value }
 
+export function pendingShareIdentity(record: PendingShare): string {
+  return JSON.stringify([record.workspace.basePath, record.workspace.mascRoot, record.operation.id,
+    record.operation.operationId, record.operation.expectedVersion, record.operation.shared,
+    record.operation.expectedArtifactRevision, record.operation.expectedArtifactSha256])
+}
+
 export function retainPendingShare(record: PendingShare): void {
   const decoded = decode(record)
   if (!decoded) throw new Error('외부 공유 요청을 보관할 수 없습니다.')
@@ -68,9 +77,11 @@ export function retainPendingShare(record: PendingShare): void {
 }
 
 export function forgetPendingShare(record: PendingShare): void {
-  const key = prefix + record.operation.operationId
+  const normalized = decode(record)
+  if (!normalized) return
+  const key = prefix + normalized.operation.operationId
   try {
-    if (localStorage.getItem(key) === JSON.stringify(record)) localStorage.removeItem(key)
+    if (localStorage.getItem(key) === JSON.stringify(normalized)) localStorage.removeItem(key)
   } catch { /* A retained request can be checked again safely. */ }
   refresh()
 }

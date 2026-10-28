@@ -21,6 +21,7 @@ let root ~base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "published_artifacts"
 let path ~base_path id = Filename.concat (root ~base_path) (id ^ ".json")
 let share_path ~base_path id = Filename.concat (root ~base_path) (id ^ ".share")
+let share_guard_path ~base_path id = Filename.concat (root ~base_path) (id ^ ".share-v3")
 
 (* [lockf] locks belong to a process, so its in-process mutex must use the
    same key for every spelling of the same directory. The directory is
@@ -96,6 +97,23 @@ let list ~base_path = protect (fun () ->
     |> List.map (fun (id, r) -> summary_to_json ~id r) in
   Ok { artifacts; diagnostics = List.rev diagnostics })
 
+(* Publication and share changes use the same lock. A pending first share
+   operation must settle before a new revision can change what it exposes. *)
+let ensure_share_migration_not_pending ~base_path ~id =
+  match Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.geteuid ())
+      ~single_link:true ~ownership_root:base_path (share_guard_path ~base_path id) with
+  | Error _ -> Error (Unavailable "artifact share guard could not be read")
+  | Ok None -> Ok ()
+  | Ok (Some { content; _ }) when not (String.is_valid_utf_8 content) ->
+    Error (Unavailable "artifact share guard is not valid UTF-8")
+  | Ok (Some { content; _ }) ->
+    (match Yojson.Safe.from_string content with
+     | `Assoc fields when List.sort compare fields = List.sort compare
+         ["schema", `String "masc.published_artifact_share_guard.v2";
+          "id", `String id; "phase", `String "active"] -> Ok ()
+     | _ -> Error (Unavailable "artifact share migration must settle before publication")
+     | exception Yojson.Json_error _ -> Error (Unavailable "artifact share guard is invalid"))
+
 let publish ~base_path ~author (request : request) =
   if String.trim author = "" || not (String.is_valid_utf_8 author)
   then Error (Invalid "author must be a nonblank UTF-8 string")
@@ -116,6 +134,7 @@ let publish ~base_path ~author (request : request) =
     let* () = if valid_id id then Ok () else Error (Invalid "invalid artifact id") in
     match File_lock_eio.with_durable_lock_observed
       ~lock_path:(lock_path ~base_path id) (fun () ->
+        let* () = ensure_share_migration_not_pending ~base_path ~id in
         let* previous = match request.update with
           | Create ->
             (match load ~base_path id with
@@ -151,7 +170,6 @@ let publish ~base_path ~author (request : request) =
 
 module Share = Published_artifact_share
 
-let share_guard_path ~base_path id = Filename.concat (root ~base_path) (id ^ ".share-v3")
 let share_receipt_dir ~base_path id = Filename.concat (root ~base_path) (id ^ ".share-receipts")
 let share_receipt_path ~base_path id operation_id =
   Filename.concat (share_receipt_dir ~base_path id) operation_id
@@ -255,7 +273,7 @@ let read_share_guard ~base_path ~id =
        let* next = decode_share_state ~id (Some (List.assoc "next" fields)) in
        (match Share.latest next with
         | Some receipt ->
-          (match Share.apply initial receipt.request with
+          (match Share.apply initial ~publication_matches:receipt.publication_matches receipt.request with
            | Ok (Share.Recorded (expected, _)) when Share.to_json expected = Share.to_json next ->
              Ok (Guard_pending { previous; next })
            | Ok (Share.Recorded _ | Share.Replay _) | Error _ ->
@@ -304,14 +322,24 @@ let lookup_receipt ~base_path ~id ~state ~operation_id =
 let durable_share_save ~ownership_root path json =
   Keeper_fs.save_json_durable_atomic ~ownership_root path json
 
-let recover_pending_share ~base_path ~id =
+let publication_matches (artifact : Published_artifact.t) (request : Share.request) =
+  match artifact.revisions with
+  | latest :: _ -> latest.revision = request.expected_artifact_revision
+      && String.equal latest.body.sha256 request.expected_artifact_sha256
+  | [] -> false
+
+let recover_pending_share ~base_path ~id ~artifact =
   let* guard = read_share_guard ~base_path ~id in
   match guard with
   | Guard_absent | Guard_active -> Ok ()
   | Guard_pending { previous; next } ->
     let* current = load_share_text ~base_path (share_path ~base_path id) in
     let* current_json = parse_share_json current in
-    if current <> previous && current_json <> Some (Share.to_json next) then
+    let publication_unchanged = match Share.latest next with
+      | Some receipt when receipt.publication_matches -> publication_matches artifact receipt.request
+      | Some _ -> true
+      | None -> false in
+    if not publication_unchanged || (current <> previous && current_json <> Some (Share.to_json next)) then
       Error (Share_unavailable "share migration baseline changed")
     else
       let save path json =
@@ -328,10 +356,10 @@ let with_share_lock ~base_path ~id f =
     let* () = match entries with None -> Error Share_missing | Some _ -> Ok () in
     match File_lock_eio.with_durable_lock_observed
       ~lock_path:(lock_path ~base_path id) (fun () ->
-        let* _artifact = load ~base_path id |> Result.map_error share_artifact_error in
-        let* () = recover_pending_share ~base_path ~id in
+        let* artifact = load ~base_path id |> Result.map_error share_artifact_error in
+        let* () = recover_pending_share ~base_path ~id ~artifact in
         let* state = load_share ~base_path ~id in
-        f state) with
+        f artifact state) with
     | File_lock_eio.Lock_not_acquired error ->
       Error (Share_unavailable (File_lock_eio.durable_lock_error_to_string error))
     | File_lock_eio.Body_completed { value; release_error = None } -> value
@@ -345,7 +373,7 @@ let observe_share ~base_path ~id f = protect_share (fun () ->
   else
     let* guard = read_share_guard ~base_path ~id in
     match guard with
-    | Guard_pending _ -> with_share_lock ~base_path ~id f
+    | Guard_pending _ -> with_share_lock ~base_path ~id (fun _artifact state -> f state)
     | Guard_absent | Guard_active ->
       let* state = load_share ~base_path ~id in
       f state)
@@ -378,14 +406,14 @@ let archive_receipt ~base_path ~id ~state receipt =
     | Error error -> Error (Share_unavailable (Keeper_fs.durable_write_error_to_string error))
 
 let change_share_with_save ~save ~base_path ~id request =
-  with_share_lock ~base_path ~id (fun state ->
+  with_share_lock ~base_path ~id (fun artifact state ->
     if not (Share.valid_operation_id request.Share.operation_id) then Error (Share_invalid "invalid share operation id")
     else let* existing = lookup_receipt ~base_path ~id ~state ~operation_id:request.operation_id in
     match existing with
     | Some receipt when receipt.request <> request -> Error Share_operation_reused
     | Some receipt -> save_share ~save ~base_path ~id state receipt
     | None ->
-      match Share.apply state request with
+      match Share.apply state ~publication_matches:(publication_matches artifact request) request with
       | Error (Share.Invalid message) -> Error (Share_invalid message)
       | Error Share.Operation_reused | Ok (Share.Replay _) -> Error Share_operation_reused
       | Ok (Share.Recorded (next, receipt)) ->
@@ -438,8 +466,13 @@ let is_shared ~base_path ~id =
 
 let set_shared ~base_path ~id ~shared =
   let* snapshot = read_share ~base_path ~id |> Result.map_error share_error_to_artifact_error in
+  let* artifact = load ~base_path id in
+  let* latest = match artifact.revisions with
+    | latest :: _ -> Ok latest
+    | [] -> Error (Unavailable "artifact has no revision") in
   let request : Share.request =
-    { operation_id = Random_id.uuid_v7 (); expected_version = snapshot.version; requested = shared } in
+    { operation_id = Random_id.uuid_v7 (); expected_version = snapshot.version; requested = shared;
+      expected_artifact_revision = latest.revision; expected_artifact_sha256 = latest.body.sha256 } in
   let* receipt = change_share ~base_path ~id request |> Result.map_error share_error_to_artifact_error in
   match receipt.Share.outcome with
     | Share.Applied state -> Ok state.shared

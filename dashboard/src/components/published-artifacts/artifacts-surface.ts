@@ -214,7 +214,7 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
   activeDocumentKey.current = documentKey
   const readerAllowed = useRef(allowReader)
   readerAllowed.current = allowReader
-  const shareActivity = selectedId ? artifactExternalSharing.activity(selectedId) : 'ready'
+  const shareActivity = selectedId ? artifactExternalSharing.activity(selectedId, workspaceRoot) : 'ready'
   const shareReread = useRef<ShareObservation | null>(null)
   const active = useRef(true)
   const current = () => active.current && isCurrent()
@@ -260,7 +260,7 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
     const publish = (next: DocumentRemote) => {
       if (!controller.signal.aborted && currentDocument()) { documentRef.current = next; setDocument(next) }
     }
-    const shareObservation = artifactExternalSharing.observe(selectedId)
+    const shareObservation = artifactExternalSharing.observe(selectedId, workspaceRoot)
     void fetchPublishedArtifact(selectedId, revision, controller.signal).then(document => {
       publish({ key: documentKey, kind: 'loaded', data: { kind: 'operator', document, shareObservation }, receivedAt: Date.now() })
     }, error => {

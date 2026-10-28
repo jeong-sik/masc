@@ -38,18 +38,26 @@ const ArtifactShareSchema = Schema.Struct({
   receipt: Schema.Struct({
     operation_id: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)),
     expected_version: Schema.Int.pipe(Schema.nonNegative(), Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
+    expected_artifact_revision: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
+    expected_artifact_sha256: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
+    publication_matches: Schema.Boolean,
     requested: Schema.Boolean,
     outcome: Schema.Literal('applied', 'conflict'),
     snapshot: ShareSnapshotSchema,
   }),
   current: ShareSnapshotSchema,
 })
-export type ArtifactShareOperation = { id: string; operationId: string; expectedVersion: number; shared: boolean }
+export type ArtifactShareOperation = { id: string; operationId: string; expectedVersion: number; shared: boolean;
+  expectedArtifactRevision: number; expectedArtifactSha256: string }
 export type ArtifactShareResult = typeof ArtifactShareSchema.Type
 export type PublishedArtifact = typeof PublishedArtifactSchema.Type
 export type ArtifactDocument = typeof DocumentSchema.Type
 export type ArtifactList = typeof ListSchema.Type
 export type ArtifactPublication = typeof ArtifactPublicationSchema.Type
+export function latestArtifactRevision(doc: ArtifactDocument): typeof ArtifactRevisionSchema.Type | undefined {
+  return doc.revisions.reduce<typeof ArtifactRevisionSchema.Type | undefined>(
+    (latest, revision) => !latest || revision.revision > latest.revision ? revision : latest, undefined)
+}
 export type ArtifactDraft = {
   title: string; summary: string; format: 'markdown' | 'html'; content: string;
   task_id?: string | null; goal_id?: string | null;
@@ -111,6 +119,7 @@ export async function setPublishedArtifactShared(operation: ArtifactShareOperati
     raw = await post<unknown>('/api/v1/published-artifact-shares', {
       id: operation.id, shared: operation.shared, operation_id: operation.operationId,
       expected_version: operation.expectedVersion,
+      expected_artifact_revision: operation.expectedArtifactRevision, expected_artifact_sha256: operation.expectedArtifactSha256,
       expected_workspace: { base_path: workspace.basePath, masc_root: workspace.mascRoot },
     }, artifactWorkspaceHeaders(workspace))
   } catch (error) {
@@ -123,10 +132,12 @@ export async function setPublishedArtifactShared(operation: ArtifactShareOperati
   const receipt = result.receipt
   if (result.id !== operation.id || receipt.operation_id !== operation.operationId
     || receipt.expected_version !== operation.expectedVersion || receipt.requested !== operation.shared
+    || receipt.expected_artifact_revision !== operation.expectedArtifactRevision
+    || receipt.expected_artifact_sha256 !== operation.expectedArtifactSha256
     || (receipt.outcome === 'conflict') !== conflicted
-    || (receipt.outcome === 'applied' && (receipt.snapshot.version !== operation.expectedVersion + 1
+    || (receipt.outcome === 'applied' && (!receipt.publication_matches || receipt.snapshot.version !== operation.expectedVersion + 1
       || receipt.snapshot.shared !== operation.shared))
-    || (receipt.outcome === 'conflict' && receipt.snapshot.version === operation.expectedVersion)
+    || (receipt.outcome === 'conflict' && receipt.publication_matches && receipt.snapshot.version === operation.expectedVersion)
     || result.current.version < receipt.snapshot.version) {
     throw new Error('외부 공유 요청 결과가 보낸 작업과 다릅니다. 적용 여부를 확인해 주세요.')
   }

@@ -48,15 +48,17 @@ let share_ok = function
   | Ok value -> value
   | Error error -> Alcotest.fail (S.share_error_message error)
 
-let share_request suffix expected_version requested : Masc.Published_artifact_share.request =
-  { operation_id = "01890e2a-4c8e-7b21-9f3c-" ^ suffix; expected_version; requested }
+let share_request (artifact : A.t) suffix expected_version requested : Masc.Published_artifact_share.request =
+  let latest = match artifact.revisions with latest :: _ -> latest | [] -> Alcotest.fail "artifact has no revisions" in
+  { operation_id = "01890e2a-4c8e-7b21-9f3c-" ^ suffix; expected_version; requested;
+    expected_artifact_revision = latest.revision; expected_artifact_sha256 = latest.body.sha256 }
 
 let test_share_transactions () = with_base (fun base_path ->
   let module Share = Masc.Published_artifact_share in
   let artifact, _ = publish ~base_path (request "share concurrency") in
   let id = artifact.id in
-  let left = share_request "000000000011" 0 true in
-  let right = share_request "000000000012" 0 true in
+  let left = share_request artifact "000000000011" 0 true in
+  let right = share_request artifact "000000000012" 0 true in
   let save path request = Eio_unix.run_in_systhread (fun () -> S.change_share ~base_path:path ~id request) in
   let alias = Filename.concat base_path "." in
   let left_receipt, right_receipt = Eio.Fiber.pair (fun () -> save base_path left) (fun () -> save alias right) in
@@ -89,7 +91,7 @@ let test_share_uncertain_commit () = with_base (fun base_path ->
   let original = S.read_share ~base_path ~id |> share_ok in
   Alcotest.(check bool) "legacy share stays enabled" true original.shared;
   Alcotest.(check int) "legacy share starts at version zero" 0 original.version;
-  let request = share_request "000000000013" 0 false in
+  let request = share_request artifact "000000000013" 0 false in
   let before_stage stage = match stage with
     | Masc.Keeper_fs.Parent_directory_fsync_after_rename ->
       raise (Unix.Unix_error (Unix.EIO, "fsync", "injected"))
@@ -115,12 +117,12 @@ let test_share_archives_and_downgrade () = with_base (fun base_path ->
   let module Share = Masc.Published_artifact_share in
   let artifact, _ = publish ~base_path (request "share archive") in
   let id = artifact.id in
-  let future = share_request "000000000021" 1 true in
+  let future = share_request artifact "000000000021" 1 true in
   let refused = S.change_share ~base_path ~id future |> share_ok in
   (match refused.outcome with
    | Share.Conflict { version = 0; shared = false } -> ()
    | Share.Conflict _ | Share.Applied _ -> Alcotest.fail "future request did not conflict");
-  let noop = share_request "000000000022" 0 false in
+  let noop = share_request artifact "000000000022" 0 false in
   ignore (S.change_share ~base_path ~id noop |> share_ok);
   let replayed = S.change_share ~base_path ~id future |> share_ok in
   Alcotest.(check bool) "archived conflict replays after its version becomes current" true (refused = replayed);
@@ -149,7 +151,7 @@ let test_share_interrupted_migration () = with_base (fun base_path ->
   let id = artifact.id in
   let share_file = Filename.concat (catalog_dir base_path) (id ^ ".share") in
   Yojson.Safe.to_file share_file (`Assoc ["id", `String id; "shared", `Bool true]);
-  let operation = share_request "000000000023" 0 false in
+  let operation = share_request artifact "000000000023" 0 false in
   let before_stage = function
     | Masc.Keeper_fs.Payload_write -> raise (Unix.Unix_error (Unix.EIO, "write", "injected"))
     | Directory_prepare | Payload_encode | Temp_file_create | Payload_fsync | Temp_file_close
@@ -159,6 +161,10 @@ let test_share_interrupted_migration () = with_base (fun base_path ->
     | Error ((S.Share_invalid _ | S.Share_missing | S.Share_operation_reused | S.Share_unavailable _) as error) ->
       Alcotest.fail (S.share_error_message error)
     | Ok _ -> Alcotest.fail "interrupted migration was reported as certain" in
+  (match S.publish ~base_path ~author:"writer" (request ~id ~expected_revision:1 "new publication") with
+   | Error (S.Unavailable _) -> ()
+   | Error ((S.Invalid _ | S.Missing | S.Conflict _ | S.Commit_uncertain _) as error) -> Alcotest.fail (S.error_message error)
+   | Ok _ -> Alcotest.fail "publication crossed a pending share migration");
   let observed = S.read_share ~base_path ~id |> share_ok in
   Alcotest.(check int) "read settles the pending migration" 1 observed.version;
   Alcotest.(check bool) "settled migration revokes sharing" false observed.shared;
@@ -169,9 +175,10 @@ let test_share_interrupted_migration () = with_base (fun base_path ->
    | Share.Applied _ | Share.Conflict _ -> Alcotest.fail "wrong recovered migration");
   Alcotest.(check bool) "recovered snapshot is private" false (S.read_share ~base_path ~id |> share_ok).shared;
   let other, _ = publish ~base_path (request "changed migration baseline") in
+  let other_operation = share_request other "000000000023" 0 false in
   let other_file = Filename.concat (catalog_dir base_path) (other.id ^ ".share") in
   Yojson.Safe.to_file other_file (`Assoc ["id", `String other.id; "shared", `Bool true]);
-  (match S.For_testing.change_share_before_stage ~before_stage ~base_path ~id:other.id operation with
+  (match S.For_testing.change_share_before_stage ~before_stage ~base_path ~id:other.id other_operation with
    | Error (S.Share_commit_uncertain _) -> ()
    | Error ((S.Share_invalid _ | S.Share_missing | S.Share_operation_reused | S.Share_unavailable _) as error) ->
      Alcotest.fail (S.share_error_message error)
@@ -185,15 +192,32 @@ let test_share_interrupted_migration () = with_base (fun base_path ->
      Alcotest.fail (S.share_error_message error)
    | Ok _ -> Alcotest.fail "changed migration baseline was silently overwritten"))
 
+let test_share_publication_precondition () = with_base (fun base_path ->
+  let module Share = Masc.Published_artifact_share in
+  let artifact, _ = publish ~base_path (request "observed publication") in
+  let operation = share_request artifact "000000000024" 0 true in
+  ignore (publish ~base_path (request ~id:artifact.id ~expected_revision:1 "newer publication"));
+  let receipt = S.change_share ~base_path ~id:artifact.id operation |> share_ok in
+  (match receipt.outcome with
+   | Share.Conflict { version = 0; shared = false } when not receipt.publication_matches -> ()
+   | Share.Applied _ | Share.Conflict _ -> Alcotest.fail "stale publication was shared");
+  ignore (publish ~base_path (request ~id:artifact.id ~expected_revision:2 "another publication"));
+  Alcotest.(check bool) "publication conflict replays its original result" true
+    (S.change_share ~base_path ~id:artifact.id operation |> share_ok = receipt);
+  Alcotest.(check bool) "stale publication stays private" false
+    (S.read_share ~base_path ~id:artifact.id |> share_ok).shared)
+
 let test_share_http_preconditions () = with_base (fun base_path ->
   let module Routes = Server_routes_http_routes_published_artifacts in
   let artifact, _ = publish ~base_path (request "share HTTP preconditions") in
   let config = Masc.Workspace.default_config base_path in
   let workspace = `Assoc ["base_path", `String (Unix.realpath base_path);
     "masc_root", `String (Unix.realpath (masc_dir base_path))] in
-  let operation = share_request "000000000031" 0 true in
+  let operation = share_request artifact "000000000031" 0 true in
   let fields = ["id", `String artifact.id; "shared", `Bool true;
-    "operation_id", `String operation.operation_id; "expected_version", `Int 0] in
+    "operation_id", `String operation.operation_id; "expected_version", `Int 0;
+    "expected_artifact_revision", `Int operation.expected_artifact_revision;
+    "expected_artifact_sha256", `String operation.expected_artifact_sha256] in
   let decode fields = Routes.decode_share_request ~config ~body:(Yojson.Safe.to_string (`Assoc fields)) in
   (match decode (("expected_workspace", workspace) :: fields) with
    | Ok (id, decoded) ->
@@ -206,6 +230,8 @@ let test_share_http_preconditions () = with_base (fun base_path ->
   expect 400 (("expected_workspace", workspace) :: ("shared", `Bool false) :: fields);
   expect 400 (("expected_workspace", workspace) :: ("operation_id", `String "invalid") :: List.remove_assoc "operation_id" fields);
   expect 400 (("expected_workspace", workspace) :: ("expected_version", `Int (-1)) :: List.remove_assoc "expected_version" fields);
+  expect 400 (("expected_workspace", workspace) :: ("expected_artifact_revision", `Int 0) :: List.remove_assoc "expected_artifact_revision" fields);
+  expect 400 (("expected_workspace", workspace) :: ("expected_artifact_sha256", `String "invalid") :: List.remove_assoc "expected_artifact_sha256" fields);
   let wrong_workspace = `Assoc ["base_path", `String "/another/workspace"; "masc_root", `String "/another/workspace/.masc"] in
   expect 409 (("expected_workspace", wrong_workspace) :: fields))
 
@@ -554,6 +580,7 @@ let () = Eio_main.run (fun _ ->
       Alcotest.test_case "uncertain commit and legacy share recovery" `Quick test_share_uncertain_commit;
       Alcotest.test_case "archived conflicts and legacy overwrite" `Quick test_share_archives_and_downgrade;
       Alcotest.test_case "pre-rename migration failure recovers" `Quick test_share_interrupted_migration;
+      Alcotest.test_case "publication revision is bound to share request" `Quick test_share_publication_precondition;
       Alcotest.test_case "HTTP workspace and share version preconditions" `Quick test_share_http_preconditions];
      "Keeper and HTTP publication", [
       Alcotest.test_case "producer persists exact content, identity and CAS" `Quick test_keeper_publication;

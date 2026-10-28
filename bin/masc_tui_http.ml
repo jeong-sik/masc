@@ -920,16 +920,32 @@ let post_artifact_check ~credential ~expected_workspace ~host ~port ~request =
     ~path:"/api/v1/published-artifact-checks" ~body in
   Masc_tui_artifact_check_action.decode_response request json
 
-let post_artifact_share ~credential ~expected_workspace ~host ~port ~id ~shared ~operation_id ~expected_version =
+type artifact_share_result = Artifact_share_applied of bool | Artifact_share_conflict of bool
+
+let post_artifact_share ~credential ~expected_workspace ~host ~port ~id ~shared ~operation_id ~expected_version
+    ~expected_artifact_revision ~expected_artifact_sha256 =
   let module Share = Masc.Published_artifact_share in
   let ( let* ) = Result.bind in
   let body =
     `Assoc [expected_workspace_field expected_workspace; "id", `String id; "shared", `Bool shared;
-      "operation_id", `String operation_id; "expected_version", `Int expected_version]
+      "operation_id", `String operation_id; "expected_version", `Int expected_version;
+      "expected_artifact_revision", `Int expected_artifact_revision;
+      "expected_artifact_sha256", `String expected_artifact_sha256]
     |> Yojson.Safe.to_string
   in
-  let* json = post_json_bound ~credential ~host ~port
-    ~path:"/api/v1/published-artifact-shares" ~body in
+  let path = "/api/v1/published-artifact-shares" in
+  let url = url_of ~host ~port ~path in
+  let response = timed ~verb:"POST" ~path (fun () ->
+    Masc_http_client.post_sync ?clock:(request_clock ())
+      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(json_headers credential.bound_headers) ~body ()) in
+  let* status, json = match response with
+    | Error detail -> Error (Masc.Tui_decode.http_transport_error ~verb:"POST" ~url ~detail)
+    | Ok (409, text) ->
+      (match Yojson.Safe.from_string text with
+       | json -> Ok (409, json)
+       | exception Yojson.Json_error _ -> Error "Invalid share conflict response")
+    | Ok (status, text) ->
+      decode_json ~allow_empty:false ~status_code:status ~body:text |> Result.map (fun json -> status, json) in
   match json with
   | `Assoc fields when List.sort String.compare (List.map fst fields) = ["current"; "id"; "receipt"] ->
     let* receipt = Share.receipt_of_json (List.assoc "receipt" fields)
@@ -939,10 +955,15 @@ let post_artifact_share ~credential ~expected_workspace ~host ~port ~id ~shared 
     let identity_matches = List.assoc "id" fields = `String id
       && String.equal receipt.request.operation_id operation_id
       && receipt.request.expected_version = expected_version
+      && receipt.request.expected_artifact_revision = expected_artifact_revision
+      && String.equal receipt.request.expected_artifact_sha256 expected_artifact_sha256
       && Bool.equal receipt.request.requested shared in
     if not identity_matches then Error "Published artifact share response did not match the requested operation"
     else (match receipt.outcome with
-      | Share.Applied applied when current.version >= applied.version -> Ok current.shared
+      | Share.Applied applied when status >= 200 && status < 300 && current.version >= applied.version ->
+        Ok (Artifact_share_applied current.shared)
+      | Share.Conflict at when status = 409 && current.version >= at.version ->
+        Ok (Artifact_share_conflict current.shared)
       | Share.Applied _ | Share.Conflict _ -> Error "Share response did not confirm the requested operation")
   | _ -> Error "Published artifact share response must be a JSON object"
 

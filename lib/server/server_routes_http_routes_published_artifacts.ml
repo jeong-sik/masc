@@ -97,14 +97,19 @@ let decode_share_request ~config ~body =
         "workspace precondition failed", `Conflict) in
   match json with
   | `Assoc fields ->
-    if List.sort String.compare (List.map fst fields) <> ["expected_version"; "id"; "operation_id"; "shared"]
-    then Error (error_response (Store.Invalid "expected id, shared, operation_id and expected_version fields"))
+    if List.sort String.compare (List.map fst fields) <>
+       ["expected_artifact_revision"; "expected_artifact_sha256"; "expected_version"; "id"; "operation_id"; "shared"]
+    then Error (error_response (Store.Invalid "expected artifact identity, publication and share version, and operation id"))
     else
       (match List.assoc "id" fields, List.assoc "shared" fields,
-             List.assoc "operation_id" fields, List.assoc "expected_version" fields with
-       | `String id, `Bool requested, `String operation_id, `Int expected_version
-         when Published_artifact.valid_id id && Share.valid_operation_id operation_id && Share.valid_version expected_version ->
-         Ok (id, { Share.operation_id; expected_version; requested })
+             List.assoc "operation_id" fields, List.assoc "expected_version" fields,
+             List.assoc "expected_artifact_revision" fields, List.assoc "expected_artifact_sha256" fields with
+       | `String id, `Bool requested, `String operation_id, `Int expected_version,
+         `Int expected_artifact_revision, `String expected_artifact_sha256
+         when Published_artifact.valid_id id && Share.valid_operation_id operation_id && Share.valid_version expected_version
+           && Share.valid_version expected_artifact_revision && expected_artifact_revision > 0
+           && Share.valid_sha256 expected_artifact_sha256 ->
+         Ok (id, { Share.operation_id; expected_version; requested; expected_artifact_revision; expected_artifact_sha256 })
        | _ -> Error (error_response (Store.Invalid "invalid artifact share operation")))
   | _ -> Error (error_response (Store.Invalid "expected a JSON object"))
 

@@ -131,7 +131,7 @@ let verify_receipt ~sw ~storage ~root_stat ~content ~sha256 =
       ~length:(min 65536 (String.length content-offset))) in
     if String.length data=0 then Error Receipt_storage_unavailable else (Buffer.add_string bytes data;read (offset+String.length data)) in
   let* actual=read 0 in
-  let hash=cpu (fun () -> Digestif.SHA256.(to_hex (digest_string actual))) in
+  let hash=cpu (fun () -> Agent_core_sha256.(to_hex (digest_string actual))) in
   let* ()=if actual=content && hash=P.Sha256.to_string sha256 then Ok () else Error Receipt_storage_unavailable in
   let* synced=receipt_io (fun () -> Fs_compat.sync_owned_reader ~parent:storage ~leaf:result_leaf reader) in
   let* ()=synced |> Result.map_error (fun _ -> Receipt_storage_unavailable) in
@@ -148,7 +148,7 @@ let publish_result ~before_result_publish ~after_result_publish ~sw ~fs t settle
   let* root_stat=receipt_io (fun () -> Eio.Path.stat ~follow:true storage) in
   let* root_path=receipt_io (fun () -> Eio.Path.native_exn storage) in
   let* content=cpu (fun () -> result_content observation launch_id) in
-  let hash=cpu (fun () -> Digestif.SHA256.(to_hex (digest_string content))) in
+  let hash=cpu (fun () -> Agent_core_sha256.(to_hex (digest_string content))) in
   let* sha256=P.Sha256.of_string hash |> Result.map_error (fun _ -> Receipt_storage_unavailable) in
   let* target=Fs_compat.capability_publication_target ~allowed_root_path:root_path
       ~allowed_root_device:root_stat.dev ~allowed_root_inode:root_stat.ino

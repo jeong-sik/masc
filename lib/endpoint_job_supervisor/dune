@@ -3,4 +3,4 @@
  (name endpoint_job_supervisor)
  (public_name masc.endpoint_job_supervisor)
  (modules endpoint_job_supervisor)
- (libraries endpoint_job_registry endpoint_job_protocol endpoint_job_launch endpoint_job_output endpoint_process_gate masc_process masc_core fs_compat eio eio.unix unix cstruct yojson digestif base64 optint))
+ (libraries endpoint_job_registry endpoint_job_protocol endpoint_job_launch endpoint_job_output endpoint_process_gate masc_process masc_core fs_compat eio eio.unix unix cstruct yojson masc.agent_core.digest base64 optint))

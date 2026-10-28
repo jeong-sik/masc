@@ -242,7 +242,7 @@ Intent는 대상 없이 digest만 남기지 않는다. 중단된 회수가 어�
 
 - `맞음`: 마지막 `Committed`(판정 2로 승격되는 것을 포함)가 replay에 있고, 남은 `Intent_pending`이 판정 1~5로 풀리고, 외부 고수위와 replay의 epoch 값이 같다. lease 줄은 외부 저장소에 가지 않으므로 늘어도 `맞음`은 깨지지 않는다.
 - `안 맞음`: 외부 저장소를 읽을 수 있는데 `맞음`도 `없음`도 아니다. §8.2의 판정 1~5를 통과하지 못한 경우가 여기에 든다.
-- `읽지 못함`: 외부 저장소나 설치 기록이 있는데 열지 못하거나 손상됐다(§8.4). 쓰다가 죽어 끝이 잘린 마지막 항목은 손상이 아니다. 마지막 줄바꿈 뒤에 남은 바이트만 끝이 잘린 항목이고, 줄바꿈으로 끝났는데 읽히지 않는 항목은 손상이다. 잘린 항목에 든 `Committed`에 기대어 나간 응답은 없고, 잘라 낸 `Committed`는 판정 2가, 잘라 낸 `aborted_intent`는 판정 3이 다시 세운다. 부팅은 외부 저장소를 열 때(판정 1~5를 돌리기 전에) 그 항목을 잘라 내고, 잘라 낸 바이트 수와 남긴 바이트 수를 경고로 남긴다(`authz.jsonl`에서 끝이 잘린 마지막 줄을 자르는 규칙과 같다).
+- `읽지 못함`: 외부 저장소나 설치 기록이 있는데 열지 못하거나 손상됐다(§8.4). 쓰다가 죽어 끝이 잘린 마지막 항목은 손상이 아니다. 마지막 줄바꿈 뒤에 남은 바이트만 끝이 잘린 항목이고, 줄바꿈으로 끝났는데 읽히지 않는 항목은 손상이다. 잘린 항목에 든 `Committed`에 의존해 나간 응답은 없고, 잘라 낸 `Committed`는 판정 2가, 잘라 낸 `aborted_intent`는 판정 3이 다시 세운다. 부팅은 외부 저장소를 열 때(판정 1~5를 돌리기 전에) 그 항목을 잘라 내고, 잘라 낸 바이트 수와 남긴 바이트 수를 경고로 남긴다(`authz.jsonl`에서 끝이 잘린 마지막 줄을 자르는 규칙과 같다).
 - `없음`: 외부 저장소가 없거나, 있어도 `Committed`가 하나도 없고 남은 `Intent_pending`이 모두 `Fresh_bootstrap`의 것이어서 판정 3이 `aborted_intent`로 정한다(쓰기가 실패해도 판정은 선다). `Fresh_bootstrap`이 `Intent_pending`을 쓴 뒤 `authz.jsonl`에 append하기 전에 죽은 설치가 여기에 든다. 이 설치는 `Fresh_bootstrap`을 다시 실행할 수 있고, 새 `Intent_pending`을 쓰기 전에 남은 것을 판정 3으로 닫는다(§8.2-1). workspace_id는 `Committed`가 된 `Fresh_bootstrap`(판정 2로 승격되는 것을 포함)의 것만 유효하다.
 
 `있음`은 `없음`이 아닌 모든 값(`맞음`, `안 맞음`, `읽지 못함`)이다.
@@ -485,9 +485,13 @@ Committed {
 
 ### 8.4 신규 설치와 읽기 실패
 
-이 절은 `Fresh_bootstrap`을 실행하는 경우와 마지막 모드 사건이 있는 설치에 적용한다. 모드 사건이 없는 `Single_user` 설치는 외부 저장소가 없는 것이 정상이고 그대로 시작한다(§5.1 표 첫 행). 외부 저장소가 없을 때(`ENOENT`, 부모 경로 부재) 새로 시작할 수 있는 것은 명시적 `Fresh_bootstrap`뿐이다. §5.1이 `없음`으로 읽는 저장소도 같다. 외부 저장소의 위치는 설치 기록에서 읽는다. 설치 기록은 `$XDG_CONFIG_HOME/masc/`(없으면 `~/.config/masc/`) 아래에 base path 단위로 두는 파일이고 외부 저장소의 경로를 적는다. `Fresh_bootstrap`은 설치 기록을 먼저 쓰고 외부 저장소를 만든다. 외부 저장소가 있는데 설치 기록이 가리키지 않는 상태를 만들지 않기 위해서다. 설치 기록이 없거나 가리키는 곳에 외부 저장소가 없으면 §5.1은 외부 고수위를 `없음`으로 읽는다. `Fresh_bootstrap`은 **Local_operator가 서명한** 새 workspace_id·새 `account_mode`(`Multi_account`)·빈 `authz.jsonl`·빈 Recovery_manifest·초기 generation이 같은 bootstrap append로 확인되어야 한다. workspace_id도 외부 저장소와 같은 append에 기록한다. `Fresh_bootstrap`이 확인하는 `account_mode`는 `Multi_account`뿐이다. `Multi_account`를 거친 적 없는 `Single_user`는 `authz.jsonl`을 쓰지 않는다(§9.2).
+이 절은 `Fresh_bootstrap`을 실행하는 경우와 마지막 모드 사건이 있는 설치에 적용한다. 모드 사건이 없는 `Single_user` 설치는 외부 저장소가 없는 것이 정상이고 그대로 시작한다(§5.1 표 첫 행). 외부 저장소가 없을 때(`ENOENT`, 부모 경로 부재) 새로 시작할 수 있는 것은 명시적 `Fresh_bootstrap`뿐이다. §5.1이 `없음`으로 읽는 저장소도 같다.
 
-`EACCES`·다른 I/O 오류·손상 JSON(쓰다가 죽어 끝이 잘린 마지막 항목은 제외, §5.1)·디렉터리·심볼릭 링크·workspace_id 불일치는 `AuthorizationUncertain`으로 거부한다. 설치 기록을 읽지 못하거나 손상된 경우도 같다. 마지막 모드 사건이 있는데 외부 저장소가 없거나 생성 규칙이 맞지 않으면 실행하지 않는다. 외부 고수위를 생략하고 legacy 경로로 부팅하지 않는다.
+외부 저장소의 위치는 설치 기록에서 읽는다. 설치 기록은 `$XDG_CONFIG_HOME/masc/`(없으면 `~/.config/masc/`) 아래에 base path 단위로 두는 파일이고 외부 저장소의 경로를 적는다. 기록 안에도 canonical base path를 적어 읽을 때 대조한다. 설치 기록은 임시 파일에 쓰고 fsync한 뒤 rename하고 부모 디렉터리를 fsync한다. 그래서 읽는 쪽이 보는 파일은 없거나 온전하고, 온전하지 않은 기록은 손상이다. `Fresh_bootstrap`은 설치 기록을 먼저 쓰고 외부 저장소를 만든다. 외부 저장소가 있는데 설치 기록이 가리키지 않는 상태를 만들지 않기 위해서다. `Fresh_bootstrap`은 외부 고수위가 `없음`일 때만 열리므로 설치 기록이 이미 있어도 그 기록이 가리키는 저장소는 `없음`이다. 이때는 기록을 같은 방식으로 새 경로로 교체한다. 설치 기록이 없거나 가리키는 곳에 외부 저장소가 없으면 부팅은 외부 고수위를 `없음`으로 읽는다(§5.1). 설정 디렉터리를 알 수 없으면(`XDG_CONFIG_HOME`과 `HOME`이 모두 없다) 설치 기록이 없는 것이고, 이때 `Fresh_bootstrap`은 기록을 쓸 수 없어 거부한다. 설치 기록이 없는데 `Fresh_bootstrap`이 외부 저장소를 만들 경로에 파일이 이미 있으면 그 파일을 열지 않고 실패한다. 기록 없이 옛 저장소를 덮거나 잇지 않기 위해서다. 설치 기록과 외부 저장소는 백업 복원이 되돌린 것을 알아채려는 장치다. 설정 디렉터리와 base path에 모두 쓸 수 있는 쪽은 막지 못한다.
+
+`Fresh_bootstrap`은 **Local_operator가 서명한** 새 workspace_id·새 `account_mode`(`Multi_account`)·빈 `authz.jsonl`·빈 Recovery_manifest·초기 generation이 같은 bootstrap append로 확인되어야 한다. workspace_id도 외부 저장소와 같은 append에 기록한다. `Fresh_bootstrap`이 확인하는 `account_mode`는 `Multi_account`뿐이다. `Multi_account`를 거친 적 없는 `Single_user`는 `authz.jsonl`을 쓰지 않는다(§9.2).
+
+`EACCES`·다른 I/O 오류·손상 JSON(쓰다가 죽어 끝이 잘린 마지막 항목은 제외, §5.1)·디렉터리·심볼릭 링크·workspace_id 불일치는 `AuthorizationUncertain`으로 거부한다. 설치 기록도 같아서, 읽지 못하거나 손상됐거나 디렉터리나 심볼릭 링크이면 거부한다. 마지막 모드 사건이 있는데 외부 저장소가 없거나 생성 규칙이 맞지 않으면 실행하지 않는다. 외부 고수위를 생략하고 legacy 경로로 부팅하지 않는다.
 
 외부 저장소가 복구되지 않으면 창은 닫히지 않는다. `/health`와 `account_busy`에 `Recovery_store_unavailable`과 필요한 운영 조치를 표시하고, stale snapshot으로 Cleared를 만들지 않는다.
 

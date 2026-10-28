@@ -5,6 +5,7 @@ module L = Endpoint_job_launch
 module D = Endpoint_job_result
 module G = Endpoint_process_gate
 module S = Endpoint_job_supervisor
+module C = Endpoint_job_lifetime
 module Recovery_test = Fs_compat_test_support.Publication_recovery_for_testing
 
 let require = function Ok value -> value | Error error -> Alcotest.fail error
@@ -486,6 +487,14 @@ let cold_result_read_does_not_restore_launch_authority =
         ~route:rebooted_route ~owner:owner_identity ~payload_uid:fixture.uid |> registry in
       let controller=controller ~sw:cold_sw ~env fixture store in
       let cold=Owner.lookup controller (Owner.original operation) |> owner in
+      check "cold snapshot does not invent live ownership"
+        ((Owner.snapshot cold |> owner).progress=Owner.Ownership_unknown);
+      let discovered=Owner.read_output ~sw:cold_sw cold ~stream:P.Stdout ~offset:0L ~max_bytes:64 |> owner in
+      (match discovered with
+       | Some chunk -> Alcotest.(check string) "cold output discovery reads actual original bytes" "original" chunk.data
+       | None -> Alcotest.fail "retained cold output was replaced by pending");
+      check "cold output discovery does not adopt a live lifetime"
+        ((Owner.snapshot cold |> owner).progress=Owner.Ownership_unknown);
       check "cold known launch has no invented live future" (Owner.await_result cold=Error Owner.Launch_unknown);
       (match Owner.await_request (Owner.activate cold) with
        | Error Owner.Launch_unknown -> ()
@@ -1177,6 +1186,128 @@ let uncertain_cancel_can_reconcile_the_held_original =
       check "reconciliation never runs the payload"
         (not (Sys.file_exists (Filename.concat fixture.work "uncertain-ran")))))
 
+let pending_and_published_output_are_distinct_original_observations =
+  with_fixture (fun ~env ~sw ~store fixture ->
+    let controller=controller ~sw ~env fixture store in
+    let binding,spec=prepare fixture 910 ": > must-not-run" in
+    let operation=Owner.admit controller ~binding ~spec |> owner in
+    check "registered view does not wait for activation"
+      ((Owner.snapshot operation |> owner).progress=Owner.Registered);
+    check "no capture is pending rather than invented empty output"
+      (Owner.read_output ~sw operation ~stream:P.Stdout ~offset:0L ~max_bytes:64 |> owner = None);
+    (match Owner.read_output ~sw operation ~stream:P.Stdout ~offset:0L ~max_bytes:0 with
+     | Error error -> check "invalid pending read retains its actual range error"
+         (error=Owner.Result_error (D.Output_error {stream=P.Stdout;cause=Owner.O.Invalid_range}))
+     | Ok _ -> Alcotest.fail "an invalid read became a pending request");
+    let claim=claim_path fixture binding in
+    let saved=claim ^ ".saved" in
+    Unix.rename claim saved;
+    Fun.protect ~finally:(fun () -> Unix.rename saved claim) (fun () ->
+      (match Owner.snapshot operation with
+       | Error (Owner.Registry_error _) -> ()
+       | Error error -> Alcotest.fail (Owner.error_to_string error)
+       | Ok _ -> Alcotest.fail "missing original became a pending snapshot");
+      match Owner.read_output ~sw operation ~stream:P.Stdout ~offset:0L ~max_bytes:64 with
+      | Error (Owner.Registry_error _) -> ()
+      | Error error -> Alcotest.fail (Owner.error_to_string error)
+      | Ok _ -> Alcotest.fail "missing authority became pending or empty output");
+    let digest,loaded=cancel_and_load ~sw operation in
+    assert_no_child digest loaded;
+    check "non-start publication is historical rather than fabricated readiness"
+      ((Owner.snapshot operation |> owner).progress=Owner.Publication_known digest);
+    (match Owner.read_output ~sw operation ~stream:P.Stdout ~offset:0L ~max_bytes:64 |> owner with
+     | Some chunk -> check "verified no-child output is actually empty and sealed"
+         (chunk.data="" && match chunk.extent with P.Sealed {byte_length=0L;_} -> true | P.Growing _ | P.Sealed _ -> false)
+     | None -> Alcotest.fail "published no-child output became pending");
+    let receipt=job_leaf fixture binding R.Terminal_receipt in
+    let original_bytes=read receipt in
+    Out_channel.with_open_bin receipt (fun channel -> output_string channel "invalid original receipt");
+    Fun.protect ~finally:(fun () -> Out_channel.with_open_bin receipt (fun channel -> output_string channel original_bytes)) (fun () ->
+      check "historical publication digest does not claim fresh integrity"
+        ((Owner.snapshot operation |> owner).progress=Owner.Publication_known digest);
+      match Owner.read_output ~sw operation ~stream:P.Stdout ~offset:0L ~max_bytes:64 with
+      | Error (Owner.Result_error _) -> ()
+      | Error error -> Alcotest.fail (Owner.error_to_string error)
+      | Ok _ -> Alcotest.fail "corrupt published receipt became valid or pending output");
+    check "original observation never launches the registered payload"
+      (not (Sys.file_exists (Filename.concat fixture.work "must-not-run"))))
+
+let live_views_do_not_join_startup_or_blocked_process_and_survive_teardown =
+  with_fixture (fun ~env ~sw ~store fixture ->
+    let open_fifo name =
+      let path=Filename.concat fixture.work name in
+      Unix.mkfifo path 0o666;
+      Unix.chmod path 0o666;
+      Unix.openfile path [Unix.O_RDWR;Unix.O_NONBLOCK;Unix.O_CLOEXEC] 0
+    in
+    let ready=open_fifo "live-ready" and input=open_fifo "live-input" in
+    Fun.protect ~finally:(fun () -> List.iter Unix.close [ready;input]) (fun () ->
+      let operation,digest=Eio.Switch.run (fun endpoint ->
+        let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+        let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+        let controller=Owner.For_testing.create ~sw:endpoint ~fs:env#fs ~registry:store
+          ~cgroup_parent_path:"/sys/fs/cgroup" ~new_id:(fresh fixture)
+          ~resolve_execution:(fun _ -> Ok fixture.execution) ~before_request:(fun () -> ())
+          ~after_commit:(fun () -> Eio.Promise.resolve signal ();Eio.Promise.await resume) in
+        let binding,spec=prepare fixture 911
+          "printf prefix; printf R > live-ready; read token < live-input; printf unexpected > live-past-input" in
+        let operation=Owner.admit controller ~binding ~spec |> owner in
+        Fun.protect ~finally:unblock (fun () ->
+          let activation=Owner.activate operation in
+          Eio.Promise.await entered;
+          check "view returns during this controller's suspended launch handoff"
+            ((Owner.snapshot operation |> owner).progress=Owner.Activation_pending);
+          check "output view does not wait for native startup"
+            (Owner.read_output ~sw operation ~stream:P.Stdout ~offset:0L ~max_bytes:64 |> owner = None);
+          check "pending observation creates no output spool"
+            (not (Sys.file_exists (job_leaf fixture binding (R.Stream_data P.Stdout))));
+          let other_binding,other_spec=prepare fixture 912 ": > other-must-not-run" in
+          let other=Owner.admit controller ~binding:other_binding ~spec:other_spec |> owner in
+          let digest,loaded=cancel_and_load ~sw other in
+          assert_no_child digest loaded;
+          unblock ();
+          Owner.await_request activation |> owner);
+        Eio_unix.await_readable ready;
+        await_native_startup operation;
+        let observed=Owner.snapshot operation |> owner in
+        (match observed.progress with
+         | Owner.Owned_lifetime progress ->
+           (match progress with
+            | C.Supervised native_progress ->
+              (match native_progress with
+               | S.Awaiting_settlement {stdout;stderr} ->
+                 List.iter (function
+                   | P.Growing _ -> ()
+                   | P.Sealed _ -> Alcotest.fail "open original output became sealed") [stdout;stderr]
+               | S.Physically_settled _ | S.Publication_known _ ->
+                   Alcotest.fail "blocked native process became settled or published")
+            | C.Startup_pending | C.No_supervisor _ | C.Publication_known _ ->
+                Alcotest.fail "settled startup did not retain its original native supervisor")
+         | Owner.Registered | Owner.Activation_pending | Owner.Publication_known _ | Owner.Ownership_unknown ->
+             Alcotest.fail "live snapshot lost its native lifetime");
+        (match Owner.read_output ~sw operation ~stream:P.Stdout ~offset:0L ~max_bytes:64 |> owner with
+         | Some chunk ->
+           Alcotest.(check string) "live read returns only the retained original prefix"
+             (String.sub "prefix" 0 (String.length chunk.data)) chunk.data;
+           (match chunk.extent with
+            | P.Growing _ -> ()
+            | P.Sealed _ -> Alcotest.fail "open child output became sealed before its EOF")
+         | None -> Alcotest.fail "actual initialized native capture became pending");
+        check "views do not run the blocked payload past its input"
+          (not (Sys.file_exists (Filename.concat fixture.work "live-past-input")));
+        Owner.await_request (Owner.cancel operation) |> owner;
+        let digest=Owner.await_result operation |> owner in
+        operation,digest) in
+      check "post-teardown snapshot retains its historical original publication"
+        ((Owner.snapshot operation |> owner).progress=Owner.Owned_lifetime (C.Publication_known digest));
+      match Owner.read_output ~sw operation ~stream:P.Stdout ~offset:0L ~max_bytes:64 |> owner with
+      | Some chunk ->
+        Alcotest.(check string) "post-teardown view opens the actual retained output" "prefix" chunk.data;
+        (match chunk.extent with
+         | P.Sealed {byte_length=6L;_} -> ()
+         | P.Sealed _ | P.Growing _ -> Alcotest.fail "retained output lost its exact complete seal")
+      | None -> Alcotest.fail "published output after native teardown became pending"))
+
 let portable_cases=[
   "missing original never readmits",(fun () -> captured_original_survives_missing_or_replaced_files ~owned:false Missing_original ());
   "replacement job never rebinds",(fun () -> captured_original_survives_missing_or_replaced_files ~owned:false Replaced_job ());
@@ -1195,6 +1326,7 @@ let portable_cases=[
   "conflicting pending admissions do not join",conflicting_pending_admissions_do_not_join_or_contaminate;
   "request exception leaves original controls serviceable",request_exception_does_not_poison_later_original_controls;
   "failed actor resumes only an explicit control",failed_actor_resumes_only_an_explicit_new_control;
+  "pending and published output remain distinct",pending_and_published_output_are_distinct_original_observations;
 ]
 
 let native_cases=[
@@ -1213,6 +1345,7 @@ let native_cases=[
   "handoff preserves a concurrent cancellation",(fun () -> cancellation_during_handoff_preserves_pin false ());
   "handoff refuses rollback after observed cancellation",(fun () -> cancellation_during_handoff_preserves_pin true ());
   "uncertain cancellation reconciles the held original",uncertain_cancel_can_reconcile_the_held_original;
+  "live views do not join process and survive teardown",live_views_do_not_join_startup_or_blocked_process_and_survive_teardown;
 ]
 
 let () =

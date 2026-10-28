@@ -1,0 +1,445 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.1.11). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+profiles
+
+List browser profiles available for new task spaces.
+
+await profiles()
+
+listTaskSpaces
+
+List Agent-owned and user-owned spaces available to reuse or claim.
+
+await listTaskSpaces()
+
+taskSpace
+
+Reuse or create an Agent-owned task space; a name held by a user-owned space fails with EGO_TASK_SPACE_NAME_IN_USE. A new space starts with managed Page p1, and profileId applies only when creating it. Options: profileId: Browser profile id returned by profiles(); new spaces only.
+
+await taskSpace(nameOrId, { profileId? })
+
+claimTaskSpace
+
+Claim a user-owned or inactive space after user approval and return TaskSpace.
+
+await claimTaskSpace(spaceId)
+
+takeOverTaskSpace
+
+Resume an Agent-owned space after user approval and return TaskSpace.
+
+await takeOverTaskSpace(spaceId)
+
+TaskSpace.spaceId
+
+Stable numeric identifier for this task space.
+
+task.spaceId
+
+TaskSpace.name
+
+Human-readable task-space name.
+
+task.name
+
+TaskSpace.ownership
+
+Ownership state captured when this TaskSpace was created.
+
+task.ownership
+
+TaskSpace.page
+
+Create a lazy handle for an existing managed Page label; it neither creates a Page nor checks that the label exists.
+
+task.page(label)
+
+TaskSpace.userPage
+
+Return the tab active at the claim/takeover boundary, when one was captured.
+
+task.userPage()
+
+TaskSpace.pages
+
+List the managed Page handles in this space.
+
+await task.pages()
+
+TaskSpace.tabs
+
+List managed Pages and unmanaged tabs in this space.
+
+await task.tabs()
+
+TaskSpace.newPage
+
+Create and durably label a blank Page.
+
+await task.newPage()
+
+TaskSpace.adopt
+
+Bring an unmanaged tab under the Page lifecycle. Options: as: Permanent Page label.
+
+await task.adopt(unmanagedPage, { as? })
+
+TaskSpace.release
+
+Stop managing an unknown-origin Page without closing it.
+
+await task.release(label)
+
+TaskSpace.waitForControl
+
+Wait for Agent control without taking it from the user. Options: interval: Polling interval in milliseconds. timeout: Maximum duration in milliseconds.
+
+await task.waitForControl({ interval?, timeout? })
+
+TaskSpace.handOff
+
+Give control of this space to the user.
+
+await task.handOff()
+
+TaskSpace.finish
+
+Finish the task and return a receipt with retained and closed managed Page labels; an empty list closes the space when no protected tabs remain. Options: keep: Required Page retention policy: "all" or an array of managed Page labels.
+
+await task.finish({ keep })
+
+TaskSpace.cdp
+
+Send a Target or Browser domain CDP command. Options: timeout: Maximum duration in milliseconds.
+
+await task.cdp(method, params?, { timeout? })
+
+Page.label
+
+Durable Page label used to restore the tab across rounds.
+
+page.label
+
+Page.spaceId
+
+Numeric identifier of the Page's task space.
+
+page.spaceId
+
+Page.openedBy
+
+Conservative origin attribution for this Page.
+
+page.openedBy
+
+Page.targetId
+
+Internal browser target identifier for advanced Target-domain CDP only.
+
+page.targetId
+
+Page.goto
+
+Navigate this Page in place. Timeout errors report whether the new document committed, plus its URL and readyState when available. Options: referer: HTTP Referer header for the navigation. timeout: Maximum duration in milliseconds. waitUntil (commit | domcontentloaded | load | networkidle): Completion state; defaults to load. networkidle requires 500ms without network activity.
+
+await page.goto(url, { referer?, timeout?, waitUntil? })
+
+Page.reload
+
+Reload this Page and wait for the selected navigation state. Options: timeout: Maximum duration in milliseconds. waitUntil (commit | domcontentloaded | load | networkidle): Completion state; defaults to load. networkidle requires 500ms without network activity.
+
+await page.reload({ timeout?, waitUntil? })
+
+Page.snapshot
+
+Return a semantic snapshot of the current viewport, full Page, or one snapshot-ref subtree with Page provenance. Options: scope (full_page | only_within_viewport | subtree): Snapshot scope; defaults to only_within_viewport, including visible iframe content returned by the browser. Use subtree with an iframe root ref to focus on that frame. root: Valid Page snapshot ref such as @21; required only when scope is subtree. Partial snapshots preserve existing node identities. includeActionMarks: Include action marks. includeStableLocator: Include stable locators.
+
+await page.snapshot({ scope?, root?, includeActionMarks?, includeStableLocator? })
+
+Page.screenshot
+
+Capture this Page to a PNG file. Options: path: Absolute output path; missing parent directories are created. fullPage: Capture the full scrollable page. clip: CSS-pixel clipping rectangle. scale (css): Output scale mode; css uses CSS-pixel sizing and is the default. raw: Bypass device-pixel-ratio correction.
+
+await page.screenshot({ path?, fullPage?, clip?, scale?, raw? })
+
+Page.url
+
+Read this Page's current URL.
+
+await page.url()
+
+Page.waitForURL
+
+Wait for an exact URL, Playwright-style glob, RegExp, or synchronous predicate receiving a URL object. Options: timeout: Maximum duration in milliseconds.
+
+await page.waitForURL(urlMatcher, { timeout? })
+
+Page.waitForEvent
+
+Wait for this Page's next "popup" or "download"; arm the promise before the triggering action. Options: timeout: Maximum duration in milliseconds.
+
+await page.waitForEvent(event, { timeout? })
+
+Download.page
+
+Return the Page that started this download.
+
+download.page()
+
+Download.url
+
+Return the download URL.
+
+download.url()
+
+Download.suggestedFilename
+
+Return Chromium's suggested file name.
+
+download.suggestedFilename()
+
+Download.saveAs
+
+Wait for completion and copy the download to an absolute path, creating missing parent directories.
+
+await download.saveAs(absolutePath)
+
+Download.path
+
+Wait for completion and return the round-local temporary file path.
+
+await download.path()
+
+Download.failure
+
+Wait for completion and return null or the failure reason.
+
+await download.failure()
+
+Download.cancel
+
+Cancel this download by its Chromium download identifier.
+
+await download.cancel()
+
+Download.delete
+
+Delete this download's round-local temporary files.
+
+await download.delete()
+
+Page.waitForTimeout
+
+Wait a fixed number of milliseconds without activating this Page.
+
+await page.waitForTimeout(timeout)
+
+Page.title
+
+Read this Page's current title.
+
+await page.title()
+
+Page.info
+
+Read URL, title, viewport, scroll, and dialog state.
+
+await page.info()
+
+Page.acceptDialog
+
+Accept this Page's JavaScript dialog, optionally supplying prompt text; return false when none is open.
+
+await page.acceptDialog(promptText?)
+
+Page.dismissDialog
+
+Dismiss this Page's JavaScript dialog; return false when none is open.
+
+await page.dismissDialog()
+
+Page.evaluate
+
+Run JavaScript in this Page; callbacks receive JSON data but cannot capture Node.js variables. Safety-timeout errors report executionStopped, pageResponsive, and mayHaveLateEffects.
+
+await page.evaluate(fnOrString, argument?)
+
+Page.waitForFunction
+
+Wait until a Page function or expression returns a truthy value. Options: timeout: Maximum duration in milliseconds. polling: Polling interval in milliseconds; defaults to 100.
+
+await page.waitForFunction(fnOrString, argument?, { timeout?, polling? })
+
+Page.fetch
+
+Run window.fetch in this Page, obey browser CORS, and return a structured response. Options: timeout: Maximum duration in milliseconds. saveAs: Write the response body to this absolute path without text conversion. method: HTTP method. headers: Request headers. body: Request body. cache (default | no-store | reload | no-cache | force-cache | only-if-cached): Fetch cache mode. credentials (omit | same-origin | include): Fetch credentials mode. integrity: Subresource integrity value. keepalive: Allow the request to outlive the page. mode (cors | no-cors | same-origin): Fetch request mode. redirect (follow | error | manual): Redirect handling mode. referrer: Request referrer. referrerPolicy: Request referrer policy.
+
+await page.fetch(url, options?)
+
+Page.cdp
+
+Send a CDP command through this Page's target session. Options: timeout: Maximum duration in milliseconds.
+
+await page.cdp(method, params?, { timeout? })
+
+Page.waitForSelector
+
+Wait for an element state in this Page. Options: timeout: Maximum duration in milliseconds. state (attached | detached | visible | hidden): Required element state.
+
+await page.waitForSelector(selector, { timeout?, state? })
+
+Page.waitForLoadState
+
+Wait for DOM content, load, or network-idle state; no state defaults to load. Options: timeout: Maximum duration in milliseconds. idleMs: Required network-idle window in milliseconds.
+
+await page.waitForLoadState(state?, { timeout?, idleMs? })
+
+Page.events
+
+Read and clear CDP events buffered for this Page.
+
+await page.events()
+
+Page.click
+
+Click an element with native CDP input. Options: button (left | middle | right): Mouse button. clickCount: Number of clicks. delay: Input delay in milliseconds. position: CSS-pixel offset from the element's top-left corner. force: Bypass pointer interception checks. timeout: Maximum wait for the element to become usable in milliseconds; defaults to 3000. label: Concise user-visible action description shown with the native mouse highlight.
+
+await page.click(selector, { button?, clickCount?, delay?, position?, force?, timeout?, label? })
+
+Page.dblclick
+
+Double-click an element with native CDP input. Options: button (left | middle | right): Mouse button. delay: Input delay in milliseconds. position: CSS-pixel offset from the element's top-left corner. force: Bypass pointer interception checks. timeout: Maximum wait for the element to become usable in milliseconds; defaults to 3000. label: Concise user-visible action description shown with the native mouse highlight.
+
+await page.dblclick(selector, { button?, delay?, position?, force?, timeout?, label? })
+
+Page.hover
+
+Move the mouse over an element. Options: position: CSS-pixel offset from the element's top-left corner. force: Bypass pointer interception checks. timeout: Maximum wait for the element to become usable in milliseconds; defaults to 3000. label: Concise user-visible action description shown with the native mouse highlight.
+
+await page.hover(selector, { position?, force?, timeout?, label? })
+
+Page.dragAndDrop
+
+Drag from one element to another. Options: button (left | middle | right): Mouse button. sourcePosition: CSS-pixel offset from the element's top-left corner. targetPosition: CSS-pixel offset from the element's top-left corner. force: Bypass pointer interception checks. timeout: Maximum wait for the element to become usable in milliseconds; defaults to 3000. label: Concise user-visible action description shown with the native mouse highlight.
+
+await page.dragAndDrop(source, target, { button?, sourcePosition?, targetPosition?, force?, timeout?, label? })
+
+Page.fill
+
+Fill the selected field, its editing host, or its unique fillable descendant, then confirm editing took effect. Options: clearFirst: Clear the current value before filling. timeout: Maximum wait for the element to become usable in milliseconds; defaults to 3000.
+
+await page.fill(selector, value, { clearFirst?, timeout? })
+
+Page.selectOption
+
+Select by a value-or-label string or { value?, label?, index? }; arrays select multiple options, while null or [] clears the selection. The select must be enabled, but disabled options remain programmatically selectable. Options: timeout: Maximum wait for the element to become usable in milliseconds; defaults to 3000.
+
+await page.selectOption(selector, valueOrValues, { timeout? })
+
+Page.focus
+
+Focus the element, its nearest interactive ancestor, or its unique editable descendant. Options: timeout: Maximum wait for the element to become usable in milliseconds; defaults to 3000.
+
+await page.focus(selector, { timeout? })
+
+Page.press
+
+Focus one element and press a key or shortcut chord. Named keys are case-insensitive; single-character keys preserve case. Options: delay: Input delay in milliseconds. timeout: Maximum wait for the element to become usable in milliseconds; defaults to 3000.
+
+await page.press(selector, chord, { delay?, timeout? })
+
+Page.setInputFiles
+
+Set files on a file input resolved from the input, its label, or a unique descendant.
+
+await page.setInputFiles(selector, pathOrPaths)
+
+Page.waitForFileChooser
+
+Wait for a dynamically created file chooser. Options: timeout: Maximum duration in milliseconds.
+
+page.waitForFileChooser({ timeout? })
+
+FileChooser.isMultiple
+
+Report whether the chooser accepts multiple files.
+
+fileChooser.isMultiple()
+
+FileChooser.setFiles
+
+Set files on an intercepted chooser and return any JavaScript dialog opened by the upload.
+
+await fileChooser.setFiles(pathOrPaths)
+
+Page.close
+
+Close this Page after confirming its tab disappeared.
+
+await page.close()
+
+Page.mouse.click
+
+Click CSS-pixel coordinates with native CDP input. Options: button (left | middle | right): Mouse button. clickCount: Number of clicks. delay: Input delay in milliseconds. label: Concise user-visible action description shown with the native mouse highlight.
+
+await page.mouse.click(x, y, { button?, clickCount?, delay?, label? })
+
+Page.mouse.move
+
+Move the mouse to CSS-pixel coordinates. Options: steps: Number of movement steps. label: Concise user-visible action description shown with the native mouse highlight.
+
+await page.mouse.move(x, y, { steps?, label? })
+
+Page.mouse.down
+
+Press a mouse button at the current Page position. Options: button (left | middle | right): Mouse button. clickCount: Click count reported to the page.
+
+await page.mouse.down({ button?, clickCount? })
+
+Page.mouse.up
+
+Release a mouse button at the current Page position. Options: button (left | middle | right): Mouse button. clickCount: Click count reported to the page.
+
+await page.mouse.up({ button?, clickCount? })
+
+Page.mouse.wheel
+
+Perform a short wheel-input motion at the current Page position; move or click over the intended scroll container first in each process. Options: label: Concise user-visible action description shown with the native mouse highlight.
+
+await page.mouse.wheel(deltaX, deltaY, { label? })
+
+Page.keyboard.down
+
+Press and hold a keyboard key.
+
+await page.keyboard.down(key)
+
+Page.keyboard.up
+
+Release a keyboard key.
+
+await page.keyboard.up(key)
+
+Page.keyboard.press
+
+Press and release a key or portable shortcut chord. Named keys are case-insensitive; single-character keys preserve case. Options: delay: Input delay in milliseconds.
+
+await page.keyboard.press(chord, { delay? })
+
+Page.keyboard.type
+
+Type text using physical keys where possible. Options: delay: Input delay in milliseconds.
+
+await page.keyboard.type(text, { delay? })
+
+Page.keyboard.insertText
+
+Insert text without synthesizing key presses.
+
+await page.keyboard.insertText(text)
+
+Page.keyboard.paste
+
+Send native paste with a string or { text, html? }, then restore the clipboard.
+
+await page.keyboard.paste(textOrContent)
+

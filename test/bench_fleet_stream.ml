@@ -23,6 +23,9 @@ module Route = Server_routes_http_routes_fleet_stream
 
 let queue_bound = 64
 let ping_interval_s = 30.0
+
+(* No run of the bench stalls a reader for this long. *)
+let stalled_after_s = 600.0
 let client_idle_timeout_s = 120.0
 let wait_poll_s = 0.0002
 
@@ -145,6 +148,7 @@ let sse =
                  ~clock
                  ~subscribe:(Hub.subscribe hub)
                  ~ping_interval_s
+                 ~stalled_after_s
                  ~max_queued_events:queue_bound
                  gluten_reqd.Gluten.Reqd.reqd);
            `Stop_daemon);

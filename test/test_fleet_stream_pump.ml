@@ -5,6 +5,7 @@ module Grade = Masc.Keeper_fleet_grade
 module Pump = Server_fleet_stream_pump
 
 let ping_interval_s = 30.0
+let stalled_after_s = 100.0
 let queue_bound = 3
 
 let fleet ?(running = 1) () : F.fleet =
@@ -57,7 +58,8 @@ let ending_t =
          fmt
          (match ending with
           | Pump.Client_gone -> "Client_gone"
-          | Pump.Fell_behind -> "Fell_behind"))
+          | Pump.Fell_behind -> "Fell_behind"
+          | Pump.Stalled -> "Stalled"))
     ( = )
 ;;
 
@@ -88,14 +90,15 @@ let new_hub () =
 
 (* The pump in a fiber of its own. [frames] receives every frame [send] is
    given, and [send] answers [true] until [stop_after] frames were sent. With a
-   [gate], [send] does not return until the gate opens, which is a client that
-   stopped reading. [live] counts the subscriptions the pump holds. *)
+   [gate], [send] does not return until the gate opens, from the [gate_from]th
+   frame on, which is a client that stopped reading. [live] counts the
+   subscriptions the pump holds. *)
 type served =
   { frames : string Eio.Stream.t
   ; ending : Pump.ending Eio.Promise.t
   }
 
-let serve ~sw ~clock ~live ?(stop_after = max_int) ?gate hub =
+let serve ~sw ~clock ~live ?(stop_after = max_int) ?gate ?(gate_from = 1) hub =
   let frames = Eio.Stream.create max_int in
   let ending, resolve_ending = Eio.Promise.create () in
   let subscribe ~on_event =
@@ -109,7 +112,7 @@ let serve ~sw ~clock ~live ?(stop_after = max_int) ?gate hub =
   let send frame =
     Eio.Stream.add frames frame;
     incr sent;
-    Option.iter Eio.Promise.await gate;
+    if !sent >= gate_from then Option.iter Eio.Promise.await gate;
     !sent < stop_after
   in
   Eio.Fiber.fork ~sw (fun () ->
@@ -119,6 +122,7 @@ let serve ~sw ~clock ~live ?(stop_after = max_int) ?gate hub =
          ~subscribe
          ~clock
          ~ping_interval_s
+         ~stalled_after_s
          ~max_queued_events:queue_bound
          ~send));
   { frames; ending }
@@ -130,10 +134,18 @@ let take_frames served count =
   |> read_frames
 ;;
 
+(* Scheduler turns the pump may need after a [send] returned before it waits
+   for the next event: the time bound on the [send] ends first. *)
+let max_turns_to_next_timer = 16
+
 (* Moves the mock clock to the pump's next timer. *)
 let advance clock =
-  Eio.Fiber.yield ();
-  if not (Eio_mock.Clock.try_advance clock) then fail "the pump set no timer"
+  let rec go turns_left =
+    Eio.Fiber.yield ();
+    if not (Eio_mock.Clock.try_advance clock)
+    then if turns_left = 0 then fail "the pump set no timer" else go (turns_left - 1)
+  in
+  go max_turns_to_next_timer
 ;;
 
 let test_the_first_frame_is_the_snapshot_the_hub_holds () =
@@ -263,11 +275,15 @@ let test_the_interval_counts_from_the_last_frame () =
         "a change at second 20"
         [ Some "2", changed ~revision:2 ~measured_at:20.0 (fleet ~running:2 ()) ]
         (take_frames served 1);
-      Eio_mock.Clock.set_time clock ping_interval_s;
-      Eio.Fiber.yield ();
-      check bool "nothing at second 30, 10 seconds after the change" true (Eio.Stream.is_empty served.frames);
-      Eio_mock.Clock.set_time clock (20.0 +. ping_interval_s);
-      check string "the keepalive comes 30 seconds after the change" Pump.keepalive_frame (Eio.Stream.take served.frames)))
+      (* The next timer is the one set after the change. One counted from the
+         first frame would have fallen due at second 30. *)
+      advance clock;
+      check
+        (float 0.0)
+        "the keepalive falls due 30 seconds after the change"
+        (20.0 +. ping_interval_s)
+        (Eio.Time.now clock);
+      check string "and it is a keepalive" Pump.keepalive_frame (Eio.Stream.take served.frames)))
 ;;
 
 let test_an_event_that_arrives_with_a_due_keepalive_is_sent_not_the_keepalive () =
@@ -324,6 +340,99 @@ let test_a_client_exactly_at_the_bound_keeps_every_event () =
   check int "the subscription is removed" 0 live
 ;;
 
+(* A client that stopped reading leaves [send] waiting, and nothing the client
+   does later is needed to free the connection: the bound runs on the clock. *)
+let test_a_send_that_does_not_return_in_time_ends_the_pump () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    let hub = new_hub () in
+    let live = ref 0 in
+    Hub.observe hub ~measured_at:10.0 (fleet ());
+    Eio.Switch.run (fun sw ->
+      let gate, (_never_opened : unit Eio.Promise.u) = Eio.Promise.create () in
+      let served = serve ~sw ~clock ~live ~gate hub in
+      (* The Snapshot is in [send], which does not return. *)
+      ignore (take_frames served 1 : _ list);
+      Eio_mock.Clock.set_time clock (stalled_after_s -. 1.0);
+      Eio.Fiber.yield ();
+      check bool "still waiting a second before the bound" false (Eio.Promise.is_resolved served.ending);
+      check int "and still subscribed" 1 !live;
+      Eio_mock.Clock.set_time clock stalled_after_s;
+      check ending_t "stalled at the bound" Pump.Stalled (Eio.Promise.await served.ending);
+      check int "the subscription is removed" 0 !live))
+;;
+
+let test_a_keepalive_that_is_not_accepted_in_time_stalls_too () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    let hub = new_hub () in
+    let live = ref 0 in
+    Hub.observe hub ~measured_at:10.0 (fleet ());
+    Eio.Switch.run (fun sw ->
+      let gate, (_never_opened : unit Eio.Promise.u) = Eio.Promise.create () in
+      let served = serve ~sw ~clock ~live ~gate ~gate_from:2 hub in
+      ignore (take_frames served 1 : _ list);
+      advance clock;
+      check string "the keepalive is in send" Pump.keepalive_frame (Eio.Stream.take served.frames);
+      Eio_mock.Clock.set_time clock (ping_interval_s +. stalled_after_s -. 1.0);
+      Eio.Fiber.yield ();
+      check bool "still waiting a second before the bound" false (Eio.Promise.is_resolved served.ending);
+      Eio_mock.Clock.set_time clock (ping_interval_s +. stalled_after_s);
+      check ending_t "the bound counts from the keepalive" Pump.Stalled (Eio.Promise.await served.ending);
+      check int "the subscription is removed" 0 !live))
+;;
+
+(* The bound belongs to one [send]. A client that took the first frame late,
+   but in time, is read again from its next frame on. *)
+let test_a_send_that_returns_before_the_bound_does_not_stall_the_pump () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    let hub = new_hub () in
+    let live = ref 0 in
+    Hub.observe hub ~measured_at:10.0 (fleet ~running:1 ());
+    Eio.Switch.run (fun sw ->
+      let gate, open_gate = Eio.Promise.create () in
+      let served = serve ~sw ~clock ~live ~stop_after:2 ~gate hub in
+      ignore (take_frames served 1 : _ list);
+      Eio_mock.Clock.set_time clock (stalled_after_s -. 1.0);
+      Eio.Promise.resolve open_gate ();
+      Eio.Fiber.yield ();
+      (* Past the deadline the first [send] had. *)
+      Eio_mock.Clock.set_time clock (stalled_after_s +. 1.0);
+      Hub.observe hub ~measured_at:20.0 (fleet ~running:2 ());
+      check
+        (list frame_t)
+        "the next event is still sent"
+        [ Some "2", changed ~revision:2 ~measured_at:20.0 (fleet ~running:2 ()) ]
+        (take_frames served 1);
+      check ending_t "the client left; the first deadline did not end the pump"
+        Pump.Client_gone (Eio.Promise.await served.ending);
+      check int "the subscription is removed" 0 !live))
+;;
+
+(* While [send] waits, events pile up past the bound, but nothing acts on that
+   until [send] returns. The time bound is what ends this connection. *)
+let test_a_pile_up_behind_a_send_that_never_returns_ends_as_stalled () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    let hub = new_hub () in
+    let live = ref 0 in
+    Hub.observe hub ~measured_at:10.0 (fleet ~running:1 ());
+    Eio.Switch.run (fun sw ->
+      let gate, (_never_opened : unit Eio.Promise.u) = Eio.Promise.create () in
+      let served = serve ~sw ~clock ~live ~gate hub in
+      ignore (take_frames served 1 : _ list);
+      for index = 1 to queue_bound + 1 do
+        Hub.observe hub ~measured_at:(10.0 +. float_of_int index) (fleet ~running:(1 + index) ())
+      done;
+      Eio.Fiber.yield ();
+      check bool "the pile-up alone does not end it" false (Eio.Promise.is_resolved served.ending);
+      Eio_mock.Clock.set_time clock stalled_after_s;
+      check ending_t "the bound ends it" Pump.Stalled (Eio.Promise.await served.ending);
+      check int "nothing was written after the Snapshot" 0 (Eio.Stream.length served.frames);
+      check int "the subscription is removed" 0 !live))
+;;
+
 let test_cancelling_a_connection_removes_its_subscription () =
   Eio_mock.Backend.run (fun () ->
     let clock = Eio_mock.Clock.make () in
@@ -360,6 +469,7 @@ let test_a_send_that_raises_removes_the_subscription_and_propagates () =
          ~subscribe
          ~clock
          ~ping_interval_s
+         ~stalled_after_s
          ~max_queued_events:queue_bound
          ~send:(fun _ -> failwith "socket write failed")
      with
@@ -394,6 +504,16 @@ let () =
             test_a_client_that_stops_reading_is_closed_once_the_queue_is_full
         ; test_case "a client exactly at the bound keeps every event" `Quick
             test_a_client_exactly_at_the_bound_keeps_every_event
+        ] )
+    ; ( "stalled client"
+      , [ test_case "a send that does not return in time ends the pump" `Quick
+            test_a_send_that_does_not_return_in_time_ends_the_pump
+        ; test_case "a keepalive that is not accepted in time stalls too" `Quick
+            test_a_keepalive_that_is_not_accepted_in_time_stalls_too
+        ; test_case "a send that returns before the bound does not stall the pump" `Quick
+            test_a_send_that_returns_before_the_bound_does_not_stall_the_pump
+        ; test_case "a pile-up behind a send that never returns ends as stalled" `Quick
+            test_a_pile_up_behind_a_send_that_never_returns_ends_as_stalled
         ] )
     ; ( "cleanup"
       , [ test_case "cancelling a connection removes its subscription" `Quick

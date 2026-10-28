@@ -11,6 +11,12 @@ let ping_interval_s = 0.15
 let reconnect_s = 0.05
 let queue_bound = 64
 
+(* No test waits this long on a server that is meant to keep a connection. *)
+let kept_stalled_after_s = 600.0
+
+(* Short enough that a reader that stopped is let go within a test's patience. *)
+let short_stalled_after_s = 0.3
+
 (* A wait that has not ended by now has failed. *)
 let patience_s = 10.0
 let poll_s = 0.002
@@ -78,7 +84,7 @@ type server =
 
 (* The real accept loop and the route's [serve], on a loopback port: everything
    the server does for this stream but the authorization. *)
-let start_server ~sw env ?port ?subscribe hub =
+let start_server ~sw env ?port ?subscribe ?(stalled_after_s = kept_stalled_after_s) hub =
   let subscribe = Option.value subscribe ~default:(Hub.subscribe hub) in
   let clock = Eio.Stdenv.clock env in
   let net = Eio.Stdenv.net env in
@@ -115,6 +121,7 @@ let start_server ~sw env ?port ?subscribe hub =
                ~clock
                ~subscribe
                ~ping_interval_s
+               ~stalled_after_s
                ~max_queued_events:queue_bound
                gluten_reqd.Gluten.Reqd.reqd))
      with
@@ -367,6 +374,63 @@ let test_a_reader_that_stops_reading_recovers_with_a_new_snapshot () =
       server.stop ()))
 ;;
 
+(* Events this large fill the kernel's buffers for one connection within a few
+   dozen of them. The pump is then waiting in [send] while fewer events than
+   the queue holds are behind it, so the time bound on [send] is the only thing
+   that can end the connection: a pile-up is not acted on until [send]
+   returns. *)
+let blocking_keepers = 6000
+let blocking_changes = 100
+
+(* The server lets go of a connection whose reader stopped reading for good,
+   without the reader's help: the subscription is gone while the reader is
+   still stopped. Reading again then ends at the end of the response, and a
+   new connection's Snapshot makes the reader right. *)
+let test_a_reader_that_does_not_read_again_is_let_go () =
+  with_env (fun env ->
+    Eio.Switch.run (fun sw ->
+      let clock = Eio.Stdenv.clock env in
+      let hub = new_hub () in
+      let counts = { live = 0; total = 0 } in
+      Hub.observe hub ~measured_at:0.0 (fleet ~keepers:blocking_keepers ~running:0 ());
+      let server =
+        start_server
+          ~sw
+          env
+          ~stalled_after_s:short_stalled_after_s
+          ~subscribe:(counted hub counts)
+          hub
+      in
+      let reader = Client.create () in
+      let gate, open_gate = Eio.Promise.create () in
+      let stopped = ref false in
+      follow
+        ~sw
+        env
+        ~port:server.port
+        ~on_bytes:(fun _ ->
+          if not !stopped
+          then (
+            stopped := true;
+            Eio.Promise.await gate))
+        reader;
+      wait_until env "the reader to stop reading" (fun () -> !stopped);
+      (* One change per pause, so the pump keeps up until the buffers are full. *)
+      for change = 1 to blocking_changes do
+        Hub.observe
+          hub
+          ~measured_at:(float_of_int change)
+          (fleet ~keepers:blocking_keepers ~running:change ());
+        Eio.Time.sleep clock poll_s
+      done;
+      wait_until env "the server to let the stopped reader go" (fun () -> counts.live = 0);
+      check int "it was the one connection" 1 counts.total;
+      Eio.Promise.resolve open_gate ();
+      wait_until env "the reader to be right again" (fun () ->
+        position reader = Some (blocking_changes + 1, blocking_changes, Fine));
+      server.stop ()))
+;;
+
 let () =
   run
     "fleet_stream_loopback"
@@ -382,6 +446,8 @@ let () =
             test_a_reader_recovers_from_a_server_restart_with_the_new_snapshot
         ; test_case "a reader that stops reading recovers with a new snapshot" `Quick
             test_a_reader_that_stops_reading_recovers_with_a_new_snapshot
+        ; test_case "a reader that does not read again is let go" `Quick
+            test_a_reader_that_does_not_read_again_is_let_go
         ] )
     ]
 ;;

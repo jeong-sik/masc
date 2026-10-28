@@ -44,6 +44,71 @@ let check_unavailable = function
     Alcotest.failf "expected unavailable, received %s" (S.error_message error)
   | Ok _ -> Alcotest.fail "unsafe storage was accepted"
 
+let share_ok = function
+  | Ok value -> value
+  | Error error -> Alcotest.fail (S.share_error_message error)
+
+let share_request suffix expected_version requested : Masc.Published_artifact_share.request =
+  { operation_id = "01890e2a-4c8e-7b21-9f3c-" ^ suffix; expected_version; requested }
+
+let test_share_transactions () = with_base (fun base_path ->
+  let module Share = Masc.Published_artifact_share in
+  let artifact, _ = publish ~base_path (request "share concurrency") in
+  let id = artifact.id in
+  let left = share_request "000000000011" 0 true in
+  let right = share_request "000000000012" 0 true in
+  let save request = Eio_unix.run_in_systhread (fun () -> S.change_share ~base_path ~id request) in
+  let left_receipt, right_receipt = Eio.Fiber.pair (fun () -> save left) (fun () -> save right) in
+  let left_receipt = share_ok left_receipt and right_receipt = share_ok right_receipt in
+  (match left_receipt.outcome, right_receipt.outcome with
+   | Share.Applied { version = 1; shared = true }, Share.Conflict { version = 1; shared = true }
+   | Share.Conflict { version = 1; shared = true }, Share.Applied { version = 1; shared = true } -> ()
+   | (Share.Applied _ | Share.Conflict _), (Share.Applied _ | Share.Conflict _) ->
+     Alcotest.fail "concurrent changes did not produce one winner and one conflict");
+  Alcotest.(check bool) "legacy writer remains compatible" false
+    (S.set_shared ~base_path ~id ~shared:false |> store_ok);
+  let current = S.read_share ~base_path ~id |> share_ok in
+  Alcotest.(check int) "legacy write advances the shared version" 2 current.version;
+  Alcotest.(check bool) "later revocation is current" false current.shared;
+  List.iter (fun (request, expected) ->
+    let observed = S.find_share_receipt ~base_path ~id ~operation_id:request.Share.operation_id |> share_ok in
+    Alcotest.(check bool) "receipt survives another writer" true (observed = Some expected);
+    let replayed = S.change_share ~base_path ~id request |> share_ok in
+    Alcotest.(check bool) "replay returns the original result" true (replayed = expected))
+    [left, left_receipt; right, right_receipt];
+  let after_replay = S.read_share ~base_path ~id |> share_ok in
+  Alcotest.(check bool) "replay cannot undo the later revocation" true (after_replay = current))
+
+let test_share_uncertain_commit () = with_base (fun base_path ->
+  let module Share = Masc.Published_artifact_share in
+  let artifact, _ = publish ~base_path (request "share recovery") in
+  let id = artifact.id in
+  let share_file = Filename.concat (catalog_dir base_path) (id ^ ".share") in
+  Yojson.Safe.to_file share_file (`Assoc ["id", `String id; "shared", `Bool true]);
+  let original = S.read_share ~base_path ~id |> share_ok in
+  Alcotest.(check bool) "legacy share stays enabled" true original.shared;
+  Alcotest.(check int) "legacy share starts at version zero" 0 original.version;
+  let request = share_request "000000000013" 0 false in
+  let before_stage stage = match stage with
+    | Masc.Keeper_fs.Parent_directory_fsync_after_rename ->
+      raise (Unix.Unix_error (Unix.EIO, "fsync", "injected"))
+    | Directory_prepare | Payload_encode | Temp_file_create | Payload_write | Payload_fsync
+    | Temp_file_close | Atomic_rename | Temp_directory_fsync_after_rename -> () in
+  let uncertain = match S.For_testing.change_share_before_stage ~before_stage ~base_path ~id request with
+    | Error (S.Share_commit_uncertain receipt) -> receipt
+    | Error error -> Alcotest.fail (S.share_error_message error)
+    | Ok _ -> Alcotest.fail "post-rename failure was reported as certain" in
+  let visible = S.find_share_receipt ~base_path ~id ~operation_id:request.operation_id |> share_ok in
+  Alcotest.(check bool) "uncertain receipt can be observed" true (visible = Some uncertain);
+  let settled = S.change_share ~base_path ~id request |> share_ok in
+  Alcotest.(check bool) "same operation settles the original receipt" true (settled = uncertain);
+  (match settled.outcome with
+   | Share.Applied { version = 1; shared = false } -> ()
+   | Share.Applied _ | Share.Conflict _ -> Alcotest.fail "unexpected recovered share receipt");
+  let current = S.read_share ~base_path ~id |> share_ok in
+  Alcotest.(check int) "replay does not advance the version" 1 current.version;
+  Alcotest.(check bool) "recovered revocation remains current" false current.shared)
+
 let test_create_and_revise () = with_base (fun base_path ->
   let empty = S.list ~base_path |> store_ok in
   Alcotest.(check int) "fresh catalog is empty" 0 (List.length empty.artifacts);
@@ -384,6 +449,9 @@ let () = Eio_main.run (fun _ ->
       Alcotest.test_case "reject malformed UTF-8 at publication and read" `Quick test_utf8_boundaries;
       Alcotest.test_case "unsafe directory is unavailable, not empty" `Quick test_unsafe_directory;
       Alcotest.test_case "metadata symlink is unavailable" `Quick test_metadata_symlink];
+     "external sharing", [
+      Alcotest.test_case "concurrent requests and later replay" `Quick test_share_transactions;
+      Alcotest.test_case "uncertain commit and legacy share recovery" `Quick test_share_uncertain_commit];
      "Keeper and HTTP publication", [
       Alcotest.test_case "producer persists exact content, identity and CAS" `Quick test_keeper_publication;
       Alcotest.test_case "model-facing receipt preserves links and durable manifests" `Quick test_keeper_model_publication_receipt;

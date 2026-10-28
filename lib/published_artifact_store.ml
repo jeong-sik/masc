@@ -143,42 +143,138 @@ let publish ~base_path ~author (request : request) =
         (File_lock_eio.durable_lock_error_to_string error);
       value)
 
-let is_shared ~base_path ~id =
-  if not (valid_id id) then Error (Invalid "invalid artifact id")
-  else protect (fun () ->
+module Share = Published_artifact_share
+
+type share_error =
+  | Share_invalid of string
+  | Share_missing
+  | Share_operation_reused
+  | Share_unavailable of string
+  | Share_commit_uncertain of Share.receipt
+
+let share_error_message = function
+  | Share_invalid message | Share_unavailable message -> message
+  | Share_missing -> "artifact not found"
+  | Share_operation_reused -> "share operation id was already used for a different request"
+  | Share_commit_uncertain _ -> "share operation may have committed; reconcile the same operation id"
+
+let protect_share f =
+  try f () with
+  | Sys_error message -> Error (Share_unavailable message)
+  | Unix.Unix_error (error, operation, _) ->
+    Error (Share_unavailable (operation ^ ": " ^ Unix.error_message error))
+
+let share_artifact_error = function
+  | Invalid message -> Share_invalid message
+  | Missing -> Share_missing
+  | (Conflict _ | Unavailable _ | Commit_uncertain _) as error ->
+    Share_unavailable (error_message error)
+
+let load_share ~base_path ~id =
+  if not (valid_id id) then Error (Share_invalid "invalid artifact id")
+  else
     match Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.geteuid ())
       ~ownership_root:base_path (share_path ~base_path id) with
-    | Error _ -> Error (Unavailable "artifact share state could not be read")
-    | Ok None -> Ok false
+    | Error _ -> Error (Share_unavailable "artifact share state could not be read")
+    | Ok None ->
+      Share.initial ~id ~shared:false
+      |> Result.map_error (function
+        | Share.Invalid message -> Share_invalid message
+        | Share.Operation_reused -> Share_operation_reused)
     | Ok (Some { content = text; _ }) when not (String.is_valid_utf_8 text) ->
-      Error (Unavailable "artifact share state is not valid UTF-8")
+      Error (Share_unavailable "artifact share state is not valid UTF-8")
     | Ok (Some { content = text; _ }) ->
       match Yojson.Safe.from_string text with
-      | `Assoc ["id", `String stored_id; "shared", `Bool shared]
-      | `Assoc ["shared", `Bool shared; "id", `String stored_id]
-        when String.equal stored_id id -> Ok shared
-      | _ -> Error (Unavailable "invalid artifact share metadata")
-      | exception Yojson.Json_error message -> Error (Unavailable message))
+      | json ->
+        (match Share.of_json json with
+         | Ok state when String.equal (Share.id state) id -> Ok state
+         | Ok _ -> Error (Share_unavailable "artifact share identity mismatch")
+         | Error (Share.Invalid message) -> Error (Share_unavailable message)
+         | Error Share.Operation_reused -> Error (Share_unavailable "duplicate share operation"))
+      | exception Yojson.Json_error message -> Error (Share_unavailable message)
 
-let set_shared ~base_path ~id ~shared =
-  if not (valid_id id) then Error (Invalid "invalid artifact id")
-  else protect (fun () ->
+let read_share ~base_path ~id = protect_share (fun () ->
+  load_share ~base_path ~id |> Result.map Share.snapshot)
+
+let find_share_receipt ~base_path ~id ~operation_id = protect_share (fun () ->
+  match Random_id.parse_uuid_v7 operation_id with
+  | Error _ -> Error (Share_invalid "invalid share operation id")
+  | Ok canonical when not (String.equal canonical operation_id) ->
+    Error (Share_invalid "noncanonical share operation id")
+  | Ok _ ->
+    load_share ~base_path ~id |> Result.map (fun state -> Share.find state ~operation_id))
+
+let with_share_lock ~base_path ~id f =
+  if not (valid_id id) then Error (Share_invalid "invalid artifact id")
+  else protect_share (fun () ->
     let dir = root ~base_path in
-    let* entries = directory_entries ~base_path in
-    let* () = match entries with None -> Error Missing | Some _ -> Ok () in
+    let* entries = directory_entries ~base_path |> Result.map_error share_artifact_error in
+    let* () = match entries with None -> Error Share_missing | Some _ -> Ok () in
     match File_lock_eio.with_durable_lock_observed
       ~lock_path:(Filename.concat dir (id ^ ".lock")) (fun () ->
-        let* _artifact = load ~base_path id in
-        let json = `Assoc ["id", `String id; "shared", `Bool shared] in
-        match Keeper_fs.save_json_durable_atomic ~ownership_root:base_path
-          (share_path ~base_path id) json with
-        | Ok () -> Ok shared
-        | Error error ->
-          Error (Unavailable (Keeper_fs.durable_write_error_to_string error))) with
+        let* _artifact = load ~base_path id |> Result.map_error share_artifact_error in
+        let* state = load_share ~base_path ~id in
+        f state) with
     | File_lock_eio.Lock_not_acquired error ->
-      Error (Unavailable (File_lock_eio.durable_lock_error_to_string error))
+      Error (Share_unavailable (File_lock_eio.durable_lock_error_to_string error))
     | File_lock_eio.Body_completed { value; release_error = None } -> value
     | File_lock_eio.Body_completed { value; release_error = Some error } ->
       Log.Misc.error "artifact share lock release: %s"
         (File_lock_eio.durable_lock_error_to_string error);
       value)
+
+let save_share ~save ~base_path ~id state receipt =
+  match save ~ownership_root:base_path
+    (share_path ~base_path id) (Share.to_json state) with
+  | Ok () -> Ok receipt
+  | Error (error : Keeper_fs.durable_write_error) when error.renamed ->
+    Error (Share_commit_uncertain receipt)
+  | Error error -> Error (Share_unavailable (Keeper_fs.durable_write_error_to_string error))
+
+let change_share_with_save ~save ~base_path ~id request =
+  with_share_lock ~base_path ~id (fun state ->
+    match Share.apply state request with
+    | Error (Share.Invalid message) -> Error (Share_invalid message)
+    | Error Share.Operation_reused -> Error Share_operation_reused
+    | Ok (Share.Recorded (next, receipt)) -> save_share ~save ~base_path ~id next receipt
+    | Ok (Share.Replay receipt) ->
+      (* Rewriting even a replay settles a prior rename whose directory sync
+         was uncertain before returning its original result. *)
+      save_share ~save ~base_path ~id state receipt)
+
+let durable_share_save ~ownership_root path json =
+  Keeper_fs.save_json_durable_atomic ~ownership_root path json
+
+let change_share ~base_path ~id request =
+  change_share_with_save ~save:durable_share_save ~base_path ~id request
+
+let share_error_to_artifact_error = function
+  | Share_invalid message -> Invalid message
+  | Share_missing -> Missing
+  | (Share_operation_reused | Share_unavailable _ | Share_commit_uncertain _) as error ->
+    Unavailable (share_error_message error)
+
+let is_shared ~base_path ~id =
+  read_share ~base_path ~id
+  |> Result.map (fun (snapshot : Share.snapshot) -> snapshot.shared)
+  |> Result.map_error share_error_to_artifact_error
+
+let set_shared ~base_path ~id ~shared =
+  with_share_lock ~base_path ~id (fun state ->
+    let request : Share.request =
+      { operation_id = Random_id.uuid_v7 (); expected_version = (Share.snapshot state).version; requested = shared } in
+    match Share.apply state request with
+    | Error (Share.Invalid message) -> Error (Share_invalid message)
+    | Error Share.Operation_reused | Ok (Share.Replay _) -> Error Share_operation_reused
+    | Ok (Share.Recorded (next, ({ outcome = Share.Applied _; _ } as receipt))) ->
+      save_share ~save:durable_share_save ~base_path ~id next receipt |> Result.map (fun _ -> shared)
+    | Ok (Share.Recorded (_, { outcome = Share.Conflict _; _ })) ->
+      Error (Share_unavailable "share version changed while holding its lock"))
+  |> Result.map_error share_error_to_artifact_error
+
+module For_testing = struct
+  let change_share_before_stage ~before_stage ~base_path ~id request =
+    let save ~ownership_root path json =
+      Keeper_fs.For_testing.save_json_durable_atomic ~before_stage ~ownership_root path json in
+    change_share_with_save ~save ~base_path ~id request
+end

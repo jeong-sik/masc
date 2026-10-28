@@ -17,6 +17,16 @@ type client_id =
           Dynamic Client Registration. *)
   | Document of document_url
 
+val has_control_character : string -> bool
+(** [true] when the text holds a C0 control, DEL, or a UTF-8 encoded C1
+    control (U+0080..U+009F). A terminal or a page may act on any of them,
+    so client-chosen text with one is refused. *)
+
+val is_plain_url_text : string -> bool
+(** No space, control character or backslash, and ocaml-uri prints the text
+    back unchanged. A string it would print differently is not the URL that
+    would be fetched or redirected to. *)
+
 val classify_client_id : string -> (client_id, string) result
 (** A client id with the https scheme must be a usable document URL. It is
     plain URL text: no space, control character or backslash, and ocaml-uri

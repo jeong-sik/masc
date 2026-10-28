@@ -141,7 +141,8 @@ let validate_loopback_redirect_uri value =
        neither recognised an IPv4-mapped address. *)
     let host_ok = Masc_network_defaults.is_loopback_host_opt (Uri.host uri) in
     if
-      scheme_ok
+      Auth_oauth_client_metadata.is_plain_url_text value
+      && scheme_ok
       && host_ok
       && Option.is_none (Uri.userinfo uri)
       && Option.is_none (Uri.fragment uri)
@@ -476,6 +477,37 @@ let cleanup_expired_codes_locked current =
     pending_codes
 ;;
 
+(* An unreadable record names its file, so the operator can find it: the
+   file name is a hash, not the client id. *)
+let with_record_path path result =
+  Result.map_error
+    (function
+      | Store_error detail -> Store_error (path ^ ": " ^ detail)
+      | ( Invalid_request _ | Invalid_client | Invalid_grant | Invalid_scope
+        | Access_denied | Temporarily_unavailable ) as error -> error)
+    result
+;;
+
+let load_stored_clients_locked ~base_path =
+  let entries =
+    Sys.readdir (clients_dir base_path)
+    |> Array.to_list
+    |> List.filter (fun path -> Filename.check_suffix path ".json")
+  in
+  let rec load_clients acc = function
+    | [] -> Ok (List.rev acc)
+    | entry :: rest ->
+      let path = Filename.concat (clients_dir base_path) entry in
+      let* json = load_json_opt path |> with_record_path path in
+      (match json with
+       | None -> load_clients acc rest
+       | Some json ->
+         let* stored = client_of_yojson json |> with_record_path path in
+         load_clients ((path, stored) :: acc) rest)
+  in
+  load_clients [] entries
+;;
+
 let register_client ~base_path ~client_name ~redirect_uris =
   if redirect_uris = [] || List.length redirect_uris > Policy.max_redirect_uris
   then Error (Invalid_request "redirect_uris count is invalid")
@@ -484,6 +516,11 @@ let register_client ~base_path ~client_name ~redirect_uris =
     | Some value -> String.length value > Policy.max_client_name_bytes
     | None -> false
   then Error (Invalid_request "client_name is too long")
+  else if
+    match client_name with
+    | Some value -> Auth_oauth_client_metadata.has_control_character value
+    | None -> false
+  then Error (Invalid_request "client_name contains a control character")
   else
     let rec validate seen = function
       | [] -> Ok ()
@@ -504,23 +541,7 @@ let register_client ~base_path ~client_name ~redirect_uris =
       }
     in
     with_store_io ~base_path (fun () ->
-      let entries =
-        Sys.readdir (clients_dir base_path)
-        |> Array.to_list
-        |> List.filter (fun path -> Filename.check_suffix path ".json")
-      in
-      let rec load_clients acc = function
-        | [] -> Ok (List.rev acc)
-        | entry :: rest ->
-          let path = Filename.concat (clients_dir base_path) entry in
-          let* json = load_json_opt path in
-          (match json with
-           | None -> load_clients acc rest
-           | Some json ->
-             let* stored = client_of_yojson json in
-             load_clients ((path, stored) :: acc) rest)
-      in
-      let* stored_clients = load_clients [] entries in
+      let* stored_clients = load_stored_clients_locked ~base_path in
       match
         List.find_opt
           (fun (_, (stored : client)) ->
@@ -537,7 +558,14 @@ let register_client ~base_path ~client_name ~redirect_uris =
         let* () =
           if List.length stored_clients < client_limit
           then Ok ()
-          else Error Temporarily_unavailable
+          else (
+            Log.Auth.warn
+              "oauth: refused a new client registration: %d of %d clients are \
+               stored; `masc oauth-client list` shows them and `masc \
+               oauth-client revoke <client_id>` releases one"
+              (List.length stored_clients)
+              client_limit;
+            Error Temporarily_unavailable)
         in
         let* () =
           save_json_private
@@ -939,7 +967,15 @@ let exchange_authorization_code
           ~bootstrap_token_hash:grant.bootstrap_token_hash
           ~granted_role:grant.role
       in
-      if live_bootstrap
+      let* client_present =
+        match grant.request.client_verification with
+        | Registered_client ->
+          let* json = load_json_opt (client_path base_path grant.request.client_id) in
+          Ok (Option.is_some json)
+        | Verified_document -> Ok true
+        | Unverified_document -> Ok false
+      in
+      if live_bootstrap && client_present
       then
         mint_pair_locked
           ~base_path
@@ -1037,6 +1073,105 @@ let rotate_refresh_token
              "oauth: superseded access record cleanup failed error=%s"
              (Printexc.to_string exn));
         Ok pair))
+;;
+
+let load_families_locked ~base_path =
+  let rec load acc = function
+    | [] -> Ok (List.rev acc)
+    | entry :: rest ->
+      let path = Filename.concat (families_dir base_path) entry in
+      let* json = load_json_opt path |> with_record_path path in
+      (match json with
+       | None -> load acc rest
+       | Some json ->
+         let* family = family_of_yojson json |> with_record_path path in
+         load (family :: acc) rest)
+  in
+  load [] (json_entries (families_dir base_path))
+;;
+
+let family_is_live ~current (family : family_record) =
+  Option.is_none family.revoked_at_unix && family.refresh_expires_at_unix > current
+;;
+
+type client_listing =
+  { client : client
+  ; live_families : int
+  }
+
+(* Listing and revoking only read a store that exists: [with_store_io] would
+   create one, and a mistyped base path would then read as an empty store. *)
+let store_exists ~base_path =
+  Auth_credential_base.run_blocking_io (fun () -> Sys.file_exists (oauth_dir base_path))
+;;
+
+let oauth_store_path = oauth_dir
+
+let list_clients ~base_path =
+  if not (store_exists ~base_path)
+  then Ok None
+  else
+  with_store_io ~base_path (fun () ->
+    let* clients = load_stored_clients_locked ~base_path in
+    let* families = load_families_locked ~base_path in
+    let current = now () in
+    Ok
+      (List.map
+         (fun (_, (client : client)) ->
+           let live_families =
+             List.length
+               (List.filter
+                  (fun (family : family_record) ->
+                    String.equal family.client_id client.client_id
+                    && family_is_live ~current family)
+                  families)
+           in
+           { client; live_families })
+         clients)
+    |> Result.map Option.some)
+;;
+
+type client_revocation = { revoked_families : int }
+
+(* The operator's way to release a registration slot (#26702). Every family
+   still open for the client is revoked before the record goes, so a crash in
+   between leaves a client that a second revoke finishes. *)
+let revoke_client ~base_path ~client_id =
+  if not (store_exists ~base_path)
+  then Ok None
+  else
+  with_store_io ~base_path (fun () ->
+    let path = client_path base_path client_id in
+    let* json = load_json_opt path |> with_record_path path in
+    match json with
+    | None -> Ok None
+    | Some json ->
+      let* stored = client_of_yojson json |> with_record_path path in
+      if not (constant_time_string_equal stored.client_id client_id)
+      then Error (Store_error (path ^ ": OAuth client file integrity mismatch"))
+      else
+        let* families = load_families_locked ~base_path in
+        let current = now () in
+        let open_families =
+          List.filter
+            (fun (family : family_record) ->
+              String.equal family.client_id client_id
+              && Option.is_none family.revoked_at_unix)
+            families
+        in
+        let rec revoke = function
+          | [] -> Ok ()
+          | family :: rest ->
+            let* () = revoke_family_locked ~base_path ~current family in
+            revoke rest
+        in
+        let* () = revoke open_families in
+        remove_file_if_exists path;
+        Ok
+          (Some
+             { revoked_families =
+                 List.length (List.filter (family_is_live ~current) open_families)
+             }))
 ;;
 
 let find_access_credential ~base_path ~token =

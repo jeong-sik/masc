@@ -41,14 +41,23 @@ let prepare_cursor ~candidate ~(program_source : Current.program_source) =
   Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name token
     ~through:(Keeper_librarian_input_sources.external_through (Capture.counterparts source)) ~atom ~official
 
-let publish ~candidate ~(finished : Machine.finished) =
+type apply = keepers_dir:string -> keeper_id:string -> now:float -> anchor:Current.program_anchor ->
+  source:Current.program_source -> validate_source:(unit -> (unit, string) result) -> Program.t ->
+  (Current.program_commit, string) result
+
+let publish_with ~(apply : apply) ~candidate ~(finished : Machine.finished) =
   let request = Descent.request candidate in
   let owner = Request.physical_owner request in
   let keepers_dir = Request.keepers_dir owner and keeper_id = Request.keeper_id owner in
   let program = finished.program in
-  let* proved = io (fun () -> Commit.receipt_state request) in
+  let receipt () = io (fun () -> Commit.receipt_state request) in
+  (* A range that is already there needs no lock: a pass that finds the read
+     position moved on would fail in the lock before it could say so. The
+     caller serializes this owner, so no other call writes the range between
+     this check and the commit. *)
+  let* proved = receipt () in
   if proved then Ok Published else
-  let* outcome = io (fun () ->
+  let outcome = io (fun () ->
     Lock.with_original_snapshot ~request (fun ~messages ->
       let* anchor = Current.capture_program_anchor ~keepers_dir ~keeper_id in
       let facts = Option.map (fun (snapshot : Current.t) -> snapshot.facts)
@@ -56,13 +65,30 @@ let publish ~candidate ~(finished : Machine.finished) =
       if facts <> program.initial_current then Ok Superseded else
       let* program_source = program_source ~candidate ~messages program in
       let* () = prepare_cursor ~candidate ~program_source in
-      let* _ = Current.apply_program ~keepers_dir ~keeper_id ~now:(Time_compat.now ()) ~anchor
+      let* _ = apply ~keepers_dir ~keeper_id ~now:(Time_compat.now ()) ~anchor
         ~source:program_source ~validate_source:(fun () -> Ok ()) program in
       Ok Published)) in
   match outcome with
-  | Superseded -> Ok Superseded
-  | Published ->
+  | Ok Superseded -> Ok Superseded
+  | Ok Published ->
     (* The store's receipts decide, never the status it returned. *)
-    let* proved = io (fun () -> Commit.receipt_state request) in
+    let* proved = receipt () in
     let* () = require proved "Memory returned without the receipt of the range" in
     Ok Published
+  | Error detail ->
+    (* The lock reports an error after its callback finished, and a commit can
+       report one after its snapshot was renamed. A range that is there was
+       published, whatever the status said. *)
+    (match receipt () with
+     | Ok true -> Ok Published
+     | Ok false -> Error detail
+     | Error why -> Error (detail ^ "; the receipt of the range could not be read either: " ^ why))
+
+let publish ~candidate ~finished =
+  publish_with ~candidate ~finished
+    ~apply:(fun ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program ->
+      Current.apply_program ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program)
+
+module For_testing = struct
+  let publish_with = publish_with
+end

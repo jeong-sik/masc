@@ -551,6 +551,27 @@ let resolve_dispatch dispatch =
     reraise_hook_observer exception_ backtrace
 ;;
 
+(* A tool that hands back file or process bytes can return text cut inside a
+   multi-byte character. Every consumer of the result (PostToolUse, the wire to
+   the client, durable receipts) encodes it as JSON, and a JSON reader repairs
+   those bytes to U+FFFD, so a consumer that stored the raw bytes can no
+   longer find them. Repair once here so all of them see the same string. *)
+let repair_utf8_tool_result : tool_result -> tool_result = function
+  | Ok { content; content_blocks; _meta } ->
+    let repair_block = function
+      | Text text -> Text (Llm_provider.Utf8_sanitize.repair_invalid_utf8 text)
+      | ( Thinking _ | RedactedThinking _ | ReasoningDetails _ | ToolUse _
+        | ToolResult _ | Image _ | Document _ | Audio _ ) as block -> block
+    in
+    Ok
+      { content = Llm_provider.Utf8_sanitize.repair_invalid_utf8 content
+      ; content_blocks = Option.map (List.map repair_block) content_blocks
+      ; _meta
+      }
+  | Error ({ message; _ } as error) ->
+    Error { error with message = Llm_provider.Utf8_sanitize.repair_invalid_utf8 message }
+;;
+
 (** Find and execute a single tool, invoking PostToolUse hook.
     Returns a structured execution result. *)
 let find_and_execute_tool_with_index
@@ -704,6 +725,7 @@ let find_and_execute_tool_with_index
              match prepared_call with
              | Some prepared -> Tool.execute_prepared ~context ~invocation prepared
              | None -> Tool.execute ~context ~invocation tool exact_input)
+           |> repair_utf8_tool_result
          in
          let duration_ms = (Unix.gettimeofday () -. t0) *. 1000.0 in
          let result_bytes =

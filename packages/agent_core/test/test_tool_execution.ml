@@ -260,6 +260,85 @@ let approval_failure_fixture env callback =
   !executed, result
 ;;
 
+(* A line cut inside a Korean syllable, followed by a terminal escape. *)
+let cut_mid_syllable = "\xEB\xA1\x9C\xEC\x9D"
+let repaired_mid_syllable = "\xEB\xA1\x9C\xEF\xBF\xBD"
+
+let test_tool_result_bytes_are_repaired_before_any_consumer () =
+  Eio_main.run
+  @@ fun _env ->
+  let context = Context.create_sync () in
+  let schedule : Tool_contract.schedule =
+    { planned_index = 0
+    ; batch_index = 0
+    ; batch_size = 1
+    ; execution_mode = Tool_contract.Serial
+    }
+  in
+  let run (tool : Tool.t) =
+    let observed = ref None in
+    let hooks =
+      { Hooks.empty with
+        post_tool_use =
+          Some
+            (function
+              | Hooks.PostToolUse { output; _ } ->
+                observed := Some output;
+                Hooks.Continue
+              | _ -> fail "expected PostToolUse")
+      }
+    in
+    let result =
+      Agent_tools.find_and_execute_tool
+        ~context
+        ~tools:[ tool ]
+        ~hooks
+        ~event_bus:None
+        ~tracer:Tracing.null
+        ~agent_name:"agent"
+        ~invocation:
+          (Tool_contract.Invocation.create
+             ~tool_use_id:"cut-1"
+             ~turn:0
+             ~schedule
+             ~completion:Tool_contract.Continue_after_success)
+        tool.schema.name
+        (`Assoc [])
+    in
+    result, !observed
+  in
+  let ok_tool =
+    Tool.create ~name:"cut" ~description:"returns cut bytes" ~parameters:[] (fun _ ->
+      Ok
+        { Types.content = "line " ^ cut_mid_syllable ^ "\n\x1b[0m"
+        ; content_blocks = Some [ Text cut_mid_syllable ]
+        ; _meta = None
+        })
+  in
+  (match run ok_tool with
+   | Ok result, Some (Ok output) ->
+     let expected = "line " ^ repaired_mid_syllable ^ "\n\x1b[0m" in
+     check string "returned content is repaired and keeps the escape" expected result.content;
+     check string "PostToolUse sees the returned content" result.content output.content;
+     check
+       bool
+       "PostToolUse sees the returned blocks"
+       true
+       (result.content_blocks = output.content_blocks
+        && output.content_blocks = Some [ Text repaired_mid_syllable ]);
+     check bool "returned content is valid UTF-8" true (String.is_valid_utf_8 result.content)
+   | _ -> fail "cut bytes did not come back as a successful tool result");
+  let failing_tool =
+    Tool.create ~name:"cut_failure" ~description:"fails with cut bytes" ~parameters:[] (fun _ ->
+      Error { Types.message = cut_mid_syllable; recoverable = false; error_class = None })
+  in
+  match run failing_tool with
+  | Ok result, Some (Error error) ->
+    check string "PostToolUse error message is repaired" repaired_mid_syllable error.message;
+    check string "returned error content is repaired" repaired_mid_syllable result.content
+  | _ -> fail "cut bytes did not come back as a failed tool result"
+;;
+
 let test_pre_tool_approval_callback_failure_is_typed () =
   Eio_main.run
   @@ fun env ->
@@ -1491,6 +1570,12 @@ let () =
             `Quick
             test_non_tool_use_blocks_filtered
         ; test_case "only non-ToolUse = empty" `Quick test_only_non_tool_use_blocks
+        ] )
+    ; ( "result bytes"
+      , [ test_case
+            "cut multi-byte text is repaired before any consumer"
+            `Quick
+            test_tool_result_bytes_are_repaired_before_any_consumer
         ] )
     ; ( "scheduling"
       , [ test_case "concurrent batch" `Quick test_concurrent_tools_share_batch

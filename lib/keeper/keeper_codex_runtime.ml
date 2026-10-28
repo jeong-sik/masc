@@ -1254,9 +1254,13 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
         ()
     in
     let produced_results = ref None in
+    let confirmed_tool_calls = ref [] in
     let close_delivery_frontier () =
       if Option.is_none !produced_results then
-        produced_results := Option.map Keeper_client_tool_outbox.close_delivery_frontier result_producer
+        produced_results := Option.map (fun producer ->
+          Keeper_client_tool_outbox.close_delivery_frontier producer
+          |> fun snapshot -> Keeper_client_tool_outbox.retain_confirmed_calls snapshot
+              ~call_ids:!confirmed_tool_calls) result_producer
     in
     let dynamic_tools =
       List.map
@@ -1523,6 +1527,8 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
               | exception exn -> Log.Keeper.warn ~keeper_name
                   "retained tool result notification raised: %s" (Printexc.to_string exn));
              Ok ())
+         ~on_tool_response_confirmed:(fun ~call_id ->
+           confirmed_tool_calls := call_id :: !confirmed_tool_calls)
          ~on_stream_event
          ~on_thread_ready:(fun ~thread_id ->
            update_session "active transition" (fun expected ->
@@ -1605,6 +1611,10 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
            ~gate_continuation:(Option.is_some official_client_continuation) error;
        Error (codex_error_to_core_error error)
      | Ok turn ->
+       (* A zero-pending terminal does not emit Tool_delivery_closed. Freeze
+          its confirmed writes here; an earlier in-flight terminal has already
+          frozen its own frontier, excluding later results. *)
+       close_delivery_frontier ();
        recovery_failure := Keeper_official_client_session_store.Protocol_failed;
        let expected_resumed =
          match thread_mode with

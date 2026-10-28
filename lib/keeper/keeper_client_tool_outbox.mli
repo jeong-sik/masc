@@ -55,6 +55,12 @@ val close_delivery_frontier : host_producer -> snapshot
     Idempotent: late writes cannot enter a previously frozen snapshot. Only a
     natural, accepted Completed turn with durable settlement can ACK it. *)
 
+val retain_confirmed_calls : snapshot -> call_ids:string list -> snapshot
+(** Restrict a frozen host snapshot to the call IDs independently confirmed by
+    the same provider turn. This does not ACK or alter retained results. The
+    caller must establish that each ID uniquely identifies a physical call in
+    that producer's turn. *)
+
 val retain_host_result :
   host_producer ->
   invocation_index:int -> call_id:string -> tool_name:string -> arguments:Yojson.Safe.t ->

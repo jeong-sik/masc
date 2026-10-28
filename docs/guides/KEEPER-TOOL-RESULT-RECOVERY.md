@@ -8,6 +8,16 @@ After a durable receipt is stored, its SHA256 identifier is submitted as a typed
 
 Queue admission, wake hints, turn start and queue acknowledgement are distinct from delivery. Only successful Codex settlement acknowledges the exact loaded receipt snapshot. A failed recovery turn leaves the receipt available for another normal maintenance pass. A newer receipt added after the snapshot remains unread.
 
+For a result produced during a Codex turn, a complete response write alone is
+not receipt by the client. The current turn can settle a result only after the
+client reports a matching successful `dynamicToolCall` completion for the same
+call and response, and the Keeper accepts the completed turn. An absent,
+cancelled or mismatched completion leaves the original result in the outbox.
+Codex can synthesize failed responses that look like a tool's own failure, so
+failed results remain available for the next recovery turn. A matching client
+completion establishes client receipt, not that the final model input included
+the result.
+
 Normal Keeper lifecycle decisions still apply. Recovery does not start an absent owner, unpause a Keeper, override desired state, or restart container services. Startup owner restoration follows the configured activation mode and existing lifecycle. The automatic model wake currently requires a nonempty Codex-only route: every reachable candidate must resolve to Codex. Quota ordering and fallback may select another candidate, so a Codex entry alone is insufficient. Mixed routes, other clients, and unavailable or unknown candidates retain their receipts. A previously queued notification for an unsupported current route is retired without deleting the receipt or blocking unrelated work; returning to a Codex-only route makes the receipt discoverable again.
 
 Malformed or unreadable outbox entries fail closed and remain on disk with a Warn diagnostic. The recovery process does not fabricate a missing response, discard corrupt evidence, or repair unknown data by rerunning a command.

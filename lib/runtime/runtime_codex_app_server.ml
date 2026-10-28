@@ -1716,13 +1716,15 @@ let host_stop_of_error = function
    tool calls had finished on the host. *)
 let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
     ~tools ~tool_call_count ~tool_effect_attempted ~on_stream_event
-    ~on_undelivered_tool_result ~thread_id ~turn_id run =
+    ~on_undelivered_tool_result ~on_tool_response_confirmed ~thread_id ~turn_id run =
     Eio.Switch.run (fun sw ->
       let incoming = Eio.Stream.create max_int in
       let pending = ref 0 in
       let barrier = ref None in
       let concurrent = ref [] in
       let calls = Hashtbl.create 8 in
+      let written_responses = Hashtbl.create 8 in
+      let completed_calls = Hashtbl.create 8 in
       let reader_state = ref Reader_ready in
       let vendor_terminal = ref None in
       let vendor_closed = ref false in
@@ -1834,7 +1836,22 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
                   {stage = "undelivered tool result"; detail}) in
            if !vendor_closed then retain ()
            else
-             (try io.send ?on_response_sent frame json; Ok () with
+             (try
+                io.send ?on_response_sent frame json;
+                (* A complete pipe write is not provider receipt. Track the
+                   written success and wait for the matching server item. *)
+                (match json with
+                 | `Assoc fields ->
+                   (match List.assoc_opt "result" fields with
+                    | Some (`Assoc result) ->
+                      (match List.assoc_opt "success" result, List.assoc_opt "contentItems" result with
+                       | Some (`Bool true), Some (`List _ as content) ->
+                         if not (Hashtbl.mem completed_calls call_id) then
+                           Hashtbl.replace written_responses call_id (tool_name, arguments, content)
+                       | _ -> ())
+                    | _ -> ())
+                 | _ -> ());
+                Ok () with
               | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
               | Idle_timeout seconds ->
                 close_delivery ();
@@ -1895,6 +1912,37 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
               vendor_terminal := Some terminal;
               receive ()
             end
+          | Provider_message (Ok (Notification {method_ = "item/completed"; params} as message)) ->
+            let field key fields =
+              match List.filter (fun (name, _) -> String.equal name key) fields with
+              | [(_, value)] -> Some value
+              | [] | _ :: _ -> None in
+            (match params with
+             | `Assoc fields
+               when field "threadId" fields = Some (`String thread_id)
+                    && field "turnId" fields = Some (`String turn_id) ->
+               (match field "item" fields with
+                | Some (`Assoc item) when field "type" item = Some (`String "dynamicToolCall") ->
+                  (match field "id" item with
+                   | Some (`String call_id) when not (Hashtbl.mem completed_calls call_id) ->
+                     Hashtbl.add completed_calls call_id ();
+                     (match Hashtbl.find_opt written_responses call_id with
+                      | Some (tool_name, arguments, content) ->
+                        Hashtbl.remove written_responses call_id;
+                        (match field "arguments" item, field "contentItems" item with
+                         | Some returned_arguments, Some returned_content
+                           when field "tool" item = Some (`String tool_name)
+                                && field "status" item = Some (`String "completed")
+                                && field "success" item = Some (`Bool true)
+                                && Yojson.Safe.equal (Yojson.Safe.sort arguments) (Yojson.Safe.sort returned_arguments)
+                                && Yojson.Safe.equal (Yojson.Safe.sort content) (Yojson.Safe.sort returned_content) ->
+                           on_tool_response_confirmed ~call_id
+                         | _ -> ())
+                      | None -> ())
+                   | _ -> ())
+                | _ -> ())
+             | _ -> ());
+            Ok message
           | Provider_message (Error error) ->
             if !pending > 0 then begin
               close_delivery ();
@@ -2455,7 +2503,7 @@ let history_item (message : history_message) =
     ]
 ;;
 
-let run_protocol io (config : config) ~await_handoff ~on_undelivered_tool_result ~protocol_cwd ~dynamic_tools ~reasoning_effort
+let run_protocol io (config : config) ~await_handoff ~on_undelivered_tool_result ~on_tool_response_confirmed ~protocol_cwd ~dynamic_tools ~reasoning_effort
     ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent
     ~on_turn_started ~on_stream_event ~on_reasoning_effort_resolved =
   send_control_request io ~id:1 ~method_:"initialize"
@@ -2656,7 +2704,7 @@ let run_protocol io (config : config) ~await_handoff ~on_undelivered_tool_result
   let* text, turn_usage =
     with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
       ~tools:dynamic_tools ~tool_call_count ~tool_effect_attempted ~on_stream_event
-      ~on_undelivered_tool_result ~thread_id ~turn_id (fun io ->
+      ~on_undelivered_tool_result ~on_tool_response_confirmed ~thread_id ~turn_id (fun io ->
     await_turn_terminal
       io ~handoff ~terminal_tools_closed
       ~tools:dynamic_tools
@@ -3007,7 +3055,7 @@ let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd 
            }))
 ;;
 
-let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~await_handoff ~on_undelivered_tool_result ~dynamic_tools ~on_context_submission
+let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~await_handoff ~on_undelivered_tool_result ~on_tool_response_confirmed ~dynamic_tools ~on_context_submission
     ~reasoning_effort ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready
     ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent ~on_turn_started ~on_stream_event
     ~on_reasoning_effort_resolved =
@@ -3025,6 +3073,7 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~await_handoff ~on_undeliv
       config
       ~await_handoff
       ~on_undelivered_tool_result
+      ~on_tool_response_confirmed
       ~protocol_cwd
       ~dynamic_tools
       ~reasoning_effort
@@ -3174,7 +3223,7 @@ let read_rate_limits ~mgr ~clock ~cwd config =
   probe_metadata ~mgr ~clock ~cwd config rate_limits_read_protocol
 ;;
 
-let run_turn ?await_handoff ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error "No durable owner is configured for the undelivered tool result") ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
+let run_turn ?await_handoff ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error "No durable owner is configured for the undelivered tool result") ?(on_tool_response_confirmed = fun ~call_id:_ -> ()) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
     ?(history = [])
     ?(developer_context = [])
     ?(on_context_submission = fun _ -> ())
@@ -3224,6 +3273,7 @@ let run_turn ?await_handoff ?(dynamic_tools = []) ?(on_undelivered_tool_result =
               config
               ~await_handoff
               ~on_undelivered_tool_result
+              ~on_tool_response_confirmed
               ~dynamic_tools
               ~on_context_submission
               ~reasoning_effort

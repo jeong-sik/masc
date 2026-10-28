@@ -561,7 +561,7 @@ let openrouter_seed_runtimes =
   ; "openrouter.openrouter-glm-5-3-flash", "z-ai/glm-5.3-flash"
   ; "openrouter.openrouter-glm-5-3", "z-ai/glm-5.3"
   ; "openrouter.openrouter-deepseek-v4-flash", "deepseek/deepseek-v4-flash"
-  ; "openrouter.openrouter-deepseek-v4-1-flash", "deepseek/deepseek-v4.1-flash"
+  ; "openrouter.openrouter-deepseek-v4-1-flash", "deepseek/deepseek-v4.1-flash-1017"
   ; "openrouter.openrouter-deepseek-v4-pro", "deepseek/deepseek-v4-pro"
   ; "openrouter.openrouter-qwen3-8-max", "qwen/qwen3.8-max-0902"
   ; "openrouter.openrouter-claude-fable-5-1", "anthropic/claude-fable-5.1"
@@ -573,6 +573,8 @@ let openrouter_seed_runtimes =
   ; "openrouter.openrouter-grok-4-7", "x-ai/grok-4.7"
   ; "openrouter.openrouter-qwen3-8-flash", "qwen/qwen3.8-flash"
   ; "openrouter.openrouter-glm-5-3-flashx", "z-ai/glm-5.3-flashx"
+  ; ( "openrouter.openrouter-free-nemotron-3-5-super-vl"
+    , "nvidia/nemotron-3.5-super-vl:free" )
   ]
 
 let test_openrouter_seed_runtimes_are_dispatchable () =

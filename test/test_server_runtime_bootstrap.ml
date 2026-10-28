@@ -4317,10 +4317,15 @@ let test_full_health_cold_refresh_timeout_is_timeout_not_error () =
   Alcotest.(check bool) "failed cold memory observation names the timeout" true
     (after |> member "keeper_memory_execution" |> member "component_timed_out" |> to_bool);
   (* The fleet stream reads this same body. A cold refresh that timed out has
-     no reading to tell, and is not a fleet of zeros. *)
+     no reading to tell and is not a fleet of zeros. It is a scan that ran out
+     of time, and the stream reports it as one. *)
   match Fleet_stream_health_section.fleet_of_health_fields (to_assoc after) with
   | Ok _ -> Alcotest.fail "a timed-out cold refresh read as a fleet reading"
-  | Error (Fleet_stream_health_section.Not_measured _) -> ()
+  | Error (Fleet_stream_health_section.Scan_failed Fleet_stream.Scan_timed_out) -> ()
+  | Error (Fleet_stream_health_section.Scan_failed Fleet_stream.Scan_failed) ->
+    Alcotest.fail "a timed-out cold refresh read as a failed scan"
+  | Error (Fleet_stream_health_section.Not_measured { status }) ->
+    Alcotest.fail ("a timed-out cold refresh read as not measured: " ^ status)
   | Error (Fleet_stream_health_section.Unreadable detail) -> Alcotest.fail detail
 
 (* After a refresh that timed out, the fleet section is still the last good
@@ -4370,6 +4375,8 @@ let test_a_rebuilding_snapshot_has_no_fleet_reading () =
   | Error (Fleet_stream_health_section.Not_measured { status }) ->
     Alcotest.(check string) "the placeholder's word" "warming" status
   | Ok _ -> Alcotest.fail "a snapshot being rebuilt read as a fleet reading"
+  | Error (Fleet_stream_health_section.Scan_failed _) ->
+    Alcotest.fail "a snapshot being rebuilt read as a failed scan"
   | Error (Fleet_stream_health_section.Unreadable detail) -> Alcotest.fail detail
 
 let test_health_response_survives_deleted_cwd () =

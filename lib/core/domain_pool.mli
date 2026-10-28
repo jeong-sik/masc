@@ -56,6 +56,12 @@ val domain_count : t -> int
 (** Resolved worker count.  Matches the value passed to [create] (or
     {!recommended_domain_count} when omitted). *)
 
+val weight_io : float
+(** [0.05]: the weight {!submit_io} gives a job. *)
+
+val weight_cpu : float
+(** [1.0]: the weight {!submit_cpu} gives a job. *)
+
 val submit_io : t -> (unit -> 'a) -> 'a
 (** Blocking submit for IO-bound work (HTTP calls, disk I/O, network
     syscalls).

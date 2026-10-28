@@ -2225,11 +2225,67 @@ let test_native_workflow_pointer_ownership () =
      "keyboard.type",["text",str "x"];
      "keyboard.paste",["text",str "x"]]
 
+let test_operator_input_recovery () =
+  let module Input=Masc.Browser_ego_input in
+  let module Operator=Masc.Browser_ego_operator in
+  let answer label = function
+    | Ok value -> value
+    | Error _ as result -> failf "%s: %s" label (failure_kind result) in
+  let issued=ref 0 and scripts=ref 0 in
+  let dialog=ego_dialog "alert" "check" in
+  let peer=opened (fun sent -> incr scripts;match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.dialog" -> answered (obj ["dialog",dialog])
+    | "page.native_workflow" ->
+      incr issued;
+      if !issued=1 then answered (obj [
+        "completed",`List [obj ["index",`Int 0;"method",str "click";"receipt",obj ["dialog",dialog]]];
+        "effectStarted",`Bool true;"completedEffect",`Bool true;"inputReleased",`Bool false;
+        "failure",obj ["index",`Int 0;"method",str "click";"message",str "answer dialog";"dialog",dialog]])
+      else answered (obj ["completed",`List [];"effectStarted",`Bool false;"completedEffect",`Bool false;
+        "inputReleased",`Bool true;"failure",`Null;"urlBefore",str "https://app.slack.com/";
+        "url",str "https://app.slack.com/";"title",str "Slack";"snapshot",str "root";"chars",`Int 4;"truncated",`Bool false])
+    | other -> failf "unexpected recovery fixture step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let args steps=obj ["tabId",`Int 1;"expectedUrl",str "https://app.slack.com/";"maxChars",`Int 1000;"steps",`List steps] in
+  let first=Peer.dispatch ~command_id:"original-input-command" peer ~verb:Live.Page_native_workflow
+    (args [obj ["method",str "click";"selector",str "#dialog"]]) in
+  check string "dialog retains partial effect" "partial" (failure_kind first);
+  let pending=match Peer.input_status peer with Input.Uncertain pending -> pending
+    | Ready _ -> fail "dialog lost its pending input" in
+  check string "pending input names original command" "original-input-command" pending.command_id;
+  ignore (answer "answer dialog" (dispatch peer Live.Page_act (Lane.Action.to_json
+    (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog None}))));
+  ignore (before_effect "dialog answer is not input-reset authority" (dispatch peer Live.Page_native_workflow (args [])));
+  let connection:Operator.connection={client_id="original-client";space=Peer.space peer;recovery={
+    status=(fun () -> Peer.input_status peer);busy=(fun () -> Peer.input_busy peer);
+    assert_reset=(fun ~generation -> Peer.assert_input_reset peer ~generation)}} in
+  let view=Operator.invoke (Some connection) (obj ["action",str "view";"arguments",obj []]) in
+  let action=Yojson.Safe.Util.(view |> member "actions" |> to_list |> List.hd) in
+  let fields=Yojson.Safe.Util.(action |> member "arguments") in
+  let invoke fields=Operator.invoke (Some connection) (obj ["action",str "assert_input_reset";"arguments",fields]) in
+  let before= !scripts in
+  let replace key value=match fields with `Assoc fields -> obj ((key,str value)::List.remove_assoc key fields)
+    | _ -> fail "form arguments missing" in
+  List.iter (fun fields -> check string "foreign/stale assertion rejected" "not_applied"
+    Yojson.Safe.Util.(invoke fields |> member "outcome" |> to_string))
+    [replace "clientId" "replacement-client";replace "spaceId" "52";replace "generation" "old";replace "confirmation" "go"];
+  check string "human assertion applied" "operator_asserted"
+    Yojson.Safe.Util.(invoke fields |> member "outcome" |> to_string);
+  check string "same assertion is idempotent" "operator_asserted"
+    Yojson.Safe.Util.(invoke fields |> member "outcome" |> to_string);
+  check int "private view/assertions issue no browser scripts" before !scripts;
+  let resumed=answer "continue after explicit operator assertion" (dispatch peer Live.Page_native_workflow (args [])) in
+  check string "resume retains operator provenance, not native release proof" "operator_asserted"
+    Yojson.Safe.Util.(resumed |> member "inputReadiness" |> to_string);
+  check int "only original and subsequent distinct workflow were issued" 2 !issued
+
 let () =
   run "browser_ego_peer" [
     "ego", [
       test_case "production workflow envelope preserves special JSON header keys" `Quick test_native_workflow_json_headers;
       test_case "native drag preserves release and failure boundaries" `Quick test_native_drag_and_release;
+      test_case "operator input assertion resumes the same peer without replay" `Quick test_operator_input_recovery;
       test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;
       test_case "chooser upload respects uncertain input release" `Quick test_chooser_upload_respects_uncertain_pointer_release;
       test_case "the space opens by name and is held by number" `Quick test_the_space_opens_by_name_and_is_held_by_number;

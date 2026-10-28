@@ -97,6 +97,11 @@ val space_id : t -> int
     peer for its lifetime. The name is an attachment-time observation, not a
     current ownership, visibility or login claim. *)
 val space : t -> Browser_lane.ego_space
+val input_status : t -> Browser_ego_input.status
+val input_busy : t -> bool
+val assert_input_reset : t -> generation:string -> (unit, string) result
+(** An assertion from the worker's private operator port only; not a browser
+    verb, SDK cleanup acknowledgement, takeover, or login receipt. *)
 
 (** Answers one live verb the way the BiDi peer answers it. [hand_off] returns
     [action], [spaceId] and [spaceName], captured from the same TaskSpace before
@@ -143,7 +148,11 @@ val space : t -> Browser_lane.ego_space
     scene drags retain the observed waypoint contract, require zero duration
     and release the button in the same run.
     Unconfirmed release blocks further input on this peer; read/finish remain
-    available. End this task space before opening a fresh peer. Frames are read
+    available. The private operator controls can record an explicit human
+    check/reset assertion for this pending input generation and resume the
+    same peer. This remains [operator_asserted], not native release proof.
+    Answering a dialog, handing off or taking over alone does not reset it.
+    Frames are read
     through the snapshot. Snapshot-target click, fill, hover and double-click
     use ego's native element resolver, including iframe refs; expectedUrl still
     identifies the top-level page. Explicit input framePath is refused here
@@ -159,7 +168,8 @@ val space : t -> Browser_lane.ego_space
     Verbs this connection does not serve are refused before any effect; selection
     refuses them earlier ({!Browser_lane.live_transport_serves}). *)
 val dispatch
-  :  ?actor:string
+  :  ?command_id:string
+  -> ?actor:string
   -> t
   -> verb:Browser_live_peer.verb
   -> Yojson.Safe.t

@@ -190,10 +190,12 @@ val append_error_to_string : append_error -> string
     line that never ended. A caller that needs a list to land whole or not at
     all appends one record per call.
 
-    If the write raises an exception (for example
-    [Systhread_host.Host_failed]), the lines may be in the file. The log is
-    stopped and the exception goes on to the caller. An exception that comes
-    before the write began stops the log too, because the module cannot tell
-    the two cases apart. The caller does not append the same records again: the
-    next start shows what the file holds. *)
+    If the call that runs the write on a system thread raises an exception (for
+    example [Systhread_host.Host_failed]), the lines may be in the file. The
+    log is stopped and the exception goes on to the caller. This holds even when
+    the exception was raised before the file work began, because the module
+    cannot tell the two cases apart. An exception raised while the records are
+    checked comes before any byte is written and does not stop the log. The
+    caller does not append the same records again: the next start shows what
+    the file holds. *)
 val append : writer -> Authz_record.t list -> (Authz_record.head, append_error) result

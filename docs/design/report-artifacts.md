@@ -122,7 +122,9 @@ that a Keeper is currently viewing or editing a document.
   The Dashboard does not substitute a static report snapshot when the live API
   refuses a read; the static asset route also rejects its report-snapshot
   namespace. Previously downloaded or independently copied content remains
-  outside the server's control after sharing is revoked.
+  outside the server's control after sharing is revoked, including copies held
+  in browser or intermediary caches. In unbound Dashboard asset mode, descendant
+  symlinks and multi-link files are refused even when they name ordinary assets.
 - `keeper_artifact_publish`: the same store operation using the Keeper's own
   identity. Publication is non-terminal: the Keeper can continue and report its
   durable link. No automatic duplicate Board/chat post is sent by the tool.

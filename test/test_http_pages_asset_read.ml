@@ -285,20 +285,62 @@ let test_report_snapshots_are_not_public_assets () =
     let snapshots = Filename.concat asset_dir "published-artifacts" in
     Unix.mkdir snapshots 0o755;
     let name = "artifact-0123456789abcdef0123456789abcdef-r1.json" in
-    Out_channel.with_open_bin (Filename.concat snapshots name)
+    let snapshot = Filename.concat snapshots name in
+    Out_channel.with_open_bin snapshot
       (fun oc -> Out_channel.output_string oc "private snapshot");
     Out_channel.with_open_bin (Filename.concat asset_dir "bundle.js")
       (fun oc -> Out_channel.output_string oc "dashboard asset");
-    let snapshot_path = "/dashboard/assets/published-artifacts/" ^ name in
+    let nested = Filename.concat asset_dir "nested" in
+    Unix.mkdir nested 0o755;
+    Out_channel.with_open_bin (Filename.concat nested "bundle.js")
+      (fun oc -> Out_channel.output_string oc "nested dashboard asset");
+    Unix.symlink snapshots (Filename.concat asset_dir "snapshot-directory");
+    Unix.symlink snapshot (Filename.concat asset_dir "snapshot-file.json");
+    Unix.symlink snapshot (Filename.concat nested "snapshot.json");
+    Unix.link snapshot (Filename.concat asset_dir "snapshot-hardlink.json");
+    let private_paths =
+      [ "/dashboard/assets/published-artifacts/" ^ name
+      ; "/dashboard/assets/Published-Artifacts/" ^ name
+      ; "/dashboard/assets/publiſhed-artifacts/" ^ name
+      ; "/dashboard/assets/snapshot-directory/" ^ name
+      ; "/dashboard/assets/snapshot-file.json"
+      ; "/dashboard/assets/nested/snapshot.json"
+      ; "/dashboard/assets/snapshot-hardlink.json"
+      ] in
     List.iter (fun (protocol, request) ->
-      let status, body = request snapshot_path in
-      check int (protocol ^ " refuses report snapshot") 404 status;
-      check bool (protocol ^ " does not return snapshot bytes") false
-        (String_util.contains_substring body "private snapshot");
-      let status, body = request "/dashboard/assets/bundle.js" in
-      check int (protocol ^ " still serves regular assets") 200 status;
-      check string (protocol ^ " returns the asset") "dashboard asset" body)
+      List.iter (fun path ->
+        let status, body = request path in
+        check bool (protocol ^ " refuses " ^ path) true (status = 404 || status = 503);
+        check bool (protocol ^ " does not return snapshot bytes for " ^ path) false
+          (String_util.contains_substring body "private snapshot")) private_paths;
+      List.iter (fun (path, expected) ->
+        let status, body = request path in
+        check int (protocol ^ " still serves " ^ path) 200 status;
+        check string (protocol ^ " returns the asset bytes") expected body)
+        [ "/dashboard/assets/bundle.js", "dashboard asset"
+        ; "/dashboard/assets/nested/bundle.js", "nested dashboard asset" ])
       [ "HTTP/1", http1_dashboard_asset_response; "HTTP/2", http2_dashboard_asset_response ])
+;;
+
+let test_report_snapshot_exclusion_uses_directory_identity () =
+  with_dashboard_asset_tree (fun asset_dir ->
+    let snapshots = Filename.concat asset_dir "published-artifacts" in
+    Unix.mkdir snapshots 0o755;
+    Out_channel.with_open_bin (Filename.concat snapshots "snapshot.json")
+      (fun oc -> Out_channel.output_string oc "private snapshot");
+    let relative components = match Fs_compat.owned_relative_path components with
+      | Ok path -> path | Error detail -> fail detail in
+    let excluded = relative ["assets"; "published-artifacts"] in
+    let read components =
+      Fs_compat.load_single_link_regular_file_beneath
+        ~root:(Filename.dirname asset_dir) ~excluded_directory:excluded (relative components) in
+    check bool "the held protected directory is never read" true
+      (Result.is_error (read ["assets"; "published-artifacts"; "snapshot.json"]));
+    (* On case-insensitive filesystems long s can name the same directory even
+       when the request uses a different spelling. Exercise that real alias. *)
+    if Sys.file_exists (Filename.concat asset_dir "publiſhed-artifacts") then
+      check bool "a Unicode alias of the protected directory is refused" true
+        (Result.is_error (read ["assets"; "publiſhed-artifacts"; "snapshot.json"])))
 ;;
 
 let test_with_env_restores_missing_env_as_unset () =
@@ -329,6 +371,10 @@ let () =
             "H1/H2 refuse static report snapshots"
             `Quick
             test_report_snapshots_are_not_public_assets
+        ; test_case
+            "snapshot exclusion uses directory identity"
+            `Quick
+            test_report_snapshot_exclusion_uses_directory_identity
         ] )
     ; ( "dashboard_etag"
       , [ test_case "body content hash" `Quick test_dashboard_etag_of_body_content_hash

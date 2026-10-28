@@ -19,7 +19,7 @@ type binding =
   ; receipt : receipt; binary_snapshot : Fs_compat.owned_regular_file_snapshot }
 type selection = Not_installed | Unavailable of error | Bound of binding
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let sha256 body =
   Domain_pool_ref.submit_cpu_or_inline (fun () ->
     Agent_core_sha256.(digest_string body |> to_hex))

@@ -33,7 +33,7 @@ let error_to_string = function
   | Storage_failed detail -> "presentation_inspection_storage_failed: " ^ detail
   | Pdf_inspection_failed error -> Verification_pdf_inspection.error_to_string error
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let read_owned root path =
   match Fs_compat.load_owned_regular_file ~ownership_root:root path with

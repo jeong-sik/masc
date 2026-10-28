@@ -108,7 +108,7 @@ let rec take_within_budget ~limit ~budget acc = function
 ;;
 
 let render ~pages_total ~pages_unreadable ~log ~findings request =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () =
     match request.kind with
     | None -> Ok ()

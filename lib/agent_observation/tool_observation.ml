@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type declared_progress = Progress | No_progress | Failed
 type t =

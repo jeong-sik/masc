@@ -54,7 +54,7 @@ let error_to_string = function
     Printf.sprintf "pdf_payload_budget_exceeded: %d bytes exceed %d" bytes limit
   | Storage_failed detail -> "pdf_inspection_storage_failed: " ^ detail
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let read_owned root path =
   match Fs_compat.load_owned_regular_file ~ownership_root:root path with

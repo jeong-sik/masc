@@ -92,7 +92,7 @@ let valid_search_result_url url =
     | Some "http" | Some "https" -> true
     | _ -> false
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* A provider's empty answer is data. Missing arrays and malformed responses
    must stay failures; otherwise a broken endpoint becomes a cached no-hit

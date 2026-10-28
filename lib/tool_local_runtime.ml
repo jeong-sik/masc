@@ -154,7 +154,7 @@ type ollama_probe_bounds =
   }
 
 let runtime_ollama_probe_bounds args : (ollama_probe_bounds, string) result =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* timeout_sec = runtime_ollama_probe_timeout_sec args in
   let* probe_runs =
     runtime_ollama_probe_bounded_field args ~name:"probe_runs" ~default:2

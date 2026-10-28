@@ -20,7 +20,7 @@
    registry application). The current state is saved first as [_autosave], over the one
    the previous restore left. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 module Override = Prompt_override_persistence
 

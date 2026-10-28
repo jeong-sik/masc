@@ -541,7 +541,7 @@ let parse_executable_provenance
     | [] -> Error (Printf.sprintf "executable provenance %s is missing" name)
     | _ -> Error (Printf.sprintf "executable provenance %s is duplicated" name)
   in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let required_nonnegative_int fields name =
     match List.find_all (fun (field, _) -> String.equal field name) fields with
     | [ _, `Int value ] when value >= 0 -> Ok value
@@ -1097,7 +1097,7 @@ let dashboard_asset_index provenance =
 ;;
 
 let bind_executable_provenance ~path ~sha256 ~device ~inode =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* expected_binary_commit =
     match embedded_commit with
     | Some value -> Ok value

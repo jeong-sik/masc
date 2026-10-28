@@ -9,7 +9,7 @@ type revision =
   ; task_id : string option; goal_id : string option }
 type t = { id : string; revisions : revision list }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let format_name = function Markdown -> "markdown" | Html -> "html"
 let media_type = function Markdown -> "text/markdown" | Html -> "text/html"
 let format_of_json = function

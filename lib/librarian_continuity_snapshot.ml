@@ -64,7 +64,7 @@ let error_to_string = function
   | Write_failed detail -> "continuity snapshot write failed: " ^ detail
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let valid_sha256 text =
   String.length text = 64

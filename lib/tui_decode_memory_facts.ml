@@ -1,7 +1,7 @@
 (** Memory fact listings and the pure all-Keepers projection. *)
 
 open Tui_decode_fields
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type memory_fact_retrieval =
   | Never_retrieved

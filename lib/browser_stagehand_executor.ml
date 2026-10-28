@@ -51,7 +51,7 @@ let failure_message = function
   | Session.Lost detail -> "Stagehand did not answer: " ^ detail
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let rec traverse f = function
   | [] -> Ok []

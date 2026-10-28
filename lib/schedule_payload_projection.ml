@@ -35,7 +35,7 @@ type support_summary =
   ; unknown_request_count : int
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let known_kind_to_string = function
   | Keeper_wake -> Schedule_supported_kinds.keeper_wake
@@ -124,7 +124,7 @@ let kind_of_json_result payload =
 ;;
 
 let result_delivery_of_body body =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match List.assoc_opt "result_delivery" body with
   | None -> Ok None
   | Some (`Assoc fields) ->
@@ -215,7 +215,7 @@ let unknown_keeper_wake_body_fields body =
   |> List.sort_uniq String.compare
 
 let validate_keeper_wake_body body =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () =
     match unknown_keeper_wake_body_fields body with
     | [] -> Ok ()
@@ -541,7 +541,7 @@ let wake_keeper_name request =
 ;;
 
 let result_delivery request =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* view = payload_view request in
   match classify_kind view.raw_kind with
   | Some Keeper_wake -> result_delivery_of_body view.body

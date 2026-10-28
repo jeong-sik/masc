@@ -19,7 +19,7 @@ type context = {
 let json_ok ~tool_name ~start_time (json : Yojson.Safe.t) : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data:json ()
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let metric_read_failure ~tool_name ~start_time error =
   let code, message =

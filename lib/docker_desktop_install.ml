@@ -6,7 +6,7 @@ type verified_artifact = {directory:string; path:string; sha256:string; size:int
 type cleanup = Cleaned | Pending of string
 type completion = { cleanup : cleanup }
 type action_result = { completion : completion; service : Sandbox_readiness.entry }
-let ( let* ) = Result.bind
+open Result.Syntax
 let publisher = "Developer ID Application: Docker Inc (9BNSXJN65R)"
 (* Explicit trust anchor measured from official Docker 4.90.0/238679 macOS ARM
    DMG; see docs/evidence/prerequisite-installers/docker-desktop-4.90.0.json. *)

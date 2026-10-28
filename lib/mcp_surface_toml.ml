@@ -1,7 +1,7 @@
 (* See mcp_surface_toml.mli. *)
 
 let sprintf = Printf.sprintf
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* ── TOML value accessors ─────────────────────────────────────────────── *)
 

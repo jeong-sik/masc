@@ -2,7 +2,7 @@
     Pure wire models and decoders; callers own HTTP and presentation effects. *)
 open Tui_decode_fields
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type tool_entry = {
   tl_name : string;

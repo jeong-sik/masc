@@ -143,7 +143,7 @@ let optional_string json key =
   | _ -> None
 
 let of_yojson json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match json with
   | `Assoc _ ->
       let* () =

@@ -526,7 +526,7 @@ let fence_private_session t ~session = match t.state with
 
 let execute_private t ~session ~tab_id ~run =
   private_request t (fun () -> with_verb_slot t (fun () ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* opened = match t.state with
       | Open opened when session.owner == t.private_owner && session.opened == opened
           && Option.is_none !(opened.ended) && t.private_ready opened.session -> Ok opened

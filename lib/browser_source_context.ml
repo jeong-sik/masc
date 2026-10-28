@@ -1,7 +1,7 @@
 type kind = Template | Element
 type location = { file : string; line : int; column : int; kind : kind; digest : string }
 type t = Unmapped | Located of location | Invalid of string
-let ( let* ) = Result.bind
+open Result.Syntax
 let parse = function
   | `Assoc fields ->
       let* () = if List.length fields = 6 &&

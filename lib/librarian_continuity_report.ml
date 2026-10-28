@@ -88,7 +88,7 @@ type t =
 [@@deriving yojson]
 
 let schema = "masc.librarian-continuity.v1"
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let question_text = function
   | Provided text -> text

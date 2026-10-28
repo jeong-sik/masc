@@ -27,7 +27,7 @@ let reaction_stage = function
   | Observed stage -> stage
   | Terminal_conflict -> Unknown "예약 소비 증거 충돌"
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let object_fields = function
   | `Assoc fields ->

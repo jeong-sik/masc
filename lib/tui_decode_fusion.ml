@@ -1,6 +1,6 @@
 open Tui_decode_fields
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type fusion_run_status =
   | Fusion_running

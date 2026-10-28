@@ -75,7 +75,7 @@ let config_from_env_result () =
              Error (Negative_config_duration { field; value })
          | Some value -> Ok value)
   in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* notify_delay_s =
     get_duration Notify_delay ~default:default_config.notify_delay_s
       ~positive:false

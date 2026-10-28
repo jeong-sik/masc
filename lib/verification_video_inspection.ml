@@ -37,7 +37,7 @@ type error =
    machine; expiry reports an incomplete runtime inspection. *)
 let command_timeout_sec = 120.
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let error_to_string = function
   | Dependency_unavailable programs ->
     "video_dependency_unavailable: install FFmpeg with ffprobe in the verifier service environment; missing "

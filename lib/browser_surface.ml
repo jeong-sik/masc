@@ -28,7 +28,7 @@ let ego_page_of_json = function
 type tab = { id : int; title : string; url : string; active : bool; window_id : int option;
   dialog : dialog option; ego_page : ego_page option }
 type selection = Requested of tab | Active of tab | None_active
-let ( let* ) = Result.bind
+open Result.Syntax
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let parse_client_id = function
   | `Assoc fields ->

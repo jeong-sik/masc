@@ -20,7 +20,7 @@ type progress =
   { work : work; selected_source : Keeper_librarian.input option
   ; snapshot : snapshot; baseline : R.progress; restored : R.progress }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let initial_progress = {work=Work_not_started; selected_source=None; snapshot=Snapshot_not_started;
   baseline=R.Not_started; restored=R.Not_started}
 let optional encode = Option.fold ~none:`Null ~some:encode

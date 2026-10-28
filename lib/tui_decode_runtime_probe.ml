@@ -1,7 +1,7 @@
 (** Strict Runtime probe observations; no I/O or UI state. *)
 
 open Tui_decode_fields
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type runtime_probe_refresh_state =
   | Runtime_probe_fresh

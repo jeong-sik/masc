@@ -340,7 +340,7 @@ let handle_create ~tool_name ~start_time ctx args : Tool_result.result =
   let text name = Json_util.get_string args name |> Option.value ~default:"" in
   let raw_page = text "page" in
   let body = text "body" in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let sent =
     let* page =
       validate_page_name raw_page
@@ -418,7 +418,7 @@ let stale_revision ~tool_name ~start_time ~page ~base_revision ~current_revision
 let handle_update ~tool_name ~start_time ctx args : Tool_result.result =
   let raw_page = Json_util.get_string args "page" |> Option.value ~default:"" in
   let body = Json_util.get_string args "body" |> Option.value ~default:"" in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   (* A title or summary the caller left out keeps the current one. One that
      was sent has to be a header value. *)
   let kept_or_new name =
@@ -652,7 +652,7 @@ let handle_lint ~tool_name ~start_time ctx args : Tool_result.result =
   let string_arg name =
     typed name ~expected:"a string" ~pick:(function `String s -> Some s | _ -> None)
   in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let request =
     let* page = string_arg "page" in
     let* kind = string_arg "kind" in

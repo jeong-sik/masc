@@ -4,7 +4,7 @@ type positioned = { snapshot : snapshot; selection : selection; anchor : int; he
 type error_kind = Invalid_request | Invalid_document | Invalid_selection | Changed_selection | Unavailable
 type error = { kind : error_kind; message : string }
 type runner = string -> (Unix.process_status * string, string) result
-let ( let* ) = Result.bind
+open Result.Syntax
 let error_message error = error.message
 let invalid message = Error { kind = Invalid_request; message }
 let unavailable message = Error { kind = Unavailable; message }

@@ -8,7 +8,7 @@ type keeper_pause_status =
       }
 
 let keeper_pause_census config =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   (* The census raises when the roster path cannot even be ensured (e.g.
      occupied by a file); that failure is an [Error] here, like the
      fleet-health projections do, instead of escaping the caller. *)

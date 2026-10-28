@@ -9,7 +9,7 @@ type error =
   | Commit_uncertain of Check.t
 type listing = { checks : Check.t list; diagnostics : (string * string) list }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let error_message = function
   | Invalid message | Unavailable message -> message
   | Artifact_error error -> Artifacts.error_message error

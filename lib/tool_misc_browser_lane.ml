@@ -100,7 +100,7 @@ let instruct_action = function
 ;;
 
 let instruct_verb fields =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* instruction =
     match List.assoc_opt "instruction" fields with
     | None -> Ok None

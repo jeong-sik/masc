@@ -16,9 +16,14 @@ let failure_label = function
 (* Who acts, per class. The text is guidance for the keeper reading it; the
    decision of which text is the variant's, never the detail string's. *)
 let action_of_failure = function
-  | Keeper_sandbox_remote.Local_timeout | Keeper_sandbox_remote.Remote_timeout ->
-    "The payload ran out of its time budget; the lane itself worked. Shorten the \
-     command or raise timeout_sec. No operator action."
+  | Keeper_sandbox_remote.Local_timeout ->
+    "The host timed out without a completed shim reply. Whether the payload \
+     started or produced effects is unknown; an earlier probe does not prove \
+     the lane is currently healthy. Inspect the endpoint and reconcile any \
+     effects before retrying."
+  | Keeper_sandbox_remote.Remote_timeout ->
+    "The shim reported that the payload timed out. Partial effects may have \
+     occurred; reconcile them before retrying."
   | Keeper_sandbox_remote.Transport_failed ->
     "The lane could not read the shim's answer. If the detail names \
      remote_ssh_version_error, the server and the endpoint's shim disagree on the \

@@ -108,6 +108,13 @@ identity and shim without starting a guest or cleaning build output. The first
 owned turn handoff per server process stages unkept real `_build` directories
 before deleting them. `.masc-keep-build` preserves a checkout's output.
 
+Work-volume admission distinguishes an explicit guest observation that the
+mount is absent (`microvm_work_volume_not_mounted`) from a failed or timed-out
+check (`microvm_work_volume_probe_unverified`). The latter leaves the mount
+state unknown; inspect the guest and its execution transport before deciding
+how to recover it. Neither result alone establishes that GitHub credentials are
+invalid. Admission refuses the guest in both cases.
+
 Sandbox status exposes the work volume's current discard default as `set`,
 `absent` or `unreadable`. A new boot runs the discard helper only when a fresh
 superblock read proves the default absent; an unreadable value never triggers

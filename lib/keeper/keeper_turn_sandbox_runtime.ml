@@ -911,24 +911,6 @@ let bound_egress_proxy_port (t : t) =
   |> Option.join
 ;;
 
-module For_testing_microvm = struct
-  let microvm_container_name = microvm_container_name
-
-  let microvm_identity_snapshot_registered ~container_name =
-    Option.is_some (microvm_identity_snapshot container_name)
-  ;;
-
-  let mark_microvm_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
-    let container_name =
-      microvm_container_name
-        ~config
-        ~keeper_name:meta.name
-        ~network_mode:meta.network_mode
-    in
-    mark_microvm_work_root_ready container_name
-  ;;
-end
-
 let keeper_vm_name (t : t) =
   microvm_container_name
     ~config:t.config
@@ -1135,18 +1117,51 @@ let ensure_microvm_work_volume_mounted ?timeout_sec (t : t) ~backend ~container_
     let probe =
       Keeper_sandbox_microvm.work_volume_mounted_probe_argv_for backend ~container_name
     in
-    (match run_argv_with_status ?timeout_sec probe with
-     | Unix.WEXITED 0, _ -> Ok ()
-     | (Unix.WEXITED _, out) | (Unix.WSIGNALED _, out) | (Unix.WSTOPPED _, out) ->
-       let detail = Keeper_sandbox_runtime.docker_failure_output_for_log out in
+    let status, stdout, stderr = run_argv_with_status_split ?timeout_sec probe in
+    (match Keeper_sandbox_microvm.work_volume_mount_probe_of_result ~status ~stdout ~stderr with
+     | Keeper_sandbox_microvm.Work_volume_mounted -> Ok ()
+     | Keeper_sandbox_microvm.Work_volume_not_mounted ->
        Error
          (Printf.sprintf
-            "microvm_work_volume_not_mounted: %s is not a mountpoint in guest %s (volume %s)%s; remove the guest to force a fresh boot with the volume attached"
+            "microvm_work_volume_not_mounted: guest %s reported that %s is not a mountpoint (volume %s); the guest cannot be used until its work volume is mounted"
+            container_name
+            Keeper_sandbox_microvm.work_volume_guest_root
+            volume_name)
+     | Keeper_sandbox_microvm.Work_volume_probe_unverified { status; stdout; stderr } ->
+       let detail =
+         output_for_status ~stdout ~stderr
+         |> Keeper_sandbox_runtime.docker_failure_output_for_log
+       in
+       Error
+         (Printf.sprintf
+            "microvm_work_volume_probe_unverified: could not verify %s in guest %s (volume %s; %s)%s; inspect the guest and its execution transport before recovery"
             Keeper_sandbox_microvm.work_volume_guest_root
             container_name
             volume_name
-            (if String.equal (String.trim detail) "" then "" else ": " ^ detail)))
+            (Keeper_sandbox_exec_failure.status_label status)
+            (if String.equal (String.trim detail) "" then ""
+             else "; unverified probe output: " ^ detail)))
 ;;
+
+module For_testing_microvm = struct
+  let microvm_container_name = microvm_container_name
+
+  let microvm_identity_snapshot_registered ~container_name =
+    Option.is_some (microvm_identity_snapshot container_name)
+  ;;
+
+  let mark_microvm_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
+    let container_name =
+      microvm_container_name
+        ~config
+        ~keeper_name:meta.name
+        ~network_mode:meta.network_mode
+    in
+    mark_microvm_work_root_ready container_name
+  ;;
+
+  let ensure_work_volume_mounted = ensure_microvm_work_volume_mounted
+end
 
 (** The keeper's root on the work volume, made inside the guest once it is
     up. The volume outlives the guest, so this is a no-op after the first
@@ -1564,8 +1579,8 @@ let start_process_bound_microvm_container ?timeout_sec (t : t) =
          hand turns to exactly that guest, so the mount invariant is checked
          here the same as on a fresh boot, and a guest that fails it is
          refused rather than adopted. The guest is left running for an
-         operator to inspect; the next start probes it again and fails the
-         same way until it is removed. *)
+         operator to inspect; a later start probes again. A failed probe may
+         recover without the guest being removed. *)
       (match
          ensure_microvm_work_volume_mounted ?timeout_sec t ~backend ~container_name
        with

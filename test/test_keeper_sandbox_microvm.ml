@@ -3126,19 +3126,20 @@ let test_keeper_work_root_is_created_as_root_with_a_mode () =
 (* Boot invariant (RFC-0052): the mkdir and the write probe above both pass
    against a writable rootfs directory, so they cannot catch a guest whose
    work volume is not mounted. Only /proc/mounts can. *)
-let mounted_probe_pattern () =
+let mounted_probe_script () =
   let argv =
     M.work_volume_mounted_probe_argv_for
       Backend.Apple_container
       ~container_name:"masc-keeper-vm-x"
   in
   match List.rev argv with
-  | "/proc/mounts" :: pattern :: "-qF" :: "grep" :: _ -> argv, pattern
-  | _ -> Alcotest.fail "probe is not grep -qF <pattern> /proc/mounts"
+  | "/proc/mounts" :: pattern :: "masc-mount-probe" :: script :: "-c" :: "sh" :: _ ->
+    argv, pattern, script
+  | _ -> Alcotest.fail "probe does not run the guest mount observation script"
 ;;
 
 let test_work_volume_mounted_probe_reads_proc_mounts () =
-  let argv, pattern = mounted_probe_pattern () in
+  let argv, pattern, _script = mounted_probe_script () in
   Alcotest.(check bool) "execs into the guest" true
     (adjacent ~flag:"exec" ~value:"--user" argv && contains "masc-keeper-vm-x" argv);
   Alcotest.(check bool) "runs as root" true (adjacent ~flag:"--user" ~value:"0:0" argv);
@@ -3155,39 +3156,132 @@ let test_work_volume_mounted_probe_reads_proc_mounts () =
     pattern
 ;;
 
-(* The probe's grep runs on the host against fixture /proc/mounts contents:
-   the exit codes the guest will answer with, without needing a guest. grep
-   -qF is POSIX-spelled the same by the guest's GNU grep and the host's. *)
+(* Run the guest's actual probe script against mount fixtures. A transport
+   failure or incomplete response must not be mistaken for its missing-volume
+   observation, even if it contains a partial missing marker. *)
 let test_work_volume_mounted_probe_grep_against_fixture_mounts () =
-  let _argv, pattern = mounted_probe_pattern () in
+  let _argv, pattern, script = mounted_probe_script () in
   let dir = temp_dir "microvm_mounts_fixture_" in
-  let check_fixture name contents expected_exit =
+  let stdout_file = Filename.concat dir "stdout" in
+  let stderr_file = Filename.concat dir "stderr" in
+  let read path = In_channel.with_open_bin path In_channel.input_all in
+  let run path =
+    let code =
+      Sys.command
+        (Printf.sprintf "sh -c %s masc-mount-probe %s %s > %s 2> %s"
+           (Filename.quote script) (Filename.quote pattern) (Filename.quote path)
+           (Filename.quote stdout_file) (Filename.quote stderr_file))
+    in
+    let stdout = read stdout_file and stderr = read stderr_file in
+    M.work_volume_mount_probe_of_result ~status:(Unix.WEXITED code) ~stdout ~stderr
+  in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree dir) @@ fun () ->
+  let check_fixture name contents expected =
     let file = Filename.concat dir name in
     let oc = open_out file in
     output_string oc contents;
     close_out oc;
-    let exit_code =
-      Sys.command
-        (Printf.sprintf "grep -qF %s %s" (Filename.quote pattern) (Filename.quote file))
-    in
-    Alcotest.(check int) name expected_exit exit_code
+    match run file with
+    | M.Work_volume_mounted -> Alcotest.(check bool) name expected true
+    | M.Work_volume_not_mounted -> Alcotest.(check bool) name expected false
+    | M.Work_volume_probe_unverified _ ->
+      Alcotest.failf "%s did not produce its guest observation" name
   in
   check_fixture
     "the volume mounted is accepted"
     "/dev/vda / ext4 rw,relatime 0 0\nmasc-keeper-work-x /masc-work ext4 rw,relatime 0 0\n"
-    0;
+    true;
   check_fixture
     "no mount is refused"
     "/dev/vda / ext4 rw,relatime 0 0\n"
-    1;
+    false;
   check_fixture
     "a path prefix is not the mountpoint"
     "/dev/vdb /masc-workfoo ext4 rw,relatime 0 0\n"
-    1;
+    false;
   check_fixture
     "a submount alone is not the volume"
     "/dev/vdb /masc-work/lane-smith ext4 rw,relatime 0 0\n"
-    1
+    false;
+  (match run (Filename.concat dir "missing-file") with
+   | M.Work_volume_probe_unverified _ -> ()
+   | M.Work_volume_mounted | M.Work_volume_not_mounted ->
+     Alcotest.fail "a failed /proc/mounts read claimed a mount state");
+  let check_unverified status stdout =
+    match M.work_volume_mount_probe_of_result ~status ~stdout ~stderr:"failure" with
+    | M.Work_volume_probe_unverified _ -> ()
+    | M.Work_volume_mounted | M.Work_volume_not_mounted ->
+      Alcotest.fail "an incomplete probe claimed a mount state"
+  in
+  check_unverified Process_eio.timed_out_status "not_mounted\n";
+  check_unverified (Unix.WEXITED 1) "";
+  check_unverified (Unix.WSIGNALED Sys.sigterm) "mounted\n";
+  check_unverified (Unix.WEXITED 0) "";
+  check_unverified (Unix.WEXITED 0) "not_mounted\nunexpected output\n"
+;;
+
+let test_work_volume_admission_keeps_failed_probes_unverified () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir "microvm-mount-admission-" in
+  let bin = Filename.concat base "bin" in
+  Unix.mkdir bin 0o700;
+  let mode = Filename.concat base "mode" in
+  let calls = Filename.concat base "calls" in
+  let cli = Filename.concat bin "container" in
+  let write path contents =
+    Out_channel.with_open_bin path (fun out -> output_string out contents)
+  in
+  write calls "";
+  write cli
+    (Printf.sprintf {|#!/bin/sh
+printf '%%s\n' "$*" >> %s
+case "$(/bin/cat %s)" in
+  mounted) printf 'mounted\n' ;;
+  missing) printf 'not_mounted\n' ;;
+  transport_failure) printf 'container unavailable\n' >&2; exit 1 ;;
+  timeout) printf 'not_mounted\n'; exec /bin/sleep 5 ;;
+  malformed) printf 'unknown\n' ;;
+  *) exit 2 ;;
+esac
+|} (Filename.quote calls) (Filename.quote mode));
+  Unix.chmod cli 0o700;
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (bin ^ ":" ^ previous_path);
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv "PATH" previous_path; remove_snapshot_fixture base)
+  @@ fun () ->
+  let module Turn = Masc.Keeper_turn_sandbox_runtime in
+  let config = Masc.Workspace.default_config base in
+  let meta = microvm_meta ~name:"lane-smith" in
+  let runtime = Turn.For_testing.create_minimal ~config ~meta ~state:Turn.Not_started in
+  let probe ~timeout_sec outcome =
+    write mode outcome;
+    Turn.For_testing_microvm.ensure_work_volume_mounted ~timeout_sec runtime
+      ~backend:Backend.Apple_container ~container_name:"guest-x"
+  in
+  let require_error ~label ~prefix = function
+    | Ok () -> Alcotest.failf "%s unexpectedly admitted the guest" label
+    | Error detail ->
+      Alcotest.(check bool) label true (String.starts_with ~prefix detail)
+  in
+  (match probe ~timeout_sec:5. "mounted" with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "mounted guest was refused: %s" detail);
+  require_error ~label:"explicit missing mount" ~prefix:"microvm_work_volume_not_mounted:"
+    (probe ~timeout_sec:5. "missing");
+  List.iter
+    (fun (outcome, timeout_sec) ->
+       require_error ~label:outcome ~prefix:"microvm_work_volume_probe_unverified:"
+         (probe ~timeout_sec outcome))
+    [ "transport_failure", 5.; "malformed", 5.; "timeout", 0.2 ];
+  let commands =
+    In_channel.with_open_bin calls In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> not (String.equal line ""))
+  in
+  Alcotest.(check int) "each admission uses exactly one probe" 5 (List.length commands);
+  Alcotest.(check bool) "admission never removes or recreates the guest" true
+    (List.for_all (String.starts_with ~prefix:"exec ") commands)
 ;;
 
 (* The running guest as a remote endpoint: the argv the remote runner spawns
@@ -4213,6 +4307,8 @@ let () =
             test_work_volume_mounted_probe_reads_proc_mounts
         ; Alcotest.test_case "work volume mounted probe grep against fixture mounts" `Quick
             test_work_volume_mounted_probe_grep_against_fixture_mounts
+        ; Alcotest.test_case "work volume admission keeps failed probes unverified" `Quick
+            test_work_volume_admission_keeps_failed_probes_unverified
         ; Alcotest.test_case "keeper work root write probe runs as the keeper" `Quick
             test_keeper_work_root_write_probe_runs_as_the_keeper
         ; Alcotest.test_case "running guest is a remote endpoint" `Quick

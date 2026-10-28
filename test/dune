@@ -6918,3 +6918,5 @@
 (include stanzas/test_endpoint_job_peer.inc)
 
 (include stanzas/test_authz_jsonl_file.inc)
+
+(include stanzas/test_authz_external_store.inc)

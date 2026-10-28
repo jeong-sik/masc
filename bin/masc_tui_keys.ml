@@ -100,7 +100,13 @@ let config_bindings =
        to and what it does are in the help, which the ? overlay draws in
        full. *)
   ; b ~ko:"새로 저장" Act "n" "new"
-      ~help:"on presets, name a preset holding the configuration as it stands",
+      ~help:"on presets, name a preset holding the current configuration; in the name field PgUp/PgDn and Home/End scroll details",
+      Some [ Config_presets ]
+  ; b ~ko:"미전송 명령 복사" Act "c" "copy unsent command"
+      ~help:"presets: copy the next retained unsent chat save command to the terminal clipboard",
+      Some [ Config_presets ]
+  ; b ~ko:"미전송 원문 보기" Act "v" "show unsent originals"
+      ~help:"presets: show hidden unsent chat save receipts and their original commands",
       Some [ Config_presets ]
   ; b ~ko:"입력" Act "i" "input"
       ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
@@ -124,6 +130,9 @@ let config_bindings =
       ~help:"on presets, delete the selected one; press twice to confirm. \
              A preset listed with ! under a valid name is deleted with \
              /preset delete <name>",
+      Some [ Config_presets ]
+  ; b ~ko:"저장 알림 숨기기" Act "x" "hide save notice"
+      ~help:"presets: hide the most recent save notice; unconfirmed saves remain guarded",
       Some [ Config_presets ]
   ; b ~ko:"초안 저장" Act "S" "save draft"
       ~help:"runtime.toml: retry the retained draft against its original or explicitly adopted revision",
@@ -1339,6 +1348,14 @@ let config_row ~lang ~own ~shared =
 
 let footer_hints_config ~lang ~pane =
   let own, shared = config_pane_bindings pane in
+  (* Save notices name x, c and v when applicable; retain them in help without
+     spending footer slots when there is nothing to hide or copy. *)
+  let own = match pane with
+    | Config_presets -> List.filter (fun binding ->
+        binding.key <> "x" && binding.key <> "c" && binding.key <> "v") own
+    | Config_runtime | Config_models | Config_params | Config_prompts
+    | Config_themes | Config_voice -> own
+  in
   match pane with
   | Config_params | Config_presets ->
     (* At 80 cells the page/selection hints otherwise outlive E, the only

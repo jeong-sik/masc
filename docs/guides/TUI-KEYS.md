@@ -262,13 +262,21 @@ data and paint. A missing finish record remains an unfinished observation.
 | `e / Enter` | on params: edit the selected value with a type-aware field |
 | `E` | on params only: edit the exact JSON value |
 | `Enter` | on themes, use that colour scheme |
-| `x` | params return to default; prompts clear override; themes follow terminal colours |
+| `x` | parameters: return the selected value to its default |
+| `x` | prompts: clear the selected override |
+| `x` | themes: follow terminal colours |
 | `f` | on themes, cycle All / Dark / Light schemes |
-| `n` | on presets, name a preset holding the configuration as it stands |
+| `n` | on presets, name a preset holding the current configuration; in the name field PgUp/PgDn and Home/End scroll details |
+| `c` | presets: copy the next retained unsent chat save command to the terminal clipboard |
+| `v` | presets: show hidden unsent chat save receipts and their original commands |
 | `i` | on prompts, the input this prompt was last given |
-| `a` | on prompts, show or hide the internal pieces the main prompts are built from, though not on the runtime assets reading; on voice, give the selected keeper its own voice; on runtime.toml, declare one more Claude Code, Codex or Antigravity account by copying a provider the file declares |
-| `u` | on presets, put the selected one back; press twice to confirm; on runtime.toml, keep the draft and adopt the displayed current file revision; S saves |
+| `a` | runtime.toml: declare an account by copying a provider |
+| `a` | prompts: show or hide internal fragments |
+| `a` | voice: assign a voice to a keeper |
+| `u` | presets: restore the selected preset; press twice to confirm |
+| `u` | runtime.toml: keep the draft and adopt the displayed current file revision; S saves |
 | `D` | on presets, delete the selected one; press twice to confirm. A preset listed with ! under a valid name is deleted with /preset delete <name> |
+| `x` | presets: hide the most recent save notice; unconfirmed saves remain guarded |
 | `S` | runtime.toml: retry the retained draft against its original or explicitly adopted revision |
 | `C` | runtime.toml: switch between the retained draft and the current file read with r |
 | `U` | runtime.toml: replace the retained draft with the displayed current file without writing |
@@ -276,6 +284,8 @@ data and paint. A missing finish record remains an unfinished observation.
 | `o` | on prompts, switch between the read-only runtime assets and the registry you can override |
 | `Esc` | back to Dashboard |
 | `r` | reload |
+| `Tab` | next |
+| `q` | quit |
 
 Runtime model and account form saves keep input and its opening revision while
 workspace checks, source reading, preview and guarded commit run outside the

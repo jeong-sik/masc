@@ -746,7 +746,145 @@ let theme_name_width ~cols =
    restores one behind a two-press arm — a restore rewrites all three, and
    the report below the list is the only place it says what it skipped and
    whether runtime.toml committed. *)
+let preset_save_receipt_lines ~ko (receipt : preset_save_receipt) =
+  let text korean english = if ko then korean else english in
+  let name = Terminal_text.single_line receipt.psr_request.psp_name in
+  let reason detail =
+    text "  원인 · " "  Reason · " ^ Terminal_text.single_line detail in
+  let outcome = match receipt.psr_result with
+  | Ok _ ->
+    [text "✓ 프리셋 저장 확인 · " "✓ Preset save confirmed · " ^ name]
+  | Error (Preset_save_not_sent detail) ->
+    [text "! 프리셋 저장 미전송 · " "! Preset save not sent · " ^ name;
+     reason detail]
+  | Error (Preset_save_refused detail) ->
+    [text "! 프리셋 저장 거절 · " "! Preset save refused · " ^ name;
+     reason detail]
+  | Error (Preset_save_auth_retry_not_sent detail) ->
+    [text "! 인증 거절 · 재시도 미전송 · " "! Authentication refused · retry not sent · " ^ name;
+     reason detail]
+  | Error (Preset_save_unconfirmed detail) ->
+    [text "! 프리셋 저장 결과 미확인 · " "! Preset save unconfirmed · " ^ name;
+     text "  다시 저장하기 전 내용을 확인하세요 · 같은 이름은 덮어씁니다"
+       "  Check contents before saving again · the same name is overwritten";
+     text "  목록에 이름이 있어도 이번 저장의 성공을 뜻하지 않습니다"
+       "  A listed name alone does not confirm this save";
+     text "  알림을 숨겨도 같은 이름의 재저장 경고는 유지됩니다"
+       "  Hiding this notice keeps the same-name retry warning";
+     reason detail] in
+  match receipt.psr_result, receipt.psr_request.psp_chat_input with
+  | Error (Preset_save_not_sent _ | Preset_save_auth_retry_not_sent _), Some input ->
+    outcome @ [text "  미전송 채팅 명령 원문" "  Unsent chat command"]
+    @ Masc_tui_text_block.lines input
+  | (Ok _ | Error (Preset_save_refused _ | Preset_save_unconfirmed _)), _
+  | Error (Preset_save_not_sent _ | Preset_save_auth_retry_not_sent _), None -> outcome
+
+let preset_confirmation_rows (state : state) ~cols =
+  let description = match state.preset_save_draft_source with
+    | Preset_form_local -> []
+    | Preset_form_chat _ when String.equal state.preset_save_draft_description "" ->
+      [ui_text state ~ko:"▸ 채팅 설명 · 없음" ~en:"▸ Chat description · empty"]
+    | Preset_form_chat _ ->
+      [ui_text state ~ko:"▸ 채팅 설명" ~en:"▸ Chat description";
+       state.preset_save_draft_description] in
+  let lines = match state.preset_armed with
+    | Some (Save_workspace_armed (name, workspace)) ->
+      [ui_text state ~ko:"▸ 저장 이름 · " ~en:"▸ Save name · " ^ Terminal_text.single_line name;
+       ui_text state ~ko:"▸ 저장할 작업 공간" ~en:"▸ Save workspace";
+       ui_text state ~ko:"  기준 경로 · " ~en:"  Base · " ^ Terminal_text.single_line workspace.wi_base_path;
+       ui_text state ~ko:"  MASC 경로 · " ~en:"  MASC root · " ^ Terminal_text.single_line workspace.wi_masc_root]
+      @ description
+      @ [ui_text state ~ko:"  전체 확인 후 Enter: 진행 · Esc: 취소"
+           ~en:"  After reviewing all rows, Enter: continue · Esc: cancel"]
+    | Some (Save_armed name) ->
+      [ui_text state ~ko:"! 이전 저장 결과 미확인 · " ~en:"! Earlier save unconfirmed · "
+         ^ Terminal_text.single_line name;
+       ui_text state ~ko:"  이전 저장은 성공했을 수 있습니다" ~en:"  The earlier save may have succeeded";
+       ui_text state ~ko:"  재저장하면 현재 설정으로 같은 이름을 덮어씁니다"
+         ~en:"  Saving again overwrites the same name with current settings";
+       ui_text state ~ko:"  목록에 이름이 있어도 이전 저장의 성공은 확인되지 않습니다"
+         ~en:"  A listed name alone does not confirm the earlier save"]
+      @ description
+      @ [ui_text state ~ko:"  전체 확인 후 Enter: 덮어쓰기 · Esc: 취소"
+           ~en:"  After reviewing all rows, Enter: overwrite · Esc: cancel"]
+    | Some (Restore_armed _ | Delete_armed _) | None -> [] in
+  List.concat_map (fun text ->
+    Masc_tui_text_block.lines text
+    |> List.concat_map (fun line ->
+      if String.equal line "" then [""]
+      else Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols - 2)) line)) lines
+
+let preset_confirmation_ready (state : state) =
+  let _, cols = get_terminal_size () in
+  match state.preset_armed, state.preset_confirmation_token, state.preset_confirmation_presented with
+  | Some arm, Some token, Some progress ->
+    let frame = progress.pcp_frame in
+    frame.pcf_token == token && frame.pcf_arm = arm
+    && frame.pcf_cols = cols && frame.pcf_language = state.ui_language
+    && String.equal frame.pcf_description state.preset_save_draft_description
+    && frame.pcf_source = state.preset_save_draft_source
+    && frame.pcf_authority = state.workspace_authority
+    && frame.pcf_reading == state.workspace_read_authority
+    && frame.pcf_workspace = workspace_input_identity_of_server state.server_identity
+    && frame.pcf_count = List.length (preset_confirmation_rows state ~cols)
+    && progress.pcp_seen_through >= frame.pcf_count
+  | (None, _, _) | (_, None, _) | (_, _, None) -> false
+
 let preset_detail_lines (state : state) ~cols ~selected =
+  let draft_workspace = match state.preset_armed with
+    | Some (Save_workspace_armed _ | Save_armed _) -> []
+    | Some (Restore_armed _ | Delete_armed _) | None ->
+      if Option.is_some state.preset_save_draft && state.preset_save_draft_workspace = None then
+        [ui_text state ~ko:"▸ 이름 초안 · 작업 공간 미지정"
+           ~en:"▸ Name draft · workspace not selected";
+         ui_text state ~ko:"  Enter로 저장할 작업 공간을 확인하세요"
+           ~en:"  Press Enter to check the save workspace"; ""]
+      else [] in
+  let pending_saves = List.map (fun pending ->
+    let label = match Atomic.get pending.psp_phase with
+      | Preset_save_preparing -> ui_text state ~ko:"저장 준비 중" ~en:"Preparing save"
+      | Preset_save_dispatching -> ui_text state ~ko:"저장 결과 대기" ~en:"Waiting for save result"
+      | Preset_save_auth_refused ->
+        ui_text state ~ko:"인증 거절 · 재확인 중" ~en:"Authentication refused · checking retry" in
+    "▸ " ^ label ^ " · " ^ Terminal_text.single_line pending.psp_name)
+      (workspace_preset_save_pending state) in
+  let recovery = match recoverable_preset_save_commands state with
+    | [] -> []
+    | commands ->
+      let index = state.preset_save_copy_cursor mod List.length commands in
+      let name, _ = List.nth commands index in
+      [Printf.sprintf
+         (if state.ui_language = Lang_ko then "▸ 미전송 채팅 명령 %d개 · %s%s 복사"
+          else "▸ Unsent chat commands: %d · %scopy %s")
+         (List.length commands)
+         (if state.ui_language = Lang_ko then
+            (if Option.is_some state.preset_save_draft then "Esc 후 c: " else "c: ")
+          else if Option.is_some state.preset_save_draft then "Esc then c: " else "c: ")
+         (Terminal_text.single_line name);
+       (if Option.is_some state.preset_save_draft then
+          ui_text state ~ko:"  Esc 후 v: 미전송 원문 다시 보기"
+            ~en:"  Esc then v: show unsent originals again"
+        else ui_text state ~ko:"  v: 미전송 원문 다시 보기"
+            ~en:"  v: show unsent originals again"); ""] in
+  let save_issues = match visible_preset_save_receipts state with
+    | [] -> []
+    | issues ->
+      [Printf.sprintf
+         (if state.ui_language = Lang_ko then "▸ 저장 알림 %d개 · %s"
+          else "▸ Save notices: %d · %s") (List.length issues)
+         (if Option.is_some state.preset_save_draft then
+            ui_text state ~ko:"Esc 후 x:최근 알림 숨기기" ~en:"Esc then x:hide latest"
+          else ui_text state ~ko:"x:최근 알림 숨기기" ~en:"x:hide latest")]
+      @ List.concat_map (fun receipt ->
+          let lines = preset_save_receipt_lines ~ko:(state.ui_language = Lang_ko) receipt in
+          match receipt.psr_request.psp_pane_observer, lines with
+          | Some (_, Preset_save_shared), first :: rest ->
+            first :: ui_text state ~ko:"  먼저 시작한 저장 결과 · 새 저장은 보내지 않았습니다"
+              ~en:"  Earlier save result · no new save was sent" :: rest
+          | (Some (_, Preset_save_original) | None), _ | _, [] -> lines) issues
+      @ [""]
+  in
+  let save_issues = if pending_saves = [] then save_issues else pending_saves @ [""] @ save_issues in
   let unreadable = match state.presets_snapshot with
     | None -> []
     | Some snapshot -> snapshot.Tui_decode.pss_unreadable
@@ -773,10 +911,14 @@ let preset_detail_lines (state : state) ~cols ~selected =
           [ui_text state ~ko:"새로고침 실패 · " ~en:"Refresh failed · " ^ reason])
       @ List.map (fun (name, reason) -> "! " ^ name ^ " — " ^ reason) rows
   in
-  warning @ detail @ failures
+  let remaining = draft_workspace @ recovery @ save_issues @ warning @ detail @ failures
   |> List.concat_map (fun line ->
        if String.equal line "" then [""]
        else Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols - 2)) line)
+  in
+  match preset_confirmation_rows state ~cols with
+  | [] -> remaining
+  | rows -> rows @ [""] @ remaining
 
 let preset_pane_heights (state : state) ~rows ~count ~presets_count =
   let error_rows = if Option.is_some state.presets_error then 1 else 0 in
@@ -873,7 +1015,7 @@ let render_presets (state : state) =
               Theme.warn () ^ "u" ^ Ansi.reset
           | Some (Delete_armed armed) when String.equal armed name ->
               Theme.bad () ^ "D" ^ Ansi.reset
-          | Some (Restore_armed _ | Delete_armed _) | None -> " "
+          | Some (Restore_armed _ | Delete_armed _ | Save_armed _ | Save_workspace_armed _) | None -> " "
         in
         let label =
           row_with_field ~cols ~lead:(" " ^ mark ^ " ")
@@ -890,6 +1032,17 @@ let render_presets (state : state) =
   done;
   box_divider buf cols;
   let scroll = Masc_tui_scroll.normalize ~count ~height:detail_height state.config_scroll in
+  let confirmation = match state.preset_armed, state.preset_confirmation_token with
+    | Some (Save_armed _ | Save_workspace_armed _ as arm), Some token ->
+      let count = List.length (preset_confirmation_rows state ~cols) in
+      Some { pcf_token = token; pcf_arm = arm; pcf_cols = cols
+           ; pcf_language = state.ui_language; pcf_authority = state.workspace_authority
+           ; pcf_description = state.preset_save_draft_description
+           ; pcf_source = state.preset_save_draft_source
+           ; pcf_reading = state.workspace_read_authority
+           ; pcf_workspace = workspace_input_identity_of_server state.server_identity; pcf_count = count
+           ; pcf_first = scroll; pcf_last = min count (scroll + detail_height) }
+    | Some (Restore_armed _ | Delete_armed _), _ | None, _ | _, None -> None in
   let detail_window = Rows.of_list ~first:scroll ~height:detail_height detail in
   for index = 0 to detail_height - 1 do
     match Rows.at detail_window (scroll + index) with
@@ -906,13 +1059,34 @@ let render_presets (state : state) =
        (row_with_field ~cols
           ~lead:(Theme.info () ^ ui_text state ~ko:"  이름: " ~en:"  Name: " ^ Ansi.reset)
           ~field:(Terminal_text.single_line draft)
-          ~tail:(Ansi.dim ^ ui_text state ~ko:"  Enter:저장  Esc:취소" ~en:"  Enter:save  Esc:cancel" ^ Ansi.reset))
+          ~tail:(Ansi.dim ^ (match state.preset_armed with
+            | Some (Save_armed _) ->
+              if preset_confirmation_ready state then
+                ui_text state ~ko:"  Enter:덮어쓰기  Esc:취소"
+                  ~en:"  Enter:overwrite  Esc:cancel"
+              else ui_text state ~ko:"  Home 후 PgDn:경고 확인  Esc:취소"
+                  ~en:"  Home then PgDn:read warning  Esc:cancel"
+            | Some (Save_workspace_armed _) ->
+              if preset_confirmation_ready state then
+                ui_text state ~ko:"  Enter:여기로 진행  Esc:취소"
+                  ~en:"  Enter:continue here  Esc:cancel"
+              else ui_text state ~ko:"  Home 후 PgDn:경로 확인  Esc:취소"
+                  ~en:"  Home then PgDn:read paths  Esc:cancel"
+            | Some (Restore_armed _ | Delete_armed _) | None ->
+              ui_text state ~ko:"  Enter:저장  Esc:취소" ~en:"  Enter:save  Esc:cancel") ^ Ansi.reset))
    | None -> ());
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints_config ~lang:state.ui_language ~pane:Config_presets));
-  finish_surface state ~clamped:(Preset_detail_scroll scroll)
+       ~hints:(match state.preset_save_draft with
+         | Some _ ->
+           ui_text state
+             ~ko:"Enter:진행  Esc:닫기  Home/End:처음/끝  PgUp/PgDn:상세"
+             ~en:"Enter:continue  Esc:close  Home/End:edges  PgUp/PgDn:details"
+         | None ->
+           Masc_tui_keys.footer_hints_config ~lang:state.ui_language
+             ~pane:Config_presets));
+  finish_surface state ~clamped:(Preset_detail_scroll (scroll, confirmation))
     ~surface_key:"presets" ~rows:terminal_rows ~cols buf
 
 let render_themes (state : state) =

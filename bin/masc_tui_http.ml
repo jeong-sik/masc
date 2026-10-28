@@ -3626,11 +3626,41 @@ let fetch_preset_detail ~(host : string) ~(port : int) ~(name : string)
 (** POST /api/v1/presets — body {name, description}: snapshot the live
     prompt overrides, keeper instructions and runtime routing under [name]. *)
 let post_preset_save ~(host : string) ~(port : int) ~(name : string)
-    ~(description : string) : post_outcome =
-  post_json_outcome ~host ~port ~path:"/api/v1/presets"
-    ~body:
-      (Yojson.Safe.to_string
-         (`Assoc [ ("name", `String name); ("description", `String description) ]))
+    ~(description : string) ~(expected_workspace : Masc_tui_types.workspace_input_identity)
+    ~before_dispatch ~after_auth_refused =
+  let body = Yojson.Safe.to_string
+      (`Assoc [ ("name", `String name); ("description", `String description) ]) in
+  let headers =
+    [ Masc.Request_workspace_precondition.expected_base_path_header, expected_workspace.wi_base_path
+    ; Masc.Request_workspace_precondition.expected_masc_root_header, expected_workspace.wi_masc_root
+    ] @ auth_headers () in
+  let path = "/api/v1/presets" in
+  let url = url_of ~host ~port ~path in
+  let first = ref true and withdrawn = ref None in
+  let response = timed ~verb:"POST" ~path @@ fun () ->
+    with_credential_refresh @@ fun () ->
+    let headers = if !first then headers else rebind_authorization headers in
+    first := false;
+    let headers = json_headers headers in
+    let clock = request_clock () in
+    (* Authentication may suspend, including on a retry after 401. Recheck
+       the original authority after it, immediately before every POST. *)
+    match before_dispatch () with
+    | Error failure ->
+      withdrawn := Some failure;
+      Error "Preset save withdrawn before dispatch"
+    | Ok () ->
+      (match Masc_http_client.post_sync ?clock
+          ~timeout_sec:(request_timeout_sec ()) ~url ~headers ~body () with
+       | Ok (401, _) as answer ->
+         after_auth_refused ();
+         answer
+       | Ok answer -> Ok answer
+       | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"POST" ~url ~detail:e))
+  in
+  match !withdrawn with
+  | Some failure -> Error failure
+  | None -> Ok (mutation_outcome response)
 
 (** POST /api/v1/presets/restore — body {name}: the server autosaves the live
     state, applies the preset surface by surface, and answers a report. *)

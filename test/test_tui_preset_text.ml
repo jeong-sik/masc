@@ -3,6 +3,7 @@
 open Alcotest
 module D = Masc.Tui_decode
 module Text = Masc_tui_preset_text
+module Types = Masc_tui_types
 
 let morning : D.preset_manifest =
   { D.pm_name = "morning"
@@ -145,6 +146,140 @@ let test_default_drift_is_visible_without_failing_restore () =
      `Assoc ["status", `String "matches"; "changes", `List [`Assoc
        ["key", `String "keeper"; "saved_sha256", `String before; "current_sha256", `String after]]]]
 
+let preset_identity base : D.server_identity =
+  { sid_version = "test"; sid_binary_commit = "test"; sid_binary_commit_age_s = None
+  ; sid_base_path = D.Canonical_path.of_path base
+  ; sid_masc_root = D.Canonical_path.of_path (base ^ "/.masc")
+  ; sid_executable_in_worktree = None; sid_state_ready = Some true
+  ; sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None
+  }
+
+let preset_state () =
+  Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+
+let preset_pending (state : Types.state) identity ?chat_input name : Types.preset_save_pending =
+  { psp_token = ref ()
+  ; psp_workspace = Types.workspace_input_identity_of_server (Some identity)
+  ; psp_name = name; psp_description = "description"; psp_chat_input = chat_input
+  ; psp_authority = state.workspace_authority; psp_reading = state.workspace_read_authority
+  ; psp_host = "localhost"; psp_port = state.port
+  ; psp_phase = Atomic.make Types.Preset_save_preparing
+  ; psp_pane_observer = None; psp_chat_observers = []
+  }
+
+let test_save_receipts_remain_with_their_workspace () =
+  let state = preset_state () in
+  let a = preset_identity "/fixture/preset-a" and b = preset_identity "/fixture/preset-b" in
+  let command_a = "/preset save Long " ^ String.make 9000 'a' in
+  let command_b = "/preset save Other other workspace" in
+  let unknown_a = preset_pending state a ~chat_input:"/preset save Foo earlier" "Foo" in
+  let unsent_a = preset_pending state a ~chat_input:command_a "Long" in
+  let unsent_b = preset_pending state b ~chat_input:command_b "Other" in
+  state.server_identity <- Some a;
+  state.preset_save_receipts <-
+    [ { Types.psr_request = unknown_a; psr_result = Error (Types.Preset_save_unconfirmed "timeout"); psr_visible = true }
+    ; { Types.psr_request = unsent_a; psr_result = Error (Types.Preset_save_not_sent "offline"); psr_visible = true }
+    ; { Types.psr_request = unsent_b; psr_result = Error (Types.Preset_save_auth_retry_not_sent "offline"); psr_visible = false }
+    ];
+  Types.dismiss_latest_preset_save_receipt state;
+  Types.dismiss_latest_preset_save_receipt state;
+  check int "A's notices can be hidden" 0 (List.length (Types.visible_preset_save_receipts state));
+  check bool "hiding does not remove the case-alias overwrite guard" true
+    (Types.preset_save_is_unconfirmed state " foo ");
+  check (list (pair string string)) "A's hidden, definitely unsent command remains recoverable"
+    ["Long", command_a] (Types.recoverable_preset_save_commands state);
+  state.server_identity <- Some b;
+  check bool "A's unknown save does not guard B" false
+    (Types.preset_save_is_unconfirmed state "foo");
+  check (list (pair string string)) "B sees only its own unsent command"
+    ["Other", command_b] (Types.recoverable_preset_save_commands state);
+  state.server_identity <- Some a;
+  Types.reveal_unsent_preset_save_receipts state;
+  check int "A can reopen its hidden unsent receipt" 1
+    (List.length (Types.visible_preset_save_receipts state));
+  Types.reveal_unconfirmed_preset_save state "FOO";
+  check int "A can reopen its unknown receipt by case alias" 2
+    (List.length (Types.visible_preset_save_receipts state));
+  state.server_identity <- Some b;
+  check int "reopening A's notices does not reveal B's" 0
+    (List.length (Types.visible_preset_save_receipts state));
+  Types.reveal_unsent_preset_save_receipts state;
+  check int "B can independently reopen its unsent receipt" 1
+    (List.length (Types.visible_preset_save_receipts state))
+
+let test_pending_saves_follow_workspace_and_name () =
+  let state = preset_state () in
+  let a = preset_identity "/fixture/preset-a" and b = preset_identity "/fixture/preset-b" in
+  state.preset_save_pending <- [preset_pending state a "Foo"; preset_pending state b "Bar"];
+  state.server_identity <- Some a;
+  check bool "A finds its pending case alias" true (Types.preset_save_is_pending state "foo");
+  check bool "A does not acquire B's pending save" false (Types.preset_save_is_pending state "bar");
+  state.server_identity <- Some b;
+  check bool "B does not acquire A's pending save" false (Types.preset_save_is_pending state "foo");
+  check bool "B finds its own pending case alias" true (Types.preset_save_is_pending state "BAR");
+  state.server_identity <- Some a;
+  check bool "A's pending save is still guarded on return" true
+    (Types.preset_save_is_pending state "FOO")
+
+let test_confirmation_requires_contiguous_current_frames () =
+  let state = preset_state () in
+  let a = preset_identity "/fixture/preset-a" and b = preset_identity "/fixture/preset-b" in
+  let token = ref () in
+  let arm = Types.Save_armed "Foo" in
+  state.view <- Types.Config;
+  state.config_pane <- Types.Config_presets;
+  state.server_identity <- Some a;
+  state.preset_save_draft <- Some "Foo";
+  state.preset_armed <- Some arm;
+  state.preset_confirmation_token <- Some token;
+  let frame : Types.preset_confirmation_frame =
+    { pcf_token = token; pcf_arm = arm; pcf_cols = 80; pcf_language = state.ui_language
+    ; pcf_description = ""; pcf_source = Types.Preset_form_local
+    ; pcf_authority = state.workspace_authority; pcf_reading = state.workspace_read_authority
+    ; pcf_workspace = Types.workspace_input_identity_of_server state.server_identity
+    ; pcf_count = 9; pcf_first = 0; pcf_last = 3 }
+  in
+  let seen () = match state.preset_confirmation_presented with
+    | Some progress -> progress.pcp_seen_through
+    | None -> fail "no confirmation frame was recorded" in
+  check bool "the first frame must be presented" true
+    (Types.preset_confirmation_needs_present state frame);
+  Types.record_preset_confirmation_frame state frame;
+  check int "first rows recorded" 3 (seen ());
+  check bool "the same range does not need another presentation" false
+    (Types.preset_confirmation_needs_present state frame);
+  let tail = { frame with pcf_first = 6; pcf_last = 9 } in
+  check bool "a changed range needs presentation" true
+    (Types.preset_confirmation_needs_present state tail);
+  Types.record_preset_confirmation_frame state tail;
+  check int "jumping to the end does not cover skipped rows" 3 (seen ());
+  Types.record_preset_confirmation_frame state { frame with pcf_first = 3; pcf_last = 6 };
+  check int "filling the gap does not retroactively cover the tail" 6 (seen ());
+  Types.record_preset_confirmation_frame state tail;
+  check int "the tail counts after the gap is covered" 9 (seen ());
+  state.workspace_read_authority <- ref ();
+  let renewed = { frame with pcf_reading = state.workspace_read_authority } in
+  check bool "a new reading owner needs a new presentation" true
+    (Types.preset_confirmation_needs_present state renewed);
+  Types.record_preset_confirmation_frame state renewed;
+  check int "a new reading owner cannot reuse the old coverage" 3 (seen ());
+  state.preset_confirmation_presented <- None;
+  Types.record_preset_confirmation_frame state frame;
+  check bool "a stale reading owner cannot record a frame" true
+    (Option.is_none state.preset_confirmation_presented);
+  Types.record_preset_confirmation_frame state renewed;
+  check int "a frame under the new reading owner starts again" 3 (seen ());
+  state.preset_confirmation_presented <- None;
+  state.workspace_authority <- Types.Workspace_authority 42;
+  Types.record_preset_confirmation_frame state renewed;
+  check bool "a stale workspace authority cannot record a frame" true
+    (Option.is_none state.preset_confirmation_presented);
+  state.workspace_authority <- frame.pcf_authority;
+  state.server_identity <- Some b;
+  Types.record_preset_confirmation_frame state renewed;
+  check bool "a frame cannot record under a different workspace" true
+    (Option.is_none state.preset_confirmation_presented)
+
 let () =
   run "Masc_tui_preset_text"
     [ ( "preset text"
@@ -156,5 +291,11 @@ let () =
             test_decode_saved_settings_and_effective_prompt_sources
         ; test_case "preserved request settings and skipped lanes retain typed evidence" `Quick
             test_decode_preserved_and_skipped_lanes
+        ; test_case "save receipts remain with their workspace" `Quick
+            test_save_receipts_remain_with_their_workspace
+        ; test_case "pending saves follow workspace and name" `Quick
+            test_pending_saves_follow_workspace_and_name
+        ; test_case "confirmation requires contiguous current frames" `Quick
+            test_confirmation_requires_contiguous_current_frames
         ] )
     ]

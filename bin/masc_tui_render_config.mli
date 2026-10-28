@@ -22,6 +22,13 @@ val prompts_detail_viewport : Masc_tui_types.state -> int * int
 val presets_viewport : Masc_tui_types.state -> int * int
 (** Wrapped detail row count and height below the Presets selection list. *)
 
+val preset_confirmation_ready : Masc_tui_types.state -> bool
+(** The current save confirmation was actually presented from start to end. *)
+
+val preset_save_receipt_lines :
+  ko:bool -> Masc_tui_types.preset_save_receipt -> string list
+(** A save receipt's localized outcome and, when needed, recovery guidance. *)
+
 val runtime_config_status_scroll_limit :
   Masc_tui_types.state -> terminal_rows:int -> cols:int -> int
 

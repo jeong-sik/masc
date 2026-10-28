@@ -8361,6 +8361,83 @@ type goal_action_pending =
 type preset_arm =
   | Restore_armed of string
   | Delete_armed of string
+  | Save_armed of string
+  | Save_workspace_armed of string * workspace_input_identity
+
+type preset_save_form_source =
+  | Preset_form_local
+  | Preset_form_chat of
+      { target : string option
+      ; input : string
+      ; revision : Masc_tui_message_input.revision
+      ; authority : workspace_authority
+      }
+
+type preset_save_draft_details =
+  { psd_name : string
+  ; psd_description : string
+  ; psd_source : preset_save_form_source
+  }
+
+type preset_confirmation_frame =
+  { pcf_token : unit ref
+  ; pcf_arm : preset_arm
+  ; pcf_cols : int
+  ; pcf_language : ui_language
+  ; pcf_description : string
+  ; pcf_source : preset_save_form_source
+  ; pcf_authority : workspace_authority
+  ; pcf_reading : unit ref
+  ; pcf_workspace : workspace_input_identity option
+  ; pcf_count : int
+  ; pcf_first : int
+  ; pcf_last : int
+  }
+
+type preset_confirmation_progress =
+  { pcp_frame : preset_confirmation_frame
+  ; pcp_seen_through : int
+  }
+
+(* A refusal proves the server declined the save; an unanswered or unreadable
+   response does not prove whether the named snapshot was written. *)
+type preset_save_failure =
+  | Preset_save_not_sent of string
+  | Preset_save_refused of string
+  | Preset_save_auth_retry_not_sent of string
+  | Preset_save_unconfirmed of string
+
+type preset_save_phase =
+  | Preset_save_preparing
+  | Preset_save_dispatching
+  | Preset_save_auth_refused
+
+(* A save is owned by the session and its original workspace, not by either
+   surface. Observers can join it without dispatching a second snapshot. *)
+type preset_save_observation = Preset_save_original | Preset_save_shared
+
+type preset_save_pending =
+  { psp_token : unit ref
+  ; psp_workspace : workspace_input_identity option
+  ; psp_name : string
+  ; psp_description : string
+  ; psp_chat_input : string option
+  ; psp_authority : workspace_authority
+  ; psp_reading : unit ref
+  ; psp_host : string
+  ; psp_port : int
+  ; psp_phase : preset_save_phase Atomic.t
+  ; psp_pane_observer : (workspace_authority * preset_save_observation) option
+  ; psp_chat_observers : (workspace_authority * string option * preset_save_observation) list
+  }
+
+(* A completed request keeps its original workspace and observers even when
+   its result arrives after the operator has moved to another workspace. *)
+type preset_save_receipt =
+  { psr_request : preset_save_pending
+  ; psr_result : (Tui_decode.preset_manifest, preset_save_failure) result
+  ; psr_visible : bool
+  }
 
 (* A refused schedule create or modify form, kept on the Schedules surface for
    the last-action window. [sfr_workspace] is the workspace the form was sent
@@ -8882,8 +8959,19 @@ type state = {
      waiting", which is the state this pane spends its first moments in. *)
   mutable preset_detail: (string, Tui_decode.preset_detail) Masc_tui_fetched.t;
   mutable preset_save_draft: string option;
+  mutable preset_save_draft_description: string;
+  mutable preset_save_draft_source: preset_save_form_source;
+  (* [None] means the draft was entered before any workspace was confirmed. *)
+  mutable preset_save_draft_workspace: workspace_input_identity option;
+  mutable preset_save_suspended_drafts: (workspace_input_identity * preset_save_draft_details) list;
   mutable preset_armed: preset_arm option;
+  mutable preset_confirmation_token: unit ref option;
+  mutable preset_confirmation_presented: preset_confirmation_progress option;
   mutable preset_report: Tui_decode.preset_restore_report option;
+  (* Hiding a notice never erases the uncertain save or its retry guard. *)
+  mutable preset_save_receipts: preset_save_receipt list;
+  mutable preset_save_pending: preset_save_pending list;
+  mutable preset_save_copy_cursor: int;
   mutable preset_busy: bool;
   (* Rows of coloured segments, the shape the Code surface keeps, so the two
      surfaces read the same file the same way. Plain text is derived where it
@@ -10091,6 +10179,112 @@ type state = {
   port: int;
   refresh_interval: float;
 }
+
+(* The server trims names and accepts ASCII only. Group case aliases
+   conservatively even when its filesystem happens to be case-sensitive. *)
+let same_preset_save_name left right =
+  String.equal (String.lowercase_ascii (String.trim left))
+    (String.lowercase_ascii (String.trim right))
+
+let same_preset_confirmation_frame left right =
+  left.pcf_token == right.pcf_token && left.pcf_arm = right.pcf_arm
+  && left.pcf_cols = right.pcf_cols && left.pcf_language = right.pcf_language
+  && String.equal left.pcf_description right.pcf_description && left.pcf_source = right.pcf_source
+  && left.pcf_authority = right.pcf_authority && left.pcf_reading == right.pcf_reading
+  && left.pcf_workspace = right.pcf_workspace && left.pcf_count = right.pcf_count
+
+let preset_confirmation_needs_present state frame =
+  match state.preset_confirmation_presented with
+  | None -> true
+  | Some progress ->
+    not (same_preset_confirmation_frame progress.pcp_frame frame)
+    || progress.pcp_frame.pcf_first <> frame.pcf_first
+    || progress.pcp_frame.pcf_last <> frame.pcf_last
+
+let record_preset_confirmation_frame (state : state) frame =
+  let owns_frame = state.view = Config && state.config_pane = Config_presets
+    && state.preset_armed = Some frame.pcf_arm
+    && Option.fold ~none:false ~some:(fun token -> token == frame.pcf_token)
+         state.preset_confirmation_token
+    && state.workspace_authority = frame.pcf_authority
+    && state.workspace_read_authority == frame.pcf_reading
+    && workspace_input_identity_of_server state.server_identity = frame.pcf_workspace in
+  if owns_frame then begin
+    let seen = match state.preset_confirmation_presented with
+      | Some progress when same_preset_confirmation_frame progress.pcp_frame frame ->
+        progress.pcp_seen_through
+      | Some _ | None -> 0 in
+    let seen = if frame.pcf_first <= seen then max seen frame.pcf_last else seen in
+    state.preset_confirmation_presented <- Some { pcp_frame = frame; pcp_seen_through = seen }
+  end
+
+let workspace_preset_save_receipts (state : state) =
+  let workspace = workspace_input_identity_of_server state.server_identity in
+  List.filter (fun receipt -> receipt.psr_request.psp_workspace = workspace)
+    state.preset_save_receipts
+
+let visible_preset_save_receipts (state : state) =
+  List.filter (fun receipt -> receipt.psr_visible) (workspace_preset_save_receipts state)
+
+let recoverable_preset_save_commands (state : state) =
+  List.filter_map (fun receipt ->
+    match receipt.psr_result, receipt.psr_request.psp_chat_input with
+    | Error (Preset_save_not_sent _ | Preset_save_auth_retry_not_sent _), Some input ->
+      Some (receipt.psr_request.psp_name, input)
+    | (Ok _ | Error (Preset_save_refused _ | Preset_save_unconfirmed _)), _
+    | Error (Preset_save_not_sent _ | Preset_save_auth_retry_not_sent _), None -> None)
+    (workspace_preset_save_receipts state)
+
+let reveal_unsent_preset_save_receipts (state : state) =
+  let workspace = workspace_input_identity_of_server state.server_identity in
+  state.preset_save_receipts <- List.map (fun receipt ->
+    if receipt.psr_request.psp_workspace = workspace
+       && Option.is_some receipt.psr_request.psp_chat_input
+       && (match receipt.psr_result with
+           | Error (Preset_save_not_sent _ | Preset_save_auth_retry_not_sent _) -> true
+           | Ok _ | Error (Preset_save_refused _ | Preset_save_unconfirmed _) -> false)
+    then { receipt with psr_visible = true } else receipt) state.preset_save_receipts
+
+let preset_save_is_unconfirmed (state : state) name =
+  List.exists (fun receipt ->
+    same_preset_save_name receipt.psr_request.psp_name name
+    && match receipt.psr_result with
+       | Error (Preset_save_unconfirmed _) -> true
+       | Ok _ | Error (Preset_save_not_sent _ | Preset_save_refused _
+                      | Preset_save_auth_retry_not_sent _) -> false)
+    (workspace_preset_save_receipts state)
+
+let workspace_preset_save_pending (state : state) =
+  match workspace_input_identity_of_server state.server_identity with
+  | None -> []
+  | Some workspace ->
+    List.filter (fun pending -> pending.psp_workspace = Some workspace)
+      state.preset_save_pending
+
+let preset_save_is_pending (state : state) name =
+  List.exists (fun pending -> same_preset_save_name pending.psp_name name)
+    (workspace_preset_save_pending state)
+
+let reveal_unconfirmed_preset_save (state : state) name =
+  let workspace = workspace_input_identity_of_server state.server_identity in
+  state.preset_save_receipts <- List.map (fun receipt ->
+    if receipt.psr_request.psp_workspace = workspace
+       && same_preset_save_name receipt.psr_request.psp_name name
+       && (match receipt.psr_result with
+           | Error (Preset_save_unconfirmed _) -> true
+           | Ok _ | Error (Preset_save_not_sent _ | Preset_save_refused _
+                          | Preset_save_auth_retry_not_sent _) -> false)
+    then { receipt with psr_visible = true } else receipt) state.preset_save_receipts
+
+let dismiss_latest_preset_save_receipt (state : state) =
+  let workspace = workspace_input_identity_of_server state.server_identity in
+  let rec hide = function
+    | [] -> []
+    | receipt :: rest when receipt.psr_request.psp_workspace = workspace && receipt.psr_visible ->
+      { receipt with psr_visible = false } :: rest
+    | receipt :: rest -> receipt :: hide rest
+  in
+  state.preset_save_receipts <- hide state.preset_save_receipts
 
 (* A local draft survives peer reconfirmation but never a workspace/draft
    replacement. Peer images retain the exact reading that acquired them.
@@ -16118,8 +16312,17 @@ let create_state
   presets_cursor = 0;
   preset_detail = Masc_tui_fetched.initial;
   preset_save_draft = None;
+  preset_save_draft_description = "";
+  preset_save_draft_source = Preset_form_local;
+  preset_save_draft_workspace = None;
+  preset_save_suspended_drafts = [];
   preset_armed = None;
+  preset_confirmation_token = None;
+  preset_confirmation_presented = None;
   preset_report = None;
+  preset_save_receipts = [];
+  preset_save_pending = [];
+  preset_save_copy_cursor = 0;
   preset_busy = false;
   prompts_show_fragments = false;
   prompts_show_runtime_assets = false;
@@ -17644,7 +17847,7 @@ type clamped_scroll =
      it -- later endpoints, the probe's last rows, the footer -- could not be
      reached. *)
   | Voice_scroll of int
-  | Preset_detail_scroll of int
+  | Preset_detail_scroll of int * preset_confirmation_frame option
   (* The Keepers list window, which the frame keeps still while the cursor
      is on it. Worked out from the cursor alone, the cursor sat on the bottom
      row once the list scrolled, and choosing a row above it moved the whole
@@ -17721,7 +17924,7 @@ let apply_clamped_scroll (state : state) = function
   | Link_modal_scroll value -> state.link_modal_scroll <- value
   | Play_invite_scroll value -> state.play_invite_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value
-  | Preset_detail_scroll value -> state.config_scroll <- value
+  | Preset_detail_scroll (value, _) -> state.config_scroll <- value
   | Keeper_list_scroll value -> state.keeper_list_scroll <- value
   | Context_inspector_scroll value -> state.context_inspector_scroll <- value
   | Context_inspector_response_scroll value -> state.context_inspector_response_scroll <- value

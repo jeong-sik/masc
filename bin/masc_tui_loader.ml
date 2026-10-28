@@ -1592,18 +1592,18 @@ let load_preset_detail ~(host : string) ~(port : int) ~(name : string)
 
 (** POST /api/v1/presets — the manifest the server wrote. *)
 let save_preset ~(host : string) ~(port : int) ~(name : string) ~(description : string)
-    : (Tui_decode.preset_manifest, string) result =
-  let unconfirmed detail =
-    Error ("preset save result unconfirmed — the preset may have been saved; \
-            check the preset list before retrying: " ^ detail)
-  in
-  match Masc_tui_http.post_preset_save ~host ~port ~name ~description with
-  | Post_refused detail -> Error ("preset save refused: " ^ detail)
-  | Post_unanswered detail -> unconfirmed detail
-  | Post_answered json ->
+    ~expected_workspace ~before_dispatch ~after_auth_refused
+    : (Tui_decode.preset_manifest, preset_save_failure) result =
+  match Masc_tui_http.post_preset_save ~host ~port ~name ~description ~expected_workspace
+          ~before_dispatch ~after_auth_refused with
+  | Error failure -> Error failure
+  | Ok (Post_refused detail) -> Error (Preset_save_refused detail)
+  | Ok (Post_unanswered detail) -> Error (Preset_save_unconfirmed detail)
+  | Ok (Post_answered json) ->
     (match Tui_decode.decode_preset_saved json with
-     | Ok manifest -> Ok manifest
-     | Error detail -> unconfirmed detail)
+     | Ok manifest when String.equal manifest.Tui_decode.pm_name (String.trim name) -> Ok manifest
+     | Ok _ -> Error (Preset_save_unconfirmed "Preset save receipt names a different preset")
+     | Error detail -> Error (Preset_save_unconfirmed detail))
 
 (** POST /api/v1/presets/restore — the per-surface report. A transport
     failure leaves the outcome unknown: the server writes an autosave and

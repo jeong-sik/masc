@@ -33,6 +33,12 @@ type t =
   | Individual of string
   | Shared of string
 
+type reference =
+  { shared_index : int
+  ; call_id : string
+  ; host_invocation_index : int option
+  }
+
 let shared_description =
   "The JSON is losslessly shared: each receipts row is \
    [shared_index, call_id] or [shared_index, call_id, host_invocation_index]. \
@@ -42,7 +48,7 @@ let shared_description =
 type grouped =
   { indices : int Json_map.t
   ; shared_rev : Yojson.Safe.t list
-  ; receipts_rev : Yojson.Safe.t list
+  ; receipts_rev : reference list
   ; next_index : int
   ; has_shared : bool
   }
@@ -52,34 +58,49 @@ let unique_field name fields =
   | [(_, value)] -> Some value
   | [] | _ :: _ -> None
 
+let add_valid_receipt grouped fields call_id host_invocation_index =
+  let shared = `Assoc (List.filter (fun (key, _) ->
+    not (String.equal key "call_id" || String.equal key "host_invocation_index")) fields) in
+  let index, indices, shared_rev, next_index, has_shared =
+    match Json_map.find_opt shared grouped.indices with
+    | Some index -> index, grouped.indices, grouped.shared_rev, grouped.next_index, true
+    | None ->
+      grouped.next_index, Json_map.add shared grouped.next_index grouped.indices,
+      shared :: grouped.shared_rev, grouped.next_index + 1, grouped.has_shared in
+  let receipt = {shared_index=index; call_id; host_invocation_index} in
+  Some {indices; shared_rev; receipts_rev=receipt :: grouped.receipts_rev; next_index; has_shared}
+
 let add_receipt grouped = function
   | `Assoc fields ->
     let call_id = unique_field "call_id" fields in
     let physical_index = unique_field "host_invocation_index" fields in
     let index_fields = List.filter (fun (key, _) -> String.equal key "host_invocation_index") fields in
     (match call_id, physical_index, index_fields with
-     | Some (`String id), (None | Some (`Int _)), ([] | [_]) ->
-       let shared = `Assoc (List.filter (fun (key, _) ->
-         not (String.equal key "call_id" || String.equal key "host_invocation_index")) fields) in
-       let index, indices, shared_rev, next_index, has_shared =
-         match Json_map.find_opt shared grouped.indices with
-         | Some index -> index, grouped.indices, grouped.shared_rev, grouped.next_index, true
-         | None ->
-           grouped.next_index, Json_map.add shared grouped.next_index grouped.indices,
-           shared :: grouped.shared_rev, grouped.next_index + 1, grouped.has_shared in
-       let identity = [`Int index; `String id] @ Option.to_list physical_index in
-       Some {indices; shared_rev; receipts_rev = `List identity :: grouped.receipts_rev; next_index; has_shared}
+     | Some (`String id), None, [] -> add_valid_receipt grouped fields id None
+     | Some (`String id), Some (`Int index), [_] -> add_valid_receipt grouped fields id (Some index)
      | _ -> None)
   | _ -> None
 
 let saturating_add left right =
   if right > max_int - left then max_int else left + right
 
-let list_size rows =
-  let bytes, _ = List.fold_left (fun (bytes, first) row ->
-    let bytes = if first then bytes else saturating_add bytes 1 in
-    saturating_add bytes (String.length (Yojson.Safe.to_string row)), false) (2, true) rows in
-  bytes
+let saturating_multiply left right =
+  if left = 0 || right = 0 then 0
+  else if left > max_int / right then max_int else left * right
+
+let json_size buffer json =
+  Buffer.clear buffer;
+  Yojson.Safe.to_buffer buffer json;
+  Buffer.length buffer
+
+let reference_json receipt =
+  `List ([`Int receipt.shared_index; `String receipt.call_id]
+    @ Option.to_list (Option.map (fun index -> `Int index) receipt.host_invocation_index))
+
+let identity_json receipt =
+  `Assoc (["call_id", `String receipt.call_id]
+    @ Option.to_list (Option.map (fun index -> "host_invocation_index", `Int index)
+        receipt.host_invocation_index))
 
 let encode rows =
   let individual () = Individual (Yojson.Safe.to_string (`List rows)) in
@@ -91,9 +112,32 @@ let encode rows =
   | Some grouped when not grouped.has_shared -> individual ()
   | Some grouped ->
     let shared = List.rev grouped.shared_rev and receipts = List.rev grouped.receipts_rev in
+    let counts = Array.make grouped.next_index 0 in
+    List.iter (fun receipt -> counts.(receipt.shared_index) <- counts.(receipt.shared_index) + 1) receipts;
+    let scratch = Buffer.create 0 in
+    (* One copy of each common object occurs in both representations, and the
+       receipt-array separators cancel. Only repeated copies contribute to
+       the size difference, so unique large results need not be serialized to
+       decide whether the shared representation is smaller. *)
+    let shared_info = Array.of_list (List.mapi (fun index json ->
+      let has_fields = match json with `Assoc [] -> false | _ -> true in
+      let duplicates = counts.(index) - 1 in
+      let saved = if duplicates = 0 then 0 else
+        saturating_multiply duplicates (json_size scratch json) in
+      has_fields, saved) shared) in
     let empty = `Assoc ["shared", `List []; "receipts", `List []] in
-    let container_size = String.length (Yojson.Safe.to_string empty) - 4 in
-    let packed_size = saturating_add container_size (saturating_add (list_size shared) (list_size receipts)) in
-    if saturating_add (String.length shared_description) packed_size < list_size rows then
-      Shared (Yojson.Safe.to_string (`Assoc ["shared", `List shared; "receipts", `List receipts]))
+    let packed_base = saturating_add (String.length (Yojson.Safe.to_string empty))
+      (saturating_add (Array.length shared_info - 1) (String.length shared_description)) in
+    let individually, packed = List.fold_left (fun (individual, packed) receipt ->
+      let has_fields, _ = shared_info.(receipt.shared_index) in
+      let identity_size = json_size scratch (identity_json receipt) in
+      let identity_bytes = saturating_add (identity_size - 2) (if has_fields then 1 else 0) in
+      saturating_add individual identity_bytes,
+      saturating_add packed (json_size scratch (reference_json receipt))) (2, packed_base) receipts in
+    let individually = Array.fold_left (fun size (_, saved) -> saturating_add size saved)
+      individually shared_info in
+    Buffer.reset scratch;
+    if packed < individually then
+      Shared (Yojson.Safe.to_string (`Assoc
+        ["shared", `List shared; "receipts", `List (List.map reference_json receipts)]))
     else individual ()

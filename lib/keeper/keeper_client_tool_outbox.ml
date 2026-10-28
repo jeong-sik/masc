@@ -243,7 +243,7 @@ let developer_context snapshot =
     (match encoded with
      | Keeper_client_tool_outbox_encoding.Individual json -> [prefix ^ json]
      | Shared json ->
-       [prefix ^ Keeper_client_tool_outbox_encoding.shared_description ^ json])
+       [String.concat "" [prefix; Keeper_client_tool_outbox_encoding.shared_description; json]])
 
 let context_message snapshot =
   match developer_context snapshot with

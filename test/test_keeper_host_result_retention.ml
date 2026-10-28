@@ -322,6 +322,15 @@ let test_unique_results_remain_individual () =
       (Yojson.Safe.equal (`List rows) (Yojson.Safe.from_string json))
   | Shared _ -> fail "unrepeated results should remain individual"
 
+let test_sparse_repetition_falls_back_without_losing_unique_result () =
+  let row call_id response = `Assoc ["call_id", `String call_id; "response", `String response] in
+  let rows = [row "first" "x"; row "second" "x"; row "third" (String.make 100_000 'y')] in
+  match Keeper_client_tool_outbox_encoding.encode rows with
+  | Individual json ->
+    check string "large unique data survives when sharing is not worthwhile"
+      (Yojson.Safe.to_string (`List rows)) json
+  | Shared _ -> fail "small repeated group does not offset the shared description"
+
 let test_shared_nested_signed_zero () =
   let payload = `String (String.make 4096 'x') in
   let rows = List.init 4 (fun index ->
@@ -344,6 +353,59 @@ let test_shared_nested_signed_zero () =
       | _ -> fail "missing nested number" in
     let expected = Int64.bits_of_float (if index mod 2 = 0 then 0.0 else -0.0) in
     check bool "each receipt retains the bit pattern of its nested zero" true (expected = actual)) refs
+
+let test_representation_choice_uses_exact_serialized_size () =
+  List.iter (fun count -> List.iter (fun payload_length -> List.iter (fun host ->
+    let common = if payload_length = 0 then [] else
+      ["payload", `String (String.make payload_length 'x');
+       "nested", `Assoc ["same", `Int 1; "same", `String "\"한글\n"]] in
+    let call_id index = Printf.sprintf "call-\"한글\n-%d" index in
+    let identity index = ["call_id", `String (call_id index)] @
+      if host then ["host_invocation_index", `Int index] else [] in
+    let rows = List.init count (fun index ->
+      let fields = if index mod 2 = 0 then identity index @ common else common @ identity index in
+      `Assoc fields) in
+    let references = List.init count (fun index ->
+      `List ([`Int 0; `String (call_id index)] @ if host then [`Int index] else [])) in
+    let individual = Yojson.Safe.to_string (`List rows) in
+    let shared = Yojson.Safe.to_string (`Assoc ["shared", `List [`Assoc common];
+      "receipts", `List references]) in
+    let sharing_is_smaller = String.length Keeper_client_tool_outbox_encoding.shared_description
+      + String.length shared < String.length individual in
+    (match Keeper_client_tool_outbox_encoding.encode rows with
+     | Shared actual ->
+       check bool "shared representation is selected only when smaller" true sharing_is_smaller;
+       check string "shared representation contains every reference" shared actual
+     | Individual actual ->
+       check bool "individual is selected when sharing is not smaller" false sharing_is_smaller;
+       check string "individual representation retains original field order" individual actual))
+    [false;true]) [0;40;200;2048]) [2;5;24;72]
+
+let test_mixed_groups_use_exact_serialized_size () =
+  List.iter (fun payload_length ->
+    let groups = [| []; ["response", `String (String.make payload_length 'x')];
+      ["response", `String (String.make 10_000 'y')] |] in
+    let specs = [0, "a\"", None; 1, "b", Some 0; 0, "c\n", Some 1;
+      2, "unique", None; 1, "한글", None] in
+    let rows = List.map (fun (group, call_id, physical) ->
+      let identity = ["call_id", `String call_id] @
+        Option.to_list (Option.map (fun index -> "host_invocation_index", `Int index) physical) in
+      `Assoc (identity @ groups.(group))) specs in
+    let references = List.map (fun (group, call_id, physical) ->
+      `List ([`Int group; `String call_id] @ Option.to_list (Option.map (fun index -> `Int index) physical))) specs in
+    let individual = Yojson.Safe.to_string (`List rows) in
+    let shared = Yojson.Safe.to_string (`Assoc
+      ["shared", `List (Array.to_list (Array.map (fun fields -> `Assoc fields) groups));
+       "receipts", `List references]) in
+    let sharing_is_smaller = String.length Keeper_client_tool_outbox_encoding.shared_description
+      + String.length shared < String.length individual in
+    match Keeper_client_tool_outbox_encoding.encode rows with
+    | Shared actual ->
+      check bool "mixed groups select shared only when smaller" true sharing_is_smaller;
+      check string "mixed groups retain each reference" shared actual
+    | Individual actual ->
+      check bool "mixed groups fall back only when sharing is not smaller" false sharing_is_smaller;
+      check string "mixed groups retain original fields" individual actual) [1; 6000]
 
 let test_mcp_reused_string_id_keeps_physical_invocations () = with_workspace (fun base_path ->
   let module Mcp = Runtime_official_client_mcp in
@@ -461,4 +523,7 @@ let () = run "Original official-client host result retention"
     test_case "ambiguous receipt shape remains individual" `Quick test_ambiguous_receipt_shape_is_not_shared;
     test_case "small shared JSON does not expand context" `Quick test_small_shared_json_does_not_expand_context;
     test_case "unique results remain individual" `Quick test_unique_results_remain_individual;
-    test_case "nested signed zero stays distinct" `Quick test_shared_nested_signed_zero]]
+    test_case "sparse repetition preserves the large unique result" `Quick test_sparse_repetition_falls_back_without_losing_unique_result;
+    test_case "nested signed zero stays distinct" `Quick test_shared_nested_signed_zero;
+    test_case "representation choice matches serialized size" `Quick test_representation_choice_uses_exact_serialized_size;
+    test_case "mixed groups match serialized size" `Quick test_mixed_groups_use_exact_serialized_size]]

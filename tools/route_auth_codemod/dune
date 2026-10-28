@@ -1,0 +1,24 @@
+; The tool picks a few shapes out of the compiler's Parsetree, which has about
+; fifty expression constructors, so its matches end in a catch-all. The root dune
+; keeps warning 4 on for variants we define and names this case as the exception:
+; a foreign type with far too many cases.
+(env
+ (_
+  (flags
+   (:standard -w -4))))
+
+(library
+ (name route_auth_rewrite)
+ (wrapped false)
+ (modules route_auth_rewrite)
+ (libraries compiler-libs.common))
+
+(executable
+ (name main)
+ (modules main)
+ (libraries route_auth_rewrite))
+
+(test
+ (name test_route_auth_rewrite)
+ (modules test_route_auth_rewrite)
+ (libraries alcotest compiler-libs.common route_auth_rewrite))

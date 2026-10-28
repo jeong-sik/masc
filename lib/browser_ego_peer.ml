@@ -562,13 +562,12 @@ let capture t args =
           | Some options -> ["captureOptions",Browser_lane.Capture.to_json options])))
   | _ -> Error "the capture state lacks the page URL, title or viewport"
 
-(* Effects. Only a page the space manages and an agent opened takes one: ego
-   marks a tab the operator opened, or one adopted from them, otherwise. The
-   page's own row is checked in the same run that acts, before acting. *)
-let not_agent_refused = "was not opened by an agent in the ego task space; this connection moves and closes only the pages its space opened"
+(* Effects use native managed Pages in the agent-controlled Space, including
+   Pages explicitly adopted from an unknown origin. The SDK retains Page
+   lifecycle/Space authority. No effect implicitly adopts an unmanaged tab. *)
 
 (* ego hands a page's download only to a wait armed before the download
-   starts (Page.waitForEvent), so every step that acts on an agent page arms
+   starts (Page.waitForEvent), so every step that acts on a managed Page arms
    one wait there, once in each ego process, and the wait arms itself again.
    A download is saved as <downloads>/<id>, the folder the step's arguments
    carry, and ego's own copy is deleted. The rows live in that ego process:
@@ -601,18 +600,23 @@ let download_watch = String.concat "\n" [
   "      registry.watched.delete(label);";
   "    })().catch(() => { registry.watched.delete(label); });";
   "  };" ]
-let watch_agent_page = "    watchDownloads(task.page(args.label), args.label);"
+let watch_managed_page = "    watchDownloads(task.page(args.label), args.label);"
 
-let find_agent_tab = "  const tab = (await task.tabs()).find(item => item.label === args.label);"
-let agent_refusals = [
-  "  if (tab === undefined) emit({ok: false, before: true, error: \"browser tab is no longer present\"});";
-  "  else if (tab.openedBy !== \"agent\") emit({ok: false, before: true, error: \"tab \" + args.tabId + \" \" + " ^ Yojson.Safe.to_string (str not_agent_refused) ^ "});" ]
-let agent_page = String.concat "\n" (download_watch :: find_agent_tab :: agent_refusals @ ["  else {"; watch_agent_page])
-let unblocked_agent_page = String.concat "\n" (download_watch :: find_agent_tab
-  :: ("  const blocking = tab === undefined || tab.openedBy !== \"agent\" ? null : " ^ open_dialog "task.page(args.label)" ^ ";")
-  :: agent_refusals @ [
+let find_managed_tab = "  const tab = (await task.tabs()).find(item => item.label === args.label);"
+let managed_refusals = [
+  "  if (tab === undefined) emit({ok: false, before: true, error: \"browser tab is no longer present\"});" ]
+let managed_page = String.concat "\n" (download_watch :: find_managed_tab :: managed_refusals @ ["  else {"; watch_managed_page])
+(* The installed SDK guide treats unknown-origin Pages as user-owned when
+   deciding whether to close. Explicit adoption grants Page operations but
+   does not change that disposition; release returns the tab without closing. *)
+let closable_page = String.concat "\n" (download_watch :: find_managed_tab :: managed_refusals @ [
+  "  else if (tab.openedBy !== \"agent\") emit({ok: false, before: true, error: \"only an agent-created Page may be closed; release an unknown-origin Page instead\"});";
+  "  else {"; watch_managed_page])
+let unblocked_managed_page = String.concat "\n" (download_watch :: find_managed_tab
+  :: ("  const blocking = tab === undefined ? null : " ^ open_dialog "task.page(args.label)" ^ ";")
+  :: managed_refusals @ [
   "  else if (blocking !== null) emit({ok: false, before: true, error: \"tab \" + args.tabId + \" \" + " ^ Yojson.Safe.to_string (str dialog_blocked) ^ "});";
-  "  else {"; watch_agent_page ])
+  "  else {"; watch_managed_page ])
 let message = "error => String(error && error.message || error)"
 (* After a step that may have moved the page, its row in the space says where it is. *)
 let row_after = "(await task.tabs()).find(item => item.label === args.label)"
@@ -716,7 +720,7 @@ let open_tab t url =
       "  if (page === undefined) emit({ok: false, before: true, error: refused});";
       "  else {";
       "    args.label = page.label;";
-      watch_agent_page;
+      watch_managed_page;
       "    let failure = null;";
       "    try { await page.goto(args.url); } catch (error) { failure = reason(error); }";
       "    const tab = " ^ row_after ^ ";";
@@ -766,11 +770,11 @@ let goto t args =
   let* () = http_url url in
   let* id = match field "tabId" args with
     | Some (`Int id) -> Ok id
-    | Some _ | None -> Error (Live.Before_effect "page.goto on an ego connection needs the tabId of a page its space opened") in
+    | Some _ | None -> Error (Live.Before_effect "page.goto on an ego connection needs the tabId of a managed Page") in
   let* label = label_of t id in
   settled ~id ~action:"goto" (run_native_step t ~step:"page.goto" ~args:(obj ["label",str label;"url",str url;"tabId",`Int id]) (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
-      unblocked_agent_page;
+      unblocked_managed_page;
       "    let failure = null;";
       "    try { await task.page(args.label).goto(args.url); } catch (error) { failure = reason(error); }";
       moved_page_answer;
@@ -783,7 +787,7 @@ let reload t id =
   let* label = label_of t id in
   settled ~id ~action:"reload" (run_native_step t ~step:"page.reload" ~args:(obj ["label",str label;"tabId",`Int id]) (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
-      unblocked_agent_page;
+      unblocked_managed_page;
       "    let failure = null;";
       "    try { await task.page(args.label).reload(); } catch (error) { failure = reason(error); }";
       moved_page_answer;
@@ -806,7 +810,7 @@ let traverse t id ~action ~delta ~side interaction =
     ~step:"page.history" ~args:(obj ["label",str label;"tabId",`Int id;"delta",`Int delta;"side",str side;"pollMs",`Int history_poll_ms])
     (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
-      unblocked_agent_page;
+      unblocked_managed_page;
       "    const page = task.page(args.label);";
       "    let history = null;";
       "    let unread = null;";
@@ -831,7 +835,7 @@ let close_tab t id =
   let* label = label_of t id in
   match run_step t ~window_s:(tab_window id Browser_lane.Action.Close_tab)
           ~step:"page.close" ~args:(obj ["label",str label;"tabId",`Int id]) (String.concat "\n" [
-      agent_page;
+      closable_page;
       "    await task.page(args.label).close();";
       "    emit({ok: true, value: {closed: true}});";
       "  }" ]) with
@@ -841,8 +845,8 @@ let close_tab t id =
     t.pages <- List.filter (fun (_, known) -> known <> id) t.pages;
     Ok (obj ["tabId",`Int id;"action",str "close_tab";"closed",`Bool true])
 
-(* A dialog is answered on a page an agent opened, as the BiDi connection
-   answers one only on a tab it opened. The dialog is read before it is
+(* A dialog is answered on a native managed Page in this Ego Space.
+   The dialog is read before it is
    answered, since the answer closes it, and the receipt says which one was
    answered; ego answers false when none is open, and nothing happened. A
    dialog ego reported in a shape this connection cannot read is left out
@@ -856,7 +860,7 @@ let answer_dialog t id ~accept text =
   match run_step t ~window_s:(tab_window id interaction) ~step:"page.dialog"
           ~args:(obj ["label",str label;"tabId",`Int id;"accept",`Bool accept;
             "text",(match text with Some text -> str text | None -> `Null)]) (String.concat "\n" [
-      agent_page;
+      managed_page;
       "    const page = task.page(args.label);";
       "    const open = " ^ open_dialog "page" ^ ";";
       "    if (open === null) emit({ok: false, before: true, error: " ^ Yojson.Safe.to_string (str no_dialog_refused) ^ "});";
@@ -907,7 +911,7 @@ let upload t id ~selector ~paths =
   Browser_lane.Upload_lease.claim ~owner:t.uploads ~paths;
   match run_native_step t ~step:"page.upload"
           ~args:(obj ["label",str label;"tabId",`Int id;"selector",str selector;"paths",`List (List.map str paths)])
-          (String.concat "\n" [native_upload_script;unblocked_agent_page;
+          (String.concat "\n" [native_upload_script;unblocked_managed_page;
       "    const page = task.page(args.label);";
       "    const outcome = await nativeUpload(page, args);";
       "    if (outcome.error !== null) emit({ok: true, value: {error: outcome.error, dialog: null, tab: null}});";
@@ -952,7 +956,7 @@ let choose_files ?actor t id ~opener ~paths =
             "cursor",str (cursor_label ~actor ~verb:"upload")])
           (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
-      unblocked_agent_page;
+      unblocked_managed_page;
       "    const page = task.page(args.label);";
       "      let failure = null, chooser = null, set = null;";
       "      const waiting = page.waitForFileChooser();";
@@ -991,8 +995,8 @@ let choose_files ?actor t id ~opener ~paths =
     | Some `Null, Some `Null -> Ok (receipt [])
     | _ -> Error (Live.Outcome_unknown "ego answered an upload outside its frame")
 
-(* Input acts as a move or a close does: on a page an agent opened, checked
-   in the run that acts. The page scripts the BiDi connection runs find the
+(* Input acts on a native managed Page, checked in the run that acts.
+   The page scripts the BiDi connection runs find the
    target, check that the document, URL and viewport are the observed ones,
    and make the DOM edits, so a selector or node means the same on both;
    ego moves the mouse and presses the keys. *)
@@ -1114,7 +1118,7 @@ let guarded_input ?(holds_button=false) t ~id ~label ~deadline ~verb ~step ~guar
           (String.concat "\n" ([
       page_call;
       "  const reason = " ^ message ^ ";";
-      unblocked_agent_page;
+      unblocked_managed_page;
       "    const page = task.page(args.label);";
       "    const guard = await page.evaluate(pageCall(args.guard, args.input));";
       "    if (guard.pageError !== undefined) emit({ok: false, before: true, error: guard.pageError});";
@@ -1171,7 +1175,7 @@ let dom_input t ~id ~label ~deadline ~verb input =
           (String.concat "\n" [
       page_call;
       "  const reason = " ^ message ^ ";";
-      unblocked_agent_page;
+      unblocked_managed_page;
       "    const page = task.page(args.label);";
       "    let result = null, failure = null;";
       "    try { result = await page.evaluate(pageCall(args.fn, args.input)); } catch (error) { failure = reason(error); }";
@@ -1279,7 +1283,7 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
         "destination",(match operation with Target_drag destination -> str destination | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_select _ -> `Null)])
       (String.concat "\n" [
         target_input_script;
-        unblocked_agent_page;
+        unblocked_managed_page;
         "    const page = task.page(args.label);";
         "    const outcome = await nativeTargetInput(page, args);";
         "    if (outcome.before === true) emit({ok: false, before: true, error: outcome.error});";
@@ -1635,7 +1639,7 @@ let workflow ?actor t args =
   let* ()=if holds_input then Input.begin_holding t.input ~tab_id:request.tab_id ~page_label:label ~operation:"native_workflow"
     |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok () in
   let result = run_native_step t ~step:"page.native_workflow" ~args:arguments
-      (String.concat "\n" [Browser_ego_workflow.script;unblocked_agent_page;
+      (String.concat "\n" [Browser_ego_workflow.script;unblocked_managed_page;
         "    const outcome = await nativeWorkflow(task.page(args.label), args);";
         "    emit({ok: true, value: outcome});";"  }"]) in
   match result with

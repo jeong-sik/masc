@@ -462,8 +462,8 @@ let test_effects_answer_what_happened () =
   check string "a request block is not served" "before effect"
     (failure_kind (dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Block_requests ["ads.example"]}))));
   check int "none of those ran a script" before (runs ());
-  reply := (fun _ -> refused "tab 3 was not opened by an agent in the ego task space");
-  check string "a page the space adopted" "before effect"
+  reply := (fun _ -> refused "the SDK refused native navigation before acting");
+  check string "a native navigation refusal remains before-effect" "before effect"
     (failure_kind (dispatch peer Live.Page_goto (obj ["tabId",`Int 3;"url",str "https://slack.com/"])));
   reply := (fun _ -> answered (obj ["error",`Null;"tab",obj ["url",str "https://slack.com/c";"title",str "Channel"]]));
   (match dispatch peer Live.Page_goto (obj ["tabId",`Int 1;"url",str "https://slack.com/c"]) with
@@ -1461,6 +1461,124 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
   let before= !native_calls in
   ignore (before_effect "management cannot clear uncertain input" (act (Lane.Action.Release_tab 2)));
   check int "uncertain input never dispatches a lifecycle call" before !native_calls
+
+let test_adopted_managed_page_uses_native_actions_without_changing_origin () =
+  let owner=ref "agent" and label=ref `Null and url=ref "https://fixture.test/mail"
+  and closed=ref false and lost=ref false and calls=ref [] and scripts=ref 0 and used_labels=ref [] in
+  let run ~window_s:_ script =
+    incr scripts;
+    let shim=Printf.sprintf {js|
+let label=%s,url=%s,closed=%s,ownership=%s,lost=%s,active=false;
+const usedLabels=new Set(%s);
+const seen=[];
+process.on('exit',()=>console.log('adopted-state '+JSON.stringify({label,url,closed,seen,usedLabels:[...usedLabels]})));
+const handle={targetId:'T9',openedBy:'unknown'};
+const page={
+ url:async()=>url,title:async()=> 'Mail',info:async()=>({url,title:'Mail',dialog:null}),
+ waitForEvent:()=>new Promise(()=>{}),snapshot:async()=> 'root',
+ goto:async next=>{seen.push('goto');url=next;return {};},
+ fill:async(selector,text)=>{if(selector!=='#editor'||text!=='changed')throw Error('native fill arguments changed');seen.push('fill');return {};},
+ click:async selector=>{if(selector!=='#submit')throw Error('native click selector changed');seen.push('click');if(lost)throw Error('native click result lost');return {};},
+ close:async()=>{seen.push('close');closed=true;}
+};
+const taskSpace=async reference=>{
+ if(reference!==51&&reference!=='masc')throw Error('wrong original Space');
+ return {spaceId:51,name:'SDK Space',ownership,
+  tabs:async()=>{seen.push('tabs');return closed?[]:[{label,targetId:'T9',openedBy:'unknown',url,title:'Mail',active,page:handle}];},
+  page:requested=>{if(label===null||requested!==label||closed)throw Error('not a managed Page');seen.push('page');return page;},
+  adopt:async(original,options)=>{if(original!==handle||label!==null)throw Error('wrong adopt handle');seen.push('adopt');
+   if(usedLabels.has(options.as))throw Error('Page label already used in this Space');
+   usedLabels.add(options.as);label=options.as;return {...handle,label};},
+  release:async requested=>{if(requested!==label)throw Error('wrong release label');seen.push('release');label=null;return {...handle,label};},
+  cdp:async(method,args)=>{
+   if(args.targetId!=='T9')throw Error('foreign activation target');
+   if(method==='Browser.getWindowForTarget')return {windowId:7,bounds:{windowState:'normal'}};
+   if(method==='Target.activateTarget'){seen.push('activate');active=true;return {};}
+   throw Error('unexpected CDP command');
+  }};
+};
+|js} (Yojson.Safe.to_string !label) (Yojson.Safe.to_string (str !url))
+      (string_of_bool !closed) (Yojson.Safe.to_string (str !owner)) (string_of_bool !lost)
+      (Yojson.Safe.to_string (`List (List.map str !used_labels))) in
+    let output=in_node (shim^script) in
+    let state=match List.find_opt (String.starts_with ~prefix:"adopted-state ") (String.split_on_char '\n' output) with
+      | Some line->Yojson.Safe.from_string (after ~prefix:"adopted-state " line)
+      | None->fail "native Page fixture emitted no state" in
+    label:=field "label" state;url:=text (field "url" state);
+    closed:=Yojson.Safe.Util.to_bool (field "closed" state);
+    used_labels:=List.map text (Yojson.Safe.Util.to_list (field "usedLabels" state));
+    calls:=List.map text (Yojson.Safe.Util.to_list (field "seen" state));
+    Ok output in
+  let open_peer ()=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
+      ~space:(Browser_configuration.Named_space "masc") ~version:"fixture" ~capture_directory:(capture_directory ()) with
+    | Ok peer->peer | Error detail->fail detail in
+  let served label=function Ok value->value|other->failf "%s was %s" label (failure_kind other) in
+  let peer=open_peer () in
+  ignore (served "list original unmanaged Page" (dispatch peer Live.Tabs_list (obj [])));
+  let control peer action=dispatch peer Live.Page_act (act_args (Lane.Action.Control action)) in
+  let interact peer action=dispatch peer Live.Page_interact
+    (field "args" (Lane.verb_json (Lane.Page_interact {tab_id=1;frame_path=[];expected_url=Some !url;action}))) in
+  let workflow peer=dispatch peer Live.Page_native_workflow (obj ["tabId",`Int 1;"expectedUrl",str !url;"maxChars",`Int 100;
+    "steps",`List [obj ["method",str "click";"selector",str "#submit"]]]) in
+  let close peer=dispatch peer Live.Page_act
+    (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Close_tab})) in
+  let effects peer=[(fun ()->dispatch peer Live.Page_goto (obj ["tabId",`Int 1;"url",str "https://fixture.test/moved"]));
+    (fun ()->interact peer (Lane.Fill {selector="#editor";text="changed"}));
+    (fun ()->workflow peer);(fun ()->interact peer Lane.Activate_tab);(fun ()->close peer)] in
+  let before= !scripts in
+  List.iter (fun action->ignore (before_effect "unmanaged Page effect" (action ()))) (effects peer);
+  check int "unmanaged Page effects run no SDK wrapper" before !scripts;
+  let adopted=served "explicit native adoption" (control peer (Lane.Action.Adopt_tab {tab_id=1;label=Some "borrowed"})) in
+  check bool "adoption retains original target and unknown origin" true
+    (field "egoPage" adopted=obj ["label",str "borrowed";"targetId",str "T9";"openedBy",str "unknown"]);
+  check bool "explicit adoption used the SDK handle" true (List.mem "adopt" !calls);
+  List.iter (fun (name,action)->
+    ignore (served name (action ()));
+    check bool ("managed unknown origin reaches native "^name) true (List.mem name !calls))
+    ["goto",(fun ()->dispatch peer Live.Page_goto (obj ["tabId",`Int 1;"url",str "https://fixture.test/moved"]));
+     "fill",(fun ()->interact peer (Lane.Fill {selector="#editor";text="changed"}));
+     "click",(fun ()->workflow peer);"activate",(fun ()->interact peer Lane.Activate_tab)];
+  owner:="agentDelegatedToUser";
+  List.iter (fun action->ignore (before_effect "delegated Space blocks managed Page effects" (action ()));
+    check (list string) "delegated control runs no SDK Page or CDP effects" [] !calls) (effects peer);
+  owner:="agent";
+  let released=served "native release after Page actions" (control peer (Lane.Action.Release_tab 1)) in
+  check bool "release never changes origin" true
+    (field "egoPage" released=obj ["label",`Null;"targetId",str "T9";"openedBy",str "unknown"]);
+  let before= !scripts in
+  List.iter (fun action->ignore (before_effect "released Page effect" (action ()))) (effects peer);
+  check int "released Page effects run no SDK wrapper" before !scripts;
+  check string "the SDK rejects reuse of a released Page label" "unknown"
+    (failure_kind (control peer (Lane.Action.Adopt_tab {tab_id=1;label=Some "borrowed"})));
+  check bool "failed label reuse retains the unmanaged Page and used-label history" true
+    (!label=`Null && !used_labels=["borrowed"] && not !closed);
+  let still_unmanaged=served "observe original target after rejected label reuse" (dispatch peer Live.Tabs_list (obj [])) in
+  check bool "rejected label reuse keeps the original unmanaged tab and origin" true
+    (List.exists (fun row->field "id" row=`Int 1 && field "egoPage" row=
+      obj ["label",`Null;"targetId",str "T9";"openedBy",str "unknown"])
+      (Yojson.Safe.Util.to_list still_unmanaged));
+  ignore (served "re-adopt same original target with a fresh label"
+    (control peer (Lane.Action.Adopt_tab {tab_id=1;label=Some "borrowed-again"})));
+  ignore (before_effect "unknown-origin managed Page is protected from close" (close peer));
+  check bool "protected close never calls the native Page method" false (List.mem "close" !calls);
+  check bool "protected close leaves the Page managed and open" true (!label=str "borrowed-again" && not !closed);
+  let remaining=served "observe protected original Page" (dispatch peer Live.Tabs_list (obj [])) in
+  check bool "protected close retains the original tab and unknown origin" true
+    (List.exists (fun row->field "id" row=`Int 1 && field "egoPage" row=
+      obj ["label",str "borrowed-again";"targetId",str "T9";"openedBy",str "unknown"])
+      (Yojson.Safe.Util.to_list remaining));
+  let uncertain=peer in
+  lost:=true;
+  check string "lost adopted-Page input stays uncertain" "unknown" (failure_kind (workflow uncertain));
+  let pending=Peer.input_status uncertain in
+  check bool "lost input records an unsettled generation" true
+    (match pending with Masc.Browser_ego_input.Uncertain _->true|Ready _->false);
+  let before= !scripts in
+  List.iter (fun action->ignore (before_effect "adoption cannot settle uncertain input" (action ())))
+    [(fun ()->interact uncertain (Lane.Fill {selector="#editor";text="changed"}));
+     (fun ()->workflow uncertain);(fun ()->control uncertain (Lane.Action.Release_tab 1))];
+  check int "uncertain input prevents later native commands" before !scripts;
+  check bool "adopted origin never resets pending input" true (Peer.input_status uncertain=pending)
 
 let test_the_space_goes_to_the_operator_and_back () =
   let ownership = ref "agent" and user_page = ref {|({spaceId:51,label:"p2",targetId:"T2",openedBy:"agent"})|} and output = ref "" in
@@ -2773,6 +2891,7 @@ let () =
     "ego", [
       test_case "Space status reads native metadata without Page or control effects" `Quick test_native_space_status;
       test_case "production workflow envelope preserves special JSON header keys" `Quick test_native_workflow_json_headers;
+      test_case "adopted managed Pages retain origin while using native actions" `Quick test_adopted_managed_page_uses_native_actions_without_changing_origin;
       test_case "takeover receipts and native runner preserve pending input" `Quick test_takeover_receipt_and_native_runner_preserve_pending_input;
       test_case "saved fetch survives snapshot failure and reaches the download broker" `Quick test_saved_fetch_survives_snapshot_failure_and_reaches_download_broker;
       test_case "native drag preserves release and failure boundaries" `Quick test_native_drag_and_release;

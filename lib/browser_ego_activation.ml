@@ -2,15 +2,18 @@ let script = {js|async function activateNativeTab(task, args) {
   const states = ['normal', 'minimized', 'maximized', 'fullscreen'];
   const validWindow = value => value && Number.isSafeInteger(value.windowId) && value.windowId >= 0
     && value.bounds && states.includes(value.bounds.windowState);
-  let tab, before;
+  let tab, before, origin;
   try {
     tab = (await task.tabs()).find(item => item.label === args.label);
     if (!tab) return {before:true, error:'browser tab is no longer present'};
-    if (tab.openedBy !== 'agent') return {before:true, error:'activation requires an agent-created Page'};
+    if (typeof tab.label !== 'string' || tab.label.trim() === ''
+        || (tab.openedBy !== 'agent' && tab.openedBy !== 'unknown'))
+      return {before:true, error:'activation requires a native managed Page'};
     if (tab.url !== args.expectedUrl) return {before:true, error:'the tab moved from expectedUrl; read it again'};
     if (typeof tab.targetId !== 'string' || !tab.targetId)
       return {before:true, error:'the native tab has no target identity'};
     const targetId = tab.targetId;
+    origin = tab.openedBy;
     before = await task.cdp('Browser.getWindowForTarget', {targetId});
     if (!validWindow(before)) return {before:true, error:'invalid native window observation'};
     const currentWindow = await task.cdp('Browser.getWindowForTarget', {targetId});
@@ -20,8 +23,8 @@ let script = {js|async function activateNativeTab(task, args) {
     const currentTab = (await task.tabs()).find(item => item.label === args.label);
     if (!currentTab || currentTab.targetId !== targetId)
       return {before:true, error:'the native Page identity changed; read it again'};
-    if (currentTab.openedBy !== 'agent')
-      return {before:true, error:'activation requires an agent-created Page'};
+    if (currentTab.openedBy !== origin)
+      return {before:true, error:'the native Page origin changed; read it again'};
     if (currentTab.url !== args.expectedUrl)
       return {before:true, error:'the tab moved from expectedUrl; read it again'};
     tab = currentTab;
@@ -37,7 +40,7 @@ let script = {js|async function activateNativeTab(task, args) {
   const active = (await task.tabs()).find(item => item.targetId === tab.targetId);
   if (!validWindow(after) || after.windowId !== before.windowId
       || after.bounds.windowState === 'minimized' || !active || active.active !== true
-      || active.label !== args.label || active.openedBy !== 'agent' || active.url !== args.expectedUrl)
+      || active.label !== args.label || active.openedBy !== origin || active.url !== args.expectedUrl)
     throw new Error('native tab activation is unconfirmed; observe the same Space before another command');
   return {spaceId:task.spaceId, label:active.label, targetId:active.targetId,
     urlBefore:tab.url, url:active.url, title:active.title, active:true,

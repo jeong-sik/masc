@@ -155,8 +155,9 @@ missing or changed target is uncertain, never replaced by the current active
 tab. An absent native boundary Page returns no active ID.
 
 For an unmanaged boundary Page, explicitly `adopt_tab` that observed ID before
-reading it; takeover itself neither adopts nor reads a document. Existing
-mutation paths still require agent-created Pages. List tabs and observe the
+reading it; takeover itself neither adopts nor reads a document. Explicit
+effects then use the adopted native Page with its original origin. List tabs
+and observe the
 intended managed Page to verify login. SDK takeover runs without a host reply
 clock; a lost result is never replayed or treated as input-reset confirmation.
 A question or an invisible-window
@@ -166,7 +167,7 @@ an Ask, show a window, or verify credentials. The identity receipt and guidance
 are source changes; a real Keeper login handoff remains unverified.
 
 Before handing off an agent-controlled Space, `BrowserInteract activate_tab`
-can explicitly activate its observed agent-created Page, with exact `clientId`,
+can explicitly activate its observed managed Page, with exact `clientId`,
 `tabId` and `expectedUrl`. It uses Ego's native `TaskSpace.cdp` to look up that
 target's window, restores it only if minimized, and activates the target.
 The command rechecks Page identity, URL and window before effects and observes
@@ -184,8 +185,10 @@ For an observed unmanaged tab in an **agent-controlled** Space, explicit
 `BrowserAct action=adopt_tab` takes that tab's `tabId` and exact `clientId`.
 Optional `pageLabel` is forwarded as the SDK's `as` option; omission lets Ego
 assign the label. The receipt retains the tab number, target and unknown origin.
-Reads can then use that Page. Existing mutations still require agent-created
-Pages; adoption does not change origin or grant those effects.
+Reads and explicit Page effects can then use that native Page, including
+input, navigation and activation. Adoption preserves its origin;
+unmanaged tabs remain unavailable to those operations. Unknown-origin Pages
+remain protected from close; use release to return their tabs to the operator.
 `action=release_tab` returns an unknown-origin managed Page without closing its
 browser tab; agent-created Pages must be closed instead. Neither operation takes
 over user control or clears uncertain input release. If a receipt is lost, list

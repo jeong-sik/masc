@@ -32,7 +32,7 @@ Neither means fully supported.
 | --- | --- | --- |
 | `profiles` | None | Profile selection only after explicit user request; no general profile inspection |
 | `listTaskSpaces` | None in Keeper tools | Discover existing goal Spaces without creating replacements |
-| `taskSpace` | Configuration accepts a name or exact numeric ID; subsequent rounds use the bound ID. Missing/mismatched IDs never fall back to a new Space | One configured Space is shared by Keepers; per-goal binding and automatic resume are missing |
+| `taskSpace` | Configuration accepts a name or exact numeric ID; subsequent rounds use the bound ID. Explicit BrowserSession Goal binding pins Keeper initial discovery to an observed Space across client UUID changes; missing connections never fall back | One configured Space per worker; automatic creation, multi-Goal worker lifecycle and installed Keeper routing remain unverified |
 | `claimTaskSpace` | None | Explicit approval and user-owned Space admission |
 | `takeOverTaskSpace` | `page.act` take_over | Explicit operator control boundary, currently only configured Space |
 | `TaskSpace.spaceId` | SDK-observed ID follows client inventory, tool receipts, stored screenshots and the TUI connection identity | Installed-route proof and per-goal Space lifecycle |
@@ -46,7 +46,7 @@ Neither means fully supported.
 | `TaskSpace.adopt` | Explicit `page.act` adopt_tab, observed tabId and clientId; native UnmanagedPage handle and optional pageLabel/as | Current mutations remain agent-origin only; real SDK/installed-route proof and per-goal scope |
 | `TaskSpace.release` | Explicit `page.act` release_tab unmanages an unknown-origin Page without closing it | Real SDK/installed-route proof and per-goal scope |
 | `TaskSpace.waitForControl` | `page.act` wait_for_control forwards native interval/timeout and uses the SDK clock within an agent-owned Space | Real SDK/installed-route proof; no handoff completion or takeover implied |
-| `TaskSpace.handOff` | `page.act` hand_off returns same-Space ID/name; Keeper guidance composes `masc_ask` and explicit-confirmation resume | Real Keeper login handoff, per-goal scope and UI control-state projection |
+| `TaskSpace.handOff` | `page.act` hand_off returns same-Space ID/name; Keeper guidance composes `masc_ask` and explicit-confirmation resume. Input-reset assertions are separate and never authorize takeover | Real Keeper login handoff, per-goal scope and UI control-state projection |
 | `TaskSpace.finish` | Internal connection teardown uses `keep:[]` | Goal completion with explicit keep policy and retained-page receipt |
 | `TaskSpace.cdp` | None | Explicit Target/Browser protocol boundary and lifecycle reconciliation |
 | `Page.label` | Inventory and document-read DTO retain the permanent label; TUI shows it for the selected tab | Installed/UI proof and lifecycle-aware resume |
@@ -169,3 +169,10 @@ unmanaged, and `openedBy` is exactly `agent` or `unknown`. An unknown origin doe
 not mean the user created the tab. The same context survives partial inventories
 and document projection. These observations grant no adoption, takeover or close
 authority. The TUI changes are source integration; visible behavior is unverified.
+
+A pending input may be resumed through the private operator confirmation form.
+This records a human check/reset assertion for the exact connected Space and
+pending generation, not an SDK cleanup acknowledgement. It does not fix the
+existing void-keyboard settlement inference, prove login/visible UI, or persist
+pending input through worker replacement. Current exact-source build/test
+receipts must be checked separately from installed Keeper and real SDK proof.

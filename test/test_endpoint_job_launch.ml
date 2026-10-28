@@ -2012,7 +2012,7 @@ let endpoint_teardown_finishes_entered_publication boundary normal_teardown =
 let () =
   if G.For_testing.linux_build && Unix.geteuid ()<>0 && Sys.getenv_opt "GITHUB_ACTIONS"=Some "true" then (
     let executable=Unix.realpath Sys.executable_name in
-    Unix.execvp "sudo" (Array.concat [[|"sudo";"-n";"--";executable|];Array.sub Sys.argv 1 (Array.length Sys.argv-1)]));
+    Unix.execvp "sudo" (Array.concat [[|"sudo";"-n";"--preserve-env=EIO_BACKEND";"--";executable|];Array.sub Sys.argv 1 (Array.length Sys.argv-1)]));
   let cases=if not G.For_testing.linux_build || Unix.geteuid ()<>0 then
       ["platform/controller refusal (kernel integration not run)",refusal;
        "digest package matches known SHA-256 values",digest_package_matches_known_sha256;

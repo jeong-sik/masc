@@ -1,0 +1,8 @@
+Testing `play-screen'.
+This run has ID `16ILSXMC'.
+
+  [OK]          screen          0   an invite reads the frame as a PNG.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/play-screen'.
+Test Successful in 0.898s. 1 test run.
+exit=0

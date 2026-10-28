@@ -1,0 +1,9 @@
+Testing `browser_surface_session_routes'.
+This run has ID `LFMFAV2B'.
+
+  [OK]          lanes          0   missing Add-on never borrows builtin execu...
+  [OK]          lanes          1   Stagehand open keeps its attach wait.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/browser_surface_session_routes'.
+Test Successful in 0.018s. 2 tests run.
+exit=0

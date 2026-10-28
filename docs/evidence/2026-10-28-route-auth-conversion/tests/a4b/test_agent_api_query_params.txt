@@ -1,0 +1,10 @@
+Testing `agent_api_query_params'.
+This run has ID `STY51RS6'.
+
+  [OK]          parsing          0   absent uses the default.
+  [OK]          parsing          1   readable values pass.
+  [OK]          parsing          2   unreadable values are rejected.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/agent_api_query_params'.
+Test Successful in 0.009s. 3 tests run.
+exit=0

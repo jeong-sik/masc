@@ -1,0 +1,22 @@
+[2026-10-29 00:19:21] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `request workspace precondition'.
+This run has ID `R3XNQB35'.
+
+  [OK]          parse                     0   absent precondition.
+  [OK]          parse                     1   well-formed pair.
+  [OK]          parse                     2   malformed precondition.
+  [OK]          decision                  0   served workspace.
+  [OK]          decision                  1   another workspace.
+  [OK]          decision                  2   booting server.
+  [OK]          request                   0   case-insensitive names.
+  [OK]          request                   1   repeated field.
+  [OK]          request                   2   health is not checked.
+  [OK]          request                   3   paths read only when asked.
+  [OK]          request                   4   refusal responses.
+  [OK]          served workspace          0   retargeted after boot.
+  [OK]          entries                   0   HTTP/1.1.
+  [OK]          entries                   1   HTTP/2 gateway.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/request workspace precondition'.
+Test Successful in 0.118s. 14 tests run.
+exit=0

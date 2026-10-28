@@ -1,0 +1,78 @@
+[2026-10-29 00:16:25] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `play-page'.
+This run has ID `4HZL8UGY'.
+
+  [OK]          page          0   the page is public and self-contained.
+  [OK]          page          1   the guide names this server's doors.
+  [OK]          page          2   the guide over HTTP/2.
+> [FAIL]        page          3   the seat names the bearer, the holder and t...
+  [OK]          page          4   expired invites and operators are not seats.
+  [FAIL]        page          5   explicit departure and same-link reconnect ...
+  [OK]          page          6   ineligible damaged participation cannot hid...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        page          3   the seat names the bearer, the holder an...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+[2026-10-29 00:16:26] [INFO] [Workspace] MASC base: /tmp/play-seat-0fb04b (no git root found)
+[2026-10-29 00:16:26] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/play-guide-h2-5f83a5 for requested path /tmp/play-seat-0fb04b
+[2026-10-29 00:16:26] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/play-seat-0fb04b for test executable test_play_page.exe
+[2026-10-29 00:16:26] [WARN] [Backend] No Eio fs context for FileSystem backend; Falling back to Memory backend.
+[2026-10-29 00:16:26] [WARN] [Subscriptions] session push fn already set, overwriting
+[2026-10-29 00:16:26] [WARN] [Auth] HTTP auth rejected: h1 /api/v1/play/seat -> 401
+ASSERT the seat needs a bearer
+[2026-10-29 00:16:26] [WARN] [Auth] HTTP auth rejected: h1 /api/v1/play/participants -> 401
+ASSERT the roster needs a bearer
+[2026-10-29 00:16:26] [WARN] [Keeper] toml_loader: keepers directory /tmp/play-seat-0fb04b/.masc/config/keepers is missing or not a directory: fleet scan finds zero keepers
+ASSERT the roster answers without a worker
+ASSERT operators and invites, not agents' clients
+ASSERT no attached worker is unavailable
+[2026-10-29 00:16:26] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT a player reads its seat
+File "test/test_play_page.ml", line 395, character 10:
+FAIL a player reads its seat
+
+   Expected: `200'
+   Received: `503'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Dune__exe__Test_play_page.test_the_seat.(fun).read in file "test/test_play_page.ml", line 395, characters 10-70
+Called from Dune__exe__Test_play_page.test_the_seat.(fun) in file "test/test_play_page.ml", line 397, characters 21-28
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio__core__Fiber.any_gen.(fun).wrap in file "lib_eio/core/fiber.ml", line 113, characters 16-20
+Re-raised at Eio__core__Fiber.any_gen in file "lib_eio/core/fiber.ml", line 155, characters 25-60
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio__Eio_mutex.use_ro in file "lib_eio/eio_mutex.ml", line 107, characters 8-13
+Re-raised at Eio__Eio_mutex.use_ro in file "lib_eio/eio_mutex.ml", line 109, characters 30-38
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio__core__Fiber.any_gen.(fun).wrap in file "lib_eio/core/fiber.ml", line 113, characters 16-20
+Re-raised at Eio__core__Fiber.any_gen in file "lib_eio/core/fiber.ml", line 155, characters 25-60
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 328, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 334, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 396, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 352, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 391-398, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 268, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 273, characters 4-39
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/play-page/page.003.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/play-page'.
+2 failures! in 1.231s. 7 tests run.
+exit=1

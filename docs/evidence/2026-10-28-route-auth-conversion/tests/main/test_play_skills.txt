@@ -1,0 +1,9 @@
+Testing `play-skills'.
+This run has ID `T8Y3843R'.
+
+  [OK]          skills          0   declared under another id.
+  [OK]          skills          1   attached by hand.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/play-skills'.
+Test Successful in 0.211s. 2 tests run.
+exit=0

@@ -1,0 +1,10 @@
+[2026-10-29 00:30:59] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `keeper_tool_approval_mode_actor_log'.
+This run has ID `L9U4IK7M'.
+
+  [OK]          actor log          0   actor appears in approval-mode change ...
+  [OK]          actor log          1   held tool approval rejects replaced wo...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/keeper_tool_approval_mode_actor_log'.
+Test Successful in 0.036s. 2 tests run.
+exit=0

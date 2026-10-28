@@ -1,0 +1,9 @@
+Testing `browser_surface_session_routes'.
+This run has ID `B6C3NV78'.
+
+  [OK]          lanes          0   missing Add-on never borrows builtin execu...
+  [OK]          lanes          1   Stagehand open keeps its attach wait.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/browser_surface_session_routes'.
+Test Successful in 0.158s. 2 tests run.
+exit=0

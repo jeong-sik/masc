@@ -1,0 +1,19 @@
+[2026-10-29 00:28:11] [INFO] [Workspace] MASC base: /tmp/dashboard-snapshot-test (no git root found)
+[2026-10-29 00:28:11] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/dashboard-snapshot-test for test executable test_dashboard_snapshot.exe
+[2026-10-29 00:28:11] [WARN] [Backend] No Eio fs context for FileSystem backend; Falling back to Memory backend.
+Testing `Dashboard_snapshot'.
+This run has ID `SWAW9RVL'.
+
+  [OK]          storage           0   current () empty initially.
+  [OK]          storage           1   publish then current ().
+  [OK]          storage           2   reset clears slot.
+  [OK]          metadata          0   generated_at within call window.
+  [OK]          metadata          1   projection ttl reuse boundaries.
+  [OK]          metadata          2   projection cache keeps last good and null.
+  [OK]          metadata          3   activity defaults cache keeps last good.
+  [OK]          metadata          4   tools component reuses final HTTP repre...
+  [OK]          metadata          5   tools pending and errors never renew th...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/Dashboard_snapshot'.
+Test Successful in 0.018s. 9 tests run.
+exit=0

@@ -1,0 +1,25 @@
+[2026-10-29 00:16:05] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `Dashboard_execute_output'.
+This run has ID `NUZXS5AL'.
+
+  [OK]          events          0   no task event.
+  [OK]          events          1   snapshot merges completed output.
+  [OK]          events          2   snapshot json shape.
+  [OK]          events          3   snapshot line ring shape.
+  [OK]          events          4   malformed output has UTF-8 snapshot and l...
+  [OK]          events          5   long line continues in next rows.
+  [OK]          events          6   snapshot tail starts on a character.
+  [OK]          events          7   live tail subscriber receives line and cl...
+  [OK]          events          8   stream start emits task_opened.
+  [OK]          events          9   stream chunk emits line.
+  [OK]          events         10   stream end emits task_closed.
+  [OK]          events         11   stream completed does not duplicate events.
+  [OK]          events         12   large chunk reaches undrained subscriber ...
+  [OK]          events         13   subscriber behind retained log receives gap.
+  [OK]          events         14   initial snapshot starts live tail after it.
+  [OK]          events         15   sse frame.
+  [OK]          events         16   routes match keeper path.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/Dashboard_execute_output'.
+Test Successful in 0.378s. 17 tests run.
+exit=0

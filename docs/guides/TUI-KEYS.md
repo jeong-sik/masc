@@ -48,6 +48,7 @@ The command palette is `:`.
 | Keys | What it does |
 |---|---|
 | `j/k` | move |
+| `b` | read captured Goal totals, the global Task backlog, history, and snapshot changes |
 | `t` | switch between Goals and the active task list |
 | `p` | open operator approvals and Keeper questions; Esc returns to Work |
 | `v` | Goals, then the two task surfaces: Task Review and Task Verdicts. Not stages of one flow |

@@ -455,7 +455,7 @@ let planning_selected_detail (goal : planning_goal) =
   | None -> Ansi.dim, Printf.sprintf "%s \xc2\xb7 %s" goal.pg_id metric
   | Some (colour, proof) ->
       colour,
-      Printf.sprintf "%s \xc2\xb7 %s \xc2\xb7 %s" goal.pg_id metric proof
+      Printf.sprintf "%s \xc2\xb7 %s \xc2\xb7 %s" proof goal.pg_id metric
 ;;
 
 (* Freshness in one short word: the exact timestamps live in the detail
@@ -504,8 +504,103 @@ let planning_stale_notice_rows (state : state) ~cols =
          | Some detail -> [data_unreliable_row ~cols detail])
   | None, (None | Some _) | Some _, None -> []
 
+let planning_summary_reading ~cols (state : state) =
+  let ko = state.ui_language = Lang_ko in
+  let text korean english = if ko then korean else english in
+  let section heading rows : Masc_tui_detail_reading.section =
+    { heading; body = String.concat "\n" (List.map Masc_tui_theme.strip_sgr rows) }
+  in
+  let warning =
+    (match state.workspace_identity with
+     | Workspace_identity_match_unconfirmed detail ->
+         [text "워크스페이스 미확인: " "Workspace unconfirmed: " ^ Terminal_text.single_line detail]
+     | Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _ -> [])
+    @ Option.to_list (Option.map (fun detail ->
+        text "조회 실패: " "Read failed: " ^ Terminal_text.single_line detail) state.planning_error)
+  in
+  let sections = match state.planning with
+    | None -> [section (text "관측 상태" "Observation")
+        (warning @ [text "목표 관측 없음" "No Goal observation"])]
+    | Some p ->
+        let stamps =
+          [ text "표시 중인 서버 스냅샷: " "Displayed server snapshot: " ^ Terminal_text.single_line p.pl_generated_at ]
+          @ (match state.planning_baseline with
+             | None -> [text "기준 스냅샷 없음" "No baseline snapshot"]
+             | Some first -> [text "기준 서버 스냅샷: " "Baseline server snapshot: " ^ Terminal_text.single_line first.pl_generated_at])
+        in
+        let history = match p.pl_goal_history with
+          | [] -> [text "목록 밖 이력 없음" "No unlisted Goal history"]
+          | history ->
+              let ended = List.length (List.filter (fun row -> Option.is_some row.pgh_closed_at) history) in
+              (if ko then Printf.sprintf "목록 밖 %d개 · 종결 결과 미기록 %d개" (List.length history) (List.length history - ended)
+               else planning_goal_history_summary ~unlisted:(List.length history) ~ended)
+              :: List.map (fun row ->
+                   let name = Option.value row.pgh_title ~default:row.pgh_goal_id |> Terminal_text.single_line in
+                   let phase = match row.pgh_final_phase with
+                     | None -> text "단계 미기록" "phase not recorded"
+                     | Some phase -> text "마지막 단계 " "last phase " ^ Terminal_text.single_line phase in
+                   let outcome = if Option.is_some row.pgh_closed_at
+                     then text "종결 시각 기록됨" "close time recorded"
+                     else text "종결 결과 미기록" "terminal outcome not recorded" in
+                   let lifetime = match row.pgh_lifetime_hours with
+                     | None -> ""
+                     | Some hours ->
+                         if hours >= 48. then Printf.sprintf " · %.1fd" (hours /. 24.)
+                         else Printf.sprintf " · %.1fh" hours in
+                   name ^ " · " ^ phase ^ " · " ^ outcome ^ lifetime) history
+        in
+        let rollup = p.pl_rollup in
+        let backlog = p.pl_backlog in
+        let total_goals = rollup.pr_active + rollup.pr_verifying + rollup.pr_awaiting_confirmation
+          + rollup.pr_done + rollup.pr_paused + rollup.pr_blocked + rollup.pr_dropped in
+        let goal_rows = if not ko then planning_rollup_rows ~cols rollup else
+          [ Printf.sprintf "전체 %d · 진행 %d · 검증 %d · 확인 대기 %d" total_goals rollup.pr_active rollup.pr_verifying rollup.pr_awaiting_confirmation
+          ; Printf.sprintf "완료 단계 %d · 일시정지 %d · 막힘 %d · 중단 %d" rollup.pr_done rollup.pr_paused rollup.pr_blocked rollup.pr_dropped ] in
+        let backlog_rows = if not ko then pack_planning_summary_rows ~cols (planning_backlog_clauses backlog) else
+          [ Printf.sprintf "할 일 %d · 담당 %d · 진행 %d" backlog.pb_todo backlog.pb_claimed backlog.pb_running
+          ; Printf.sprintf "검증 대기 %d · 완료 %d · 취소 %d" backlog.pb_awaiting_verification backlog.pb_done backlog.pb_cancelled ] in
+        let change_rows = if not ko then
+            pack_planning_summary_rows ~cols (planning_change_clauses ~baseline:state.planning_baseline p)
+          else match state.planning_baseline with
+            | None -> ["첫 성공 스냅샷 대기"]
+            | Some first ->
+                [Printf.sprintf "완료 단계 목표 %+d · 완료 Task %+d · 검증 대기 목표 %+d"
+                   (rollup.pr_done - first.pl_rollup.pr_done)
+                   (backlog.pb_done - first.pl_backlog.pb_done)
+                   (rollup.pr_verifying - first.pl_rollup.pr_verifying)] in
+        [section (text "관측과 기준" "Observation and baseline") (warning @ stamps);
+         section (text "목표 상태" "Goal states") goal_rows;
+         section (text "전체 Task 현황" "Global Task backlog") backlog_rows;
+         section (text "기준 대비 변화" "Change from baseline") change_rows;
+         section (text "목록 밖 목표 이력" "Unlisted Goal history") history]
+  in
+  Masc_tui_detail_reading.create ~title:(text "작업 요약" "Work summary") sections
+
+(* The list owns the first row of the summary; its complete counts and the
+   two server timestamps stay in the captured reading at [b]. *)
+let planning_compact_summary ~cols (state : state) (p : planning_snapshot) =
+  let ko = state.ui_language = Lang_ko in
+  let r = p.pl_rollup in
+  let total = r.pr_active + r.pr_verifying + r.pr_awaiting_confirmation
+    + r.pr_done + r.pr_dropped + r.pr_paused + r.pr_blocked in
+  let clauses =
+    [ if ko then "b:전체 요약" else "b:full summary"
+    ; Printf.sprintf (if ko then "목표 %d" else "%d goals") total
+    ; Printf.sprintf (if ko then "완료 단계 %d" else "%d in completed phase") r.pr_done
+    ]
+    @ (if r.pr_blocked = 0 then [] else
+         [Printf.sprintf (if ko then "막힘 %d" else "%d blocked") r.pr_blocked])
+    @ (if p.pl_goal_history = [] then [] else
+         [Printf.sprintf (if ko then "목록 밖 %d" else "%d no longer listed") (List.length p.pl_goal_history)])
+  in
+  let fits line = Message_layout.display_width line <= framed_inner_width cols in
+  List.fold_left (fun line clause ->
+      let next = if line = "" then "  " ^ clause else line ^ " · " ^ clause in
+      if fits next then next else line) "" clauses
+
 let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -518,9 +613,18 @@ let render_planning_list (state : state) =
   let tail_rows = count_frame_lines tail in
 
   let now_unix = Unix.gettimeofday () in
-  let modes = Printf.sprintf "sort:%s  filter:%s"
-    (planning_sort_label state.planning_sort)
-    (planning_filter_label state.planning_filter) in
+  let modes = if ko then
+      let sort = match state.planning_sort with
+        | Planning_sort_phase_priority -> "단계/우선순위"
+        | Planning_sort_updated -> "최근 갱신"
+        | Planning_sort_due -> "기한" in
+      let filter = match state.planning_filter with
+        | Planning_filter_all -> "전체" | Planning_filter_active -> "진행 중"
+        | Planning_filter_completed -> "완료" | Planning_filter_dropped -> "중단" in
+      Printf.sprintf "정렬:%s  필터:%s" sort filter
+    else Printf.sprintf "sort:%s  filter:%s"
+      (planning_sort_label state.planning_sort)
+      (planning_filter_label state.planning_filter) in
   (* Connection identity keeps its place. Modes share the title only when
      every navigation tab retains the width it has without them. *)
   let chrome = "  " ^ connection_badge state in
@@ -554,46 +658,6 @@ let render_planning_list (state : state) =
   if not modes_fit_header then
     box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ modes);
   List.iter (box_line buf cols) (planning_stale_notice_rows state ~cols);
-  (* The list below can only show goals the store still holds. A goal that
-     completed and left goals.json left every planning surface with it, so
-     "what did we finish" had no answer here at all. These two lines are what
-     the event log remembers; they sit above the divider because they are not
-     rows the cursor walks. *)
-  (match state.planning with
-   | None -> ()
-   | Some planning -> (
-     match planning.pl_goal_history with
-     | [] -> ()
-     | history ->
-       let ended =
-         List.length
-           (List.filter
-              (fun (row : planning_goal_history) -> Option.is_some row.pgh_closed_at)
-              history)
-       in
-       box_line_styled buf cols ~style:(Theme.recede ())
-         (planning_goal_history_summary ~unlisted:(List.length history) ~ended);
-       let lifetime_label hours =
-         if hours >= 48. then Printf.sprintf "%.1fd" (hours /. 24.)
-         else Printf.sprintf "%.1fh" hours
-       in
-       let named =
-         List.map
-           (fun (row : planning_goal_history) ->
-             (* No title means the goal was opened before the server recorded
-                openings, so the id is all there is to call it. *)
-             let name =
-               match row.pgh_title with
-               | Some title -> title
-               | None -> row.pgh_goal_id
-             in
-             match row.pgh_lifetime_hours with
-             | Some hours -> name ^ " " ^ lifetime_label hours
-             | None -> name)
-           history
-       in
-       box_line_styled buf cols ~style:(Theme.recede ())
-         ("  " ^ String.concat " · " named)));
   box_divider buf cols;
 
   let goals =
@@ -619,14 +683,8 @@ let render_planning_list (state : state) =
          box_empty buf cols
        done
    | Some p ->
-       (* The backlog counts are a list of atomic clauses: each [glyph state=N]
-          stays together when wrapped, and continuation rows keep the 2-cell
-          left margin instead of splitting between the icon and its label. *)
-       let backlog_clauses = planning_backlog_clauses p.pl_backlog in
-       (* Budget summary chrome against the actual header and divider rows.
-          Retained history and wrapped modes already occupy [buf]; preserve
-          a goal (or empty note), its selected detail and the footer before
-          adding optional trend/backlog rows. *)
+       (* Keep the selected Goal, its detail and the footer before spending
+          a row on the summary. The complete reading is available at [b]. *)
        let phase_width = planning_phase_column + 2 in
        let goal_layout =
          Render_schedule.planning_layout
@@ -636,7 +694,8 @@ let render_planning_list (state : state) =
        let list_header = Buffer.create 256 in
        box_line_styled list_header cols ~style:(Theme.recede ())
          ("  "
-         ^ Render_schedule.planning_header_row ~phase_width ~layout:goal_layout);
+         ^ (if ko then Render_schedule.planning_header_row_korean ~phase_width ~layout:goal_layout
+            else Render_schedule.planning_header_row ~phase_width ~layout:goal_layout));
        let divider = Buffer.create 128 in
        box_divider divider cols;
        let selection_rows = if count = 0 then 0 else 1 in
@@ -644,47 +703,8 @@ let render_planning_list (state : state) =
          count_frame_lines list_header + (2 * count_frame_lines divider)
          + 1 + selection_rows + tail_rows
        in
-       let add_summary_if_fits summary =
-         if count_frame_lines buf + count_frame_lines summary + reserved_rows <= rows
-         then (Buffer.add_buffer buf summary; true)
-         else false
-       in
-       let pack_summary summary ~style clauses =
-         pack_planning_summary_rows ~cols clauses
-         |> List.iter (box_line_styled summary cols ~style)
-       in
-       (* Counts are supporting text at every width. A wide terminal gives
-          goal titles room; it does not turn the same readings into cards. *)
-       let rollup_summary = Buffer.create 256 in
-       planning_rollup_rows ~cols p.pl_rollup
-       |> List.iter (box_line_styled rollup_summary cols ~style:"");
-       ignore (add_summary_if_fits rollup_summary);
-       let backlog_summary = Buffer.create 256 in
-       pack_summary backlog_summary ~style:"" backlog_clauses;
-       (* Preserve the current counts before spending optional rows on change
-          since the baseline. Wrapped physical rows share the list budget. *)
-       let backlog_visible = add_summary_if_fits backlog_summary in
-       let stamps_summary = Buffer.create 256 in
-       let change_summary = Buffer.create 256 in
-       (match state.planning_baseline with
-        | None -> ()
-        | Some first ->
-            (* Baseline and current are server snapshot generation times,
-               not the time this TUI received them or the process age. *)
-            pack_summary stamps_summary ~style:(Theme.recede ())
-              [ "Baseline snapshot: " ^ Terminal_text.single_line first.pl_generated_at
-              ; "Displayed snapshot: " ^ Terminal_text.single_line p.pl_generated_at
-              ]);
-       pack_summary change_summary ~style:(Theme.info ())
-         (planning_change_clauses ~baseline:state.planning_baseline p);
-       if backlog_visible then begin
-         let stamps_rows = count_frame_lines stamps_summary in
-         let change_rows = count_frame_lines change_summary in
-         if stamps_rows > 0
-            && count_frame_lines buf + stamps_rows + change_rows + reserved_rows <= rows
-         then Buffer.add_buffer buf stamps_summary;
-         ignore (add_summary_if_fits change_summary)
-       end;
+       if count_frame_lines buf + 1 + reserved_rows <= rows then
+         box_line buf cols (planning_compact_summary ~cols state p);
        Buffer.add_buffer buf divider;
        (* The list drew rows and never said what they were. *)
        Buffer.add_buffer buf list_header;
@@ -700,7 +720,9 @@ let render_planning_list (state : state) =
           verdict before spending rows on the legend. At the minimum
           height the headers and summary stay in place and a goal remains
           visible; taller frames get the legend back. *)
-       let rows_after_legend = 1 + 1 + selection_rows + tail_rows in
+       let list_floor = if count = 0 then 1
+         else min 5 count + (if count > 5 then 1 else 0) in
+       let rows_after_legend = 1 + list_floor + selection_rows + tail_rows in
        let judge_legend =
          if
            List.mem Render_schedule.Planning_proof
@@ -766,7 +788,15 @@ let render_planning_list (state : state) =
            | Some g -> begin
              let is_selected = idx = state.planning_cursor in
              let status_color = planning_phase_color g.pg_phase in
-             let status_label = planning_phase_label g.pg_phase in
+             let status_label = if not ko then planning_phase_label g.pg_phase else
+               match g.pg_phase with
+               | Goal_phase.Executing -> "진행"
+               | Goal_phase.Verifying -> "검증 중"
+               | Goal_phase.Awaiting_confirmation -> "확인 대기"
+               | Goal_phase.Completed -> "완료"
+               | Goal_phase.Dropped -> "중단"
+               | Goal_phase.Paused _ -> "일시정지"
+               | Goal_phase.Blocked _ -> "막힘" in
             (* The gap belonged to the reading before; the columns space
                themselves now, and an absent date leaves its cell empty rather
                than moving the one beside it. *)
@@ -857,7 +887,7 @@ let render_planning_list (state : state) =
          done;
          if overflowing then
            box_line_styled buf cols ~style:(Theme.recede ())
-             (Printf.sprintf "  [goals %s]"
+             (Printf.sprintf (if ko then "  [목표 %s]" else "  [goals %s]")
                 (Masc_tui_scroll.window_text ~scroll:scroll_offset
                    ~height:list_rows count));
          match List.nth_opt goals state.planning_cursor with

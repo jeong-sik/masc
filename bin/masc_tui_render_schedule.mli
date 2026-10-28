@@ -680,6 +680,9 @@ val planning_layout :
 val planning_header_row :
   phase_width:int -> layout:planning_column Masc_tui_table.layout -> string
 
+val planning_header_row_korean :
+  phase_width:int -> layout:planning_column Masc_tui_table.layout -> string
+
 val planning_row :
   ?priority_style:string ->
   ?open_style:string ->

@@ -1703,37 +1703,40 @@ let planning_layout ~inner_width ~phase_width =
   Table.fit ~inner_width ~width:(planning_column_width ~phase_width)
     ~flex:Planning_title ~drop_order:planning_drop_order planning_columns
 
-let planning_cell ~phase_style ~priority_style ~open_style ~phase_width
+let planning_cell ~ko ~phase_style ~priority_style ~open_style ~phase_width
     ~title_width values = function
   | Planning_phase ->
-      Table.cell ~style:phase_style ~header:"PHASE" ~width:phase_width
+      Table.cell ~style:phase_style ~header:(if ko then "단계" else "PHASE") ~width:phase_width
         values.prow_phase
   | Planning_proof ->
-      Table.cell ~header:"JUDGE" ~width:planning_proof_width values.prow_proof
+      Table.cell ~header:(if ko then "판정" else "JUDGE") ~width:planning_proof_width values.prow_proof
   | Planning_priority ->
-      Table.cell ~style:priority_style ~header:"PRI"
+      Table.cell ~style:priority_style ~header:(if ko then "순" else "PRI")
         ~width:planning_priority_width values.prow_priority
   | Planning_open ->
-      Table.cell ~style:open_style ~header:"OPEN" ~width:planning_open_width
+      Table.cell ~style:open_style ~header:(if ko then "열린 작업" else "OPEN") ~width:planning_open_width
         values.prow_open
   | Planning_title ->
-      Table.cell ~fold:Table.Fold_tail ~header:"TITLE" ~width:title_width
+      Table.cell ~fold:Table.Fold_tail ~header:(if ko then "목표" else "TITLE") ~width:title_width
         values.prow_title
   | Planning_age ->
-      Table.cell ~align:Table.Right ~header:"AGE" ~width:planning_age_width
+      Table.cell ~align:Table.Right ~header:(if ko then "갱신" else "AGE") ~width:planning_age_width
         values.prow_age
   | Planning_due ->
-      Table.cell ~header:"DUE" ~width:planning_due_width values.prow_due
+      Table.cell ~header:(if ko then "기한" else "DUE") ~width:planning_due_width values.prow_due
 
-let planning_cells ?(phase_style = "") ?(priority_style = "") ?(open_style = "")
+let planning_cells ?(ko = false) ?(phase_style = "") ?(priority_style = "") ?(open_style = "")
     ~phase_width ~(layout : planning_column Table.layout) values =
   List.map
-    (planning_cell ~phase_style ~priority_style ~open_style ~phase_width
+    (planning_cell ~ko ~phase_style ~priority_style ~open_style ~phase_width
        ~title_width:layout.Table.flex_width values)
     layout.Table.shown
 
 let planning_header_row ~phase_width ~layout =
   Table.header_row (planning_cells ~phase_width ~layout planning_no_values)
+
+let planning_header_row_korean ~phase_width ~layout =
+  Table.header_row (planning_cells ~ko:true ~phase_width ~layout planning_no_values)
 
 let planning_row ?(priority_style = "") ?(open_style = "") ~phase_style
     ~phase_width ~layout values =

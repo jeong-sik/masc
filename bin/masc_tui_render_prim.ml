@@ -2615,7 +2615,8 @@ type planning_tab = Render_schedule.planning_tab =
    whatever followed -- at a hundred columns this title lost its badge and
    half its clock. Callers build that tail once and hand the same value here
    and to the row, so the measurement and the drawing cannot disagree. *)
-let planning_workspace_lead = screen_title " MASC Work" ^ "  "
+let planning_workspace_lead (state : state) =
+  screen_title (if state.ui_language = Lang_ko then " MASC 작업" else " MASC Work") ^ "  "
 
 let planning_workspace_tabs (state : state) ~(tab : planning_tab) ~(window : string) =
   let review_count = Option.map (fun s -> s.vs_total) state.verification in
@@ -2631,6 +2632,17 @@ let planning_workspace_tabs (state : state) ~(tab : planning_tab) ~(window : str
   let stops =
     Render_schedule.planning_strip_plain ~tab ~review_count ~verifying_count
       ~window
+  in
+  let stops = if state.ui_language <> Lang_ko then stops else
+    let counted label = function
+      | Some count when count > 0 -> Printf.sprintf "%s·%d" label count
+      | Some _ | None -> label in
+    List.map (fun (stop, _) ->
+      let label = match stop with
+        | Planning_goals -> counted "목표" verifying_count
+        | Planning_task_review -> counted "작업 검토" review_count
+        | Planning_verdicts -> "작업 판정" in
+      stop, if stop = tab then label ^ window else label) stops
   in
   (* Each stop is a surface of its own; [v] walks them in this order. *)
   let surface_of_stop = function
@@ -2648,6 +2660,7 @@ let planning_workspace_strip ~width tabs =
     tabs
 
 let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(window : string) ~(after : string) =
+  let planning_workspace_lead = planning_workspace_lead state in
   planning_workspace_lead
   ^ planning_workspace_strip
       ~width:(tab_strip_width ~cols ~before:planning_workspace_lead ~after)
@@ -2663,6 +2676,7 @@ let harness_detail_heading (state : state) ~cols ~task_id ~tail =
     Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
   in
   let tabs = planning_workspace_tabs state ~tab:Planning_verdicts ~window:"" in
+  let planning_workspace_lead = planning_workspace_lead state in
   let mark = " \xe2\x96\xb8 verdict  " in
   let around = cells planning_workspace_lead + cells mark in
   detail_heading ~cols

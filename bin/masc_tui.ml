@@ -27811,6 +27811,15 @@ and is loaded on demand through keeper_skill.
             | Some (origin, successor) ->
                 state.followed_from <- Some (Board, Some origin);
                 open_board_post_id state ~mailbox:async_messages ~focus:Right_pane successor)
+       | Some "b"
+         when state.view = Planning && state.planning_mode = Planning_list
+              && not (Masc_tui_overview_tasks.is_focused state.task_focus)
+              && not state.composer_focused
+              && not (modal_owns_keys state) && not state.palette_open
+              && not state.answering_open && not state.patch_modal_open && not state.link_modal_open
+              && Option.is_none (text_input_target state ~compact_viewport) ->
+           open_detail_reading state
+             (Masc_tui_render_work.planning_summary_reading ~cols:terminal_columns state)
        | Some "v"
          when not state.composer_focused
               && not (modal_owns_keys state) && not state.palette_open

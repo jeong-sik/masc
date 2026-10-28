@@ -446,7 +446,9 @@ module Ring = struct
      about-to-rotate channel, which is harmless. *)
   let sink_mutex = Stdlib.Mutex.create ()
 
-  let write_to_sink entry_json =
+  (* Append [lines] (each already ends in a newline) and flush once. The
+     writer thread passes a batch; a synchronous producer passes one line. *)
+  let write_lines_now lines =
     rotate_if_needed ();
     Stdlib.Mutex.protect sink_mutex
       (fun () ->
@@ -464,8 +466,7 @@ module Ring = struct
         end;
         match !file_channel with
         | Some oc ->
-            let line = Yojson.Safe.to_string entry_json ^ "\n" in
-            (try output_string oc line
+            (try List.iter (output_string oc) lines
              with exn ->
                Printf.eprintf
                  "[%s] [ERROR] [Log] file-sink write failed: %s; \
@@ -475,6 +476,135 @@ module Ring = struct
                close_sink ());
             protect ~default:() (fun () -> flush oc)
         | None -> ())
+
+  (* RFC async-log-sink-durable-append-offload §3. Once [start_writer] runs,
+     producers append serialized lines to a bounded queue and one OS thread
+     writes them, so a slow write() stops that thread instead of the
+     producer's domain. A full queue makes the producer wait: the file is the
+     authoritative record, unlike the console mirror, which drops. Before
+     [start_writer] and after [stop_writer] producers write synchronously. *)
+  type writer_mode = Synchronous | Queued
+
+  (* §4: 213 records/s at the busiest measured second fills this in 38 s;
+     the largest measured record (4,022 B) bounds it at 33 MB. *)
+  let file_writer_capacity = 8192
+
+  let writer_mutex = Stdlib.Mutex.create ()
+  let writer_nonempty = Condition.create ()
+  let writer_nonfull = Condition.create ()
+  let writer_queue : string Queue.t = Queue.create ()
+
+  (* All guarded by [writer_mutex]. [writer_in_flight] counts the lines the
+     writer took and has not written yet; they still count against
+     [file_writer_capacity], so the capacity bounds every buffered line. *)
+  let writer_mode = ref Synchronous
+  let writer_thread : Thread.t option ref = ref None
+  let writer_in_flight = ref 0
+
+  let writer_exit_registered = Atomic.make false
+
+  (* [true] when the queue took [line]; [false] when the mode is (or became,
+     while this producer waited for room) [Synchronous]. *)
+  let enqueue line =
+    Stdlib.Mutex.protect writer_mutex (fun () ->
+      let rec admit () =
+        match !writer_mode with
+        | Synchronous -> false
+        | Queued
+          when Queue.length writer_queue + !writer_in_flight >= file_writer_capacity ->
+            Condition.wait writer_nonfull writer_mutex;
+            admit ()
+        | Queued ->
+            Queue.add line writer_queue;
+            Condition.signal writer_nonempty;
+            true
+      in
+      admit ())
+
+  let write_to_sink entry_json =
+    let line = Yojson.Safe.to_string entry_json ^ "\n" in
+    if not (enqueue line) then write_lines_now [ line ]
+
+  (* Every queued line, and the mode they were taken under. Waits while the
+     queue is empty and the writer is still wanted. *)
+  let take_batch () =
+    Stdlib.Mutex.protect writer_mutex (fun () ->
+      let rec wait () =
+        match !writer_mode with
+        | Queued when Queue.is_empty writer_queue ->
+            Condition.wait writer_nonempty writer_mutex;
+            wait ()
+        | Queued | Synchronous -> ()
+      in
+      wait ();
+      let batch = List.of_seq (Queue.to_seq writer_queue) in
+      Queue.clear writer_queue;
+      writer_in_flight := List.length batch;
+      (batch, !writer_mode))
+
+  (* The written batch gives its room back to waiting producers. *)
+  let finish_batch () =
+    Stdlib.Mutex.protect writer_mutex (fun () ->
+      writer_in_flight := 0;
+      Condition.broadcast writer_nonfull)
+
+  (* Ends once [stop_writer] set [Synchronous] and the queue is empty. *)
+  let rec writer_loop () =
+    let batch, mode = take_batch () in
+    (match batch with
+     | [] -> ()
+     | _ :: _ -> write_lines_now batch);
+    finish_batch ();
+    match mode, batch with
+    | Synchronous, [] -> ()
+    | Synchronous, _ :: _ | Queued, _ -> writer_loop ()
+
+  (* A writer that ended on an exception would leave producers waiting on a
+     full queue for good. It hands the queue back to the synchronous path,
+     says so on stderr, and writes what was queued. The batch being written
+     when the exception came is not retried. *)
+  let run_writer () =
+    match writer_loop () with
+    | () -> ()
+    | exception exn ->
+        let residue =
+          Stdlib.Mutex.protect writer_mutex (fun () ->
+            writer_mode := Synchronous;
+            let residue = List.of_seq (Queue.to_seq writer_queue) in
+            Queue.clear writer_queue;
+            writer_in_flight := 0;
+            Condition.broadcast writer_nonfull;
+            residue)
+        in
+        Printf.eprintf
+          "[%s] [ERROR] [Log] file-sink writer stopped: %s; producers write \
+           synchronously again\n%!"
+          (timestamp ()) (Printexc.to_string exn);
+        (match residue with
+         | [] -> ()
+         | _ :: _ -> write_lines_now residue)
+
+  let stop_writer () =
+    let thread =
+      Stdlib.Mutex.protect writer_mutex (fun () ->
+        writer_mode := Synchronous;
+        Condition.broadcast writer_nonempty;
+        Condition.broadcast writer_nonfull;
+        let thread = !writer_thread in
+        writer_thread := None;
+        thread)
+    in
+    Option.iter Thread.join thread
+
+  let start_writer () =
+    Stdlib.Mutex.protect writer_mutex (fun () ->
+      match !writer_mode, !writer_thread with
+      | Queued, _ | Synchronous, Some _ -> ()
+      | Synchronous, None ->
+          writer_mode := Queued;
+          writer_thread := Some (Thread.create run_writer ()));
+    if Atomic.compare_and_set writer_exit_registered false true then
+      at_exit stop_writer
 
   exception Entry_decode_error of string
 

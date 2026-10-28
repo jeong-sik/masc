@@ -78,7 +78,7 @@ let be32 cursor =
 
 (* A delta time: 7 bits a byte, high bit set means more, four bytes at most. *)
 let varlen cursor =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let rec loop count acc =
     if count >= 4 then Error Bad_varlen
     else
@@ -112,7 +112,7 @@ type events = {
 let bpm_of_micros micros = 60_000_000 / micros
 
 let parse_events body =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let cursor = { source = body; pos = 0 } in
   let name = ref None in
   let tempos = ref [] in
@@ -256,7 +256,7 @@ let duration division tracks tempos =
 (* {1 File} *)
 
 let read source =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let cursor = { source; pos = 0 } in
   let* tag = take cursor 4 in
   if not (String.equal tag "MThd") then Error Not_midi

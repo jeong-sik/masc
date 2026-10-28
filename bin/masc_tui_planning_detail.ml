@@ -51,7 +51,7 @@ type confirmation_state =
   | Submitting of string * (string, confirmation) Masc_tui_fetched.t
 
 let decode_confirmation ~goal_id json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let field name = function
     | `Assoc fields ->
         (match List.assoc_opt name fields with

@@ -1,7 +1,7 @@
 type action = Inspect | Pause | Resume | Clear | Cancel of string | Move_to_end of string | Edit of string * string
   | Cancel_event of string * int64 * string
   | Prioritize_event of string * int64 * Keeper_event_queue.urgency
-let ( let* ) = Result.bind
+open Result.Syntax
 let split text =
   let text = String.trim text in
   match String.index_opt text ' ' with

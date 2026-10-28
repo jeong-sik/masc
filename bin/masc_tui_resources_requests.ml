@@ -3,7 +3,7 @@ open Masc_tui_types
 open Masc_tui_async_protocol
 module Catalog = Masc_tui_resource_catalog
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let report_json = Masc_tui_http.get_json
 

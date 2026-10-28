@@ -53,7 +53,7 @@ let of_projection ?(account_groups = []) (projection : Runtime_config_models.t) 
     | c -> c) rows)
 
 let parse ?(account_groups = []) lines =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* config = Runtime_toml.parse_string (String.concat "\n" lines)
     |> Result.map_error (fun errors -> String.concat "; "
       (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors)) in

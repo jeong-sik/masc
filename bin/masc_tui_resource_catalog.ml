@@ -46,7 +46,7 @@ let next_scope = function
 type direction = Older | Newer
 type read_request = { key : key; owner : unit ref }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let key = function Mcp resource -> Mcp_uri resource.uri | Report report -> Report_revision report
 let equal_key left right = match left, right with
   | Mcp_uri left, Mcp_uri right -> String.equal left right

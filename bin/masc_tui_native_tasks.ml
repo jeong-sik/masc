@@ -1,6 +1,6 @@
 module Read = Masc.Keeper_native_task_read
 module Task = Runtime_native_tasks
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type error =
   | Transport of string

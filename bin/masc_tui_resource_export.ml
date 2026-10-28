@@ -27,7 +27,7 @@ let path_input path =
   else Ok path
 
 let save ~fs ~path t =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* path = path_input path in
   if String.equal path "" then Error "Enter a destination file path"
   else

@@ -64,7 +64,7 @@ let response_json body =
   | json -> Ok json
   | exception Yojson.Json_error detail -> Error ("tools/call answer was not JSON: " ^ detail)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let text_of_content (content : Yojson.Safe.t) =
   match content with

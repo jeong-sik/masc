@@ -27,7 +27,7 @@ type reading = { path : string; source_text : string; metadata : metadata;
   account_emails : (Masc_tui_account_login.account_emails, string) result }
 type tone = Neutral | Good | Warning | Bad
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let field key = function
   | `Assoc fields -> (match List.filter (fun (name, _) -> name = key) fields with
       | [(_, value)] -> Ok value | [] -> Error ("missing " ^ key)

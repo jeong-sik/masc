@@ -5,7 +5,7 @@ type t = {schema:Yojson.Safe.t;fields:field list;cursor:int;draft:string option;
 and array_editor = {item_schema:Yojson.Safe.t;items:Yojson.Safe.t list;item_cursor:int;
                     child:(int option * t) option}
 type event = Updated of t | Submit of Yojson.Safe.t | Cancel
-let ( let* ) = Result.bind
+open Result.Syntax
 let member key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let rec at path value = match path with
   | [] -> Some value

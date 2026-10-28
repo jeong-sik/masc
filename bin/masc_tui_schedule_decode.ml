@@ -1,6 +1,6 @@
 open Masc_tui_types
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* The kind beside the name is a word, not the wire token: the row read
    "Operator Proof (human_operator)" and "keeper-701 (automated_actor)". The

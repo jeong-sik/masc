@@ -47,7 +47,7 @@ let path source ~since =
 (* The server writes this name beside the pixels. *)
 let rgb8_format = "rgb8"
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let has_duplicates fields =
   let names = List.map fst fields in

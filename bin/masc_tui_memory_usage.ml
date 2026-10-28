@@ -60,7 +60,7 @@ let of_records records =
   }
 
 let decode ~keeper json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match json with
   | `Assoc fields ->
     let* () =

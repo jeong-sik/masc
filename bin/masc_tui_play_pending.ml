@@ -1,7 +1,7 @@
 type kind = Issue_invite of string | Revoke_invite of string
 type entry = { id : string; base_path : string; masc_root : string; kind : kind }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let same_origin a b = a.base_path = b.base_path && a.masc_root = b.masc_root
 let decode_entry fields =
   let text key = match List.assoc_opt key fields with

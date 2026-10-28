@@ -72,7 +72,7 @@ let arguments t = match origin t with
         "expected_workspace",`Assoc ["base_path",`String (Masc.Tui_decode.Canonical_path.to_string expected.Masc.Tui_decode.sid_base_path);
                                      "masc_root",`String (Masc.Tui_decode.Canonical_path.to_string expected.sid_masc_root)]]
 let invalid detail = Error (Invalid_reply detail)
-let ( let* ) = Result.bind
+open Result.Syntax
 let field key = function
   | `Assoc fields ->
     (match List.filter (fun (name,_) -> String.equal name key) fields with

@@ -1,7 +1,7 @@
 module Form = Masc_tui_schema_form
 module Document = Masc_tui_lane_declaration
 module Browser = Masc_tui_package_browser
-let ( let* ) = Result.bind
+open Result.Syntax
 let field name = function
   | `Assoc fields -> (match List.assoc_opt name fields with Some value -> Ok value | None -> Error ("missing " ^ name))
   | _ -> Error "expected object"

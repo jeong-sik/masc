@@ -8,7 +8,7 @@ type observation = { target : target; state : state }
 type tracking = Observed of state | Awaiting_declaration | Different_source
   | Different_inputs | Unavailable of string
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let field key = function
   | `Assoc fields -> (match List.assoc_opt key fields with
       | Some value -> Ok value | None -> Error ("Missing application field: " ^ key))

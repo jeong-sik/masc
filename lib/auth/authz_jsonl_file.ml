@@ -38,6 +38,7 @@ module type Line_format = sig
   val genesis : state
   val of_line : state -> string -> (record, line_error) result
   val to_line : record -> string
+  val equal_record : record -> record -> bool
   val advance : state -> record -> state
   val check_next : state -> record -> (unit, reject) result
   val describe_state : state -> string
@@ -167,6 +168,7 @@ module Make (F : Line_format) = struct
         { index : int
         ; error : F.line_error
         }
+    | Read_back_changed of { index : int }
     | Write_locked of { path : string }
     | Diverged of { path : string }
     | Write_failed of
@@ -289,6 +291,8 @@ module Make (F : Line_format) = struct
       Printf.sprintf "record %d was refused: %s" index (F.reject_to_string reject)
     | Would_not_read_back { index; error } ->
       Printf.sprintf "record %d would not read back: %s" index (F.line_error_to_string error)
+    | Read_back_changed { index } ->
+      Printf.sprintf "record %d reads back as a different record" index
     | Write_locked { path } ->
       Printf.sprintf "%s %s is locked by another process" F.description path
     | Diverged { path } ->
@@ -299,7 +303,8 @@ module Make (F : Line_format) = struct
 
   (* The lines to write and the state after them, or the first record that
      does not continue the file. Each line is read back against the state it
-     would have in the file. *)
+     would have in the file, and must give the record that was written: the
+     state after the append is the state the next start computes. *)
   let encode ~head records =
     let rec go index head lines = function
       | [] -> Ok (List.rev lines, head)
@@ -310,7 +315,9 @@ module Make (F : Line_format) = struct
            let line = F.to_line record in
            (match F.of_line head line with
             | Error error -> Error (Would_not_read_back { index; error })
-            | Ok _ -> go (index + 1) (F.advance head record) (line :: lines) rest))
+            | Ok read_back when F.equal_record record read_back ->
+              go (index + 1) (F.advance head record) (line :: lines) rest
+            | Ok _ -> Error (Read_back_changed { index })))
     in
     go 0 head [] records
   ;;

@@ -27,7 +27,7 @@
     returns {!Stopped}, until the process restarts and opens the file again.
     While the log is stopped, the in-memory head is not trusted, and the file is
     the only truth. A refusal that wrote nothing ({!Write_locked}, {!Rejected},
-    {!Would_not_read_back}) does not stop the log. *)
+    {!Would_not_read_back}, {!Read_back_changed}) does not stop the log. *)
 
 type t
 
@@ -142,7 +142,8 @@ type reject =
 (** Why an append wrote nothing, or failed. The constructors are those of
     {!Authz_jsonl_file.Make}. [Rejected] carries a {!reject}.
     [Would_not_read_back] means that {!Authz_record.of_line} refuses the line
-    that {!Authz_record.to_line} writes for the record, which is a bug in
+    that {!Authz_record.to_line} writes for the record, and [Read_back_changed]
+    means that it reads the line as another record. Both are bugs in
     [Authz_record]. *)
 type append_error =
   | Writer_expired
@@ -155,6 +156,7 @@ type append_error =
       { index : int
       ; error : Authz_record.decode_error
       }
+  | Read_back_changed of { index : int }
   | Write_locked of { path : string }
   | Diverged of { path : string }
   | Write_failed of
@@ -171,10 +173,10 @@ val append_error_to_string : append_error -> string
     not continue the chain is refused with [Rejected] before any byte is
     written. Each line is read back with {!Authz_record.of_line} before it is
     written, so a line that {!Authz_record.of_line} would refuse at the next
-    start is never written. The fold function of {!open_at_start} is not run
-    here, and a record that it refuses stops every later start, so the caller
-    runs the same fold function before it appends. An empty list writes
-    nothing.
+    start, or would read as another record, is never written. The fold function
+    of {!open_at_start} is not run here, and a record that it refuses stops
+    every later start, so the caller runs the same fold function before it
+    appends. An empty list writes nothing.
 
     Once this returns [Ok], the lines are in the file and synced the way
     [Fs_compat] syncs. [Fs_compat] does not call [F_FULLFSYNC], so the lines

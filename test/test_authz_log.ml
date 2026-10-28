@@ -212,6 +212,7 @@ let append_error_name : L.append_error -> string = function
   | L.Rejected { index; reject = L.Wrong_previous_hash } ->
     Printf.sprintf "Wrong_previous_hash index=%d" index
   | L.Would_not_read_back { index; _ } -> Printf.sprintf "Would_not_read_back index=%d" index
+  | L.Read_back_changed { index } -> Printf.sprintf "Read_back_changed index=%d" index
   | L.Write_locked { path } -> Printf.sprintf "Write_locked path=%s" path
   | L.Diverged { path } -> Printf.sprintf "Diverged path=%s" path
   | L.Write_failed { path; _ } -> Printf.sprintf "Write_failed path=%s" path

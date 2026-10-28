@@ -39,6 +39,7 @@ module Counter = struct
   ;;
 
   let to_line = string_of_int
+  let equal_record = Int.equal
   let advance _count number = number
 
   let check_next count number =
@@ -67,6 +68,28 @@ end
 
 module Numbers = J.Make (Counter)
 module Broken_numbers = J.Make (Broken)
+
+(* The decoder accepts the bytes but loses a field used by the file state. *)
+module Lossy = struct
+  type state = int * bool
+  type record = int * bool
+  type line_error = Counter.line_error
+  type reject = Counter.reject
+
+  let description = "lossy counter"
+  let thread_label = "lossy-counter"
+  let genesis = 0, false
+  let of_line (count, _) line = Result.map (fun number -> number, false) (Counter.of_line count line)
+  let to_line (number, _) = string_of_int number
+  let equal_record (a, x) (b, y) = Int.equal a b && Bool.equal x y
+  let advance _state record = record
+  let check_next (count, _) (number, _) = Counter.check_next count number
+  let describe_state (count, _) = Counter.describe_state count
+  let line_error_to_string = Counter.line_error_to_string
+  let reject_to_string = Counter.reject_to_string
+end
+
+module Lossy_numbers = J.Make (Lossy)
 
 (* ---- fixtures ---- *)
 
@@ -141,9 +164,21 @@ let numbers_append_error_name : Numbers.append_error -> string = function
   | Numbers.Rejected { index; reject = Counter.Skips { expected; actual } } ->
     Printf.sprintf "Rejected index=%d expected=%d actual=%d" index expected actual
   | Numbers.Would_not_read_back { index; _ } -> Printf.sprintf "Would_not_read_back index=%d" index
+  | Numbers.Read_back_changed { index } -> Printf.sprintf "Read_back_changed index=%d" index
   | Numbers.Write_locked { path } -> Printf.sprintf "Write_locked path=%s" path
   | Numbers.Diverged { path } -> Printf.sprintf "Diverged path=%s" path
   | Numbers.Write_failed { path; _ } -> Printf.sprintf "Write_failed path=%s" path
+;;
+
+let lossy_append_error_name : Lossy_numbers.append_error -> string = function
+  | Lossy_numbers.Writer_expired -> "Writer_expired"
+  | Lossy_numbers.Stopped _ -> "Stopped"
+  | Lossy_numbers.Rejected { index; _ } -> Printf.sprintf "Rejected index=%d" index
+  | Lossy_numbers.Would_not_read_back { index; _ } -> Printf.sprintf "Would_not_read_back index=%d" index
+  | Lossy_numbers.Read_back_changed { index } -> Printf.sprintf "Read_back_changed index=%d" index
+  | Lossy_numbers.Write_locked _ -> "Write_locked"
+  | Lossy_numbers.Diverged _ -> "Diverged"
+  | Lossy_numbers.Write_failed _ -> "Write_failed"
 ;;
 
 let contains ~sub text =
@@ -226,6 +261,7 @@ let line_that_does_not_read_back_is_not_written () =
          ( Broken_numbers.Writer_expired
          | Broken_numbers.Stopped _
          | Broken_numbers.Rejected _
+         | Broken_numbers.Read_back_changed _
          | Broken_numbers.Write_locked _
          | Broken_numbers.Diverged _
          | Broken_numbers.Write_failed _ ) -> Alcotest.fail "wrong error"
@@ -235,6 +271,35 @@ let line_that_does_not_read_back_is_not_written () =
       "a refusal that wrote nothing does not stop the file"
       true
       (Option.is_none (Broken_numbers.stopped file)))
+;;
+
+let changed_read_back_is_not_written () =
+  with_path (fun path ->
+    let file =
+      match Lossy_numbers.open_at_start ~path ~init:[] ~step:collect with
+      | Ok (file, _, _) -> file
+      | Error _ -> Alcotest.fail "open refused"
+    in
+    let append records =
+      match Lossy_numbers.with_writer file (fun writer _ -> Lossy_numbers.append writer records) with
+      | Ok result -> result
+      | Error _ -> Alcotest.fail "the file is stopped"
+    in
+    (match append [ 1, false; 2, true ] with
+     | Error error ->
+       Alcotest.(check string)
+         "the second record reads back as another record"
+         "Read_back_changed index=1"
+         (lossy_append_error_name error)
+     | Ok _ -> Alcotest.fail "a changed second record must be refused");
+    Alcotest.(check bool) "no prefix was written" false (Sys.file_exists path);
+    Alcotest.(check bool) "the file remains usable" true (Option.is_none (Lossy_numbers.stopped file));
+    (match append [ 1, false ] with
+     | Ok (1, false) -> ()
+     | Error _ | Ok _ -> Alcotest.fail "a lossless record must be accepted");
+    match Lossy_numbers.open_at_start ~path ~init:[] ~step:collect with
+    | Ok (_file, [ (1, false) ], _) -> ()
+    | Error _ | Ok _ -> Alcotest.fail "replay must recover the accepted record")
 ;;
 
 (* ---- what the format says about the lines of a file ---- *)
@@ -365,6 +430,9 @@ let texts_name_the_file_the_line_and_the_format () =
       , Numbers.append_error_to_string
           (Numbers.Would_not_read_back { index = 3; error = Counter.Not_a_number "1!" })
       , [ "3"; "\"1!\" is not a number" ] )
+    ; ( "Read_back_changed"
+      , Numbers.append_error_to_string (Numbers.Read_back_changed { index = 3 })
+      , [ "3"; "different record" ] )
     ; "Stopped", Numbers.append_error_to_string (Numbers.Stopped { path; reason = "why" }), [ "counter file"; path; "why" ]
     ; "Diverged", Numbers.append_error_to_string (Numbers.Diverged { path }), [ "counter file"; path ]
     ]
@@ -386,6 +454,10 @@ let () =
             "line that does not read back"
             `Quick
             line_that_does_not_read_back_is_not_written
+        ; Alcotest.test_case
+            "line that reads back as a different record"
+            `Quick
+            changed_read_back_is_not_written
         ] )
     ; ( "format of a file"
       , [ Alcotest.test_case "format decides the next line" `Quick format_decides_the_next_line

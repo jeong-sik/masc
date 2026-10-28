@@ -7,9 +7,10 @@ module Invocation = Agent_core.Tool_contract.Invocation
 type handle = { trace_id : Keeper_id.Trace_id.t; delivery : Keeper_skill_async_delivery.t }
 type scope = unit ref * unit ref
 type pending = { invocation : Invocation.t; tool_name : string; runtime_id : string; handles : handle list; scope : scope }
+type snapshot = { active : handle list; pending : pending list; scope : scope }
 type t =
   { config : Workspace.config; context : Recorder.t
-  ; mutable active : handle list; mutable pending : pending list; mutable scope : scope }
+  ; mutable snapshot : snapshot }
 type error =
   | Delivery_failed of Delivery.error
   | Ledger_failed of Keeper_skill_activation_ledger.store_error
@@ -19,15 +20,18 @@ let error_to_string = function
   | Delivery_failed error -> Delivery.error_to_string error
   | Ledger_failed error -> Keeper_skill_activation_ledger.store_error_to_string error
   | Invalid_evidence detail -> detail
-let create ~config ~context = {config;context;active=[];pending=[];scope=ref (),ref ()}
-let clear state = state.scope <- ref (),ref (); state.active <- []; state.pending <- []
-let begin_handoff state = state.scope <- fst state.scope,ref (); state.active <- []
+let empty_snapshot () = {active=[];pending=[];scope=ref (),ref ()}
+let create ~config ~context = {config;context;snapshot=empty_snapshot ()}
+let clear state = state.snapshot <- empty_snapshot ()
+let begin_handoff state =
+  let snapshot = state.snapshot in
+  state.snapshot <- {snapshot with scope=fst snapshot.scope,ref (); active=[]}
 let same_scope (left_attempt,left_handoff) (right_attempt,right_handoff) =
   left_attempt == right_attempt && left_handoff == right_handoff
-let clear_if_current state scope = if same_scope state.scope scope then clear state
+let clear_if_current state scope = if same_scope state.snapshot.scope scope then clear state
 let refuse state scope error = clear_if_current state scope; Error error
 let record_delivery state (observation : Delivery.observation) =
-  let scope = state.scope in
+  let scope = state.snapshot.scope in
   if not (Ids.Turn_ref.equal observation.physical_turn_ref (Recorder.physical_turn_ref state.context))
      || Recorder.current_runtime_id state.context <> Some observation.runtime_id
   then Error (Invalid_evidence "handoff differs from the selected physical attempt")
@@ -39,10 +43,16 @@ let record_delivery state (observation : Delivery.observation) =
        | Manifest_reference -> ()
        | Inline_result ->
          let handle = {trace_id=Recorder.bound_trace_id (Delivery.original_recorder observation.binding);delivery} in
-         if same_scope state.scope scope && Recorder.current_runtime_id state.context = Some delivery.runtime_id
-            && not (List.exists (fun known -> String.equal (Keeper_skill_async_delivery.identity known.delivery)
-             (Keeper_skill_async_delivery.identity delivery)) state.active)
-         then state.active <- state.active @ [handle]);
+         if same_scope state.snapshot.scope scope && Recorder.current_runtime_id state.context = Some delivery.runtime_id
+         then begin
+           (* Read the owner again after the runtime callback: it may have
+              yielded or selected another handoff before returning. *)
+           let snapshot = state.snapshot in
+           if same_scope snapshot.scope scope
+              && not (List.exists (fun known -> String.equal (Keeper_skill_async_delivery.identity known.delivery)
+               (Keeper_skill_async_delivery.identity delivery)) snapshot.active)
+           then state.snapshot <- {snapshot with active=snapshot.active @ [handle]}
+         end);
       Ok (Some delivery)
 let same_occurrence invocation tool_name (pending : pending) =
   Keeper_skill_async_delivery.equal_invocation invocation pending.invocation && String.equal tool_name pending.tool_name
@@ -56,16 +66,23 @@ let record state ~handles ~runtime_id ~tool_name ~occurrence =
       |> Result.map_error (fun error -> Ledger_failed error) in
     Ok (count+1)) (Ok 0) handles
 let take_pending state ~invocation ~tool_name =
-  let found = List.find_opt (same_occurrence invocation tool_name) state.pending in
-  state.pending <- List.filter (fun pending -> not (same_occurrence invocation tool_name pending)) state.pending;
-  found
+  let snapshot = state.snapshot in
+  match List.find_opt (same_occurrence invocation tool_name) snapshot.pending with
+  | None -> None
+  | Some _ as found ->
+      state.snapshot <- {snapshot with pending=List.filter (fun pending ->
+        not (same_occurrence invocation tool_name pending)) snapshot.pending};
+      found
 let sdk_hook state ~on_error event =
   (match event with
    | Agent_core.Hooks.PreToolUse {invocation;tool_name;_} ->
      ignore (take_pending state ~invocation ~tool_name);
      (match Recorder.current_runtime_id state.context with
       | None -> ()
-      | Some runtime_id -> state.pending <- {invocation;tool_name;runtime_id;handles=state.active;scope=state.scope} :: state.pending)
+      | Some runtime_id ->
+        let snapshot = state.snapshot in
+        let pending = {invocation;tool_name;runtime_id;handles=snapshot.active;scope=snapshot.scope} in
+        state.snapshot <- {snapshot with pending=pending :: snapshot.pending})
    | PostToolUse {invocation;tool_name;output;_} ->
      (match take_pending state ~invocation ~tool_name with
       | None -> ()
@@ -80,10 +97,10 @@ let sdk_hook state ~on_error event =
    | BeforeTurn _ | BeforeTurnParams _ | AfterTurn _ | OnStop _ | OnError _ | OnToolError _ -> ());
   Agent_core.Hooks.Continue
 let native_started state ~runtime_id ~official_turn ~identity ~tool_name =
-  let scope = state.scope in
+  let scope = state.snapshot.scope in
   if Recorder.current_runtime_id state.context <> Some runtime_id
   then Error (Invalid_evidence "native start differs from the selected physical attempt")
-  else match record state ~handles:state.active ~runtime_id ~tool_name
+  else match record state ~handles:state.snapshot.active ~runtime_id ~tool_name
       ~occurrence:(Fact.Native_started {official_turn;identity}) with
     | Ok count -> Ok count
     | Error error -> refuse state scope error

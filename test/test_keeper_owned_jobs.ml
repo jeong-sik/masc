@@ -5698,7 +5698,40 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
      "fault_after_durable_acceptance",`Bool fault_after_acceptance;
      "upstream_inline_arguments",`Bool dynamic_arguments;
      "accepted_fault_worker_calls",`Int !accepted_worker_calls;
-     "program_creates",`Int (effect_count fixture "create");"program_starts",`Int (effect_count fixture "start")]))
+     "program_creates",`Int (effect_count fixture "create");"program_starts",`Int (effect_count fixture "start")]));
+  (* A dispatch that began under one handoff must finish under that handoff,
+     even after a sibling handoff becomes current in the same attempt. *)
+  physical_runtime := observation.runtime_id;
+  Action_observer.clear action_observer;
+  let delivered observation =
+    Action_observer.record_delivery action_observer observation
+    |> require "pending handoff delivery" |> function
+    | Some delivery -> delivery
+    | None -> fail "pending handoff has no admitted child" in
+  let old_delivery = delivered observation in
+  let pending_invocation = invocation ~turn:30 "pending-before-next-handoff" in
+  ignore (action_hook (Agent_core.Hooks.PreToolUse {invocation=pending_invocation;
+    tool_name="fixture_follow_on";input=`Assoc [];usage=None}));
+  Action_observer.begin_handoff action_observer;
+  let new_delivery = delivered sibling_provider in
+  let prior_actions = action_count () and prior_errors = List.length !action_errors in
+  ignore (action_hook (Agent_core.Hooks.PostToolUse {invocation=pending_invocation;
+    tool_name="fixture_follow_on";input=`Assoc [];output=result;result_bytes=16;duration_ms=0.}));
+  execute_action ~turn:31 ~id:"action-after-next-handoff" success_tool |> ignore;
+  check int "both dispatches record one causal action" (prior_actions+2) (action_count ());
+  check int "handoff transition introduces no action error" prior_errors (List.length !action_errors);
+  let action_for id =
+    match List.filter (fun (value : Action.t) -> match value.occurrence with
+      | Sdk_result {invocation;_} -> Agent_core.Tool_contract.Invocation.tool_use_id invocation = id
+      | Native_started _ -> false) (Ledger.async_actions (ledger ())) with
+    | [action] -> action
+    | [] | _::_::_ -> failf "expected one action for %s" id in
+  check string "pending dispatch keeps its original handoff"
+    (Async_delivery.identity old_delivery)
+    (action_for "pending-before-next-handoff").delivery_sha256;
+  check string "later dispatch uses the new handoff"
+    (Async_delivery.identity new_delivery)
+    (action_for "action-after-next-handoff").delivery_sha256
 
 exception Fixture_result_observer_failed
 

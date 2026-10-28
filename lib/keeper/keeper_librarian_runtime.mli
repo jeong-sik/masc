@@ -149,6 +149,11 @@ val merge_message_descent : message_descent -> message_descent -> message_descen
 (** Invalid output is absorbing; a neutral local settlement report cannot
     erase an earlier size observation or unblock an earlier invalid output. *)
 
+val not_committed_of_failure : detail:string -> Keeper_exact_walk_failure.t -> not_committed
+(** The one place whole-walk host evidence becomes a pass report. Both the
+    direct Runtime walk and the Add-on original refusal use it, so a given
+    observation reads the same on either path. *)
+
 val may_descend_messages : not_committed list -> bool
 (** Fold every report for the failed pass. Empty reports and unclassified
     transport failures grant no descent; any invalid-output veto holds even

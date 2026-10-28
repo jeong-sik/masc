@@ -481,6 +481,23 @@ let test_terminal_refusal_allows_fresh_original () = with_fixture (fun ~sw:_ fix
   check int "one refused and one successful provider call" 2 (F.post_count fixture.server);
   check (list string) "new original alone publishes Memory"
     ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir)))
+let test_retained_body_refusal_shows_descent_from_its_receipt () = with_fixture (fun ~sw:_ fixture ->
+  fixture.set_response (fun _ -> `Request_entity_too_large,
+    {|{"error":{"message":"fixture body too large","type":"invalid_request_error"}}|});
+  let deliveries= !(fixture.deliveries) in
+  assert_pending (run_worker fixture);
+  await_delivery fixture ~after:deliveries;
+  (match run_worker fixture with
+   | Ok (Consumer.Memory_not_committed [report]) ->
+     check bool "a provider body refusal the host retained shows that reading less may help" true
+       (Keeper_librarian_runtime.may_descend_messages [report]);
+     check bool "the report names the provider's cause" true
+       (report.provider_input_refusals=[Keeper_librarian_input_refusal.Request_body_refused])
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok (Consumer.Memory_not_committed ([] | _::_::_) | Nothing_to_read | Pending
+         | Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
+     fail "a retained body refusal must give one report");
+  check int "the provider refused once and no later pass called it again" 1 (F.post_count fixture.server))
 (* The Librarian worker's declared reply frame is 4 MiB; a request whose host
    listing cannot fit is refused by the worker before the host retains it. *)
 let oversized_turn_bytes = 4_500_000
@@ -496,6 +513,11 @@ let test_worker_body_refusal_ends_the_original () = with_fixture (fun ~sw:_ fixt
      let final=Lane_addon_exact.Call_final (Input_refused Request_body_refused) in
      check string "the worker's typed frame refusal ends the pass"
        ("Original history request refused: " ^ Yojson.Safe.to_string (Lane_addon_exact.final_to_json final)) report.detail
+     ;check bool "a frame refusal shows that reading less may help" true
+       (Keeper_librarian_runtime.may_descend_messages [report]);
+     check bool "the frame refusal names its cause and no provider ran" true
+       (report.provider_input_refusals=[Keeper_librarian_input_refusal.Request_body_refused]
+        && not report.smaller_range_meets_same_failure)
    | Error error -> fail (Consumer.error_to_string error)
    | Ok (Consumer.Memory_not_committed ([] | _::_::_) | Nothing_to_read | Pending
          | Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
@@ -1218,6 +1240,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
   test_case "terminal refusal preserves reason and allows a fresh original" `Quick test_terminal_refusal_allows_fresh_original;
   test_case "a worker frame refusal ends the original instead of blocking publication" `Quick
     test_worker_body_refusal_ends_the_original;
+  test_case "a retained provider body refusal shows descent from its receipt" `Quick
+    test_retained_body_refusal_shows_descent_from_its_receipt;
   test_case "actual original reaches Memory and source ACK" `Quick test_actual_completed_history_path;
   test_case "a settle stopped before its gate records finishes with the next original" `Quick
     test_stopped_settle_leaves_gates_for_the_next_original;

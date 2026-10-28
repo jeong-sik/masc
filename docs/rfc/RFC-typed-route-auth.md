@@ -101,7 +101,7 @@ val Server_route.get : 'h auth -> string -> 'h -> Router.t -> Router.t
 
 `get`, `post`, `add`, `prefix_get`, `prefix_post`, `prefix_put`, `prefix_delete`가 있어요. 코드에서 쓰이는 등록 함수만 만들었어요. 정확한 경로의 `put`, `delete`, `any`는 쓰는 곳이 없어서 없고, 쓰게 되면 그때 더해요. `ws_get`은 업그레이드 핸들러가 직접 인증하므로 종류를 받지 않고 항상 `Self_authenticated Websocket_upgrade`를 기록해요.
 
-등록 함수가 종류에 맞는 `Server_auth` 래퍼를 씌워서 `Http_server_eio.Router.register ~access`에 넣어요. 라우터의 `route` 레코드에는 `access : Route_access.t` 필드가 있고 인벤토리가 이것을 읽어요. 의존 방향은 그대로예요. `Route_access`는 라우터와 같은 라이브러리(`masc`)에, 래퍼를 잇는 `Server_route`는 `masc.server`에 있어요. 라우터의 옛 등록 함수(`Router.get` 등)는 `Route_access.Unclassified`를 기록하고, 마지막 층(A4d)에서 지워요.
+등록 함수는 종류에 맞는 `Server_auth` 래퍼를 핸들러에 씌우고, 종류를 같은 호출에서 기록해요. 종류와 핸들러를 따로 받는 함수는 라우터가 공개하지 않아요. 그래서 `Permission`이라 적고 인증 없는 핸들러를 넘기는 등록은 쓸 수 없어요. 등록 함수는 라우터 모듈의 함수자 `Router.Make_typed`가 만들어요. `Server_auth`는 `masc.server`에 있어서 라우터가 직접 부를 수 없으니, 래퍼 일곱 개를 함수자 인자(`Router.Wrappers`)로 받아요. `Server_route`가 이 함수자를 `Server_auth`로 적용하는 유일한 곳이에요. 아무것도 검사하지 않는 래퍼로 함수자를 적용하면 이 보장을 우회할 수 있어요. 그것은 타입이 아니라 리뷰가 막고, 적용이 한 곳뿐인지는 `rg Make_typed`로 보여요. 라우터의 `route` 레코드에는 `access : Route_access.t` 필드가 있고 인벤토리가 이것을 읽어요. 라우터의 옛 등록 함수(`Router.get` 등)는 `Route_access.Unclassified`를 기록하고, 마지막 층(A4d)에서 지워요. 그 뒤에는 모든 경로의 `access`가 이 함수자를 거친 값이에요.
 
 ### 3.3 HTTP/2
 
@@ -120,6 +120,7 @@ H2 게이트웨이의 갈래도 같은 `Server_route.auth`를 써요. 같은 경
 2. 인벤토리 도구가 경로·메서드·종류를 출력해요. 그 표를 evidence로 남기고, 종류가 바뀐 줄은 PR diff로 리뷰해요.
 3. 변환하는 동안 `Always_public` 경로 집합과 `is_public_read_path`가 양쪽으로 같은지 시험해요. 변환이 끝나면 목록을 지우고 시험도 함께 지워요.
 4. 등록할 때 종류를 안 적으면 컴파일이 실패해요.
+5. 종류와 핸들러를 따로 받는 등록 함수는 `http_server_eio.mli`에 없어요. `Router.Make_typed`를 적용하는 곳이 `server_route.ml` 한 곳인지는 `rg Make_typed`로 확인해요.
 
 ## 5. 단계
 

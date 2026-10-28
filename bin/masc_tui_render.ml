@@ -335,6 +335,7 @@ let render_acting = Masc_tui_render_activity.render_acting
 
 let render_memory (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
   let open Masc.Tui_decode_memory_health in
   let keepers =
     match state.memory_health with
@@ -356,17 +357,18 @@ let render_memory (state : state) =
           | Some _ -> ""
         in
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Memory") reading_note timestamp
+          (screen_title (if ko then " MASC 메모리" else " MASC Memory")) reading_note timestamp
           (connection_badge state)
     | Some s ->
-        Printf.sprintf "%s · %s · %s need memory · read %s  %s"
-          (screen_title " MASC Memory") (Masc_tui_message_layout.count_noun shown "keeper")
+        Printf.sprintf "%s · %s · %s · %s  %s"
+          (screen_title (if ko then " MASC 메모리" else " MASC Memory"))
+          (if ko then Printf.sprintf "키퍼 %d명" shown else Masc_tui_message_layout.count_noun shown "keeper")
           (match current_memory_starving_count s with
-           | Some count -> string_of_int count
-           | None -> "? (unread rows)")
+           | Some count -> Printf.sprintf (if ko then "기억 필요 %d" else "%d need memory") count
+           | None -> if ko then "기억 필요 ? (일부 미조회)" else "? need memory (unread rows)")
           (let tm = Unix.localtime s.mhs_generated_at in
-           Printf.sprintf "%04d-%02d-%02d %02d:%02d"
-             (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+           Printf.sprintf (if ko then "%02d/%02d %02d:%02d 관측" else "read %02d/%02d %02d:%02d")
+             (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
              tm.Unix.tm_hour tm.Unix.tm_min)
           (connection_badge state)
   in

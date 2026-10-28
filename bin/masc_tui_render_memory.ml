@@ -903,6 +903,8 @@ let memory_fact_detail_lines ~cols row =
    width, so the list's height is worked out from these same rows
    ([memory_overview_scrolled]) rather than from a fixed count of header lines. *)
 let memory_fleet_header_rows ~cols (state : state) : string list =
+  let ko = state.ui_language = Lang_ko in
+  let text korean english = if ko then korean else english in
   (* A failed first read has no counts. The error row below owns the cause;
      keep these two labelled values unavailable without repeating its verdict.
      An unread first visit still says what it is waiting for. *)
@@ -934,35 +936,38 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
   in
   let total =
     match state.memory_health with
-    | None -> [ "  Total: " ^ missing_reading "waiting for memory snapshots" ]
+    | None -> [ text "  전체: " "  Total: " ^ missing_reading (text "메모리 관측 대기" "waiting for memory snapshots") ]
     | Some snapshot ->
-       labelled "Total"
-         [ Masc_tui_message_layout.count_noun
-             (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact"
-         ; Printf.sprintf "%d ordinary + %d source"
+       labelled (text "전체" "Total")
+         [ (if ko then Printf.sprintf "기억 %d개" (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts)
+            else Masc_tui_message_layout.count_noun
+              (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact")
+         ; Printf.sprintf (text "일반 %d + 원본 %d" "%d ordinary + %d source")
              snapshot.mhs_total_facts snapshot.mhs_total_source_facts
-         ; Printf.sprintf "stored %s"
+         ; Printf.sprintf (text "저장 %s" "stored %s")
              (stored_amount state.memory_unit
                 (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
-         ; Masc_tui_message_layout.count_noun (List.length snapshot.mhs_keepers) "keeper"
+         ; (if ko then Printf.sprintf "키퍼 %d명" (List.length snapshot.mhs_keepers)
+            else Masc_tui_message_layout.count_noun (List.length snapshot.mhs_keepers) "keeper")
          ; (match state.memory_unit with
-            | Memory_usage.Tokens -> "stored estimate, not turn input"
-            | Memory_usage.Bytes -> "stored knowledge, not turn input")
+            | Memory_usage.Tokens -> text "저장 추정량, 턴 입력 아님" "stored estimate, not turn input"
+            | Memory_usage.Bytes -> text "저장된 지식, 턴 입력 아님" "stored knowledge, not turn input")
          ]
   in
   let readings =
     match state.memory_health with
-    | None -> [ "  Librarian: " ^ missing_reading "waiting for health data" ]
+    | None -> [ "  Librarian: " ^ missing_reading (text "상태 관측 대기" "waiting for health data") ]
     | Some snapshot ->
        (* Every count spells its own noun: each of these reads 1 on an
           ordinary day, and the line said "1 keepers", "1 atoms",
           "1 failures". The unread turns keep "?" when nothing measured
           them, which is not a count and cannot take a noun from one. *)
-       labelled "Ordinary:"
-         [ Printf.sprintf "%d observed / %d derived"
+       labelled (text "일반:" "Ordinary:")
+         [ Printf.sprintf (text "관측 %d / 파생 %d" "%d observed / %d derived")
              snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
-         ; Masc_tui_message_layout.count_noun
-             snapshot.mhs_total_support_invalidations "support invalidation"
+         ; (if ko then Printf.sprintf "근거 무효화 %d건" snapshot.mhs_total_support_invalidations
+            else Masc_tui_message_layout.count_noun
+              snapshot.mhs_total_support_invalidations "support invalidation")
          ]
        (* The source-bound snapshot is stored and invalidated apart from the
           ordinary facts above, and each Keeper's roster row and detail already
@@ -972,30 +977,36 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
           Keeper whose source snapshot could not be read contributes 0 to the
           count, so the row also says how many Keepers that is, as the roster
           does with "read error". *)
-       @ labelled "Source:"
-         ([ Masc_tui_message_layout.count_noun
-              snapshot.mhs_total_source_invalidations "invalidation"
+       @ labelled (text "원본:" "Source:")
+         ([ (if ko then Printf.sprintf "무효화 %d건" snapshot.mhs_total_source_invalidations
+             else Masc_tui_message_layout.count_noun
+               snapshot.mhs_total_source_invalidations "invalidation")
           ]
           @ (if snapshot.mhs_total_source_read_errors > 0
              then
-               [ Masc_tui_message_layout.count_noun
-                   snapshot.mhs_total_source_read_errors "keeper"
-                 ^ " with a source read error"
+               [ if ko then Printf.sprintf "원본 읽기 실패 키퍼 %d명" snapshot.mhs_total_source_read_errors
+                 else Masc_tui_message_layout.count_noun
+                   snapshot.mhs_total_source_read_errors "keeper" ^ " with a source read error"
                ]
              else []))
        @ labelled "Librarian:"
-         [ (match snapshot.mhs_total_librarian_unread_turns with
-            | None -> "? turns"
-            | Some turns -> Masc_tui_message_layout.count_noun turns "turn")
-           ^ " unread"
-         ; Printf.sprintf "%s behind in continuity (%s not measured)"
-             (Masc_tui_message_layout.count_noun
-                snapshot.mhs_total_librarian_continuity_unread_atoms "atom")
-             (Masc_tui_message_layout.count_noun
-                snapshot.mhs_total_librarian_continuity_unmeasured "keeper")
-         ; Masc_tui_message_layout.count_noun
-             snapshot.mhs_total_librarian_failures "failure"
-           ^ " since server start"
+         [ (if ko then
+              match snapshot.mhs_total_librarian_unread_turns with
+              | None -> "미읽은 턴 ?"
+              | Some turns -> Printf.sprintf "미읽은 턴 %d개" turns
+            else
+              (match snapshot.mhs_total_librarian_unread_turns with
+               | None -> "? turns"
+               | Some turns -> Masc_tui_message_layout.count_noun turns "turn") ^ " unread")
+         ; (if ko then Printf.sprintf "연속성 지연 원자 %d개 (미측정 키퍼 %d명)"
+              snapshot.mhs_total_librarian_continuity_unread_atoms
+              snapshot.mhs_total_librarian_continuity_unmeasured
+            else Printf.sprintf "%s behind in continuity (%s not measured)"
+              (Masc_tui_message_layout.count_noun snapshot.mhs_total_librarian_continuity_unread_atoms "atom")
+              (Masc_tui_message_layout.count_noun snapshot.mhs_total_librarian_continuity_unmeasured "keeper"))
+         ; (if ko then Printf.sprintf "서버 시작 후 실패 %d건" snapshot.mhs_total_librarian_failures
+            else Masc_tui_message_layout.count_noun snapshot.mhs_total_librarian_failures "failure"
+              ^ " since server start")
          ]
   in
   total @ readings
@@ -1027,7 +1038,7 @@ let fold_memory_rows ~subject ~max_rows rows =
 (* Keep the requested storage/input prefix and the actionable stalled row
    when detail exceeds the frame. Spend remaining room on the tail, with an
    explicit omission count between the readings. *)
-let fold_memory_context_rows ~max_rows context =
+let fold_memory_context_rows ~ko ~max_rows context =
   let rows = context.rows in
   let count = List.length rows in
   if count <= max_rows then rows
@@ -1046,7 +1057,9 @@ let fold_memory_context_rows ~max_rows context =
       |> List.rev |> List.take remaining |> List.rev |> List.map snd in
     let hidden = count - leading - stalled_count - List.length tail in
     List.take leading rows
-    @ [Printf.sprintf "  … %d Keeper detail rows hidden; enlarge terminal" hidden]
+    @ [Printf.sprintf
+         (if ko then "  … 상세 %d행 숨김 · v:전체" else "  … %d Keeper detail rows hidden · v:full reading")
+         hidden]
     @ (match stalled with Some (_, row) -> [row] | None -> [])
     @ tail
 
@@ -1062,6 +1075,71 @@ let memory_refused_keeper_lines (state : state) =
            | None -> "(keeper id not read)")
           (Terminal_text.single_line refusal.mkr_reason))
       refused
+
+(* The full fleet and selected Keeper readings remain reachable even when the
+   small overview cannot fit them beside a useful list. This is a captured
+   reading: selection and later refreshes do not change an open document. *)
+let memory_overview_reading ~cols (state : state) =
+  let ko = state.ui_language = Lang_ko in
+  let section heading lines : Masc_tui_detail_reading.section =
+    { heading; body = String.concat "\n" lines }
+  in
+  let observed = match state.memory_health with
+    | None -> []
+    | Some snapshot ->
+        [ (if ko then "관측 시각 · " else "Observed at · ")
+          ^ memory_date snapshot.mhs_generated_at ]
+  in
+  let warnings =
+    Option.to_list (Option.map (fun detail ->
+      (if ko then "조회 오류 · " else "Read error · ") ^ Terminal_text.single_line detail)
+      state.memory_health_error)
+    @ memory_refused_keeper_lines state
+  in
+  let keeper_section = match selected_memory_keeper state with
+    | None -> []
+    | Some keeper ->
+        let input = Masc_tui_fetched.view_for ~equal:String.equal state.memory_input
+            ~key:keeper.mkh_keeper_id in
+        let context = memory_context_lines ~cols ~detail:true ~unit:state.memory_unit ~input keeper in
+        [section
+           ((if ko then "선택한 키퍼 · " else "Selected Keeper · ") ^ keeper.mkh_keeper_id)
+           context.rows]
+  in
+  Masc_tui_detail_reading.create
+    ~title:(if ko then "메모리 관측 상세" else "Memory observation details")
+    ([section (if ko then "전체 메모리" else "Fleet memory")
+        (observed @ memory_fleet_header_rows ~cols state)]
+     @ (if warnings = [] then [] else
+          [section (if ko then "조회 경고" else "Read warnings") warnings])
+     @ keeper_section)
+
+(* A single row replaces an unfittable fleet header. It leads with any
+   actionable read failures, then unmeasured coverage, and always names the
+   complete reading rather than displaying a detached continuation line. *)
+let memory_compact_fleet_row (state : state) =
+  let ko = state.ui_language = Lang_ko in
+  let hint = if ko then "  v:전체 · " else "  v:details · " in
+  let detail = match state.memory_health with
+    | None -> if ko then "메모리 미조회" else "memory not read"
+    | Some snapshot ->
+        let source_errors = snapshot.mhs_total_source_read_errors in
+        let failures = snapshot.mhs_total_librarian_failures in
+        let unmeasured = snapshot.mhs_total_librarian_continuity_unmeasured in
+        if source_errors > 0 || failures > 0 then
+          Printf.sprintf
+            (if ko then "원본 읽기 실패 %d · Librarian 실패 %d (서버 시작 후)"
+             else "source read failures %d · Librarian failures %d since server start")
+            source_errors failures
+        else if unmeasured > 0 then
+          Printf.sprintf (if ko then "연속성 미측정 %d명" else "continuity not measured for %d keepers") unmeasured
+        else match snapshot.mhs_total_librarian_unread_turns with
+          | None -> if ko then "Librarian 미읽음 미관측" else "Librarian unread turns unobserved"
+          | Some _ ->
+              Printf.sprintf (if ko then "전체 기억 %d개" else "%d total facts")
+                (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts)
+  in
+  hint ^ detail
 
 type memory_overview_projection =
   { header : string list
@@ -1089,23 +1167,26 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
   let base = memory_overview_scrolled ~header_rows:0 ~refused_rows:0 ~context_rows:0 state in
   (* The context divider needs a row only when the detail itself is shown. *)
   let fixed_rows = base.sc_chrome - Masc_tui_frame.chrome_rows in
-  (* A nonempty list needs one selected row; a longer list also needs its
-     overflow line. The empty state needs one explanation row. *)
-  let list_rows = if List.length keepers > 1 then 2 else 1 in
+  (* Keep the selected Keeper and neighbouring rows together where they fit;
+     an overflowing list also needs its window line. *)
+  let count = List.length keepers in
+  let visible_floor = min 3 count in
+  let list_rows = if count = 0 then 1 else visible_floor + (if count > visible_floor then 1 else 0) in
   (* Reserve a visible count when decoding rejected rows. The rejection
      block spends any additional room after the summary and before detail. *)
   let refused_min = if all_refused = [] then 0 else 1 in
-  (* Keep the selected Keeper's input reading and sample coverage before the
-     fleet summary spends the body; folding also needs an omission row and
-     divider, plus any actionable stalled-gap row. *)
+  (* A compact selected reading keeps its state, an omission marker and an
+     actionable stalled-gap row. [v] retains the full input and coverage. *)
   let context_reserve =
     if context.rows = [] then 0
-    else context.primary_rows + 2 + (if Option.is_some context.stalled_row then 1 else 0)
+    else 3 + (if Option.is_some context.stalled_row then 1 else 0)
   in
+  let header_budget = max 0 (budget - fixed_rows - list_rows - refused_min - context_reserve) in
+  let full_header = memory_fleet_header_rows ~cols state in
   let header =
-    memory_fleet_header_rows ~cols state
-    |> fold_memory_rows ~subject:"Memory summary"
-         ~max_rows:(max 0 (budget - fixed_rows - list_rows - refused_min - context_reserve))
+    if List.length full_header <= header_budget then full_header
+    else if header_budget > 0 then [memory_compact_fleet_row state]
+    else []
   in
   let refused_available =
     max 0 (budget - fixed_rows - list_rows - List.length header - context_reserve)
@@ -1123,7 +1204,7 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
     in
     if context.rows = [] || available <= 1 then []
     else
-      fold_memory_context_rows ~max_rows:(available - 1) context
+      fold_memory_context_rows ~ko:(state.ui_language = Lang_ko) ~max_rows:(available - 1) context
   in
   { header; refused; refused_divider; context }
 
@@ -1147,15 +1228,28 @@ let render_memory_body ~cols ~budget (state : state)
     Render_schedule.allocate_memory_columns
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
-  let sort_label = memory_overview_sort_label state.memory_overview_sort in
+  let ko = state.ui_language = Lang_ko in
+  let sort_label =
+    if not ko then memory_overview_sort_label state.memory_overview_sort
+    else match state.memory_overview_sort with
+      | Mem_overview_facts -> "기억 많은 순"
+      | Mem_overview_size -> "저장량 많은 순"
+      | Mem_overview_delta -> "최근 변경 순"
+      | Mem_overview_state -> "주의 우선"
+      | Mem_overview_name -> "이름순"
+      | Mem_overview_updated -> "최근 갱신순"
+  in
   (* The sort it is in, and the filter key the footer gives up first. The row
      also named [a / A] in bold, a key with no value beside it that the footer
      carries at every width, so it said the footer's word again louder. *)
   let info_bar =
-    Printf.sprintf "  %sSort [s]:%s %s  %s·%s  %s[u]:%s %s  %s[/]:%s Filter"
+    Printf.sprintf (if ko then "  %s정렬 [s]:%s %s  %s·%s  %s[u]:%s %s  %s[/]:%s 필터"
+      else "  %sSort [s]:%s %s  %s·%s  %s[u]:%s %s  %s[/]:%s Filter")
       (Theme.recede ()) Ansi.reset sort_label
       (Theme.recede ()) Ansi.reset
-      (Theme.recede ()) Ansi.reset (Memory_usage.unit_label state.memory_unit)
+      (Theme.recede ()) Ansi.reset
+      (if ko then (match state.memory_unit with Memory_usage.Tokens -> "토큰" | Memory_usage.Bytes -> "KiB")
+       else Memory_usage.unit_label state.memory_unit)
       (Theme.recede ()) Ansi.reset
   in
   let projection = memory_overview_rows ~cols ~budget state in
@@ -1173,16 +1267,20 @@ let render_memory_body ~cols ~budget (state : state)
        leaves exactly one, which read "1 matching keepers". The stats line four
        rows up already counts through the helper that declines the plural. *)
     if query <> "" then
-      Printf.sprintf "  %sFilter [/]:%s \"%s\" (%s)  %s[Esc to clear]%s"
-        Ansi.bold Ansi.reset (Terminal_text.single_line query)
-        (Masc_tui_message_layout.count_noun shown "matching keeper")
-        (Theme.recede ()) Ansi.reset
+      if ko then
+        Printf.sprintf "  %s필터 [/]:%s \"%s\" (키퍼 %d명)  %s[Esc:해제]%s"
+          Ansi.bold Ansi.reset (Terminal_text.single_line query) shown (Theme.recede ()) Ansi.reset
+      else
+        Printf.sprintf "  %sFilter [/]:%s \"%s\" (%s)  %s[Esc to clear]%s"
+          Ansi.bold Ansi.reset (Terminal_text.single_line query)
+          (Masc_tui_message_layout.count_noun shown "matching keeper")
+          (Theme.recede ()) Ansi.reset
     else ""
   in
   if search_bar <> "" then push search_bar;
   push_divider ();
   push_styled ~style:(Theme.recede ())
-    ("  " ^ Render_schedule.memory_header_row columns);
+    ("  " ^ Render_schedule.memory_header_row ~ko columns);
   push_divider ();
   (match state.memory_health_error with
    | None -> ()
@@ -1244,7 +1342,8 @@ let render_memory_body ~cols ~budget (state : state)
     done;
     if overflowing then
       push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "  [keepers %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
+        (Printf.sprintf (if ko then "  [키퍼 %s]" else "  [keepers %s]")
+           (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
   end;
   (match projection.context with
    | [] -> ()

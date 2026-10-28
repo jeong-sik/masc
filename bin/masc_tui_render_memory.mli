@@ -74,6 +74,10 @@ val memory_fleet_header_rows : cols:int -> state -> string list
 (** The Total, Ordinary, Source and Librarian rows above the sort row, each
     wrapped to the frame [cols] gives. *)
 
+val memory_overview_reading : cols:int -> state -> Masc_tui_detail_reading.t
+(** A captured, scrollable fleet summary and selected Keeper health reading.
+    It does not follow later selection or refreshes. *)
+
 val memory_overview_scrolled : cols:int -> budget:int -> ?cursor:int -> state -> scrolled
 (** The overview's scroll layout at [cols], with summary, rejected Keeper
     rows and selected Keeper detail limited to the same body [budget] used by

@@ -8,7 +8,7 @@ type inventory =
   ; received_at : float }
 type status = Known of Check.t option | Unknown of string
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let fields names = function
   | `Assoc fields when List.length fields = List.length names
       && List.sort String.compare (List.map fst fields) = List.sort String.compare names -> Ok fields

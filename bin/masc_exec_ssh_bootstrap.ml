@@ -7,7 +7,7 @@
 open Cmdliner
 open Masc
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* Interactive SSH children are waited on synchronously inside Eio's signal
    runtime. Resume only the interrupted syscall, never spawn or stream again. *)

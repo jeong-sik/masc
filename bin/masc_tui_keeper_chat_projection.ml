@@ -140,7 +140,7 @@ type error_certainty =
   | Verified_failed
   | Outcome_unverified
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let create_request ?(attachments = []) ?(references = []) ~keeper_name ~message () =
   {

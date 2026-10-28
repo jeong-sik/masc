@@ -20,7 +20,7 @@ type agent_total =
   ; usage_missing_entries : int
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let cost_store () =
   Config_dir_resolver.base_path_or_cwd ()

@@ -14,7 +14,7 @@ let runtime_config_text_revision source_text =
   |> Runtime.config_source_revision_to_string
 
 let runtime_config_conflict_document body =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* json = try Ok (Yojson.Safe.from_string body)
     with Yojson.Json_error detail -> Error detail in
   let* current = match Json_util.assoc_member_opt "code" json, Json_util.assoc_member_opt "current" json with
@@ -57,7 +57,7 @@ let skill_editor_body reference source_text =
 
 let decode_skill_editor_loaded = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     (match List.assoc_opt "reference" fields,
            List.assoc_opt "source_text" fields,
            List.assoc_opt "access" fields with

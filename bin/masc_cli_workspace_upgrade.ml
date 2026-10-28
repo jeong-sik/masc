@@ -12,7 +12,7 @@ type action = Inspect | Apply of { keeper_name : string; source_sha256 : string 
   | Inspect_journal_installation of string
   | List_journal_installations
   | Restore_journal_installation of string
-let ( let* ) = Result.bind
+open Result.Syntax
 let root base_path = Filename.concat base_path Common.masc_dirname
 let directory base_path = Filename.concat (root base_path) "config/keepers"
 let names path = try Ok (Sys.readdir path |> Array.to_list |> List.sort String.compare)

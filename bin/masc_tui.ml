@@ -1970,7 +1970,7 @@ let launch_artifact_checks_load state ~mailbox =
       launch_workspace_json_read state ~mailbox
         ~deliver:(fun result -> Artifact_checks_loaded (request, result))
         (fun () ->
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* json = Masc_tui_http.get_json ~host ~port ~path:"/api/v1/published-artifact-checks" in
           Masc_tui_artifact_checks.of_json ~received_at:(Unix.gettimeofday ()) json)
 
@@ -2019,7 +2019,7 @@ let save_resource_source state ~mailbox prompt =
           Error ("Save interrupted; the destination may contain complete or incomplete data. Inspect before retrying: " ^ path)))
         ~deliver:(fun result -> Resource_exported (Masc_tui_resource_export.label prompt.rsp_document, result))
         (fun () ->
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* () = resource_export_is_current state prompt in
           Masc_tui_resource_export.save ~fs:env#fs ~path prompt.rsp_document)
 
@@ -2603,7 +2603,7 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
       let run () =
         let result =
           try
-            let ( let* ) = Result.bind in
+            let open Result.Syntax in
             let* () = if authority <> state.workspace_authority then Error "Workspace authority withdrawn" else Ok () in
             let* () = probe_expected_workspace ~host ~port expected_workspace in
             Masc_tui_http.post_keeper_tool_approval ~expected_workspace ~host ~port ~keeper_name
@@ -2649,7 +2649,7 @@ let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mail
     ~deliver:(fun result ->
       enqueue_async mailbox (Keeper_tool_approvals_loaded (request, expected_workspace, result)))
     (fun () ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* () = probe_expected_workspace ~host ~port expected_workspace in
       let* held = Masc_tui_loader.load_keeper_tool_approvals ~host ~port in
       let* () = probe_expected_workspace ~host ~port expected_workspace in
@@ -3314,7 +3314,7 @@ let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
     ~deliver:(fun result ->
       enqueue_async mailbox (Gate_snapshot_loaded (request, expected_workspace, result)))
     (fun () ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* () = probe_expected_workspace ~host ~port expected_workspace in
       let* snapshot = Masc_tui_loader.load_dashboard_gate ~host ~port in
       let* () = probe_expected_workspace ~host ~port expected_workspace in
@@ -3350,7 +3350,7 @@ let launch_gate_resolve state ~mailbox ~approval_id ~approve ~reason =
       let run () =
         let result =
           try
-            let ( let* ) = Result.bind in
+            let open Result.Syntax in
             let* () = if authority <> state.workspace_authority then Error "Workspace authority withdrawn" else Ok () in
             let* () = probe_expected_workspace ~host ~port expected_workspace in
             Masc_tui_http.post_dashboard_gate_resolve ~host ~port ~approval_id
@@ -3398,7 +3398,7 @@ let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pendi
           let run () =
             let result =
               try
-                let ( let* ) = Result.bind in
+                let open Result.Syntax in
                 let* () = if authority <> state.workspace_authority then Error "Workspace authority withdrawn" else Ok () in
                 let* () = probe_expected_workspace ~host ~port expected_workspace in
                 Masc_tui_http.post_dashboard_gate_retry ~host ~port ~request
@@ -3561,7 +3561,7 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
   let run () =
     let result =
       try
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let* () = if authority <> state.workspace_authority then Error "Workspace authority withdrawn" else Ok () in
             let* () = probe_expected_workspace ~host ~port expected_workspace in
         Masc_tui_http.post_keeper_tool_approval ~expected_workspace ~host ~port ~keeper_name
@@ -3929,7 +3929,7 @@ let launch_board_read state ~mailbox key =
       launch_workspace_json_read ~key:(Masc_tui_board_reader.request_job request) state ~mailbox
         ~deliver:(fun result -> Board_attachment_loaded (request,result))
         (fun () ->
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* bytes=Masc_tui_http.get_workspace_bytes ~host ~port
             ~max_body_bytes:Masc_tui_board_upload.max_attachment_bytes
             ~path:("/api/v1/artifact-bytes/" ^ key.Masc_tui_board_reader.sha256) in
@@ -4171,7 +4171,7 @@ let launch_keeper_deletions state ~mailbox ?retry () =
     let run () =
       let result =
         try
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let check_authority () =
             if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
             else if generation <> state.keeper_deletions_generation then Error "Deletion inventory request superseded"
@@ -4480,7 +4480,7 @@ let commit_runtime_config_text ?prior_contact state ~mailbox ~authority ~identit
     ~before_commit ~expected_source_path ~expected_source_revision edited =
   let host = server_peer_host in
   let port = state.port in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let refused result = Result.map_error (fun detail -> Masc_tui_http.Runtime_config_save_refused detail) result in
   let* () = refused (check_workspace_request ?prior_contact state ~mailbox ~authority ~identity ~host ~port ()) in
   let* preview = refused (Masc_tui_http.post_runtime_config_preview ~host ~port ~source_text:edited) in
@@ -4521,7 +4521,7 @@ let launch_keeper_settings_save state ~mailbox request =
     else check_workspace () in
   let run () =
     let outcome = try
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let prepare () =
         let* () = check () in
         let* snapshot = match request.ksv_input with
@@ -4591,7 +4591,7 @@ let launch_runtime_form_save state ~mailbox request =
   let interrupted detail = if !sent then Form_unconfirmed detail else Form_not_sent detail in
   let run () =
     let result = try
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let not_sent result = Result.map_error (fun detail -> Form_not_sent detail) result in
       let* draft = match request.rfs_draft with
         | Config_document_draft session -> Ok (prepare_runtime_document session)
@@ -4860,7 +4860,7 @@ let launch_keeper_settings_editor_read state ~mailbox request =
     (fun () ->
       let result = try Eio.Fiber.first
         (fun () ->
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* () = check () in
           let* observed, stem = Masc_tui_loader.load_keeper_config_editor ~host ~port
               ~keeper_name:key.ksk_keeper in
@@ -4939,7 +4939,7 @@ let launch_keeper_items ?(keep_observed_account = false) state ~mailbox keeper_n
         ^ Masc_tui_http.percent_encode_path_segment keeper_name ^ "/items?expected_workspace="
         ^ Masc_tui_http.percent_encode_query_value
             (Tui_decode.Canonical_path.to_string identity.Tui_decode.sid_base_path) in
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* json = Masc_tui_http.get_json ~host ~port ~path in
       Masc_tui_keeper_items.decode ~keeper_name json)
   end
@@ -5414,7 +5414,7 @@ let launch_lane_declaration state ~mailbox ~edit request =
       application_reading=Masc_tui_lane_application.empty};
     let host = server_peer_host and port = state.port in
     let perform () =
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* status, body = match request with
         | Document.Read source_path -> Masc_tui_http.http_get ~host ~port
             ~path:("/api/v1/lane-addons/declaration?source_path=" ^ Masc_tui_http.percent_encode_query_value source_path)
@@ -5505,7 +5505,7 @@ let launch_lane_addons ?target state ~mailbox request =
     Result.bind (check_request ())
       (fun () -> Masc_tui_http.post_json ~host ~port ~path ~body) in
   let perform () =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let inventory_result result = Result.map_error (fun detail -> `Inventory detail) result in
     let detail_result result = Result.map_error (fun detail -> `Detail detail) result in
     let request_result result = Result.map_error (fun detail -> `Request detail) result in
@@ -7661,7 +7661,7 @@ let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~ma
       ~deliver:(fun result -> enqueue_async mailbox (Keeper_native_tasks_loaded (keeper_name,result)))
       (fun () -> Masc_tui_native_tasks.read ~mode ~keeper_name ~previous
         ~fetch:(fun path ->
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* () = if read_authority == state.workspace_read_authority then Ok ()
             else Error "workspace observation read was retired" in
           let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
@@ -7702,7 +7702,7 @@ let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~
       ~deliver:(fun result -> enqueue_async mailbox (Keeper_child_content_loaded (keeper_name,result)))
       (fun () -> Masc_tui_child_content.read ~mode ~keeper_name ~previous
         ~fetch:(fun path ->
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let check () =
             if reading != state.workspace_read_authority then
               Error "Child observation read was retired"
@@ -7756,7 +7756,7 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
       let check_request = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
       let result =
         try
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* () = check_request () in
           let* reading = fetch ~host ~port ~keeper_name in
           let* () = check_request () in
@@ -7775,7 +7775,7 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
       let check_request = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
       let result =
         try
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let check () = Result.map_error
             (fun detail -> Keeper_chat_history.Page_read_failed detail) (check_request ()) in
           let* () = check () in
@@ -7872,7 +7872,7 @@ let launch_keeper_chat_copy state ~mailbox ~keeper_name =
 let read_keeper_chat_operation ~check_request ~host ~port
     ~keeper_name ~operation_id =
   try
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* () = check_request () in
     let path = Printf.sprintf "/api/v1/keepers/%s/chat/operations/%s"
       (Masc_tui_http.percent_encode_path_segment keeper_name)
@@ -8966,7 +8966,7 @@ let launch_runtime_assignment_set state ~keeper_name ~runtime_id =
         else Error "Original workspace or read authority withdrew before assignment dispatch" in
       let run () =
         let outcome = try
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let prepare () =
             let* () = check () in
             publish Assignment_reading;
@@ -9547,7 +9547,7 @@ let launch_task_creation_read state ~mailbox =
     launch_workspace_result ~key:request.tcr_job ~observation:true state ~mailbox
       ~boundary_error:(fun detail -> Masc_tui_original_task_read.Read_failed detail)
       ~deliver:(fun result -> Task_creation_read_done (request,result)) (fun () ->
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let workspace_error detail=Masc_tui_original_task_read.Workspace_unconfirmed detail in
         let* arguments=Masc_tui_original_task_read.arguments source in
         let* ()=check_workspace_request state ~mailbox ~authority ~identity ~host ~port ()
@@ -9641,7 +9641,7 @@ let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
     let host = server_peer_host and port = state.port and session = state.mcp_session in
     Masc_tui_task_dispatch.launch request.tdr_dispatch
       ~prepare:(fun () ->
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
         let* session_id = match session with
           | Some session_id -> Ok session_id
@@ -9891,7 +9891,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
     :: List.map (fun (item : Chat_queue.item) ->
          Printf.sprintf "  %s\n    %s" item.request.request_id item.request.message) pending in
   let perform () =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* () = check_control () in
     let* receipt = match action with
       | Inbox.Inspect -> Ok []
@@ -11107,7 +11107,7 @@ let prepare_inspected_frame state ~mailbox =
          Eio.Fiber.fork_daemon ~sw (fun () ->
            Eio.Fiber.yield ();
            let result = Eio_guard.run_in_systhread ~label:"tui-vector-window" (fun () ->
-             let ( let* ) = Result.bind in
+             let open Result.Syntax in
              let* png = Masc_tui_pele.render ~cache_dir:(ensure_img_cache_dir ()) ~raster scene in
              let* prepared = Masc_tui_image_cache.prepare_presentation ~run:Unix.system
                ~cache_dir:(ensure_img_cache_dir ()) Masc_tui_image_cache.Pixel_graphics png in
@@ -11331,7 +11331,7 @@ let conversation_media state =
       projected @ queued
 
 let prepare_listen_media ~host ~port (media : Masc_tui_chat_media.playable) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* bytes = match media.source with
     | `Server_path path ->
         Masc_tui_http.get_workspace_bytes
@@ -13110,7 +13110,7 @@ let launch_approvals_summary_load state ~mailbox =
                       (Approvals_summary_loaded
                          (request, listing_ticket, expected_workspace, result)))
                   (fun () ->
-                    let ( let* ) = Result.bind in
+                    let open Result.Syntax in
                     let check_identity ?prior_contact () =
                       check_workspace_request ?prior_contact ~refresh_ticket state ~mailbox ~authority
                         ~identity:(Some expected_workspace) ~host ~port ()
@@ -15548,7 +15548,7 @@ let launch_goal_confirmation_read state ~mailbox ~goal_id =
              launch_workspace_request state ~mailbox ~boundary_error:Fun.id
                ~deliver:(fun result -> Goal_confirmation_loaded (request, result))
                (fun () ->
-                 let ( let* ) = Result.bind in
+                 let open Result.Syntax in
                  let* json = Masc_tui_http.fetch_goal_confirmation ~host ~port ~goal_id in
                  let* confirmation = Goal_confirmation.decode_confirmation ~goal_id json in
                  match confirmation.phase with
@@ -15567,7 +15567,7 @@ let launch_skill_evidence_read state ~mailbox reference =
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
       ~deliver:(fun result -> Skill_evidence_loaded (request, key, result))
       (fun () ->
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let* () = check () in
         let* json = Masc_tui_http.post_skill_evidence ~host ~port reference in
         let* () = check () in
@@ -15894,7 +15894,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
     let read_refresh () =
       try
         Masc_tui_credential_preparation.await_initial state.credential_preparation;
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let identity = currency_authority.car_identity in
         (* A superseded scoped probe must not enqueue an unticketed identity
            withdrawal. Only its ticketed completion may change authority. *)
@@ -16589,7 +16589,7 @@ let start_ask_answer state ~asker ~ask_id ~source_turn_ref ~answered_label ~answ
     Fun.protect ~finally:(fun () -> close_ask_submission submission) (fun () ->
     let result =
       try
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let* () = observe_ask_answer_call submission Ask_answer_observation.Workspace_check check in
         observe_ask_answer_call submission Ask_answer_observation.Answer_post (fun () ->
           (* The asker decides the route; each route's receipt keeps its kind. *)
@@ -16620,7 +16620,7 @@ let start_ask_answer state ~asker ~ask_id ~source_turn_ref ~answered_label ~answ
       asks in
     let asks =
       try
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let* expected_workspace = match identity with
           | Some identity -> Ok identity
           | None -> Error "Server workspace identity is unavailable" in
@@ -16890,7 +16890,7 @@ let handle_goal_confirmation_key state ~mailbox =
            launch_workspace_request state ~mailbox ~boundary_error:Fun.id
              ~deliver:(fun result -> Goal_confirmation_submitted result)
              (fun () ->
-               let ( let* ) = Result.bind in
+               let open Result.Syntax in
                let* json = Masc_tui_http.post_goal_confirmation ~host ~port confirmation in
                let* confirmed = Goal_confirmation.decode_confirmation ~goal_id json in
                match confirmed.phase with
@@ -17067,7 +17067,7 @@ let start_verification_verdict state ~mailbox ~(task_id : string)
   let port = state.port in
   let run_verdict () =
     let result =
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
       match
         Masc_tui_http.post_verification_verdict ~host ~port ~task_id
@@ -17207,7 +17207,7 @@ let export_verification_evidence state ~mailbox ~open_file =
       ~cancelled:(Verification_evidence_exported (request, Error "File operation interrupted; a local copy or opened viewer may exist. Inspect before retrying."))
       ~deliver:(fun result -> Verification_evidence_exported (request,result))
       (fun () ->
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let* file = read () in
         let open_file = if not open_file then None else Some (fun path ->
           Eio_guard.run_in_systhread ~label:"tui-evidence-open" (fun () ->
@@ -23579,7 +23579,7 @@ let main
                     (action ^ ": channel_id must remain the selected binding")
               | Some _ | None -> (
                   let result =
-                    let ( let* ) = Result.bind in
+                    let open Result.Syntax in
                     let* () = check_workspace_request state ~mailbox:async_messages
                       ~authority ~identity ~host ~port () in
                     post ~connector ~json in
@@ -23671,7 +23671,7 @@ let main
                   if state.connector_unbind_armed = Some exact then begin
                     state.connector_unbind_armed <- None;
                     let result =
-                      let ( let* ) = Result.bind in
+                      let open Result.Syntax in
                       let* () = check_workspace_request state ~mailbox:async_messages
                         ~authority ~identity ~host ~port () in
                       Masc_tui_http.post_connector_unbind ~host ~port

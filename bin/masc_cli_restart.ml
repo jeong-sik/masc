@@ -212,7 +212,7 @@ let build_summary ~clock ~port =
   | Ok _ | Error _ -> "masc"
 
 let replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = check_host host in
   let* incumbent = observe ~clock ~run_dir ~base_path ~port in
   let* wait_flag =

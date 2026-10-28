@@ -27,7 +27,7 @@ let body ~expected_workspace request =
     "expected_change_id", Option.fold ~none:`Null ~some:(fun id -> `String id) request.expected_change_id]
 
 let decode_response request json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* check = match json with
     | `Assoc ["check", check] -> Check.of_json check
     | _ -> Error "invalid confirmation change response" in

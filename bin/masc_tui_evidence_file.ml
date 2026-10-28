@@ -1,7 +1,7 @@
 type t = { name : string; contents : string }
 
 let decode ~task_id ~verification_id ~index json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let object_fields = function
     | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok fields
     | _ -> Error "The evidence file response is not a unique object" in
@@ -37,7 +37,7 @@ let decode ~task_id ~verification_id ~index json =
 type progress = Not_started | Writing of string | Saved of string | Aborted of string
 
 let save ?(with_lock=File_lock_eio.with_durable_lock_observed) ~fs ~registry_root ~directory ~directory_name ~path ~progress t =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let lock_path = Filename.concat registry_root "tui-evidence-export.lock" in
   try
     Eio.Path.with_open_dir Eio.Path.(fs / registry_root) (fun registry_root ->
@@ -98,7 +98,7 @@ let save ?(with_lock=File_lock_eio.with_durable_lock_observed) ~fs ~registry_roo
     Printexc.raise_with_backtrace exn backtrace
 
 let export_with ?with_lock ~fs ~registry_root ~directory ~progress ~admitted ~open_file t =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = admitted () in
   let directory = if Filename.is_relative directory then Filename.concat (Sys.getcwd ()) directory else directory in
   let directory_name = "masc-evidence-" ^ Random_id.uuid_v7 () in

@@ -31,7 +31,7 @@ let parse_providers ~flag raw =
 
 let changes
     ~searxng_url ~provider ~provider_order ~fallbacks ~timeout_sec ~cache_ttl_sec ~unset =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let optional parse wrap = function
     | None -> Ok []
     | Some raw -> Result.map (fun parsed -> [ wrap parsed ]) (parse raw)

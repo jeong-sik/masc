@@ -263,7 +263,7 @@ let take_saved ~requested retained =
   | None -> None, retained
   | Some view -> Some view, List.filter (fun held -> held != view) retained
 let groups_of_inventory providers json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let invalid = Error "계정 그룹 목록을 확인하지 못했습니다. 새로고침하세요." in
   let strings = function
     | `List rows ->
@@ -313,7 +313,7 @@ let inventory ?view t json =
         let setup_supported = field "setup_support" row <> `String "unsupported" in
         Option.map (fun client -> {id;label;client;origin;enabled;setup_supported}) (client_of_protocol protocol)
       | _ -> None) rows in
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* account_groups = groups_of_inventory providers json in
     (* [/login <client>] opens that client's accounts; [/login <id>] opens its
        client's accounts on that row. *)

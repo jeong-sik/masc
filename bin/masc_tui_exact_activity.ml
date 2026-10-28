@@ -14,7 +14,7 @@ type write_result =
   | Conflict of document
   | Refused of string
   | Unconfirmed of string
-let ( let* ) = Result.bind
+open Result.Syntax
 let same_owner a b = a.workspace = b.workspace && Standalone_lane.equal a.lane b.lane
 let owner (t : t) = t.owner
 let request_owner (request : request) = request.owner

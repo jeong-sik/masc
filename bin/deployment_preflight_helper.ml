@@ -1,6 +1,6 @@
 open Cmdliner
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let errorf format = Printf.ksprintf (fun message -> Error (`Msg message)) format
 

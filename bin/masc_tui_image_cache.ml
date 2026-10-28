@@ -308,7 +308,7 @@ let prepare_presentation ~run ~cache_dir display png =
   match display with
   | Pixel_graphics -> Ok (Png png)
   | Character_cells {columns;rows} ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* width, height =
       match verdict_of_bytes png, Masc.Keeper_image_dimensions.image_dimensions png with
       | Known_image {media_type="image/png"}, Some (width,height)

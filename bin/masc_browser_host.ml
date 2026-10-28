@@ -1,6 +1,6 @@
 (** Firefox native messaging host: the command line of {!Browser_host}. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* What stops a BiDi host that the operator runs in a terminal. *)
 type stop_signal = Interrupt | Terminate | Hangup

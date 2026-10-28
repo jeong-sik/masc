@@ -759,8 +759,24 @@ let live_transport_setup_doc = function
   | Ego_task_space -> "docs/rfc/RFC-browser-live-ego.md"
 ;;
 
+type ego_space = { id : int; name : string }
+let ego_space_to_json (space : ego_space) = `Assoc ["id",`Int space.id;"name",`String space.name]
+let ego_space_of_json = function
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=["id";"name"] ->
+    (match List.assoc_opt "id" fields,List.assoc_opt "name" fields with
+     | Some (`Int id),Some (`String name) when id>=0 && Int64.of_int id<=9007199254740991L && String.trim name<>"" -> Ok {id;name}
+     | (None|Some _),(None|Some _) -> Error "invalid Ego Space identity")
+  | _ -> Error "invalid or duplicate Ego Space fields"
+let client_space_to_json = function None -> `Null | Some space -> ego_space_to_json space
+let client_space_of_json ~transport value = match transport,value with
+  | Ego_task_space,value -> Result.map Option.some (ego_space_of_json value)
+  | (Web_extension|Webdriver_bidi),`Null -> Ok None
+  | (Web_extension|Webdriver_bidi),_ -> Error "Space context requires an Ego connection"
+let same_space_id left right =
+  Option.map (fun (space : ego_space) -> space.id) left
+  = Option.map (fun (space : ego_space) -> space.id) right
 type client_info = { client_id : client_id; browser : browser; version : string; engine_version : string;
-  transport : live_transport }
+  transport : live_transport; space : ego_space option }
 type interaction_phase = Interaction_queued | Interaction_running
 type interaction_activity = { request_id : string; actor : string option;
   action : string; tab_id : int option; phase : interaction_phase }
@@ -871,6 +887,7 @@ let refresh_unlocked client = match client.liveness with
   | Worker_held -> ()
 let same_info left right = left.browser = right.browser
   && left.transport = right.transport
+  && same_space_id left.space right.space
   && String.equal left.version right.version && String.equal left.engine_version right.engine_version
 let retire_unlocked key client =
   Hashtbl.remove clients key;
@@ -913,6 +930,7 @@ let client_json info =
   "browser", `String (browser_name info.browser); "version", `String info.version;
   "engineVersion", `String info.engine_version;
   "transport", `String (live_transport_to_string info.transport);
+  "space",client_space_to_json info.space;
   "interactions",`List (List.map interaction_activity_json active);
   "lastActivities",`List (List.map settled_activity_json settled)]
 let target_client_id = function Automation | Stagehand -> None | Live_client client -> Some client.info.client_id
@@ -921,29 +939,40 @@ let target_client_id = function Automation | Stagehand -> None | Live_client cli
    have no client, and no transport to name. *)
 let client_id_field = "clientId"
 let transport_field = "transport"
-let connection_field_names = [client_id_field; transport_field]
-let live_connection_fields ~client_id ~transport =
+let space_field = "browserSpace"
+let connection_field_names = [client_id_field; transport_field;space_field]
+let live_connection_fields ~client_id ~transport ~space =
   [client_id_field, `String (client_id_to_string client_id);
    transport_field, `String (live_transport_to_string transport)]
+  @ Option.to_list (Option.map (fun space -> space_field,ego_space_to_json space) space)
 let target_connection_fields = function
   | Live_client client ->
-    live_connection_fields ~client_id:client.info.client_id ~transport:client.info.transport
+    live_connection_fields ~client_id:client.info.client_id ~transport:client.info.transport ~space:client.info.space
   | Automation | Stagehand -> [client_id_field, `Null]
 (* Those fields read back from an answer, for a holder that keeps only what
    it can check. An answer states no connection, the server's own browser, or
    a live connection together with its transport. A client ID without its
    transport, or a transport without its client, is none of the three. *)
 let connection_fields_of_json fields =
-  match List.assoc_opt client_id_field fields, List.assoc_opt transport_field fields with
-  | None, None -> Ok []
-  | Some `Null, None -> Ok [client_id_field, `Null]
-  | Some (`String client_id), Some (`String transport) ->
+  let keys=List.filter_map (fun (key,_) -> if List.mem key connection_field_names then Some key else None) fields in
+  if List.length keys<>List.length (List.sort_uniq String.compare keys) then Error "duplicate_connection_fields"
+  else
+  let space=List.assoc_opt space_field fields in
+  match List.assoc_opt client_id_field fields, List.assoc_opt transport_field fields,space with
+  | None, None,None -> Ok []
+  | Some `Null, None,None -> Ok [client_id_field, `Null]
+  | Some (`String client_id), Some (`String transport),space ->
     Result.bind (client_id_of_string client_id) (fun client_id ->
-      Result.map (fun transport -> live_connection_fields ~client_id ~transport)
-        (live_transport_of_string transport))
-  | Some (`String client_id), None ->
+      Result.bind (live_transport_of_string transport) (fun transport ->
+        let parsed=match transport,space with
+          | Ego_task_space,Some value -> Result.map Option.some (ego_space_of_json value)
+          | Ego_task_space,None -> Error "ego_connection_without_space"
+          | (Web_extension|Webdriver_bidi),None -> Ok None
+          | (Web_extension|Webdriver_bidi),Some _ -> Error "space_requires_ego_connection" in
+        Result.map (fun space -> live_connection_fields ~client_id ~transport ~space) parsed))
+  | Some (`String client_id), None,None ->
     Result.bind (client_id_of_string client_id) (fun _ -> Error "client_without_transport")
-  | Some _, _ | None, Some _ -> Error "invalid_connection_fields"
+  | (Some _, _,_) | (None, Some _,_) | (None,None,Some _) -> Error "invalid_connection_fields"
 (* The route's own values replace anything a page or backend supplied under
    the same names, so a reader that takes the first key and one that takes the
    last see the same connection. *)

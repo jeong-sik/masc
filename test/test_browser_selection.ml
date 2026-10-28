@@ -7,7 +7,7 @@ let empty : Selection.snapshot = {live_activity=Lane.Enabled;live_clients=[];
 let client digit transport : Lane.client_info =
   let id="00000000-0000-4000-8000-00000000000" ^ digit in
   let client_id = match Lane.client_id_of_string id with Ok id -> id | Error error -> fail error in
-  {client_id;browser=Lane.Firefox;version="fixture";engine_version="fixture";transport}
+  {client_id;browser=Lane.Firefox;version="fixture";engine_version="fixture";transport;space=(match transport with Browser_lane.Ego_task_space -> Some ({id=51;name="fixture Space"} : Browser_lane.ego_space) | Web_extension|Webdriver_bidi -> None)}
 let route info = Lane.Live_route (Some info.Lane.client_id)
 let choose ?(verb=Lane.Tabs_list) ?(bound=false) snapshot = Selection.choose ~verb ~bound ~snapshot Selection.Automatic
 let selected (expected : Selection.selected) = function
@@ -185,6 +185,28 @@ let test_target_from_snapshot () =
   check bool "the live lane follows the snapshot's live activity" true
     (target {empty with live_activity=Lane.Unobserved;live_clients=[first]} (route first)
      =Error (Lane.Activity_rejected Lane.Activity_unavailable))
+let test_space_binding () =
+  let module Binding=Masc.Browser_binding in
+  let original=client "1" Lane.Ego_task_space in
+  let space : Lane.ego_space = {id=51;name="SDK Space"} in
+  let original={original with space=Some space} in
+  let make info=Binding.of_browser {Selection.route=route info;reason=Selection.Explicit_browser}
+    (Selection.Connected info) in
+  let binding=make original in
+  let renamed=make {original with space=Some {space with name="Renamed Space"}} in
+  let replaced=make {original with space=Some {space with id=52}} in
+  check bool "a rename retains the same Space connection" true (Binding.same_connection binding renamed);
+  check bool "reusing a client UUID cannot silently replace its Space" false (Binding.same_connection binding replaced);
+  let forged=`Assoc ["browserSpace",`Assoc ["id",`Int 999;"name",`String "forged"];
+    "browserSpace",`Null;"clientId",`String "forged";"tabId",`Int 3] in
+  let answer=Binding.annotate binding forged in
+  check bool "host Space replaces every page-supplied context" true
+    (Yojson.Safe.Util.member "browserSpace" answer=Lane.ego_space_to_json space);
+  (match answer with
+   | `Assoc fields -> check int "Space context has one authoritative value" 1
+       (List.length (List.filter (fun (key,_) -> key="browserSpace") fields))
+   | _ -> fail "expected object")
+
 let () = run "browser selection" ["policy",[
   test_case "connected login and actual owned sessions" `Quick test_connections_and_sessions;
   test_case "exact browser binding" `Quick test_explicit_binding;
@@ -195,5 +217,6 @@ let () = run "browser selection" ["policy",[
   test_case "observation sends no command" `Quick test_observation_is_not_dispatch;
   test_case "selection wire contract" `Quick test_wire;
   test_case "ambiguous selection names its recovery" `Quick test_ambiguous_selection_recovery;
+  test_case "receipts bind Space identity and reject forged context" `Quick test_space_binding;
   test_case "receipts retain the chosen client" `Quick test_bind_chosen_identity;
   test_case "a route names its browser in the snapshot" `Quick test_target_from_snapshot]]

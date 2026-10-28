@@ -41,7 +41,7 @@ let scenario () =
     check bool "unregistered clients grant no owned cleanup" true
       (Result.is_error (Owner.attach_live owner ~client_id ~cleanup:(fun () -> fail "foreign cleanup")));
     let client:B.client_info={client_id;browser=B.Firefox;version="fixture";
-      engine_version="fixture";transport=B.Webdriver_bidi} in
+      engine_version="fixture";transport=B.Webdriver_bidi;space=None} in
     (match Owner.dispatch owner {W.incarnation;command=W.Poll {client;window_sec=0.001}} with
      | W.Poll_result _ -> ()
      | Service_refusal _|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Receipt|Issue_result _ -> fail "live registration refused");

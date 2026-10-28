@@ -5792,6 +5792,7 @@ module Browser_lane_view = struct
   type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
   type browser = Browser_lane.browser = Firefox | Zen | Ego_lite
   type client = { client_id : string; browser : browser; transport : Browser_lane.live_transport;
+    space : Browser_lane.ego_space option;
     interactions : Browser_lane.interaction_activity list;
     last_activities : Browser_lane.settled_activity list }
   type discovery = Read_after_discovery | Choose_client
@@ -6042,10 +6043,11 @@ module Browser_lane_view = struct
     | Browser_missing -> "Browser not connected"
   let busy t = match t.load with Loading _ -> true | Idle | No_browser | Failed _ -> false
   let listed_clients t = Option.value t.clients ~default:[]
-  (* Activity changes during a connection; it is not the connection's identity. *)
+  (* Activity and a Space name may change; a different Space ID is a different
+     connection even if a producer reuses the client UUID. *)
   let same_client (left : client) (right : client) =
     left.client_id = right.client_id && left.browser = right.browser
-    && left.transport = right.transport
+    && left.transport = right.transport && Browser_lane.same_space_id left.space right.space
   let same_selected_client left right = match left, right with
     | None, None -> true
     | Some left, Some right -> same_client left right
@@ -6123,7 +6125,11 @@ module Browser_lane_view = struct
   (* Where attaching a connection of one of these transports is written. *)
   let transport_setup_row transports =
     "Setup: " ^ String.concat " or " (List.map Browser_lane.live_transport_setup_doc transports)
-  let browser_identity (client : client) = browser_name client.browser ^ " · " ^ client.client_id
+  let browser_identity (client : client) =
+    browser_name client.browser ^ " · " ^ client.client_id
+    ^ (match client.space with None -> "" | Some space ->
+        Printf.sprintf " · Space #%d · %s" space.id
+          (Masc.Tui_terminal_text.sanitize_terminal_text space.name))
   let connection_name (client : client) =
     browser_name client.browser ^ " · " ^ transport_label client.transport
   (* The title names the connection; the connection row adds what it leaves
@@ -6739,12 +6745,16 @@ module Browser_lane_view = struct
     Option.to_result ~none:"unknown browser source" lane
   let get parse name json = let* value = field name json in parse value
   let parse_client json =
+    let* ()=match json with
+      | `Assoc fields when List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok ()
+      | _ -> Error "invalid or duplicate browser client fields" in
     let* client_id = get string "clientId" json in
     let* browser = get (function
       | `String raw -> Browser_lane.browser_of_string raw |> Result.map_error (fun _ -> "unknown native browser")
       | _ -> Error "unknown native browser") "browser" json in
     let* transport = get string "transport" json in
     let* transport = Browser_lane.live_transport_of_string transport in
+    let* space=get (Browser_lane.client_space_of_json ~transport) "space" json in
     if String.trim client_id = "" then Error "empty browser client ID"
     else
       let* interactions = get (function
@@ -6761,7 +6771,7 @@ module Browser_lane_view = struct
             | row::rest -> let* work=Browser_lane.settled_activity_of_json row in parse (work::acc) rest in
           parse [] rows
         | _ -> Error "expected settled browser activities array") "lastActivities" json in
-      Ok { client_id; browser; transport; interactions; last_activities }
+      Ok { client_id; browser; transport; space; interactions; last_activities }
   let decode_clients json =
     let* ok = get boolean "ok" json in
     if not ok then let* detail = get string "error" json in Error detail

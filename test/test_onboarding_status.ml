@@ -302,7 +302,7 @@ let record_file base = Filename.concat base ".masc/browser-lane/bidi-host.json"
 let the_launcher_verdict_reads_the_browser_addon_before_the_launcher () =
   let host : Browser_lane.client_info =
     { client_id = host_client; browser = Browser_lane.Firefox; version = "157.0"
-    ; engine_version = "157.0"; transport = Browser_lane.Web_extension }
+    ; engine_version = "157.0"; transport = Browser_lane.Web_extension ;space=None}
   in
   let lane ?(launcher = Launcher.Follows_workspace) polling : Launcher.t =
     { base_path = "/workspace"; launcher; workspace_port = Ok 8935
@@ -345,7 +345,7 @@ let the_browser_lane_check_asks_the_browser_addon_only_when_serving () =
   Browser_lane.install_serving_port 64850;
   let host : Browser_lane.client_info =
     { client_id = host_client; browser = Browser_lane.Firefox; version = "157.0"
-    ; engine_version = "157.0"; transport = Browser_lane.Web_extension }
+    ; engine_version = "157.0"; transport = Browser_lane.Web_extension ;space=None}
   in
   let cases =
     [ "no browser Add-on is a step to take", Launcher.Unlisted Launcher.No_browser_addon,
@@ -733,7 +733,7 @@ let a_bidi_host_record_that_cannot_be_read_is_invalid () =
    it, so that is what the doctor is satisfied by. *)
 let a_running_host_is_rated_by_the_server_that_lists_it () =
   let client transport client_id : Browser_lane.client_info =
-    { client_id; browser = Browser_lane.Firefox; version = "157.0"; engine_version = "157.0"; transport }
+    { client_id; browser = Browser_lane.Firefox; version = "157.0"; engine_version = "157.0"; transport ;space=(match transport with Browser_lane.Ego_task_space -> Some ({id=51;name="fixture Space"} : Browser_lane.ego_space) | Web_extension|Webdriver_bidi -> None)}
   in
   let serving polling = Launcher.Serving { port = 8935; polling = Launcher.Polling polling } in
   let listing = serving [ client Browser_lane.Webdriver_bidi host_client ] in

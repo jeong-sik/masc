@@ -343,6 +343,16 @@ ID without its transport. Carry that ID into subsequent operations; the
 transport says which [live work](#what-each-live-connection-serves) the
 connection serves before a request is refused for it.
 
+An Ego connection also carries `browserSpace: {id, name}` in those replies and
+stored screenshot metadata. Client inventories and private worker messages use
+the corresponding `space` object; other transports require `space: null` there
+and have no `browserSpace` in command receipts. The peer obtains both values
+from the SDK on attachment. The ID binds the connection; a name is an
+attachment-time observation and does not assert ownership, visibility or login.
+Page-provided Space metadata is discarded with the other connection fields.
+Read composition rejects a changed Space ID even if its client UUID is reused.
+Missing, duplicate or cross-transport Space context is rejected at decoding.
+
 One answer does not follow that rule. The automation lane's optional document
 read keeps `clientId: "automation:<session>"`, the session its observer read,
 because the document source requires that string.

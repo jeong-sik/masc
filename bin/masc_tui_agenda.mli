@@ -128,7 +128,7 @@ val waiting : t -> int
     open ask counts once however many questions it holds. A list that was not
     read adds nothing. *)
 
-val waiting_label : cells:int -> t -> string
+val waiting_label : ?ko:bool -> cells:int -> t -> string
 (** The badge for the surface strip, as plain text; styling belongs to the
     renderer. It names what waits, by kind and in that order of attention --
     questions, held calls, Goals to confirm, stuck tasks -- led by the [;] key
@@ -137,7 +137,8 @@ val waiting_label : cells:int -> t -> string
     The longest of three spellings that fits [cells] is returned: the
     sentence, the kinds alone, the {!waiting} total alone. The total is
     returned even when it does not fit, so the badge never disappears; the
-    caller makes room for it. *)
+    caller makes room for it. [ko] selects Korean labels; the default is
+    English. *)
 
 val strip :
   now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> string option

@@ -3204,10 +3204,30 @@ type runtime_probe_annotation =
   | Runtime_probe_note of string
   | Runtime_probe_failure of string
 
-let runtime_probe_status_label = function
-  | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_cli -> "CLI not probed"
-  | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_native_auth -> "ADC not probed"
-  | (Masc.Tui_decode_runtime_probe.Runtime_provider_reachable | Masc.Tui_decode_runtime_probe.Runtime_provider_missing_auth | Masc.Tui_decode_runtime_probe.Runtime_provider_auth_failed | Masc.Tui_decode_runtime_probe.Runtime_provider_network_error | Masc.Tui_decode_runtime_probe.Runtime_provider_server_error | Masc.Tui_decode_runtime_probe.Runtime_provider_endpoint_not_found | Masc.Tui_decode_runtime_probe.Runtime_provider_http_error | Masc.Tui_decode_runtime_probe.Runtime_provider_unknown_http_status | Masc.Tui_decode_runtime_probe.Runtime_provider_invalid_endpoint | Masc.Tui_decode_runtime_probe.Runtime_provider_invalid_execution_transport) as status -> Masc.Tui_decode_runtime_probe.runtime_provider_status_to_string status
+let runtime_probe_status_label ?(ko = false) status =
+  let open Masc.Tui_decode_runtime_probe in
+  if ko then
+    match status with
+    | Runtime_provider_reachable -> "연결 가능"
+    | Runtime_provider_skipped_cli -> "CLI 검사 안 함"
+    | Runtime_provider_skipped_native_auth -> "ADC 검사 안 함"
+    | Runtime_provider_missing_auth -> "인증 정보 없음"
+    | Runtime_provider_auth_failed -> "인증 실패"
+    | Runtime_provider_network_error -> "네트워크 오류"
+    | Runtime_provider_server_error -> "서버 오류"
+    | Runtime_provider_endpoint_not_found -> "엔드포인트 없음"
+    | Runtime_provider_http_error -> "HTTP 오류"
+    | Runtime_provider_unknown_http_status -> "알 수 없는 HTTP 상태"
+    | Runtime_provider_invalid_endpoint -> "잘못된 엔드포인트"
+    | Runtime_provider_invalid_execution_transport -> "잘못된 실행 전송"
+  else
+    match status with
+    | Runtime_provider_skipped_cli -> "CLI not probed"
+    | Runtime_provider_skipped_native_auth -> "ADC not probed"
+    | (Runtime_provider_reachable | Runtime_provider_missing_auth | Runtime_provider_auth_failed
+      | Runtime_provider_network_error | Runtime_provider_server_error | Runtime_provider_endpoint_not_found
+      | Runtime_provider_http_error | Runtime_provider_unknown_http_status | Runtime_provider_invalid_endpoint
+      | Runtime_provider_invalid_execution_transport) as status -> runtime_provider_status_to_string status
 
 let runtime_probe_annotation ~status detail =
   Option.map (fun detail ->
@@ -19713,19 +19733,21 @@ let runtime_row_deemphasized state (option : Tui_decode.runtime_option) =
 let toggle_runtime_dim_refusals state =
   state.runtime_dim_refusals <- not state.runtime_dim_refusals
 
-let runtime_quota_label (runtime : Tui_decode.runtime_option) =
+let runtime_quota_label ?(ko = false) (runtime : Tui_decode.runtime_option) =
   if not runtime.ro_quota_exhausted then None
   else Some (match runtime.ro_quota_resets_at with
     | Some at -> let tm = Unix.localtime at in
-        Printf.sprintf "quota exhausted (resets %02d:%02d)" tm.Unix.tm_hour tm.Unix.tm_min
-    | None -> "quota exhausted (no reset stated)")
+        Printf.sprintf (if ko then "쿼터 소진 (%02d:%02d 초기화)" else "quota exhausted (resets %02d:%02d)")
+          tm.Unix.tm_hour tm.Unix.tm_min
+    | None -> if ko then "쿼터 소진 (초기화 시각 없음)" else "quota exhausted (no reset stated)")
 
-let runtime_rate_limit_label (runtime : Tui_decode.runtime_option) =
+let runtime_rate_limit_label ?(ko = false) (runtime : Tui_decode.runtime_option) =
   if not runtime.ro_rate_limited then None
   else Some (match runtime.ro_rate_limit_resets_at with
     | Some at -> let tm = Unix.localtime at in
-        Printf.sprintf "rate limited (retry %02d:%02d)" tm.Unix.tm_hour tm.Unix.tm_min
-    | None -> "rate limited")
+        Printf.sprintf (if ko then "호출 제한 (%02d:%02d 재시도)" else "rate limited (retry %02d:%02d)")
+          tm.Unix.tm_hour tm.Unix.tm_min
+    | None -> if ko then "호출 제한" else "rate limited")
 
 (* What the last failed attempt was, in the words the failure route uses. *)
 let runtime_attempt_failure_word = function
@@ -19750,22 +19772,24 @@ let runtime_failed_attempt_text (attempt : Tui_decode.runtime_failed_attempt) =
     tm.Unix.tm_hour tm.Unix.tm_min attempt.rfa_recorded_by
 
 let runtime_usage_label state runtime =
+  let ko = state.ui_language = Lang_ko in
   match state.runtime_surface with
-  | None -> Some "usage unknown"
+  | None -> Some (if ko then "사용량 미확인" else "usage unknown")
   | Some snapshot ->
       match runtime_spent_usage snapshot.rss_resolved runtime with
-      | Error _ -> Some "usage unknown"
+      | Error _ -> Some (if ko then "사용량 미확인" else "usage unknown")
       | Ok [] -> None
-      | Ok (_ :: _) -> Some "account limit spent"
+      | Ok (_ :: _) -> Some (if ko then "계정 한도 소진" else "account limit spent")
 
 let runtime_route_probe_text state runtime probe =
+  let ko = state.ui_language = Lang_ko in
   let route = match List.filter_map Fun.id
-      [ runtime_quota_label runtime; runtime_rate_limit_label runtime; runtime_usage_label state runtime ] with
-    | [] -> "no refusal"
+      [ runtime_quota_label ~ko runtime; runtime_rate_limit_label ~ko runtime; runtime_usage_label state runtime ] with
+    | [] -> if ko then "거절 없음" else "no refusal"
     | parts -> String.concat " " parts in
   route ^ " / " ^ (match probe with
-    | None -> "unobserved"
-    | Some probe -> runtime_probe_status_label probe.Masc.Tui_decode_runtime_probe.rpp_status)
+    | None -> if ko then "미관측" else "unobserved"
+    | Some probe -> runtime_probe_status_label ~ko probe.Masc.Tui_decode_runtime_probe.rpp_status)
 
 let runtime_pick_facts = function
   | Pick_lane (lane, candidates) ->
@@ -20034,39 +20058,39 @@ let keeper_assignment_activity keepers =
     Printf.sprintf " (%d turns, %s)" turns (Tui_decode.keeper_cost_summary cost)
   | Some _ -> ""
 
-(* The authority line under the Runtime title: where every reading on this
-   screen comes from, and what the last probe found. It is one sentence of
-   clauses, and with a fleet on screen it asked for about 197 cells with every
-   count a single digit -- the frame gives 96 at the 100 columns the PTY
-   harness opens and 136 at 140, so it was cut mid-word at every width a
-   terminal is likely to have. What the cut took was the tail: the config path
-   this whole screen is a reading of, and a cut path names a file that does not
-   exist.
+let runtime_fleet_summary state =
+  match state.keepers with
+  | [] -> None
+  | keepers ->
+      let summary = match aggregate_keeper_stats keepers with
+        | None -> "activity not observed"
+        | Some (turns, tokens, cost) ->
+            Printf.sprintf "%d turns · %s tok · %s"
+              turns (format_context_tokens tokens) (Tui_decode.keeper_cost_summary cost)
+      in
+      Some (Printf.sprintf "%d keepers · %s" (List.length keepers) summary)
 
-   The shape is the Memory fleet header's (#36497): pack at clause marks rather
-   than at any space, continuation rows under the same indent. A clause carries
-   its own qualifier -- "2 probe-only" counts runtimes the probe reached and
-   the config does not name, so a row ending at "2" claims something else. *)
+(* The list leads with the last probe's outcome and exceptions. Source path,
+   fleet totals and the complete probe diagnostics remain in [v] routes/status;
+   repeating them above every candidate can leave only one selectable row. *)
 let runtime_authority_rows ~cols (state : state) : string list =
   let single_line = Masc.Tui_terminal_text.sanitize_terminal_text in
+  let ko = state.ui_language = Lang_ko in
   let clauses =
     match state.runtime_surface with
     | None ->
-        [ "SSOT: runtime.toml"
-        ; "projections: /api/v1/runtime/resolved + runtime-probe"
-        ]
+        [ (match state.runtime_surface_error with
+           | None -> if ko then "런타임 설정 읽는 중" else "Reading runtime settings"
+           | Some _ -> if ko then "런타임 설정 읽기 실패" else "Runtime settings read failed") ]
     | Some snapshot ->
-        let config =
-          match snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_config_path with
-          | None -> "config path unavailable"
-          | Some path -> single_line path
-        in
         let summary_text =
           match snapshot.Tui_decode.rss_probe with
-          | None -> "probe unavailable"
+          | None -> if ko then "프로브 미확인" else "probe unavailable"
           | Some probe ->
               let summary = probe.Masc.Tui_decode_runtime_probe.rps_summary in
-              Printf.sprintf "%d reachable / %d failed / %d skipped"
+              Printf.sprintf
+                (if ko then "연결 가능 %d · 실패 %d · 검사 생략 %d"
+                 else "%d reachable / %d failed / %d skipped")
                 summary.Masc.Tui_decode_runtime_probe.rpsu_reachable
                 summary.Masc.Tui_decode_runtime_probe.rpsu_failed
                 summary.Masc.Tui_decode_runtime_probe.rpsu_skipped
@@ -20075,33 +20099,20 @@ let runtime_authority_rows ~cols (state : state) : string list =
           match
             snapshot.Tui_decode.rss_probe_error, snapshot.Tui_decode.rss_probe
           with
-          | Some detail, _ -> [ "probe: " ^ single_line detail ]
+          | Some detail, _ -> [ (if ko then "프로브: " else "probe: ") ^ single_line detail ]
           | None, Some probe ->
               (match probe.Masc.Tui_decode_runtime_probe.rps_errors with
-               | detail :: _ -> [ "probe: " ^ single_line detail ]
+               | detail :: _ -> [ (if ko then "프로브: " else "probe: ") ^ single_line detail ]
                | [] -> [])
           | None, None -> []
         in
         let probe_only_note =
           match snapshot.Tui_decode.rss_unassigned_probe_count with
           | 0 -> []
-          | count -> [ Printf.sprintf "%d probe-only" count ]
+          | count -> [ Printf.sprintf (if ko then "설정 외 프로브 %d" else "%d probe-only") count ]
         in
-        let fleet_note =
-          match state.keepers with
-          | [] -> []
-          | keepers ->
-              let summary = match aggregate_keeper_stats keepers with
-                | None -> "activity not observed"
-                | Some (turns, tokens, cost) ->
-                  Printf.sprintf "%d turns · %s tok · %s"
-                    turns (format_context_tokens tokens) (Tui_decode.keeper_cost_summary cost)
-              in
-              [ Printf.sprintf "fleet: %d keepers · %s"
-                  (List.length keepers) summary ]
-        in
-        [ "SSOT: runtime.toml"; "projections: resolved + probe"; summary_text ]
-        @ fleet_note @ [ config ] @ probe_only_note @ probe_note
+        [ summary_text ] @ probe_only_note @ probe_note
+        @ [ if ko then "v:라우트·진단" else "v:routes / status" ]
   in
   let indent = "  " in
   let room =
@@ -20111,16 +20122,21 @@ let runtime_authority_rows ~cols (state : state) : string list =
   |> List.map (fun line -> indent ^ line)
 
 let runtime_default_route_lines ~cols state =
+  let ko = state.ui_language = Lang_ko in
   let text =
     match state.runtime_surface with
-    | None -> "[runtime].default  not observed"
+    | None -> if ko then "[runtime].default  미관측" else "[runtime].default  not observed"
     | Some snapshot ->
         let resolved = snapshot.Tui_decode.rss_resolved in
         (match resolved.rrs_default_route, resolved.rrs_default_runtime_id with
+         | Some route, Some runtime_id when String.equal route runtime_id ->
+             Printf.sprintf (if ko then "[runtime].default  %s · f:변경" else "[runtime].default  %s · f replaces") route
          | Some route, Some runtime_id ->
-             Printf.sprintf "[runtime].default  %s (enters %s) · f replaces" route runtime_id
-         | None, None -> "[runtime].default  none — every keeper needs an assignment · f chooses"
-         | Some _, None | None, Some _ -> "[runtime].default  inconsistent reading")
+             Printf.sprintf (if ko then "[runtime].default  %s (시작 %s) · f:변경" else "[runtime].default  %s (enters %s) · f replaces") route runtime_id
+         | None, None -> if ko then "[runtime].default  없음 — 키퍼마다 배정 필요 · f:선택"
+             else "[runtime].default  none — every keeper needs an assignment · f chooses"
+         | Some _, None | None, Some _ -> if ko then "[runtime].default  관측 불일치"
+             else "[runtime].default  inconsistent reading")
   in
   Masc_tui_message_layout.wrap_words
     ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols - 2))
@@ -20211,11 +20227,9 @@ let runtime_selection_summary_lines ~cols state =
   | None -> []
   | Some (runtime, probe, lane) ->
       let width = max 1 (Masc_tui_frame.inner_width ~cols - 2) in
-      [ "Selected " ^ runtime.ro_id
-          ^ Option.fold ~none:"" ~some:(fun lane -> " · Lane " ^ lane) lane
-          ^ " · Quota scope " ^ runtime_quota_scope_label runtime
-          ^ " · Connection " ^ runtime.ro_provider_id
-          ^ " · " ^ runtime.ro_provider ^ " / " ^ runtime.ro_model
+      let ko = state.ui_language = Lang_ko in
+      [ (if ko then "선택 " else "Selected ") ^ runtime.ro_id
+          ^ Option.fold ~none:"" ~some:(fun lane -> (if ko then " · 레인 " else " · Lane ") ^ lane) lane
       ; runtime_route_probe_text state runtime probe ]
       |> List.concat_map (fun line ->
           Masc_tui_message_layout.wrap_words ~max_cells:width
@@ -20276,7 +20290,8 @@ let runtime_selection_summary_for_viewport ~rows ~cols state =
   let lines = runtime_selection_summary_lines ~cols state in
   let spare = rows - runtime_surface_base_chrome ~rows ~cols state - 1 in
   if lines = [] || List.length lines + 1 <= spare then lines
-  else if spare >= 2 then ["  Enter: full connection and status details"]
+  else if spare >= 2 then
+    [if state.ui_language = Lang_ko then "  Enter: 연결·상태 상세" else "  Enter: full connection and status details"]
   else []
 
 let runtime_surface_listing_chrome ~rows ~cols state =

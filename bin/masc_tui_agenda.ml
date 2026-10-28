@@ -158,15 +158,16 @@ let clock_half ~now ~localtime ~cells row =
    panel has the "Confirm a goal" and "Stuck on you" sections. Gate requests and
    operator confirmations are not in the agenda, so "approval" would claim more
    than the number counts. *)
-let waiting_phrases t =
-  [ List.length (rows_of t.asking), "question", "questions"
-  ; List.length (rows_of t.blocked), "held call", "held calls"
-  ; List.length (rows_of t.confirming), "goal to confirm", "goals to confirm"
-  ; List.length (rows_of t.stuck), "stuck task", "stuck tasks"
+let waiting_phrases ~ko t =
+  [ List.length (rows_of t.asking), "질문", "question", "questions"
+  ; List.length (rows_of t.blocked), "보류된 호출", "held call", "held calls"
+  ; List.length (rows_of t.confirming), "완료 확인 목표", "goal to confirm", "goals to confirm"
+  ; List.length (rows_of t.stuck), "막힌 작업", "stuck task", "stuck tasks"
   ]
-  |> List.filter_map (fun (count, one, many) ->
+  |> List.filter_map (fun (count, korean, one, many) ->
     if count <= 0 then None
-    else Some (Printf.sprintf "%d %s" count (if count = 1 then one else many)))
+    else Some (if ko then Printf.sprintf "%s %d건" korean count
+      else Printf.sprintf "%d %s" count (if count = 1 then one else many)))
 ;;
 
 (* What waits on the operator, by kind, for the surface strip at the top of
@@ -178,17 +179,17 @@ let waiting_phrases t =
    the sentence, the kinds alone, the total alone. The total is the last
    resort and is returned even when it does not fit, because a badge that
    vanishes is worse than one the ring has to make room for. *)
-let waiting_label ~cells t =
-  match waiting_phrases t with
+let waiting_label ?(ko = false) ~cells t =
+  match waiting_phrases ~ko t with
   | [] -> ""
   | phrases ->
     let listed = String.concat " \xc2\xb7 " phrases in
     let spellings =
-      [ "; Awaiting you: " ^ listed
+      [ (if ko then "; 확인 필요: " else "; Awaiting you: ") ^ listed
       ; "; " ^ listed
       ]
     in
-    let total = Printf.sprintf "; %d waiting" (waiting t) in
+    let total = Printf.sprintf (if ko then "; 확인 필요 %d건" else "; %d waiting") (waiting t) in
     let fits text = Masc_tui_message_layout.display_width text <= cells in
     (match List.find_opt fits spellings with
      | Some text -> text

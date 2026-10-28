@@ -2475,8 +2475,8 @@ let remove_keeper_volumes_by_name
        Error
          (Printf.sprintf
             "microvm_volume_removal_not_established: keeper %s's work volume \
-             on %s was left on the host; verify ownership across workspaces \
-             before deleting it"
+             on %s, if present, was not removed; verify ownership across \
+             workspaces before deleting it"
             keeper_name
             (Keeper_microvm_backend.to_string microvm_backend)))
 ;;

@@ -40,4 +40,5 @@ val handle_dashboard_task_history :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 val handle_dashboard_workspace :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-val handle_telemetry : Httpun.Request.t -> Httpun.Reqd.t -> unit
+val handle_telemetry :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit

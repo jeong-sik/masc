@@ -157,9 +157,9 @@ let websocket_handler ?sw ?clock ~upgrade request reqd =
 
 let add_routes ?sw ?clock ~port router =
   router
-  |> Http.Router.get "/health" health_handler
-  |> Http.Router.get Server_health_paths.liveness liveness_handler
-  |> Http.Router.get Server_health_paths.readiness readiness_handler
+  |> Server_route.get Server_route.Always_public "/health" health_handler
+  |> Server_route.get Server_route.Always_public Server_health_paths.liveness liveness_handler
+  |> Server_route.get Server_route.Always_public Server_health_paths.readiness readiness_handler
   |> Server_route.get Server_route.Public_read "/.well-known/agent.json" (fun _state req reqd ->
          let request_authority = Server_request_authority.current_exn () in
          Http.Response.json_value
@@ -170,11 +170,11 @@ let add_routes ?sw ?clock ~port router =
          Http.Response.json_value
            (Runtime.agent_card_json ~request_authority req)
            reqd)
-  |> Http.Router.ws_get "/ws" (websocket_handler ?sw ?clock)
+  |> Server_route.ws_get "/ws" (websocket_handler ?sw ?clock)
   (* RFC-0217 S4-2 — Otel_metric_store scrape endpoint removed; metrics now
      export via OTLP push (Otel_metrics observable). *)
-  |> Http.Router.get "/ag-ui/events" handle_ag_ui_events
-  |> Http.Router.get "/events/presence" handle_presence_events
+  |> Server_route.get (Server_route.Self_authenticated Route_access.Mcp_transport) "/ag-ui/events" handle_ag_ui_events
+  |> Server_route.get (Server_route.Self_authenticated Route_access.Mcp_transport) "/events/presence" handle_presence_events
   |> Server_route.get Server_route.Public_read "/favicon.ico" (fun _state req reqd ->
          serve_favicon req reqd
        )
@@ -182,7 +182,7 @@ let add_routes ?sw ?clock ~port router =
          serve_favicon req reqd
        )
   (* Dashboard SPA: static assets — prefix match for /dashboard/assets/* *)
-  |> Http.Router.prefix_get "/dashboard/assets/"
+  |> Server_route.prefix_get Server_route.Always_public "/dashboard/assets/"
        (fun request reqd ->
          let req_path = Http.Request.path request in
          let prefix_len = String.length "/dashboard/assets/" in
@@ -192,32 +192,29 @@ let add_routes ?sw ?clock ~port router =
          else
            Http.Response.not_found reqd)
   (* Dashboard SPA: index.html *)
-  |> Http.Router.get "/dashboard" (fun request reqd ->
+  (* The host check runs inside the public read, not before it. A request for a
+     non-canonical host while the server is not ready now gets the 503 of
+     [with_public_read] instead of the redirect, and a malformed workspace
+     precondition on such a request gets its 400 instead of the redirect. For the
+     canonical host the answers are the same. *)
+  |> Server_route.get Server_route.Public_read "/dashboard" (fun _state req reqd ->
        with_canonical_loopback_host ~port
-         (fun request reqd ->
-           with_public_read (fun _state req reqd ->
-             serve_dashboard_index req reqd
-           ) request reqd)
-         request reqd)
-  |> Http.Router.get "/dashboard/" (fun request reqd ->
+         (fun req reqd -> serve_dashboard_index req reqd)
+         req reqd)
+  |> Server_route.get Server_route.Public_read "/dashboard/" (fun _state req reqd ->
        with_canonical_loopback_host ~port
-         (fun request reqd ->
-           with_public_read (fun _state req reqd ->
-             serve_dashboard_index req reqd
-           ) request reqd)
-         request reqd)
-  |> Http.Router.prefix_get "/dashboard/"
-       (fun request reqd ->
+         (fun req reqd -> serve_dashboard_index req reqd)
+         req reqd)
+  |> Server_route.prefix_get Server_route.Public_read "/dashboard/"
+       (fun _state req reqd ->
          with_canonical_loopback_host ~port
-           (fun request reqd ->
-             with_public_read (fun _state req reqd ->
-               let req_path = Http.Request.path req in
-               if is_dashboard_spa_deep_link req_path then
-                 serve_dashboard_index req reqd
-               else
-                 Http.Response.not_found reqd
-             ) request reqd)
-           request reqd)
+           (fun req reqd ->
+             let req_path = Http.Request.path req in
+             if is_dashboard_spa_deep_link req_path then
+               serve_dashboard_index req reqd
+             else
+               Http.Response.not_found reqd)
+           req reqd)
   |> Server_route.get Server_route.Public_read "/api/v1/openapi.json" (fun _state req reqd ->
          let request_authority = Server_request_authority.current_exn () in
          let resolved_host, resolved_port =
@@ -236,26 +233,26 @@ let add_routes ?sw ?clock ~port router =
          in
          Http.Response.json_value ~status json reqd
        )
-  |> Http.Router.get "/" (fun request reqd ->
+  |> Server_route.get Server_route.Always_public "/" (fun request reqd ->
        let request_authority = Server_request_authority.current_exn () in
        match
          canonical_root_dashboard_location ~default_port:port ~request_authority
        with
        | Some location -> respond_redirect ~location reqd
        | None -> redirect_to_dashboard reqd)
-  |> Http.Router.get "/static/css/middleware.css"
+  |> Server_route.get Server_route.Always_public "/static/css/middleware.css"
        (serve_playground_asset "static/css/middleware.css")
-  |> Http.Router.get "/static/js/middleware.js"
+  |> Server_route.get Server_route.Always_public "/static/js/middleware.js"
        (serve_playground_asset "static/js/middleware.js")
-  |> Http.Router.get "/graphiql/graphiql.min.css"
+  |> Server_route.get Server_route.Always_public "/graphiql/graphiql.min.css"
        (serve_graphiql_asset "graphiql.min.css")
-  |> Http.Router.get "/graphiql/graphiql.min.js"
+  |> Server_route.get Server_route.Always_public "/graphiql/graphiql.min.js"
        (serve_graphiql_asset "graphiql.min.js")
-  |> Http.Router.get "/graphiql/react.production.min.js"
+  |> Server_route.get Server_route.Always_public "/graphiql/react.production.min.js"
        (serve_graphiql_asset "react.production.min.js")
-  |> Http.Router.get "/graphiql/react-dom.production.min.js"
+  |> Server_route.get Server_route.Always_public "/graphiql/react-dom.production.min.js"
        (serve_graphiql_asset "react-dom.production.min.js")
-  |> Http.Router.get "/mcp" (fun request reqd ->
+  |> Server_route.get (Server_route.Self_authenticated Route_access.Mcp_transport) "/mcp" (fun request reqd ->
        (* Observer/presence SSE streams authenticate via the `token` query
           param — an EventSource cannot set an Authorization header. Parse
           sse_kind and let handle_get_mcp route it: Observer/Presence go to
@@ -279,25 +276,25 @@ let add_routes ?sw ?clock ~port router =
          | _ -> None
        in
        handle_get_mcp ?sse_kind request reqd)
-  |> Http.Router.get "/mcp/operator" handle_get_operator_mcp
-  |> Http.Router.post "/" handle_post_mcp
-  |> Http.Router.post "/mcp" handle_post_mcp
-  |> Http.Router.post "/mcp/managed"
+  |> Server_route.get (Server_route.Self_authenticated Route_access.Mcp_transport) "/mcp/operator" handle_get_operator_mcp
+  |> Server_route.post (Server_route.Self_authenticated Route_access.Mcp_transport) "/" handle_post_mcp
+  |> Server_route.post (Server_route.Self_authenticated Route_access.Mcp_transport) "/mcp" handle_post_mcp
+  |> Server_route.post (Server_route.Self_authenticated Route_access.Mcp_transport) "/mcp/managed"
        (handle_post_mcp ~profile:Server_mcp_transport_http.Managed_agent)
-  |> Http.Router.post "/mcp/operator"
+  |> Server_route.post (Server_route.Self_authenticated Route_access.Mcp_transport) "/mcp/operator"
        (handle_post_mcp ~profile:Server_mcp_transport_http.Operator_remote)
   (* No GET: the agent stream carries workspace task events a player must not
      see, so the router answers 405, which the MCP transport spec defines as
      "this endpoint offers no SSE stream". *)
-  |> Http.Router.post "/mcp/play"
+  |> Server_route.post (Server_route.Self_authenticated Route_access.Mcp_transport) "/mcp/play"
        (handle_post_mcp ~profile:Server_mcp_transport_http.Seat)
-  |> Http.Router.add ~path:"/mcp" ~methods:[`DELETE]
-       ~handler:handle_delete_mcp
-  |> Http.Router.add ~path:"/mcp/managed" ~methods:[`DELETE]
-       ~handler:(handle_delete_mcp ~profile:Server_mcp_transport_http.Managed_agent)
-  |> Http.Router.add ~path:"/mcp/operator" ~methods:[`DELETE]
-       ~handler:(handle_delete_mcp ~profile:Server_mcp_transport_http.Operator_remote)
-  |> Http.Router.add ~path:"/mcp/play" ~methods:[`DELETE]
-       ~handler:(handle_delete_mcp ~profile:Server_mcp_transport_http.Seat)
+  |> Server_route.add (Server_route.Self_authenticated Route_access.Mcp_transport) ~path:"/mcp" ~methods:[`DELETE]
+       handle_delete_mcp
+  |> Server_route.add (Server_route.Self_authenticated Route_access.Mcp_transport) ~path:"/mcp/managed" ~methods:[`DELETE]
+       (handle_delete_mcp ~profile:Server_mcp_transport_http.Managed_agent)
+  |> Server_route.add (Server_route.Self_authenticated Route_access.Mcp_transport) ~path:"/mcp/operator" ~methods:[`DELETE]
+       (handle_delete_mcp ~profile:Server_mcp_transport_http.Operator_remote)
+  |> Server_route.add (Server_route.Self_authenticated Route_access.Mcp_transport) ~path:"/mcp/play" ~methods:[`DELETE]
+       (handle_delete_mcp ~profile:Server_mcp_transport_http.Seat)
   |> Server_route.add Server_route.Read_auth ~path:"/graphql" ~methods:[`GET; `POST]
        (fun _state req reqd -> handle_graphql req reqd)

@@ -4,7 +4,6 @@
     Reads/writes are scoped to the workspace base resolved by
     {!Server_routes_http_routes_workspace.classify_workspace_query}. *)
 
-open Server_auth
 open Masc_domain
 module Http = Http_server_eio
 

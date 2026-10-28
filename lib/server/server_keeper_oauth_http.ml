@@ -185,9 +185,7 @@ let handle_set_client = (fun state _agent_name req reqd ->
    one: it deletes a credential the login route wrote, and an operator token
    the TUI carries is the one allowed to begin that flow. Not scoped to the
    install -- the token belongs to the Keeper the request names. *)
-let handle_disconnect ~clock request reqd =
-  Server_auth.with_token_permission_auth ~permission:Masc_domain.CanAdmin
-    (fun state _agent_name req reqd ->
+let handle_disconnect ~clock state _agent_name req reqd =
       let config = Mcp_server.workspace_config state in
       Http.Request.read_body_async reqd (fun body_str ->
         let answer =
@@ -212,16 +210,15 @@ let handle_disconnect ~clock request reqd =
             (`Assoc [ "error", `String message ])
             reqd
         | Ok payload ->
-          Http.Response.json_value ~compress:true ~request:req payload reqd))
-    request reqd
+          Http.Response.json_value ~compress:true ~request:req payload reqd)
 ;;
 
 let add_routes ~clock router =
   router
-  |> Http.Router.get Server_keeper_oauth.callback_path (handle_callback ~clock)
+  |> Server_route.get (Server_route.Self_authenticated Route_access.Oauth_protocol) Server_keeper_oauth.callback_path (handle_callback ~clock)
   |> Server_route.get Server_route.Public_read "/api/v1/keepers/oauth/providers" handle_providers
   |> Server_route.get Server_route.Public_read "/api/v1/keepers/oauth/attached-tools" handle_attached_tools
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/keepers/oauth/attempt-status" handle_attempt_status
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/keepers/oauth/client" handle_set_client
-  |> Http.Router.post "/api/v1/keepers/oauth/disconnect" (handle_disconnect ~clock)
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/keepers/oauth/disconnect" (handle_disconnect ~clock)
 ;;

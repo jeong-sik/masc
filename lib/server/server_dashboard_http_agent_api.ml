@@ -6,7 +6,6 @@
 
 module Http = Http_server_eio
 
-open Server_auth
 
 let is_ascii_digit = function '0' .. '9' -> true | _ -> false
 

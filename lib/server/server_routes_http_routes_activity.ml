@@ -967,7 +967,7 @@ let add_routes ~sw ~clock router =
          respond_board_json reqd (board_curation_json ())
        )
 
-  |> Http.Router.get "/api/v1/board/flairs" (fun _request reqd ->
+  |> Server_route.get Server_route.Always_public "/api/v1/board/flairs" (fun _request reqd ->
        let flairs = List.map Board.flair_to_yojson Board.available_flairs in
        let json = `Assoc [("flairs", `List flairs)] in
        Http.Response.json_value json reqd)

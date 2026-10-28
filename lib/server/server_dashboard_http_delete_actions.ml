@@ -9,7 +9,6 @@
 
 module Http = Http_server_eio
 
-open Server_auth
 
 type agent_purge_cleanup_result =
   { agent_name : string

@@ -1,5 +1,4 @@
 
-open Server_auth
 open Server_routes_http_common
 
 module Http = Http_server_eio
@@ -82,8 +81,7 @@ let resolve_telemetry_limit ~has_time_window ~(n_param : string option) =
 
 (* Telemetry unified view handler — extracted from add_routes pipeline
    as part of godfile near-threshold split. *)
-let handle_telemetry request reqd =
-  with_public_read (fun state req reqd ->
+let handle_telemetry state req reqd =
     let config = (Mcp_server.workspace_config state) in
     let base_path = config.base_path in
     let masc_root = Workspace.masc_dir config in
@@ -216,4 +214,3 @@ let handle_telemetry request reqd =
     in
     Server_cached_read_http.respond ~request:req
       ~extra_headers:(Server_timing.extra_header timing) reqd payload
-  ) request reqd

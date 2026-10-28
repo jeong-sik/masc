@@ -12,14 +12,26 @@
     (docs/evidence/2026-10-28-auth-route-baseline/) measured all three. *)
 type self_authenticated_reason =
   | Mcp_transport
-      (** [/mcp] and its profiles: the transport answers 401 with a
+      (** [/mcp] and its profiles, and the observer streams [/ag-ui/events] and
+          [/events/presence]: the transport answers 401 with a
           [WWW-Authenticate] challenge. *)
   | Oauth_protocol
-      (** The OAuth endpoints and the discovery documents that go with them,
-          which run before the caller has a credential. *)
+      (** The OAuth endpoints, the discovery documents that go with them and the
+          callback pages, which run before the caller has a credential. *)
   | Websocket_upgrade
       (** An upgrade route ([/ws], the IDE LSP proxy): the handler checks the
           credential before it upgrades. *)
+  | Browser_lane
+      (** The browser lane add-on's endpoints: the handler checks the lane token
+          and answers 403 without it. *)
+  | Loopback_dev_token
+      (** [/api/v1/dashboard/dev-token]: the handler answers 404 unless the bind
+          is loopback and strict auth is off, and then hands out the dashboard
+          token without a credential (#46560). *)
+  | Subpath_dispatch
+      (** A prefix route whose handler picks the authentication by the part of
+          the path after the prefix ([/api/v1/keepers/]). The kinds of its
+          sub-routes are not in the route table. *)
 
 type t =
   | Unclassified

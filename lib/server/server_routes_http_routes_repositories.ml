@@ -1,4 +1,3 @@
-open Server_auth
 open Server_utils
 
 module Http = Http_server_eio

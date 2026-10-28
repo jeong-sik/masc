@@ -118,9 +118,7 @@ let respond_official_client_probe_result request reqd = function
 
 let execute_output_heartbeat_s = 15.0
 
-let handle_execute_output_stream ~sw ~clock request reqd =
-  with_public_read
-    (fun _state req inner_reqd ->
+let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
        let path = Http.Request.path req in
        let keeper =
          match
@@ -233,9 +231,7 @@ let handle_execute_output_stream ~sw ~clock request reqd =
                    Log.Dashboard.warn
                      "execute output stream loop failed: %s"
                      (Printexc.to_string exn);
-                   close_stream ())))
-    request
-    reqd
+                   close_stream ()))
 
 let runtime_editor_protocol_json (protocol : Runtime_toml.editor_protocol) =
   let transport =
@@ -1691,10 +1687,10 @@ let add_routes ~sw ~clock router =
            handle_broadcast state agent_name reqd body_str
          )
        )
-  |> Http.Router.prefix_get
+  |> Server_route.prefix_get Server_route.Public_read
        "/api/dashboard/execute-output/"
        (handle_execute_output_stream ~sw ~clock)
-  |> Http.Router.prefix_get
+  |> Server_route.prefix_get Server_route.Public_read
        "/api/v1/dashboard/execute-output/"
        (handle_execute_output_stream ~sw ~clock)
 
@@ -1900,7 +1896,7 @@ let add_routes ~sw ~clock router =
      overrides are disabled, so that a LAN deployment never hands out a
      credential over the wire. The token is canonicalized to the [dashboard]
      actor and persisted at [.masc/auth/dashboard.token]. *)
-  |> Http.Router.get "/api/v1/dashboard/dev-token" (fun request reqd ->
+  |> Server_route.get (Server_route.Self_authenticated Route_access.Loopback_dev_token) "/api/v1/dashboard/dev-token" (fun request reqd ->
        if (not (http_auth_bind_is_loopback ()))
           || http_auth_strict_enabled () then
          respond_dashboard_error ~status:`Not_found ~request reqd
@@ -2126,13 +2122,10 @@ let add_routes ~sw ~clock router =
                ~configuration:(Runtime.browser_configuration ())
                ~base_path:(Some config.base_path) in
            Http.Response.json_value ~request:req (Onboarding_status.to_json observed) reqd)
-  |> Http.Router.get "/api/v1/dashboard/runtime-probe" (fun request reqd ->
-       let force = Server_utils.bool_query_param request "force" ~default:false in
-       let handle _state req reqd =
-         let json = dashboard_runtime_probe_http_json ~force () in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       in
-       with_permission_auth ~permission:runtime_probe_read_permission handle request reqd)
+  |> Server_route.get (Server_route.Permission runtime_probe_read_permission) "/api/v1/dashboard/runtime-probe" (fun _state req reqd ->
+       let force = Server_utils.bool_query_param req "force" ~default:false in
+       let json = dashboard_runtime_probe_http_json ~force () in
+       Http.Response.json_value ~compress:true ~request:req json reqd)
   (* Structured, already-resolved runtime defaults / model routing for the
      Settings surface. Read-only projection of the runtime.toml SSOT
      singletons (no credentials, no raw TOML), so a public read mirrors the
@@ -3398,7 +3391,7 @@ let add_routes ~sw ~clock router =
        )
 
   (* ── Telemetry unified view ── *)
-  |> Http.Router.get "/api/v1/dashboard/telemetry" handle_telemetry
+  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/telemetry" handle_telemetry
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/telemetry/summary" (fun state req reqd ->
          let timing = Server_timing.create () in
          (* RFC-0138 Phase 3 Step 2: wait-free read via
@@ -3481,7 +3474,7 @@ let add_routes ~sw ~clock router =
        )
 
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)
-  |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
+  |> Server_route.prefix_get (Server_route.Self_authenticated Route_access.Subpath_dispatch) "/api/v1/keepers/" (fun request reqd ->
        match Keeper_items.route (Http.Request.path request) with
        | Some name ->
          with_token_permission_auth ~permission:Keeper_items.permission
@@ -3596,7 +3589,7 @@ let add_routes ~sw ~clock router =
              reqd)
 
   (* Keeper POST sub-routes. *)
-  |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
+  |> Server_route.prefix_post (Server_route.Self_authenticated Route_access.Subpath_dispatch) "/api/v1/keepers/" (fun request reqd ->
        match
          Server_dashboard_http_hitl_recover.route (Http.Request.path request)
        with

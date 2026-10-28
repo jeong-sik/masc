@@ -1557,7 +1557,7 @@ let session_response ~config ~name ~token body =
 
 let add_routes router =
   router
-  |> Http.Router.get play_page_path serve_page
+  |> Server_route.get Server_route.Always_public play_page_path serve_page
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanPlayMachine) seat_path (fun state name request reqd ->
            let status, json = seat_response ~config:(Mcp_server.workspace_config state) ~name in
            respond_json_value_with_cors ~status request reqd json)

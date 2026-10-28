@@ -7,7 +7,6 @@
     - [GET /api/v1/attribution/summary] — per-gate outcome counts over the
       current ring window, for the dashboard graph nodes. *)
 
-open Server_auth
 
 module Http = Http_server_eio
 module DA = Dashboard_attribution

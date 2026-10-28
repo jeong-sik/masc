@@ -69,10 +69,7 @@ let listing_json (listing : Prompt_preset.listing) =
     ]
 ;;
 
-let write_snapshot ~save request reqd =
-  with_permission_auth
-    ~permission:Masc_domain.CanAdmin
-    (fun state _req reqd ->
+let write_snapshot ~save state request reqd =
       Http.Request.read_body_async reqd (fun body ->
         match decode_save body with
         | Error message ->
@@ -95,8 +92,7 @@ let write_snapshot ~save request reqd =
               | `Internal_server_error -> Log.Pages.error "preset save %s failed: %s" name message
               | `Bad_request | `Conflict -> ());
              respond_json_value_with_cors ~status:(status :> Httpun.Status.t)
-               request reqd (error_json message))))
-    request reqd
+               request reqd (error_json message)))
 ;;
 
 let add_routes router =
@@ -156,11 +152,11 @@ let add_routes router =
                    request
                    reqd
                    (error_json message)))
-  |> Http.Router.post "/api/v1/presets"
+  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/v1/presets"
        (write_snapshot ~save:(fun ~base_path snapshot ->
           Prompt_preset.save ~base_path snapshot
           |> Result.map_error (fun message -> `Internal_server_error, message)))
-  |> Http.Router.post "/api/v1/presets/create"
+  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/v1/presets/create"
        (write_snapshot ~save:(fun ~base_path snapshot ->
           Prompt_preset.create ~base_path snapshot
           |> Result.map_error (fun error ->

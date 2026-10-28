@@ -191,20 +191,20 @@ let handle_authorization_server request reqd =
 
 let add_routes router =
   router
-  |> Http.Router.get
+  |> Server_route.get (Server_route.Self_authenticated Route_access.Oauth_protocol)
        "/.well-known/oauth-protected-resource"
        handle_protected_resource
-  |> Http.Router.get
+  |> Server_route.get (Server_route.Self_authenticated Route_access.Oauth_protocol)
        "/.well-known/oauth-protected-resource/mcp"
        handle_protected_resource
-  |> Http.Router.get
+  |> Server_route.get (Server_route.Self_authenticated Route_access.Oauth_protocol)
        "/mcp/.well-known/oauth-protected-resource"
        handle_protected_resource
-  |> Http.Router.get
+  |> Server_route.get (Server_route.Self_authenticated Route_access.Oauth_protocol)
        "/.well-known/oauth-authorization-server"
        handle_authorization_server
-  |> Http.Router.get "/oauth/authorize" handle_authorize_get
-  |> Http.Router.post "/oauth/authorize" handle_authorize_post
-  |> Http.Router.post "/oauth/register" handle_register
-  |> Http.Router.post "/oauth/token" handle_token
+  |> Server_route.get (Server_route.Self_authenticated Route_access.Oauth_protocol) "/oauth/authorize" handle_authorize_get
+  |> Server_route.post (Server_route.Self_authenticated Route_access.Oauth_protocol) "/oauth/authorize" handle_authorize_post
+  |> Server_route.post (Server_route.Self_authenticated Route_access.Oauth_protocol) "/oauth/register" handle_register
+  |> Server_route.post (Server_route.Self_authenticated Route_access.Oauth_protocol) "/oauth/token" handle_token
 ;;

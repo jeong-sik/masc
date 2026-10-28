@@ -123,7 +123,7 @@ let respond_markdown text reqd =
 
 let add_routes router =
   router
-  |> Http.Router.get Play_invite.agent_guide_path (fun request reqd ->
+  |> Server_route.get Server_route.Always_public Play_invite.agent_guide_path (fun request reqd ->
        match guide_response () with
        | Ok text -> respond_markdown text reqd
        | Error (status, json) ->

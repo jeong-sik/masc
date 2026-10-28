@@ -520,14 +520,13 @@ let get_live = (fun state request reqd ->
          | Error detail -> respond_json_value_with_cors ~status:`Service_unavailable request reqd
              (Server_refusal.json ~code:"machine_observation_unavailable" detail)))
 
-let post ~operation ~tool_name request reqd =
-  with_tool_actor_auth ~tool_name (fun state caller request reqd ->
+let post ~operation state caller request reqd =
     Http.Request.read_body_async reqd (fun body ->
       match source_access state request caller with
       | Error Source_credential_unreadable -> respond_unavailable request reqd
       | Ok access ->
         let result = let* args = decode_body body in dispatch ~caller ~access state operation args in
-        respond request reqd result)) request reqd
+        respond request reqd result)
 
 let respond_declaration request reqd = function
   | Ok json -> respond_json_value_with_cors request reqd json
@@ -537,15 +536,13 @@ let respond_declaration request reqd = function
         | Not_found -> `Not_found | Revision_conflict -> `Conflict | Io_error -> `Internal_server_error in
       respond_json_value_with_cors ~status request reqd (Lane_addon_declaration.error_to_json error)
 
-let read_declaration request reqd =
-  with_tool_actor_auth ~tool_name:"masc_lane_declaration_read" (fun state caller request reqd ->
+let read_declaration state caller request reqd =
     let args = `Assoc (List.map (fun (key,value) -> key,`String value) (query_fields request)) in
     match source_access state request caller with
     | Error Source_credential_unreadable -> respond_unavailable request reqd
-    | Ok access -> respond_declaration request reqd (Runtime.read_declaration ~access ~config:(Mcp_server.workspace_config state) args)) request reqd
+    | Ok access -> respond_declaration request reqd (Runtime.read_declaration ~access ~config:(Mcp_server.workspace_config state) args)
 
-let save_declaration request reqd =
-  with_tool_actor_auth ~tool_name:"masc_lane_declaration_save" (fun state caller request reqd ->
+let save_declaration state caller request reqd =
     Http.Request.read_body_async reqd (fun body ->
       match source_access state request caller with
       | Error Source_credential_unreadable -> respond_unavailable request reqd
@@ -553,7 +550,7 @@ let save_declaration request reqd =
         let result = match decode_body body with
           | Error message -> Error {Lane_addon_declaration.code=Invalid_request;message;current=None}
           | Ok args -> Runtime.save_declaration ~access ~config:(Mcp_server.workspace_config state) args in
-        respond_declaration request reqd result)) request reqd
+        respond_declaration request reqd result)
 
 type operator_command = Describe_operator | Invoke_operator of Yojson.Safe.t
 type operator_request = {
@@ -625,9 +622,7 @@ deliver();
     "cross-origin-opener-policy","same-origin-allow-popups"])
     ("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\"><title>Connection return</title>"
      ^ "<p id=\"status\">Returning to connection settings…</p><button id=\"retry\" type=\"button\">Retry original return</button><script>" ^ script ^ "</script></html>") reqd
-let operator_control request reqd =
-  Http.Response.with_scoped_headers private_headers (fun () ->
-  with_private_token_permission_auth ~permission:Masc_domain.CanAdmin (fun state _actor request reqd ->
+let operator_control state _actor request reqd =
     let reply ?(status=`OK) value =
       Http.Response.with_scoped_headers private_headers (fun () ->
         Http.Response.json_value ~status ~compress:false ~request value reqd) in
@@ -666,8 +661,7 @@ let operator_control request reqd =
               | Ok value -> reply value
               | Error Runtime.Operator_unavailable -> reply ~status:`Conflict (error_json "original operator control unavailable")
               | Error Runtime.Operator_rejected -> reply ~status:`Bad_request (error_json "operator request refused")
-              | Error Runtime.Operator_outcome_unknown -> reply ~status:`Conflict (error_json "operator outcome unknown; inspect before another attempt")))
-    request reqd)
+              | Error Runtime.Operator_outcome_unknown -> reply ~status:`Conflict (error_json "operator outcome unknown; inspect before another attempt"))
 
 (* RFC operator-quiz §4.6: an installation's questions, beside the Keeper
    questions in Approvals. Questions and resolutions use the Keeper wire form,
@@ -814,10 +808,10 @@ let add_routes ~sw ~clock router =
                Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                  Lane_addon_subscription.handle ~access ~config:(Mcp_server.workspace_config state) ~caller args) in
              respond request reqd result))
-  |> Http.Router.get "/api/v1/lane-addons/declaration" read_declaration
-  |> Http.Router.post "/api/v1/lane-addons/declaration" save_declaration
-  |> Http.Router.post "/api/v1/lane-addons/operator" operator_control
-  |> Http.Router.get "/addons/oauth/callback" operator_callback
+  |> Server_route.get (Server_route.Tool_actor { tool_name = "masc_lane_declaration_read" }) "/api/v1/lane-addons/declaration" read_declaration
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_lane_declaration_save" }) "/api/v1/lane-addons/declaration" save_declaration
+  |> Server_route.post (Server_route.Private_token_permission Masc_domain.CanAdmin) "/api/v1/lane-addons/operator" operator_control
+  |> Server_route.get (Server_route.Self_authenticated Route_access.Oauth_protocol) "/addons/oauth/callback" operator_callback
   |> Server_route.get Server_route.Read_auth "/api/v1/lane-addons" get_inspect
   |> Server_route.get Server_route.Read_auth "/api/v1/lane-addons/slice" get_slice
   |> Server_route.get Server_route.Read_auth "/api/v1/lane-addons/actions" get_action
@@ -826,9 +820,9 @@ let add_routes ~sw ~clock router =
   |> Server_route.post (Server_route.Tool_actor { tool_name = "lane_addon_ask_answer_route" }) "/api/v1/lane-addons/ask-answer"
        (fun state actor request reqd ->
          handle_ask_answer ~actor state request reqd)
-  |> Http.Router.post "/api/v1/lane-addons/actions" (post ~operation:Runtime.Act ~tool_name:"masc_lane_act")
-  |> Http.Router.post "/api/v1/lane-addons/attach" (post ~operation:Runtime.Attach ~tool_name:"masc_lane_attach")
-  |> Http.Router.post "/api/v1/lane-addons/observe" (post ~operation:Runtime.Observe ~tool_name:"masc_lane_observe")
-  |> Http.Router.post "/api/v1/lane-addons/detach" (post ~operation:Runtime.Detach ~tool_name:"masc_lane_detach")
-  |> Http.Router.post "/api/v1/lane-addons/retain" (post ~operation:Runtime.Retain ~tool_name:"lane_addon_retain_route")
-  |> Http.Router.post "/api/v1/lane-addons/evidence" (post ~operation:Runtime.Evidence ~tool_name:"masc_lane_evidence")
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_lane_act" }) "/api/v1/lane-addons/actions" (post ~operation:Runtime.Act)
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_lane_attach" }) "/api/v1/lane-addons/attach" (post ~operation:Runtime.Attach)
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_lane_observe" }) "/api/v1/lane-addons/observe" (post ~operation:Runtime.Observe)
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_lane_detach" }) "/api/v1/lane-addons/detach" (post ~operation:Runtime.Detach)
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "lane_addon_retain_route" }) "/api/v1/lane-addons/retain" (post ~operation:Runtime.Retain)
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_lane_evidence" }) "/api/v1/lane-addons/evidence" (post ~operation:Runtime.Evidence)

@@ -1,7 +1,7 @@
 (** Connector wire models, refusals and name-page projection. *)
 
 open Tui_decode_fields
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type connector_connection =
   | Connector_connected

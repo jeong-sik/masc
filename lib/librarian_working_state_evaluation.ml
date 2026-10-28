@@ -12,7 +12,7 @@ type snapshot = Snapshot_not_started | Snapshot_failed of string | Snapshot_read
 type progress =
   { work : work; snapshot : snapshot; baseline : R.progress; restored : R.progress }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let initial_progress =
   { work = Work_not_started; snapshot = Snapshot_not_started
   ; baseline = R.Not_started; restored = R.Not_started }

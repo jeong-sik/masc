@@ -6,7 +6,7 @@ type t =
   { target : target; state : state; change_id : string
   ; changed_by : string; changed_at : string }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let fields allowed = function
   | `Assoc fields ->

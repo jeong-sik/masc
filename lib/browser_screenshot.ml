@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 let persist ?native_options ~base_path ~keeper_name json =
   let string key = match json with
     | `Assoc fields -> (match List.assoc_opt key fields with

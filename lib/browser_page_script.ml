@@ -196,7 +196,7 @@ let css_filter_of_json key = function
 ;;
 
 let elements_filter_of_json field =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* within = css_filter_of_json "within" (field "within") in
   let* selector = css_filter_of_json "selector" (field "selector") in
   Ok Browser_lane.{within; selector}

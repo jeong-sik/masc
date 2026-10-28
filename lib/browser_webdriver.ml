@@ -10,7 +10,7 @@ type locate = scene:Browser_scene.t -> instruction:string option -> (located_nod
 type session = { mutable pointer_state : pointer_state; uploads : Browser_lane.Upload_lease.owner; id : string; mutable handles : (string * int) list; mutable window_sizes : (string * (int * int)) list; mutable emulated : (string * (string * string)) list; mutable blocks : (string * string) list; mutable download_contexts : (string * int) list; mutable downloads : (Browser_downloads.connection, string) result; profile : string option }
 type profiles = { fresh : unit -> (string, string) result; ended : string -> unit }
 type t = { start_downloads : Browser_downloads.start; binary : string option; locate : locate option; profiles : profiles option; lost : unit -> unit; request : request; mutex : Eio.Mutex.t; active : int Atomic.t; mutable session : session option; mutable next_tab : int; observed_session : Browser_lane.session_observation Atomic.t }
-let ( let* ) = Result.bind
+open Result.Syntax
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let string_field key json = match field key json with
   | Some (`String value) when value <> "" -> Ok value

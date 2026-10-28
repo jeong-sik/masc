@@ -3,7 +3,7 @@ type observation = { account : string; uid : int; state : state }
 type error = Unsupported_host | Unsupported_distribution | Invalid_account
   | Account_read_failed | Grant_failed | Invalid_resume | Session_not_active
   | Service_unavailable of Sandbox_readiness.entry
-let ( let* ) = Result.bind
+open Result.Syntax
 let grant_label = "Allow this account to use the local Docker engine"
 let grant_detail = "Add your current Unix account to the Docker group. This grants root-level control through Docker. Continue setup in a new group session afterward; existing terminals are unchanged."
 type snapshot = { uid:int; effective_uid:int; account:string; account_primary_gid:int;

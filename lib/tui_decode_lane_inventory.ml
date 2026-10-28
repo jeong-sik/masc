@@ -63,7 +63,7 @@ type snapshot = {
   exact_snapshot : Tui_decode.standalone_lanes_snapshot; package_read : package_read;
 }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let error message = Error ("Lane inventory: " ^ message)
 let rec traverse f = function
   | [] -> Ok []

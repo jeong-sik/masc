@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 let mime = "application/vnd.masc.browser-scene+json"
 type t = {
   scene : Browser_scene.t;

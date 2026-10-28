@@ -5,7 +5,7 @@ type hydrate_report = {
   pruned_records : int;
 }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let reset_for_testing = Tool_metrics_store.reset_for_testing
 
 let sample_of_row (row : Tool_metrics_store.row) =

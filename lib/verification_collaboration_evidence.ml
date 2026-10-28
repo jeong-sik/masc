@@ -16,7 +16,7 @@ let error_to_string error =
     | Storage_failed detail -> "verification_source_storage_failed", detail in
   Yojson.Safe.to_string (`Assoc ["code", `String code; "detail", `String detail])
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let protect f =
   try f () with

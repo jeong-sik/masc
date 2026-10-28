@@ -9,7 +9,7 @@ type error =
 type listing =
   { artifacts : Yojson.Safe.t list; diagnostics : (string * string) list }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let error_message = function
   | Invalid message | Unavailable message -> message
   | Commit_uncertain { message; _ } -> message

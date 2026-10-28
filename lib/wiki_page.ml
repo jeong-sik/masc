@@ -167,7 +167,7 @@ let parse_frontmatter content =
   | Frontmatter.Absent -> Error No_frontmatter
   | Frontmatter.Unclosed -> Error Unclosed_frontmatter
   | Frontmatter.Closed parsed ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let lookup field =
       List.assoc_opt (frontmatter_field_key field) parsed.Frontmatter.fields
     in

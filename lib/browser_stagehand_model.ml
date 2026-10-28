@@ -36,7 +36,7 @@ type request =
   ; generation : generation
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* ---- Parsing [LLMGenerateParams] ---------------------------------------- *)
 

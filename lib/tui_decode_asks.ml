@@ -74,7 +74,7 @@ type asks_snapshot = {
   asn_rows : ask_row list;
 }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let ask_string json key =
   match member key json with

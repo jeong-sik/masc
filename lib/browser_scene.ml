@@ -118,7 +118,7 @@ let text_role (node : node) =
 type t = { document_id : string; url : string; title : string; width : float; height : float;
   scroll_x : float; scroll_y : float; nodes : node list; truncated : bool;
   view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
-let ( let* ) = Result.bind
+open Result.Syntax
 let field name = function
   | `Assoc fields -> (match List.assoc_opt name fields with Some v -> Ok v | None -> Error ("scene missing " ^ name))
   | _ -> Error "scene must be an object"

@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let member key json =
   match Json_util.assoc_member_opt key json with

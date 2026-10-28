@@ -1,6 +1,6 @@
 open Tui_decode_fields
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type provider_usage_window_kind =
   | Window_five_hour

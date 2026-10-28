@@ -1,7 +1,7 @@
 (** Strict skill-evidence wire model and decoder for the Tools surface. *)
 open Tui_decode_fields
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type skill_evidence_status =
   | Skill_evidence_observed

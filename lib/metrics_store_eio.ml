@@ -74,7 +74,7 @@ let read_error_to_string = function
   | Invalid_record { path; line; message } ->
       Printf.sprintf "%s:%d: %s" path line message
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let valid_agent_id name =
   not (String.equal (String.trim name) "")

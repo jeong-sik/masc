@@ -407,7 +407,7 @@ let send_init t link init =
     | In_flight _ | Abandoned _ -> Error Abandoned_call_pending)
 ;;
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let cdp_step result = Result.map_error (fun failure -> Cdp failure) result
 

@@ -22,7 +22,7 @@ let readiness_expression =
 type marker = { protocol_version : string; runtime_version : string }
 type readiness = Not_ready | Ready of marker
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 
 let string_at path json =

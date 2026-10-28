@@ -2,7 +2,7 @@
     This reads a supplied snapshot; it owns neither storage nor observation. *)
 open Tui_decode_fields
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type memory_alert_code =
   | Snapshot_read_error

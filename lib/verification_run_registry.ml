@@ -62,7 +62,7 @@ let tool_observation_to_yojson tool =
 ;;
 
 let tool_observation_of_yojson json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* fields = Run_registry_core.Json.object_fields json in
   let* () =
     Run_registry_core.Json.exact_fields
@@ -173,7 +173,7 @@ module Payload = struct
   ;;
 
   let registration_of_yojson json =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* fields = Run_registry_core.Json.object_fields json in
     let* () =
       Run_registry_core.Json.exact_fields ~required:registration_fields fields
@@ -222,7 +222,7 @@ module Payload = struct
   ;;
 
   let completion_of_yojson json =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* fields = Run_registry_core.Json.object_fields json in
     let* label = Run_registry_core.Json.string_field "outcome" fields in
     let required_detail_fields =
@@ -565,7 +565,7 @@ let run_to_yojson run =
 ;;
 
 let completed_run_of_yojson json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* fields = Run_registry_core.Json.object_fields json in
   (* Check envelope uniqueness before splitting. Unknown fields stay with the
      completion and are rejected by its canonical outcome-specific codec. *)

@@ -1,7 +1,7 @@
 module Persistence = Keeper_event_queue_persistence
 module State = Keeper_event_queue_state
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let matches schedule_id (source : Keeper_event_queue.stimulus) =
   match source.payload with

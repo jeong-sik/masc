@@ -182,28 +182,31 @@ let authorize_get ~base_path ~authority ~target =
   authorization_request_of_params ~base_path ~authority params
 ;;
 
-let redirect_with_code authorization_request code =
-  let params =
-    ("code", code)
-    :: (match authorization_request.Auth_oauth.state with
-        | None -> []
-        | Some state -> [ "state", state ])
+(* RFC 9207 section 2: every authorization response redirected to the client,
+   errors included, names the issuer so the client can reject a response that
+   a different authorization server produced (mix-up attack). Errors raised
+   after validation by [Auth_oauth.issue_authorization_code] are still
+   answered as JSON, not redirected. *)
+let authorization_response_uri ~issuer authorization_request params =
+  let state =
+    match authorization_request.Auth_oauth.state with
+    | None -> []
+    | Some state -> [ "state", state ]
   in
   Uri.of_string authorization_request.redirect_uri
-  |> fun uri -> Uri.add_query_params' uri params
+  |> fun uri -> Uri.add_query_params' uri (params @ state @ [ "iss", issuer ])
   |> Uri.to_string
 ;;
 
-let redirect_with_error authorization_request error =
-  let params =
-    ("error", Auth_oauth.protocol_error_code error)
-    :: (match authorization_request.Auth_oauth.state with
-        | None -> []
-        | Some state -> [ "state", state ])
-  in
-  Uri.of_string authorization_request.redirect_uri
-  |> fun uri -> Uri.add_query_params' uri params
-  |> Uri.to_string
+let redirect_with_code ~issuer authorization_request code =
+  authorization_response_uri ~issuer authorization_request [ "code", code ]
+;;
+
+let redirect_with_error ~issuer authorization_request error =
+  authorization_response_uri
+    ~issuer
+    authorization_request
+    [ "error", Auth_oauth.protocol_error_code error ]
 ;;
 
 type authorization_post_outcome =
@@ -217,8 +220,12 @@ type authorization_post_outcome =
 let authorize_post ~base_path ~authority ~body =
   let* params = parse_form body in
   let* request = authorization_request_of_params ~base_path ~authority params in
+  let issuer = Server_oauth_metadata.issuer authority in
   if Option.equal String.equal (param params "decision") (Some "deny")
-  then Ok (Authorization_redirect (redirect_with_error request Auth_oauth.Access_denied))
+  then
+    Ok
+      (Authorization_redirect
+         (redirect_with_error ~issuer request Auth_oauth.Access_denied))
   else if
     admin_scope_requested request.scopes
     && not (Option.equal String.equal (param params "confirm_admin") (Some "yes"))
@@ -254,7 +261,7 @@ let authorize_post ~base_path ~authority ~body =
              ~request
              ~bootstrap_credential
          in
-         Ok (Authorization_redirect (redirect_with_code request code)))
+         Ok (Authorization_redirect (redirect_with_code ~issuer request code)))
 ;;
 
 let string_field fields name =

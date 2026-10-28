@@ -7,7 +7,7 @@ open Alcotest
 let domain () = (Domain.self () :> int)
 
 (* The domain of a one-domain pool's only worker, learned before it is held. *)
-let worker_domain pool = Domain_pool.submit_cpu pool domain
+let worker_domain pool = Domain_pool.submit_cpu ~name:__FUNCTION__ pool domain
 
 let with_pools f =
   Eio_main.run (fun env ->
@@ -61,11 +61,11 @@ let test_a_read_starts_while_the_background_pool_is_full () =
         | None -> fail (name ^ ": the read waited behind the held background worker")
         | Some where -> check int (name ^ ": the read ran on the read pool") read_domain where
       in
-      check_submit "Executor_pool_ref.submit_or_inline" (fun f -> Executor_pool_ref.submit_or_inline f);
-      check_submit "Domain_pool_ref.submit_io_or_inline" Domain_pool_ref.submit_io_or_inline;
-      check_submit "Domain_pool_ref.submit_cpu_or_inline" Domain_pool_ref.submit_cpu_or_inline;
+      check_submit "Executor_pool_ref.submit_or_inline" (fun f -> Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ f);
+      check_submit "Domain_pool_ref.submit_io_or_inline" (Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__);
+      check_submit "Domain_pool_ref.submit_cpu_or_inline" (Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__);
       check_submit "Executor_pool_ref.submit_strict" (fun f ->
-        match Executor_pool_ref.submit_strict f with
+        match Executor_pool_ref.submit_strict ~name:__FUNCTION__ f with
         | Ok where -> where
         | Error error -> fail (Executor_pool_ref.strict_submit_error_to_string error))))
 ;;
@@ -76,16 +76,16 @@ let test_background_work_and_nested_reads_stay_put () =
   with_pools (fun _env _sw background read_domain ->
     let background_domain = worker_domain background in
     check int "Executor_pool_ref background work runs on the shared pool" background_domain
-      (Executor_pool_ref.submit_or_inline domain);
+      (Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ domain);
     check int "Domain_pool_ref background work runs on the shared pool" background_domain
-      (Domain_pool_ref.submit_cpu_or_inline domain);
+      (Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ domain);
     check int "a read runs on the read pool" read_domain
-      (Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline domain));
-    let background_job = Domain_pool_ref.submit_cpu_or_inline domain in
+      (Pool_lane.with_read (fun () -> Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ domain));
+    let background_job = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ domain in
     let read_job, nested =
       Pool_lane.with_read (fun () ->
-        Domain_pool_ref.submit_cpu_or_inline (fun () ->
-          domain (), Domain_pool_ref.submit_io_or_inline domain))
+        Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+          domain (), Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ domain))
     in
     check bool "background and read jobs ran on different domains" true
       (background_job <> read_job);
@@ -100,7 +100,7 @@ let test_without_a_read_pool_reads_use_the_shared_pool () =
       Domain_pool_ref.set shared;
       Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () ->
         let caller = domain () in
-        let where = Pool_lane.with_read (fun () -> Domain_pool_ref.submit_cpu_or_inline domain) in
+        let where = Pool_lane.with_read (fun () -> Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ domain) in
         check bool "the read still ran on a pool domain" true (where <> caller))))
 ;;
 

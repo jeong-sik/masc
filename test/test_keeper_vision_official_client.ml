@@ -314,7 +314,7 @@ let test_cancelled_queued_frame_store_does_not_start () =
   let occupied, signal_occupied = Eio.Promise.create () in
   let released, release_worker = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
-    Domain_pool.submit_cpu pool (fun () ->
+    Domain_pool.submit_cpu ~name:__FUNCTION__ pool (fun () ->
       Eio.Promise.resolve signal_occupied ();
       Eio.Promise.await released));
   Eio.Promise.await occupied;
@@ -339,7 +339,7 @@ let test_cancelled_queued_frame_store_does_not_start () =
       check bool "queued store propagates cancellation" true
         (Eio.Promise.await_exn cancelled);
       Eio.Promise.resolve release_worker ();
-      Domain_pool.submit_cpu pool (fun () -> ());
+      Domain_pool.submit_cpu ~name:__FUNCTION__ pool (fun () -> ());
       check bool "cancelled queued store creates no frame directory" false
         (Sys.file_exists (V.frames_dir ~keeper_name:"vision-fixture" ())))
 

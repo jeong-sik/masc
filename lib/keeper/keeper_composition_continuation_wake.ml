@@ -61,7 +61,7 @@ let current_snapshot ~base_path =
   | (Config_rejected _ | Config_unreadable _) as state -> Error (Snapshot_rejected state)
 
 let read_profiles ~base_path =
-  Domain_pool_ref.submit_io_or_inline (fun () ->
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     Keeper_types_profile.read_keeper_profile_snapshot ~base_path)
 
 let resume_with_profiles ?on_recovery_held ~profiles ~context continuation =
@@ -198,7 +198,7 @@ type recovery_readiness =
 let recovery_readiness ~base_path candidate cause =
   match cause with
   | Original_run_unavailable _ ->
-    (match Domain_pool_ref.submit_io_or_inline (fun () ->
+    (match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
        Keeper_composition_draft.load_nested_activation ~base_path
          (Journal.continuation_source candidate)) with
      | Ok _ -> Revalidate_original

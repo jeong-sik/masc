@@ -404,7 +404,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
            the source then drops the round before's checkpoint once it knows
            the file changed, before decoding the new one. *)
         let handed = ref previous in
-        match Domain_pool_ref.submit_io_or_inline (fun () ->
+        match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           let previous = !handed in
           handed := None;
           P.prepare_source ?previous ~config ~keeper_name ~trace_id:current_trace ()) with
@@ -423,7 +423,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
              (* The prepared source already owns the exact checkpoint and
                 validated boundaries. Re-reading it here decoded and hashed
                 the whole history again just to choose a smaller endpoint. *)
-             (match Domain_pool_ref.submit_cpu_or_inline (fun () ->
+             (match Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
                 P.select_prefix ~end_atom prepared) with
               | Error detail -> report O.Input_unavailable O.Input_build_failed detail
               | Ok one_unit ->
@@ -438,7 +438,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
                 attempt ~keeper_id meta one_unit))
   and attempt ~keeper_id meta prepared =
     select prepared;
-    let inputs = Domain_pool_ref.submit_io_or_inline (fun () ->
+    let inputs = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       let open Result.Syntax in
       let* current = Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
       let input : Keeper_librarian.input =
@@ -584,7 +584,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
            that fits is computed rather than searched: this arm retries inside
            the pass and records no width, where the arm above, which only
            knows that something was too large, steps down once and waits. *)
-        let fitted = Domain_pool_ref.submit_io_or_inline (fun () ->
+        let fitted = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           Runtime.fit_continuity ~capacity:observed ~base_path
             ~keeper_id:keeper_name ~input_for:(memory_input input) selected) in
         (match fitted with
@@ -617,7 +617,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
           outcome.provider_input_refusals))) reports) in
     let inferred =
       let* sources = P.memory_sources selected in
-      let* archived = Domain_pool_ref.submit_io_or_inline (fun () ->
+      let* archived = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name) in
       let* unread_messages = Unread.merge (P.previous_unread_messages selected) archived in
       let* inferred = Floor.infer ?cli_runner ~base_path ~keepers_dir ~keeper_name ~sources
@@ -647,7 +647,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
     | Ok (anchor,program,working_state,served_by) ->
       let published_memory = ref false in
       let published = Eio.Cancel.protect (fun () ->
-        Domain_pool_ref.submit_io_or_inline (fun () ->
+        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           let* range = P.memory_range_id ~config ~keeper_name selected in
           let range = {range with Current.unread_messages=program.Keeper_memory_os_program.unread} in
           let* () = match !external_capture with
@@ -745,7 +745,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
         (detail ^ "; volatile state and new unread records discarded")
     | Ok (working_state, served_by, new_unread_messages) ->
       let published = Eio.Cancel.protect (fun () ->
-        let result = Domain_pool_ref.submit_io_or_inline (fun () ->
+        let result = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           P.commit ~config ~keeper_name ~prepared:selected ~new_unread_messages ~working_state) in
         (match result with
          | Error detail -> report O.Not_committed O.Input_build_failed detail
@@ -837,7 +837,7 @@ let queue_input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta)
   ; turn_ref = Ids.Turn_ref.make
       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       ~absolute_turn:meta.runtime.usage.total_turns
-  ; historical_task_contexts = []; goal_context = Domain_pool_ref.submit_io_or_inline (fun () ->
+  ; historical_task_contexts = []; goal_context = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Keeper_librarian_input_sources.goal_context_for_task ~config meta.current_task_id)
   ; keeper_instructions = meta.instructions
   ; current = None
@@ -873,7 +873,7 @@ let run_with_readers ~durable ~continuity ~cleanup ~base_path ~keeper_name =
           Keeper_owner_projection.lookup ~base_path ~keeper_name with
     | Enabled, Owner_projection {meta = Some meta; stopping = false} ->
       let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-      let working_context = Domain_pool_ref.submit_io_or_inline (fun () ->
+      let working_context = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name) in
       if context_pass_needed ~keepers_dir ~keeper_name working_context then (
         let inp = queue_input ~config:(Workspace.default_config base_path) ~keeper_id ~meta
@@ -997,7 +997,7 @@ let unlaunched_keeper_names ~persisted ~launched =
 
 let submit_durable_for_unlaunched ~base_path ~persisted ~launched =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let queued = match Domain_pool_ref.submit_io_or_inline (fun () ->
+  let queued = match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     Keeper_memory_admission_queue.list_keeper_ids ~keepers_dir) with
     | Ok names -> names
     | Error detail ->

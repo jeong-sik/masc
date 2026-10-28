@@ -126,7 +126,7 @@ let png_of cache ~name ~equipment size =
   match Cache.find cache key with
   | Some png -> Ok png
   | None ->
-    match Domain_pool_ref.submit_cpu_or_inline (fun () -> draw ~name ~equipment size) with
+    match Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () -> draw ~name ~equipment size) with
     | Ok png -> Cache.add cache key png; Ok png
     | Error _ as refused -> refused
 

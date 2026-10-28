@@ -152,10 +152,10 @@ let prepare_available ~config ~keeper_id ~purpose =
       | Ok destinations ->
         let adapter = IO.create ~config ~keeper_id ~destinations in
         let base_path = config.Workspace.base_path in
-        let summary () = Domain_pool_ref.submit_io_or_inline (fun () -> View.summary ~base_path) in
+        let summary () = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () -> View.summary ~base_path) in
         let detail_snapshot () =
           let snapshot = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
-            Domain_pool_ref.submit_io_or_inline (fun () -> View.resolve_snapshot ~base_path)) in
+            Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () -> View.resolve_snapshot ~base_path)) in
           fun ~id ->
             let* snapshot = Eio.Lazy.force snapshot in
             View.detail_in_snapshot snapshot ~id in
@@ -187,7 +187,7 @@ let prepare_available ~config ~keeper_id ~purpose =
     | `List (_ :: _ as rows) ->
       let* _ = Typesafeai_config.workspace_memory_selection_destinations ~keeper_id
         |> Result.map_error Typesafeai_config.unavailable_reason_to_string in
-      let* snapshot = Domain_pool_ref.submit_io_or_inline (fun () ->
+      let* snapshot = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         View.resolve_snapshot ~base_path:config.Workspace.base_path) in
       List.fold_left (fun result row ->
         let* () = result in
@@ -211,7 +211,7 @@ let prepare_available ~config ~keeper_id ~purpose =
 let prepare ~config ~keeper_id ~purpose =
   let empty text = {payload=`Null;text;validate=(fun _ -> Ok ());
     retain=(fun ~reason:_ ~payload:_ -> Error "no selected memory")} in
-  match Domain_pool_ref.submit_io_or_inline (fun () ->
+  match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     Workspace_memory_ledger.observe ~base_path:config.Workspace.base_path) with
   | Workspace_memory_ledger.Missing -> empty ""
   | Available descriptor when descriptor.claim_count=0 && descriptor.conflict_count=0 -> empty ""

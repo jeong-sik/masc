@@ -14,7 +14,7 @@ let test_job_runs_on_the_tuned_minor_heap () =
       let main_domain = (Domain.self () :> int) in
       let where, words =
         Executor_pool_ref.For_testing.with_pool pool (fun () ->
-          Executor_pool_ref.submit_or_inline (fun () ->
+          Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
             (Domain.self () :> int), (Gc.get ()).Gc.minor_heap_size))
       in
       check bool "the job ran off the main domain" true (where <> main_domain);

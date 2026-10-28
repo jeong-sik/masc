@@ -82,7 +82,7 @@ let test_submit_or_inline_preserves_mutex () =
         @@ fun () ->
         let mu = Eio.Mutex.create () in
         let v =
-          Executor_pool_ref.submit_or_inline (fun () ->
+          Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
             Eio.Mutex.use_rw ~protect:true mu (fun () -> 7))
         in
         check int "use_rw inside offloaded closure returns its value" 7 v;
@@ -135,7 +135,7 @@ let test_ready_raw_domain_uses_non_eio_path () =
                 durable_dir
             in
             ( Eio_guard.execution_context ()
-            , Executor_pool_ref.submit_or_inline Eio_guard.execution_context
+            , Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ Eio_guard.execution_context
             , Eio_guard.run_in_systhread ~label:"test-protected-value" (fun () -> protected_value)
             , !cleanup_ran
             , mutex_rejected
@@ -210,7 +210,7 @@ let test_submit_strict_absent_pool_does_not_run () =
   @@ fun () ->
   let calls = ref 0 in
   match
-    Executor_pool_ref.submit_strict (fun () ->
+    Executor_pool_ref.submit_strict ~name:__FUNCTION__ (fun () ->
       incr calls;
       7)
   with
@@ -247,7 +247,7 @@ let test_submit_strict_worker_failure_is_not_replayed_inline () =
        let calls = Atomic.make 0 in
        let ran_off_caller = Atomic.make false in
        let result =
-         Executor_pool_ref.submit_strict (fun () ->
+         Executor_pool_ref.submit_strict ~name:__FUNCTION__ (fun () ->
            ignore (Atomic.fetch_and_add calls 1);
            Atomic.set ran_off_caller (Domain.self () <> caller_domain);
            raise Strict_worker_failure)
@@ -291,7 +291,7 @@ let test_startup_installs_pool_before_strict_read () =
             let caller_domain = Domain.self () in
             Server_runtime_bootstrap.For_testing.install_domain_pool_references pool;
             match
-              Executor_pool_ref.submit_strict (fun () ->
+              Executor_pool_ref.submit_strict ~name:__FUNCTION__ (fun () ->
                 Domain.self () <> caller_domain)
             with
             | Ok ran_off_caller ->

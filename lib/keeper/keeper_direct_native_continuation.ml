@@ -137,7 +137,7 @@ let restore binding call =
     |> Result.map_error Keeper_repetition_snapshot.error_to_string in
   let* checkpoint = Keeper_repetition_context.load resumed.checkpoint.context
     |> Result.map_error Keeper_repetition_snapshot.error_to_string in
-  let* recovered = Domain_pool_ref.submit_io_or_inline (fun () ->
+  let* recovered = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     Keeper_native_repetition_recovery.reconcile ~base_path:binding.base_path
       ~scope:(Keeper_execution_scope_id.direct_operation binding.operation_id)
       ~seed ~checkpoint ~settled ()
@@ -203,7 +203,7 @@ let retired_evidence binding call disposition =
 
 let retains_settled_results binding (call : Native.t) messages results =
   let* seed = load_checkpoint binding call.seed_checkpoint in
-  Ok (Domain_pool_ref.submit_cpu_or_inline (fun () ->
+  Ok (Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
     Keeper_native_result_retention.retains ~seed:seed.messages ~messages ~results))
 
 let load ~binding =

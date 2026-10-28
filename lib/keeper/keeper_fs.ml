@@ -530,7 +530,7 @@ let save_encoded_durable_atomic_from_with
               exception re-raises here instead of being conflated with a
               pool failure and re-run inline; [run_durable_write_stage]
               turns it into a typed [Payload_encode] failure. *)
-           Domain_pool_ref.submit_cpu_or_inline encoded_source)
+           Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ encoded_source)
     in
     save_pieces_durable_atomic_core
       ~before_stage

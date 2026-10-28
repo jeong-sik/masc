@@ -361,11 +361,11 @@ let rec remember_screen key ~blob ~blob_bytes ~screen =
 
 let encode_lazily identity encoding =
   Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
-    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
       Http_response_payload.compress_encoded_body ~level:3 encoding identity))
 
 let build_frame ~fields ~observation_seq ~refreshing =
-  let identity, etag = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+  let identity, etag = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
     let identity = Yojson.Safe.to_string (`Assoc (observed_fields fields ~observation_seq ~refreshing)) in
     identity, Http.Response.weak_etag_value identity) in
   { etag; identity
@@ -818,7 +818,7 @@ let add_routes ~sw ~clock router =
            | Error Source_credential_unreadable -> respond_unavailable request reqd
            | Ok access ->
              let result = let* args=decode_body body in
-               Domain_pool_ref.submit_io_or_inline (fun () ->
+               Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                  Lane_addon_subscription.handle ~access ~config:(Mcp_server.workspace_config state) ~caller args) in
              respond request reqd result)))
   |> Http.Router.get "/api/v1/lane-addons/declaration" read_declaration

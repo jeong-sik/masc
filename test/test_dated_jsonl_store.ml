@@ -67,6 +67,22 @@ let test_no_two_stores_share_a_directory () =
     (List.length (List.sort_uniq String.compare dirs))
 ;;
 
+(* RFC-0474 L4c. A pool job that reads a store is named by it: the name
+   tells the store apart from every other store and does not carry the keeper,
+   so one keeper store across forty keepers is one name. *)
+let test_a_location_knows_its_store_and_its_job_name () =
+  List.iter
+    (fun store ->
+       let name = Store.pool_job_name store in
+       check string name name (Store.pool_job_name (Store.of_location (location store)));
+       check bool (name ^ " does not name the keeper") false
+         (String.split_on_char '/' name |> List.mem keeper))
+    Store.all;
+  let names = List.map Store.pool_job_name Store.all in
+  check int "distinct job names" (List.length names)
+    (List.length (List.sort_uniq String.compare names))
+;;
+
 (* A caller holding the [.masc] directory and one holding the base path name
    the same root. *)
 let test_both_roots_name_the_same_directories () =
@@ -356,6 +372,8 @@ let () =
             test_every_store_has_its_directory
         ; test_case "no two stores share a directory" `Quick
             test_no_two_stores_share_a_directory
+        ; test_case "a location knows its store and its job name" `Quick
+            test_a_location_knows_its_store_and_its_job_name
         ; test_case "both roots name the same directories" `Quick
             test_both_roots_name_the_same_directories
         ; test_case "dated path names the day file under the store" `Quick

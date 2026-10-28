@@ -28,7 +28,7 @@ let json = testable (Fmt.of_to_string Yojson.Safe.to_string) Yojson.Safe.equal
 
 let lookup ?(timeout_sec = 5.) ~clock key compute =
   Dashboard_cache.get_or_compute_with_timeout key ~ttl:60. ~clock ~timeout_sec
-    (Pool_work.cpu compute)
+    (Pool_work.cpu ~name:__FUNCTION__ compute)
 ;;
 
 (* A cached value, read without computing. *)
@@ -40,7 +40,7 @@ let start_job ?(queued = false) ~sw ~go body =
   let on_worker, arrived = Eio.Promise.create () in
   let result =
     Eio.Fiber.fork_promise ~sw (fun () ->
-      Executor_pool_ref.submit_or_inline (fun () ->
+      Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
         Eio.Promise.resolve arrived ();
         Eio.Promise.await go;
         body ()))

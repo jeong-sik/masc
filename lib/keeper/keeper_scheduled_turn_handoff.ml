@@ -8,7 +8,7 @@ let is_scheduled (source : Keeper_event_queue.stimulus) =
   | Owned_job_completed _ | Addon_operation_changed _ | Task_outcome _ -> false
 
 let pending ~base_path ~keeper_name =
-  Executor_pool_ref.submit_or_inline (fun () ->
+  Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
     Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name
     |> Result.map (List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
          is_scheduled selection.source)))

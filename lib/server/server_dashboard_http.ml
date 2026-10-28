@@ -57,7 +57,7 @@ let dashboard_board_payload
      the work to a worker domain and keeps user requests on the
      cache fast-path so they never wait for this refresh. *)
   Dashboard_cache.get_or_compute_payload cache_key ~ttl:dashboard_projection_cache_ttl_s
-    (Pool_work.cpu (fun () ->
+    (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
       let base_fetch =
         board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset
       in
@@ -186,7 +186,7 @@ let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
       approval_queue_revision
   in
   let compute =
-    Pool_work.cpu (fun () ->
+    Pool_work.cpu ~name:__FUNCTION__ (fun () ->
       Dashboard_gate.dashboard_json ~base_path ~limit ~window_minutes)
   in
   if force then Dashboard_cache.invalidate cache_key;
@@ -286,7 +286,7 @@ let dashboard_scheduled_automation_http_json ~(config : Workspace.config) :
   Dashboard_cache.get_or_compute
     (Server_dashboard_http_core_cache.scheduled_automation_cache_key config)
     ~ttl:Server_dashboard_http_core_cache.live_cache_ttl_s
-    (Pool_work.cpu (fun () ->
+    (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
       Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
         config))
 ;;
@@ -304,12 +304,12 @@ let dashboard_scheduled_automation_query_http_json
     (match Server_utils.query_param request "payload_target" with
      | None -> dashboard_scheduled_automation_http_json ~config
      | Some payload_target ->
-       Domain_pool_ref.submit_io_or_inline (fun () ->
+       Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
          Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
            ~payload_target
            config))
   | Some schedule_id ->
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Server_dashboard_schedule_projection.scheduled_automation_exact_lookup_json
         config
         (* NDT-OK: the request boundary is where wall-clock enters, so the
@@ -323,7 +323,7 @@ let dashboard_proof_http_json ~config request : Yojson.Safe.t =
   let key =
     Printf.sprintf "dashboard.proof:%s;%d" config.Workspace.base_path limit
   in
-  Dashboard_cache.get_or_compute key ~ttl:dashboard_projection_cache_ttl_s (Pool_work.cpu (fun () ->
+  Dashboard_cache.get_or_compute key ~ttl:dashboard_projection_cache_ttl_s (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
     dashboard_proof_compute ~config ~limit ()))
 ;;
 
@@ -856,7 +856,7 @@ let dashboard_bootstrap_http_json
         Printf.sprintf "planning:%s" (Mcp_server.workspace_config state).base_path
       in
       (Dashboard_cache.get_or_compute_payload cache_key
-         ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.cpu (fun () ->
+         ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
            dashboard_planning_http_json ~config:(Mcp_server.workspace_config state))))
         .json)
   in
@@ -902,7 +902,7 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
       (* fire-and-forget: pre-warm planning cache *)
       ignore
         (Dashboard_cache.get_or_compute_payload cache_key
-           ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.cpu (fun () ->
+           ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
              dashboard_planning_http_json ~config)));
       Log.Dashboard.info "planning surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
     with
@@ -916,7 +916,7 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
       ignore
         (Dashboard_cache.get_or_compute_payload "config_introspect"
            ~ttl:Server_dashboard_http_core_cache.config_cache_ttl_s
-           (Pool_work.cpu Env_config_introspect.to_json));
+           (Pool_work.cpu ~name:__FUNCTION__ Env_config_introspect.to_json));
       Log.Dashboard.info "config surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -929,7 +929,7 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
       (* fire-and-forget: pre-warm keeper-memory-health cache *)
       ignore
         (Dashboard_cache.get_or_compute_payload cache_key
-           ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.cpu (fun () ->
+           ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
              Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json ~base_path)));
       Log.Dashboard.info "keeper-memory-health surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
     with

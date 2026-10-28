@@ -34,6 +34,7 @@ val run_dashboard_compute :
   clock:_ Eio.Time.clock ->
   config:Workspace.config ->
   kind:Pool_work.kind ->
+  name:string ->
   (config:Workspace.config -> sw:Eio.Switch.t -> 'a) ->
   'a
 (** Dispatch [compute] under the chosen [mode] (defaults to

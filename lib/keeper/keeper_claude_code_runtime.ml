@@ -108,7 +108,7 @@ let model_input_projection_for_capacity ~input_source
       messages
   in
   let () =
-    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
       let full_bytes =
         List.fold_left
           (fun total message ->

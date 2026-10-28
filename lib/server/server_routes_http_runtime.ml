@@ -1420,7 +1420,7 @@ let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
        the main domain so concurrent HTTP requests are not stalled. *)
     ~compute:(fun () ->
       await_full_health_refresh_worker ~sw ~compute:(fun () ->
-          Domain_pool_ref.submit_io_or_inline (fun () ->
+          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
               compute_full_health_snapshot ~request_authority request)))
     ~on_result:Fun.id
 

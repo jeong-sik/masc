@@ -209,7 +209,7 @@ let test_pending_confirmation_mutations_invalidate_snapshot_views () =
       let projection_computes = ref 0 in
       let projection () =
         Dashboard_projection_cache.get_or_compute_snapshot_json ~config
-          ~actor:(Some "operator") (fun _ -> Pool_work.cpu (fun () ->
+          ~actor:(Some "operator") (fun _ -> Pool_work.cpu ~name:__FUNCTION__ (fun () ->
             incr projection_computes;
             `Int !projection_computes))
       in

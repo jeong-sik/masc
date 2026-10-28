@@ -152,7 +152,7 @@ let observe_linked_task ~base_path (ask : Keeper_ask.ask) =
         try
           let config = Workspace_core.default_config base_path in
           Eio_guard.with_named_switch "ask-linked-task-status" (fun () ->
-          Domain_pool_ref.submit_io_or_inline
+          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__
             (fun () -> Workspace_query.read_task_status_r config ~task_id))
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -202,14 +202,14 @@ let observe_followup ?on_started ?on_source ~base_path ~keeper_name ~ask ~resolu
          "ask followup source unavailable ask_id=%s source=%s" ask.ask_id source);
     result in
   let read_reactions () = read_observation ~source:"wake_turn" (fun () ->
-    Domain_pool_ref.submit_io_or_inline (fun () ->
+    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Keeper_reaction_ledger.event_queue_reaction_evidence_result
         ~base_path ~keeper_name ~stimulus_id
       |> Result.map_error Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string)) in
   let read_actions () = read_observation ~source:"tool_results" (fun () ->
     match Keeper_ask.answer_source_id ~ask_id:ask.ask_id ~answered_at:stimulus.arrived_at with
     | None -> Error "canonical answer input identity is invalid"
-    | Some source_id -> Domain_pool_ref.submit_io_or_inline (fun () ->
+    | Some source_id -> Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         observe_tool_actions ~base_path ~keeper_name ~source_id)) in
   let read_task () = observe_linked_task ~base_path ask in
   let read_reactions () = publish (fun value -> Reaction_evidence value) (read_reactions ()) in

@@ -660,7 +660,7 @@ let snapshot_json
       then
         let cache_key = "operator:board-quarantines:" ^ config.base_path in
         Dashboard_cache.get_or_compute cache_key ~ttl:10.0
-          (Pool_work.cpu (fun () ->
+          (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
              Keeper_board_attention_quarantine_command.inventory_json
                ~base_path:config.base_path
                ~keeper_names))

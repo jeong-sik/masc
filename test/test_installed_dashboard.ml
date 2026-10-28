@@ -344,7 +344,7 @@ let test_pool_integrity () =
 
 let test_worker_and_raw_domain () =
   with_cpu_pool (fun pool ->
-    Domain_pool.submit_cpu pool test_exact_release;
+    Domain_pool.submit_cpu ~name:__FUNCTION__ pool test_exact_release;
     Domain.join (Domain.spawn test_exact_release))
 
 let () = run "Installed dashboard authority" ["distribution", List.map (fun (name, test) -> test_case name `Quick test)

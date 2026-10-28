@@ -731,7 +731,7 @@ let test_read_page_path_in_a_pool_job () =
        let pooled =
          walk (fun ~since_seq ~start ->
            let worker, answer =
-             Domain_pool_ref.submit_cpu_or_inline (fun () ->
+             Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
                (Domain.self () :> int), read_page ~since_seq ~start)
            in
            if worker = caller then Alcotest.fail "the page was read on the calling domain";

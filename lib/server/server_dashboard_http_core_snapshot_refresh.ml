@@ -45,7 +45,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock ~broadcast_snapshot =
           ~sw
           ~clock
           ~config
-          ~kind:Pool_work.Cpu
+          ~kind:Pool_work.Cpu ~name:__FUNCTION__
           (fun ~config ~sw ->
              let ctx : _ Operator_control.context =
                { config

@@ -12,12 +12,12 @@ let observe ?preview ~(config : Workspace.config) ~keeper_name () =
       let lane () =
         Keeper_turn_preview.with_preparation_result ~writer:preview ~turn_ref
           ~phase:Keeper_turn_preview.Lane_inputs_preparation (fun () ->
-            Domain_pool_ref.submit_io_or_inline (fun () ->
+            Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
               Lane_addon_subscription.observe ~config ~keeper_name)) in
       let memory () =
         Keeper_turn_preview.with_preparation_result ~writer:preview ~turn_ref
           ~phase:Keeper_turn_preview.Workspace_memory_preparation (fun () ->
-            let observed = Domain_pool_ref.submit_io_or_inline (fun () ->
+            let observed = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
               Workspace_memory_ledger.observe ~base_path:config.base_path) in
             match observed with
             | Workspace_memory_ledger.Unavailable _ -> Error observed
@@ -26,7 +26,7 @@ let observe ?preview ~(config : Workspace.config) ~keeper_name () =
       let wiki () =
         Keeper_turn_preview.with_preparation_result ~writer:preview ~turn_ref
           ~phase:Keeper_turn_preview.Wiki_preparation (fun () ->
-            let observed = Domain_pool_ref.submit_io_or_inline (fun () ->
+            let observed = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
               Keeper_wiki_contents.observe ~base_path:config.base_path) in
             match observed with
             | Keeper_wiki_contents.Unlisted _ -> Error observed

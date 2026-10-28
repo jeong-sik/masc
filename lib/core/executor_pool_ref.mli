@@ -50,6 +50,7 @@ val strict_submit_error_to_string : strict_submit_error -> string
 
 val submit_strict :
   ?weight:float ->
+  name:string ->
   (unit -> 'a) ->
   ('a, strict_submit_error) result
 (** Submit [f] exactly once to an installed pool from an Eio fiber.
@@ -62,8 +63,11 @@ val submit_strict :
     before caller cancellation returns; blocking or protected work can
     delay it. Pending entry is retired when cancellation wins its entry race. *)
 
-val submit_or_inline : ?weight:float -> (unit -> 'a) -> 'a
-(** Run [f] on an Executor_pool worker (a real Eio fiber under
+val submit_or_inline : ?weight:float -> name:string -> (unit -> 'a) -> 'a
+(** [name] names the work in {!Pool_wait} and the trace; callers pass
+    [__FUNCTION__] (RFC-0474 L4c).
+
+    Run [f] on an Executor_pool worker (a real Eio fiber under
     [Eio.Switch.run], so effect-based ops keep their handlers), or inline
     in the current fiber when no pool is installed (tests, pre-init), when
     outside Eio, or when already running on the shared worker. A worker or

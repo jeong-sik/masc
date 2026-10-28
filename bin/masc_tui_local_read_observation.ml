@@ -133,7 +133,7 @@ let run_stage t stage submit work =
     Printexc.raise_with_backtrace exn bt
 let run t ~read ~prepare =
   observe t Caller_started;
-  match prepare (run_stage t Io Domain_pool_ref.submit_io_or_inline read) with
+  match prepare (run_stage t Io (Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__) read) with
   | value -> observe t (Caller_observed Returned);value
   | exception exn -> let bt=Printexc.get_raw_backtrace () in
     observe t (Caller_observed (Caller_failed (failure_of_exception exn)));

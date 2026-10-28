@@ -86,7 +86,7 @@ let read_source_json ~config ~keeper_name ~render source =
   Ok (render messages turns)
 
 let read_json ~config ~keeper_name ~render =
-  Domain_pool_ref.submit_io_or_inline (fun () ->
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     let open Result.Syntax in
     let* source = inspect ~config ~keeper_name in
     read_source_json ~config ~keeper_name ~render source)
@@ -105,11 +105,11 @@ let cached_json ~config ~keeper_name ~ttl ~render =
      A failed later inspection also prevents retention; it cannot retroactively
      make the already-read body an unreadable or empty successful transcript. *)
   let retire_if_changed fingerprint =
-    match Domain_pool_ref.submit_io_or_inline (fun () -> inspect ~config ~keeper_name) with
+    match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () -> inspect ~config ~keeper_name) with
     | Ok after when String.equal fingerprint after.fingerprint -> ()
     | Ok _ | Error (Unknown_keeper | History_unavailable _) -> Dashboard_cache.invalidate key
   in
-  match Domain_pool_ref.submit_io_or_inline (fun () -> inspect ~config ~keeper_name) with
+  match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () -> inspect ~config ~keeper_name) with
   | Error error -> refuse error
   | Ok source ->
     (match Dashboard_cache.peek key with
@@ -120,8 +120,8 @@ let cached_json ~config ~keeper_name ~ttl ~render =
      | Some _ -> Dashboard_cache.invalidate key
      | None -> ());
     (try
-       let cached = Dashboard_cache.get_or_compute key ~ttl @@ Pool_work.cpu (fun () ->
-         match Domain_pool_ref.submit_io_or_inline (fun () ->
+       let cached = Dashboard_cache.get_or_compute key ~ttl @@ Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+         match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
              read_source_json ~config ~keeper_name ~render source) with
          | Ok body ->
            retire_if_changed source.fingerprint;

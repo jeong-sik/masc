@@ -112,7 +112,7 @@ let run_artifact_job ~label f =
   | None -> Eio_guard.run_in_systhread ~label f
   | Some _ ->
       Eio_guard.check_if_ready ();
-      Domain_pool_ref.submit_io_or_inline f
+      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 
 let store_frame ?base_path ~keeper_name bytes =
   let dir = frames_dir ?base_path ~keeper_name () in

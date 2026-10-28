@@ -792,7 +792,7 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars ~fetched_at_unix =
                  installed, and inline otherwise. [truncate_text] stays on the
                  fiber: it offloads the full text to a file. *)
               let title, description, (rendered, extraction_source) =
-                Domain_pool_ref.submit_cpu_or_inline (fun () ->
+                Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
                   let title =
                     match content_kind with
                     | Html -> extract_title response.body

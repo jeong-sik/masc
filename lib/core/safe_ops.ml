@@ -412,7 +412,7 @@ let json_parse_offload_min_bytes = 128 * 1024
 let parse_json_off_fiber ~context str : (Yojson.Safe.t, string) result =
   if String.length str < json_parse_offload_min_bytes
   then parse_json_safe ~context str
-  else Domain_pool_ref.submit_cpu_or_inline (fun () -> parse_json_safe ~context str)
+  else Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () -> parse_json_safe ~context str)
 
 let read_json_file_safe path : (Yojson.Safe.t, string) result =
   match read_file_safe path with

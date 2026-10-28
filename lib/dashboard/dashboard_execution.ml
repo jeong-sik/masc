@@ -748,7 +748,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
         ~config
         ~actor:(Some effective_actor)
         (fun actor_name ->
-           Pool_work.cpu (fun () ->
+           Pool_work.cpu ~name:__FUNCTION__ (fun () ->
              Dashboard_projection_cache.operator_snapshot_json
                ~actor:actor_name
                ~view:"summary"

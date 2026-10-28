@@ -98,7 +98,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
         ~sw
         ~clock
         ~config:workspace_config
-        ~kind:Pool_work.Cpu
+        ~kind:Pool_work.Cpu ~name:__FUNCTION__
       |> fun run_compute ->
       let result =
         run_compute (fun ~config ~sw ->
@@ -145,7 +145,7 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
       ~sw
       ~clock
       ~config:(Mcp_server.workspace_config state)
-      ~kind:Pool_work.Cpu
+      ~kind:Pool_work.Cpu ~name:__FUNCTION__
       (fun ~config ~sw ->
          Dashboard_briefing.json
            ?actor
@@ -170,7 +170,7 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
         ~ttl:deep_surface_cache_ttl_s
         ~clock
         ~timeout_sec:dashboard_briefing_timeout_s
-        (Pool_work.cpu (fun () -> compute ()))
+        (Pool_work.cpu ~name:__FUNCTION__ (fun () -> compute ()))
     | Some _ ->
       (* Actor-parameterized: on-demand with SWR cache. *)
       let cache_key =
@@ -184,7 +184,7 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
         ~ttl:deep_surface_cache_ttl_s
         ~clock
         ~timeout_sec:dashboard_briefing_timeout_s
-        (Pool_work.cpu (compute ?actor))
+        (Pool_work.cpu ~name:__FUNCTION__ (compute ?actor))
   in
   Dashboard_projection_cache.with_current_keeper_observations
     ~config:(Mcp_server.workspace_config state) full_json
@@ -219,7 +219,7 @@ let dashboard_briefing_sections_http_json ~state ~sw ~clock request =
       ~ttl:deep_surface_cache_ttl_s
       ~clock
       ~timeout_sec:dashboard_briefing_timeout_s
-      (Pool_work.cpu compute))
+      (Pool_work.cpu ~name:__FUNCTION__ compute))
 ;;
 
 let dashboard_shell_status_json =
@@ -658,7 +658,7 @@ let dashboard_shell_http_json
        [Dashboard_cache] runs this [Pool_work.cpu] compute on a
        worker domain when the pool is wired, so the main HTTP domain
        keeps serving requests during the cold-shell refresh. *)
-    Pool_work.cpu (fun () ->
+    Pool_work.cpu ~name:__FUNCTION__ (fun () ->
       dashboard_shell_payload_json ?timing ~light config)
   in
   let clock_opt =

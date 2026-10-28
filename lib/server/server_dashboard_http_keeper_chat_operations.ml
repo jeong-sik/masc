@@ -386,7 +386,7 @@ let handle_get state request reqd = function
           journal. *)
        let page =
          match
-           Domain_pool_ref.submit_cpu_or_inline (fun () ->
+           Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
              Keeper_chat_event_log.read_page_path ~path ~since_seq ~start ~limit
              |> Result.map render)
          with
@@ -445,7 +445,7 @@ let handle_get state request reqd = function
           the journal. *)
        let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
        (match
-          Domain_pool_ref.submit_cpu_or_inline (fun () ->
+          Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
             Keeper_chat_event_log.read_page_path
               ~path
               ~since_seq:query.er_since_seq

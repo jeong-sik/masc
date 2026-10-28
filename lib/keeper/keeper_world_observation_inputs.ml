@@ -121,7 +121,7 @@ let tasks_with_identities_memoized tasks =
   | Some _ | None ->
     (* A changed backlog: parse every task id again, on the domain pool when
        one is installed, so the regex per task does not run on the fiber. *)
-    let result = Domain_pool_ref.submit_cpu_or_inline (fun () -> tasks_with_identities tasks) in
+    let result = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () -> tasks_with_identities tasks) in
     Atomic.set identities_memo (Some (tasks, result));
     result
 ;;

@@ -4603,7 +4603,7 @@ let launch_runtime_form_save state ~mailbox request =
               (fun () -> Masc_tui_runtime_config_view.decode json)) in
             (* Account declaration may resolve a client path/environment. Keep
                that boundary out of the UI domain and pure response decoder. *)
-            Domain_pool_ref.submit_io_or_inline
+            Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__
               (fun () -> prepare_runtime_form_save request.rfs_draft reading) in
       prepared := Some draft;
       publish (Form_previewing draft);
@@ -14164,7 +14164,7 @@ let launch_live_context_load state ~mailbox keeper =
             Eio.Fiber.first
               (fun () ->
                 let result =
-                  try Domain_pool_ref.submit_io_or_inline
+                  try Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__
                         (fun () ->
                           let config = Workspace_core.default_config base_path in
                           Context.load ~config keeper)
@@ -14602,7 +14602,7 @@ let launch_keeper_log_read state ~mailbox ~intent keeper =
         ~finally:(fun () -> finish_keeper_log_read state request)
         (fun () -> Eio.Fiber.first
           (fun () ->
-            let result = try Domain_pool_ref.submit_io_or_inline (fun () ->
+            let result = try Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                 Metrics_tail.load_keeper ~base_path:key.klk_base_path
                   ~keeper_name:key.klk_keeper ~limit:key.klk_limit)
               with

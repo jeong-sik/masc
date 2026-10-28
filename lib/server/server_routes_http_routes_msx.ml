@@ -410,7 +410,7 @@ let checkpoint_operation_response ~(config : Workspace.config) ~restore ~body =
         (* Admission is durably committed before the effect job is submitted.
            A cancelled HTTP waiter cannot turn a pending record into permission
            to dispatch the same operation again. *)
-        match Executor_pool_ref.submit_strict (fun () ->
+        match Executor_pool_ref.submit_strict ~name:__FUNCTION__ (fun () ->
           Workspace.mkdir_p (Filename.dirname path);
           Checkpoint_receipt.admit ~path ~epoch:checkpoint_epoch binding) with
         | Error failure ->
@@ -455,7 +455,7 @@ let checkpoint_operation_response ~(config : Workspace.config) ~restore ~body =
                   ~notify:(fun () -> ()) settled with
                 | Error message -> Error message
                 | Ok () -> Ok {Checkpoint_receipt.binding;epoch=checkpoint_epoch;state=settled}) in
-            (match Executor_pool_ref.submit_strict run with
+            (match Executor_pool_ref.submit_strict ~name:__FUNCTION__ run with
              | Ok (Ok receipt) ->
                  `OK, `Assoc (receipt_json ~config receipt)
              | Ok (Error message) -> `Internal_server_error,write_error_json message
@@ -476,7 +476,7 @@ let checkpoint_status_response ~(config : Workspace.config) ~body =
            (match checkpoint_binding ~restore:(action="restore") (`Assoc (List.remove_assoc "checkpoint" fields)) with
             | Error message -> `Bad_request,write_error_json message
             | Ok binding ->
-                (match Executor_pool_ref.submit_strict (fun () ->
+                (match Executor_pool_ref.submit_strict ~name:__FUNCTION__ (fun () ->
                   let path = checkpoint_receipt_path config in
                   let recovered = Checkpoint_receipt.retry_settlement ~path ~epoch:checkpoint_epoch binding in
                   match Result.bind recovered (fun () -> Checkpoint_receipt.inspect ~path binding) with

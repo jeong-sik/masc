@@ -1042,7 +1042,7 @@ let test_json_worker_yields_to_caller ~queued respond () =
       let release, release_u = Eio.Promise.create () in
       let blocker_done, blocker_done_u = Eio.Promise.create () in
       Eio.Fiber.fork ~sw (fun () ->
-        Executor_pool_ref.submit_or_inline (fun () ->
+        Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
           Eio.Promise.resolve occupied_u ();
           Eio.Promise.await release);
         Eio.Promise.resolve blocker_done_u ());
@@ -1084,7 +1084,7 @@ let test_json_worker_cancelled_before_write respond () =
       let release, release_u = Eio.Promise.create () in
       let blocker_done, blocker_done_u = Eio.Promise.create () in
       Eio.Fiber.fork ~sw (fun () ->
-        Executor_pool_ref.submit_or_inline (fun () ->
+        Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
           Eio.Promise.resolve occupied_u ();
           Eio.Promise.await release);
         Eio.Promise.resolve blocker_done_u ());
@@ -1128,7 +1128,7 @@ let test_json_worker_cancelled_before_write respond () =
         Eio.Promise.await blocker_done;
         (* Pass a worker barrier before checking that cancellation did not
            defer a response write until the occupied executor was released. *)
-        Executor_pool_ref.submit_or_inline (fun () -> ());
+        Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () -> ());
         Eio.Fiber.yield ();
         check_no_write ()
       end)))

@@ -530,7 +530,7 @@ let read_recent ~base_path ?keeper_name ?(n = 20) ()
     match get_audit_store ~base_path () with
     | Error detail -> Error ({ stage = Read_recent; detail } : read_error)
     | Ok store ->
-      Domain_pool_ref.submit_io_or_inline (fun () ->
+      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         let rows = ref [] in
         let count = ref 0 in
         let select = function

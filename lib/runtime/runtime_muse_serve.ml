@@ -720,7 +720,7 @@ let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mg
           config.admission_timeout_s
           (fun () ->
              let payload, write =
-               Domain_pool_ref.submit_cpu_or_inline (fun () ->
+               Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
                  let payload = Yojson.Safe.to_string json in
                  payload, Runtime_official_client_write.json_line selection json payload)
              in

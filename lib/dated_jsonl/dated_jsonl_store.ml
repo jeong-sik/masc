@@ -76,21 +76,22 @@ type t =
   | Decision_audit
 [@@deriving enumerate]
 
-type location = { dir : string; root : string; segments : string list }
+type location = { store : t; dir : string; root : string; segments : string list }
 type root = Masc_dir of string
 
 let root_of_base_path ~base_path = Masc_dir (Common.masc_dir_from_base_path ~base_path)
 let root_of_masc_dir dir = Masc_dir dir
-let under (Masc_dir root) segments =
-  { dir = List.fold_left Filename.concat root segments; root; segments }
-let at root store = under root (Root.segments store)
+let under (Masc_dir root) store segments =
+  { store; dir = List.fold_left Filename.concat root segments; root; segments }
+let at root store = under root (Root store) (Root.segments store)
 
 let keeper root ~keeper store =
-  under root [ Common.keepers_runtime_dirname; keeper; Keeper.dirname store ]
+  under root (Keeper store) [ Common.keepers_runtime_dirname; keeper; Keeper.dirname store ]
 
 let reaction_ledger root ~keeper ~generation =
   under
     root
+    Reaction_ledger
     [ Common.keepers_runtime_dirname
     ; keeper
     ; Common.keeper_runtime_store_dirname Common.Keeper_reaction_ledger
@@ -100,9 +101,17 @@ let reaction_ledger root ~keeper ~generation =
 let decision_audit_dirname = "decision_audit"
 
 let decision_audit root ~keeper_dirname =
-  under root [ decision_audit_dirname; keeper_dirname ]
+  under root Decision_audit [ decision_audit_dirname; keeper_dirname ]
 
 let dir location = location.dir
+let of_location location = location.store
+
+let pool_job_name = function
+  | Root store -> "root/" ^ Root.relative_path store
+  | Keeper store -> "keeper/" ^ Keeper.dirname store
+  | Reaction_ledger ->
+    "keeper/" ^ Common.keeper_runtime_store_dirname Common.Keeper_reaction_ledger
+  | Decision_audit -> decision_audit_dirname
 
 type retention =
   | Operator_window

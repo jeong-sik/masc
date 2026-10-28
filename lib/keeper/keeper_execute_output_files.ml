@@ -72,7 +72,7 @@ let publish ~inline_ceiling_bytes ~base_path ~redaction (files : Process_output_
      the worker pool exists, and keep blocking I/O off the main fiber otherwise. *)
   let run f =
     match Domain_pool_ref.get () with
-    | Some _ -> Domain_pool_ref.submit_cpu_or_inline f
+    | Some _ -> Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ f
     | None -> Eio_guard.run_in_systhread ~label:"keeper-execute-publish-output" f
   in
   run (fun () ->

@@ -33,7 +33,7 @@ let warm_shell_cache (state : Mcp_server.server_state) =
            dashboard_shell_cache_key ~light (Mcp_server.workspace_config state)
          in
          let compute =
-           Pool_work.cpu (fun () ->
+           Pool_work.cpu ~name:__FUNCTION__ (fun () ->
              dashboard_shell_payload_json ~light (Mcp_server.workspace_config state))
          in
          match state.Mcp_server.clock with
@@ -116,7 +116,7 @@ let broadcast_cached_surface ~encoding ~event_type (json : Yojson.Safe.t) : unit
     | Encode_inline -> Some (Sse_wire.encode_json json)
     | Encode_on_pool { still_current; on_superseded } ->
       let payload =
-        Domain_pool_ref.submit_cpu_or_inline (fun () -> Sse_wire.encode_json json)
+        Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () -> Sse_wire.encode_json json)
       in
       if still_current ()
       then Some payload
@@ -797,7 +797,7 @@ let rec refresh_execution_default_light_http_body_with
       | `Prepare preparation ->
         let response_json = build_default_light_response_json ~config in
         let etag, encoded =
-          Domain_pool_ref.submit_cpu_or_inline (fun () ->
+          Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
             let body = Yojson.Safe.to_string response_json in
             Http_server_eio.Response.weak_etag_value body, prepare body)
         in
@@ -1347,7 +1347,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
           ~net
           ~mono_clock
           ~config:workspace_config
-          ~kind:Pool_work.Cpu
+          ~kind:Pool_work.Cpu ~name:__FUNCTION__
           (fun ~config ~sw ->
              Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
              |> (match Dashboard_execution_helpers.execution_fixture_name () with
@@ -1542,7 +1542,7 @@ let compute_execution_trust_json ~state ~sw ~clock =
     ~sw
     ~clock
     ~config:(Mcp_server.workspace_config state)
-    ~kind:Pool_work.Cpu
+    ~kind:Pool_work.Cpu ~name:__FUNCTION__
     (fun ~config ~sw:_ ->
        Dashboard_http_keeper.execution_trust_dashboard_json config
        |> Server_dashboard_http_core_cache.with_projection_diagnostics
@@ -1610,7 +1610,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
       ~sw
       ~clock
       ~config
-      ~kind:Pool_work.Cpu
+      ~kind:Pool_work.Cpu ~name:__FUNCTION__
       (fun ~config ~sw ->
          Dashboard_execution.json
            ?actor
@@ -1696,7 +1696,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
       cached_execution_or_first_success
         ~clock
         ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
-        (Pool_work.cpu (compute ~light:true))
+        (Pool_work.cpu ~name:__FUNCTION__ (compute ~light:true))
     in
     let json = match selected with
       | Published_snapshot (_, json) | Unpublished_response json -> json
@@ -1732,7 +1732,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
                `String (Workspace.masc_dir config);
                `Int generation; query ])
     in
-    let compute_with_generation = Pool_work.cpu @@ fun () ->
+    let compute_with_generation = Pool_work.cpu ~name:__FUNCTION__ @@ fun () ->
       compute ?actor ~light ()
       (* The request wrapper below re-projects every non-fixture response and
          serves the cached payload's bytes only when that changes nothing, so
@@ -1812,7 +1812,7 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
         ~ttl:shell_surface_cache_ttl_s
         ~clock
         ~timeout_sec:Env_config_runtime.Dashboard.execution_trust_timeout_sec
-        (Pool_work.cpu (fun () -> compute_execution_trust_json ~state ~sw ~clock))
+        (Pool_work.cpu ~name:__FUNCTION__ (fun () -> compute_execution_trust_json ~state ~sw ~clock))
   in
   attach_surface_envelope json
 ;;

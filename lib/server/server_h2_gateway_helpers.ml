@@ -118,7 +118,7 @@ let h2_respond_json_value_on_cpu ?status ?(extra_headers = []) ?(compress = true
   let request = H2.Reqd.request h2_reqd in
   let accept_encoding = H2.Headers.get request.headers "accept-encoding" in
   let body, compression_headers =
-    Executor_pool_ref.submit_or_inline (fun () ->
+    Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
       Http_response_payload.compress_body ~compress ~accept_encoding
         (Yojson.Safe.to_string json))
   in

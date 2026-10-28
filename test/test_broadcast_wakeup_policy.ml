@@ -778,7 +778,7 @@ let test_workspace_message_mutation_invalidates_workspace_and_health () =
   let unrelated_projection = ref 0 in
   let full_health_invalidations = ref 0 in
   let read key counter =
-    Dashboard_cache.get_or_compute key ~ttl:120.0 (Pool_work.cpu (fun () ->
+    Dashboard_cache.get_or_compute key ~ttl:120.0 (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
       incr counter;
       `Int !counter))
   in

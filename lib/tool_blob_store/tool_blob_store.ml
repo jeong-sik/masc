@@ -305,7 +305,7 @@ let fetch_range_with ~after_window_read t ~sha256 ~offset ~max_bytes =
       (* The full-file digest is CPU work. Keep cache admission on the caller
          so a cancelled pool wait cannot publish a validated snapshot. *)
       match
-        Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
           Fs_compat.load_owned_regular_file_range_with_sha256
             ~ownership_root:t.ownership_root
             ~offset

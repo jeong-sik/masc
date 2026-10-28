@@ -65,7 +65,7 @@ let test_a_stale_refresh_forked_by_a_read_is_background_work () =
           (Pool_lane.with_read (fun () ->
              let served =
                Dashboard_cache.get_or_compute_with_timeout key ~ttl:60. ~clock ~timeout_sec:5.
-                 (Pool_work.cpu (fun () ->
+                 (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
                    Eio.Promise.resolve start ();
                    Eio.Promise.await release;
                    Eio.Promise.resolve finish ();
@@ -91,7 +91,7 @@ let test_a_compute_a_read_waits_for_is_a_read () =
     let served =
       Pool_lane.with_read (fun () ->
         Dashboard_cache.get_or_compute_with_timeout "miss-lane" ~ttl:60. ~clock ~timeout_sec:5.
-          (Pool_work.cpu (fun () -> `String "computed")))
+          (Pool_work.cpu ~name:__FUNCTION__ (fun () -> `String "computed")))
     in
     check json "the read is answered with its compute" (`String "computed") served;
     check lanes "the compute entered the pool as a read" (1, 0) (entered_since before))
@@ -107,7 +107,7 @@ let test_an_inline_refresh_the_read_waits_for_is_a_read () =
     let _served =
       Pool_lane.with_read (fun () ->
         Dashboard_cache.get_or_compute_with_timeout key ~ttl:60. ~clock ~timeout_sec:5.
-          (Pool_work.cpu (fun () -> `String "fresh")))
+          (Pool_work.cpu ~name:__FUNCTION__ (fun () -> `String "fresh")))
     in
     check lanes "the inline refresh entered the pool as a read" (1, 0) (entered_since before))
 ;;
@@ -168,8 +168,8 @@ let read_in_fiber ~sw key h =
 let test_two_io_computes_share_the_one_worker () =
   with_pool (fun ~clock ->
     let returned_count = Atomic.make 0 in
-    let a = held ~declare:Pool_work.io ~lane:Pool_lane.Read ~returned_count (`String "a") in
-    let b = held ~declare:Pool_work.io ~lane:Pool_lane.Read ~returned_count (`String "b") in
+    let a = held ~declare:(Pool_work.io ~name:__FUNCTION__) ~lane:Pool_lane.Read ~returned_count (`String "a") in
+    let b = held ~declare:(Pool_work.io ~name:__FUNCTION__) ~lane:Pool_lane.Read ~returned_count (`String "b") in
     Fun.protect ~finally:(release_all [ a; b ]) (fun () ->
       Eio.Switch.run (fun sw ->
         let served_a = read_in_fiber ~sw "l4b-io-a" a in
@@ -194,8 +194,8 @@ let test_two_io_computes_share_the_one_worker () =
 let test_two_cpu_computes_take_turns_on_the_one_worker () =
   with_pool (fun ~clock ->
     let returned_count = Atomic.make 0 in
-    let a = held ~declare:Pool_work.cpu ~lane:Pool_lane.Read ~returned_count (`String "a") in
-    let b = held ~declare:Pool_work.cpu ~lane:Pool_lane.Read ~returned_count (`String "b") in
+    let a = held ~declare:(Pool_work.cpu ~name:__FUNCTION__) ~lane:Pool_lane.Read ~returned_count (`String "a") in
+    let b = held ~declare:(Pool_work.cpu ~name:__FUNCTION__) ~lane:Pool_lane.Read ~returned_count (`String "b") in
     Fun.protect ~finally:(release_all [ a; b ]) (fun () ->
       Eio.Switch.run (fun sw ->
         let served_a = read_in_fiber ~sw "l4b-cpu-a" a in
@@ -232,8 +232,8 @@ let test_two_cpu_computes_take_turns_on_the_one_worker () =
 let test_two_io_refreshes_share_the_one_worker () =
   with_pool (fun ~clock ->
     let returned_count = Atomic.make 0 in
-    let a = held ~declare:Pool_work.io ~lane:Pool_lane.Background ~returned_count (`String "a") in
-    let b = held ~declare:Pool_work.io ~lane:Pool_lane.Background ~returned_count (`String "b") in
+    let a = held ~declare:(Pool_work.io ~name:__FUNCTION__) ~lane:Pool_lane.Background ~returned_count (`String "a") in
+    let b = held ~declare:(Pool_work.io ~name:__FUNCTION__) ~lane:Pool_lane.Background ~returned_count (`String "b") in
     Fun.protect ~finally:(release_all [ a; b ]) (fun () ->
       let read key h =
         Dashboard_cache.seed_stale_if_missing key ~stale_for:60. (`String "stale");

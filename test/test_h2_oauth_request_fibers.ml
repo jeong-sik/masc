@@ -60,7 +60,7 @@ let with_gateway run =
                  a regression times out or an assertion fails. *)
               Fun.protect ~finally:release (fun () ->
                 Eio.Fiber.fork ~sw (fun () ->
-                  Domain_pool.submit_cpu pool (fun () ->
+                  Domain_pool.submit_cpu ~name:__FUNCTION__ pool (fun () ->
                     Eio.Promise.resolve occupy ();
                     Eio.Promise.await released));
                 Eio.Promise.await occupied;

@@ -30,7 +30,7 @@ let rec run t =
   | Some request ->
       let outcome =
         try
-          match Domain_pool_ref.submit_io_or_inline (fun () ->
+          match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
             Masc_tui_config.record_chat_visit ~base_path:request.base_path request.keeper) with
           | Ok durability -> Saved durability
           | Error detail -> Refused detail

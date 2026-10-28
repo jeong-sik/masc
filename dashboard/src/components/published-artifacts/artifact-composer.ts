@@ -9,6 +9,8 @@ import {
 export type ArtifactPublicationOutcome = { title: string; base?: { id: string; revision: number } } & (
   | { kind: 'published'; publication: ArtifactPublication; verified: boolean }
   | { kind: 'unconfirmed'; detail: string }
+  | { kind: 'checkpoint'; publication: ArtifactPublication;
+      status: 'pending' | 'checkpointed' | 'already_current' | 'refused' | 'unconfirmed'; detail?: string }
 )
 export type ArtifactDraftSnapshot = {
   readonly identity: object;
@@ -84,11 +86,11 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDr
       publication = await publishArtifact(request, expectedWorkspace)
     } catch (error) {
       const message = error instanceof Error ? error.message : '저장 응답을 받지 못했습니다.'
-      // A parsed 4xx response is a definite refusal: the write did not happen.
-      // Only an unreadable outcome (network, timeout, 5xx) is unconfirmed.
+      // A proxy timeout can arrive after the server has committed. Preserve
+      // the uncertain publication without offering another save in this editor.
       const refusalStatus = error instanceof ApiRequestError ? error.status : undefined
-      const definiteRefusal = refusalStatus !== undefined && refusalStatus >= 400 && refusalStatus < 500
-      if (error instanceof ApiRequestError && error.errorCode === 'workspace_precondition_failed') {
+      const definiteRefusal = refusalStatus !== undefined && refusalStatus >= 400 && refusalStatus < 500 && refusalStatus !== 408
+      if (definiteRefusal && error instanceof ApiRequestError && error.errorCode === 'workspace_precondition_failed') {
         sending.current = false
         if (current()) setState({ kind: 'ready', message: '서버의 작업 공간이 바뀌어 저장 요청이 거절되었습니다. 작성한 원고는 그대로 남아 있습니다.' })
         return

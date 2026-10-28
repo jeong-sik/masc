@@ -6,16 +6,18 @@ import { EditorView } from '@codemirror/view'
 import { ArtifactSharedEditor } from './artifact-shared-editor'
 import { ArtifactReader } from './artifact-reader'
 import type { ArtifactDraftSnapshot } from './artifact-composer'
+import { ApiRequestError } from '../../api/core'
 import { seedSharedDocument, sharedSource, sharedState, selectSharedSource } from '../../lib/artifact-shared-document'
 import { draftBase64, draftBytes } from '../../lib/artifact-live-session'
 import type { ArtifactDraftView } from '../../api/artifact-drafts'
-import { sendArtifactDraftCommand } from '../../api/artifact-drafts'
+import { checkpointArtifactDraft, sendArtifactDraftCommand } from '../../api/artifact-drafts'
 import { streamArtifactDraft, sendArtifactPresence, type ArtifactDraftLiveFrame } from '../../api/artifact-draft-live'
 import { captureArtifactWorkspace, fetchPublishedArtifact, publishArtifact, readPublishedDraft, type ArtifactDocument } from '../../api/published-artifacts'
 import { artifactDraftRecoveries, discardArtifactDraftRecovery } from '../../lib/artifact-draft-recovery'
 vi.mock('../../api/published-artifacts', async original => ({ ...await original<typeof import('../../api/published-artifacts')>(),
   captureArtifactWorkspace: vi.fn(), fetchPublishedArtifact: vi.fn(), publishArtifact: vi.fn(), readPublishedDraft: vi.fn() }))
-vi.mock('../../api/artifact-drafts', async original => ({ ...await original<typeof import('../../api/artifact-drafts')>(), sendArtifactDraftCommand: vi.fn() }))
+vi.mock('../../api/artifact-drafts', async original => ({ ...await original<typeof import('../../api/artifact-drafts')>(),
+  sendArtifactDraftCommand: vi.fn(), checkpointArtifactDraft: vi.fn() }))
 vi.mock('../../api/artifact-draft-live', async original => ({ ...await original<typeof import('../../api/artifact-draft-live')>(),
   streamArtifactDraft: vi.fn(), sendArtifactPresence: vi.fn() }))
 vi.mock('../../router', () => ({ navigate: vi.fn() }))
@@ -31,7 +33,7 @@ beforeEach(() => {
   retainedDrafts.clear()
   vi.mocked(captureArtifactWorkspace).mockReset().mockResolvedValue(workspace)
   vi.mocked(fetchPublishedArtifact).mockReset(); vi.mocked(publishArtifact).mockReset(); vi.mocked(readPublishedDraft).mockReset()
-  vi.mocked(sendArtifactDraftCommand).mockReset(); vi.mocked(streamArtifactDraft).mockReset()
+  vi.mocked(sendArtifactDraftCommand).mockReset(); vi.mocked(checkpointArtifactDraft).mockReset(); vi.mocked(streamArtifactDraft).mockReset()
   vi.mocked(sendArtifactPresence).mockReset().mockResolvedValue()
 })
 afterEach(() => {
@@ -61,8 +63,13 @@ function fixture(char: string,source='shared source\r\n한글 😀\r\n') {
   const artifact = { id: target.artifact_id, revision: 1, title: 'original title', summary: 'original summary', format: 'markdown' as const,
     author: 'publisher', created_at: '2026-10-25T13:00:00Z', task_id: null, goal_id: null, body: { _blob: { sha256: 'a'.repeat(64) } }, url: '/dashboard' }
   const doc: ArtifactDocument = { artifact, content: sharedSource(authority), revisions: [artifact] }
-  const mount = (isCurrent = () => true, onPublished = vi.fn(), openingDoc:ArtifactDocument=doc) => render(html`<${ArtifactSharedEditor} draftRetention=${draftRetention} doc=${openingDoc} workspaceRoot="/fixture"
-    isCurrent=${isCurrent} onCloseRequest=${() => {}} onMutation=${() => {}} onPublished=${onPublished} onClose=${() => {}} />`)
+  vi.mocked(checkpointArtifactDraft).mockImplementation(async (requestedTarget, expectedSequence, publication) => {
+    const document = snapshot()
+    return { checkpoint: 'checkpointed', document: { ...document, draft: { ...document.draft, target: requestedTarget,
+      base_revision: publication.artifact.revision, base_sha256: publication.artifact.body._blob.sha256, sequence: expectedSequence + 1 } } }
+  })
+  const mount = (isCurrent = () => true, onPublished = vi.fn(), openingDoc:ArtifactDocument=doc, onMutation=vi.fn()) => render(html`<${ArtifactSharedEditor} draftRetention=${draftRetention} doc=${openingDoc} workspaceRoot="/fixture"
+    isCurrent=${isCurrent} onCloseRequest=${() => {}} onMutation=${onMutation} onPublished=${onPublished} onClose=${() => {}} />`)
   const editor = async () => {
     fireEvent.click(await screen.findByRole('button',{name:'원본 편집'}))
     return EditorView.findFromDOM(await screen.findByRole('textbox', { name: '공동 편집 원고' }))!
@@ -166,6 +173,10 @@ it('publishes again only after explicit latest-version comparison, preserving it
   fireEvent.click(save)
   await waitFor(() => expect(onPublished).toHaveBeenCalledTimes(1))
   expect(vi.mocked(publishArtifact).mock.calls[0]![0].expected_revision).toBe(1)
+  expect(checkpointArtifactDraft).toHaveBeenCalledTimes(1)
+  expect(vi.mocked(checkpointArtifactDraft).mock.calls[0]![0]).toEqual(f.target)
+  expect(vi.mocked(checkpointArtifactDraft).mock.calls[0]![1]).toBe(0)
+  expect(vi.mocked(checkpointArtifactDraft).mock.calls[0]![3]).toEqual(workspace)
 
   // Another publisher changed both content and metadata after our first post.
   latest = { ...latest, artifact: { ...latest.artifact, revision: 3, title: 'latest title', summary: 'latest summary',
@@ -195,8 +206,90 @@ it('publishes again only after explicit latest-version comparison, preserving it
   }, workspace])
   expect(fetchPublishedArtifact).toHaveBeenLastCalledWith(f.target.artifact_id, undefined, undefined, workspace)
   expect(captureArtifactWorkspace).toHaveBeenCalledTimes(1)
+  expect(checkpointArtifactDraft).toHaveBeenCalledTimes(2)
+  // The later edit happened while comparison was open. It must not change the
+  // sequence attached to the frozen publication prepared before that edit.
+  expect(vi.mocked(checkpointArtifactDraft).mock.calls[1]![1]).toBe(1)
   expect(retainedDrafts.size).toBe(0)
   expect(editor.state.doc.toString()).toBe(`later shared edit ${frozen}`)
+})
+
+it('keeps a verified publication and shared source when its edited composer copy cannot advance the shared base', async () => {
+  const f = fixture('a'), onPublished = vi.fn(), onMutation = vi.fn()
+  let latest = f.doc
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchPublishedArtifact).mockImplementation(async () => latest)
+  vi.mocked(publishArtifact).mockImplementation(async request => {
+    const artifact = { ...latest.artifact, ...request, revision: 2, task_id: request.task_id ?? null, goal_id: request.goal_id ?? null }
+    latest = { artifact, content: request.content, revisions: [artifact] }
+    return { schema: 'masc.published_artifact.v1', artifact, revision_url: '/revision' }
+  })
+  vi.mocked(readPublishedDraft).mockImplementation(async () => latest)
+  vi.mocked(checkpointArtifactDraft).mockRejectedValue(new ApiRequestError({ method: 'POST', path: '/checkpoint', status: 409, detail: 'source mismatch' }))
+  f.mount(() => true, onPublished, f.doc, onMutation)
+  const editor = await f.editor(), original = editor.state.doc.toString()
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  fireEvent.input(await screen.findByLabelText('문서 본문'), { target: { value: 'different publication copy' } })
+  const save = screen.getByRole('button', { name: '새 버전 저장' })
+  await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(save)
+  await waitFor(() => expect(onPublished).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(onMutation).toHaveBeenCalledWith(expect.objectContaining({ kind: 'checkpoint', status: 'refused' })))
+  expect(onMutation).toHaveBeenCalledWith(expect.objectContaining({ kind: 'published', verified: true }))
+  expect(checkpointArtifactDraft).toHaveBeenCalledTimes(1)
+  expect(editor.state.doc.toString()).toBe(original)
+  expect(sharedSource(f.authority)).toBe(original)
+})
+
+it.each(['authority', 'pagehide'] as const)('does not start a checkpoint after %s during publication readback', async retirement => {
+  const f = fixture('b'), onMutation = vi.fn()
+  let current = true, finishRead!: (value: ArtifactDocument) => void
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchPublishedArtifact).mockResolvedValue(f.doc)
+  const artifact = { ...f.doc.artifact, revision: 2 }
+  vi.mocked(publishArtifact).mockResolvedValue({ schema: 'masc.published_artifact.v1', artifact, revision_url: '/revision' })
+  vi.mocked(readPublishedDraft).mockImplementation(() => new Promise(resolve => { finishRead = resolve }))
+  const mounted = f.mount(() => current, vi.fn(), f.doc, onMutation)
+  await f.editor()
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  const save = await screen.findByRole('button', { name: '새 버전 저장' })
+  await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(save)
+  await waitFor(() => expect(readPublishedDraft).toHaveBeenCalledTimes(1))
+  // Retire the authority or window before the component's cleanup runs.
+  if (retirement === 'authority') current = false
+  else fireEvent(window, new Event('pagehide'))
+  finishRead({ ...f.doc, artifact })
+  await waitFor(() => expect(onMutation).toHaveBeenCalledWith(expect.objectContaining({ kind: 'published', verified: true })))
+  expect(checkpointArtifactDraft).not.toHaveBeenCalled()
+  mounted.unmount()
+})
+
+it.each([408, 503])('retains status %i as an uncertain checkpoint after the old editor is closed, without replaying it', async status => {
+  const f = fixture('c'), onMutation = vi.fn()
+  let current = true, rejectCheckpoint!: (reason: Error) => void
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchPublishedArtifact).mockResolvedValue(f.doc)
+  const artifact = { ...f.doc.artifact, revision: 2 }
+  vi.mocked(publishArtifact).mockResolvedValue({ schema: 'masc.published_artifact.v1', artifact, revision_url: '/revision' })
+  vi.mocked(readPublishedDraft).mockResolvedValue({ ...f.doc, artifact })
+  vi.mocked(checkpointArtifactDraft).mockImplementation(() => new Promise((_, reject) => { rejectCheckpoint = reject }))
+  const mounted = f.mount(() => current, vi.fn(), f.doc, onMutation)
+  const editor = await f.editor(), original = editor.state.doc.toString()
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  const save = await screen.findByRole('button', { name: '새 버전 저장' })
+  await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(save)
+  await waitFor(() => expect(checkpointArtifactDraft).toHaveBeenCalledTimes(1))
+  current = false; mounted.unmount()
+  rejectCheckpoint(new ApiRequestError({ method: 'POST', path: '/checkpoint', status, detail: 'response unavailable' }))
+  await waitFor(() => expect(onMutation).toHaveBeenCalledWith(expect.objectContaining({ kind: 'checkpoint', status: 'unconfirmed' })))
+  expect(onMutation).toHaveBeenCalledWith(expect.objectContaining({ kind: 'published', verified: true }))
+  expect(checkpointArtifactDraft).toHaveBeenCalledTimes(1)
+  expect(sharedSource(f.authority)).toBe(original)
 })
 
 it('offers an in-flight owner’s full local draft after remount without replaying it until explicit resume', async () => {

@@ -1,8 +1,9 @@
 type format = Markdown | Html
 type update = Create | Revise of { id : string; expected_revision : int }
+type link_update = Unspecified | Clear | Set of string
 type request =
   { update : update; title : string; summary : string; format : format
-  ; content : string; task_id : string option; goal_id : string option }
+  ; content : string; task_id : link_update; goal_id : link_update }
 type revision =
   { revision : int; title : string; summary : string; format : format
   ; author : string; created_at : string; body : Tool_output.artifact_ref
@@ -47,6 +48,13 @@ let optional name fields =
   | Some (`String value) when String.trim value <> "" && String.is_valid_utf_8 value -> Ok (Some value)
   | Some _ -> Error (name ^ " must be a nonblank UTF-8 string when supplied")
 
+let link_update name fields =
+  match List.assoc_opt name fields with
+  | None -> Ok Unspecified
+  | Some `Null -> Ok Clear
+  | Some (`String value) when String.trim value <> "" && String.is_valid_utf_8 value -> Ok (Set value)
+  | Some _ -> Error (name ^ " must be null or a nonblank UTF-8 string when supplied")
+
 let positive name fields =
   match List.assoc_opt name fields with
   | Some (`Int n) when n > 0 -> Ok n
@@ -60,8 +68,8 @@ let request_of_json json =
   let* summary = required "summary" fields in
   let* content = required "content" fields in
   let* format = format_of_json (Option.value ~default:`Null (List.assoc_opt "format" fields)) in
-  let* task_id = optional "task_id" fields in
-  let* goal_id = optional "goal_id" fields in
+  let* task_id = link_update "task_id" fields in
+  let* goal_id = link_update "goal_id" fields in
   let* update = match List.assoc_opt "id" fields, List.assoc_opt "expected_revision" fields with
     | None, None -> Ok Create
     | Some (`String id), Some _ when valid_id id ->

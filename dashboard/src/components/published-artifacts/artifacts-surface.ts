@@ -87,6 +87,10 @@ export function ArtifactsSurface() {
         ${outcome.kind === 'published' ? html` · <a href=${artifactHref(outcome.publication.artifact.id, outcome.publication.artifact.revision)}>
           ${outcome.publication.artifact.id} · v${outcome.publication.artifact.revision}</a>
           · ${outcome.verified ? '저장 내용 확인됨' : '저장 응답 받음 · 내용 확인 필요'}`
+          : outcome.kind === 'checkpoint' ? html` · 공동 원고 기준 v${outcome.publication.artifact.revision} · ${
+            outcome.status === 'pending' ? '갱신 중' : outcome.status === 'checkpointed' ? '갱신됨'
+              : outcome.status === 'already_current' ? '이미 갱신됨' : outcome.status === 'refused'
+                ? `갱신 거절됨: ${outcome.detail ?? ''}` : `갱신 결과 미확인: ${outcome.detail ?? ''}`}`
           : ` · 적용 여부 미확인: ${outcome.detail}`}
         ${original !== owner ? ' · 이전 접근 상태의 요청 결과' : ''}
       </p>`)}
@@ -111,8 +115,8 @@ export function ArtifactsSurface() {
       : html`<${ArtifactsObservation} key=${owner.mount} authRevision=${authRevision} isCurrent=${current}
           workspaceRoot=${authority.workspaceRoot} draftRetention=${draftRetention} allowReader=${retiredDrafts.length === 0}
           onPublication=${(outcome: ArtifactPublicationOutcome) => setPublications(previous => {
-            const index = outcome.kind === 'published' ? previous.findIndex(entry => entry.owner === owner
-              && entry.outcome.kind === 'published'
+            const index = outcome.kind === 'published' || outcome.kind === 'checkpoint' ? previous.findIndex(entry => entry.owner === owner
+              && entry.outcome.kind === outcome.kind
               && entry.outcome.publication.artifact.id === outcome.publication.artifact.id
               && entry.outcome.publication.artifact.revision === outcome.publication.artifact.revision) : -1
             return index < 0 ? [...previous, { owner, outcome }]

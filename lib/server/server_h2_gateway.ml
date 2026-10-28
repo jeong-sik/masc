@@ -422,6 +422,60 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | Error refusal -> h2_respond_gate_refusal h2_reqd refusal
       | Ok permission -> with_h2_token_permission_auth h2_reqd ~permission f
     in
+    (* H1's token and public wrappers also bind optional GET workspace query
+       preconditions. The global ingress guard only checks request headers. *)
+    let with_artifact_read_workspace state f =
+      match validate_read_workspace_precondition
+              ~config:(Mcp_server.workspace_config state) httpun_request with
+      | Ok Workspace_read_unbound -> f []
+      | Ok Workspace_read_matched -> f [Workspace.read_precondition_admission_header]
+      | Error error ->
+        let json, status = read_workspace_precondition_error_response error in
+        h2_respond_json_value h2_reqd json ~status:(status :> H2.Status.t)
+          ~extra_headers:cors
+    in
+    (* The artifact module names the permission each of its routes needs. The
+       gateway does not take that as a kind: it runs the gate that goes with the
+       kind the HTTP/1 router recorded for the path. A route on which the two
+       disagree is refused, so the module cannot give a path a second kind. *)
+    let h2_artifact_kind_disagrees h2_reqd =
+      Log.Http.error "h2 artifact route and route table disagree about %s" path;
+      h2_respond_text h2_reqd
+        "500 Internal Server Error: the route table and this HTTP/2 route disagree about who may call it"
+        ~status:`Internal_server_error ~extra_headers:cors
+    in
+    let artifact_admission : Server_h2_artifact_routes.admission =
+      { with_token = (fun ~permission f ->
+          match Result.bind (Lazy.force route_access) Server_h2_route_gate.plan_actor with
+          | Error refusal -> h2_respond_gate_refusal h2_reqd refusal
+          | Ok table_permission when table_permission <> permission ->
+            h2_artifact_kind_disagrees h2_reqd
+          | Ok _ ->
+            with_h2_token_permission_auth h2_reqd ~permission (fun state actor ->
+              with_artifact_read_workspace state (fun headers -> f state actor headers)))
+      ; with_public = (fun f ->
+          match Result.bind (Lazy.force route_access) Server_h2_route_gate.plan with
+          | Error refusal -> h2_respond_gate_refusal h2_reqd refusal
+          | Ok Server_h2_route_gate.Public_read ->
+            with_h2_public_read h2_reqd (fun state ->
+              with_artifact_read_workspace state (fun headers ->
+                match authorize_optional_token_bound_permission_request
+                        ~base_path:(Mcp_server.workspace_config state).base_path
+                        ~permission:Masc_domain.CanReadState httpun_request with
+                | Error error -> h2_respond_auth_error h2_reqd error
+                | Ok actor ->
+                  (match h2_check_agent_rate_limit
+                           ~quota:(read_request_quota httpun_request.Httpun.Request.meth) h2_reqd with
+                   | Error () -> ()
+                   | Ok () -> f state actor headers)))
+          | Ok Server_h2_route_gate.Open
+          | Ok Server_h2_route_gate.Read_auth
+          | Ok (Server_h2_route_gate.Token_permission _) ->
+            h2_artifact_kind_disagrees h2_reqd)
+      ; read_body = (fun f -> h2_read_body h2_reqd f)
+      ; refuse_auth = h2_respond_auth_error h2_reqd
+      }
+    in
     let h2_respond_board_reaction_result h2_reqd = function
       | Ok json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
       | Error error ->
@@ -1906,6 +1960,11 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                     h2_respond_json_value h2_reqd
                       (`Assoc [ "error", `String "tool blob read failed" ])
                       ~status:`Service_unavailable ~extra_headers:cors))
+
+      | _
+        when Server_h2_artifact_routes.dispatch ~request_sw ~h2_reqd
+               ~request:httpun_request ~path ~cors ~admission:artifact_admission httpun_meth ->
+          ()
 
       | _
         when Server_h2_gateway_routes_extra.dispatch ~h2_reqd ~httpun_request

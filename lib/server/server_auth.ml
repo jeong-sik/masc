@@ -1281,6 +1281,16 @@ let validate_read_workspace_precondition ~config request =
      | _ -> Error Workspace.Invalid_workspace_precondition)
   | _ -> Ok Workspace_read_unbound
 
+let read_workspace_precondition_error_response error =
+  let status, code, message = match error with
+    | Workspace.Invalid_workspace_precondition ->
+      `Bad_request, "invalid_workspace_precondition",
+      "expected_base_path and expected_masc_root must each occur once"
+    | Workspace.Workspace_precondition_failed ->
+      `Conflict, "workspace_precondition_failed", "workspace precondition failed" in
+  (* Keep both keys for existing consumers. *)
+  (`Assoc ["error_code", `String code; "error", `String message; "code", `String code], status)
+
 let with_read_workspace_precondition state handler request reqd =
   match validate_read_workspace_precondition
       ~config:(Mcp_server.workspace_config state) request with
@@ -1289,21 +1299,9 @@ let with_read_workspace_precondition state handler request reqd =
     Http_server_eio.Response.with_scoped_headers [Workspace.read_precondition_admission_header]
       (fun () -> handler state request reqd)
   | Error error ->
-    let status, code, message = match error with
-      | Workspace.Invalid_workspace_precondition ->
-        `Bad_request, "invalid_workspace_precondition",
-        "expected_base_path and expected_masc_root must each occur once"
-      | Workspace.Workspace_precondition_failed ->
-        `Conflict, "workspace_precondition_failed", "workspace precondition failed" in
-    (* [Server_refusal.json]'s [code] is the documented refusal vocabulary
-       (routes_play/msx read [code]; tests assert it). [error_code] stays for
-       the existing envelopes so current readers keep working. *)
+    let json, status = read_workspace_precondition_error_response error in
     Http_server_eio.Response.json_value ~status ~request
-      (`Assoc
-        [ "error_code", `String code
-        ; "error", `String message
-        ; "code", `String code ])
-      reqd
+      ~extra_headers:(public_read_cors_headers request) json reqd
 
 let rec with_public_read handler request reqd =
   match ready_server_state () with

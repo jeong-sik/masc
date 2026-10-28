@@ -106,6 +106,42 @@ it('keeps an uncertain write locked and does not repeat a timed-out publication'
   expect(post).toHaveBeenCalledTimes(1)
 })
 
+it.each([
+  ['create', 408, 'proxy timeout'], ['revision', 408, 'proxy timeout'],
+  ['create', 503, 'response capacity unavailable'], ['revision', 503, 'response capacity unavailable'],
+] as const)('retains an uncertain %s after status %i and blocks another save', async (action, status, detail) => {
+  let editor: ReturnType<typeof within>, saveName: string
+  const source = '# 보존할 원고\r\n한글 😀'
+  if (action === 'revision') {
+    editor = await edit()
+    saveName = '새 버전 저장'
+    fireEvent.input(editor.getByLabelText('문서 본문'), { target: { value: source } })
+  } else {
+    render(html`<${ArtifactsSurface} />`)
+    fireEvent.click(screen.getByRole('button', { name: '파일 가져오기' }))
+    const file = new File([source], 'report.md')
+    Object.defineProperty(file, 'arrayBuffer', { value: async () => new TextEncoder().encode(source).buffer })
+    fireEvent.change(screen.getByLabelText('가져올 문서 파일'), { target: { files: [file] } })
+    editor = within(await screen.findByRole('region', { name: '아티팩트 편집' }))
+    saveName = '아티팩트 등록'
+  }
+  const save = editor.getByRole('button', { name: saveName }) as HTMLButtonElement
+  await waitFor(() => expect(save.disabled).toBe(false))
+  vi.mocked(post).mockRejectedValue(new ApiRequestError({ method: 'POST', path: list, status, detail }))
+  fireEvent.click(save)
+  await editor.findByText(/자동으로 다시 저장하지 않습니다/)
+  expect(save.disabled).toBe(true)
+  expect((editor.getByLabelText('문서 본문') as HTMLTextAreaElement).value).toBe(source)
+  const outcome = await screen.findByRole('region', { name: '문서 저장 요청 결과' })
+  expect(outcome.textContent).toContain('적용 여부 미확인')
+  expect(outcome.textContent).toContain(detail)
+  fireEvent.click(save)
+  expect(post).toHaveBeenCalledTimes(1)
+  const body = vi.mocked(post).mock.calls[0]![1]
+  if (action === 'create') expect(body).not.toHaveProperty('id')
+  else expect(body).toMatchObject({ id, expected_revision: 2 })
+})
+
 it('retains the committed identity when readback fails, without claiming the draft was saved correctly', async () => {
   const reader = await edit()
   vi.mocked(post).mockResolvedValue(publication(artifact.title))

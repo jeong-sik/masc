@@ -1,6 +1,7 @@
-import { beforeEach, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { get, post } from './core'
-import { fetchArtifactDraft, sendArtifactDraftCommand } from './artifact-drafts'
+import { checkpointArtifactDraft, fetchArtifactDraft, sendArtifactDraftCommand } from './artifact-drafts'
+import type { ArtifactPublication } from './published-artifacts'
 import { artifactDiscussionRequest, sendArtifactDiscussion } from './artifact-discussion'
 vi.mock('./core', () => ({ get: vi.fn(), post: vi.fn() }))
 const target = { artifact_id: `artifact-${'a'.repeat(32)}`, generation: '019c6e27-e55b-73d1-87d8-4e01f1f75043' }
@@ -48,4 +49,47 @@ it('requires the fresh discussion view and refuses the previous schema instead o
   const {discussion_receipts:_,...incomplete}=view
   vi.mocked(get).mockResolvedValue(incomplete)
   await expect(fetchArtifactDraft(target.artifact_id,workspace)).rejects.toThrow()
+})
+
+describe('shared draft publication checkpoints', () => {
+const publication: ArtifactPublication = { schema: 'masc.published_artifact.v1', revision_url: '/revision', artifact: {
+  id: target.artifact_id, revision: 2, title: 'title', summary: 'summary', format: 'markdown', author: 'author',
+  created_at: '2026-10-28T00:00:00Z', task_id: null, goal_id: null,
+  body: { _blob: { sha256: 'a'.repeat(64) } }, url: '/artifact',
+} }
+const response = () => ({ checkpoint: 'checkpointed', document: {
+  draft: { schema: 'masc.artifact_draft.v2', target, base_revision: 2, base_sha256: 'a'.repeat(64),
+    state: 'AA==', sequence: 4, updated_by: 'human', updated_at: '2026-10-28T00:00:00Z' },
+  content: 'content', threads: [], discussion_receipts: [], selection: null,
+} })
+beforeEach(() => { vi.mocked(post).mockReset().mockResolvedValue(response()) })
+
+it('sends one workspace-bound checkpoint and verifies its revision, digest and draft generation', async () => {
+  const result = await checkpointArtifactDraft(target, 3, publication, workspace)
+  expect(result.document.draft.base_revision).toBe(2)
+  expect(post).toHaveBeenCalledExactlyOnceWith('/api/v1/artifact-draft-checkpoints',
+    { target, expected_sequence: 3, revision: 2 },
+    { 'x-masc-expected-base-path': workspace.basePath, 'x-masc-expected-masc-root': workspace.mascRoot })
+})
+
+it.each([
+  ['generation', (value: ReturnType<typeof response>) => { value.document.draft.target = { ...target, generation: '019f0000-0000-7000-8000-000000000001' } }],
+  ['revision', (value: ReturnType<typeof response>) => { value.document.draft.base_revision = 1 }],
+  ['digest', (value: ReturnType<typeof response>) => { value.document.draft.base_sha256 = 'b'.repeat(64) }],
+  ['sequence', (value: ReturnType<typeof response>) => { value.document.draft.sequence = 5 }],
+  ['unexpected field', (value: ReturnType<typeof response>) => { Object.assign(value, { unexpected: true }) }],
+])('rejects a checkpoint response with a different %s', async (_, corrupt) => {
+  const value = response(); corrupt(value); vi.mocked(post).mockResolvedValue(value)
+  await expect(checkpointArtifactDraft(target, 3, publication, workspace)).rejects.toThrow()
+  expect(post).toHaveBeenCalledTimes(1)
+})
+
+it('rejects unsafe input before sending and never retries an uncertain result', async () => {
+  await expect(checkpointArtifactDraft(target, Number.MAX_SAFE_INTEGER + 1, publication, workspace)).rejects.toThrow()
+  expect(post).not.toHaveBeenCalled()
+  vi.mocked(post).mockRejectedValue(new Error('connection lost'))
+  await expect(checkpointArtifactDraft(target, 3, publication, workspace)).rejects.toThrow('connection lost')
+  expect(post).toHaveBeenCalledTimes(1)
+})
+
 })

@@ -37,7 +37,10 @@ workspace, identity and dashboard. It does not require another hosting service.
    and any Task or Goal links. A native modal keeps background controls inert.
 6. Updating an artifact requires its ID and expected latest revision. A stale
    revision produces a conflict without overwriting another publication. The
-   stable link follows the latest version; a version link is immutable.
+   stable link follows the latest version; a version link is immutable. An
+   omitted Task or Goal retains its preceding revision's link; HTTP `null`
+   clears it, and a supplied ID replaces it. The Keeper tool currently accepts
+   a supplied ID or omission.
 
 Existing files can be published by passing their body through the same API or
 tool. Runtime directories and private conversations are not recursively indexed.
@@ -81,10 +84,9 @@ recorded revision. Late publication receipts retain their original workspace
 even after the selection or credential changes, without a read under replacement
 credentials. There is no automatic publication or confirmation on editor input.
 
-This source editor is the first layer of #45940. Shared drafts, rich-text editing,
-anchored comments and human/Keeper document positions require their own explicit
-producer/store/consumer contract. Authorship or publication alone is not evidence
-that a Keeper is currently viewing or editing a document.
+The shared-draft editor and its human/Keeper collaboration contract are described
+in [artifact collaboration](artifact-collaboration.md). Authorship or publication
+alone is not evidence that a Keeper is currently viewing or editing a document.
 
 ## Storage and authority
 
@@ -108,14 +110,29 @@ that a Keeper is currently viewing or editing a document.
 
 ## HTTP and tool contracts
 
+The artifact catalog, shared-draft and application-input routes are registered
+on both the HTTP/1 router and the h2c gateway. Both apply the same workspace,
+token and allowed-origin checks. Application inputs remain private to the
+authenticated actor and require `CanAdmin`.
+
+The h2c listener reserves its configured shared response capacity for the
+encoded response and an in-flight chunk. If capacity is unavailable, a normal
+response gets an empty 503; a live draft stream is reset and reconnecting
+attempts a fresh snapshot. If one snapshot exceeds the configured capacity,
+reconnecting cannot deliver it until the capacity changes. A write may already
+have been applied before a 503 or lost connection, so clients must read back its
+outcome before retrying.
+
 - `GET /api/v1/published-artifacts`: metadata list plus per-entry diagnostics.
 - `GET /api/v1/published-artifacts/<id>?revision=<n>`: selected revision, exact
   body and available revision metadata. Omitted revision means latest.
 - `POST /api/v1/published-artifacts`: same publication request as the tool;
   author is the authenticated actor, never supplied in JSON.
-- Existing dashboard token authentication and admin permission apply to the
-  catalog list, check state and publication routes. Capability-addressed single
-  artifact reads (`GET /api/v1/published-artifacts/<id>`) allow unauthenticated
+- Workspace members with `CanReadState` can list and read artifacts and check
+  state; members with `CanBroadcast` can publish and edit shared drafts. The
+  workspace-wide check state and external-sharing switch can be changed only
+  with `CanAdmin`. Capability-addressed single artifact reads
+  (`GET /api/v1/published-artifacts/<id>`) allow unauthenticated
   read-only sharing only when external sharing is enabled for that artifact via
   `POST /api/v1/published-artifact-shares` (`{"id": "<id>", "shared": true|false}`),
   while still validating any presented token. Responses are private and uncached.
@@ -198,7 +215,7 @@ interaction and browser primitives; the checks above establish MASC behavior.
 
 `/artifacts` (alias `/reports`) opens the existing authenticated report inventory
 without sending a Keeper message. The command palette also finds it under
-Artifacts / Resources. Published reports keep the Admin HTTP authority and exact
+Artifacts / Resources. Published reports use workspace read authority and exact
 revision, byte count, UTF-8 and digest checks used by Resources; MCP resources
 remain a separate typed authority.
 
@@ -309,8 +326,9 @@ a check even when its body is byte-identical to an older revision.
 Only a successful complete listing can establish that a revision has no check;
 unavailable or corrupt storage must remain unknown. `POST` accepts `id`,
 `revision`, `body_sha256`, `checked` and `expected_change_id` (null for an
-authoritatively absent record). Both routes use the existing Admin authority and
-private, no-store HTTP response. The actor comes from authentication, not JSON.
+authoritatively absent record). Reading requires `CanReadState`; changing the
+workspace-wide confirmation requires `CanAdmin`. Both return private, no-store
+HTTP responses. The actor comes from authentication, not JSON.
 The terminal also supplies `expected_workspace` with canonical base/runtime
 roots. The server validates and removes this envelope before strict operation
 decoding, refusing mismatched roots before store dispatch. Dashboard requests

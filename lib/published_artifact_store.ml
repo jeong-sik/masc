@@ -71,7 +71,34 @@ let read ~base_path ~id ~revision =
       | Ok (Some _) -> Error (Unavailable "published body length mismatch")
       | Error error -> Error (Unavailable (Tool_blob_store.fetch_error_to_string error)))
 
-let list ~base_path = protect (fun () ->
+let with_latest_locked ~base_path ~id ~expected_revision ~f =
+  if not (valid_id id) then Error (Invalid "invalid artifact id")
+  else if expected_revision <= 0 then Error (Invalid "expected revision must be positive")
+  else
+    let* () = protect (fun () ->
+      let* entries = directory_entries ~base_path in
+      match entries with None -> Error Missing | Some _ -> Ok ()) in
+    match File_lock_eio.with_durable_lock_observed
+      ~lock_path:(Filename.concat (root ~base_path) (id ^ ".lock")) (fun () ->
+        (* The admitted lock scope protects cancellation until the callback
+           and release settle. Read, hash and callback work can be large, so
+           run the blocking portion outside the Eio scheduler. *)
+        Eio_guard.run_in_systhread ~label:"artifact-publication-checkpoint" (fun () ->
+          let* _, latest, content = read ~base_path ~id ~revision:None in
+          if latest.revision <> expected_revision then
+            Error (Conflict { expected = expected_revision; actual = latest.revision })
+          else Ok (f latest content))) with
+    | File_lock_eio.Lock_not_acquired error ->
+      Error (Unavailable (File_lock_eio.durable_lock_error_to_string error))
+    | File_lock_eio.Body_completed { value; release_error = None } -> value
+    | File_lock_eio.Body_completed { value; release_error = Some error } ->
+      (* The callback may have durably committed another store. A failed lock
+         release must not erase that result or authorize another attempt. *)
+      Log.Misc.error "artifact publication lock release: %s"
+        (File_lock_eio.durable_lock_error_to_string error);
+      value
+
+let catalog ~base_path = protect (fun () ->
   let* entries = directory_entries ~base_path in
   let files = Option.value ~default:[] entries in
   let artifacts, diagnostics = List.fold_left (fun (entries, diagnostics) filename ->
@@ -80,15 +107,31 @@ let list ~base_path = protect (fun () ->
       let id = Filename.remove_extension filename in
       if not (valid_id id) then entries, (filename, "invalid artifact filename") :: diagnostics
       else match load ~base_path id with
-        | Ok { revisions = latest :: _; _ } -> (id, latest) :: entries, diagnostics
+        | Ok { revisions = latest :: _ as revisions; _ } ->
+          let authors = List.map (fun (revision : revision) -> revision.author) revisions
+            |> List.sort_uniq String.compare in
+          (id, latest, authors) :: entries, diagnostics
         | Ok { revisions = []; _ } -> entries, (filename, "empty revision history") :: diagnostics
         | Error error -> entries, (filename, error_message error) :: diagnostics)
     ([], []) files in
-  let artifacts = List.sort (fun (id_a, a) (id_b, b) ->
+  let artifacts = List.sort (fun (id_a, a, _) (id_b, b, _) ->
     let order = String.compare b.created_at a.created_at in
-    if order = 0 then String.compare id_a id_b else order) artifacts
-    |> List.map (fun (id, r) -> summary_to_json ~id r) in
-  Ok { artifacts; diagnostics = List.rev diagnostics })
+    if order = 0 then String.compare id_a id_b else order) artifacts in
+  Ok (artifacts, List.rev diagnostics))
+
+let list ~base_path =
+  let* artifacts, diagnostics = catalog ~base_path in
+  Ok { artifacts = List.map (fun (id, revision, _) -> summary_to_json ~id revision) artifacts;
+       diagnostics }
+
+let list_with_authors ~base_path =
+  let* artifacts, diagnostics = catalog ~base_path in
+  let* artifacts = List.fold_left (fun collected (id, revision, authors) ->
+    let* collected = collected in
+    match summary_to_json ~id revision with
+    | `Assoc fields -> Ok (`Assoc (("authors", `List (List.map (fun author -> `String author) authors)) :: fields) :: collected)
+    | _ -> Error (Unavailable "invalid artifact summary")) (Ok []) artifacts in
+  Ok { artifacts = List.rev artifacts; diagnostics }
 
 let publish ~base_path ~author (request : request) =
   if String.trim author = "" || not (String.is_valid_utf_8 author)
@@ -123,11 +166,20 @@ let publish ~base_path ~author (request : request) =
             else Ok artifact.revisions in
         let body = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
           ~bytes:request.content ~mime:(media_type request.format) in
+        let previous_task_id, previous_goal_id = match previous with
+          | [] -> None, None
+          | (prior : revision) :: _ -> prior.task_id, prior.goal_id in
+        let resolve_link change previous = match change with
+          | Unspecified -> previous
+          | Clear -> None
+          | Set value -> Some value in
+        let task_id = resolve_link request.task_id previous_task_id
+        and goal_id = resolve_link request.goal_id previous_goal_id in
         let revision =
           { revision = List.length previous + 1; title = request.title
           ; summary = request.summary; format = request.format; author
           ; created_at = Types_core.now_iso (); body
-          ; task_id = request.task_id; goal_id = request.goal_id } in
+          ; task_id; goal_id } in
         let artifact = { id; revisions = revision :: previous } in
         match Keeper_fs.save_json_durable_atomic ~ownership_root:base_path
           (path ~base_path id) (Published_artifact.to_json artifact) with

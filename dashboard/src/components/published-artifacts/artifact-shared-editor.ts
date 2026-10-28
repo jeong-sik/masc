@@ -3,8 +3,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { EditorState, StateEffect, StateField } from '@codemirror/state'
 import { Decoration, EditorView, WidgetType, keymap, lineNumbers, type DecorationSet } from '@codemirror/view'
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next'
+import { ApiRequestError } from '../../api/core'
 import { sameDraftTarget } from '../../api/artifact-draft-live'
-import { sendArtifactDraftCommand } from '../../api/artifact-drafts'
+import { checkpointArtifactDraft, sendArtifactDraftCommand, type ArtifactDraftTarget } from '../../api/artifact-drafts'
 import { captureArtifactWorkspace, fetchPublishedArtifact, type ArtifactDocument, type ArtifactPublication } from '../../api/published-artifacts'
 import { artifactDraftRecoveries, discardArtifactDraftRecovery, type ArtifactDraftRecovery } from '../../lib/artifact-draft-recovery'
 import { ArtifactLiveSession, draftBytes, type ArtifactLiveState } from '../../lib/artifact-live-session'
@@ -15,6 +16,8 @@ import { ArtifactDiscussionPanel } from './artifact-discussion-panel'
 
 export type ArtifactSharedCloseResult = { kind: 'keep_open' } | { kind: 'close'; publicationDiscarded: boolean }
 export type ArtifactSharedCloseRequest = () => ArtifactSharedCloseResult
+type PublicationInput = { base: ArtifactDocument; content: string; owner: ArtifactLiveSession;
+  target: ArtifactDraftTarget; expectedSequence: number }
 
 const remoteSelections = StateEffect.define<DecorationSet>()
 const selectionField = StateField.define<DecorationSet>({
@@ -95,8 +98,10 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
   const [reveal, setReveal] = useState<SharedSelection | null>(null)
   const resumed = useRef(new Map<string,ArtifactDraftRecovery>())
   const [recoveries, setRecoveries] = useState<ArtifactDraftRecovery[]>([])
-  const [comparison, setComparison] = useState<{ base: ArtifactDocument; content: string } | null>(null)
-  const [publication, setPublication] = useState<{ base: ArtifactDocument; content: string; snapshot: ArtifactDraftSnapshot } | null>(null)
+  const [comparison, setComparison] = useState<PublicationInput | null>(null)
+  const [publication, setPublication] = useState<(PublicationInput & { snapshot: ArtifactDraftSnapshot }) | null>(null)
+  const mounted = useRef(true)
+  const attempted = useRef(new WeakSet<object>())
   const publicationForClose = useRef<ArtifactDraftSnapshot | null>(null)
   const sessionForClose = useRef<ArtifactLiveSession | null>(null)
   const visualPendingForClose = useRef(false)
@@ -112,11 +117,14 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
         && !window.confirm('이 창에 아직 저장하지 못한 변경이 있습니다. 원고를 닫을까요?')) return { kind: 'keep_open' }
       if (copy) draftRetention.forget(copy.identity)
       publicationForClose.current = null
+      mounted.current = false
       return { kind: 'close', publicationDiscarded: copy !== null }
     }
     onCloseRequest(request)
+    const pagehide = () => { mounted.current = false }
+    window.addEventListener('pagehide', pagehide)
     // Retirement unregisters the close request, preserving the inert snapshot.
-    return () => onCloseRequest(null)
+    return () => { mounted.current = false; window.removeEventListener('pagehide', pagehide); onCloseRequest(null) }
   }, [])
   useEffect(() => {
     let active = true, opened: ArtifactLiveSession | null = null
@@ -152,7 +160,7 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
   }, [session, state?.pending])
   const draft = (content: string) => ({ title: doc.artifact.title, summary: doc.artifact.summary,
     format: sourceFormat, content, task_id: doc.artifact.task_id, goal_id: doc.artifact.goal_id })
-  const preparePublication = (value: { base: ArtifactDocument; content: string }) => {
+  const preparePublication = (value: PublicationInput) => {
     const artifact = value.base.artifact
     const snapshot: ArtifactDraftSnapshot = { identity: {}, base: { id: artifact.id, revision: artifact.revision },
       value: { ...draft(value.content), title: artifact.title, summary: artifact.summary, format: artifact.format,
@@ -180,16 +188,23 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
     } catch (reason) { setError(reason instanceof Error ? reason.message : '복구 원고를 읽지 못했습니다.') }
   }
   const publish = async () => {
-    if (!session || !state || state.pending || visualPending || state.connection !== 'connected' || !isCurrent()) return
+    if (!session || !state || visualPending || !mounted.current || !session.current) return
+    const captured = session.snapshot
+    if (captured.pending || captured.connection !== 'connected') return
     // Publication is a frozen snapshot; subsequent shared edits stay in the
-    // shared draft. Capture the latest publication for comparison and CAS.
+    // shared draft. Capture the target and sequence before any async read.
     const content = session.content
+    const target = { ...captured.view.draft.target }, expectedSequence = captured.view.draft.sequence
+    setError('')
     try {
       const latest = await fetchPublishedArtifact(doc.artifact.id, undefined, undefined, session.workspace)
-      if (!isCurrent()) return
-      if (latest.artifact.revision === state.view.draft.base_revision) preparePublication({ base: latest, content })
-      else setComparison({ base: latest, content })
-    } catch (reason) { setError(reason instanceof Error ? reason.message : '게시할 원고의 원본 버전을 읽지 못했습니다.') }
+      if (!mounted.current || !session.current || sessionForClose.current !== session) return
+      const input = { base: latest, content, owner: session, target, expectedSequence }
+      if (latest.artifact.revision === captured.view.draft.base_revision) preparePublication(input)
+      else setComparison(input)
+    } catch (reason) {
+      if (mounted.current && session.current) setError(reason instanceof Error ? reason.message : '게시할 원고의 원본 버전을 읽지 못했습니다.')
+    }
   }
   return html`<section aria-label="문서 공동 편집" class="flex min-h-0 flex-1 flex-col gap-3 p-4">
     <div class="flex flex-wrap items-center gap-4">
@@ -246,9 +261,33 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
         }} /></div>
     </div>` : null}
     ${publication ? html`<${ArtifactComposer} initial=${publication.snapshot.value} base=${publication.base}
-      capturedWorkspace=${session?.workspace} workspaceRoot=${workspaceRoot} isCurrent=${isCurrent} onMutation=${onMutation}
+      capturedWorkspace=${publication.owner.workspace} workspaceRoot=${workspaceRoot} isCurrent=${isCurrent} onMutation=${onMutation}
       onDraftChange=${(value: ArtifactDraftSnapshot['value']) => draftRetention.remember({ ...publication.snapshot, value })}
-      onSaved=${(value: ArtifactPublication) => { publicationForClose.current = null; draftRetention.forget(publication.snapshot.identity); setPublication(null); onPublished(value) }}
+      onSaved=${(value: ArtifactPublication) => {
+        if (attempted.current.has(publication.snapshot.identity)) return
+        attempted.current.add(publication.snapshot.identity)
+        const current = () => mounted.current && isCurrent() && publication.owner.current && sessionForClose.current === publication.owner
+          && sameDraftTarget(publication.target, publication.owner.snapshot.view.draft.target)
+        if (!current()) return
+        // Start synchronously under the original authority; navigation can
+        // retire it immediately after onPublished. Never send a later retry.
+        const attempt = checkpointArtifactDraft(publication.target, publication.expectedSequence, value, publication.owner.workspace)
+        const report = (status: 'pending' | 'checkpointed' | 'already_current' | 'refused' | 'unconfirmed', detail?: string) =>
+          onMutation({ kind: 'checkpoint', title: value.artifact.title, publication: value, status, detail })
+        report('pending')
+        void attempt.then(result => {
+          if (current()) publication.owner.acceptServerView(result.document)
+          report(result.checkpoint)
+        }, reason => {
+          const detail = reason instanceof Error ? reason.message : '공유 원고 기준 갱신 결과를 확인하지 못했습니다.'
+          const status = reason instanceof ApiRequestError ? reason.status : undefined
+          // A proxy timeout may arrive after the server committed the request.
+          const refused = status !== undefined && status >= 400 && status < 500 && status !== 408
+          report(refused ? 'refused' : 'unconfirmed', detail)
+          if (current()) setError(`게시 내용은 확인됐지만 공동 원고 기준을 갱신하지 못했습니다: ${detail}`)
+        })
+        publicationForClose.current = null; draftRetention.forget(publication.snapshot.identity); setPublication(null); onPublished(value)
+      }}
       onCancel=${() => {
         if (window.confirm('작성 중인 원고를 닫을까요? 저장하지 않은 내용은 사라집니다.')) {
           publicationForClose.current = null; draftRetention.forget(publication.snapshot.identity); setPublication(null)

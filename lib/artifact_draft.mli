@@ -15,6 +15,10 @@ type command =
 val create : target:target -> base_revision:int -> base_sha256:string ->
   state:string -> actor:string -> at:string -> (t, string) result
 val advance : ?discussion:Artifact_discussion.event list -> t -> state:string -> actor:string -> at:string -> (t, string) result
+val checkpoint : t -> base_revision:int -> base_sha256:string -> actor:string -> at:string -> (t, string) result
+(** Advance the publication base while retaining the exact CRDT state and
+    discussion. The store must establish that the new publication matches the
+    same observed draft before calling this constructor. *)
 val of_json : Yojson.Safe.t -> (t, string) result
 val to_json : t -> Yojson.Safe.t
 val public_to_json : t -> Yojson.Safe.t

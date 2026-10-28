@@ -97,6 +97,49 @@ let test_create_and_revise () = with_base (fun base_path ->
     Alcotest.(check string) "revision survives offline retention" expected actual)
     [1, original; 2, next])
 
+let test_publication_link_updates () = with_base (fun base_path ->
+  let parse fields =
+    match A.request_of_json (`Assoc (fields @
+      ["title", `String "linked"; "summary", `String "work links";
+       "format", `String "markdown"; "content", `String "body"])) with
+    | Ok request -> request
+    | Error error -> Alcotest.fail error in
+  let update id revision fields =
+    parse (["id", `String id; "expected_revision", `Int revision] @ fields) in
+  let assert_links description task goal (revision : A.revision) =
+    Alcotest.(check (option string)) (description ^ " task") task revision.task_id;
+    Alcotest.(check (option string)) (description ^ " goal") goal revision.goal_id in
+  let omitted = parse [] and clear = parse ["task_id", `Null; "goal_id", `Null] in
+  Alcotest.(check bool) "omitted is preserved by request parser" true
+    (omitted.task_id = A.Unspecified && omitted.goal_id = A.Unspecified);
+  Alcotest.(check bool) "null is preserved by request parser" true
+    (clear.task_id = A.Clear && clear.goal_id = A.Clear);
+  let _, created_omitted = publish ~base_path omitted in
+  let _, created_clear = publish ~base_path clear in
+  assert_links "omitted creation" None None created_omitted;
+  assert_links "null creation" None None created_clear;
+  let artifact, first = publish ~base_path
+    (parse ["task_id", `String "task-1"; "goal_id", `String "goal-1"]) in
+  assert_links "creation" (Some "task-1") (Some "goal-1") first;
+  let _, second = publish ~base_path (update artifact.id 1 []) in
+  assert_links "omitted revision" (Some "task-1") (Some "goal-1") second;
+  let _, third = publish ~base_path
+    (update artifact.id 2 ["task_id", `Null; "goal_id", `String "goal-2"]) in
+  assert_links "clear task and set goal" None (Some "goal-2") third;
+  let _, fourth = publish ~base_path
+    (update artifact.id 3 ["task_id", `String "task-2"; "goal_id", `Null]) in
+  assert_links "set task and clear goal" (Some "task-2") None fourth;
+  let _, recovered_first, _ = S.read ~base_path ~id:artifact.id ~revision:(Some 1) |> store_ok in
+  let _, recovered_third, _ = S.read ~base_path ~id:artifact.id ~revision:(Some 3) |> store_ok in
+  assert_links "old revision remains immutable" (Some "task-1") (Some "goal-1") recovered_first;
+  assert_links "cleared link remains absent" None (Some "goal-2") recovered_third;
+  List.iter (fun value -> match A.request_of_json (`Assoc
+      ["title", `String "linked"; "summary", `String "links";
+       "format", `String "markdown"; "content", `String "body"; "task_id", value]) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "invalid link accepted")
+    [`String " "; `Int 1; `String "invalid \255"])
+
 let test_utf8_boundaries () = with_base (fun base_path ->
   List.iter (fun json -> match A.request_of_json json with
     | Error _ -> ()
@@ -377,10 +420,140 @@ let test_http_publication_errors () =
     ["/api/v1/published-artifacts/" ^ id;
      "/api/v1/published-artifacts/" ^ id ^ "?revision=3"]
 
+(* Exercise the registered routes through Httpun so permission wrappers,
+   anonymous sharing, and the checkpoint wire parser are tested together. *)
+let test_workspace_http_permissions_and_checkpoint_parser () = with_base (fun base_path ->
+  let module Http = Masc.Http_server_eio in
+  Auth.save_auth_config base_path
+    { Masc_domain.default_auth_config with enabled = true; require_token = true };
+  let token role agent_name = match Auth.create_token base_path ~agent_name ~role with
+    | Ok (token, _) -> token
+    | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error) in
+  let worker = token Masc_domain.Worker "worker" and player = token Masc_domain.Player "player"
+  and admin = token Masc_domain.Admin "admin" in
+  let artifact, _ = publish ~base_path (request "workspace shared document") in
+  let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+  let router = Http.Router.create ()
+    |> Server_routes_http_routes_published_artifacts.add_routes
+    |> Server_routes_http_routes_artifact_drafts.add_routes
+    |> Server_routes_http_routes_artifact_draft_live.add_routes in
+  let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+    | Ok authority -> authority | Error `Malformed -> Alcotest.fail "invalid test request authority" in
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  let previous_startup = Server_startup_state.snapshot () in
+  Server_auth.publish_server_state state;
+  Fun.protect ~finally:(fun () ->
+    Server_auth.For_testing.restore_server_state previous_state;
+    Server_startup_state.For_testing.restore previous_startup) (fun () ->
+    (match Server_startup_state.mark_state_ready () with
+     | Ok () -> ()
+     | Error error -> Alcotest.fail (Server_startup_state.state_ready_error_to_string error));
+    Server_request_authority.with_current authority (fun () ->
+      let request ?(meth = "GET") ?(body = "") ?(extra_headers = "") bearer path =
+        let output = Buffer.create 2048 in
+        let connection = Httpun.Server_connection.create (fun reqd ->
+          let request = Httpun.Reqd.request reqd in
+          Server_workspace_precondition.guard_http1 ~path:(Http.Request.path request) request reqd
+            ~admitted:(fun () -> Http.Router.dispatch router request reqd)) in
+        let authorization = match bearer with
+          | None -> "" | Some token -> "Authorization: Bearer " ^ token ^ "\r\n" in
+        let wire = Printf.sprintf "%s %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\n%s%sContent-Length: %d\r\n\r\n%s"
+          meth path authorization extra_headers (String.length body) body in
+        let input = Bigstringaf.of_string ~off:0 ~len:(String.length wire) wire in
+        ignore (Httpun.Server_connection.read_eof connection input ~off:0 ~len:(Bigstringaf.length input));
+        let rec drain () = match Httpun.Server_connection.next_write_operation connection with
+          | `Write iovecs ->
+            let n = List.fold_left (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+              Buffer.add_string output (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+              total + iov.len) 0 iovecs in
+            Httpun.Server_connection.report_write_result connection (`Ok n); drain ()
+          | `Yield when Buffer.length output = 0 ->
+            let ready, resolve = Eio.Promise.create () in
+            Httpun.Server_connection.yield_writer connection (fun () -> Eio.Promise.resolve resolve ());
+            Eio.Promise.await ready; drain ()
+          | `Yield | `Close _ -> () in
+        drain ();
+        let response = Buffer.contents output in
+        match String.split_on_char ' ' response with
+        | _ :: status :: _ -> int_of_string status, response
+        | _ -> Alcotest.failf "invalid HTTP response: %S" response in
+      let status ?meth ?body bearer path = fst (request ?meth ?body bearer path) in
+      let check label expected actual = Alcotest.(check int) label expected actual in
+      let doc = "/api/v1/published-artifacts/" ^ artifact.id in
+      let draft = "/api/v1/artifact-drafts/" ^ artifact.id in
+      let events = "/api/v1/artifact-draft-events/" ^ artifact.id ^ "?generation=019f0000-0000-7000-8000-000000000000" in
+      let list = "/api/v1/published-artifacts" in
+      List.iter (fun path ->
+        check "anonymous workspace listing/draft requires a token" 401 (status None path);
+        check "Player cannot read workspace artifacts" 403 (status (Some player) path))
+        [list; draft; "/api/v1/published-artifact-checks"; events];
+      check "Worker reads artifact list" 200 (status (Some worker) list);
+      check "Worker reads checks" 200 (status (Some worker) "/api/v1/published-artifact-checks");
+      check "Worker can reach draft read" 404 (status (Some worker) draft);
+      check "Worker can reach SSE admission" 503 (status (Some worker) events);
+      let worker_status, worker_response = request (Some worker) doc in
+      check "Worker reads workspace artifact" 200 worker_status;
+      Alcotest.(check bool) "workspace artifact is not cached" true
+        (String.lowercase_ascii worker_response |> String.split_on_char '\n'
+         |> List.exists (fun line -> String.trim line = "cache-control: private, no-store"));
+      check "private artifact is not anonymous" 401 (status None doc);
+      check "Player cannot read even an authenticated private document" 403 (status (Some player) doc);
+      let post ?(body = "{}") bearer path = status ~meth:"POST" ~body bearer path in
+      List.iter (fun path ->
+        check "Worker can reach workspace write parser" 400 (post (Some worker) path);
+        check "Player cannot write workspace artifacts" 403 (post (Some player) path);
+        check "anonymous cannot write workspace artifacts" 401 (post None path))
+        [list; "/api/v1/artifact-drafts"; "/api/v1/artifact-draft-checkpoints";
+         "/api/v1/artifact-draft-presence"];
+      List.iter (fun path ->
+        check "Worker cannot change admin-only artifact state" 403 (post (Some worker) path);
+        check "Admin reaches admin-only write parser" 400 (post (Some admin) path))
+        ["/api/v1/published-artifact-checks"; "/api/v1/published-artifact-shares"];
+      let share_body = Yojson.Safe.to_string (`Assoc ["id", `String artifact.id; "shared", `Bool true]) in
+      check "Admin enables external sharing" 200 (post ~body:share_body (Some admin) "/api/v1/published-artifact-shares");
+      check "explicitly shared document is anonymously readable" 200 (status None doc);
+      check "Player token does not bypass its permission even for a shared document" 403 (status (Some player) doc);
+      check "invalid token does not become an anonymous shared read" 401 (status (Some "invalid") doc);
+      let target = Yojson.Safe.to_string (`Assoc ["artifact_id", `String artifact.id;
+        "generation", `String "019f0000-0000-7000-8000-000000000000"]) in
+      let checkpoint fields = "{\"target\":" ^ target ^ "," ^ fields ^ "}" in
+      let endpoint = "/api/v1/artifact-draft-checkpoints" in
+      let valid_body = checkpoint "\"expected_sequence\":0,\"revision\":1" in
+      check "valid checkpoint reaches store" 404
+        (post ~body:valid_body (Some worker) endpoint);
+      let headers base root = Printf.sprintf "X-Masc-Expected-Base-Path: %s\r\nX-Masc-Expected-Masc-Root: %s\r\n" base root in
+      let served = match Server_workspace_precondition.served_workspace () with
+        | Some served -> served | None -> Alcotest.fail "test workspace not available" in
+      check "matching captured workspace reaches checkpoint store" 404
+        (fst (request ~meth:"POST" ~body:valid_body ~extra_headers:(headers served.base_path served.masc_root) (Some worker) endpoint));
+      check "checkpoint refuses a different workspace before routing" 409
+        (fst (request ~meth:"POST" ~body:valid_body ~extra_headers:(headers "/different-workspace" served.masc_root) (Some worker) endpoint));
+      check "checkpoint refuses an incomplete workspace precondition" 400
+        (fst (request ~meth:"POST" ~body:valid_body ~extra_headers:"X-Masc-Expected-Base-Path: /different-workspace\r\n" (Some worker) endpoint));
+      List.iter (fun fields ->
+        check "malformed checkpoint is rejected" 400 (post ~body:(checkpoint fields) (Some worker) endpoint))
+        ["\"expected_sequence\":0,\"revision\":1,\"extra\":true";
+         "\"expected_sequence\":0,\"revision\":1,\"revision\":1";
+         "\"expected_sequence\":-1,\"revision\":1";
+         "\"expected_sequence\":0,\"revision\":0";
+         "\"expected_sequence\":9007199254740992,\"revision\":1";
+         "\"expected_sequence\":0,\"revision\":1.0";
+         "\"expected_sequence\":0"];
+      let module Live = Masc.Artifact_draft_live in
+      let owner_target = { Masc.Artifact_draft.artifact_id = artifact.id; generation = "019f0000-0000-7000-8000-000000000000" } in
+      let session = Live.join ~base_path ~actor:"worker" ~source:Live.Dashboard_connection ~target:owner_target in
+      Fun.protect ~finally:(fun () -> Live.leave session) (fun () ->
+        let body = Yojson.Safe.to_string (`Assoc ["action", `String "leave";
+          "target", Masc.Artifact_draft.target_to_json owner_target; "session_id", `String (Live.id session)]) in
+        let presence = "/api/v1/artifact-draft-presence" in
+        check "another actor cannot end this connection" 409 (post ~body (Some admin) presence);
+        check "connection owner may leave" 200 (post ~body (Some worker) presence)))))
+
 let () = Eio_main.run (fun _ ->
   Alcotest.run "published reports"
     ["durable catalog", [
       Alcotest.test_case "create, reread, CAS revise and retain history" `Quick test_create_and_revise;
+      Alcotest.test_case "omitted, cleared and replaced work links" `Quick test_publication_link_updates;
       Alcotest.test_case "reject malformed UTF-8 at publication and read" `Quick test_utf8_boundaries;
       Alcotest.test_case "unsafe directory is unavailable, not empty" `Quick test_unsafe_directory;
       Alcotest.test_case "metadata symlink is unavailable" `Quick test_metadata_symlink];
@@ -389,4 +562,5 @@ let () = Eio_main.run (fun _ ->
       Alcotest.test_case "model-facing receipt preserves links and durable manifests" `Quick test_keeper_model_publication_receipt;
       Alcotest.test_case "manifest failure preserves committed publication recovery" `Quick test_publication_manifest_failure_recovery;
       Alcotest.test_case "publish discovery preserves schema and mutation policy" `Quick test_publication_discovery;
-      Alcotest.test_case "HTTP errors carry status and recovery identity" `Quick test_http_publication_errors]])
+      Alcotest.test_case "HTTP errors carry status and recovery identity" `Quick test_http_publication_errors;
+      Alcotest.test_case "workspace HTTP permissions and checkpoint parsing" `Quick test_workspace_http_permissions_and_checkpoint_parser]])

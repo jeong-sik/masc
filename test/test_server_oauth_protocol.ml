@@ -439,13 +439,13 @@ let with_oauth_workspace f =
         (fun () -> f base_path)))
 ;;
 
-let authorize_query ?(extra = []) ~client_id ~redirect_uri ~challenge () =
+let authorize_query ?(extra = []) ?(scope = "mcp:tools") ~client_id ~redirect_uri ~challenge () =
   Uri.encoded_of_query
     ([ "response_type", [ "code" ]
      ; "client_id", [ client_id ]
      ; "redirect_uri", [ redirect_uri ]
      ; "resource", [ "http://127.0.0.1:8935/mcp" ]
-     ; "scope", [ "mcp:tools" ]
+     ; "scope", [ scope ]
      ; "state", [ "cimd-state" ]
      ; "code_challenge", [ challenge ]
      ; "code_challenge_method", [ "S256" ]
@@ -593,6 +593,126 @@ let test_consent_policy_lets_the_callback_redirect_through () =
     (contains policy "form-action 'self' http://127.0.0.1:43123;")
 ;;
 
+(* An OAuth access token for [bootstrap_token], minted through the same
+   service calls a client's browser sign-in makes. *)
+let oauth_access_token ~base_path ~bootstrap_token ~scope =
+  let redirect_uri = "http://127.0.0.1:43123/callback" in
+  let verifier = String.make 43 'v' in
+  let client =
+    Auth_oauth.register_client
+      ~base_path
+      ~client_name:(Some "step-up probe")
+      ~redirect_uris:[ redirect_uri ]
+    |> Result.get_ok
+  in
+  let body =
+    authorize_query
+      ~client_id:client.client_id
+      ~redirect_uri
+      ~challenge:(Auth_oauth.pkce_s256 verifier)
+      ~scope
+      ~extra:
+        [ "bootstrap_token", [ bootstrap_token ]
+        ; "confirm_admin", [ "yes" ]
+        ; "decision", [ "authorize" ]
+        ]
+      ()
+  in
+  let location =
+    match
+      Server_oauth_service.authorize_post
+        ~base_path
+        ~authority:(authority ())
+        ~fetch_client_metadata:no_document
+        ~body
+    with
+    | Ok (Server_oauth_service.Authorization_redirect location) -> location
+    | Ok (Server_oauth_service.Authorization_form_error { message; _ }) -> fail message
+    | Error error -> fail (Auth_oauth.show_error error)
+  in
+  let code =
+    match Uri.get_query_param (Uri.of_string location) "code" with
+    | Some code -> code
+    | None -> fail "approval carried no code"
+  in
+  match
+    Auth_oauth.exchange_authorization_code
+      ~base_path
+      ~expected_resource:"http://127.0.0.1:8935/mcp"
+      ~code
+      ~client_id:client.client_id
+      ~redirect_uri
+      ~resource:(Some "http://127.0.0.1:8935/mcp")
+      ~code_verifier:verifier
+  with
+  | Ok pair -> pair.access_token
+  | Error error -> fail (Auth_oauth.show_error error)
+;;
+
+let tools_call name =
+  Yojson.Safe.to_string
+    (`Assoc
+      [ "jsonrpc", `String "2.0"
+      ; "id", `Int 1
+      ; "method", `String "tools/call"
+      ; "params", `Assoc [ "name", `String name; "arguments", `Assoc [] ]
+      ])
+;;
+
+let test_step_up_names_the_scope_an_oauth_token_lacks () =
+  with_oauth_workspace (fun base_path ->
+    let admin_tool = "masc_keeper_down" in
+    let worker_tool = "masc_status" in
+    let permission name =
+      Option.map
+        (fun (metadata : Tool_catalog.metadata) -> metadata.required_permission)
+        (Tool_catalog.registered_metadata name)
+    in
+    check bool "the fixture admin tool needs the admin permission" true
+      (permission admin_tool = Some Masc_domain.CanAdmin);
+    check bool "the fixture worker tool is registered" true
+      (Option.is_some (permission worker_tool));
+    let mint role name =
+      match Auth.create_token base_path ~agent_name:name ~role with
+      | Ok (token, _) -> token
+      | Error error -> fail (Masc_domain.masc_error_to_string error)
+    in
+    let worker_bearer = mint Masc_domain.Worker "step-up-worker" in
+    let admin_bearer = mint Masc_domain.Admin "step-up-admin" in
+    let worker_oauth =
+      oauth_access_token ~base_path ~bootstrap_token:worker_bearer ~scope:"mcp:tools"
+    in
+    let admin_oauth =
+      oauth_access_token ~base_path ~bootstrap_token:admin_bearer ~scope:"mcp:admin"
+    in
+    let required ?(token = None) body =
+      Auth_oauth.with_expected_resource "http://127.0.0.1:8935/mcp" (fun () ->
+        Server_oauth_step_up.required_scope ~base_path ~auth_token:token ~body)
+    in
+    let scope_option = option (testable Auth_oauth.pp_scope Auth_oauth.equal_scope) in
+    check scope_option "a mcp:tools token is told to ask for mcp:admin"
+      (Some Auth_oauth.Mcp_admin)
+      (required ~token:(Some worker_oauth) (tools_call admin_tool));
+    check scope_option "a tool the token's role may call is not challenged" None
+      (required ~token:(Some worker_oauth) (tools_call worker_tool));
+    check scope_option "an admin approval is not challenged" None
+      (required ~token:(Some admin_oauth) (tools_call admin_tool));
+    check scope_option "a static bearer has no scope to widen" None
+      (required ~token:(Some worker_bearer) (tools_call admin_tool));
+    check scope_option "no token is not a scope question" None
+      (required (tools_call admin_tool));
+    check scope_option "an unregistered tool keeps its tool-level refusal" None
+      (required ~token:(Some worker_oauth) (tools_call "no_such_tool_x"));
+    check scope_option "only tools/call is checked" None
+      (required ~token:(Some worker_oauth)
+         {|{"jsonrpc":"2.0","id":1,"method":"tools/list"}|});
+    check scope_option "a body that is not JSON is left to the ordinary path" None
+      (required ~token:(Some worker_oauth) "not json");
+    check string "the challenge names the scope and the resource metadata"
+      {|Bearer error="insufficient_scope", scope="mcp:admin", resource_metadata="http://127.0.0.1:8935/.well-known/oauth-protected-resource"|}
+      (Server_oauth_metadata.insufficient_scope_challenge (authority ()) Auth_oauth.Mcp_admin))
+;;
+
 let test_a_denial_redirects_only_to_this_computer () =
   with_oauth_workspace (fun base_path ->
     let fetched, fetch_client_metadata = serving claude_code_document in
@@ -730,6 +850,10 @@ let () =
             "consent policy lets the callback redirect through"
             `Quick
             test_consent_policy_lets_the_callback_redirect_through
+        ; test_case
+            "step-up names the scope an OAuth token lacks"
+            `Quick
+            test_step_up_names_the_scope_an_oauth_token_lacks
         ; test_case
             "a denial redirects only to this computer"
             `Quick

@@ -279,6 +279,7 @@ let is_method_not_found_error = function
      | Some (Mcp_error_code.Auth_error) | Some (Mcp_error_code.Not_ready)
      | Some (Mcp_error_code.Provider_timeout) | Some (Mcp_error_code.Tool_dispatch_failure)
      | Some (Mcp_error_code.Backpressure_shed) | Some (Mcp_error_code.Session_evicted)
+     | Some (Mcp_error_code.Insufficient_scope)
      | Some (Mcp_error_code.Header_mismatch) | Some (Mcp_error_code.Unsupported_protocol_version)
      | Some (Mcp_error_code.Quiet _) -> false)
   | Mcp_client.Transport _ | Mcp_client.Unauthorized _ | Mcp_client.Http _

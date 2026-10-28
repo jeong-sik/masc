@@ -29,6 +29,15 @@ let challenge authority =
     (Auth_oauth.scope_to_string Auth_oauth.Mcp_tools)
 ;;
 
+(* MCP 2026-07-28 Scope Challenge Handling: a 403 names the scope the
+   operation needs and points at the protected resource metadata. *)
+let insufficient_scope_challenge authority scope =
+  Printf.sprintf
+    "Bearer error=\"insufficient_scope\", scope=%S, resource_metadata=%S"
+    (Auth_oauth.scope_to_string scope)
+    (protected_resource_metadata_url authority)
+;;
+
 let protected_resource_json authority =
   `Assoc
     [ "resource", `String (resource authority)

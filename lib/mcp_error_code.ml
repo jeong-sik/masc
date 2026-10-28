@@ -10,6 +10,7 @@ type t =
   | Tool_dispatch_failure
   | Backpressure_shed
   | Session_evicted
+  | Insufficient_scope
   | Header_mismatch
   | Unsupported_protocol_version
   | Quiet of { reason : string ; recovered : bool }
@@ -26,6 +27,7 @@ let to_wire_code = function
   | Tool_dispatch_failure -> -32004
   | Backpressure_shed -> -32005
   | Session_evicted -> -32006
+  | Insufficient_scope -> -32007
   (* Both fixed by MCP revision 2026-07-28, not chosen by this server. That
      revision partitions the JSON-RPC server-error range -- -32000..-32019 stays
      implementation-defined, -32020..-32099 belongs to the specification -- and
@@ -49,6 +51,7 @@ let of_wire_code = function
   | -32004 -> Some Tool_dispatch_failure
   | -32005 -> Some Backpressure_shed
   | -32006 -> Some Session_evicted
+  | -32007 -> Some Insufficient_scope
   | -32020 -> Some Header_mismatch
   | -32022 -> Some Unsupported_protocol_version
   | _ -> None
@@ -65,6 +68,7 @@ let to_wire_message_default = function
   | Tool_dispatch_failure -> "Tool dispatch failed"
   | Backpressure_shed -> "Backpressure shed; resume via Last-Event-ID"
   | Session_evicted -> "Session evicted by server policy"
+  | Insufficient_scope -> "Insufficient scope"
   (* Verbatim from the MCP 2026-07-28 example response. *)
   | Header_mismatch -> "Header mismatch"
   | Unsupported_protocol_version -> "Unsupported protocol version"
@@ -86,6 +90,7 @@ let allows_null_request_id : t -> bool = function
   | Tool_dispatch_failure -> false
   | Backpressure_shed -> false
   | Session_evicted -> false
+  | Insufficient_scope -> false
   (* The version is read from the [MCP-Protocol-Version] header, so the
      rejection happens before the JSON-RPC body — and the request id — has
      been parsed. That is exactly the §5 case a null id is for. *)
@@ -134,6 +139,7 @@ let to_http_status : t -> Httpun.Status.t = function
   | Tool_dispatch_failure -> `Internal_server_error
   | Backpressure_shed -> `Too_many_requests
   | Session_evicted -> `Gone
+  | Insufficient_scope -> `Forbidden
   (* 4xx is what MCP 2026-07-28 Backward Compatibility has clients inspect;
      the body, not the status, is what marks the server as modern. *)
   | Header_mismatch -> `Bad_request
@@ -153,6 +159,7 @@ let all =
     Tool_dispatch_failure;
     Backpressure_shed;
     Session_evicted;
+    Insufficient_scope;
     Header_mismatch;
     Unsupported_protocol_version;
     Quiet { reason = "<exemplar>"; recovered = false };
@@ -218,6 +225,7 @@ let pp fmt = function
   | Tool_dispatch_failure -> Format.pp_print_string fmt "Tool_dispatch_failure"
   | Backpressure_shed -> Format.pp_print_string fmt "Backpressure_shed"
   | Session_evicted -> Format.pp_print_string fmt "Session_evicted"
+  | Insufficient_scope -> Format.pp_print_string fmt "Insufficient_scope"
   | Header_mismatch -> Format.pp_print_string fmt "Header_mismatch"
   | Unsupported_protocol_version ->
       Format.pp_print_string fmt "Unsupported_protocol_version"

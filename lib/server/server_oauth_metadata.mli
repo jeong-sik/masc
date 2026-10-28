@@ -12,6 +12,12 @@ val challenge_for_authority : Server_request_authority.authority -> string
 (** OAuth discovery challenge on a loopback authority, where the built-in
     authorization server answers; otherwise the plain challenge [Bearer]. *)
 
+val insufficient_scope_challenge :
+  Server_request_authority.authority -> Auth_oauth.scope -> string
+(** [WWW-Authenticate] value for a 403 whose token lacks [scope]:
+    [error="insufficient_scope"], the needed [scope], and the protected
+    resource metadata URL (RFC 6750 3.1, MCP 2026-07-28). *)
+
 val protected_resource_json :
   Server_request_authority.authority -> Yojson.Safe.t
 

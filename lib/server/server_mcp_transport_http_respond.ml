@@ -92,7 +92,8 @@ let respond_mcp_error ?(extra_headers = []) ?data ?id
     | Mcp_error_code.Parse_error | Mcp_error_code.Invalid_request | Mcp_error_code.Method_not_found
     | Mcp_error_code.Invalid_params | Mcp_error_code.Internal_error
     | Mcp_error_code.Provider_timeout | Mcp_error_code.Tool_dispatch_failure
-    | Mcp_error_code.Session_evicted | Mcp_error_code.Header_mismatch
+    | Mcp_error_code.Session_evicted | Mcp_error_code.Insufficient_scope
+    | Mcp_error_code.Header_mismatch
     | Mcp_error_code.Unsupported_protocol_version | Mcp_error_code.Quiet _ -> []
   in
   let headers =

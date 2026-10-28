@@ -775,6 +775,29 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                    in
                                    remember_mcp_profile ~otel_transport_context
                                      session_id profile);
+                                 (match
+                                    Auth_oauth.with_expected_resource
+                                      (Server_oauth_metadata.resource request_authority)
+                                      (fun () ->
+                                        Server_oauth_step_up.required_scope ~base_path
+                                          ~auth_token ~body:body_str)
+                                  with
+                                  | Some scope ->
+                                      let body =
+                                        json_rpc_error Mcp_error_code.Insufficient_scope
+                                          (Printf.sprintf
+                                             "This tool needs the OAuth scope %s."
+                                             (Auth_oauth.scope_to_string scope))
+                                      in
+                                      h2_respond_json h2_reqd body ~status:`Forbidden
+                                        ~extra_headers:
+                                          (( "www-authenticate"
+                                           , Server_oauth_metadata
+                                             .insufficient_scope_challenge
+                                               request_authority scope )
+                                          :: (cors
+                                             @ mcp_headers session_id protocol_version))
+                                  | None ->
                                  with_server_state h2_reqd (fun state ->
                                    let serves_listen =
                                      Server_mcp_transport_http
@@ -864,7 +887,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                           h2_respond_json_value h2_reqd json ~status:`Bad_request
                                             ~extra_headers:mcp_hdrs
                                         | None ->
-                                          h2_respond_json_value h2_reqd json ~extra_headers:mcp_hdrs))))))
+                                          h2_respond_json_value h2_reqd json ~extra_headers:mcp_hdrs)))))))
 
       | `DELETE, "/mcp"
       | `DELETE, "/mcp/managed"

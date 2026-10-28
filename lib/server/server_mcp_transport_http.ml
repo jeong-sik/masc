@@ -465,6 +465,26 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
         in
         remember_mcp_profile ~otel_transport_context session_id profile);
       let accept_mode = post_context.accept_mode in
+      let* () =
+        match
+          Auth_oauth.with_expected_resource expected_resource (fun () ->
+            Server_oauth_step_up.required_scope ~base_path ~auth_token
+              ~body:body_str)
+        with
+        | None -> Ok ()
+        | Some scope ->
+            respond_mcp_error
+              ~extra_headers:
+                [ ( "www-authenticate"
+                  , Server_oauth_metadata.insufficient_scope_challenge
+                      request_authority scope ) ]
+              ?id:(body_jsonrpc_id body_str)
+              ~code:Mcp_error_code.Insufficient_scope ~deps ~request_authority
+              request reqd ~session_id ~protocol_version
+              (Printf.sprintf "This tool needs the OAuth scope %s."
+                 (Auth_oauth.scope_to_string scope));
+            Error ()
+      in
       let* runtime =
         match deps.get_runtime_result () with
         | Ok r -> Ok r

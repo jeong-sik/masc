@@ -95,6 +95,23 @@ WWW-Authenticate: Bearer resource_metadata="http://127.0.0.1:8935/.well-known/oa
 A non-loopback authority keeps the bare `WWW-Authenticate: Bearer` challenge
 and does not expose the OAuth routes.
 
+A `tools/call` made with an OAuth access token whose role lacks the permission
+the tool needs is refused before any response starts, when some OAuth scope
+would grant that permission (MCP 2026-07-28 Scope Challenge Handling):
+
+```http
+HTTP/1.1 403 Forbidden
+WWW-Authenticate: Bearer error="insufficient_scope", scope="mcp:admin", resource_metadata="http://127.0.0.1:8935/.well-known/oauth-protected-resource"
+```
+
+The body is a JSON-RPC error with code `-32007`. The scope comes from the
+existing facts, not a table: `Auth_oauth.effective_role` says which role a
+scope grants and `Masc_domain.has_permission` says which permissions a role
+holds. A token's scope never exceeds the bootstrap credential that approved it,
+so a worker approval reaches `mcp:admin` only by approving again with an admin
+bearer. A static bearer, a keeper token, a tool no scope can unlock and an
+unregistered tool keep the tool-level refusal in a `200` result, as before.
+
 ### 4.1 Client registration
 
 Dynamic registration accepts public clients only:
@@ -258,8 +275,9 @@ redaction.
 - OAuth is served only on loopback authorities.
 - No agent_core dependency or protocol change is introduced.
 - No dashboard session or cookie becomes an ambient OAuth login authority.
-- MCP authorization changes only token resolution and the 401 challenge header;
-  the existing permission matrix remains authoritative.
+- MCP authorization changes only token resolution, the 401 challenge header and
+  the 403 scope challenge for OAuth tokens; the existing permission matrix
+  remains authoritative.
 
 ## 9. Implementation slices
 

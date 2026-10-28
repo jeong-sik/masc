@@ -320,7 +320,7 @@ description = "set_zoom only: actual browser zoom factor (0.3–5), requires exa
 [[params]]
 name = "steps"
 type = "array"
-description = "workflow only: native Ego Page calls followed by one final snapshot. Each step uses only its method arguments and native options. click/dblclick/hover/focus take selector; dragAndDrop takes selector,destination; mouse.click/move/wheel take CSS x,y (wheel uses deltas and needs a move/click in this round first); fill takes selector,text; press takes selector,key; selectOption takes selector,selectionJson; goto takes an absolute HTTP(S) url; waitForURL takes exactly one string/glob url or native urlRegex {source,flags?}; waitForSelector takes selector,state; waitForLoadState state is optional. Keyboard methods take text or key; paste also accepts html. evaluate/waitForFunction take source and optional argumentJson. fetch takes an HTTP(S) or relative url and returns its structured response as the step receipt. options.saveAs is an artifact filename, never a host path; retrieve the returned downloadId with BrowserRead mode=downloads on the same client/tab without repeating fetch. url/title/info return native Page state; snapshot returns native text with scope/root/action-mark/stable-locator options; events drains this SDK process's Page event buffer and is a non-replayable effect, not cross-process history. waitForTimeout takes nonnegative milliseconds and is not a page-readiness check. Native options use SDK names and are strictly validated for that method; omission uses SDK defaults. evaluate/keyboard.insertText/keyboard.paste/url/title/info/events/waitForTimeout accept no options. Source runs only in the browser; Page code and fetch may have effects even on failure. A failed pointer click/drag or lost key input result keeps release unconfirmed without synthetic cleanup. Paste can hold ControlOrMeta+V. Answering a dialog does not acknowledge button/key release; automatic continuation after interrupted input is unsupported. An unconfirmed release blocks further input. Choose the next action from current observations; no new judgment inside the call. There is no cumulative step/time limit."
+description = "workflow only: native Ego Page calls followed by one final snapshot. Each step uses only its method arguments and native options. click/dblclick/hover/focus take selector; dragAndDrop takes selector,destination; mouse.click/move/wheel take CSS x,y (wheel uses deltas and needs a move/click in this round first); fill takes selector,text; press takes selector,key; selectOption takes selector,selectionJson; goto takes an absolute HTTP(S) url; waitForURL takes exactly one string/glob url or native urlRegex {source,flags?}; waitForSelector takes selector,state; waitForLoadState state is optional. Keyboard methods take text or key; paste also accepts html. evaluate/waitForFunction take source and optional argumentJson. fetch takes an HTTP(S) or relative url and returns its structured response as the step receipt. options.saveAs is an artifact filename, never a host path; retrieve the returned downloadId with BrowserRead mode=downloads on the same client/tab without repeating fetch. download.cancel takes a canonical downloadId observed on this exact Page in this SDK process. It calls a pending native Download handle once; cancelReturned only means the SDK call returned, since completion can win the race. Re-read BrowserRead mode=downloads for actual status; never replay after a lost result. Fetch, completed, unknown and foreign-Page downloads are refused before cancellation. url/title/info return native Page state; snapshot returns native text with scope/root/action-mark/stable-locator options; events drains this SDK process's Page event buffer and is a non-replayable effect, not cross-process history. waitForTimeout takes nonnegative milliseconds and is not a page-readiness check. Native options use SDK names and are strictly validated for that method; omission uses SDK defaults. evaluate/keyboard.insertText/keyboard.paste/download.cancel/url/title/info/events/waitForTimeout accept no options. Source runs only in the browser; Page code and fetch may have effects even on failure. A failed pointer click/drag or lost key input result keeps release unconfirmed without synthetic cleanup. Paste can hold ControlOrMeta+V. Answering a dialog does not acknowledge button/key release; automatic continuation after interrupted input is unsupported. An unconfirmed release blocks further input. Choose the next action from current observations; no new judgment inside the call. There is no cumulative step/time limit."
 
 [params.items]
 type = "object"
@@ -329,7 +329,7 @@ additional_properties = false
 [[params.items.params]]
 name = "method"
 type = "string"
-enum = ["click", "dblclick", "hover", "dragAndDrop", "mouse.click", "mouse.move", "mouse.wheel", "fill", "press", "focus", "reload", "keyboard.type", "keyboard.insertText", "keyboard.paste", "keyboard.press", "selectOption", "goto", "waitForURL", "waitForSelector", "waitForLoadState", "evaluate", "waitForFunction", "fetch", "url", "title", "info", "snapshot", "events", "waitForTimeout"]
+enum = ["click", "dblclick", "hover", "dragAndDrop", "mouse.click", "mouse.move", "mouse.wheel", "fill", "press", "focus", "reload", "keyboard.type", "keyboard.insertText", "keyboard.paste", "keyboard.press", "selectOption", "goto", "waitForURL", "waitForSelector", "waitForLoadState", "evaluate", "waitForFunction", "fetch", "download.cancel", "url", "title", "info", "snapshot", "events", "waitForTimeout"]
 required = true
 
 [[params.items.params]]
@@ -351,6 +351,11 @@ type = "string"
 [[params.items.params]]
 name = "url"
 type = "string"
+
+[[params.items.params]]
+name = "downloadId"
+type = "string"
+description = "download.cancel only: canonical UUID observed in this same Page's downloads. Native pending downloads only; never a host path or a Fetch save."
 
 [[params.items.params]]
 name = "urlRegex"

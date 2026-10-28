@@ -608,6 +608,7 @@ let download_wait_ms = 2_147_483_647 (* the longest JavaScript timer *)
 let download_watch = String.concat "\n" [
   "  const watchDownloads = (page, label) => {";
   "    const registry = globalThis.mascDownloads ??= {since: new Date().toISOString(), rows: [], watched: new Set()};";
+  "    registry.handles ??= new Map();";
   "    if (registry.watched.has(label)) return;";
   "    registry.watched.add(label);";
   "    const root = args.downloads;";
@@ -619,11 +620,12 @@ let download_watch = String.concat "\n" [
   "        try {";
   "          const row = {id: crypto.randomUUID(), label, source: \"native_download\", url: download.url(), suggestedFilename: download.suggestedFilename(), state: \"pending\", path: null, reason: null};";
   "          registry.rows.push(row);";
+  "          registry.handles.set(row.id, {label, download});";
   "          const path = root + \"/\" + row.id;";
   "          download.saveAs(path).then(() => download.failure()).then(";
   "            failure => { if (failure === null) { row.state = \"completed\"; row.path = path; } else { row.state = \"interrupted\"; row.reason = String(failure); } },";
   "            error => { row.state = \"interrupted\"; row.reason = String(error && error.message || error); })";
-  "            .then(() => download.delete()).catch(() => {});";
+  "            .then(() => { registry.handles.delete(row.id); return download.delete(); }).catch(() => {});";
   "        } catch (error) {}";
   "      }";
   "      registry.watched.delete(label);";

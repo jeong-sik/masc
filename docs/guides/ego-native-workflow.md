@@ -347,6 +347,25 @@ process's inventory. Read it without repeating Fetch. A lost or malformed save
 receipt cannot be replaced by file-existence inference. Registry recovery
 across worker/SDK-process replacement remains unimplemented.
 
+To cancel a pending native browser download, first read its `downloadId` with
+BrowserRead `mode=downloads` on the same client and tab, then send one workflow
+step `{"method":"download.cancel","downloadId":"<observed UUID>"}`.
+The worker retains that exact Page's native Download handle privately until
+the save settles and invokes its SDK `cancel()` once. Fetch saves, completed
+downloads, missing handles and other Pages are refused before cancellation.
+No caller-selected file path or browser-wide download configuration is used.
+
+The step receipt is `{downloadId, source:"native_download", cancelReturned:true}`.
+It means the native call returned; the SDK explicitly allows completion to win
+the cancellation race. Read the same tab's download inventory for the observed
+transfer status. A lost response is an uncertain effect and must not be replayed.
+The existing save, failure observation, temporary-file deletion and finalized
+artifact publication remain worker-owned. Native path/delete handles are not
+exposed as host file authority. This cancellation integration has component
+checks only; actual SDK transport and Keeper execution remain unverified.
+The native cancellation behavior is pinned to
+[Ego SDK v2.1.0 DownloadArtifact.cancel](https://github.com/citrolabs/ego-lite/blob/4cf79356509bccdead17863250b442f60a881c25/package/ego-browser/src/driver/downloads.ts#L270).
+
 These methods are integrated in source with standalone codec and forwarding
 checks. The new Page observations, event drain, timeout and step-snapshot
 options have no real SDK or installed Keeper execution proof yet. An earlier

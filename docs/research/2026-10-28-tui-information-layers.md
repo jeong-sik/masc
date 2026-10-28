@@ -148,11 +148,25 @@ making the answer field behind it silently lose typed characters.
 The follow-up groups the previously separate presented approval, hit zones,
 panes and reader into one immutable snapshot. It rechecks input after output and
 holds input already observed at that boundary before dispatching the next
-owner's handlers. Source review identified an unresolved visibility issue:
-existing form and save notices can outrank a rejected-input notice in the
-footer. The event list is bounded, so recording a retry notice does not prove
-that it was seen. A rejected paste is not retained. The barrier and recovery
-behavior have not run in the candidate terminal.
+owner's handlers. Rejected-input feedback now shares the existing mutable
+notice slot with ordinary feedback as an immutable value. It stays pending
+through later ordinary notices and input until a complete, identity-bound
+notice reaches a successfully flushed frame. A rejected paste is not retained,
+and a flush does not prove that a person saw the notice.
+
+The feedback still has an unresolved visibility issue. Existing action and
+form/save feedback keep priority so a pending retry notice cannot hide a
+two-press confirmation; this can also keep the retry or Ctrl-C recovery hint
+out of view even at a normal width. Separately, a one-off observation of the
+actual footer fitter with dependency stubs found that, at 80 columns, a
+workspace-unconfirmed warning, the Config form's Enter/Esc keys and a `/hello`
+search prefix leave no room for either complete hint when it is offered. This
+calculation isolates the fitter; it is not a rendering of the current form,
+where its existing result would take priority first. If a displayed notice is
+hidden immediately before its timeout but the next observation is after it,
+the state transition cannot determine which event happened first. These are
+source/probe observations, not an actual terminal verification. The barrier and
+recovery behavior have not run in the current candidate terminal.
 
 Input can still arrive after the post-output observation, and the terminal does
 not report when the person saw the new frame. A late tail after a forced CSI

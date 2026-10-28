@@ -144,6 +144,15 @@ class HelperTests(unittest.TestCase):
     def test_a_boolean_is_neither_a_number_nor_an_integer(self):
         self.assertEqual((reach.number_of(True), reach.int_of(True), reach.number_of(2), reach.int_of(2), reach.number_of('2')), (None, None, 2.0, 2, None))
 
+    def test_a_number_too_large_for_a_float_is_not_a_number(self):
+        self.assertIsNone(reach.number_of(10 ** 400))
+
+    def test_a_moment_is_a_number_the_calendar_can_print(self):
+        self.assertEqual((reach.moment_of(0), reach.moment_of(T0)), (0.0, T0))
+        # An epoch in milliseconds, NaN, the infinities, an integer too large for a float, a boolean, a string and null are not moments.
+        for value in (T0 * 1000, float('nan'), float('inf'), float('-inf'), 10 ** 400, True, '1793059200', None):
+            self.assertIsNone(reach.moment_of(value), value)
+
     def test_quantile_picks_the_value_at_the_floor_of_the_rank(self):
         values = [float(number) for number in range(1, 12)]
         self.assertEqual((reach.quantile(values, 0.5), reach.quantile(values, 0.9), reach.quantile(values, 1.0), reach.quantile([], 0.5)), (6.0, 10.0, 11.0, 0.0))
@@ -323,8 +332,19 @@ class ScanTests(unittest.TestCase):
         self.assertEqual(len(scan.calls), 1)
         self.assertEqual(
             dict(self.skipped),
-            {'trace lines that were not JSON': 1, 'write records without a numeric ts': 1, 'trace lines that were not a JSON object': 1},
+            {'trace lines that were not JSON': 1, 'write records whose ts is not a usable time': 1, 'trace lines that were not a JSON object': 1},
         )
+
+    def test_a_ts_past_the_calendar_is_counted_and_does_not_stop_the_scan(self):
+        folder = self.store.keepers / 'a' / 'raw-traces'
+        folder.mkdir(parents=True)
+        good = json.dumps(finished(5, queued_text('memory-admission-a')))
+        in_milliseconds = json.dumps(finished(T0 * 1000, queued_text('memory-admission-b'), 'c2'))
+        not_a_number = json.dumps(finished(7, queued_text('memory-admission-c'), 'c3')).replace('"ts": 7', '"ts": NaN')
+        (folder / f'turn-{int(T0 * 1000)}-abcd-000001.jsonl').write_text(f'{good}\n{in_milliseconds}\n{not_a_number}\n', encoding='utf-8')
+        scan = self.scan()
+        self.assertEqual([call.request_id for call in scan.calls], ['memory-admission-a'])
+        self.assertEqual(dict(self.skipped), {'write records whose ts is not a usable time': 2})
 
     def test_the_trace_window_of_a_keeper_comes_from_its_file_names(self):
         self.store.trace('a', [], start=T0 + 50)
@@ -415,15 +435,15 @@ class StateTests(unittest.TestCase):
         self.assertFalse(self.state.settled['rid-new'].own_sentence)
 
     def test_a_revision_with_a_boolean_is_not_a_settlement(self):
-        self.assertEqual(reach.settlement_of({**unbound('x', 1), 'snapshot_revision': True}), reach.Skip.NOT_COMMITTED)
+        self.assertEqual(reach.settlement_of({**unbound('x', 1), 'snapshot_revision': True}, collections.Counter()), reach.Skip.NOT_COMMITTED)
 
     def test_a_binding_needs_both_a_request_id_and_a_target(self):
         no_target = bound('rid-x', 's', 't', 1, T0)
         no_target['admission_recall_binding']['target_memory_id'] = ''
         no_id = bound('rid-y', 's', 't', 1, T0)
         no_id['admission_recall_binding']['candidate_id']['request_id'] = ''
-        self.assertEqual(reach.settlement_of(no_target), reach.Skip.OTHER_SHAPE)
-        self.assertEqual(reach.settlement_of(no_id), reach.Skip.OTHER_SHAPE)
+        self.assertEqual(reach.settlement_of(no_target, collections.Counter()), reach.Skip.OTHER_SHAPE)
+        self.assertEqual(reach.settlement_of(no_id, collections.Counter()), reach.Skip.OTHER_SHAPE)
 
     def test_only_librarian_rows_date_a_revision_and_every_distinct_stamp_of_it_is_kept(self):
         times = self.state.journal.revision_times
@@ -456,7 +476,33 @@ class StateTests(unittest.TestCase):
         skipped = collections.Counter()
         state = reach.load_state(str(self.store.memory), 'r', skipped)
         self.assertEqual(sorted(state.journal.revision_times), [1])
-        self.assertEqual(skipped['committed journal rows without a revision or a recorded_at'], 2)
+        self.assertEqual(skipped['committed journal rows without a revision or a usable recorded_at'], 2)
+
+    def test_a_committed_row_without_a_usable_time_or_revision_adds_nothing_and_removes_nothing(self):
+        row = commit_row(2, T0 + 20, [OLD], [NEW], dropped=[(NEW, 'a reason')])
+        broken = [{**row, 'recorded_at': T0 * 1000}, {**row, 'recorded_at': None}, {**row, 'revision': None}]
+        self.store.keeper('broken', journal=broken)
+        skipped = collections.Counter()
+        journal = reach.load_state(str(self.store.memory), 'broken', skipped).journal
+        self.assertEqual((journal.revision_times, journal.first_added, journal.removals), ({}, {}, {}))
+        self.assertEqual(skipped['committed journal rows without a revision or a usable recorded_at'], 3)
+
+    def test_a_first_seen_past_the_calendar_is_read_as_no_write_time_and_counted(self):
+        skipped = collections.Counter()
+        found = reach.settlement_of(bound('rid-ms', 's', OLD, 1, T0 * 1000), skipped)
+        self.assertEqual(found, ('rid-ms', reach.Settled(1, mid(OLD), None, False)))
+        counted = {'settled receipts whose first_seen is not a usable time (read as having no write time)': 1}
+        self.assertEqual(dict(skipped), counted)
+        # A receipt that holds no first_seen at all had nothing wrong with it.
+        no_time = bound('rid-none', 's', OLD, 1, T0)
+        del no_time['admission_recall_binding']['source_fact']['first_seen']
+        self.assertEqual(reach.settlement_of(no_time, skipped), ('rid-none', reach.Settled(1, mid(OLD), None, False)))
+        self.assertEqual(dict(skipped), counted)
+
+    def test_every_queue_row_is_counted_whether_or_not_it_names_a_request_id(self):
+        self.store.keeper('q', pending=['rid-1', 'rid-1', ''])
+        state = self.store.state('q')
+        self.assertEqual((state.waiting_rows, state.waiting), (3, frozenset({'rid-1'})))
 
     def test_a_line_that_is_not_json_is_counted_in_the_file_it_came_from(self):
         (self.store.memory / 'a.memory-events.jsonl').write_text('{broken\n', encoding='utf-8')
@@ -634,6 +680,21 @@ class ReportTests(unittest.TestCase):
             },
         )
         self.assertEqual(sum(counts.values()), 9)
+        # The queue of Keeper "a" holds one row, and the two other Keepers read have none.
+        self.assertEqual(
+            self.line(queued, 'rows in the admission queues'),
+            'rows in the admission queues of the 3 Keepers read, whatever their age and whether or not the trace holds their call: 1',
+        )
+
+    def test_the_queue_total_adds_up_every_keeper_read_and_not_only_the_rows_a_call_names(self):
+        store = Store()
+        self.addCleanup(store.close)
+        store.keeper('q1', pending=['rid-1', 'rid-2'])
+        store.keeper('q2', pending=['rid-3', 'rid-4', 'rid-5'])
+        store.trace('q1', [finished(T0 + 1, queued_text('rid-1'), 'c1')])
+        lines = store.run()[1].split('\n')
+        self.assertIn('  still waiting in the admission queue: 1 (100.0%)', lines)
+        self.assertIn('  rows in the admission queues of the 2 Keepers read, whatever their age and whether or not the trace holds their call: 5', lines)
 
     def test_the_settled_table_counts_origin_and_the_receipts_that_are_not_candidates(self):
         settled = self.block('candidates the Librarian settled')
@@ -647,6 +708,11 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(self.line(settled, 'settled with a target added by a row stamped before the write:'), 'settled with a target added by a row stamped before the write: 8 (66.7%)')
         self.assertEqual(self.line(settled, 'settled with a target that no commit row adds:'), 'settled with a target that no commit row adds: 1 (8.3%)')
         self.assertEqual(self.line(settled, 'settled without a target:'), 'settled without a target: 1 (8.3%)')
+        # A target stamped before the write (8) or added by no row (1) may have existed before the Keeper wrote: 9 of the 11 with a target.
+        self.assertEqual(
+            self.line(settled, 'targets that may have existed before the write'),
+            'targets that may have existed before the write (stamped before it, or added by no row): 9 of 11 with a target (81.8%); the other 2 are exact',
+        )
         self.assertEqual(self.line(settled, 'not counted:'), 'not counted: 0 that cannot be placed in the window, 0 written before --since')
         self.assertEqual(self.line(settled, 'receipts that are not a settled candidate'), 'receipts that are not a settled candidate (--since does not apply): 6')
         for reason in reach.Skip:
@@ -672,6 +738,11 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(self.line(settled, 'the id where the records end was removed by a committed row with no written reason:'), 'the id where the records end was removed by a committed row with no written reason: 0 (0.0%)')
         self.assertEqual(self.line(settled, 'the id where the records end was removed by no committed row:'), 'the id where the records end was removed by no committed row: 3 (75.0%)')
         self.assertEqual(self.line(settled, 'the removing commit also added a fact:'), 'the removing commit also added a fact: 1 of 1')
+        # The base rate: TAKEN is the only id any committed row of the three Keepers removed.
+        self.assertEqual(
+            self.line(settled, 'for comparison, the last committed row to remove each of'),
+            'for comparison, the last committed row to remove each of 1 ids in the 3 Keepers read: a written reason 1 (100.0%), also added a fact 1 (100.0%)',
+        )
 
     def test_the_settled_table_counts_stamps_and_gives_the_time_as_a_range(self):
         settled = self.block('candidates the Librarian settled')
@@ -706,13 +777,23 @@ class ReportTests(unittest.TestCase):
 
     def test_the_keeper_table_names_the_files_a_keeper_lacks_and_dates_its_traces(self):
         table = self.block('Keeper |')
-        self.assertIn(f'a | 10 | 1 | 7 | 1 | 2 | 1 | 1 | 2 | 12 | 1 | {T0_ISO} | -', table)
-        self.assertIn(f'empty | 1 | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 0 | 1 | {T0_ISO} | -', table)
+        # Columns: calls, rejected, result not in the trace, queued, after, before or unknown, without a target, waiting, no record,
+        # settled in the window, of those written inside the traces without a call, trace files, oldest trace, problems.
+        self.assertIn(f'a | 10 | 1 | 0 | 7 | 1 | 2 | 1 | 1 | 2 | 12 | 8 | 1 | {T0_ISO} | -', table)
+        self.assertIn(f'empty | 1 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 1 | {T0_ISO} | -', table)
         self.assertIn(
-            f'ghost | 1 | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 0 | 1 | {T0_ISO} | missing ghost.librarian-range-commit.json; missing ghost.memory-admission.json; '
+            f'ghost | 1 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 1 | {T0_ISO} | missing ghost.librarian-range-commit.json; missing ghost.memory-admission.json; '
             'missing ghost.memory-journal.jsonl; missing ghost.memory-current.json',
             table,
         )
+
+    def test_every_row_of_the_keeper_table_has_a_cell_per_column(self):
+        table = self.block('Keeper |')
+        columns = len(table[0].split(' | '))
+        self.assertEqual(columns, 15)
+        self.assertEqual(len(table), 4)
+        for row in table[1:]:
+            self.assertEqual(len(row.split(' | ')), columns, row)
 
     def test_the_last_line_says_nothing_was_skipped(self):
         self.assertEqual(self.out.rstrip('\n').split('\n')[-1], 'skipped input: none')
@@ -766,7 +847,7 @@ class WindowTests(unittest.TestCase):
         self.addCleanup(self.store.close)
         self.since = T0 + DAY
 
-    def test_a_receipt_without_a_source_fact_is_placed_by_the_last_stamp_of_its_revision(self):
+    def test_a_receipt_without_a_source_fact_is_placed_by_the_stamp_of_a_revision_that_has_one(self):
         boundary = self.since
         self.store.keeper(
             'b',
@@ -780,7 +861,7 @@ class WindowTests(unittest.TestCase):
         self.assertIn('write calls: 2 in 1 Keepers', out)
         self.assertIn('in the --since window: 2 in 1 Keepers', out)
         self.assertIn('not counted: 0 that cannot be placed in the window, 1 written before --since', out)
-        self.assertIn(f'b | 2 | 0 | 2 | 0 | 0 | 2 | 0 | 0 | 2 | 1 | {T0_ISO} | -', out)
+        self.assertIn(f'b | 2 | 0 | 0 | 2 | 0 | 0 | 2 | 0 | 0 | 2 | 0 | 1 | {T0_ISO} | -', out)
 
     def test_a_candidate_written_after_the_date_is_in_every_table_even_when_its_revision_began_before_it(self):
         since = self.since
@@ -809,16 +890,25 @@ class WindowTests(unittest.TestCase):
         self.assertIn('in the --since window: 1 in 1 Keepers', out)
         self.assertIn('not counted: 0 that cannot be placed in the window, 1 written before --since', out)
 
-    def test_a_receipt_without_a_source_fact_is_older_unplaced_or_inside(self):
+    def test_a_receipt_without_a_source_fact_is_older_unplaced_or_inside_by_all_the_stamps_of_its_revision(self):
         since = self.since
+        # rid-u1: stamps on both sides of the date, so the pass that settled it is unknown. rid-u2: every stamp before it.
+        # rid-u3: no stamp at its revision. rid-u4 and rid-u5: every stamp at or after it, the second from the very second.
+        # rid-u6: the last stamp is in the very second of the date but the first is before it.
         self.store.keeper(
             'u',
-            receipts=[unbound('rid-u1', 1), unbound('rid-u2', 2), unbound('rid-u3', 99)],
-            journal=[commit_row(1, since - 3600), commit_row(1, since + 500, effect='unchanged'), commit_row(2, since - 3600)],
+            receipts=[unbound('rid-u1', 1), unbound('rid-u2', 2), unbound('rid-u3', 99), unbound('rid-u4', 4), unbound('rid-u5', 5), unbound('rid-u6', 6)],
+            journal=[
+                commit_row(1, since - 3600), commit_row(1, since + 500, effect='unchanged'),
+                commit_row(2, since - 3600),
+                commit_row(4, since + 100), commit_row(4, since + 200, effect='unchanged'),
+                commit_row(5, since), commit_row(5, since + 10, effect='unchanged'),
+                commit_row(6, since - 1), commit_row(6, since, effect='unchanged'),
+            ],
         )
         _, out, _ = self.store.run('--since', '2026-10-28', '--only', 'u')
-        self.assertIn('in the --since window: 1 in 1 Keepers', out)
-        self.assertIn('not counted: 1 that cannot be placed in the window, 1 written before --since', out)
+        self.assertIn('in the --since window: 2 in 1 Keepers', out)
+        self.assertIn('not counted: 3 that cannot be placed in the window, 1 written before --since', out)
 
     def test_without_a_date_a_receipt_that_cannot_be_placed_is_still_counted(self):
         self.store.keeper('u', receipts=[unbound('rid-u3', 99)])
@@ -858,6 +948,30 @@ class RemovalTests(unittest.TestCase):
                 mid(self.L3): reach.Removal(True, True),
             },
         )
+
+    def test_a_reason_written_for_another_id_is_no_reason_for_this_one(self):
+        self.store.keeper('other', journal=[commit_row(2, T0 + 20, [self.N1], [self.T1], dropped=[(self.T2, 'a reason for another fact')])])
+        self.assertEqual(self.store.state('other').journal.removals, {mid(self.T1): reach.Removal(False, True)})
+
+    def test_every_removed_id_gives_the_base_rate_the_targets_are_read_against(self):
+        # Four ids are removed: N1 with a reason by a row that also adds N2, T2 without a reason by a row that also adds T3,
+        # and N2 and T1 without a reason by rows that add nothing.
+        self.store.keeper('base', journal=[
+            commit_row(1, T0 + 10, [self.N1]),
+            commit_row(2, T0 + 20, [self.N2], [self.N1], dropped=[(self.N1, 'a written reason')]),
+            commit_row(3, T0 + 30, [], [self.N2]),
+            commit_row(4, T0 + 40, [], [self.T1]),
+            commit_row(5, T0 + 50, [self.T3], [self.T2]),
+        ])
+        lines = [line.strip() for line in self.store.run('--only', 'base')[1].split('\n')]
+        self.assertIn(
+            'for comparison, the last committed row to remove each of 4 ids in the 1 Keepers read: a written reason 1 (25.0%), also added a fact 2 (50.0%)',
+            lines,
+        )
+
+    def test_the_base_rate_of_a_store_without_removals_is_empty_not_an_error(self):
+        lines = [line.strip() for line in self.store.run('--only', 'nobody')[1].split('\n')]
+        self.assertIn('for comparison, the last committed row to remove each of 0 ids in the 0 Keepers read: a written reason 0 (-), also added a fact 0 (-)', lines)
 
     def test_the_last_row_that_removed_a_fact_is_the_one_kept(self):
         self.store.keeper('again', journal=[
@@ -912,8 +1026,48 @@ class CoverageTests(unittest.TestCase):
         self.assertIn('candidates without a source fact (the write time is not known): 2, with a matching write call: 1', lines)
         self.assertIn('skipped input: raw trace files whose name has no turn start 2', lines)
         # Two calls, both queued: rid-c2 settled with a target that a row stamped before the write had added, rid-c4 without a target.
-        self.assertIn(f'cov | 2 | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 6 | 1 | {reach.iso(T0 + 1000)} | -', out)
-        self.assertIn('odd | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 2 | - | -', out)
+        # Of its six settled candidates, c3 and c6 were written inside the traces without a call.
+        self.assertIn(f'cov | 2 | 0 | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 6 | 2 | 1 | {reach.iso(T0 + 1000)} | -', out)
+        self.assertIn('odd | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 2 | - | -', out)
+
+
+class MedianTests(unittest.TestCase):
+    def files_line(self, per_keeper):
+        store = Store()
+        self.addCleanup(store.close)
+        for keeper, files in per_keeper.items():
+            for index in range(files):
+                store.trace(keeper, [], start=T0 + index)
+        return next(line.strip() for line in store.run()[1].split('\n') if line.strip().startswith('raw trace files per Keeper'))
+
+    def test_the_median_of_an_odd_number_of_keepers_is_the_middle_count(self):
+        self.assertEqual(self.files_line({'m1': 1, 'm2': 2, 'm3': 9}), 'raw trace files per Keeper: min 1, median 2, max 9 (3 Keepers)')
+
+    def test_the_median_of_an_even_number_of_keepers_is_the_mean_of_the_two_middle_counts(self):
+        self.assertEqual(self.files_line({'m1': 1, 'm2': 2, 'm3': 4, 'm4': 8}), 'raw trace files per Keeper: min 1, median 3, max 8 (4 Keepers)')
+        self.assertEqual(self.files_line({'m1': 1, 'm2': 2}), 'raw trace files per Keeper: min 1, median 1.5, max 2 (2 Keepers)')
+
+
+class TimesPastTheCalendarTests(unittest.TestCase):
+    def test_a_report_over_times_in_milliseconds_prints_and_counts_them_instead_of_stopping(self):
+        store = Store()
+        self.addCleanup(store.close)
+        in_milliseconds = T0 * 1000
+        store.trace('ms', [finished(in_milliseconds, queued_text('rid-ms'), 'c1'), finished(T0 + 1, queued_text('rid-ok'), 'c2')])
+        store.keeper(
+            'ms',
+            receipts=[bound('rid-a', 's', OLD, 1, in_milliseconds), bound('rid-b', 's', OLD, 1, T0 + 5)],
+            journal=[commit_row(1, in_milliseconds, [OLD]), commit_row(1, T0 + 100, [OLD])],
+        )
+        code, out, err = store.run()
+        self.assertEqual((code, err), (0, ''))
+        self.assertIn('write calls: 1 in 1 Keepers', out)
+        self.assertEqual(
+            out.rstrip('\n').split('\n')[-1],
+            'skipped input: committed journal rows without a revision or a usable recorded_at 1; '
+            'settled receipts whose first_seen is not a usable time (read as having no write time) 1; '
+            'write records whose ts is not a usable time 1',
+        )
 
 
 class QuietKeeperTests(unittest.TestCase):
@@ -928,7 +1082,7 @@ class QuietKeeperTests(unittest.TestCase):
         (self.store.memory / 'quiet.memory-current.json').unlink()
         self.store.trace('loud', [finished(T0 + 1, rejected_text('source_read_failed'), 'c1')])
         _, out, _ = self.store.run()
-        self.assertIn('quiet | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | - | missing quiet.memory-current.json', out)
+        self.assertIn('quiet | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | - | missing quiet.memory-current.json', out)
 
     def test_a_claim_added_twice_is_dated_by_its_first_addition(self):
         journal = [commit_row(1, T0 + 100, [OLD]), commit_row(2, T0 + 200, [], [OLD]), commit_row(3, T0 + 2600, [OLD])]
@@ -944,7 +1098,14 @@ class CallsOnlyTests(unittest.TestCase):
         self.addCleanup(store.close)
         store.trace('solo', [finished(T0 + 1, rejected_text('source_read_failed'), 'c1')])
         _, out, _ = store.run()
-        self.assertIn(f'solo | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | {T0_ISO} | missing solo.librarian-range-commit.json', out)
+        self.assertIn(f'solo | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | {T0_ISO} | missing solo.librarian-range-commit.json', out)
+
+    def test_a_native_call_of_an_official_client_has_its_own_column(self):
+        store = Store()
+        self.addCleanup(store.close)
+        store.trace('nat', [native_finished(T0 + 1, ['Provider_step', {'step_index': 1}]), finished(T0 + 2, rejected_text('source_read_failed'), 'c1')])
+        _, out, _ = store.run()
+        self.assertIn(f'nat | 2 | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | {T0_ISO} | missing nat.librarian-range-commit.json', out)
 
 
 if __name__ == '__main__':

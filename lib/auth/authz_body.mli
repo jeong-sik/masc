@@ -7,7 +7,7 @@
 
     A body holds null, booleans, integers, strings, lists, and objects. It
     holds no float, because the text of a float is the printer's choice and
-    [nan] has none. An integer lies within [-(2^53 - 1)] and [2^53 - 1], the
+    [nan] has none. An integer lies between -(2^53 - 1) and 2^53 - 1, the
     range that RFC 8259 section 6 calls interoperable: a reader that parses
     numbers as doubles reads each of them exactly. A string and an object
     member name are valid UTF-8 (RFC 8259 section 8.1). The member names of one
@@ -17,7 +17,7 @@
     A value of type {!t} can only be made through the functions below, so a
     value that exists satisfies all of this.
 
-    {!to_string} is the one printer of the log. Its output is part of the file
+    {!to_string} is the single printer of the log. Its output is part of the file
     format and does not depend on the version of any library. It writes no
     spaces and keeps the members in the order given. A quote, a backslash,
     a backspace, a form feed, a line feed, a carriage return, and a tab get
@@ -25,7 +25,9 @@
     (U+0000 to U+001F) is written as a backslash, the letter u, and four
     lowercase hex digits. Every other character, DEL included, is written as
     its UTF-8 bytes. A string comes out as RFC 8785 section 3.2.2.2 writes it,
-    which is also what [JSON.stringify] and Python's [json] module write. *)
+    which is also what JSON.stringify and the json module of Python write. Only
+    the string rule is RFC 8785: the members are not sorted, so a tool that must
+    write the same bytes keeps the order given. *)
 
 type t = private
   | Null
@@ -62,5 +64,5 @@ val to_string : t -> string
 
 (** The canonical text of one string, quotes included, for text that is already
     known to be valid UTF-8, such as an identifier of the log's own
-    vocabulary. *)
+    vocabulary. It does not check that the text is valid UTF-8. *)
 val string_literal : string -> string

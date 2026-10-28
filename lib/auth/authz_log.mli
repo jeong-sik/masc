@@ -30,9 +30,9 @@
     cannot say whether the file changed, when the end of the file is not where
     this process left it, or when the write raises an exception. A stopped log
     does not enter a zone ({!with_writer} returns [Error]) and every {!append}
-    returns {!Stopped}, until the process starts again and opens the file
-    again. The in-memory head is then not trusted, and the file is the only
-    truth. A refusal that wrote nothing ({!Write_locked}, {!Wrong_seq},
+    returns {!Stopped}, until the process restarts and opens the file again.
+    While the log is stopped, the in-memory head is not trusted, and the file
+    is the only truth. A refusal that wrote nothing ({!Write_locked}, {!Wrong_seq},
     {!Wrong_previous_hash}, {!Would_not_read_back}) does not stop the log. *)
 
 type t
@@ -172,13 +172,14 @@ val append_error_to_string : append_error -> string
 
 (** Writes the records, in order, with one write call and one sync, and
     returns the head after the last one. The first record must continue the
-    head the zone has, each next record the one before it. A list that does not
-    continue the chain is refused before any byte is written. Each line is
+    current head of the zone (the head [f] was given, or the one the last
+    {!append} returned), each next record the one before it. A list that does
+    not continue the chain is refused before any byte is written. Each line is
     read back with {!Authz_record.of_line} before it is written, so a line that
-    [of_line] would refuse at the next start is never written. The fold
-    function of {!open_at_start} is not run here, and a record that it refuses
-    stops every later start, so the caller runs the same step before it
-    appends. An empty list writes nothing.
+    {!Authz_record.of_line} would refuse at the next start is never written.
+    The fold function of {!open_at_start} is not run here, and a record that it
+    refuses stops every later start, so the caller runs the same fold function
+    before it appends. An empty list writes nothing.
 
     Once this returns [Ok], the lines are in the file and synced the way
     [Fs_compat] syncs. [Fs_compat] does not call [F_FULLFSYNC], so the lines
@@ -191,6 +192,8 @@ val append_error_to_string : append_error -> string
 
     If the write raises an exception (for example
     [Systhread_host.Host_failed]), the lines may be in the file. The log is
-    stopped and the exception goes on to the caller. The caller does not
-    append the same records again: the next start shows what the file holds. *)
+    stopped and the exception goes on to the caller. An exception that comes
+    before the write began stops the log too, because the module cannot tell
+    the two cases apart. The caller does not append the same records again: the
+    next start shows what the file holds. *)
 val append : writer -> Authz_record.t list -> (Authz_record.head, append_error) result

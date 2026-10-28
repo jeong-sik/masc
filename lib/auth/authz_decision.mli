@@ -16,7 +16,7 @@
     + the initiator and the executor have a current membership;
     + the PAT deadline has not passed;
     + a PAT that asks for a management effect names the channel and the
-      effects; its runtimes may stay [All] (design 4.4);
+      effects; its runtimes may remain [All] (design 4.4);
     + a policy covers the pair and the channel;
     + the Runtime exists, and the initiator and the executor each hold a
       current grant on it;
@@ -67,7 +67,7 @@ end
 
 (** The facts one decision reads. This record is the trust boundary of the
     module: only the store adapter builds it, from the store and nothing else.
-    A record whose functions answer [Found Active] for everything allows
+    A record whose functions answer [Found] with [Active] for everything allows
     everything, and nothing here can tell.
 
     Every function must answer from one consistent snapshot, return only rows
@@ -102,6 +102,10 @@ type facts =
 type request =
   { context : Execution_context.t
   ; workspace_id : Workspace_id.t
+        (** The workspace of the resource the caller is handling. The caller
+            takes it from that resource and never from a value the requester
+            sent: the membership checks of the initiator, the executor, and the
+            Runtime's owner read it. *)
   ; runtime_id : Runtime_id.t
   ; requested : Effect_request.t
   }

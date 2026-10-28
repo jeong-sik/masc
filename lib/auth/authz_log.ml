@@ -189,10 +189,10 @@ let contents_of ~missing ~line_count =
   if missing then Missing else if line_count = 0 then Empty else Lines line_count
 ;;
 
-(* A size that is not larger than the bytes kept means nothing was cut. That
-   also covers a file that grew between the stat and the lock, which only a
-   second writer causes; its append then returns [Diverged] for the process
-   that wrote second. *)
+(* A size that is not larger than the bytes kept is reported as no cut. A file
+   that grew between the stat and the lock, which only a second writer causes,
+   gives a difference of zero or less, and then a cut that really happened goes
+   unreported. The append of the process that wrote second returns [Diverged]. *)
 let tail_of ~size_before ~kept_bytes =
   let discarded_bytes = size_before - kept_bytes in
   if discarded_bytes > 0 then Cut { kept_bytes; discarded_bytes } else Complete

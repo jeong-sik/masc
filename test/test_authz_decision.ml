@@ -318,7 +318,7 @@ let bindings =
         (deny "auth_binding_inactive")
     ; self "absent" ~f:(set_binding (fun _ -> D.Absent)) (deny "auth_binding_inactive")
     ; self
-        "binding of someone else's credential"
+        "the request's credential belongs to someone else"
         ~f:
           (set_binding (fun who ->
              if Principal.equal who carol then found Auth_binding_status.Active else D.Absent))
@@ -568,7 +568,7 @@ let no_grant_reveals_nothing =
         ~f:(set_account (found Resource_status.Quarantined))
         (deny "grant_not_current:initiator:no_grant")
     ; self
-        "an owner's own unknown Runtime reads the same way"
+        "an unknown Runtime reads the same for its owner"
         ~f:(set_runtime D.Absent)
         (deny "grant_not_current:initiator:no_grant")
     ]
@@ -963,7 +963,7 @@ let () =
             `Quick
             chain_names_what_the_decision_stood_on
         ] )
-    ; "labels", [ Alcotest.test_case "all different" `Quick reason_labels_are_distinct ]
+    ; "labels", [ Alcotest.test_case "every label is different" `Quick reason_labels_are_distinct ]
     ; unreadable
     ]
 ;;

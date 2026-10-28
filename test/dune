@@ -6835,3 +6835,5 @@
 (include stanzas/test_authz_record.inc)
 
 (include stanzas/test_authz_log.inc)
+
+(include stanzas/test_authz_install_record.inc)

@@ -62,7 +62,7 @@ let cleanup_failure = function
     | Protocol_failed _ | Host_refusal _ | Invalid_observation _ | Stopped) as error ->
       Lane_addon_lifecycle.Cleanup_unconfirmed (error_to_string error)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let container_id t = t.id
 let image_identity t = t.image
 let container_name t = t.name

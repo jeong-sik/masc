@@ -44,7 +44,7 @@ type started = {
   registered_now : bool;
 }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let start
       ~discover

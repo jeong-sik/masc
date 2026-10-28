@@ -5,7 +5,7 @@
    a busy timeout so two fibers racing the same advance wait instead of
    failing. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* Bumped when the schema below changes. A file that does not carry this
    number is deleted and rebuilt: the index is derived, so there is nothing

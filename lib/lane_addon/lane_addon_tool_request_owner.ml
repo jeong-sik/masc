@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 type error = Binding_conflict | Store_unavailable of string | Invalid_identity of string
   | Invalid_request of string
 type installation = Configuration of string | Manual of string

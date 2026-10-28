@@ -13,7 +13,7 @@ type source =
   ; keeper_turn_id : int option
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let nullable_json encode = function None -> `Null | Some value -> encode value
 
 let source_to_json source =

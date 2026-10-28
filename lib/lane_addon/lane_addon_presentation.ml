@@ -5,7 +5,7 @@ type reading = {
 }
 type t = { description : string option; readings : reading list }
 let empty = {description=None; readings=[]}
-let ( let* ) = Result.bind
+open Result.Syntax
 let text = function
   | `String value when String.trim value <> ""
       && not (String.exists (fun c -> Char.code c < 32 || Char.code c = 127) value) -> Ok value

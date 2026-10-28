@@ -2,7 +2,7 @@ module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Exact = Lane_addon_exact
 module Runtime = Lane_addon_runtime
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type error = Unavailable of string | Rejected of string | Uncertain of string
 let error_to_string = function Unavailable detail | Rejected detail | Uncertain detail -> detail

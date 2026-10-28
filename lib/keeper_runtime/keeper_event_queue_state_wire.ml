@@ -1,6 +1,6 @@
 open Keeper_event_queue_state_core
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let schema = Keeper_event_queue_schema.state
 
 let assoc_fields ~context = function

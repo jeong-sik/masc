@@ -30,7 +30,7 @@ type t =
   | Keeper of { keeper_name : string }
   | Unrouted of { reason : string }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let validate_nonblank field value =
   if String.equal (String.trim value) ""

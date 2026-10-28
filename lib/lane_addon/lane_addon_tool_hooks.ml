@@ -5,7 +5,7 @@ let hook_of_string = function
   | "validate_output" -> Some Validate_output
   | _ -> None
 type t = { name : string; checks : (hook * Yojson.Safe.t) list }
-let ( let* ) = Result.bind
+open Result.Syntax
 let selection_of_json = function
   | `List values ->
       let rec loop hooks = function

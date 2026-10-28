@@ -1,5 +1,5 @@
 open Lane_addon_types
-let ( let* ) = Result.bind
+open Result.Syntax
 type jsonl_snapshot = { entry_count : int; reference : evidence }
 type t = { root : string; mutable root_parent_pending : bool; sequence_mutex : Mutex.t;
            sequences : (string, jsonl_snapshot) Hashtbl.t }

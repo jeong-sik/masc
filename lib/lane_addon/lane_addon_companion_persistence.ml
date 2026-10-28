@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let blocking work =
   match Fs_compat.execution_context () with

@@ -150,7 +150,7 @@ let path_exists_exact path =
 ;;
 
 let durable_paths_exist snapshot wal =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* snapshot_exists = path_exists_exact snapshot in
   let* wal_exists = path_exists_exact wal in
   let* intent_exists = path_exists_exact (Quarantine.path ~snapshot) in
@@ -549,7 +549,7 @@ let read_primary_current_unlocked ?(after_read = fun () -> ()) owner =
 ;;
 
 let read_primary_unlocked ?after_read owner =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = Quarantine.guard ~snapshot:(snapshot_path_of_owner owner)
     |> Result.map_error Quarantine.guard_failure_to_string in
   read_primary_current_unlocked ?after_read owner
@@ -666,7 +666,7 @@ let replay_transition_wal_bytes ~wal_only owner state bytes =
 ;;
 
 let read_and_replay_wal_unlocked ~wal_only ~path ~surface owner state =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   (* The generic JSONL reader follows paths and treats ENOENT at offset zero
      as an empty stream. Queue state instead rejects a present indirect or
      non-regular entry, including a dangling link, before that reader runs. *)
@@ -987,7 +987,7 @@ type moved_aside =
    including a crash after both originals disappeared. Only explicit quarantine
    enters this recovery path; ordinary loaders never complete it implicitly. *)
 let move_aside_with ~after_read ~sync_intent ~rename ~before_clear ~base_path ~keeper_name ~rejected_path_of =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* owner = resolve_owner ~base_path ~keeper_name in
   let snapshot = snapshot_path_of_owner owner in
   let wal = transition_wal_path_of_owner owner in
@@ -1912,7 +1912,7 @@ let project_transition_outbox_result
       ~base_path
       ~keeper_name
   =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* owner = resolve_owner ~base_path ~keeper_name in
   try
     Owner_lock.with_durable_lock owner (fun () ->

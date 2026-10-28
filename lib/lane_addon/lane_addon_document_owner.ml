@@ -1,7 +1,7 @@
 type t = Pending of {keeper:string; prior:string option; proposed:string; repair:bool}
   | Owned of {keeper:string; revision:string}
   | Reassigned of {keeper:string; revision:string} | Revoked
-let ( let* ) = Result.bind
+open Result.Syntax
 let protect f = try f () with
   | Sys_error message -> Error message
   | Unix.Unix_error (error, call, _) -> Error (call ^ ": " ^ Unix.error_message error)

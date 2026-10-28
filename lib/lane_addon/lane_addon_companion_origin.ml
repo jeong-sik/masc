@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 type error = Invalid_source | Binding_conflict | Corrupt | Unavailable | Commit_unconfirmed
 let error_to_string = function
   | Invalid_source -> "original companion source is unavailable or contradictory"

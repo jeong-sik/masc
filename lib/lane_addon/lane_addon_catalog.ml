@@ -7,7 +7,7 @@ type entry =
   | Package of { manifest_path : string; metadata : metadata }
   | Issue of { path : string; message : string }
 type t = { directory : string; parent : string option; entries : entry list }
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let io f =
   try Ok (f ()) with

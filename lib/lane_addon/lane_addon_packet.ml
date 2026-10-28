@@ -1,5 +1,5 @@
 open Lane_addon_types
-let ( let* ) = Result.bind
+open Result.Syntax
 let exact names = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare names -> Ok fields
   | _ -> Error ("expected exactly fields: " ^ String.concat ", " names)

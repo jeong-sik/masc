@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 type observation = Waiting of Yojson.Safe.t | Outcome_unknown of Yojson.Safe.t
   | Absent of Yojson.Safe.t
 type refusal_stage = Before_dispatch | Execution

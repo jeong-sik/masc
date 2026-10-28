@@ -99,7 +99,7 @@ let to_observation_yojson {failures;terminal} =
         "summary",`String (Keeper_request_failure.summary failure)] in
   `Assoc ["failures",`List (List.map failure_json failures);"terminal",terminal_json]
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let object_fields = function
   | `Assoc fields -> Ok fields

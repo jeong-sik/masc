@@ -1,5 +1,5 @@
 open Lane_addon_types
-let ( let* ) = Result.bind
+open Result.Syntax
 type error = Invalid_manifest of string | Io_failure of string
 type execution_kind = Container_runtime of runtime | Host_runtime
 let error_to_string = function Invalid_manifest detail | Io_failure detail -> detail

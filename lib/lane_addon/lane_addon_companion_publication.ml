@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 module O = Lane_addon_companion_origin
 module A = Lane_addon_action
 type kind = Attention_required | Effect_submitted | Terminal | Owner_lost

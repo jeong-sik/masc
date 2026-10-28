@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type grant =
   | Board of { source_id : string; visibilities : Board_types.visibility list }

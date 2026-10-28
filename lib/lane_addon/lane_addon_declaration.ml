@@ -9,7 +9,7 @@ type write_request = { file_name : string; source_text : string; expected : expe
 type write_state = Created | Saved | Unchanged
 type durability = Durable | Unconfirmed of string
 type receipt = { document : document; state : write_state; durability : durability }
-let ( let* ) = Result.bind
+open Result.Syntax
 let reject ?current code message = Error {code;message;current}
 let digest text = Agent_core_sha256.(to_hex (digest_string text))
 let code = function Invalid_request -> "invalid_request" | Not_found -> "not_found"

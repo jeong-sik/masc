@@ -63,7 +63,7 @@ let http_ask ~clock ~timeout_sec : ask =
     | Error _ -> None
     | Ok response -> Some response.Masc_http_client.headers
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* RFC 9728 puts the well-known segment between the origin and the resource
    path, not after it: the metadata for https://host/a/b lives at

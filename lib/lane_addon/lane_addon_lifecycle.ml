@@ -103,7 +103,7 @@ type state =
 type condition = Engine_reachable | Engine_is of engine | Holder_changes of holder
 type heal = Retry | Wait_until of condition
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* Every failure is listed. A new failure cannot be added without deciding here
    whether repeating the attempt is worth making. *)

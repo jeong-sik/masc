@@ -1,6 +1,6 @@
 (* The caller owns the queue transaction lock. Ordinary readers only need to
    inspect the journal entry: decoding it is reserved for explicit recovery. *)
-let ( let* ) = Result.bind
+open Result.Syntax
 let filename = "event-queue-quarantine-v1.json"
 let path ~snapshot = Filename.concat (Filename.dirname snapshot) filename
 

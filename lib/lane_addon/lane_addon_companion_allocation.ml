@@ -56,7 +56,7 @@ let on_finish t settle =
     | Eio.Cancel.Cancelled _ as exn -> unconfirmed (); raise exn
     | Invalid_argument _ -> unconfirmed (); Error "private settlement unavailable"
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let same_directory expected current =
   current.Unix.st_dev = expected.Unix.st_dev && current.st_ino = expected.st_ino

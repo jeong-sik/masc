@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let exact_fields expected = function
   | `Assoc fields as json ->

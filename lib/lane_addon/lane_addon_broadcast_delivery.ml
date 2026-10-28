@@ -1,5 +1,5 @@
 module Request_id = Keeper_chat_delivery_identity.Request_id
-let ( let* ) = Result.bind
+open Result.Syntax
 type t = {root : string; io : Fs_compat.private_jsonl_transaction_io_for_testing option}
 type recipient_state = Pending of string option | Accepted
 type workspace_state = Uncommitted | Committed of int

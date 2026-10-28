@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type role = User | Assistant
 type message = { role : role; text : string }

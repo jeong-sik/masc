@@ -4,11 +4,11 @@ open Alcotest
 
     The dashboard metrics cache compute was offloaded via
     [Eio_guard.run_in_systhread] — a bare OS thread with no Eio effect handler.
-    The compute reached [Keeper_fs.ensure_dir], which takes the process-shared
-    [dir_mu] through [Eio.Mutex.use_rw ~protect:true].  [Cancel.protect]
+    The compute reached a process-shared Eio mutex on the file-write path,
+    taken through [Eio.Mutex.use_rw ~protect:true].  [Cancel.protect]
     performs [Get_context] as its first action; with no handler on the systhread
     that raises [Effect.Unhandled], which [use_rw] converts into a poison of
-    [dir_mu].  Every file write in the process then failed with
+    that mutex.  Every file write that took it then failed with
     [Eio.Mutex.Poisoned], so no keeper could persist and the fleet stalled.
 
     The fix routes such compute through [Executor_pool_ref.submit_or_inline],

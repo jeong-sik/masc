@@ -73,7 +73,7 @@ let with_mutex_ro mutex f =
     that performs an effect (e.g. [Eio.Mutex.use_rw], whose [Cancel.protect]
     performs [Get_context] first) raises [Effect.Unhandled] here, and an
     enclosing [use_rw] then poisons its mutex.  That is the 2026-06-19 keeper
-    stall (a poisoned process-shared [dir_mu]); the structural cure is to
+    stall (a poisoned process-shared mutex on the file-write path); the structural cure is to
     offload Eio-touching work via [Executor_pool] instead (PR #21530).
 
     Defense-in-depth: this wrapper converts that cryptic [Effect.Unhandled]

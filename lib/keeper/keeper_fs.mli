@@ -7,8 +7,10 @@
 
 (** {1 Directory Management} *)
 
-(** Ensure [path] exists, creating it recursively if needed.
-    Fiber-safe: protected by Eio.Mutex. Returns [path] for chaining. *)
+(** Ensure [path] exists, creating it recursively if needed. A cached path is
+    checked again on the filesystem, so a directory removed outside is made
+    again. Takes no lock: concurrent callers may each stat or create the same
+    path. Returns [path] for chaining. *)
 val ensure_dir : string -> string
 
 (** Remove [path] from the directory cache.

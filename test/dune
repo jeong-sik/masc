@@ -6916,3 +6916,5 @@
 
 (include stanzas/test_endpoint_job_owner.inc)
 (include stanzas/test_endpoint_job_peer.inc)
+
+(include stanzas/test_authz_jsonl_file.inc)

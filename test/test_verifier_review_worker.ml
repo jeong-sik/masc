@@ -303,6 +303,35 @@ let test_actual_host_commit_restart () = with_workspace_runtime (fun config stor
     | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ ->
       Alcotest.fail "actual host did not confirm the verdict"))
 
+(* A rejection leaves the Task nonterminal and the producer edits its handoff
+   right after. The commit must read back as applied from the rejection relation
+   the domain commit wrote, not from handoff fields the producer may change. *)
+let test_reject_commit_is_confirmed_by_its_relation () = with_workspace_runtime (fun config store clock ->
+  let task=prepare_domain config in
+  let a=authority config in let first=original a 0 in retain store first;
+  with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+    Ok {AR.selected_runtime_id="fixture-reviewer";evaluator_execution=None;verdict=Some (AR.Reject "repair needed")}) (fun () ->
+    let result=loaded (run_observed ~clock ~task ~store ~installation_id ~package_id first a) in
+    get (Host.commit_original ~config ~task ~store ~attempt:0 ~installation_id ~package_id
+      ~verification_id ~notes:(domain_notes result));
+    (match (task_in_backlog config).Masc_domain.task_status with
+     | InProgress {assignee;_} -> Alcotest.(check string) "rejection returns the Task to its producer" producer assignee
+     | Todo | Claimed _ | AwaitingVerification _ | Done _ | Cancelled _ -> Alcotest.fail "rejection was not applied");
+    let backlog=get (Workspace_backlog.read_backlog_r config) in
+    Workspace_core.write_backlog config {backlog with tasks=List.map (fun (task:Masc_domain.task) ->
+      {task with handoff_context=Some {Masc_domain.summary="resumed the repair";reason=None;next_step=Some "fix it";
+        failure_mode=None;reclaim_policy=None;evidence_refs=["board:p-1"];updated_at=None;updated_by=Some producer}})
+      backlog.tasks};
+    let finished=loaded (O.load_retained ~store ~verification_id ~attempt:0 ~installation_id ~package_id) in
+    match P.phase (O.progress finished) with
+    | P.Finished commit ->
+      Alcotest.(check bool) "producer handoff edit does not change what the commit read back" true
+        (Yojson.Safe.equal commit.P.change.P.after
+           (get (Host.observe_original ~config ~original:(O.original finished) ~judgment:commit.P.judgment
+              ~authority:Publication.authority commit.P.change)))
+    | _ -> Alcotest.fail "rejection commit was not confirmed"))
+
 let test_actual_host_commit_cancel_after_domain_write () =
   with_workspace_runtime (fun config store clock -> Eio.Switch.run (fun sw ->
   let installation_id=host_installation and package_id=host_package in
@@ -907,6 +936,7 @@ let () =
     Alcotest.test_case "bound scope plus definite pre-dispatch failure can retry safely" `Quick test_bound_scope_before_dispatch_failure_has_safe_retry;
     Alcotest.test_case "unknown and cancellation never redispatch" `Quick test_unknown_and_cancelled_never_redispatch;
     Alcotest.test_case "actual host commit and restart" `Quick test_actual_host_commit_restart;
+    Alcotest.test_case "rejection commit is confirmed by its relation after a producer handoff edit" `Quick test_reject_commit_is_confirmed_by_its_relation;
     Alcotest.test_case "actual host recovers cancellation after domain write" `Quick test_actual_host_commit_cancel_after_domain_write;
     Alcotest.test_case "Judged recovery precedes actual preparation" `Quick test_judgment_recovery_precedes_actual_preparation;
     Alcotest.test_case "commit unknown recovers original" `Quick test_commit_unknown_recovers_exact_original;

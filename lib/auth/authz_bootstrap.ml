@@ -88,16 +88,18 @@ let path_problem_to_string = function
   | Not_absolute -> "it is not absolute"
   | Holds_nul -> "it holds a NUL byte"
   | Not_normal -> "it has an empty, . or .. segment, or ends with a separator"
-  | Inside_base_path -> "it is inside the base path, which a backup of the base path takes back"
+  | Inside_base_path ->
+    "it is inside the base path, which a backup of the base path takes back, or inside the \
+     directory of the log, where the log and its lock file are"
   | Is_install_record -> "it is the file of the install record"
 ;;
 
 let error_to_string = function
   | External_store_path_invalid { path; problem } ->
     Printf.sprintf
-      "the path of the external store cannot be used (%s): %s"
+      "the path of the external store cannot be used (%s): %S"
       (path_problem_to_string problem)
-      (String.escaped path)
+      path
   | No_config_dir ->
     "no config directory is known (neither XDG_CONFIG_HOME nor HOME), so no install record \
      can be written"

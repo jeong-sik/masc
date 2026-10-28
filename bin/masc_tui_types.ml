@@ -9316,7 +9316,7 @@ type state = {
      until the next input or for [last_action_window_s], whichever comes
      first: an outcome that stayed would go on claiming a keypress the
      operator has moved past. *)
-  mutable last_action: (string * float) option;
+  mutable last_action: Masc_tui_action_notice.t;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
      fleet's own reading of what is missing, as the fleet stream (RFC-0477)
@@ -10422,6 +10422,9 @@ let dismiss_latest_preset_save_receipt (state : state) =
   in
   state.preset_save_receipts <- hide state.preset_save_receipts
 
+let set_last_action (state : state) action =
+  state.last_action <- Masc_tui_action_notice.set_ordinary state.last_action action
+
 let queue_panel_items (state : state) (panel : queue_panel) =
   let module Inbox = Masc_tui_queue_inspection in
   let local = Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
@@ -10866,10 +10869,10 @@ let ask_submit_is_armed (state : state) =
   | Ask_answering _, None, None -> false
 
 let retire_armed_ask_submit_notice (state : state) =
-  match state.last_action with
+  match Masc_tui_action_notice.ordinary state.last_action with
   | Some (text, _)
     when String.starts_with ~prefix:armed_ask_submit_notice_prefix text ->
-      state.last_action <- None
+      set_last_action state None
   | Some _ | None -> ()
 
 let disarm_ask_submit (state : state) =
@@ -16961,7 +16964,7 @@ let create_state
   voice_continuous = None;
   voice_floor = None;
   quit_armed = false;
-  last_action = None;
+  last_action = Masc_tui_action_notice.empty;
   fleet_stream_reader = Fleet_stream_idle;
   connection_status = Disconnected;
   http_refresh_started_ns = None;

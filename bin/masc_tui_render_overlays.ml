@@ -1139,23 +1139,40 @@ let render_terminal_too_small state ~recovery_notice ~rows ~cols =
     navigation_rows + surface_rows
     + Masc_tui_composer.rows_for ~terminal_rows:surface_rows
   in
-  let notice = match recovery_notice, state.last_action with
-    | Some text, _ -> Some text
-    | None, Some (text, at)
-      when Unix.gettimeofday () -. at <= Masc_tui_types.last_action_window_s -> Some text
-    | None, (Some _ | None) -> None in
+  let ordinary =
+    Masc_tui_action_notice.ordinary_visible state.last_action
+      ~now:(Unix.gettimeofday ()) ~window:Masc_tui_types.last_action_window_s in
+  let rejection =
+    match recovery_notice, ordinary with
+    | Some _, _ | None, Some _ -> None
+    | None, None ->
+        (match Masc_tui_action_notice.rejection state.last_action
+                 ~now:(Unix.gettimeofday ()) ~window:Masc_tui_types.last_action_window_s with
+         | Some notice when
+             Message_layout.display_width (Masc_tui_action_notice.rejection_text notice) <= cols ->
+             Some notice
+         | Some _ | None -> None) in
+  let notice = match recovery_notice, rejection with
+    | Some text, _ -> Some (text, None)
+    | None, Some notice -> Some (Masc_tui_action_notice.rejection_text notice, Some notice)
+    | None, None -> Option.map (fun (text, _) -> text, None) ordinary in
   let resize_hint =
     Printf.sprintf "terminal too small -- resize to at least %d rows; q: quit"
       minimum_terminal_rows in
   let buf = Buffer.create 64 in
+  let rendered (text, marked) =
+    let text = Terminal_text.single_line text in
+    match marked with
+    | Some notice -> pressable (Press_input_rejection notice) text
+    | None -> text in
   let first = match notice with
-    | Some text when rows <= 1 -> Terminal_text.single_line text
+    | Some notice when rows <= 1 -> rendered notice
     | Some _ | None -> resize_hint in
   Buffer.add_string buf (fit_width first cols);
   Buffer.add_char buf '\n';
   (match notice with
-   | Some text when rows > 1 ->
-       Buffer.add_string buf (fit_width (Terminal_text.single_line text) cols);
+   | Some notice when rows > 1 ->
+       Buffer.add_string buf (fit_width (rendered notice) cols);
        Buffer.add_char buf '\n'
    | Some _ | None -> ());
   finish_terminal_too_small_frame ~cursor:Frame_presenter.Hidden ~rows ~cols

@@ -1,0 +1,35 @@
+(** Immutable action feedback. Ordinary feedback retains its existing
+    timestamp and identity; input rejection stays pending until it is actually
+    presented with its complete text. *)
+type rejection_kind = Input_rejected | Paste_rejected
+type rejection
+type t
+type preferred = No_preferred | Csi_recovery | Rejection of rejection
+
+val empty : t
+val ordinary : t -> (string * float) option
+val ordinary_visible : t -> now:float -> window:float -> (string * float) option
+val set_ordinary : t -> (string * float) option -> t
+val csi_active : t -> bool
+val start_csi : t -> t
+val end_csi : t -> t
+(** CSI recovery is independent of ordinary notice replacement and remains
+    active until the input reader confirms that the sequence ended. *)
+val reject : t -> rejection_kind -> now:float -> window:float -> t
+val rejection : t -> now:float -> window:float -> rejection option
+(** Existing action feedback retains its previous priority. A pending input
+    rejection stays in state until it can be offered without replacing it. *)
+val preferred : t -> existing_action:bool -> now:float -> window:float -> preferred
+val rejection_text : rejection -> string
+val same_rejection : rejection -> rejection -> bool
+val presented : t -> rejection -> at:float -> input_pending:bool -> t
+val after_drain :
+  t -> at:float -> input_pending:bool -> currently_visible:rejection option -> t
+(** Start the visible lifetime only if that exact notice is still on the last
+    valid frame after input drains; otherwise it must be presented again. *)
+val after_input :
+  t -> input_seen:bool -> operator_input:bool -> currently_visible:rejection option ->
+  now:float -> window:float -> t
+(** Ordinary feedback is cleared by input as before. A rejection can be
+    cleared by operator input only while its exact identity is still visible.
+    Before expiry, a notice hidden by another surface becomes pending again. *)

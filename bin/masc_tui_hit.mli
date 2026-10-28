@@ -56,3 +56,7 @@ val filter : ('target -> bool) -> 'target zones -> 'target zones
 val to_list : 'target zones -> (int * int * int * 'target) list
 (** Every zone as [(row, first_column, last_column, target)], in the order
     the rows were read. *)
+
+val complete_to_list : 'target zones -> (int * int * int * 'target) list
+(** Only zones whose closing mark survived the final row. An open mark cut by
+    fitting can still answer a click, but cannot prove complete presentation. *)

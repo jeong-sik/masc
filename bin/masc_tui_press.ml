@@ -37,6 +37,7 @@ type press_target =
   | Press_chat_call of workspace_authority * unit ref * string * string
   | Press_lane_row of Masc_tui_lane_inventory.identity
   | Press_queue_selected of queue_selection
+  | Press_input_rejection of Masc_tui_action_notice.rejection
 
 (* An overlay keeps the surface's strip on its first row, and a press there
    would change the surface under a modal no key can leave that way. The
@@ -48,7 +49,15 @@ let press_changes_the_surface = function
   | Press_memory_category _ | Press_theme_filter _ | Press_ui_language | Press_runtime_mode _
   | Press_standalone_lanes | Press_keeper_row _ | Press_lane_row _ | Press_chat_call _ ->
       true
-  | Press_context_tab _ | Press_queue_selected _ -> false
+  | Press_context_tab _ | Press_queue_selected _ | Press_input_rejection _ -> false
+
+let press_is_interactive = function
+  | Press_input_rejection _ -> false
+  | Press_surface _ | Press_ring_edge _ | Press_keeper_tab _ | Press_config_pane _
+  | Press_metrics_section _ | Press_tools_pane _ | Press_memory_category _
+  | Press_theme_filter _ | Press_ui_language | Press_runtime_mode _ | Press_standalone_lanes
+  | Press_context_tab _ | Press_keeper_row _ | Press_chat_call _ | Press_lane_row _
+  | Press_queue_selected _ -> true
 
 (* Marks drawn during the frame being built. The frame's renderer resets it
    before drawing and reads it back once the rows are final. *)
@@ -117,7 +126,22 @@ let presented_queue_selection zones =
     | Press_surface _ | Press_ring_edge _ | Press_keeper_tab _ | Press_config_pane _
     | Press_metrics_section _ | Press_tools_pane _ | Press_memory_category _
     | Press_theme_filter _ | Press_ui_language | Press_runtime_mode _ | Press_standalone_lanes
-    | Press_context_tab _ | Press_keeper_row _ | Press_chat_call _ | Press_lane_row _ -> None)
+    | Press_context_tab _ | Press_keeper_row _ | Press_chat_call _ | Press_lane_row _
+    | Press_input_rejection _ -> None)
+
+let presented_input_rejection ~rows ~cols zones =
+  Masc_tui_hit.complete_to_list zones |> List.find_map (fun (row, first, last, target) ->
+    match target with
+    | Press_input_rejection notice
+      when row > 0 && row <= rows && first > 0 && last <= cols
+           && last - first + 1 =
+              Masc_tui_message_layout.display_width (Masc_tui_action_notice.rejection_text notice) ->
+        Some notice
+    | Press_input_rejection _ | Press_surface _ | Press_ring_edge _ | Press_keeper_tab _
+    | Press_config_pane _ | Press_metrics_section _ | Press_tools_pane _
+    | Press_memory_category _ | Press_theme_filter _ | Press_ui_language
+    | Press_runtime_mode _ | Press_standalone_lanes | Press_context_tab _
+    | Press_keeper_row _ | Press_chat_call _ | Press_lane_row _ | Press_queue_selected _ -> None)
 
 let queue_selection_authority_changed ~presented ~candidate =
   not (Option.equal same_queue_selection

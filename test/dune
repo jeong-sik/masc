@@ -4609,7 +4609,7 @@
 (test
  (name test_tui_footer_status_items)
  (modules test_tui_footer_status_items)
- (libraries alcotest str unix masc
+ (libraries alcotest str unix masc masc_tui_action_notice
   masc_tui_footer masc_tui_home masc_tui_message_layout
   masc_tui_keys masc_tui_render_prim masc_tui_theme masc_tui_types))
 
@@ -4917,6 +4917,16 @@
 (include stanzas/test_tui_emblem_state.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
+
+(test
+ (name test_tui_action_notice)
+ (modules test_tui_action_notice)
+ (libraries masc_tui_action_notice))
+
+(test
+ (name test_tui_rejection_evidence)
+ (modules test_tui_rejection_evidence)
+ (libraries masc_tui_action_notice masc_tui_hit masc_tui_press masc_tui_message_layout))
 
 (test
  (name test_tui_presented)

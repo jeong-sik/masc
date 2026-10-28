@@ -573,17 +573,25 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
     | Some notice -> Some (Terminal_text.single_line notice)
     | None -> (match image_progress with
     | Some _ -> image_progress
-    | None -> (match state.last_action with
-    | Some (text, set_at)
-      when Unix.gettimeofday () -. set_at
-           <= Masc_tui_types.last_action_window_s
-           && (not
+    | None -> (match Masc_tui_action_notice.ordinary_visible state.last_action
+        ~now:(Unix.gettimeofday ()) ~window:Masc_tui_types.last_action_window_s with
+    | Some (text, _)
+      when (not
                  (String.starts_with
                     ~prefix:Masc_tui_types.armed_ask_submit_notice_prefix text)
                || Masc_tui_types.ask_submit_is_armed state) ->
       Some text
     | Some _ | None -> None)))))
   in
+  let preferred_action =
+    match Masc_tui_action_notice.preferred state.last_action
+            ~existing_action:(Option.is_some action_text)
+            ~now:(Unix.gettimeofday ()) ~window:Masc_tui_types.last_action_window_s with
+    | No_preferred -> None
+    | Csi_recovery -> Some ("Key pending; Ctrl-C", Fun.id)
+    | Rejection notice ->
+        Some (Masc_tui_action_notice.rejection_text notice,
+              pressable (Press_input_rejection notice)) in
   let identity =
     match state.server_identity with
     | None -> []
@@ -629,7 +637,7 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
     | Masc_tui_types.Workspace_identity_unread
     | Masc_tui_types.Workspace_identity_match -> []
   in
-  Masc_tui_footer.line ?literal_prefix ?action_text ?position
+  Masc_tui_footer.line ?literal_prefix ?action_text ?preferred_action ?position
     ~status:(keeper_action_status state @ task_creation_status state
       @ List.filter (fun item -> Masc_tui_footer.needs_operator item
           && not (List.mem item (keeper_action_status state))) status

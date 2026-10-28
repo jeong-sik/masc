@@ -303,10 +303,15 @@ let add_event (state : state) event_type content =
    line: a server's reason can carry newlines. *)
 let report_action ?(show_in_footer = true) (state : state) event_type content =
   add_event state event_type content;
-  state.last_action <-
-    if show_in_footer then
+  set_last_action state
+    (if show_in_footer then
       Some (Masc_tui_ansi.Terminal_text.single_line content, Unix.gettimeofday ())
-    else None
+    else None)
+
+let report_input_rejection (state : state) kind content =
+  add_event state "error" content;
+  state.last_action <- Masc_tui_action_notice.reject state.last_action kind
+      ~now:(Unix.gettimeofday ()) ~window:Masc_tui_types.last_action_window_s
 
 (* Local metadata and the public remote roster share identity-based navigation.
    Replacing rows never reads a local directory. *)

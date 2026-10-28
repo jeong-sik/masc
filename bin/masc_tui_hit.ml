@@ -21,6 +21,7 @@ type 'target zone = {
   first : int;
   last : int;
   target : 'target;
+  complete : bool;
 }
 
 type 'target zones = 'target zone list
@@ -91,16 +92,16 @@ let extract_line registry ~row line =
   let clean = Buffer.create length in
   let cells () = Masc_tui_message_layout.display_width (Buffer.contents clean) in
   let zones = ref [] in
-  let close_at ~first ~target last =
-    if last >= first then zones := { row; first; last; target } :: !zones
+  let close_at ~first ~target ~complete last =
+    if last >= first then zones := { row; first; last; target; complete } :: !zones
   in
   let open_zone = ref None in
-  let finish_open () =
+  let finish_open ~complete =
     match !open_zone with
     | None -> ()
     | Some (first, target) ->
         open_zone := None;
-        close_at ~first ~target (cells ())
+        close_at ~first ~target ~complete (cells ())
   in
   let rec scan offset =
     if offset >= length then ()
@@ -114,16 +115,16 @@ let extract_line registry ~row line =
               Buffer.add_char clean '\027';
               scan (escape + 1)
           | Some (Close, next) ->
-              finish_open ();
+              finish_open ~complete:true;
               scan next
           | Some (Open number, next) ->
-              finish_open ();
+              finish_open ~complete:false;
               (if number >= 0 && number < Dynarray.length registry then
                  open_zone := Some (cells () + 1, Dynarray.get registry number));
               scan next)
   in
   scan 0;
-  finish_open ();
+  finish_open ~complete:false;
   (Buffer.contents clean, List.rev !zones)
 
 let extract registry lines =
@@ -144,3 +145,8 @@ let filter keep zones = List.filter (fun zone -> keep zone.target) zones
 
 let to_list zones =
   List.map (fun zone -> (zone.row, zone.first, zone.last, zone.target)) zones
+
+let complete_to_list zones =
+  List.filter_map (fun zone ->
+    if zone.complete then Some (zone.row, zone.first, zone.last, zone.target)
+    else None) zones

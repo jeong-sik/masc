@@ -1278,7 +1278,7 @@
  (name masc_tui_press)
  (wrapped false)
  (modules masc_tui_press)
- (libraries masc_tui_hit masc_tui_types masc_tui_context_inspector masc_tui_lane_inventory
+ (libraries masc_tui_action_notice masc_tui_hit masc_tui_types masc_tui_context_inspector masc_tui_lane_inventory
   masc_tui_queue_inspection masc_tui_message_layout masc_tui_play_card))
 
 (library
@@ -1743,7 +1743,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc_tui_fleet_stream masc_tui_evidence_file masc_tui_pele masc_tui_image_viewport masc_tui_resource_diagrams masc_tui_resource_export masc_tui_resource_images masc_tui_resource_reading masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_observation_store masc_tui_system_logs masc.build_version masc_tui_observation_origin masc_tui_original_task_read masc_tui_task_dispatch masc.keeper_cost_coverage masc_tui_chat_visit masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
+ (libraries masc_tui_action_notice masc_tui_fleet_stream masc_tui_evidence_file masc_tui_pele masc_tui_image_viewport masc_tui_resource_diagrams masc_tui_resource_export masc_tui_resource_images masc_tui_resource_reading masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_observation_store masc_tui_system_logs masc.build_version masc_tui_observation_origin masc_tui_original_task_read masc_tui_task_dispatch masc.keeper_cost_coverage masc_tui_chat_visit masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
    masc_tui_markdown
   masc_tui_chat_call_reader
   masc_tui_board_reader
@@ -2181,7 +2181,7 @@
  (name masc_tui_render_prim)
  (wrapped false)
  (modules masc_tui_render_prim)
- (libraries masc_tui_resource_export masc_tui_markdown_theme masc_tui_system_logs masc_tui_task_dispatch masc_tui_local_read_observation masc_tui_account_login masc_tui_message_input masc_tui_surface_search masc_tui_approvals_model masc_tui_surface_navigation
+ (libraries masc_tui_action_notice masc_tui_resource_export masc_tui_markdown_theme masc_tui_system_logs masc_tui_task_dispatch masc_tui_local_read_observation masc_tui_account_login masc_tui_message_input masc_tui_surface_search masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_candle
   masc_tui_frame_timing
   masc_tui_next_request_band
@@ -2377,7 +2377,7 @@
  (name masc_tui_loader)
  (wrapped false)
  (modules masc_tui_loader masc_tui_http masc_tui_schedule_decode)
- (libraries masc_tui_evidence_file masc_tui_artifact_check_action masc_tui_original_task_read masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
+ (libraries masc_tui_action_notice masc_tui_evidence_file masc_tui_artifact_check_action masc_tui_original_task_read masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
   masc_tui_chat_call_reader
   masc_tui_task_payloads
   masc
@@ -2582,6 +2582,7 @@
   masc_tui_pane_selection
   masc_tui_press
   masc_tui_presented
+  masc_tui_action_notice
   masc_tui_pick_list
   masc_tui_usage_trend
    masc.agent_core.digest
@@ -3105,6 +3106,11 @@
  (name masc_tui_presented)
  (wrapped false)
  (modules masc_tui_presented))
+
+(library
+ (name masc_tui_action_notice)
+ (wrapped false)
+ (modules masc_tui_action_notice))
 
 (library
  (name masc_tui_input_reader)

@@ -33,10 +33,15 @@ type press_target =
       (** The frame's original row ID and typed installation/incarnation target. *)
   | Press_queue_selected of queue_selection
       (** The selected row of a Queue list, if that row reached the frame. *)
+  | Press_input_rejection of Masc_tui_action_notice.rejection
+      (** Evidence of the complete rejection notice, not a clickable action. *)
 
 val press_changes_the_surface : press_target -> bool
 (** Whether a press changes what the surface shows. An overlay keeps its own
     Context tabs and Queue targets. *)
+
+val press_is_interactive : press_target -> bool
+(** Evidence-only marks must not hide a real click target underneath them. *)
 
 val press_marks : press_target Masc_tui_hit.registry
 
@@ -94,3 +99,9 @@ val resolve_queue_selection :
   queue_selection -> Masc_tui_queue_inspection.item_id option
 (** Resolve a painted selection only if it is still the current selected row
     with the same text and authorities. Changes also require action readiness. *)
+
+val presented_input_rejection :
+  rows:int -> cols:int -> press_target Masc_tui_hit.zones ->
+  Masc_tui_action_notice.rejection option
+(** Only an explicitly closed, full-width mark inside the presented frame
+    proves that the rejection notice reached the terminal. *)

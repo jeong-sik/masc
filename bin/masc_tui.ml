@@ -1343,7 +1343,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
      picked up something the operator did not mean to send. *)
   | "esc" when Option.is_some state.voice_capture ->
     request_voice_stop state Masc.Voice_bridge.Discard;
-    state.last_action <- Some ("voice: discarding", Unix.gettimeofday ());
+    set_last_action state (Some ("voice: discarding", Unix.gettimeofday ()));
     true
   | "esc" when Option.is_some state.msg_recall_replaces ->
     forget_recall state;
@@ -1492,10 +1492,8 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       (* Ctrl-R cycles the presentation only; transcript bytes stay intact. *)
       let visibility = next_reasoning_visibility state.msg_reasoning_visibility in
       state.msg_reasoning_visibility <- visibility;
-      state.last_action <-
-        Some
-          ( "reasoning " ^ reasoning_visibility_to_string visibility
-          , Unix.gettimeofday () );
+      set_last_action state (Some ( "reasoning " ^ reasoning_visibility_to_string visibility
+          , Unix.gettimeofday () ));
       true
     end else if c = Some 4 then begin
       (* Ctrl-D walks summary, results, and full per-call detail without
@@ -1503,10 +1501,8 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       let visibility = toggle_tool_visibility state.msg_tool_visibility in
       state.msg_tool_visibility <- visibility;
       if visibility <> Tools_compact then load_tool_changes ();
-      state.last_action <-
-        Some
-          ( "tool calls " ^ tool_visibility_to_string visibility
-          , Unix.gettimeofday () );
+      set_last_action state (Some ( "tool calls " ^ tool_visibility_to_string visibility
+          , Unix.gettimeofday () ));
       true
     end else if c = Some (Char.code Masc_tui_keys.expand_turn_key.[0]) then begin
       (* Ctrl-S folds the turn dashboard back to its progress line. Folded is
@@ -1516,10 +1512,8 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          not see a row appear has no other way to tell the key landed. *)
       state.msg_turn_folded <- not state.msg_turn_folded;
       if not state.msg_turn_folded then load_preparation ();
-      state.last_action <-
-        Some
-          ( (if state.msg_turn_folded then "turn folded" else "turn expanded")
-          , Unix.gettimeofday () );
+      set_last_action state (Some ( (if state.msg_turn_folded then "turn folded" else "turn expanded")
+          , Unix.gettimeofday () ));
       true
     end else if c = Some 6 then begin
       (* Ctrl-F starts with the clock-free gutter, then adds an inline clock,
@@ -15611,6 +15605,7 @@ let apply_ui_language state ~base_path lang =
 
 let press_marked_target state ~base_path ~mailbox (target : press_target) =
   match target with
+  | Press_input_rejection _ -> ()
   | Press_surface surface ->
       if surface <> state.view then goto_surface state ~mailbox surface
   | Press_ring_edge Ring_before -> cycle_surface state ~mailbox ~backwards:true
@@ -18214,7 +18209,7 @@ let handle_keeper_action state ~base_path ~mailbox action =
 let report_voice_failure state ~keeper error =
   chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_failure
     ("voice failed: " ^ error);
-  state.last_action <- Some ("voice failed: " ^ error, Unix.gettimeofday ())
+  set_last_action state (Some ("voice failed: " ^ error, Unix.gettimeofday ()))
 
 (* One microphone capture, off the input loop.
 
@@ -18349,7 +18344,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Some _ ->
            state.voice_continuous <- None;
            state.voice_floor <- None;
-           state.last_action <- Some ("voice: continuous off", Unix.gettimeofday ())
+           set_last_action state (Some ("voice: continuous off", Unix.gettimeofday ()))
        | None ->
       (* One capture at a time: a second microphone would contend for the same
          input device and the two transcripts would race into one draft.
@@ -18360,7 +18355,7 @@ let handle_composer_key state ~base_path ~mailbox key =
       (match state.voice_capture with
        | Some _ ->
            request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
-           state.last_action <- Some ("voice: stopping", Unix.gettimeofday ())
+           set_last_action state (Some ("voice: stopping", Unix.gettimeofday ()))
        | None -> launch_voice_capture state ~mailbox ~keeper:keeper_name));
       true
   | Composer.Toggle_continuous keeper_name ->
@@ -18368,7 +18363,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Some _ ->
            state.voice_continuous <- None;
            state.voice_floor <- None;
-           state.last_action <- Some ("voice: continuous off", Unix.gettimeofday ())
+           set_last_action state (Some ("voice: continuous off", Unix.gettimeofday ()))
        | None when Option.is_some state.voice_capture ->
            (* A manual or withdrawn capture still owns the microphone. The
               noise-floor probe must wait for its completion too. *)
@@ -18376,13 +18371,13 @@ let handle_composer_key state ~base_path ~mailbox key =
              if state.voice_capture_withdrawn
              then "voice: discarding previous capture"
              else "voice: recording in progress" in
-           state.last_action <- Some (notice, Unix.gettimeofday ())
+           set_last_action state (Some (notice, Unix.gettimeofday ()))
        | None ->
            (* Request one room probe in the asynchronous session, then reuse
               its floor between utterances. Turning the mode off drops it. *)
            state.voice_continuous <- Some keeper_name;
            state.voice_floor <- None;
-           state.last_action <- Some ("voice: continuous on", Unix.gettimeofday ());
+           set_last_action state (Some ("voice: continuous on", Unix.gettimeofday ()));
            if state.voice_capture = None
            then launch_voice_capture ~calibrate:true state ~mailbox ~keeper:keeper_name);
       true
@@ -18393,7 +18388,7 @@ let handle_composer_key state ~base_path ~mailbox key =
       (match state.voice_capture with
        | Some _ ->
            request_voice_stop state Masc.Voice_bridge.Discard;
-           state.last_action <- Some ("voice: discarding", Unix.gettimeofday ())
+           set_last_action state (Some ("voice: discarding", Unix.gettimeofday ()))
        | None ->
            save_message_draft state;
            state.composer_focused <- false;
@@ -19236,7 +19231,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         then Masc_tui_message_input.append state.msg_input " ";
         Masc_tui_message_input.append state.msg_input text;
         save_message_draft state;
-        state.last_action <- Some ("voice: " ^ text, Unix.gettimeofday ());
+        set_last_action state (Some ("voice: " ^ text, Unix.gettimeofday ()));
         (* [voice.stt].send_on_stop: the operator who says a sentence and
            stops the capture has finished the sentence, and the Enter that
            follows says nothing the stop did not. Off by default, because the
@@ -19284,7 +19279,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            not. *)
         chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_reply
           ("voice: " ^ reason);
-        state.last_action <- Some ("voice: " ^ reason, Unix.gettimeofday ()))
+        set_last_action state (Some ("voice: " ^ reason, Unix.gettimeofday ())))
   | Voice_discarded { keeper; reason } ->
       (match settle_voice_capture state ~keeper with
        | None | Some Voice_withdrawn -> ()
@@ -19298,7 +19293,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            heard" went looking for a microphone fault that was not there. *)
         chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_reply
           ("voice: " ^ reason);
-        state.last_action <- Some ("voice: " ^ reason, Unix.gettimeofday ()))
+        set_last_action state (Some ("voice: " ^ reason, Unix.gettimeofday ())))
   | Voice_failed { keeper; error } ->
       (match settle_voice_capture state ~keeper with
        | None | Some Voice_withdrawn -> ()
@@ -24135,8 +24130,22 @@ let main
         report_action state "system"
           "Approval list changed; review the updated row before deciding"
   in
+  let last_visible_rejection () =
+    match state.image_open || state.msx_open,
+          Frame_presenter.presented_rows frame_presenter with
+    | true, (Some _ | None) -> None
+    | false, None -> None
+    | false, Some rows ->
+        let _, cols = Masc_tui_ansi.get_terminal_size () in
+        presented_input_rejection ~rows:(List.length rows) ~cols (!presented).presses
+  in
   let present_frame frame approval presses panes ~input_pending ~write ~flush reader =
     let damaged = Terminal_write_repair.consume_damage () in
+    let candidate_rejection = presented_input_rejection
+        ~rows:(max 1 frame.Frame_presenter.terminal_rows)
+        ~cols:(max 1 frame.Frame_presenter.terminal_cols) presses in
+    let rejection_changed = not (Option.equal Masc_tui_action_notice.same_rejection
+        (last_visible_rejection ()) candidate_rejection) in
     let queue_or_play_reader reader =
       Option.is_some (queue_owner_of_reader reader)
       || Option.is_some (play_card_of_reader reader) in
@@ -24158,7 +24167,8 @@ let main
       | Masc_tui_pane_selection.Selecting _ | Masc_tui_pane_selection.Idle
       | Masc_tui_pane_selection.Pressed _ | Masc_tui_pane_selection.Drag_without_pane -> frame
     in
-    let authority_changed = queue_or_play_changed ||
+    let presentation_changed = queue_or_play_changed || rejection_changed in
+    let authority_changed = presentation_changed ||
       Approval_authority.authority_changed
         ~presented:(!presented).approval ~candidate:approval in
     let preset_confirmation_changed = match reader with
@@ -24211,8 +24221,12 @@ let main
         (* Include picture writes in the post-output input observation. *)
         Masc_tui_portrait_view.flush frame_result ~write:write_to_terminal;
         if queue_or_play_changed then pointer_gesture := Masc_tui_pane_selection.Idle;
+        let input_pending = input_pending () in
         presented := Presented.presented !presented ~approval ~presses ~panes ~reader
-            ~owner_changed:queue_or_play_changed ~input_pending:(input_pending ())
+            ~owner_changed:queue_or_play_changed ~input_pending;
+        Option.iter (fun notice ->
+          state.last_action <- Masc_tui_action_notice.presented state.last_action notice
+              ~at:(Unix.gettimeofday ()) ~input_pending) candidate_rejection
     | Frame_presenter.Unchanged as unchanged ->
         (* Same text, but a picture may have moved on a step. *)
         Masc_tui_portrait_view.flush unchanged ~write:write_to_terminal
@@ -26068,10 +26082,10 @@ and is loaded on demand through keeper_skill.
         if rejected_paste && Option.is_some interrupted_paste then
           presented := Presented.reject_recovery !presented;
         if rejected_paste && not paste_was_reported then
-          report_action state "error"
+          report_input_rejection state Masc_tui_action_notice.Paste_rejected
             "Paste was not applied during the screen transition; paste it again"
         else if not was_reported then
-          report_action state "error"
+          report_input_rejection state Masc_tui_action_notice.Input_rejected
             "Input was not applied during the screen transition; review and retry";
         Render_schedule.request render_schedule Render_schedule.Background
       end;
@@ -26158,7 +26172,14 @@ and is loaded on demand through keeper_skill.
          room the key hints need, and a notice left standing after the
          operator moved on hid the hints of the screen they moved to. A key
          that has something to say sets its own. *)
-      if Option.is_some input then state.last_action <- None;
+      state.last_action <- Masc_tui_action_notice.after_input state.last_action
+          ~input_seen:(Option.is_some input)
+          ~operator_input:(Option.exists is_operator_input input)
+          ~currently_visible:(last_visible_rejection ())
+          ~now:(Unix.gettimeofday ()) ~window:last_action_window_s;
+      state.last_action <- Masc_tui_action_notice.after_drain state.last_action
+          ~at:(Unix.gettimeofday ()) ~input_pending:(input_unsettled ())
+          ~currently_visible:(last_visible_rejection ());
       (* Further operator input owns focus. A pending creation may finish and
          refresh its metadata, but cannot jump over the next gesture/draft. *)
       (match input with
@@ -26215,16 +26236,18 @@ and is loaded on demand through keeper_skill.
        | true, None ->
            report_action state "system"
              "Terminal sequence incomplete; Ctrl-C cancels it";
-           csi_pause_notice := state.last_action;
+           csi_pause_notice := Masc_tui_action_notice.ordinary state.last_action;
+           state.last_action <- Masc_tui_action_notice.start_csi state.last_action;
            Render_schedule.request render_schedule Render_schedule.Background
        | true, Some _ | false, None -> ()
        | false, Some shown ->
            (* The hold is over, so its notice is no longer true. Only that
               notice is taken down: one set since (the Ctrl-C outcome, a key's
               answer) stays for its own window. *)
-           (match state.last_action with
+           state.last_action <- Masc_tui_action_notice.end_csi state.last_action;
+           (match Masc_tui_action_notice.ordinary state.last_action with
             | Some current when current == shown ->
-                state.last_action <- None;
+                set_last_action state None;
                 Render_schedule.request render_schedule Render_schedule.Background
             | Some _ | None -> ());
            csi_pause_notice := None);
@@ -26242,11 +26265,11 @@ and is loaded on demand through keeper_skill.
       (match unpresented_decision with
        | Presented.Accept_input -> ()
        | Presented.Reject_action ->
-           report_action state "error"
+           report_input_rejection state Masc_tui_action_notice.Input_rejected
              "Screen not yet displayed; input was not applied, review and retry";
            Render_schedule.request render_schedule Render_schedule.Background
        | Presented.Reject_paste ->
-           report_action state "error"
+           report_input_rejection state Masc_tui_action_notice.Paste_rejected
              "Screen not yet displayed; paste was not applied, paste it again";
            Render_schedule.request render_schedule Render_schedule.Background);
       reconcile_chat_focus ();
@@ -26893,7 +26916,8 @@ and is loaded on demand through keeper_skill.
       let pressed =
         match click with
         | Some (row, column) when Option.is_none text_target ->
-            Masc_tui_hit.target_at (!presented).presses ~row ~column
+            Masc_tui_hit.filter press_is_interactive (!presented).presses
+            |> Masc_tui_hit.target_at ~row ~column
         | Some _ | None -> None
       in
       (* The Activity pane row a click landed on. *)
@@ -26907,7 +26931,7 @@ and is loaded on demand through keeper_skill.
       in
       let reject_recovered_paste () =
         presented := Presented.reject_recovery !presented;
-        report_action state "error"
+        report_input_rejection state Masc_tui_action_notice.Paste_rejected
           "Recovered paste was not applied; paste it again after the screen transition"
       in
       (match input with
@@ -26917,14 +26941,14 @@ and is loaded on demand through keeper_skill.
           presented, its scroll report identifies it above the reader. *)
        | Some (Pasted _) when play_was_presented || Option.is_some presented_queue ->
            if recovered_paste then reject_recovered_paste ()
-           else state.last_action <- Some ("Paste was not applied on this screen; retry in a text field", Unix.gettimeofday ())
+           else report_input_rejection state Masc_tui_action_notice.Paste_rejected "Paste was not applied on this screen; retry in a text field"
        | Some (Pasted _) when compact_viewport ->
            if recovered_paste then reject_recovered_paste ()
-           else state.last_action <- Some ("Paste was not applied on this screen; retry in a text field", Unix.gettimeofday ())
+           else report_input_rejection state Masc_tui_action_notice.Paste_rejected "Paste was not applied on this screen; retry in a text field"
        | Some (Pasted _) when Option.is_some beneath && Option.is_none presented_queue
            && queue_play_owner = Wait_for_frame ->
            if recovered_paste then reject_recovered_paste ()
-           else state.last_action <- Some ("Screen transition: input was not applied; review and retry", Unix.gettimeofday ())
+           else report_input_rejection state Masc_tui_action_notice.Paste_rejected "Screen transition: paste was not applied; retry"
        | Some (Pasted paste) when Option.is_some (current_board_reader state) ->
            let reader=state.board_reader in
            insert_reading_search (Masc_tui_board_reader.document reader)
@@ -27144,7 +27168,7 @@ and is loaded on demand through keeper_skill.
            ()
        | Some (Pasted _) when Option.is_some state.queue_panel ->
            if recovered_paste then reject_recovered_paste ()
-           else state.last_action <- Some ("Paste was not applied on this screen; retry in a text field", Unix.gettimeofday ())
+           else report_input_rejection state Masc_tui_action_notice.Paste_rejected "Paste was not applied on this screen; retry in a text field"
        | Some (Pasted _)
          when state.view = Keepers Keeper_message
               && not (keeper_message_input_supported state) ->
@@ -27516,7 +27540,7 @@ and is loaded on demand through keeper_skill.
           its replacement frame. The last accepted owner keeps the keys until
           the terminal accepts the next frame. *)
        | Some _ when queue_play_owner = Wait_for_frame ->
-           state.last_action <- Some ("Screen transition: input was not applied; review and retry", Unix.gettimeofday ())
+           report_input_rejection state Masc_tui_action_notice.Input_rejected "Screen transition: input was not applied; review and retry"
        | Some k when Option.is_some presented_queue_input ->
            Option.iter (fun panel ->
              handle_queue_panel_key state ~base_path ~mailbox:async_messages
@@ -31697,28 +31721,24 @@ and is loaded on demand through keeper_skill.
                      (* The same toggle the composer row carries. *)
                      | Some _ ->
                          request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
-                         state.last_action <-
-                           Some ("voice: stopping", Unix.gettimeofday ())
+                         set_last_action state (Some ("voice: stopping", Unix.gettimeofday ()))
                      | None -> ())
                    ~toggle_voice_continuous:(fun () ->
                      match state.voice_continuous, state.msg_target_keeper_name with
                      | Some _, _ ->
                          state.voice_continuous <- None;
                          state.voice_floor <- None;
-                         state.last_action <-
-                           Some ("voice: continuous off", Unix.gettimeofday ())
+                         set_last_action state (Some ("voice: continuous off", Unix.gettimeofday ()))
                      | None, Some _ when Option.is_some state.voice_capture ->
                          let notice =
                            if state.voice_capture_withdrawn
                            then "voice: discarding previous capture"
                            else "voice: recording in progress" in
-                         state.last_action <-
-                           Some (notice, Unix.gettimeofday ())
+                         set_last_action state (Some (notice, Unix.gettimeofday ()))
                      | None, Some keeper ->
                          state.voice_continuous <- Some keeper;
                          state.voice_floor <- None;
-                         state.last_action <-
-                           Some ("voice: continuous on", Unix.gettimeofday ());
+                         set_last_action state (Some ("voice: continuous on", Unix.gettimeofday ()));
                          if state.voice_capture = None
                          then
                            launch_voice_capture ~calibrate:true state ~mailbox:async_messages ~keeper

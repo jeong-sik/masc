@@ -154,25 +154,23 @@ let add_routes router =
     | None, _ -> refuse request reqd (Store.Invalid "artifact id required")
     | Some _, Error error -> refuse request reqd error
     | Some id, Ok revision ->
-      match Eio_unix.run_in_systhread (fun () ->
-        let open Result.Syntax in
-        let* snapshot = Store.read_share ~base_path ~id |> Result.map_error (fun error -> `Share error) in
-        match actor, snapshot.Share.shared with
-        | None, false -> Ok `Unauthorized_private_artifact
-        | Some _, _ | None, true ->
-          let* (artifact, selected, content) = Store.read ~base_path ~id ~revision
-            |> Result.map_error (fun error -> `Artifact error) in
-          Ok (`Allowed (artifact, selected, content, snapshot))) with
-      | Error (`Share error) -> refuse_share request reqd error
-      | Error (`Artifact error) -> refuse request reqd error
-      | Ok `Unauthorized_private_artifact ->
+      let refuse_private () =
         respond_auth_error request reqd
           (Masc_domain.Auth
              (Masc_domain.Auth_error.Unauthorized
                 { reason = Missing_token
                 ; message = "Authentication required unless external sharing is enabled for this artifact."
-                }))
-      | Ok (`Allowed (artifact, selected, content, snapshot)) ->
+                })) in
+      match Eio_unix.run_in_systhread (fun () ->
+        Store.read_with_share ~base_path ~id ~revision ~allow_private:(Option.is_some actor)) with
+      | Error (`Share Store.Share_missing) when Option.is_none actor -> refuse_private ()
+      | Error (`Share (( Store.Share_invalid _ | Store.Share_missing
+                       | Store.Share_operation_reused | Store.Share_unavailable _
+                       | Store.Share_commit_uncertain _ ) as error)) ->
+        refuse_share request reqd error
+      | Error (`Artifact error) -> refuse request reqd error
+      | Ok `Private -> refuse_private ()
+      | Ok (`Allowed (snapshot, artifact, selected, content)) ->
         respond request reqd (`Assoc
           ["artifact", Published_artifact.summary_to_json ~id:artifact.id selected;
            "content", `String content;

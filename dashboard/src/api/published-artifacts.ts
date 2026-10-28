@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { get, getPublic, post } from './core'
+import { get, getPublic, getWithResponse, post } from './core'
 
 const revisionFields = {
   revision: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
@@ -70,6 +70,11 @@ const ArtifactWorkspaceSchema = Schema.Struct({ paths: Schema.Struct({
   effective_masc_root: Schema.String.pipe(Schema.nonEmptyString()),
 }) })
 export type ArtifactWorkspace = { readonly basePath: string; readonly mascRoot: string }
+export class ArtifactWorkspaceReadUnattested extends Error {
+  constructor(readonly document: ArtifactDocument) {
+    super('문서 조회의 작업 공간 확인 응답이 없어 공유 상태를 사용할 수 없습니다.')
+  }
+}
 
 export async function captureArtifactWorkspace(expectedBasePath: string): Promise<ArtifactWorkspace> {
   const { paths } = Schema.decodeUnknownSync(ArtifactWorkspaceSchema)(await get<unknown>('/health?full=1'))
@@ -126,6 +131,11 @@ export async function setPublishedArtifactShared(operation: ArtifactShareOperati
     if (typeof error !== 'object' || error === null || !('status' in error)
       || error.status !== 409 || !('responseData' in error)) throw error
     raw = error.responseData
+    if (typeof raw === 'object' && raw !== null && 'code' in raw && raw.code === 'workspace_precondition_failed') {
+      // Another tab may already have dispatched this operation. The refusal
+      // settles only this HTTP attempt, not every attempt with the same ID.
+      throw new Error('이번 시도는 작업 공간이 달라 거부됐습니다. 같은 작업의 다른 시도는 미확인입니다.')
+    }
     conflicted = true
   }
   const result = Schema.decodeUnknownSync(ArtifactShareSchema)(raw)
@@ -166,6 +176,22 @@ export async function fetchPublishedArtifact(id: string, revision: string | unde
     signal, ...(workspace ? { extraHeaders: artifactWorkspaceHeaders(workspace) } : {}),
   })
   return decodeArtifactDocument(id, revision, raw)
+}
+
+// Sharing authority belongs to the exact workspace that admitted the read.
+// The query receipt proves the origin checked the pair even if a proxy drops
+// the ingress headers; ordinary document viewing can still use the unbound API.
+export async function fetchWorkspacePublishedArtifact(id: string, revision: string | undefined, workspace: ArtifactWorkspace, signal?: AbortSignal): Promise<ArtifactDocument> {
+  const path = artifactRequestPath(id, revision)
+  const query = new URLSearchParams({ expected_base_path: workspace.basePath, expected_masc_root: workspace.mascRoot })
+  const response = await getWithResponse<unknown>(`${path}${revision === undefined ? '?' : '&'}${query}`, {
+    signal, extraHeaders: artifactWorkspaceHeaders(workspace),
+  })
+  const document = decodeArtifactDocument(id, revision, response.data)
+  if (response.headers.get('x-masc-workspace-read') !== 'matched-v1') {
+    throw new ArtifactWorkspaceReadUnattested(document)
+  }
+  return document
 }
 
 export async function fetchPublicArtifact(id: string, revision: string | undefined, signal?: AbortSignal): Promise<ArtifactDocument> {

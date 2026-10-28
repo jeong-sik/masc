@@ -30,6 +30,11 @@ val read_share : base_path:string -> id:string -> (Published_artifact_share.snap
 (** An interrupted first change may be settled under the publication lock
     before its snapshot can be read. A reported uncertain change can therefore
     take effect during a subsequent read. *)
+val read_with_share : base_path:string -> id:string -> revision:int option -> allow_private:bool ->
+  ([ `Private | `Allowed of Published_artifact_share.snapshot * Published_artifact.t * Published_artifact.revision * string ],
+   [ `Share of share_error | `Artifact of error ]) result
+(** Select the revision and check sharing under the publication lock. The
+    content-addressed body is loaded after releasing that lock. *)
 val find_share_receipt : base_path:string -> id:string -> operation_id:string ->
   (Published_artifact_share.receipt option, share_error) result
 (** [None] is not proof that an in-flight request will never apply. A visible
@@ -50,6 +55,10 @@ val change_share : base_path:string -> id:string -> Published_artifact_share.req
     mixed with it. *)
 
 module For_testing : sig
+  val read_with_share_after_select : after_select:(unit -> unit) -> base_path:string -> id:string ->
+    revision:int option -> allow_private:bool ->
+    ([ `Private | `Allowed of Published_artifact_share.snapshot * Published_artifact.t * Published_artifact.revision * string ],
+     [ `Share of share_error | `Artifact of error ]) result
   val change_share_before_stage : before_stage:(Keeper_fs.durable_write_stage -> unit) ->
     base_path:string -> id:string -> Published_artifact_share.request ->
     (Published_artifact_share.receipt, share_error) result

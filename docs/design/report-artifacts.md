@@ -118,6 +118,9 @@ that a Keeper is currently viewing or editing a document.
   artifact reads (`GET /api/v1/published-artifacts/<id>`) allow unauthenticated
   read-only sharing only when external sharing is enabled for that artifact,
   while still validating any presented token. Responses are private and uncached.
+  The server selects the requested revision under the same lock as sharing and
+  publication. A read already admitted while sharing was on can finish after a
+  revocation, but it cannot pick a revision published after that revocation.
   Enable or revoke sharing with
   `POST /api/v1/published-artifact-shares`. A change supplies `id`, `shared`,
   a UUIDv7 `operation_id`, the observed `expected_version`, the latest observed
@@ -141,8 +144,12 @@ that a Keeper is currently viewing or editing a document.
   try an anonymous view. A failed refresh retains an existing operator document
   and draft instead of replacing them with the public view. Retained drafts
   from an earlier authority stay accessible before a new reader dialog opens.
-- The Dashboard share action requires a known sharing version and rechecks the
-  selected revision and latest publication with both captured workspace roots.
+- The Dashboard captures both workspace roots before reading an operator
+  document and requires the server's matched workspace-read receipt before
+  using that document to change sharing. If the workspace cannot be captured,
+  the document can still be viewed but sharing cannot be changed from that read.
+  The share action requires a known sharing version and rechecks the selected
+  revision and latest publication against the original roots.
   Before sending, it retains the exact operation in browser storage; if storage
   is unavailable, it does not send. An unconfirmed operation can be checked
   again with its original identity and preconditions, including after a page
@@ -150,7 +157,10 @@ that a Keeper is currently viewing or editing a document.
   the recovery row shows its direction and original document. Separate tabs
   still rely on the server's version checks. Browser storage readback and UI
   tests do not establish survival of a browser or operating-system crash.
-  A pending first change may also be settled by a subsequent read. Dashboard
+  A workspace refusal settles that HTTP attempt only; a concurrent attempt in
+  another tab can still leave the operation unconfirmed.
+  A pending first change may also be settled by a subsequent read or before a
+  later publication, even if that publication then conflicts. Dashboard
   link copying pins the
   displayed revision and uses the origin currently open in the browser, which
   may be a local address; it is not evidence that the link is reachable from

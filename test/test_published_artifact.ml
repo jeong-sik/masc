@@ -82,6 +82,41 @@ let test_share_transactions () = with_base (fun base_path ->
   let after_replay = S.read_share ~base_path ~id |> share_ok in
   Alcotest.(check bool) "replay cannot undo the later revocation" true (after_replay = current))
 
+let test_shared_read_pins_revision () = with_base (fun base_path ->
+  let artifact, _ = publish ~base_path (request "previously public body") in
+  let id = artifact.id in
+  let guessed = "artifact-" ^ String.make 32 'f' in
+  (match S.read_with_share ~base_path ~id:guessed ~revision:None ~allow_private:false with
+   | Error (`Share S.Share_missing) -> ()
+   | Ok (`Private | `Allowed _)
+   | Error (`Share (S.Share_invalid _ | S.Share_operation_reused | S.Share_unavailable _ | S.Share_commit_uncertain _))
+   | Error (`Artifact _) -> Alcotest.fail "missing artifact read was not refused");
+  Alcotest.(check bool) "unknown read did not create a lock file" false
+    (Sys.file_exists (Filename.concat (catalog_dir base_path) (guessed ^ ".lock")));
+  let read ~allow_private = S.read_with_share ~base_path ~id ~revision:None ~allow_private in
+  (match read ~allow_private:false with
+   | Ok `Private -> ()
+   | Ok (`Allowed _) | Error _ -> Alcotest.fail "private artifact was anonymously readable");
+  ignore (S.set_shared ~base_path ~id ~shared:true |> store_ok);
+  let result = S.For_testing.read_with_share_after_select ~base_path ~id ~revision:None ~allow_private:false
+      ~after_select:(fun () ->
+        ignore (S.set_shared ~base_path ~id ~shared:false |> store_ok);
+        ignore (publish ~base_path (request ~id ~expected_revision:1 "new private body"))) in
+  (match result with
+   | Ok (`Allowed (snapshot, _, selected, content)) ->
+     Alcotest.(check bool) "admission was shared" true snapshot.shared;
+     Alcotest.(check int) "read retained the admitted revision" 1 selected.revision;
+     Alcotest.(check string) "read retained the admitted body" "previously public body" content
+   | Ok `Private | Error _ -> Alcotest.fail "admitted read did not return the selected revision");
+  (match read ~allow_private:false with
+   | Ok `Private -> ()
+   | Ok (`Allowed _) | Error _ -> Alcotest.fail "new private revision was anonymously readable");
+  (match read ~allow_private:true with
+   | Ok (`Allowed (_, _, selected, content)) ->
+     Alcotest.(check int) "operator reads the new revision" 2 selected.revision;
+     Alcotest.(check string) "operator reads the new body" "new private body" content
+   | Ok `Private | Error _ -> Alcotest.fail "operator could not read the private revision"))
+
 let test_share_uncertain_commit () = with_base (fun base_path ->
   let module Share = Masc.Published_artifact_share in
   let artifact, _ = publish ~base_path (request "share recovery") in
@@ -161,12 +196,10 @@ let test_share_interrupted_migration () = with_base (fun base_path ->
     | Error ((S.Share_invalid _ | S.Share_missing | S.Share_operation_reused | S.Share_unavailable _) as error) ->
       Alcotest.fail (S.share_error_message error)
     | Ok _ -> Alcotest.fail "interrupted migration was reported as certain" in
-  (match S.publish ~base_path ~author:"writer" (request ~id ~expected_revision:1 "new publication") with
-   | Error (S.Unavailable _) -> ()
-   | Error ((S.Invalid _ | S.Missing | S.Conflict _ | S.Commit_uncertain _) as error) -> Alcotest.fail (S.error_message error)
-   | Ok _ -> Alcotest.fail "publication crossed a pending share migration");
+  let _, new_revision = publish ~base_path (request ~id ~expected_revision:1 "new publication") in
+  Alcotest.(check int) "publication first settles pending sharing" 2 new_revision.revision;
   let observed = S.read_share ~base_path ~id |> share_ok in
-  Alcotest.(check int) "read settles the pending migration" 1 observed.version;
+  Alcotest.(check int) "publication settled the pending migration" 1 observed.version;
   Alcotest.(check bool) "settled migration revokes sharing" false observed.shared;
   let settled = S.change_share ~base_path ~id operation |> share_ok in
   Alcotest.(check bool) "retry settles the original operation" true (settled = uncertain);
@@ -186,6 +219,10 @@ let test_share_interrupted_migration () = with_base (fun base_path ->
   let channel = open_out_bin other_file in
   output_string channel (Printf.sprintf "{ \"id\": \"%s\", \"shared\": true }" other.id);
   close_out channel;
+  (match S.publish ~base_path ~author:"writer" (request ~id:other.id ~expected_revision:1 "blocked publication") with
+   | Error (S.Unavailable _) -> ()
+   | Error ((S.Invalid _ | S.Missing | S.Conflict _ | S.Commit_uncertain _) as error) -> Alcotest.fail (S.error_message error)
+   | Ok _ -> Alcotest.fail "publication crossed a changed migration baseline");
   (match S.read_share ~base_path ~id:other.id with
    | Error (S.Share_unavailable _) -> ()
    | Error ((S.Share_invalid _ | S.Share_missing | S.Share_operation_reused | S.Share_commit_uncertain _) as error) ->
@@ -577,6 +614,7 @@ let () = Eio_main.run (fun _ ->
       Alcotest.test_case "metadata symlink is unavailable" `Quick test_metadata_symlink];
      "external sharing", [
       Alcotest.test_case "concurrent requests and later replay" `Quick test_share_transactions;
+      Alcotest.test_case "anonymous read pins its admitted revision" `Quick test_shared_read_pins_revision;
       Alcotest.test_case "uncertain commit and legacy share recovery" `Quick test_share_uncertain_commit;
       Alcotest.test_case "archived conflicts and legacy overwrite" `Quick test_share_archives_and_downgrade;
       Alcotest.test_case "pre-rename migration failure recovers" `Quick test_share_interrupted_migration;

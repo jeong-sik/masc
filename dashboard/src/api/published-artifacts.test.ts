@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Schema } from 'effect'
 import nativeInventory from './fixtures/published-artifacts-native.json'
-import { get, getPublic, post } from './core'
-import { ArtifactPublicationSchema, captureArtifactWorkspace, fetchPublishedArtifact, fetchPublicArtifact, fetchPublishedArtifacts, setPublishedArtifactShared } from './published-artifacts'
+import { get, getPublic, getWithResponse, post } from './core'
+import { ArtifactPublicationSchema, captureArtifactWorkspace, fetchPublishedArtifact, fetchWorkspacePublishedArtifact, fetchPublicArtifact, fetchPublishedArtifacts, setPublishedArtifactShared } from './published-artifacts'
 import { resolveArtifactCheck, setArtifactCheck } from './published-artifact-checks'
 
-vi.mock('./core', () => ({ get: vi.fn(), getPublic: vi.fn(), post: vi.fn() }))
+vi.mock('./core', () => ({ get: vi.fn(), getPublic: vi.fn(), getWithResponse: vi.fn(), post: vi.fn() }))
 beforeEach(() => vi.resetAllMocks())
 
 // Captured from the matching native server at cc06814, using owned reports.
@@ -82,6 +82,20 @@ describe('published artifact native wire contract', () => {
     expect(get).not.toHaveBeenCalled()
   })
 
+  it('requires the workspace admission receipt on an observed sharing document', async () => {
+    const artifact = nativeInventory.artifacts[0]!
+    const workspace = { basePath: '/workspace-a', mascRoot: '/runtime-a' }
+    const data = { artifact, content: 'body', revisions: [artifact], shared: false, share_version: 0 }
+    vi.mocked(getWithResponse).mockResolvedValueOnce({ data, headers: new Headers({ 'x-masc-workspace-read': 'matched-v1' }) })
+    expect((await fetchWorkspacePublishedArtifact(artifact.id, '2', workspace)).artifact.id).toBe(artifact.id)
+    expect(getWithResponse).toHaveBeenCalledWith(
+      `/api/v1/published-artifacts/${artifact.id}?revision=2&expected_base_path=%2Fworkspace-a&expected_masc_root=%2Fruntime-a`,
+      { signal: undefined, extraHeaders: { 'x-masc-expected-base-path': '/workspace-a', 'x-masc-expected-masc-root': '/runtime-a' } },
+    )
+    vi.mocked(getWithResponse).mockResolvedValueOnce({ data, headers: new Headers() })
+    await expect(fetchWorkspacePublishedArtifact(artifact.id, '2', workspace)).rejects.toThrow(/작업 공간 확인 응답/)
+  })
+
   it('toggles per-artifact external sharing via /api/v1/published-artifact-shares', async () => {
     const artifact = nativeInventory.artifacts[0]!
     const workspace = { basePath: '/workspace', mascRoot: '/workspace/.masc' }
@@ -121,5 +135,16 @@ describe('published artifact native wire contract', () => {
       requested: true, outcome: 'conflict', snapshot: { version: 0, shared: false } }, current: { version: 0, shared: false } }
     vi.mocked(post).mockRejectedValueOnce(Object.assign(new Error('conflict'), { status: 409, responseData: reply }))
     expect(await setPublishedArtifactShared(operation, workspace)).toEqual(reply)
+  })
+
+  it('reports a workspace refusal for this attempt without claiming the operation settled', async () => {
+    const id = nativeInventory.artifacts[0]!.id
+    const workspace = { basePath: '/workspace', mascRoot: '/workspace/.masc' }
+    const operation = { id, shared: true, expectedVersion: 0, operationId: '01890e2a-4c8e-7b21-9f3c-000000000034',
+      expectedArtifactRevision: 2, expectedArtifactSha256: 'a'.repeat(64) }
+    vi.mocked(post).mockRejectedValueOnce(Object.assign(new Error('conflict'), {
+      status: 409, responseData: { code: 'workspace_precondition_failed' },
+    }))
+    await expect(setPublishedArtifactShared(operation, workspace)).rejects.toThrow(/이번 시도.*다른 시도는 미확인/)
   })
 })

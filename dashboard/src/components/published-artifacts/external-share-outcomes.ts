@@ -24,12 +24,11 @@ async function recover(record: PendingShare): Promise<void> {
     retainPendingShare(record)
     if (!current()) throw new Error('접근 상태가 달라져 원래 요청을 보관했습니다.')
     const result = await setPublishedArtifactShared(operation, workspace)
-    if (!current()) throw new Error('접근 상태가 달라져 결과를 보관했습니다.')
     forgetPendingShare(record)
-    artifactExternalSharing.finish(operation.id, workspace.basePath, owner, { ...receipt, kind: 'confirmed',
+    artifactExternalSharing.finish(operation.id, workspace, owner, { ...receipt, kind: 'confirmed',
       outcome: result.receipt.outcome, shared: result.receipt.snapshot.shared, current: result.current.shared })
   } catch (error) {
-    artifactExternalSharing.finish(operation.id, workspace.basePath, owner, { ...receipt, kind: 'unconfirmed', pending: record,
+    artifactExternalSharing.finish(operation.id, workspace, owner, { ...receipt, kind: 'unconfirmed', pending: record,
       detail: error instanceof Error ? error.message : '요청 결과를 확인하지 못했습니다.' })
   }
 }
@@ -40,14 +39,14 @@ export function ExternalShareOutcomes() {
   const outcomes = artifactExternalSharing.receipts()
   const stored = authorized ? pendingShares().filter(record => record.workspace.basePath === authority.workspaceRoot) : []
   const pending = [...new Map([...artifactExternalSharing.pendingInThisTab(), ...stored]
-    .map(record => [pendingShareIdentity(record), record])).values()]
+    .map(record => [pendingShareIdentity(record), record])).values()].filter(record => !artifactExternalSharing.confirmed(record))
   if (!outcomes.length && !pending.length) return null
   return html`<section aria-label="외부 공유 요청 결과" aria-live="polite" class="max-h-24 overflow-auto text-xs">
     ${pending.map(record => html`<p key=${record.operation.operationId}>
-      ${record.title} · ${record.operation.id} · 열람 v${record.revision} · 최신 확인 v${record.operation.expectedArtifactRevision} · 원래 작업 공간 ${record.workspace.basePath}
+      ${record.title} · ${record.operation.id} · 열람 v${record.revision} · 최신 확인 v${record.operation.expectedArtifactRevision} · 원래 작업 공간 ${record.workspace.basePath} (${record.workspace.mascRoot})
       · ${record.operation.shared ? '외부 공유 켜기' : '외부 공유 해제'} 요청 · 관찰한 공유 버전 ${record.operation.expectedVersion} · 결과 미확인
       <button type="button" disabled=${!authorized || authority.workspaceRoot !== record.workspace.basePath
-        || artifactExternalSharing.activity(record.operation.id, record.workspace.basePath) === 'pending'}
+        || artifactExternalSharing.activity(record.operation.id, record.workspace) === 'pending'}
         onClick=${() => void recover(record)}>같은 요청 확인</button>
       <span>확인 중 원래 요청이 적용될 수 있습니다.</span>
     </p>`)}

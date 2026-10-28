@@ -57,26 +57,32 @@ let load ~base_path id =
         | Error message -> Error (Unavailable ("invalid artifact metadata: " ^ message)))
      | exception Yojson.Json_error message -> Error (Unavailable message))
 
+let select_revision ~revision (artifact : Published_artifact.t) =
+  match revision with
+  | None -> (match artifact.revisions with [] -> None | r :: _ -> Some r)
+  | Some n -> List.find_opt (fun (r : revision) -> r.revision = n) artifact.revisions
+
+let read_revision_body ~base_path (selected : revision) = protect (fun () ->
+  match Tool_blob_store.fetch_bounded (Tool_blob_store.create ~base_path)
+    ~sha256:selected.body.sha256 ~max_bytes:Tool_blob_store.max_served_bytes with
+  | Ok (Some content) when String.length content = selected.body.bytes ->
+    if String.is_valid_utf_8 content then Ok content
+    else Error (Unavailable "published body is not valid UTF-8")
+  | Ok None -> Error (Unavailable "published body is missing")
+  | Ok (Some _) -> Error (Unavailable "published body length mismatch")
+  | Error error -> Error (Unavailable (Tool_blob_store.fetch_error_to_string error)))
+
 let read ~base_path ~id ~revision =
   if not (valid_id id) then Error (Invalid "invalid artifact id")
   else protect (fun () ->
     let* entries = directory_entries ~base_path in
     let* () = match entries with None -> Error Missing | Some _ -> Ok () in
     let* artifact = load ~base_path id in
-    let selected = match revision with
-      | None -> (match artifact.revisions with [] -> None | r :: _ -> Some r)
-      | Some n -> List.find_opt (fun (r : revision) -> r.revision = n) artifact.revisions in
-    match selected with
+    match select_revision ~revision artifact with
     | None -> Error Missing
     | Some selected ->
-      match Tool_blob_store.fetch_bounded (Tool_blob_store.create ~base_path)
-        ~sha256:selected.body.sha256 ~max_bytes:Tool_blob_store.max_served_bytes with
-      | Ok (Some content) when String.length content = selected.body.bytes ->
-        if String.is_valid_utf_8 content then Ok (artifact, selected, content)
-        else Error (Unavailable "published body is not valid UTF-8")
-      | Ok None -> Error (Unavailable "published body is missing")
-      | Ok (Some _) -> Error (Unavailable "published body length mismatch")
-      | Error error -> Error (Unavailable (Tool_blob_store.fetch_error_to_string error)))
+      let* content = read_revision_body ~base_path selected in
+      Ok (artifact, selected, content))
 
 let list ~base_path = protect (fun () ->
   let* entries = directory_entries ~base_path in
@@ -96,77 +102,6 @@ let list ~base_path = protect (fun () ->
     if order = 0 then String.compare id_a id_b else order) artifacts
     |> List.map (fun (id, r) -> summary_to_json ~id r) in
   Ok { artifacts; diagnostics = List.rev diagnostics })
-
-(* Publication and share changes use the same lock. A pending first share
-   operation must settle before a new revision can change what it exposes. *)
-let ensure_share_migration_not_pending ~base_path ~id =
-  match Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.geteuid ())
-      ~single_link:true ~ownership_root:base_path (share_guard_path ~base_path id) with
-  | Error _ -> Error (Unavailable "artifact share guard could not be read")
-  | Ok None -> Ok ()
-  | Ok (Some { content; _ }) when not (String.is_valid_utf_8 content) ->
-    Error (Unavailable "artifact share guard is not valid UTF-8")
-  | Ok (Some { content; _ }) ->
-    (match Yojson.Safe.from_string content with
-     | `Assoc fields when List.sort compare fields = List.sort compare
-         ["schema", `String "masc.published_artifact_share_guard.v2";
-          "id", `String id; "phase", `String "active"] -> Ok ()
-     | _ -> Error (Unavailable "artifact share migration must settle before publication")
-     | exception Yojson.Json_error _ -> Error (Unavailable "artifact share guard is invalid"))
-
-let publish ~base_path ~author (request : request) =
-  if String.trim author = "" || not (String.is_valid_utf_8 author)
-  then Error (Invalid "author must be a nonblank UTF-8 string")
-  else if String.length request.content > Tool_blob_store.max_served_bytes
-  then Error (Invalid "artifact exceeds the HTTP artifact body limit")
-  else protect (fun () ->
-    let dir = root ~base_path in
-    let* _ = directory_entries ~base_path in
-    let* () = match Keeper_fs_durable_directory.ensure
-      ~before_prepare:(fun () -> ()) ~before_directory_fsync:(fun _ -> ())
-      ~ownership_root:base_path dir with
-      | Ok _ -> Ok ()
-      | Error _ -> Error (Unavailable "artifact directory could not be prepared") in
-    let* _ = directory_entries ~base_path in
-    let id = match request.update with
-      | Create -> Random_id.prefixed ~prefix:"artifact-" ~bytes:16
-      | Revise { id; _ } -> id in
-    let* () = if valid_id id then Ok () else Error (Invalid "invalid artifact id") in
-    match File_lock_eio.with_durable_lock_observed
-      ~lock_path:(lock_path ~base_path id) (fun () ->
-        let* () = ensure_share_migration_not_pending ~base_path ~id in
-        let* previous = match request.update with
-          | Create ->
-            (match load ~base_path id with
-             | Error Missing -> Ok []
-             | Ok _ -> Error (Unavailable "generated artifact id already exists")
-             | Error ((Invalid _ | Conflict _ | Unavailable _ | Commit_uncertain _) as error) -> Error error)
-          | Revise { expected_revision; _ } ->
-            let* artifact = load ~base_path id in
-            let actual = List.length artifact.revisions in
-            if actual <> expected_revision then Error (Conflict { expected = expected_revision; actual })
-            else Ok artifact.revisions in
-        let body = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
-          ~bytes:request.content ~mime:(media_type request.format) in
-        let revision =
-          { revision = List.length previous + 1; title = request.title
-          ; summary = request.summary; format = request.format; author
-          ; created_at = Types_core.now_iso (); body
-          ; task_id = request.task_id; goal_id = request.goal_id } in
-        let artifact = { id; revisions = revision :: previous } in
-        match Keeper_fs.save_json_durable_atomic ~ownership_root:base_path
-          (path ~base_path id) (Published_artifact.to_json artifact) with
-        | Ok () -> Ok (artifact, revision)
-        | Error error ->
-          let message = Keeper_fs.durable_write_error_to_string error in
-          Error (if error.renamed then Commit_uncertain { id; revision = revision.revision; message } else Unavailable message)) with
-    | File_lock_eio.Lock_not_acquired error ->
-      Error (Unavailable (File_lock_eio.durable_lock_error_to_string error))
-    | File_lock_eio.Body_completed { value; release_error = None } -> value
-    | File_lock_eio.Body_completed { value; release_error = Some error } ->
-      Log.Misc.error "artifact publication lock release: %s"
-        (File_lock_eio.durable_lock_error_to_string error);
-      value)
 
 module Share = Published_artifact_share
 
@@ -354,6 +289,9 @@ let with_share_lock ~base_path ~id f =
   else protect_share (fun () ->
     let* entries = directory_entries ~base_path |> Result.map_error share_artifact_error in
     let* () = match entries with None -> Error Share_missing | Some _ -> Ok () in
+    (* Do not create a lock file for every unauthenticated guessed ID. The
+       locked reload below remains the authority for the actual operation. *)
+    let* _ = load ~base_path id |> Result.map_error share_artifact_error in
     match File_lock_eio.with_durable_lock_observed
       ~lock_path:(lock_path ~base_path id) (fun () ->
         let* artifact = load ~base_path id |> Result.map_error share_artifact_error in
@@ -367,6 +305,27 @@ let with_share_lock ~base_path ~id f =
       Log.Misc.error "artifact share lock release: %s"
         (File_lock_eio.durable_lock_error_to_string error);
       value)
+
+(* Capture admission and the exact revision together. Blob fetching can run
+   outside the lock because the selected body is content-addressed. *)
+let read_with_share_after_select ~after_select ~base_path ~id ~revision ~allow_private =
+  let selected = with_share_lock ~base_path ~id (fun artifact state ->
+    let snapshot = Share.snapshot state in
+    if not allow_private && not snapshot.shared then Ok `Private
+    else match select_revision ~revision artifact with
+      | None -> Ok `Missing_revision
+      | Some selected -> Ok (`Selected (snapshot, artifact, selected))) in
+  match selected with
+  | Error error -> Error (`Share error)
+  | Ok `Private -> Ok `Private
+  | Ok `Missing_revision -> Error (`Artifact Missing)
+  | Ok (`Selected (snapshot, artifact, selected)) ->
+    after_select ();
+    let* content = read_revision_body ~base_path selected |> Result.map_error (fun error -> `Artifact error) in
+    Ok (`Allowed (snapshot, artifact, selected, content))
+
+let read_with_share ~base_path ~id ~revision ~allow_private =
+  read_with_share_after_select ~after_select:(fun () -> ()) ~base_path ~id ~revision ~allow_private
 
 let observe_share ~base_path ~id f = protect_share (fun () ->
   if not (valid_id id) then Error (Share_invalid "invalid artifact id")
@@ -459,6 +418,88 @@ let share_error_to_artifact_error = function
   | (Share_operation_reused | Share_unavailable _ | Share_commit_uncertain _) as error ->
     Unavailable (share_error_message error)
 
+(* Share and publication hold the same artifact lock. Settle a prior
+   authorized migration before a new revision changes its publication target. *)
+let settle_share_before_publish ~base_path ~id artifact =
+  let map_error result = Result.map_error share_error_to_artifact_error result in
+  let* guard = read_share_guard ~base_path ~id |> map_error in
+  match artifact, guard with
+  | None, Guard_absent ->
+    let* existing = load_share_text ~base_path (share_path ~base_path id) |> map_error in
+    let* _ = load_share ~base_path ~id |> map_error in
+    if Option.is_some existing then Error (Unavailable "generated artifact id has orphaned share state") else Ok ()
+  | None, (Guard_active | Guard_pending _) ->
+    Error (Unavailable "generated artifact id has orphaned share state")
+  | Some artifact, (Guard_absent | Guard_active | Guard_pending _) ->
+    let* () = recover_pending_share ~base_path ~id ~artifact |> map_error in
+    let* _ = load_share ~base_path ~id |> map_error in
+    let* guard = read_share_guard ~base_path ~id |> map_error in
+    (match guard with
+     | Guard_absent -> Ok ()
+     | Guard_pending _ -> Error (Unavailable "artifact share migration requires recovery")
+     | Guard_active ->
+       (* A preceding active-guard rename may have returned an fsync error.
+          Rewriting it durably also settles the directory before publication. *)
+       match durable_share_save ~ownership_root:base_path (share_guard_path ~base_path id) (active_guard_json id) with
+       | Ok () -> Ok ()
+       | Error error -> Error (Unavailable (Keeper_fs.durable_write_error_to_string error)))
+
+let publish ~base_path ~author (request : request) =
+  if String.trim author = "" || not (String.is_valid_utf_8 author)
+  then Error (Invalid "author must be a nonblank UTF-8 string")
+  else if String.length request.content > Tool_blob_store.max_served_bytes
+  then Error (Invalid "artifact exceeds the HTTP artifact body limit")
+  else protect (fun () ->
+    let dir = root ~base_path in
+    let* _ = directory_entries ~base_path in
+    let* () = match Keeper_fs_durable_directory.ensure
+      ~before_prepare:(fun () -> ()) ~before_directory_fsync:(fun _ -> ())
+      ~ownership_root:base_path dir with
+      | Ok _ -> Ok ()
+      | Error _ -> Error (Unavailable "artifact directory could not be prepared") in
+    let* _ = directory_entries ~base_path in
+    let id = match request.update with
+      | Create -> Random_id.prefixed ~prefix:"artifact-" ~bytes:16
+      | Revise { id; _ } -> id in
+    let* () = if valid_id id then Ok () else Error (Invalid "invalid artifact id") in
+    match File_lock_eio.with_durable_lock_observed
+      ~lock_path:(lock_path ~base_path id) (fun () ->
+        let* previous = match request.update with
+          | Create ->
+            (match load ~base_path id with
+             | Error Missing ->
+               let* () = settle_share_before_publish ~base_path ~id None in
+               Ok []
+             | Ok _ -> Error (Unavailable "generated artifact id already exists")
+             | Error ((Invalid _ | Conflict _ | Unavailable _ | Commit_uncertain _) as error) -> Error error)
+          | Revise { expected_revision; _ } ->
+            let* artifact = load ~base_path id in
+            let* () = settle_share_before_publish ~base_path ~id (Some artifact) in
+            let actual = List.length artifact.revisions in
+            if actual <> expected_revision then Error (Conflict { expected = expected_revision; actual })
+            else Ok artifact.revisions in
+        let body = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
+          ~bytes:request.content ~mime:(media_type request.format) in
+        let revision =
+          { revision = List.length previous + 1; title = request.title
+          ; summary = request.summary; format = request.format; author
+          ; created_at = Types_core.now_iso (); body
+          ; task_id = request.task_id; goal_id = request.goal_id } in
+        let artifact = { id; revisions = revision :: previous } in
+        match Keeper_fs.save_json_durable_atomic ~ownership_root:base_path
+          (path ~base_path id) (Published_artifact.to_json artifact) with
+        | Ok () -> Ok (artifact, revision)
+        | Error error ->
+          let message = Keeper_fs.durable_write_error_to_string error in
+          Error (if error.renamed then Commit_uncertain { id; revision = revision.revision; message } else Unavailable message)) with
+    | File_lock_eio.Lock_not_acquired error ->
+      Error (Unavailable (File_lock_eio.durable_lock_error_to_string error))
+    | File_lock_eio.Body_completed { value; release_error = None } -> value
+    | File_lock_eio.Body_completed { value; release_error = Some error } ->
+      Log.Misc.error "artifact publication lock release: %s"
+        (File_lock_eio.durable_lock_error_to_string error);
+      value)
+
 let is_shared ~base_path ~id =
   read_share ~base_path ~id
   |> Result.map (fun (snapshot : Share.snapshot) -> snapshot.shared)
@@ -479,6 +520,7 @@ let set_shared ~base_path ~id ~shared =
     | Share.Conflict _ -> Error (Unavailable "share version changed; reread before retrying")
 
 module For_testing = struct
+  let read_with_share_after_select = read_with_share_after_select
   let change_share_before_stage ~before_stage ~base_path ~id request =
     let save ~ownership_root path json =
       Keeper_fs.For_testing.save_json_durable_atomic ~before_stage ~ownership_root path json in

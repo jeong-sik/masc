@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { v7 as uuidV7 } from 'uuid'
-import { artifactHref, captureArtifactWorkspace, fetchPublishedArtifact, latestArtifactRevision, setPublishedArtifactShared, type ArtifactDocument, type ArtifactPublication, type ArtifactWorkspace, type ArtifactShareResult } from '../../api/published-artifacts'
+import { artifactHref, captureArtifactWorkspace, fetchWorkspacePublishedArtifact, latestArtifactRevision, setPublishedArtifactShared, type ArtifactDocument, type ArtifactPublication, type ArtifactWorkspace, type ArtifactShareResult } from '../../api/published-artifacts'
 import { artifactExternalSharing, type ShareObservation } from '../../lib/artifact-external-sharing'
 import { forgetPendingShare, retainPendingShare } from '../../lib/artifact-share-recovery'
 import { ExternalShareOutcomes } from './external-share-outcomes'
@@ -52,11 +52,15 @@ function downloadSource(doc: ArtifactDocument): void {
   URL.revokeObjectURL(url)
 }
 
-export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError, workspaceRoot, draftRetention, checkState, authRevision, isCurrent, onMutation, onPublication, onPublished, onCheckChanged, shareObservation, onClose }: {
+export type ArtifactShareSelection = { doc: ArtifactDocument; fixedRevision: boolean; readError?: string; shareWorkspace?: ArtifactWorkspace }
+
+export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError, workspaceRoot, shareWorkspace, currentShareSelection, draftRetention, checkState, authRevision, isCurrent, onMutation, onPublication, onPublished, onCheckChanged, shareObservation, onClose }: {
   doc: ArtifactDocument; fixedRevision: boolean; checkState: ArtifactCheckState;
   readOnly?: boolean;
   readError?: string;
   shareObservation?: ShareObservation;
+  shareWorkspace?: ArtifactWorkspace;
+  currentShareSelection?: () => ArtifactShareSelection | undefined;
   workspaceRoot: string;
   draftRetention: ArtifactDraftRetention;
   authRevision: number; isCurrent: () => boolean; onMutation: (outcome: ArtifactCheckOutcome) => void;
@@ -72,13 +76,14 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
   const sharedCloseRequest = useRef<ArtifactSharedCloseRequest | null>(null)
   const appPending=useRef(false)
   const active = useRef(true)
-  const selection = useRef({ doc, fixedRevision, readError })
-  selection.current = { doc, fixedRevision, readError }
+  const selection = useRef({ doc, fixedRevision, readError, shareWorkspace })
+  selection.current = { doc, fixedRevision, readError, shareWorkspace }
   const { artifact, content, revisions } = doc
   const observedLatest = latestArtifactRevision(doc)
-  const shareActivity = artifactExternalSharing.activity(artifact.id, workspaceRoot)
-  const sharedState = doc.share_version !== undefined && observedLatest && shareObservation && !readError && shareActivity === 'ready'
-    && shareObservation.id === artifact.id && shareObservation.basePath === workspaceRoot
+  const shareActivity = shareWorkspace ? artifactExternalSharing.activity(artifact.id, shareWorkspace) : 'unconfirmed'
+  const sharedState = doc.share_version !== undefined && observedLatest && shareObservation && shareWorkspace && !readError && shareActivity === 'ready'
+    && shareObservation.id === artifact.id && shareObservation.workspace.basePath === shareWorkspace.basePath
+    && shareObservation.workspace.mascRoot === shareWorkspace.mascRoot
     && artifactExternalSharing.admits(shareObservation) ? doc.shared : undefined
   const current = () => active.current && isCurrent()
   useLayoutEffect(() => () => { active.current = false }, [])
@@ -98,30 +103,44 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
     setCopyFeedback(success ? `현재 접속 주소 ${window.location.origin} 기준으로 문서 링크를 복사했습니다.` : '링크를 복사하지 못했습니다.')
   }
   const toggleExternalShare = async () => {
-    if (!current() || !shareObservation || sharedState === undefined) return
-    const sameVisit = () => current() && selection.current.fixedRevision === fixedRevision
-      && selection.current.doc.artifact.id === artifact.id
-    const stillSelected = () => sameVisit()
-      && selection.current.doc.artifact.revision === artifact.revision
-      && selection.current.doc.artifact.body._blob.sha256 === artifact.body._blob.sha256
-    const canDispatch = () => stillSelected() && !selection.current.readError
-      && selection.current.doc.shared === sharedState && selection.current.doc.share_version === doc.share_version
-      && latestArtifactRevision(selection.current.doc)?.revision === observedLatest?.revision
-      && latestArtifactRevision(selection.current.doc)?.body._blob.sha256 === observedLatest?.body._blob.sha256
+    if (!current() || !shareObservation || !shareWorkspace || sharedState === undefined) return
+    const observed = () => currentShareSelection ? currentShareSelection() : selection.current
+    const sameVisit = () => {
+      const view = observed()
+      return current() && view?.fixedRevision === fixedRevision && view.doc.artifact.id === artifact.id
+        && view.shareWorkspace?.basePath === shareWorkspace.basePath
+        && view.shareWorkspace.mascRoot === shareWorkspace.mascRoot
+    }
+    const stillSelected = () => {
+      const view = observed()
+      return sameVisit() && view?.doc.artifact.revision === artifact.revision
+        && view.doc.artifact.body._blob.sha256 === artifact.body._blob.sha256
+    }
+    const canDispatch = () => {
+      const view = observed()
+      return stillSelected() && view !== undefined && !view.readError
+        && view.doc.shared === sharedState && view.doc.share_version === doc.share_version
+        && latestArtifactRevision(view.doc)?.revision === observedLatest?.revision
+        && latestArtifactRevision(view.doc)?.body._blob.sha256 === observedLatest?.body._blob.sha256
+    }
     const nextShared = !sharedState
-    const owner = artifactExternalSharing.begin(artifact.id, workspaceRoot, shareObservation)
+    const owner = artifactExternalSharing.begin(artifact.id, shareWorkspace, shareObservation)
     if (!owner) return
     setCopyFeedback('')
     const notSent = (message: string) => {
       if (sameVisit()) setCopyFeedback(message)
-      artifactExternalSharing.finish(artifact.id, workspaceRoot, owner, 'not-sent')
+      artifactExternalSharing.finish(artifact.id, shareWorkspace, owner, 'not-sent')
     }
     const changed = '문서 또는 공유 상태가 달라졌거나 확인할 수 없어 요청을 보내지 않았습니다. 다시 확인해 주세요.'
-    let workspace: ArtifactWorkspace
+    const workspace = shareWorkspace
     try {
-      workspace = await captureArtifactWorkspace(workspaceRoot)
+      const currentWorkspace = await captureArtifactWorkspace(workspaceRoot)
+      if (currentWorkspace.basePath !== workspace.basePath || currentWorkspace.mascRoot !== workspace.mascRoot) {
+        notSent(changed)
+        return
+      }
       if (!canDispatch()) { notSent(changed); return }
-      const fresh = await fetchPublishedArtifact(artifact.id, fixedRevision ? String(artifact.revision) : undefined, undefined, workspace)
+      const fresh = await fetchWorkspacePublishedArtifact(artifact.id, fixedRevision ? String(artifact.revision) : undefined, workspace)
       if (!canDispatch()) { notSent(changed); return }
       if (fresh.artifact.revision !== artifact.revision || fresh.shared !== sharedState || fresh.share_version !== doc.share_version
         || fresh.artifact.body._blob.sha256 !== artifact.body._blob.sha256
@@ -142,8 +161,17 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
       notSent(error instanceof Error ? error.message : '공유 요청을 보관하지 못해 전송하지 않았습니다.')
       return
     }
-    if (!canDispatch()) { forgetPendingShare(pending); notSent(changed); return }
-    artifactExternalSharing.attachPending(artifact.id, workspaceRoot, owner, pending)
+    artifactExternalSharing.attachPending(artifact.id, workspace, owner, pending)
+    if (!canDispatch()) {
+      // Another tab can see the retained operation before this tab dispatches.
+      // It may already have started a recovery, so keep the exact request.
+      const detail = '이 탭은 요청을 보내지 않았지만, 같은 작업의 다른 탭 시도는 미확인입니다.'
+      artifactExternalSharing.finish(artifact.id, workspace, owner, { id: artifact.id, title: artifact.title,
+        revision: artifact.revision, requested: nextShared, workspace, operationId: operation.operationId,
+        expectedVersion: operation.expectedVersion, operation, kind: 'unconfirmed', detail, pending })
+      if (sameVisit()) setCopyFeedback(detail)
+      return
+    }
     let updated: ArtifactShareResult
     const receipt = { id: artifact.id, title: artifact.title, revision: artifact.revision, requested: nextShared, workspace,
       operationId: operation.operationId, expectedVersion: operation.expectedVersion, operation }
@@ -151,13 +179,13 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
       updated = await setPublishedArtifactShared(operation, workspace)
     } catch (error) {
       const detail = error instanceof Error ? error.message : '외부 공유 변경 결과를 확인하지 못했습니다.'
-      artifactExternalSharing.finish(artifact.id, workspaceRoot, owner, { ...receipt, kind: 'unconfirmed', detail, pending })
+      artifactExternalSharing.finish(artifact.id, workspace, owner, { ...receipt, kind: 'unconfirmed', detail, pending })
       if (!stillSelected()) return
       setCopyFeedback(`외부 공유 변경 결과 미확인: ${detail}`)
       return
     }
     forgetPendingShare(pending)
-    artifactExternalSharing.finish(artifact.id, workspaceRoot, owner, { ...receipt, kind: 'confirmed',
+    artifactExternalSharing.finish(artifact.id, workspace, owner, { ...receipt, kind: 'confirmed',
       outcome: updated.receipt.outcome, shared: updated.receipt.snapshot.shared, current: updated.current.shared })
     if (!stillSelected()) return
     if (updated.receipt.outcome === 'conflict') {
@@ -165,17 +193,27 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readError
         ? '공유 상태가 다른 요청으로 바뀌어 적용되지 않았습니다. 현재 상태를 다시 확인해 주세요.'
         : '문서의 최신 버전이 바뀌어 공유 요청을 적용하지 않았습니다. 문서를 다시 확인해 주세요.')
     } else if (nextShared && updated.current.shared) {
-      const known = selection.current.doc
+      const known = observed()?.doc
+      if (!known) return
       if (known.share_version !== undefined && (known.share_version > updated.current.version
         || (known.share_version === updated.current.version && known.shared !== updated.current.shared))) {
         setCopyFeedback('요청이 적용된 뒤 더 새로운 공유 상태를 읽었습니다. 다시 확인해 주세요.')
         return
       }
+      // A local write started during the verification read also retires this
+      // copy, even if that write has already finished by the time it returns.
+      const copyObservation = artifactExternalSharing.observe(artifact.id, workspace)
       let verified: ArtifactDocument
-      try { verified = await fetchPublishedArtifact(artifact.id, fixedRevision ? String(artifact.revision) : undefined, undefined, workspace) }
+      try { verified = await fetchWorkspacePublishedArtifact(artifact.id, fixedRevision ? String(artifact.revision) : undefined, workspace) }
       catch { if (stillSelected()) setCopyFeedback('요청은 적용됐지만 현재 공유 상태를 확인하지 못했습니다.'); return }
       if (!stillSelected()) return
-      if (verified.shared !== true || verified.share_version === undefined || verified.share_version < updated.current.version) {
+      const latestView = observed()
+      const latestKnown = latestView?.doc
+      if (!latestView || !latestKnown || latestView.readError || latestKnown.share_version === undefined || latestKnown.shared === undefined
+        || !artifactExternalSharing.admits(copyObservation)
+        || verified.shared !== true || verified.share_version === undefined || verified.share_version < updated.current.version
+        || latestKnown.share_version > verified.share_version
+        || (latestKnown.share_version === verified.share_version && latestKnown.shared !== verified.shared)) {
         setCopyFeedback('요청 이후 공유 상태가 바뀌었거나 확인되지 않아 링크를 복사하지 않았습니다.')
         return
       }

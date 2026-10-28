@@ -3,12 +3,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import { route, navigate } from '../../router'
 import { ApiRequestError, currentStoredTokenRevision, getStoredToken } from '../../api/core'
 import { storedTokenRevision } from '../../api/token-revision'
-import { fetchPublishedArtifacts, fetchPublishedArtifact, fetchPublicArtifact, artifactHref, type ArtifactList, type ArtifactDocument, type ArtifactPublication } from '../../api/published-artifacts'
+import { ArtifactWorkspaceReadUnattested, captureArtifactWorkspace, fetchPublishedArtifacts, fetchPublishedArtifact, fetchWorkspacePublishedArtifact, fetchPublicArtifact, artifactHref, type ArtifactList, type ArtifactDocument, type ArtifactPublication, type ArtifactWorkspace } from '../../api/published-artifacts'
 import { artifactExternalSharing, type ShareObservation } from '../../lib/artifact-external-sharing'
 import { ExternalShareOutcomes } from './external-share-outcomes'
 import { fetchArtifactChecks, resolveArtifactCheck, type ArtifactCheckList, type ArtifactCheckState } from '../../api/published-artifact-checks'
 import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
-import { ArtifactReader } from './artifact-reader'
+import { ArtifactReader, type ArtifactShareSelection } from './artifact-reader'
 import { ArtifactPreview } from './artifact-preview'
 import { ArtifactCheckControl, type ArtifactCheckOutcome } from './artifact-check-control'
 import { executionWorkspaceAuthority } from '../../store'
@@ -124,7 +124,7 @@ export function ArtifactsSurface() {
 
 const noopDraftRetention: ArtifactDraftRetention = { remember: () => {}, forget: () => {} }
 type ObservedDocument =
-  | { kind: 'operator'; document: ArtifactDocument; shareObservation: ShareObservation }
+  | { kind: 'operator'; document: ArtifactDocument; shareObservation?: ShareObservation; workspace?: ArtifactWorkspace }
   | { kind: 'public'; document: ArtifactDocument }
 type DocumentRemote = Remote<ObservedDocument> | { key: object; kind: 'public-loading' }
 
@@ -214,7 +214,6 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
   activeDocumentKey.current = documentKey
   const readerAllowed = useRef(allowReader)
   readerAllowed.current = allowReader
-  const shareActivity = selectedId ? artifactExternalSharing.activity(selectedId, workspaceRoot) : 'ready'
   const shareReread = useRef<ShareObservation | null>(null)
   const active = useRef(true)
   const current = () => active.current && isCurrent()
@@ -260,9 +259,22 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
     const publish = (next: DocumentRemote) => {
       if (!controller.signal.aborted && currentDocument()) { documentRef.current = next; setDocument(next) }
     }
-    const shareObservation = artifactExternalSharing.observe(selectedId, workspaceRoot)
-    void fetchPublishedArtifact(selectedId, revision, controller.signal).then(document => {
-      publish({ key: documentKey, kind: 'loaded', data: { kind: 'operator', document, shareObservation }, receivedAt: Date.now() })
+    const readOperator = async (): Promise<ObservedDocument | undefined> => {
+      let workspace: ArtifactWorkspace | undefined
+      try { workspace = await captureArtifactWorkspace(workspaceRoot) } catch { /* Viewing can continue without sharing authority. */ }
+      if (controller.signal.aborted || !currentDocument()) return undefined
+      if (!workspace) return { kind: 'operator', document: await fetchPublishedArtifact(selectedId, revision, controller.signal) }
+      const shareObservation = artifactExternalSharing.observe(selectedId, workspace)
+      try {
+        const document = await fetchWorkspacePublishedArtifact(selectedId, revision, workspace, controller.signal)
+        return { kind: 'operator', document, workspace, shareObservation }
+      } catch (error) {
+        if (error instanceof ArtifactWorkspaceReadUnattested) return { kind: 'operator', document: error.document }
+        throw error
+      }
+    }
+    void readOperator().then(data => {
+      if (data) publish({ key: documentKey, kind: 'loaded', data, receivedAt: Date.now() })
     }, error => {
       if (controller.signal.aborted || !currentDocument()) return
       const previous = documentRef.current
@@ -285,6 +297,15 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
 
   const list = catalog?.key === catalogKey ? catalog : null
   const doc = document?.key === documentKey ? document : null
+  const observedWorkspace = doc && doc.kind !== 'public-loading' && doc.data?.kind === 'operator' ? doc.data.workspace : undefined
+  const shareActivity = selectedId && observedWorkspace ? artifactExternalSharing.activity(selectedId, observedWorkspace) : 'ready'
+  const currentShareSelection = (): ArtifactShareSelection | undefined => {
+    const current = documentRef.current
+    if (!currentDocument() || !current || current.key !== documentKey || current.kind === 'public-loading'
+      || current.data?.kind !== 'operator') return undefined
+    return { doc: current.data.document, fixedRevision: revision !== undefined, shareWorkspace: current.data.workspace,
+      ...(current.kind === 'error' ? { readError: current.message } : {}) }
+  }
   useEffect(() => {
     const observation = doc && doc.kind !== 'public-loading' && doc.data?.kind === 'operator'
       ? doc.data.shareObservation : undefined
@@ -406,6 +427,8 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
               isCurrent=${currentDocument} />`
           : html`<${ArtifactReader} key=${documentKey.visit} doc=${doc.data.document} fixedRevision=${revision !== undefined}
               draftRetention=${draftRetention} workspaceRoot=${workspaceRoot}
+              shareWorkspace=${doc.data.workspace}
+              currentShareSelection=${currentShareSelection}
               shareObservation=${doc.data.shareObservation}
               readError=${doc.kind === 'error' ? doc.message : undefined}
               checkState=${checkState(doc.data.document.artifact)} authRevision=${authRevision} isCurrent=${currentDocument} onMutation=${onMutation} onCheckChanged=${checkChanged}

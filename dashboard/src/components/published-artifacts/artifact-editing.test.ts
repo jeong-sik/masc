@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import type { Signal } from '@preact/signals'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { ApiRequestError, apiRequestErrorFromResponse, clearStoredToken, get, getPublic, post, setStoredToken } from '../../api/core'
+import { ApiRequestError, apiRequestErrorFromResponse, clearStoredToken, get, getPublic, getWithResponse, post, setStoredToken } from '../../api/core'
 import type { ExecutionWorkspaceAuthority } from '../../store'
 import { route } from '../../router'
 import { ArtifactsSurface } from './artifacts-surface'
@@ -18,7 +18,7 @@ vi.mock('../../router', async () => {
   const route = signal({ tab: 'workspace', params: {} as Record<string, string>, postId: null })
   return { route, navigate: vi.fn((tab, params) => { route.value = { tab, params, postId: null } }) }
 })
-vi.mock('../../api/core', async original => ({ ...await original<typeof import('../../api/core')>(), get: vi.fn(), getPublic: vi.fn(), post: vi.fn() }))
+vi.mock('../../api/core', async original => ({ ...await original<typeof import('../../api/core')>(), get: vi.fn(), getPublic: vi.fn(), getWithResponse: vi.fn(), post: vi.fn() }))
 vi.mock('../common/markdown', () => ({ Markdown: ({ text }: { text: string }) => html`<div>${text}</div>` }))
 
 const id = `artifact-${'a'.repeat(32)}`
@@ -52,6 +52,13 @@ beforeEach(() => {
   route.value = { tab: 'workspace', params: { section: 'artifacts' }, postId: null }
   vi.mocked(get).mockImplementation(async path => path === '/health?full=1' ? health : path === list ? { artifacts: [artifact], diagnostics: [] }
     : path === '/api/v1/published-artifact-checks' ? { checks: [], diagnostics: [] } : original)
+  vi.mocked(getWithResponse).mockImplementation(async (path, options) => {
+    const url = new URL(path, window.location.origin)
+    url.searchParams.delete('expected_base_path'); url.searchParams.delete('expected_masc_root')
+    const query = url.searchParams.toString()
+    return { data: await get(`${url.pathname}${query ? `?${query}` : ''}`, options),
+      headers: new Headers({ 'x-masc-workspace-read': 'matched-v1' }) }
+  })
 })
 afterEach(() => { cleanup(); clearStoredToken(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
@@ -145,17 +152,19 @@ it('refuses a replacement server workspace before sending and preserves the draf
   await reader.findByText(/서버의 작업 공간이 원고를 작성한 작업 공간과 다릅니다/)
   expect((reader.getByLabelText('문서 본문') as HTMLTextAreaElement).value).toBe('workspace-a draft')
   expect(post).not.toHaveBeenCalled()
-  expect(vi.mocked(get).mock.calls.filter(([path]) => path === '/health?full=1')).toHaveLength(1)
+  expect(vi.mocked(get).mock.calls.filter(([path]) => path === '/health?full=1')).toHaveLength(2)
 })
 
 it.each(['credential', 'workspace'] as const)('does not send when %s authority changes during the initial workspace capture', async changed => {
   const pending = deferred()
   const fallback = vi.mocked(get).getMockImplementation()!
-  vi.mocked(get).mockImplementation((path, options) => path === '/health?full=1' ? pending.promise : fallback(path, options))
+  let healthReads = 0
+  vi.mocked(get).mockImplementation((path, options) => path === '/health?full=1'
+    ? (++healthReads === 1 ? Promise.resolve(health) : pending.promise) : fallback(path, options))
   const reader = await edit(false)
   expect((reader.getByRole('button', { name: '새 버전 저장' }) as HTMLButtonElement).disabled).toBe(true)
   fireEvent.click(reader.getByRole('button', { name: '새 버전 저장' }))
-  await waitFor(() => expect(get).toHaveBeenCalledWith('/health?full=1'))
+  await waitFor(() => expect(healthReads).toBe(2))
   await act(async () => {
     if (changed === 'workspace') workspace.current.value = null
     else setStoredToken('credential-b')
@@ -175,7 +184,7 @@ it('preserves a draft but blocks saving after failed initial capture without rec
   expect((reader.getByLabelText('문서 본문') as HTMLTextAreaElement).value).toBe(original.content)
   expect((reader.getByRole('button', { name: '새 버전 저장' }) as HTMLButtonElement).disabled).toBe(true)
   expect(post).not.toHaveBeenCalled()
-  expect(vi.mocked(get).mock.calls.filter(([path]) => path === '/health?full=1')).toHaveLength(1)
+  expect(vi.mocked(get).mock.calls.filter(([path]) => path === '/health?full=1')).toHaveLength(2)
 })
 
 it('retains the draft origin if the server switches MASC roots under the same base before save', async () => {
@@ -190,7 +199,7 @@ it('retains the draft origin if the server switches MASC roots under the same ba
   await reader.findByText(/서버의 작업 공간이 바뀌어 저장 요청이 거절되었습니다/)
   expect(post).toHaveBeenCalledTimes(1)
   expect(vi.mocked(post).mock.calls[0]![2]).toEqual(workspaceHeaders)
-  expect(vi.mocked(get).mock.calls.filter(([path]) => path === '/health?full=1')).toHaveLength(1)
+  expect(vi.mocked(get).mock.calls.filter(([path]) => path === '/health?full=1')).toHaveLength(2)
   expect(screen.queryByText(/다른 사용자가 먼저 저장했습니다/)).toBeNull()
   expect(screen.queryByRole('region', { name: '문서 저장 요청 결과' })).toBeNull()
 })

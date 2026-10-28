@@ -947,6 +947,8 @@ let post_artifact_share ~credential ~expected_workspace ~host ~port ~id ~shared 
     | Ok (status, text) ->
       decode_json ~allow_empty:false ~status_code:status ~body:text |> Result.map (fun json -> status, json) in
   match json with
+  | `Assoc fields when status = 409 && List.assoc_opt "code" fields = Some (`String "workspace_precondition_failed") ->
+    Error "This attempt was refused because the workspace changed; another attempt of the same operation may still be unconfirmed"
   | `Assoc fields when List.sort String.compare (List.map fst fields) = ["current"; "id"; "receipt"] ->
     let* receipt = Share.receipt_of_json (List.assoc "receipt" fields)
       |> Result.map_error (fun _ -> "Invalid share operation receipt") in

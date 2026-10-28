@@ -577,7 +577,7 @@ let render_keeper_list (state : state) =
      ^ keeper_view_summary model_rows state.keeper_list_layout state.keeper_list_sort
      ^ Ansi.reset);
 
-  (match state.fleet_stream_view with
+  (match fleet_stream_view state with
    | Masc_tui_fleet_stream.Awaiting_first_reading -> ()
    | Masc_tui_fleet_stream.Unreachable { since } ->
        box_line buf cols

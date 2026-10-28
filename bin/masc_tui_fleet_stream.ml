@@ -28,8 +28,9 @@ type step =
   | Reconnect
 
 (* [following] is the revision of the last event of this connection, [None]
-   until its [Snapshot]. [down_since] is [None] exactly while a connection that
-   delivered a [Snapshot] is open. *)
+   until its [Snapshot]. [down_since] is the time of the first loss since the
+   last state arrived (a [Snapshot] or an [Unavailable_snapshot]), and [None]
+   before any loss and once a state arrived after it. *)
 type t =
   { mutable decoder : Sse_wire.decoder
   ; mutable reading : reading option

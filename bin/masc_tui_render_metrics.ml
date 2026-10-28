@@ -543,7 +543,7 @@ let render_section_resources ~cols (state : state) =
      it. It read "not observed", which is what the section says before the
      first read, so a fleet the TUI could not read looked like one it had not
      asked for yet (#38499). *)
-  let safety_lines = match state.fleet_stream_view with
+  let safety_lines = match fleet_stream_view state with
     | Masc_tui_fleet_stream.Cannot_read failure ->
       [ "    Execution readiness: " ^ Masc_tui_fleet_line.failure_text failure ]
     | Masc_tui_fleet_stream.Awaiting_first_reading -> [ "    Execution readiness not observed" ]

@@ -140,6 +140,74 @@ let test_a_loss_before_any_reading_is_unreachable_until_a_snapshot () =
    | other -> fail ("a snapshot ends the loss: " ^ describe_view other))
 ;;
 
+let test_an_unavailable_snapshot_ends_unreachable_too () =
+  let outage = { F.since = 10.0; reason = F.Scan_failed } in
+  let client = Client.create () in
+  Client.started client;
+  Client.lost client ~now:5.0;
+  Client.started client;
+  ignore
+    (Client.feed
+       client
+       (frame (F.Unavailable_snapshot { revision = revision 1; degradation = outage }))
+     : Client.step);
+  check view_t "the connection is up and the scan is failing"
+    (Client.Unavailable { degradation = outage; disconnected_since = None })
+    (Client.view client)
+;;
+
+let test_a_refusal_shows_over_unreachable_until_a_snapshot_arrives () =
+  let client = Client.create () in
+  Client.started client;
+  Client.lost client ~now:5.0;
+  Client.started client;
+  Client.refused client ~status:404 ~detail:"not found";
+  Client.lost client ~now:7.0;
+  check view_t "refused"
+    (Client.Cannot_read (Client.Refused { status = 404; detail = "not found" }))
+    (Client.view client);
+  Client.started client;
+  ignore
+    (Client.feed client (frame (snapshot ~revision:1 ~measured_at:10.0 (fleet ()))) : Client.step);
+  check view_t "a Snapshot ends both"
+    (following (reading ~revision:1 ~measured_at:10.0 (fleet ())))
+    (Client.view client)
+;;
+
+(* The producer sends [Degraded] only over a reading. One after an
+   [Unavailable_snapshot] has no reading to mark, so the connection is not
+   followed any further. *)
+let test_an_outage_event_after_an_unavailable_snapshot_asks_for_a_new_connection () =
+  let outage = { F.since = 10.0; reason = F.Scan_failed } in
+  let client = Client.create () in
+  Client.started client;
+  check step_t "the unavailable snapshot" Client.Keep_reading
+    (Client.feed
+       client
+       (frame (F.Unavailable_snapshot { revision = revision 1; degradation = outage })));
+  check step_t "an outage with no reading to mark" Client.Reconnect
+    (Client.feed client (frame (degraded ~revision:2 ~since:12.0 F.Scan_failed)));
+  check view_t "the view stays unavailable"
+    (Client.Unavailable { degradation = outage; disconnected_since = None })
+    (Client.view client)
+;;
+
+(* The Keepers screen draws what the job that follows the stream posted. The
+   view lives inside the following state, so a job that is gone leaves nothing
+   behind: withdrawing the readings ends the follow and the screen with it. *)
+let test_the_screen_draws_only_what_a_following_job_posted () =
+  let state = Masc_tui_types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  check view_t "no job" Client.Awaiting_first_reading (Masc_tui_types.fleet_stream_view state);
+  let posted = following (reading ~revision:1 ~measured_at:10.0 (fleet ())) in
+  state.Masc_tui_types.fleet_stream_reader <- Masc_tui_types.Fleet_stream_following posted;
+  check view_t "the job's view" posted (Masc_tui_types.fleet_stream_view state);
+  Masc_tui_types.suspend_workspace_readings state;
+  check view_t "readings withdrawn" Client.Awaiting_first_reading
+    (Masc_tui_types.fleet_stream_view state);
+  check bool "and a job can start again" true
+    (state.Masc_tui_types.fleet_stream_reader = Masc_tui_types.Fleet_stream_idle)
+;;
+
 let test_first_scan_failure_is_visible_until_a_real_reading () =
   let outage = { F.since = 10.0; reason = F.Scan_failed } in
   let client = Client.create () in
@@ -516,6 +584,8 @@ let () =
             test_a_client_that_has_read_nothing_awaits_the_first_reading
         ; test_case "a loss before any reading is unreachable until a snapshot" `Quick
             test_a_loss_before_any_reading_is_unreachable_until_a_snapshot
+        ; test_case "an unavailable snapshot ends unreachable too" `Quick
+            test_an_unavailable_snapshot_ends_unreachable_too
         ; test_case "first scan failure remains visible until a reading" `Quick
             test_first_scan_failure_is_visible_until_a_real_reading
         ; test_case "server restart replaces a previous reading with unavailable" `Quick
@@ -555,6 +625,14 @@ let () =
             test_half_a_frame_from_a_lost_connection_does_not_leak_into_the_next
         ; test_case "a refusal shows until a snapshot arrives" `Quick
             test_a_refusal_shows_until_a_snapshot_arrives
+        ; test_case "a refusal shows over unreachable until a snapshot arrives" `Quick
+            test_a_refusal_shows_over_unreachable_until_a_snapshot_arrives
+        ; test_case "an outage event after an unavailable snapshot asks for a new connection" `Quick
+            test_an_outage_event_after_an_unavailable_snapshot_asks_for_a_new_connection
+        ] )
+    ; ( "the screen"
+      , [ test_case "the screen draws only what a following job posted" `Quick
+            test_the_screen_draws_only_what_a_following_job_posted
         ] )
     ; ( "with the hub"
       , [ test_case "a client ends with the hub's state" `Quick

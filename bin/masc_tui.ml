@@ -14041,6 +14041,10 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.runtime_param_edit <- None;
   state.runtime_params_notice <- None;
   state.observer <- Observer_off;
+  (* The withdrawal cancelled the fleet job with every other job. What it drew
+     belongs to the workspace left, and the next refresh that confirms one
+     starts another. *)
+  state.fleet_stream_reader <- Fleet_stream_idle;
   state.mcp_session <- None;
   state.resources_list <- None;
   state.resources_error <- None;
@@ -15464,7 +15468,8 @@ let fleet_stream_reconnect_s = 2.0
 let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
   let enqueue_async = workspace_enqueue state in
   let exception Close_connection in
-  state.fleet_stream_reader <- Fleet_stream_following;
+  state.fleet_stream_reader <-
+    Fleet_stream_following Masc_tui_fleet_stream.Awaiting_first_reading;
   let run () =
     match Eio_context.get_clock_opt () with
     | None -> enqueue_async mailbox (Fleet_stream_reader_ended "Eio clock is unavailable")
@@ -15494,7 +15499,9 @@ let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
           (match outcome with
            | Error (Masc_tui_http.Http_refused { status; detail }) ->
                Masc_tui_fleet_stream.refused reader ~status ~detail
-           | Error (Masc_tui_http.Transport_failed _) | Ok () -> ());
+           | Error (Masc_tui_http.Transport_failed detail) ->
+               Log.Transport.warn "tui_fleet_stream_lost detail=%s" detail
+           | Ok () -> Log.Transport.debug "tui_fleet_stream_ended");
           Masc_tui_fleet_stream.lost reader ~now:(Eio.Time.now clock);
           post ()
         in
@@ -15522,7 +15529,7 @@ let open_fleet_stream_if_due state ~host ~port ~mailbox =
       (match state.connection_status, state.fleet_stream_reader with
        | (Connected | Degraded), Fleet_stream_idle ->
            launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox
-       | (Connected | Degraded), Fleet_stream_following
+       | (Connected | Degraded), Fleet_stream_following _
        | (Disconnected | Connecting | Booting), _ ->
            ())
   | ( Workspace_identity_unread
@@ -19423,11 +19430,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
          | Observer_closed_after_live _ ->
            Observer_closed_before_answer { reason; at });
       add_event state "observer" ("runtime event feed closed: " ^ reason)
-  | Fleet_stream_view view -> state.fleet_stream_view <- view
+  | Fleet_stream_view view ->
+      (* A view from a job that is no longer followed has no screen to go to. *)
+      (match state.fleet_stream_reader with
+       | Fleet_stream_following _ -> state.fleet_stream_reader <- Fleet_stream_following view
+       | Fleet_stream_idle -> ())
   | Fleet_stream_reader_ended detail ->
       (* The job reconnects by itself and ends only when withdrawn, so an end
-         it reports is a failure of the job: say so and let the next refresh
-         start another. *)
+         it reports is a failure of the job: say so, draw nothing more from
+         it, and let the next refresh start another. *)
       Log.Transport.warn "tui_fleet_stream_reader_ended detail=%s" detail;
       state.fleet_stream_reader <- Fleet_stream_idle
   | Http_refresh_failed (err, approval_ticket, refresh_ticket) ->

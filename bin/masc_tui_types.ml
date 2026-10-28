@@ -3535,12 +3535,14 @@ type observer_status =
       events : int;  (** frames the stream delivered before it closed *)
     }
 
-(** Whether a job follows the fleet stream ([GET /api/v1/stream/fleet]). The
-    job owns the connection and reconnects it, so it is [Fleet_stream_following]
-    from the launch until the workspace withdraws it. *)
+(** Whether a job follows the fleet stream ([GET /api/v1/stream/fleet]), and
+    what it last posted for the screen. The job owns the connection and
+    reconnects it, so it follows from the launch until the workspace withdraws
+    it. The view exists only while a job follows: a job that is gone leaves
+    nothing to draw. *)
 type fleet_stream_reader =
   | Fleet_stream_idle  (** no job: one starts on the next refresh that reaches the server *)
-  | Fleet_stream_following
+  | Fleet_stream_following of Masc_tui_fleet_stream.view
 
 type observer_replay_status =
   | Observer_replay_unobserved
@@ -9198,7 +9200,6 @@ type state = {
      fleet's own reading of what is missing, as the fleet stream (RFC-0477)
      last told it. *)
   mutable fleet_stream_reader: fleet_stream_reader;
-  mutable fleet_stream_view: Masc_tui_fleet_stream.view;
   mutable connection_status: connection_status;
   mutable http_refresh_started_ns: int64 option;
   mutable http_refresh_progress: (workspace_authority * Http_refresh_progress.t) option;
@@ -12549,6 +12550,13 @@ let suspend_verification_evidence_read state =
     state.verification_evidence;
   state.verification_evidence_request <- None
 
+(* What the Keepers screen draws of the fleet: what the job that follows the
+   stream last posted, and nothing once no job follows. *)
+let fleet_stream_view state =
+  match state.fleet_stream_reader with
+  | Fleet_stream_following view -> view
+  | Fleet_stream_idle -> Masc_tui_fleet_stream.Awaiting_first_reading
+
 let suspend_workspace_readings state =
   state.resource_diagrams <- None;
   state.listen_request <- None;
@@ -12595,7 +12603,6 @@ let suspend_workspace_readings state =
   List.iter (fun (_, cancel) -> cancel ()) cancellations;
   state.observer <- Observer_off;
   state.fleet_stream_reader <- Fleet_stream_idle;
-  state.fleet_stream_view <- Masc_tui_fleet_stream.Awaiting_first_reading;
   state.detail_read_authority <- ref ();
   state.detail_reads <- [];
   suspend_keeper_deletions_read state;
@@ -16448,7 +16455,6 @@ let create_state
   quit_armed = false;
   last_action = None;
   fleet_stream_reader = Fleet_stream_idle;
-  fleet_stream_view = Masc_tui_fleet_stream.Awaiting_first_reading;
   connection_status = Disconnected;
   http_refresh_started_ns = None;
   http_refresh_progress = None;

@@ -1624,7 +1624,10 @@ let observe_runtime_events ~clock ~(host : string) ~(port : int)
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
 
 (* The server writes a keepalive comment every [sse_ping_interval_s] when the
-   fleet has nothing to say, so a connection quiet for three of them is dead. *)
+   fleet has nothing to say. The idle watcher compares the last chunk only at
+   the end of each window of [fleet_stream_missed_keepalives] intervals, so a
+   connection that goes quiet is ended between one and two windows later:
+   90 to 180 s. *)
 let fleet_stream_missed_keepalives = 3.0
 
 let fleet_stream_idle_timeout_sec =

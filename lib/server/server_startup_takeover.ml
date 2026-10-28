@@ -526,7 +526,7 @@ let inspect_runtime_directory ~base_path runtime_directory =
 ;;
 
 let prepare_base_path_lock ~run_dir base_path =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* canonical_base_path =
     try Ok (Unix.realpath base_path) with
     | exn -> (* cancel-guard-ok: Unix.realpath performs no Eio operation. *)

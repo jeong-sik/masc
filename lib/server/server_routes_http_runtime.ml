@@ -1555,7 +1555,7 @@ let readiness_handler _request reqd =
       reqd
 
 let board_comment_request_of_query ~offset ~limit =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let integer_field name = function
     | None -> Ok None
     | Some raw ->

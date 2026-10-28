@@ -5,7 +5,7 @@ type phase = Prepared | Requested | Released
 type t = {incumbent:incumbent; observe:unit -> (string,error) result;
   authorize:unit -> bool; signal:unit -> (unit,error) result; release:unit -> unit;
   lock:Eio.Mutex.t; mutable phase:phase}
-let ( let* ) = Result.bind
+open Result.Syntax
 let decode_health body =
   let unique = function
     | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) -> Some fields

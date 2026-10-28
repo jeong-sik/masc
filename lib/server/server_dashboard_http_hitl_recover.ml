@@ -78,7 +78,7 @@ type rearm_request =
   }
 
 let parse_rearm_fields fields =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let required name =
     match List.assoc_opt name fields with
     | Some value -> Ok value
@@ -188,7 +188,7 @@ let parse_rearm_fields fields =
 ;;
 
 let parse_ack_fields fields =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let required name =
     match List.assoc_opt name fields with
     | Some value -> Ok value

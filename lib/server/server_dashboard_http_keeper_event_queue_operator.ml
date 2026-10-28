@@ -3,7 +3,7 @@
 module Http = Http_server_eio
 module Execute = Server_dashboard_http_keeper_event_queue_operator_execute
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let schema = "keeper_event_queue.operator.request.v2"
 let result_schema = "keeper_event_queue.operator.result.v1"
 let prefix = "/api/v1/keepers/"

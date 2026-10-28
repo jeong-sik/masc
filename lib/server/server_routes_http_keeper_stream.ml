@@ -339,7 +339,7 @@ let handle_keeper_tool_approval ~actor state request reqd =
       try
         match Yojson.Safe.from_string body_str with
         | `Assoc fields as json ->
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* stripped_json =
             match Workspace.validate_expected_workspace ~config json with
             | Ok payload -> Ok payload
@@ -586,7 +586,7 @@ let handle_keeper_tool_approval_mode_set ~actor state request reqd =
             | Some _ | None ->
               Error (Printf.sprintf "%s (string) is required" name)
           in
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* keeper_name = field "name" in
           let* mode_raw = field "mode" in
           (match Keeper_tool_approval_mode.mode_of_string mode_raw with
@@ -921,7 +921,7 @@ let keeper_stream_success = function
 
 let parse_keeper_chat_stream_request body_str =
   try
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let json = Yojson.Safe.from_string body_str in
     let* fields =
       match json with
@@ -1132,7 +1132,7 @@ let operation_source_of_payload
       ~user_row_origin
       payload
   =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* continuation_channel =
     if has_external_speaker payload
     then Error "connector operations must enter through the typed connector ingress"
@@ -1156,7 +1156,7 @@ let operation_source_of_payload
 ;;
 
 let operation_payload_of_json ~keeper_name ~operation_id ~source ~input =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* source = Keeper_chat_operation_payload.source_of_json source in
   let* input = Keeper_chat_operation_payload.input_of_json input in
   let raw_message = input.message in
@@ -1517,7 +1517,7 @@ let public_reply_of_outcome ~turn_outcome ~reply =
   | No_visible_reply -> Some reply
 
 let canonical_reply_payload_of_body ~redact_text body =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* fields =
     match Yojson.Safe.from_string body with
     | `Assoc fields -> Ok fields
@@ -2017,7 +2017,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       | Some Keeper_direct_gate_continuation.Checkpoint_reconciliation | None -> None) in
   let persist_operation_attempt ~settlement ?(tool_calls=[]) ?blocks ?turn_ref
       ?stream_lifecycle () =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* resumed_from = resumed_from in
     let* operation_id = match submission with
       | Owner_operation {operation_id; _} ->
@@ -2029,7 +2029,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       ~surface:chat_surface ?conversation_id ?blocks ?turn_ref ?stream_lifecycle ()
   in
   let append_queued_user_row_once () =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* delivery_key = queue_delivery_key () in
     let conversation_id, external_message_id, workspace_id =
       operation_delivery_coordinates
@@ -2232,7 +2232,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
   (* [err] is [Keeper_request_failure.summary] of the cause its producer
      built. The row still carries text; RFC-0454 D3 gives it the value. *)
   let publish_tool_transcript_bindings tool_calls =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* resumed_from = resumed_from in
     let* operation_id = queue_operation_id () in
     let* events =
@@ -3096,7 +3096,7 @@ let operation_execution_of_outcome ~operation_state ~pending_continuation ~outco
     failed Keeper_chat_operation.Turn_invariant "claimed operation was already terminal"
 
 let persist_batch_user_rows ~base_dir ~keeper_name members =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match members with
   | [] | [_] -> Ok ()
   | _ -> List.fold_left (fun result (operation : Keeper_chat_operation.t) ->
@@ -3176,7 +3176,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                 ~base_dir:(Mcp_server.workspace_config state).base_path
                 ~keeper_name ~operation_id:(Keeper_chat_operation.Operation_id.to_string member_id) ()) member_ids in
             let first_seq =
-              let ( let* ) = Result.bind in
+              let open Result.Syntax in
               let* pending = pending_continuation ()
                 |> Result.map_error (fun detail -> Keeper_chat_event_log.Journal_unreadable detail) in
               List.fold_left (fun result (_, journal) ->
@@ -3905,7 +3905,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
         if Keeper_owner.Chat_operation.is_terminal operation.state then finish ()
       in
       let submit_result =
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let* source =
           operation_source_of_payload
             ~thread_id
@@ -4142,7 +4142,7 @@ let handle_keeper_ask_answer ~actor state request reqd =
                 | Some (`String value) -> Ok (String.trim value)
                 | Some _ | None -> Error (Printf.sprintf "%s (string) is required" name)
               in
-              let ( let* ) = Result.bind in
+              let open Result.Syntax in
               let* keeper_name = string_field "name" in
               let* ask_id = string_field "ask_id" in
               let* submissions =
@@ -4409,7 +4409,7 @@ let handle_keeper_asks_list state request reqd =
        | Error error -> unavailable error
        | Ok logs ->
            let discovered = List.fold_left (fun result log ->
-             let ( let* ) = Result.bind in
+             let open Result.Syntax in
              let* owners = result in
              match log with
              | Keeper_ask_store.Unreadable_log error -> Error error

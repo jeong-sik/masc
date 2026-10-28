@@ -104,7 +104,7 @@ let error_to_string = function
 ;;
 
 let publish_lane_skills ~config exports =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* workspace = workspace config.Workspace.base_path |> Result.map_error error_to_string in
   let sources, invalid = List.fold_left
     (fun (sources, errors) (export : Lane_addon_runtime.skill_export) ->

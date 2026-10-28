@@ -40,7 +40,7 @@ let directory_stamp path =
         (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message cause)))
 
 let inspect ~config ~keeper_name =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let physical path = Physical.inspect_source ~path
       |> Result.map_error (fun error -> History_unavailable (Physical.error_to_string error)) in
   let* chat = physical
@@ -77,7 +77,7 @@ let inspect ~config ~keeper_name =
 let after_read_hook : (unit -> unit) option Atomic.t = Atomic.make None
 
 let read_source_json ~config ~keeper_name ~render source =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* messages = Keeper_chat_store.load_result ~base_dir:config.Workspace.base_path ~keeper_name
       |> Result.map_error (fun error -> History_unavailable (Physical.error_to_string error)) in
   let* turns = Autonomous.project_snapshot_result ~config ~keeper_name source.autonomous
@@ -87,7 +87,7 @@ let read_source_json ~config ~keeper_name ~render source =
 
 let read_json ~config ~keeper_name ~render =
   Domain_pool_ref.submit_io_or_inline (fun () ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* source = inspect ~config ~keeper_name in
     read_source_json ~config ~keeper_name ~render source)
 

@@ -94,7 +94,7 @@ let load_poll_config ~path =
 (* Slack's documented time pagination keeps the lower bound fixed and moves
    latest to the final message's ts. Unlike opaque cursors these boundaries
    remain usable across poll intervals and server restarts. *)
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type window = {
   oldest : string;

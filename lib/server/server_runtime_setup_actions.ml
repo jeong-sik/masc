@@ -26,7 +26,7 @@ let status_of_error : error -> Httpun.Status.t = function
   | Save_failed (Runtime_setup_batch.Configuration_unavailable | Runtime_setup_batch.Child_not_started _
       | Runtime_setup_batch.Write_failed _) -> `Service_unavailable
   | Save_failed (Runtime_setup_batch.Verification_failed _ | Runtime_setup_batch.Verification_unreadable _) -> `Bad_gateway
-let ( let* ) = Result.bind
+open Result.Syntax
 let fields allowed required = function
   | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields))
       && List.for_all (fun (key,_) -> List.mem key allowed) fields

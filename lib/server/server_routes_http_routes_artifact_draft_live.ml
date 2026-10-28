@@ -4,7 +4,7 @@ module Http = Http_server_eio
 module Draft = Artifact_draft
 module Store = Artifact_draft_store
 module Live = Artifact_draft_live
-let ( let* ) = Result.bind
+open Result.Syntax
 let respond ?(status = `OK) request reqd json =
   Http.Response.json_value ~status
     ~extra_headers:(["cache-control", "private, no-store"] @ cors_headers (get_origin request)) json reqd

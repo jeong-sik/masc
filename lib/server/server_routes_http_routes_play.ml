@@ -20,7 +20,7 @@ let invites_path = "/api/v1/play/invites"
 let invite_prefix = invites_path ^ "/"
 
 let decode_issue body =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* json =
     try Ok (Yojson.Safe.from_string body) with
     | Yojson.Json_error message -> Error ("body is not JSON: " ^ message)

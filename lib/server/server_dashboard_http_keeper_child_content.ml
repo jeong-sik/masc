@@ -1,6 +1,6 @@
 module Journal = Keeper_child_content_journal
 module Read = Keeper_child_content_read
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type route = Receivers of string | Records of string | Hints of string
 let permission = Masc_domain.CanAdmin

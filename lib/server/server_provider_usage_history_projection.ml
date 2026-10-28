@@ -1,6 +1,6 @@
 module Usage = Runtime_provider_usage_window
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let kind_json = function
   | Usage.Five_hour -> `String "five_hour"

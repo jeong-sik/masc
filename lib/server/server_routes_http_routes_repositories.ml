@@ -222,7 +222,7 @@ let get_string_list_field fields key default =
 let parse_repository_json body_str =
   match Yojson.Safe.from_string body_str with
   | `Assoc fields ->
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* raw_name = get_string_field fields "name" in
       let* raw_url = get_string_field fields "url" in
       let url = Option.value ~default:"" raw_url |> String.trim in

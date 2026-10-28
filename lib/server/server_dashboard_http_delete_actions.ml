@@ -990,7 +990,7 @@ let close_optional_bool json field =
 ;;
 
 let parse_board_close_request json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* post_id =
     match Safe_ops.json_string_opt "post_id" json with
     | Some post_id -> Ok post_id

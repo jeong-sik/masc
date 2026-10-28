@@ -9,7 +9,7 @@ type error =
   ; message : string
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let schema = "masc.dashboard.official-client-session.v2"
 
 let error kind code message = Error { kind; code; message }

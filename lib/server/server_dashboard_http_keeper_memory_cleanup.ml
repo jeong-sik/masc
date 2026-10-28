@@ -4,7 +4,7 @@ module Http = Http_server_eio
 module Current = Keeper_memory_os_current
 module Context = Keeper_librarian_context
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let permission = Masc_domain.CanAdmin
 let prefix = "/api/v1/keepers/"
 

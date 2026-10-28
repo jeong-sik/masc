@@ -134,7 +134,7 @@ type tick_failure =
   ; settlement_errors : settlement_error list
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let runner_error_to_string = function
   | Service_error err -> Schedule_service.service_error_to_string err

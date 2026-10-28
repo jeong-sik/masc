@@ -487,7 +487,7 @@ let dashboard_gate_resolve_http_json ?workspace_config ~base_path ~created_by ~(
 ;;
 
 let dashboard_gate_retry_http_json ~workspace_config ~base_path ~requested_by ~(args : Yojson.Safe.t) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* args =
     match Workspace.validate_expected_workspace ~config:workspace_config args with
     | Ok args -> Ok args

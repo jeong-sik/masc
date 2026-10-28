@@ -159,7 +159,7 @@ let kind_serves_section kind (section : Voice_setup.section) =
   | Voice_config.Espeak_ng, Voice_setup.Stt
   | Voice_config.Whisper_cli, Voice_setup.Tts -> false
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let endpoint_allowed_fields =
   [ "id"; "kind"; "enabled"; "timeout_seconds"; "base_url"; "mcp_url"; "health_url";

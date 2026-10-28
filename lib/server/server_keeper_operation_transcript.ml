@@ -4,7 +4,7 @@ type settlement =
   | Request_failed of string
 
 let tool_delivery_key ~operation_id ~resumed_from =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let delivery_key = Keeper_chat_delivery_identity.Operation operation_id in
   match resumed_from with
     | None -> Ok delivery_key
@@ -31,7 +31,7 @@ let committed_tool_events ~operation_id ~resumed_from tool_calls =
 
 let persist ~base_dir ~keeper_name ~operation_id ~resumed_from ~settlement
     ~tool_calls ?surface ?conversation_id ?blocks ?turn_ref ?stream_lifecycle () =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let delivery_key = Keeper_chat_delivery_identity.Operation operation_id in
   let* tool_delivery_key = tool_delivery_key ~operation_id ~resumed_from in
   let tools_only () = match tool_calls with

@@ -1,7 +1,7 @@
 module Capture = Workspace_memory_execution_capture
 module Exact = Lane_addon_exact
 module Owner = Lane_addon_tool_request_owner
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let package_id = Capture.package_id
 let tool = Capture.tool

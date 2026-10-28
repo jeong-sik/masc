@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 let digest text = Agent_core_sha256.(digest_string text |> to_hex)
 
 type plan =

@@ -357,7 +357,7 @@ let build_presence_snapshot state =
    mutation contract asks of this plane's first mutation. Targeted asks
    (name a keeper, or the keeper attached to this codebase) are M2. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type ide_ask =
   { question : string

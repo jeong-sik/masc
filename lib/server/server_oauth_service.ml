@@ -1,6 +1,6 @@
 (* HIGH-RISK-UNREVIEWED: transport-neutral OAuth wire protocol service. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let max_request_body_bytes = 16 * 1024
 
 let html_escape value =

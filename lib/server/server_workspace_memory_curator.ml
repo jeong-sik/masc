@@ -10,7 +10,7 @@ module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Exact = Lane_addon_exact
 module Pass = Server_workspace_memory_curator_pass
-let ( let* ) = Result.bind
+open Result.Syntax
 let io work=Systhread_host.run work
 let consumer value=Result.map_error Consumer.error_to_string value
 let id (original : Consumer.original)=Owner.Record.request_id original.record

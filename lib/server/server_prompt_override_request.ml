@@ -1,6 +1,6 @@
 (** Pure admission for the dashboard prompt-override request body. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type t =
   | Set of

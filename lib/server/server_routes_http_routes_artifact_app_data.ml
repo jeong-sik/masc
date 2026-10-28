@@ -20,7 +20,7 @@ let respond ?(status = `OK) request reqd json =
 let refuse request reqd error = let json, status = error_response error in respond ~status request reqd json
 let authorized handler = with_token_permission_auth ~permission:Masc_domain.CanAdmin handler
 let decode_request ~config body =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* json = match Yojson.Safe.from_string body with
     | json -> Ok json
     | exception Yojson.Json_error _ -> Error (error_response (Store.Invalid "invalid application input JSON")) in

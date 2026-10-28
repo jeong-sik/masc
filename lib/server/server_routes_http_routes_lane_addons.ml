@@ -2,7 +2,7 @@ open Server_auth
 module Http = Http_server_eio
 module Runtime = Lane_addon_runtime
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let error_json message = `Assoc ["error", `String message]
 let decode_body body =
   try match Yojson.Safe.from_string body with

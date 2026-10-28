@@ -556,7 +556,7 @@ let graphql_url_of_string raw =
          raw)
 
 let endpoint_of_entries entries =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* github_host =
     match List.assoc_opt github_host_key entries with
     | None -> Ok default_github_host

@@ -9,7 +9,7 @@ type error =
   ; message : string
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let schema = "masc.dashboard.official-client-probe.v1"
 let max_probe_timeout_s = 10.0
 

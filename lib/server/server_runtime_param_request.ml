@@ -1,6 +1,6 @@
 (** Pure admission for dashboard runtime-parameter request bodies. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type set_request =
   { param_key : string

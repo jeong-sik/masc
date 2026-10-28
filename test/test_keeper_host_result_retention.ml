@@ -405,7 +405,7 @@ let test_mixed_groups_use_exact_serialized_size () =
       check string "mixed groups retain each reference" shared actual
     | Individual actual ->
       check bool "mixed groups fall back only when sharing is not smaller" false sharing_is_smaller;
-      check string "mixed groups retain original fields" individual actual) [1; 6000]
+      check string "mixed groups retain original fields" individual actual) [1; 202; 203; 204; 6000]
 
 let test_mcp_reused_string_id_keeps_physical_invocations () = with_workspace (fun base_path ->
   let module Mcp = Runtime_official_client_mcp in

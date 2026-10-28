@@ -4,6 +4,18 @@ let require condition description =
   if not condition then failwith description
 
 let () =
+  let decide = Presented.decide_unpresented_input in
+  require (decide ~frame_presented:false ~external_surface:false Action = Reject_action)
+    "an invalidated frame cannot accept a key or pointer";
+  require (decide ~frame_presented:false ~external_surface:false Paste = Reject_paste)
+    "an invalidated frame cannot accept a paste";
+  require (decide ~frame_presented:false ~external_surface:false Protocol = Accept_input)
+    "an invalidated frame still accepts protocol replies";
+  require (decide ~frame_presented:true ~external_surface:false Action = Accept_input)
+    "a presented frame retains its own input policy, including compact quit";
+  require (decide ~frame_presented:false ~external_surface:true Action = Accept_input
+           && decide ~frame_presented:false ~external_surface:true Paste = Accept_input)
+    "independently drawn surfaces retain their input policy";
   let old = Presented.initial ~approval:"old approval" ~presses:"old zones"
       ~panes:"old panes" ~reader:"old reader" in
   let same = Presented.presented old ~approval:"approval" ~presses:"zones"

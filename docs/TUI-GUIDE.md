@@ -1932,7 +1932,10 @@ source is prepared from its original bytes before terminal handoff; leaving
 that conversation, replacing the request or entering another key, paste or mouse
 gesture retires its pending open. Already buffered input, a paste still arriving
 or an incomplete terminal/UTF-8 sequence also keeps the terminal
-in chat; run `/music midi` again when ready to enter the editor. The
+from handing off to the editor; run `/music midi` again when ready. The reader
+treats undecoded terminal input conservatively, so even a terminal protocol
+reply can cancel a pending open, including during a screen transition. The chat
+and bounded session event history record the cancellation. The
 original attachment stays unchanged, and saved projects use the workspace's
 music project directory. The phrase editor's first audio Space opens instrument/preset selection;
 `i` changes it. For imported MIDI, the SoundFont choice captures the configured

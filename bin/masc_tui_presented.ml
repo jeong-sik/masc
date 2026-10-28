@@ -4,6 +4,16 @@ type barrier =
 
 type recovery = No_rejected_recovery | Rejected_recovery
 
+type input_kind = Action | Paste | Protocol
+type input_decision = Accept_input | Reject_action | Reject_paste
+
+let decide_unpresented_input ~frame_presented ~external_surface input =
+  if frame_presented || external_surface then Accept_input
+  else match input with
+    | Action -> Reject_action
+    | Paste -> Reject_paste
+    | Protocol -> Accept_input
+
 type ('approval, 'presses, 'panes, 'reader) t = {
   approval : 'approval;
   presses : 'presses;

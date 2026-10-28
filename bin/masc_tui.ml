@@ -11725,8 +11725,11 @@ let listen_newest_media ?(destination=Listen_player) state ~mailbox =
 
 let withdraw_pending_music_editor state =
   withdraw_chat_music_editor state |> Option.iter (fun request ->
+    let message =
+      "/music midi: opening cancelled while terminal input was pending; run /music midi again when ready" in
     chat_notice state ~keeper_name:(Some request.lr_keeper) ~kind:Notice_reply
-      "/music midi: opening cancelled by newer input; run /music midi again when ready")
+      message;
+    report_action state "system" message)
 
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
@@ -25882,15 +25885,18 @@ and is loaded on demand through keeper_skill.
       let drain_deadline_ns =
         Int64.add (Mtime_clock.elapsed_ns ()) async_drain_budget_ns
       in
-      (* An event held across a presentation cannot cancel an operation or
-         start an editor before it is rejected below. *)
+      (* Input may cancel a pending MIDI handoff even when it will later be
+         rejected; this lets the existing editor owner yield without replay. *)
       if not (input_unsettled ()) && Option.is_none interrupted_paste then
         presented := Presented.after_input !presented ~input_pending:false;
       let input_barrier_held () = match (!presented).barrier with
         | Presented.Open -> false | Presented.Held _ -> true in
+      let frame_unavailable () =
+        not state.image_open && not state.msx_open
+        && Option.is_none (Frame_presenter.presented_rows frame_presenter) in
+      let input_not_yet_admissible () = input_barrier_held () || frame_unavailable () in
       let retire_music_editor_for_input () =
-        if not (input_barrier_held ()) &&
-           (Option.is_some interrupted_paste || input_reader_has_started_input input_reader) then
+        if Option.is_some interrupted_paste || input_reader_has_started_input input_reader then
           withdraw_pending_music_editor state
       in
       retire_music_editor_for_input ();
@@ -25904,15 +25910,15 @@ and is loaded on demand through keeper_skill.
       prepare_resource_diagrams state ~mailbox:async_messages;
       prepare_inspected_frame state ~mailbox:async_messages;
       (match state.lane_addons with
-       | Some view when view.editor_ready && not (input_barrier_held ()) -> handle_lane_document_editor ()
+       | Some view when view.editor_ready && not (input_not_yet_admissible ()) -> handle_lane_document_editor ()
        | Some _ | None -> ());
       continue_keeper_settings_editor ~input_pending:(
-        input_barrier_held () || Option.is_some interrupted_paste
+        input_not_yet_admissible () || Option.is_some interrupted_paste
         || input_reader_has_ready_input input_reader
         || input_holds_incomplete_sequence input_reader
         || match paste_phase input_reader with No_paste -> false | Pasting _ | Draining_tail _ -> true);
       let code_navigation_input_pending =
-        input_barrier_held () || Option.is_some interrupted_paste
+        input_not_yet_admissible () || Option.is_some interrupted_paste
         || input_reader_has_ready_input input_reader
         || input_holds_incomplete_sequence input_reader
         || match paste_phase input_reader with No_paste -> false | Pasting _ | Draining_tail _ -> true
@@ -26019,6 +26025,32 @@ and is loaded on demand through keeper_skill.
             Option.iter (observe_input_received input_reader) input;
             input)
       in
+      (* SIGWINCH can arrive while [read_input] is waiting. Consume it before
+         this input sees the old frame; the next loop would be one key too
+         late. *)
+      consume_resize_request ();
+      (* One direct ioctl snapshot owns both this interaction's bounds and its
+         eventual frame. This also observes resizes from terminals that omit
+         SIGWINCH, without allowing nested renderers to disagree mid-frame. *)
+      (match refresh_terminal_size () with
+       | Render_schedule.Terminal_size_cache.Changed _ ->
+           discard_frame_for_new_size frame_presenter render_schedule;
+           (* The panes a held gesture was placed in are not where they were. *)
+           pointer_gesture := Masc_tui_pane_selection.Idle;
+           (* Geometry changes redraw the cached snapshot immediately; an
+              in-flight tick must not own resize presentation either. *)
+           if state.msx_open then begin
+             if state.msx_menu_open then
+               Masc_tui_msx.render_menu ~write:write_to_terminal state
+             else
+               render_spectator state
+           end;
+           (match state.browser_viewport with
+            | Some (shot, bytes) -> draw_browser_viewport state shot bytes
+            | None -> ());
+           if state.image_open && not state.msx_open then
+             Option.iter (draw_inspected_image state) state.image_inspection
+       | Render_schedule.Terminal_size_cache.Unchanged _ -> ());
       (* Decide from the hold captured before reading: the final event is
          rejected even when reading it emptied the last input buffer. *)
       let rejected, rejected_paste, was_reported, paste_was_reported =
@@ -26045,6 +26077,40 @@ and is loaded on demand through keeper_skill.
       end;
       let input = if rejected then None else input in
       presented := Presented.after_input !presented ~input_pending:(input_unsettled ());
+      (* A resize or invalidation can leave no accepted frame even when no
+         transition barrier is active. Reject that operator input before any
+         hidden handler can consume it; protocol replies still reach their owner. *)
+      let unpresented_decision = match input with
+        | None -> Presented.Accept_input
+        | Some event ->
+            let kind = match event with
+              | Key _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _
+              | Mouse_wheel _ -> Presented.Action
+              | Pasted _ -> Presented.Paste
+              | Graphics_reply _ -> Presented.Protocol in
+            Presented.decide_unpresented_input
+              ~frame_presented:(Option.is_some (Frame_presenter.presented_rows frame_presenter))
+              ~external_surface:(state.image_open || state.msx_open) kind in
+      (match unpresented_decision with
+       | Presented.Reject_paste when Option.is_some interrupted_paste ->
+           presented := Presented.reject_recovery !presented
+       | Presented.Accept_input | Presented.Reject_action | Presented.Reject_paste -> ());
+      let input = match unpresented_decision with
+        | Presented.Accept_input -> input
+        | Presented.Reject_action | Presented.Reject_paste ->
+            pointer_gesture := Masc_tui_pane_selection.Idle;
+            None in
+      (* A rejected gesture has no target, but it still interrupts any armed
+         confirmation. Never send its key or payload to another surface. *)
+      let rejected_operator_input = rejected || match unpresented_decision with
+        | Presented.Accept_input -> false
+        | Presented.Reject_action | Presented.Reject_paste -> true in
+      if rejected_operator_input then begin
+        Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+        (* The read may have consumed its final byte, so neither the pre- nor
+           post-drain readiness check can witness this rejected gesture. *)
+        withdraw_pending_music_editor state
+      end;
       let input = match input with
         | Some (Mouse_wheel (direction, _, _))
             when Option.is_some (current_code_hover state) ->
@@ -26173,32 +26239,16 @@ and is loaded on demand through keeper_skill.
            paste_guard_idle_notified := false
        | Draining_tail _ -> ()
        | No_paste | Pasting _ -> paste_guard_idle_notified := false);
-      (* SIGWINCH can arrive while [read_input] is waiting. Consume it before
-         this input sees the old frame; the next loop would be one key too
-         late. *)
-      consume_resize_request ();
-      (* One direct ioctl snapshot owns both this interaction's bounds and its
-         eventual frame. This also observes resizes from terminals that omit
-         SIGWINCH, without allowing nested renderers to disagree mid-frame. *)
-      (match refresh_terminal_size () with
-       | Render_schedule.Terminal_size_cache.Changed _ ->
-           discard_frame_for_new_size frame_presenter render_schedule;
-           (* The panes a held gesture was placed in are not where they were. *)
-           pointer_gesture := Masc_tui_pane_selection.Idle;
-           (* Geometry changes redraw the cached snapshot immediately; an
-              in-flight tick must not own resize presentation either. *)
-           if state.msx_open then begin
-             if state.msx_menu_open then
-               Masc_tui_msx.render_menu ~write:write_to_terminal state
-             else
-               render_spectator state
-           end;
-           (match state.browser_viewport with
-            | Some (shot, bytes) -> draw_browser_viewport state shot bytes
-            | None -> ());
-           if state.image_open && not state.msx_open then
-             Option.iter (draw_inspected_image state) state.image_inspection
-       | Render_schedule.Terminal_size_cache.Unchanged _ -> ());
+      (match unpresented_decision with
+       | Presented.Accept_input -> ()
+       | Presented.Reject_action ->
+           report_action state "error"
+             "Screen not yet displayed; input was not applied, review and retry";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Presented.Reject_paste ->
+           report_action state "error"
+             "Screen not yet displayed; paste was not applied, paste it again";
+           Render_schedule.request render_schedule Render_schedule.Background);
       reconcile_chat_focus ();
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
          armed state outlives the moment it was meant for, and a Ctrl-C typed
@@ -27253,9 +27303,10 @@ and is loaded on demand through keeper_skill.
           state.quit_armed <- true;
           report_action state "system" (session_quit_notice state ~key:"q")
         end in
+      let input_seen = Option.is_some input || rejected_operator_input in
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
          a mouse report, or any other key means the operator stayed. *)
-      if Option.is_some input && not quit_key then state.quit_armed <- false;
+      if input_seen && not quit_key then state.quit_armed <- false;
       (* An armed shutdown expires on the next unrelated input. Otherwise it
          waits indefinitely and a later press of the same key -- after the
          cursor has moved, after a refresh -- submits work the operator armed
@@ -27271,13 +27322,13 @@ and is loaded on demand through keeper_skill.
          least of all across a resize the operator cannot see it through. *)
       let cancelled second_press =
         Masc_tui_keys.cancels_two_press
-          ~input_seen:(Option.is_some input) ~key ~second_press
+          ~input_seen ~key ~second_press
       in
       (* A view change that no key caused, such as a dispatched task opening
          its surface, leaves the presets pane without passing through the
          Config arm below. A delete cannot be put back, so the first input
          seen anywhere else ends the arm. *)
-      if state.view <> Config && Option.is_some input then state.preset_armed <- None;
+      if state.view <> Config && input_seen then state.preset_armed <- None;
       (match state.view with
        | Approvals ->
            if cancelled [ "y"; "Y"; "n"; "N" ] then
@@ -27353,7 +27404,7 @@ and is loaded on demand through keeper_skill.
             match
               Masc_tui_connector_unbind.read_offer_input offer
                 ~frames_presented:state.frames_presented
-                ~input_seen:(Option.is_some input) ~key
+                ~input_seen ~key
             with
             | Masc_tui_connector_unbind.Offer_waits -> None
             | Masc_tui_connector_unbind.Offer_accepted -> Some offer

@@ -6,6 +6,15 @@ type barrier =
 
 type recovery = No_rejected_recovery | Rejected_recovery
 
+type input_kind = Action | Paste | Protocol
+type input_decision = Accept_input | Reject_action | Reject_paste
+
+val decide_unpresented_input :
+  frame_presented:bool -> external_surface:bool -> input_kind -> input_decision
+(** When a frame has not been presented, reject operator input unless an
+    independently drawn image or machine surface owns it. Protocol replies
+    remain observable. A presented compact frame counts as presented. *)
+
 type ('approval, 'presses, 'panes, 'reader) t = private {
   approval : 'approval;
   presses : 'presses;

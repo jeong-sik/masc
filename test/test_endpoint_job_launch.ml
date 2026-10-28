@@ -1612,9 +1612,10 @@ let failed_gate_channel_is_written_to_the_receipt () =
   let gate : D.gate={preparation=D.Ready;decision=G.Activate_requested;
       control=D.Failed {diagnostic="control IO: Connection reset by peer"}} in
   (* encode reads its payload back, so Ok means the failed state decodes. *)
-  let content=D.encode ~status ~physical_exit:(P.Signaled 9) ~launch_id:(id "06") ~input:(D.Accepted 0L) ~gate
+  let process=D.Child {physical_exit=P.Signaled 9;launch_id=id "06";input=D.Accepted 0L;gate} in
+  let content=D.encode ~status ~process
     |> Result.map_error D.error_to_string |> require in
-  let control=Yojson.Safe.Util.(Yojson.Safe.from_string content |> member "payload" |> member "gate" |> member "control") in
+  let control=Yojson.Safe.Util.(Yojson.Safe.from_string content |> member "payload" |> member "process" |> member "gate" |> member "control") in
   (* The second value is the base64 of the diagnostic above. *)
   check "failed channel and its diagnostic are written"
     (control=`Assoc ["state",`String "failed";"diagnostic_b64",`String "Y29udHJvbCBJTzogQ29ubmVjdGlvbiByZXNldCBieSBwZWVy"])

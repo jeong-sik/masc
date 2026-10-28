@@ -161,7 +161,7 @@ let sse =
              (match Client.view reader with
               | Client.Reading { reading; _ } ->
                 on_revision (F.Revision.to_int reading.Client.revision)
-              | Client.Awaiting_first_reading | Client.Cannot_read _ -> ()))) 
+              | Client.Awaiting_first_reading | Client.Unavailable _ | Client.Cannot_read _ -> ())))
   ; read_then_stall =
       Some
         (fun ~sw ~env ~port ~stalled ->

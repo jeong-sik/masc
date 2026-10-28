@@ -4,12 +4,14 @@
     own, retained before dispatch, in a scope of its own, so completed-history
     discovery never sees it as a history original.
 
-    A step holds no source. Its input is the question the floor's machine asks
-    after the answers the earlier steps retained, so a caller restores a step by
-    replaying the chain and handing over the question; the digest of the sent
-    prompt rejects any question that differs. A step names the range original
-    it reads and the step before it by request ID and digest. Whether those
-    records exist and agree is the chain's check, not this module's.
+    A step carries its own input: the one message it asks about, the facts
+    staged by the steps before it and what the host observed that no accepted
+    step has taken yet, together with the working state and unread messages the
+    question carries in. It restores from its record alone, so the host can
+    validate a model's answer to it and a wake can name its Keeper without the
+    chain. A step names the range original it reads and the step before it by
+    request ID and digest. Whether those records exist, agree and make the next
+    question the floor asks is the chain's check, made with {!matches_question}.
     Retention and restore perform no provider, Gate, Memory, source or cursor
     effect. Blocking filesystem operations must be offloaded as a whole from
     Eio callers. *)
@@ -30,15 +32,30 @@ val create : request_id:string -> owner:Keeper_librarian_durable_request.owner -
   step:Keeper_librarian_runtime.durable_step_preparation -> unit -> (t, string) result
 (** [range] is a history request of the owner and [previous] a step of the
     owner other than this one. Only the first question has no [previous]. The
-    step must be the preparation of [question]: its context, its input with the
-    working context cleared, its position and its sources. The request restores
-    from its own encoding before it is returned. *)
-val restore : owner:Keeper_librarian_durable_request.owner ->
-  question:Keeper_librarian_message_floor.Machine.question ->
-  Lane_addon_tool_request_owner.retained -> (t, string) result
-(** Decode the record's request against [question], rendering the prompt again
-    from the retained resolutions. The record must be this owner's step scope
-    with the host binding the request names. *)
+    step must be the preparation of [question]. The request restores from its
+    own encoding before it is returned. *)
+val restore : owner:Keeper_librarian_durable_request.owner -> Lane_addon_tool_request_owner.retained ->
+  (t, string) result
+(** Decode the record's request, render its prompt again from the retained
+    resolutions and its own input, and check that the prompt is the one the
+    host was sent. The record must be this owner's step scope with the host
+    binding the request names. *)
+val matches_question : Keeper_librarian_message_floor.Machine.question -> t -> (unit, string) result
+(** The step is the question the floor asks now: the same position and sources,
+    the same carried working state and unread messages, and the same input. *)
+type header = {request_id:string;destination:Keeper_librarian_durable_request.destination;range:link;
+  previous:link option;position:int;sources:Keeper_librarian_unread.source list}
+val header : owner:Keeper_librarian_durable_request.owner -> Lane_addon_tool_request_owner.retained ->
+  (header, string) result
+(** What a record of this owner's step scope says about its place in a chain,
+    without decoding its input or rendering its prompt: the checks of its
+    identity, owner, links and position that {!restore} makes, but not of its
+    preparation. It grants no authority to run, answer or settle the step. *)
+val observe_record_owner : base_path:string -> keepers_dir:string -> Lane_addon_tool_request_owner.retained ->
+  (Keeper_librarian_durable_request.owner, string) result
+(** The live owner a retained step names: its recorded physical roots and Memory
+    epoch must still be the live ones. The host asks this before it restores a
+    step it did not create. *)
 val confirm_record : t -> Lane_addon_tool_request_owner.retained -> (unit, string) result
 (** The record is this step's: same scope, ID and host binding, and the digest
     of this request. *)

@@ -2,10 +2,10 @@ open Alcotest
 
 (* A message-floor step is an original of its own: a scope, an ID format and a
    record kind that completed-history discovery never reads. These cases pin
-   what makes a step that one question of one chain: it restores only against
-   the question the floor's machine asks after the same answers, names its range
-   and previous step by ID and digest, and cannot be mistaken for a history
-   original. *)
+   what makes a step that one question of one chain: it restores from its record
+   alone with its own input, matches only the question the floor's machine asks
+   after the same answers, names its range and previous step by ID and digest,
+   and cannot be mistaken for a history original. *)
 
 module Librarian = Masc.Keeper_librarian
 module Machine = Masc.Keeper_librarian_message_floor.Machine
@@ -84,6 +84,16 @@ let skip machine messages =
     | Unread.Atom _ -> fail "the fixture reads official turns only" in
   Machine.unreadable machine ~reasons ~hole |> ok
 
+(* The first question the floor asks about an input of the test's choosing. *)
+let question_over (source : Librarian.input) =
+  let read =
+    Machine.read ~keeper_name:keeper ~sources:(sources_of source.messages) ~unread_messages:[]
+      ~previous_state:None source |> ok in
+  let plan =
+    Plan.create ~keeper_id:source.keeper_id ~turn_ref:source.turn_ref ~snapshot:None
+    |> Result.map_error Plan.error_to_string |> ok in
+  ask (Machine.start ~transaction_id:"floor-step-test" ~plan read |> ok)
+
 let prepare (question : Machine.question) =
   Runtime.prepare_durable_step ~now:1_000_000.
     ~context:{ Runtime.previous_state = question.previous_state; unread_messages = question.unread_messages }
@@ -154,8 +164,9 @@ let chain ~owner =
       ~question:second_question ~step:(prepare second_question) () |> ok in
   { range; first_question; first_step; second_question; second_step }
 
-let retain ~store step json =
-  let scope = Step.scope (Step.physical_owner step) and request_id = Step.request_id step in
+let retain ?request_id ~store step json =
+  let scope = Step.scope (Step.physical_owner step) in
+  let request_id = Option.value request_id ~default:(Step.request_id step) in
   let destination = Step.destination step in
   (match Owner.retain ~store ~scope ~request_id ~installation_id:destination.installation_id
            ~package_id:destination.package_id ~tool:destination.tool ~summary:`Null ~request:json with
@@ -171,20 +182,29 @@ let replace_field name replacement = function
     `Assoc (List.map (fun (key, value) -> if key = name then key, replacement value else key, value) members)
   | _ -> fail "a step encodes as an object"
 
-let test_a_step_restores_from_its_record_and_its_question () =
+(* What the floor does with a retained step: restore it from its record, then
+   ask whether it is the question the machine asks now. *)
+let restore_for ~owner question record =
+  match Step.restore ~owner record with
+  | Error _ as error -> error
+  | Ok step -> Result.map (fun () -> step) (Step.matches_question question step)
+
+let test_a_step_restores_from_its_record_alone () =
   with_fixture @@ fun ~owner ~other_owner:_ ~fresh_store ->
   let chain = chain ~owner in
   let store = fresh_store () in
   let first_record = retain ~store chain.first_step (Step.to_json chain.first_step) in
   let second_record = retain ~store chain.second_step (Step.to_json chain.second_step) in
-  let restored_first = Step.restore ~owner ~question:chain.first_question first_record |> ok in
-  let restored_second = Step.restore ~owner ~question:chain.second_question second_record |> ok in
+  let restored_first = Step.restore ~owner first_record |> ok in
+  let restored_second = Step.restore ~owner second_record |> ok in
   check bool "the first step restores to what was created" true
     (Yojson.Safe.equal (Step.to_json restored_first) (Step.to_json chain.first_step));
   check bool "and so does the second" true
     (Yojson.Safe.equal (Step.to_json restored_second) (Step.to_json chain.second_step));
   Step.confirm_record restored_first first_record |> ok;
   Step.confirm_record restored_second second_record |> ok;
+  Step.matches_question chain.first_question restored_first |> ok;
+  Step.matches_question chain.second_question restored_second |> ok;
   check int "the first step is at position 0" 0 (Step.position restored_first);
   check int "the second at position 1" 1 (Step.position restored_second);
   check bool "the first has no previous step" true (Step.previous restored_first = None);
@@ -193,6 +213,9 @@ let test_a_step_restores_from_its_record_and_its_question () =
      = Some { Step.request_id = Step.request_id restored_first; request_digest = first_record.request_digest });
   check bool "both name the range original" true
     (Step.range restored_first = chain.range && Step.range restored_second = chain.range);
+  let input = (Step.step restored_second).preparation.source_input in
+  check bool "the restored step holds its own input: the second message only" true
+    (input.messages = [ second_message ]);
   let prompt = (Step.step restored_second).preparation.rendered_prompt in
   check bool "the second step's prompt carries the message the first left unread" true
     (contains prompt (Unread.message_digest first_message));
@@ -207,29 +230,33 @@ let test_a_step_restores_from_its_record_and_its_question () =
        Yojson.Safe.equal schema Masc.Keeper_structured_output_schema.librarian_continuity_output_schema
      | None -> false)
 
-let test_a_question_that_differs_does_not_restore_the_step () =
+let test_a_question_that_differs_does_not_match_the_step () =
   with_fixture @@ fun ~owner ~other_owner:_ ~fresh_store ->
   let chain = chain ~owner in
-  let store = fresh_store () in
-  let first_record = retain ~store chain.first_step (Step.to_json chain.first_step) in
+  let first_record = retain ~store:(fresh_store ()) chain.first_step (Step.to_json chain.first_step) in
+  let restored = Step.restore ~owner first_record |> ok in
   expect_error "the second question for the first step" ~mentioning:"not the question it was asked"
-    (Step.restore ~owner ~question:chain.second_question first_record);
+    (Step.matches_question chain.second_question restored);
   (* Same position, another message: the sources differ. *)
   let other = ask (machine_over [ message "another first message"; second_message ]) in
   expect_error "another message at the same position" ~mentioning:"not the question it was asked"
-    (Step.restore ~owner ~question:other first_record);
-  (* Same position and message, another working state carried in: only the
-     prompt the host was sent tells the two apart. *)
+    (Step.matches_question other restored);
+  (* Same position and message, another working state carried in. *)
   let carried = ask (machine_over ~previous_state:(Some "state carried in") messages) in
-  expect_error "another carried working state" ~mentioning:"prompt differs"
-    (Step.restore ~owner ~question:carried first_record)
+  expect_error "another carried working state" ~mentioning:"context differs"
+    (Step.matches_question carried restored);
+  (* Same position, message and context, another input around them. *)
+  let around =
+    question_over { (input messages) with keeper_instructions = "instructions around the same message" } in
+  expect_error "another input around the same message" ~mentioning:"input differs from its question"
+    (Step.matches_question around restored)
 
 let test_a_tampered_request_is_refused () =
   with_fixture @@ fun ~owner ~other_owner ~fresh_store ->
   let chain = chain ~owner in
   let refused label ~mentioning question step edit =
     let record = retain ~store:(fresh_store ()) step (edit (Step.to_json step)) in
-    expect_error label ~mentioning (Step.restore ~owner ~question record) in
+    expect_error label ~mentioning (restore_for ~owner question record) in
   refused "a moved position" ~mentioning:"not the question it was asked" chain.second_question
     chain.second_step (replace_field "position" (fun _ -> `Int 7));
   refused "a range digest that is no digest" ~mentioning:"link digest is invalid" chain.first_question
@@ -243,9 +270,60 @@ let test_a_tampered_request_is_refused () =
     (replace_field "preparation" (replace_field "rendered_prompt_sha256" (fun _ -> `String (sha_hex 'c'))));
   refused "a step of another kind" ~mentioning:"schema or kind" chain.first_question chain.first_step
     (replace_field "kind" (fun _ -> `String "completed-history-execution"));
+  refused "an input edited after its prompt was rendered" ~mentioning:"prompt differs" chain.first_question
+    chain.first_step (replace_field "input" (replace_field "keeper_instructions" (fun _ -> `String "edited")));
+  refused "a carried state edited after its prompt was rendered" ~mentioning:"prompt differs"
+    chain.first_question chain.first_step
+    (replace_field "context" (replace_field "previous_state" (fun _ -> `String "edited")));
+  refused "a source that is not the hash of its message" ~mentioning:"source hash differs"
+    chain.first_question chain.first_step
+    (replace_field "sources" (fun _ -> `List [ Unread.source_to_json (source_of 0 (message "another message")) ]));
   let record = retain ~store:(fresh_store ()) chain.first_step (Step.to_json chain.first_step) in
   expect_error "a step restored for another owner" ~mentioning:"changed"
-    (Step.restore ~owner:other_owner ~question:chain.first_question record)
+    (Step.restore ~owner:other_owner record)
+
+(* The host reads a record's place in a chain, and the owner it names, before it
+   restores the input; a record whose input is unreadable still has a header. *)
+let test_a_header_and_an_owner_are_read_without_the_input () =
+  with_fixture @@ fun ~owner ~other_owner ~fresh_store ->
+  let chain = chain ~owner in
+  let store = fresh_store () in
+  let broken = retain ~store chain.second_step (replace_field "input" (fun _ -> `Null) (Step.to_json chain.second_step)) in
+  expect_error "a step whose input is unreadable" ~mentioning:"" (Step.restore ~owner broken);
+  let header = Step.header ~owner broken |> ok in
+  check bool "still has its place in the chain" true
+    (header.position = 1 && header.range = chain.range
+     && header.previous = Some { Step.request_id = Step.request_id chain.first_step;
+                                 request_digest = (retain ~store chain.first_step (Step.to_json chain.first_step)).request_digest }
+     && header.sources = chain.second_question.sources);
+  check bool "and the destination its request names" true (header.destination = Step.destination chain.second_step);
+  let observed =
+    Step.observe_record_owner ~base_path:(Durable.base_path owner) ~keepers_dir:(Durable.keepers_dir owner) broken
+    |> ok in
+  check bool "the owner a record names is the live one" true (observed = owner);
+  let record = retain ~store chain.first_step (Step.to_json chain.first_step) in
+  (* A destructive Memory epoch reset after the step was retained: the owner the
+     record names is no longer the live one. *)
+  let epoch_path = Memory.epoch_path ~keepers_dir:(Durable.keepers_dir owner) ~keeper_id:keeper in
+  let epoch_before = In_channel.with_open_bin epoch_path In_channel.input_all in
+  Out_channel.with_open_bin epoch_path (fun channel ->
+    output_string channel {|{"schema_version":1,"epoch":"a-memory-epoch-after-a-reset"}|});
+  expect_error "an owner whose Memory epoch was reset" ~mentioning:"changed"
+    (Step.observe_record_owner ~base_path:(Durable.base_path owner) ~keepers_dir:(Durable.keepers_dir owner) record);
+  Out_channel.with_open_bin epoch_path (fun channel -> output_string channel epoch_before);
+  expect_error "a header read for another owner" ~mentioning:"changed" (Step.header ~owner:other_owner record);
+  expect_error "a header whose first step names a previous step" ~mentioning:"position disagrees"
+    (Step.header ~owner (retain ~store:(fresh_store ()) chain.first_step
+       (replace_field "previous" (fun _ ->
+          `Assoc [ "request_id", `String (Step.request_id chain.second_step); "request_digest", `String (sha_hex 'b') ])
+          (Step.to_json chain.first_step))));
+  expect_error "a header whose range is not a history request" ~mentioning:"request ID"
+    (Step.header ~owner (retain ~store:(fresh_store ()) chain.first_step
+       (replace_field "range" (replace_field "request_id" (fun _ -> `String (Step.request_id chain.second_step)))
+          (Step.to_json chain.first_step))));
+  expect_error "a header of another kind" ~mentioning:"schema or kind"
+    (Step.header ~owner (retain ~store:(fresh_store ()) chain.first_step
+       (replace_field "kind" (fun _ -> `String "completed-history-execution") (Step.to_json chain.first_step))))
 
 let test_links_and_positions_are_checked_when_a_step_is_made () =
   with_fixture @@ fun ~owner ~other_owner ~fresh_store:_ ->
@@ -273,6 +351,10 @@ let test_links_and_positions_are_checked_when_a_step_is_made () =
     (make ~range:chain.range ~previous:(Some (link_to (Step.fresh_request_id other_owner))) chain.second_question);
   expect_error "a question of another Keeper" ~mentioning:"another Keeper"
     (make ~range:chain.range ~previous:None (ask (machine_over ~keeper_name:other_keeper messages)));
+  expect_error "a question that borrows a task's Goal context" ~mentioning:"Goal context"
+    (make ~range:chain.range ~previous:None
+       (question_over { (input messages) with
+         goal_context = Librarian.Task_goals { task_id = "a-task"; criteria = Error "no goals read" } }));
   expect_error "another tool than the durable one" ~mentioning:"tool"
     (make ~destination:{ destination with tool = "not-the-durable-tool" } ~range:chain.range ~previous:None
        chain.first_question);
@@ -316,7 +398,13 @@ let test_a_record_of_another_step_is_not_this_steps () =
   expect_error "the second step against the first record" ~mentioning:"host binding differs"
     (Step.confirm_record chain.second_step first_record);
   expect_error "the first step against the second record" ~mentioning:"host binding differs"
-    (Step.confirm_record chain.first_step second_record)
+    (Step.confirm_record chain.first_step second_record);
+  (* A record keyed by one ID that holds the body of another step. *)
+  let mislabeled =
+    retain ~request_id:(Step.fresh_request_id owner) ~store chain.first_step (Step.to_json chain.first_step) in
+  expect_error "a record whose ID is not the one its request names" ~mentioning:"host binding differs"
+    (Step.restore ~owner mislabeled);
+  expect_error "and the same for its header" ~mentioning:"host binding differs" (Step.header ~owner mislabeled)
 
 let test_a_step_answer_needs_a_working_state () =
   with_fixture @@ fun ~owner ~other_owner:_ ~fresh_store:_ ->
@@ -332,11 +420,12 @@ let test_a_step_answer_needs_a_working_state () =
 let () =
   run "keeper_librarian_floor_step_request"
     [ ( "step request"
-      , [ test_case "restores from its record and the question it was asked" `Quick
-            test_a_step_restores_from_its_record_and_its_question
-        ; test_case "a question that differs does not restore it" `Quick
-            test_a_question_that_differs_does_not_restore_the_step
+      , [ test_case "restores from its record alone" `Quick test_a_step_restores_from_its_record_alone
+        ; test_case "a question that differs does not match it" `Quick
+            test_a_question_that_differs_does_not_match_the_step
         ; test_case "a tampered request is refused" `Quick test_a_tampered_request_is_refused
+        ; test_case "a header and an owner are read without the input" `Quick
+            test_a_header_and_an_owner_are_read_without_the_input
         ; test_case "links and positions are checked when it is made" `Quick
             test_links_and_positions_are_checked_when_a_step_is_made
         ; test_case "step and history IDs do not mix" `Quick test_step_and_history_ids_do_not_mix

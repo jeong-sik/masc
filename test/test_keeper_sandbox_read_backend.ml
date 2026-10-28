@@ -459,6 +459,33 @@ let test_microvm_without_a_turn_factory_routes_to_the_attached_guest () =
   | Error message ->
     Alcotest.failf "a running guest was reported unreachable: %s" message
 
+let fake_ssh_success_script =
+  Printf.sprintf
+    {|#!/bin/sh
+case "$*" in
+  *--probe*) printf '%%s' '%s'; exit 0 ;;
+esac
+if [ "${1:-}" = list ]; then printf '[]\n'; exit 0; fi
+cat >/dev/null 2>/dev/null &
+printf 'remote-file-content'
+printf '%%s' '%s' >&2
+exit 0
+|}
+    (Exec_ssh_protocol.render_probe
+       { name = "masc-exec-shim"
+       ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
+       ; capabilities = [ Exec_ssh_protocol.observe_capability ]
+       ; release = None
+       })
+    (Exec_ssh_protocol.render_trailer
+       { v = Exec_ssh_protocol.newest
+       ; exit = Some 0
+       ; signal = None
+       ; timed_out = false
+       ; shim_error = None
+       ; observed_syscalls = []
+       })
+
 let initialize_apple_attached_read_fixture
     ~base ~(config : Workspace.config) ~(meta : Masc.Keeper_meta_contract.keeper_meta) =
   let shim_dir = Config_dir_resolver.microvm_shim_dir ~base_path:base in
@@ -585,33 +612,6 @@ let test_attached_guest_endpoint_refuses_docker () =
 
    [printf '%%s'] rather than the trailer as a format: the renderer escapes
    what belongs to JSON, not what belongs to printf. *)
-let fake_ssh_success_script =
-  Printf.sprintf
-    {|#!/bin/sh
-case "$*" in
-  *--probe*) printf '%%s' '%s'; exit 0 ;;
-esac
-if [ "${1:-}" = list ]; then printf '[]\n'; exit 0; fi
-cat >/dev/null 2>/dev/null &
-printf 'remote-file-content'
-printf '%%s' '%s' >&2
-exit 0
-|}
-    (Exec_ssh_protocol.render_probe
-       { name = "masc-exec-shim"
-       ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
-       ; capabilities = [ Exec_ssh_protocol.observe_capability ]
-       ; release = None
-       })
-    (Exec_ssh_protocol.render_trailer
-       { v = Exec_ssh_protocol.newest
-       ; exit = Some 0
-       ; signal = None
-       ; timed_out = false
-       ; shim_error = None
-       ; observed_syscalls = []
-       })
-
 let fake_ssh_read_status_script code =
   Printf.sprintf
     {|#!/bin/sh
@@ -1452,6 +1452,43 @@ sandbox_profile = "remote_ssh"
       (String.starts_with ~prefix:"path_outside_sandbox" message);
     Alcotest.(check bool) "the tree refusal follows" true
       (contains ~needle:"(the keeper's tree also refused the path: path_outside_sandbox" message)
+
+let test_failed_endpoint_preflight_keeps_original_error_and_tree_refusal () =
+  let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> []) in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let probe =
+    Exec_ssh_protocol.render_probe
+      { name = "masc-exec-shim"
+      ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
+      ; capabilities = []
+      ; release = None
+      }
+  in
+  let script =
+    Printf.sprintf
+      {|#!/bin/sh
+case "$*" in
+  *--probe*) printf '%%s' '%s'; exit 0 ;;
+  *) cat >/dev/null 2>/dev/null & printf 'original-preflight-failure\n' >&2; exit 1 ;;
+esac
+|}
+      probe
+  in
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
+  with_fake_ssh script @@ fun () ->
+  match
+    Masc.Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ~config ~meta
+      ~path:"/app/drift_monitor/windowing.py" ~max_bytes:4096 ()
+  with
+  | Ok _ -> Alcotest.fail "a read continued after the endpoint preflight failed"
+  | Error error ->
+    let message = Keeper_sandbox_read_backend.read_error_to_string error in
+    Alcotest.(check bool) "the original preflight failure survives" true
+      (String_util.contains_substring message "original-preflight-failure");
+    Alcotest.(check bool) "the tree refusal remains attached" true
+      (String_util.contains_substring message
+         "(the keeper's tree also refused the path: path_outside_sandbox")
+;;
 
 (* Exercise the public result producers through real endpoint dispatch, with
    the existing SSH shim fixture and an Apple-container CLI fixture. *)
@@ -3202,6 +3239,8 @@ let run_tests ~clock () =
             test_undeclared_endpoint_root_stays_refused;
           Alcotest.test_case "unresolved endpoint leads and keeps the tree refusal" `Quick
             test_unresolved_endpoint_leads_and_keeps_the_tree_refusal;
+          Alcotest.test_case "failed preflight keeps its error and the tree refusal" `Quick
+            test_failed_endpoint_preflight_keeps_original_error_and_tree_refusal;
           Alcotest.test_case "own tree translates even under a declared root" `Quick
             test_own_tree_translates_even_under_a_declared_root;
           Alcotest.test_case "Read and Grep report the endpoint profile" `Quick

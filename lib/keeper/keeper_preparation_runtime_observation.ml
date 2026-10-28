@@ -23,7 +23,7 @@ let report_to_json report =
 ;;
 
 let report_of_json json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match json with
   | `Assoc fields when List.sort String.compare (List.map fst fields) =
       ["boundary"; "execution_scope"; "report_id"; "schema_version"; "scopes"; "turn_ref"] ->

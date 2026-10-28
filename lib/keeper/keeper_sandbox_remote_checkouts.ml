@@ -236,7 +236,7 @@ if mode == "layout":
 print(json.dumps(result))
 |}
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let json_kind : Yojson.Safe.t -> string = function
   | `Null -> "null"

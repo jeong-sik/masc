@@ -4,7 +4,7 @@
     its shared host mounts permit only the filesystem-and-network Observe
     mode through this transport. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type openssh =
   { endpoint : Exec_ssh_endpoint.t

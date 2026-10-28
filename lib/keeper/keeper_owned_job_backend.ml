@@ -1,7 +1,7 @@
 module Setup = Keeper_sandbox_runtime_setup
 module Hardening = Env_config_sandbox.Hardening
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type spec =
   { job_id : string; keeper_name : string; base_path : string

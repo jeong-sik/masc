@@ -1,5 +1,5 @@
 module Store = Keeper_owned_job_store
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type invocation = { trace_id : string; turn_ref : Ids.Turn_ref.t; tool_use_id : string }
 type replay = { invocation : invocation; source : Store.source }

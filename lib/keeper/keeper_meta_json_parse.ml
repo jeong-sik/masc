@@ -4,7 +4,7 @@ open Keeper_types_profile
 open Keeper_meta_contract
 open Keeper_meta_json_current_schema
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let invalidf format =
   Printf.ksprintf

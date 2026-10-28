@@ -42,7 +42,7 @@ let attachment_to_yojson (att : Keeper_chat_store.attachment) =
 let attachments_to_yojson attachments =
   `List (List.map attachment_to_yojson attachments)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let exact_object_fields ~field ~allowed = function
   | `Assoc fields ->

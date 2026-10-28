@@ -28,7 +28,7 @@ type dispatch =
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t option
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 (* {1 Declaration table} *)
 

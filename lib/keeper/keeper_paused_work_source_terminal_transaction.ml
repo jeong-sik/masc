@@ -41,7 +41,7 @@ type success =
   ; reservation_release : Keeper_lifecycle_reservation.release_outcome
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let failure_to_string = function
   | Invalid_request detail ->

@@ -24,7 +24,7 @@ let validate_binding t ~reference ~identity =
   else Ok ()
 
 let of_apple_inspect ~reference ~(identity : identity) raw =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let invalid field = Error (Invalid_inspect field) in
   let object_fields field = function
     | `Assoc fields ->

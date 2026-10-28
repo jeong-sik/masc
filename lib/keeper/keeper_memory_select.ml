@@ -3,7 +3,7 @@ module Source = Keeper_memory_source_current
 module Memory = Keeper_memory_os_types
 module Select = Keeper_workspace_memory_selection
 module Io = Keeper_workspace_memory_selection_io
-let ( let* ) = Result.bind
+open Result.Syntax
 let sha text = Agent_core_sha256.(digest_string text |> to_hex)
 let issue ?id kind detail = `Assoc
   (["kind",`String kind;"detail",`String detail] @ match id with None -> [] | Some id -> ["id",`String id])

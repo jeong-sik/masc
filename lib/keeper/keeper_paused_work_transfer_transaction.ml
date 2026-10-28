@@ -59,7 +59,7 @@ type success =
   ; reservation_release : Keeper_lifecycle_reservation.release_outcome
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let projection_stage_to_string = function
   | Source_ack -> "source_ack"

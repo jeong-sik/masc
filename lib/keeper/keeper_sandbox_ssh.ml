@@ -4,7 +4,7 @@
     module owns what is OpenSSH-specific: the runtime.toml endpoint registry,
     the dedicated key and pinned host-key paths. *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let resolve_path ~base_path path =
   if Filename.is_relative path then Filename.concat base_path path else path

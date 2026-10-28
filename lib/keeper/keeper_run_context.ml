@@ -54,7 +54,7 @@ let build_base_system_prompt
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(meta : keeper_meta)
   =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* workspace_root =
     Keeper_workspace_namespace.resolve ~config ~meta ~profile_defaults
     |> Result.map_error (fun detail -> Workspace_unavailable detail)
@@ -77,7 +77,7 @@ let prepare_run_context
       ?checkpoint
       ()
   =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let receipt_started_at = Masc_domain.now_iso () in
   let meta, observed_task = Keeper_current_task_reconcile.sync_current_task_id_with_observation ~config meta in
   let task_context = Keeper_turn_task_context.capture ~config observed_task in

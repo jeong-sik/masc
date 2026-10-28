@@ -8,7 +8,7 @@
 
 open Keeper_meta_contract
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let docker_has_no_remote_lane (meta : keeper_meta) =
   Printf.sprintf

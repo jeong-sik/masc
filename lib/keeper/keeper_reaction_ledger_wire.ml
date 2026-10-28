@@ -282,7 +282,7 @@ let reaction_kind_matches_transition reaction_kind transition =
 ;;
 
 let decode_reaction_stimulus_reference reaction =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* post_id = require_string Missing_reaction_post_id "post_id" reaction in
   let* raw_stimulus_kind =
     require_string Missing_reaction_stimulus_kind "stimulus_kind" reaction
@@ -297,7 +297,7 @@ let decode_reaction_stimulus_reference reaction =
 
 let decode_transition_source = function
   | `Assoc _ as json ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* stimulus_id =
       require_non_empty_string
         ~missing:Invalid_transition_source
@@ -326,7 +326,7 @@ let decode_transition_reaction
       ~reaction_stimulus_kind
       reaction
   =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* source_index =
     match int_field_opt "source_index" reaction with
     | Some value when value >= 0 -> Ok value
@@ -379,7 +379,7 @@ let decode_transition_reaction
 ;;
 
 let decode_reaction_row ~event_id metadata reaction =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* raw_kind = require_string Missing_reaction_kind "kind" reaction in
   let* reaction_kind =
     reaction_kind_of_string raw_kind
@@ -420,7 +420,7 @@ let decode_reaction_row ~event_id metadata reaction =
 ;;
 
 let decode_current_row ~keeper_name row =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* row_schema = require_string Missing_schema "schema" row in
   let* () =
     if String.equal row_schema schema then Ok () else Error Unexpected_schema

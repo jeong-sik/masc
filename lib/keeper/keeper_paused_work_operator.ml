@@ -41,7 +41,7 @@ type inventory_error =
   | Inventory_meta_missing
   | Inventory_queue_read_failed of string
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let request_of_yojson = Request.of_yojson
 
 let execute config ~keeper_name = function

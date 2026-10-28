@@ -36,7 +36,7 @@ let normalize_path path =
    and that is not a directory either. A failed creation is an [Error] for the
    start request instead of an exception out of it. *)
 let ensure_host_root path =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let kind () =
     match Unix.stat path with
     | stats -> Ok (Some stats.Unix.st_kind)
@@ -214,7 +214,7 @@ let start_managed_container
                     Keeper_sandbox.host_root_abs_of_meta ~config meta
                     |> normalize_path
                   in
-                  let ( let* ) = Result.bind in
+                  let open Result.Syntax in
                   let* () = ensure_host_root host_root in
                   let container_root =
                     Keeper_sandbox.container_root meta.name

@@ -22,7 +22,7 @@ type request_error =
   | Owner_unavailable of Keeper_owner_registry.command_error
 
 let request ~intake ~base_path ~keeper_name =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match Keeper_turn_preview_owner.current () with
   | None -> Ok []
   | Some observed ->

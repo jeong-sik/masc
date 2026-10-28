@@ -27,7 +27,7 @@ let error_message = function
   | Verification_failed (Sidecar_rejected _) -> "microvm shim sidecar verification failed; check the installed binary and sidecar"
   | Verification_invalidated -> "microvm shim guest verification was invalidated by guest replacement"
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let protect_work f =
   match Fs_compat.execution_context () with

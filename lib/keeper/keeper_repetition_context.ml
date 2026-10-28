@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 module Snapshot = Keeper_repetition_snapshot
 
 let context_key = "keeper_repetition_scopes"

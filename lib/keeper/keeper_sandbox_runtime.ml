@@ -144,7 +144,7 @@ let parse_inspect_line line =
      cleanup payload has exactly five fields. *)
   match String.split_on_char '\t' line with
   | [ owner_pid; started_at; running; ttl_sec; container_kind ] ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* owner_pid = required_positive_int ~field:"owner_pid" owner_pid in
     let* started_at = required_positive_float ~field:"started_at" started_at in
     let* running = required_bool ~field:"running" running in

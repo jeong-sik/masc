@@ -1,6 +1,6 @@
 module Snapshot = Keeper_repetition_snapshot
 module Projection = Agent_core.Agent.Execution_projection
-let ( let* ) = Result.bind
+open Result.Syntax
 
 type error =
   | Scope_mismatch

@@ -11,7 +11,7 @@ module Item = Keeper_portrait_item
 type mode = Current | Preview of Item.t
 
 let request_arg args =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match args with
   | `Assoc fields ->
       let* size =

@@ -78,7 +78,7 @@ type read_error =
       ; index : int
       }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 module Artifact_key = struct
   type t = string * string

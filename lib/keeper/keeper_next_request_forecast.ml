@@ -724,7 +724,7 @@ let librarian_gap_unmeasured_detail = function
    even beside a seed, and the Librarian side is read only once there is an
    accepted start to weigh it against. *)
 let librarian_gap ~config ~keeper_name =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   (* Presence, not [read_meta]: [read_meta] folds a meta this binary cannot
      decode into [Ok None], which would read as "no gap". *)
   match Keeper_meta_store.read_meta_presence config keeper_name with

@@ -198,14 +198,14 @@ let comparison_lines ~ko (d : D.preset_detail) =
   @ (match d.D.pd_skipped_lanes with
      | [] -> []
      | lanes ->
-       [Printf.sprintf (if ko then "! 복원 제외 레인 %d개" else "! %d lanes not restored")
+       [Printf.sprintf (if ko then "! 복원 제외 레인 %d개" else "! Lanes not restored: %d")
           (List.length lanes)])
   @ (match d.D.pd_preserved_lane_settings with
      | [] -> []
      | settings ->
        [Printf.sprintf
           (if ko then "미저장 레인 요청 설정 %d개 · 현재 값 유지"
-           else "%d unsaved lane request settings · current values retained")
+           else "Unsaved lane request settings: %d · current values retained")
           (List.length settings)])
   @ List.map (fun (lane, reason) ->
       text ~ko "! 레인 복원 제외 · " "! Lane not restored · " ^ lane ^ ": " ^ reason)

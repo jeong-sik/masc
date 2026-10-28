@@ -763,7 +763,7 @@ let preset_detail_lines (state : state) ~cols ~selected =
     | rows ->
       [Printf.sprintf
          (if state.ui_language = Lang_ko then "! 읽을 수 없는 프리셋 %d개 · 상세는 아래에"
-          else "! %d unreadable presets · details below") (List.length rows)]
+          else "! Unreadable presets: %d · details below") (List.length rows)]
   in
   let failures = match unreadable, state.presets_error with
     | [], None -> []
@@ -819,7 +819,9 @@ let render_presets (state : state) =
      snapshot has arrived, and none after a first read that failed. *)
   let count_text =
     match state.presets_snapshot with
-    | Some _ -> Printf.sprintf (if state.ui_language = Lang_ko then "%d개" else "%d presets") total
+    | Some _ -> Printf.sprintf
+        (if state.ui_language = Lang_ko then "%d개"
+         else if total = 1 then "%d preset" else "%d presets") total
     | None -> (match state.presets_error with
         | None -> ui_text state ~ko:"읽는 중" ~en:"reading"
         | Some _ -> ui_text state ~ko:"읽기 실패" ~en:"read failed")

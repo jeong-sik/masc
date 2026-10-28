@@ -73,7 +73,9 @@ val await_result : operation -> (P.Sha256.t,error) result
     is invented. Unavailable activation is a visible hold. A later explicit
     activation/cancellation can update the observation without changing the
     original. Cold known launches return Launch_unknown rather than waiting
-    on an invented live future. Cancelling an observer leaves the actor alive. *)
+    on an invented live future. This controller's pending commit/ownership
+    handoff retains its existing future rather than becoming a cold launch.
+    Cancelling an observer leaves the actor alive. *)
 val load_result :
   sw:Eio.Switch.t -> expected_sha256:P.Sha256.t option -> operation -> (D.t,error) result
 (** Load actual original storage and fully verify complete output/receipt.
@@ -83,12 +85,12 @@ val load_result :
 
 module For_testing : sig
   val create :
-    before_request:(unit -> unit) ->
+    before_request:(unit -> unit) -> after_commit:(unit -> unit) ->
     sw:Eio.Switch.t -> fs:Eio.Fs.dir_ty Eio.Path.t -> registry:R.t ->
     cgroup_parent_path:string -> new_id:(unit -> P.Id.t) ->
     resolve_execution:(P.spec -> (L.execution,string) result) -> t
-  (** Inject an exception outside request handling to observe controller failure
-      and explicit recovery. This grants no execution or registry authority. *)
+  (** Interleave outside request handling or after the original launch commit
+      before native ownership handoff. This grants no execution or authority. *)
   val inspect_original : after_refresh:(unit -> unit) -> operation -> (R.record,error) result
   (** Interleave after the actual captured-source refresh and before adopting its
       result. A concurrently advanced source remains pinned; no retry occurs. *)

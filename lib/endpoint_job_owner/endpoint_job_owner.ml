@@ -53,7 +53,7 @@ type request = {
   completion : (unit,error) result completion;
 }
 
-type execution_state = Awaiting_activation | Owned of C.t | Unknown_launch
+type execution_state = Awaiting_activation | Committing_launch | Owned of C.t | Unknown_launch
 type actor_state = Running | Failed of exn | Stopped
 type stop_reason = Actor_failed of exn | Endpoint_stopped
 
@@ -77,6 +77,7 @@ and t = {
   new_id : unit -> P.Id.t;
   resolve_execution : P.spec -> (L.execution,string) result;
   before_request : unit -> unit;
+  after_commit : unit -> unit;
   operations : (string,operation) Hashtbl.t;
   admissions : (string,admission) Hashtbl.t;
   operations_lock : Eio.Mutex.t;
@@ -108,14 +109,14 @@ let stop_operation operation reason =
   (* A controller failure is not a native job outcome. The independent lifetime
      remains responsible for an already owned original and its result. *)
   (match Atomic.get operation.execution with
-   | Awaiting_activation -> finish (current_result operation) (Error error)
+   | Awaiting_activation | Committing_launch -> finish (current_result operation) (Error error)
    | Owned _ | Unknown_launch -> ());
   Eio.Condition.broadcast operation.changed
 
 let mark_launch_unknown operation =
   match Atomic.get operation.execution with
   | Owned _ | Unknown_launch -> ()
-  | Awaiting_activation ->
+  | Awaiting_activation | Committing_launch ->
       Atomic.set operation.execution Unknown_launch;
       finish (current_result operation) (Error Launch_unknown)
 
@@ -125,7 +126,10 @@ let update_source operation ~previous record =
   else (
     (match R.launch_state record with
      | R.Not_requested -> ()
-     | R.Requested _ -> mark_launch_unknown operation);
+     | R.Requested _ ->
+       (match Atomic.get operation.execution with
+        | Committing_launch -> ()
+        | Awaiting_activation | Owned _ | Unknown_launch -> mark_launch_unknown operation));
     Ok record)
 
 let refresh_with_hook ~after_refresh operation =
@@ -138,7 +142,7 @@ let refresh operation = refresh_with_hook ~after_refresh:(fun () -> ()) operatio
 
 let reset_result_for_control operation =
   match Atomic.get operation.execution with
-  | Owned _ | Unknown_launch -> ()
+  | Committing_launch | Owned _ | Unknown_launch -> ()
   | Awaiting_activation ->
     let current=current_result operation in
     let replace=match Eio.Promise.peek current.value with
@@ -206,18 +210,21 @@ let reconcile_activation_error operation error =
   | Ok current ->
     match Atomic.get operation.execution with
     | Owned _ -> Ok (),None
-    | Unknown_launch -> Error Launch_unknown,None
+    | Committing_launch | Unknown_launch -> Error Launch_unknown,None
     | Awaiting_activation ->
       if R.cancellation_state current=R.Cancellation_requested then cancelled_activation operation current
       else Error (Registry_error error),None
 
 let start_native operation current execution =
   let launch_id=operation.controller.new_id () in
+  Atomic.set operation.execution Committing_launch;
   try
     let intent=R.commit_launch current ~confirmed_admission_id:(R.admission_id current) ~launch_id in
     match intent with
-    | Ok intent -> start_intent operation intent execution
-    | Error error -> reconcile_activation_error operation error
+    | Ok intent -> operation.controller.after_commit ();start_intent operation intent execution
+    | Error error ->
+        Atomic.set operation.execution Awaiting_activation;
+        reconcile_activation_error operation error
   with
   | Eio.Cancel.Cancelled _ as ex ->
       let bt=Printexc.get_raw_backtrace () in
@@ -235,7 +242,7 @@ let run_activate operation =
   | Ok current ->
     match Atomic.get operation.execution with
     | Owned _ -> Ok (),None
-    | Unknown_launch -> Error Launch_unknown,None
+    | Committing_launch | Unknown_launch -> Error Launch_unknown,None
     | Awaiting_activation ->
       if R.cancellation_state current=R.Cancellation_requested then cancelled_activation operation current
       else
@@ -256,7 +263,7 @@ let run_cancel operation =
          (match update_source operation ~previous current with
           | Ok _ -> Ok (),None
           | Error error -> Error error,None))
-  | Unknown_launch | Awaiting_activation ->
+  | Committing_launch | Unknown_launch | Awaiting_activation ->
     let source=Atomic.get operation.source in
     (match R.request_cancel source ~confirmed_admission_id:(R.admission_id source) with
      | Error error -> Error (Registry_error error),None
@@ -323,7 +330,7 @@ let rec actor_loop operation =
    | Error error,None ->
      (match Atomic.get operation.execution with
       | Awaiting_activation -> finish result_cell (Error error)
-      | Owned _ | Unknown_launch -> ())
+      | Committing_launch | Owned _ | Unknown_launch -> ())
    (* A request error reaches its caller through [complete_active]. With a followup, the result cell takes the publish outcome and the request error is not repeated there. *)
    | Ok (),None | Ok (),Some _ | Error _,Some _ -> ());
   (match followup with
@@ -420,7 +427,7 @@ let make_operation controller record =
     actor=Atomic.make Running;
   } in
   (match execution with
-   | Owned _ | Awaiting_activation -> ()
+   | Owned _ | Committing_launch | Awaiting_activation -> ()
    | Unknown_launch -> finish (current_result operation) (Error Launch_unknown));
   operation
 
@@ -482,12 +489,12 @@ let validate_lookup original operation =
   else if R.admission_id source<>original.P.admission_id then Error Admission_mismatch
   else Ok operation
 
-let create_with_hook ~before_request ~sw ~fs ~registry ~cgroup_parent_path ~new_id ~resolve_execution =
+let create_with_hooks ~before_request ~after_commit ~sw ~fs ~registry ~cgroup_parent_path ~new_id ~resolve_execution =
   Eio.Switch.check sw;
-  {sw;fs;cgroup_parent_path;registry;new_id;resolve_execution;before_request;operations=Hashtbl.create 32;
+  {sw;fs;cgroup_parent_path;registry;new_id;resolve_execution;before_request;after_commit;operations=Hashtbl.create 32;
    admissions=Hashtbl.create 32;operations_lock=Eio.Mutex.create ()}
 
-let create = create_with_hook ~before_request:(fun () -> ())
+let create = create_with_hooks ~before_request:(fun () -> ()) ~after_commit:(fun () -> ())
 
 (* This lock protects only table reservations. Registry I/O and observer waits
    run outside it. Cold reads share admission's slot, so no binding-only read
@@ -553,12 +560,12 @@ let await_result operation =
   match Atomic.get operation.execution with
   | Unknown_launch -> Error Launch_unknown
   | Owned job -> C.await_result job |> Result.map_error map_lifetime_error
-  | Awaiting_activation -> Eio.Promise.await (current_result operation).value
+  | Awaiting_activation | Committing_launch -> Eio.Promise.await (current_result operation).value
 
 let load_result ~sw ~expected_sha256 operation =
   let* expected=match Atomic.get operation.execution with
     | Unknown_launch -> Ok expected_sha256
-    | Owned _ | Awaiting_activation ->
+    | Owned _ | Committing_launch | Awaiting_activation ->
       let* digest=await_result operation in
       (match expected_sha256 with
        | Some expected when expected<>digest -> Error Result_digest_mismatch
@@ -569,9 +576,9 @@ let load_result ~sw ~expected_sha256 operation =
   D.load ~sw ~storage ~expected_sha256:expected |> Result.map_error (fun error -> Result_error error)
 
 module For_testing = struct
-  let create = create_with_hook
+  let create = create_with_hooks
   let inspect_original = refresh_with_hook
   let await_startup operation = match Atomic.get operation.execution with
-    | Awaiting_activation | Unknown_launch -> None
+    | Awaiting_activation | Committing_launch | Unknown_launch -> None
     | Owned job -> Some (C.await_startup job |> Result.map_error map_lifetime_error)
 end

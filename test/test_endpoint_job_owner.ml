@@ -698,6 +698,7 @@ let failed_actor_resumes_only_an_explicit_new_control =
   with_fixture (fun ~env ~sw ~store fixture ->
     let entered=ref 0 and fail_next=ref true in
     let controller=Owner.For_testing.create ~sw ~fs:env#fs ~registry:store
+      ~after_commit:(fun () -> ())
       ~cgroup_parent_path:"/sys/fs/cgroup" ~new_id:(fresh fixture)
       ~resolve_execution:(fun _ -> Alcotest.fail "cancelled original resolved execution")
       ~before_request:(fun () ->
@@ -737,6 +738,7 @@ let failed_actor_keeps_native_cancellation_and_historical_result =
       let operation,digest=Eio.Switch.run (fun endpoint ->
         let fail_next=ref false and resolutions=ref 0 in
         let controller=Owner.For_testing.create ~sw:endpoint ~fs:env#fs ~registry:store
+          ~after_commit:(fun () -> ())
           ~cgroup_parent_path:"/sys/fs/cgroup" ~new_id:(fresh fixture)
           ~resolve_execution:(fun _ -> incr resolutions;Ok fixture.execution)
           ~before_request:(fun () ->
@@ -987,6 +989,40 @@ let pending_original_admission_joins_exact_lookup_without_republication =
       check "all pending observers share the same captured operation" (operation==second && operation==looked);
       check "joining never generates another admission ID" (!(fixture.next_id)=original_next_id+1)))
 
+let own_committed_launch_keeps_pre_activation_observers =
+  with_fixture (fun ~env ~sw ~store fixture ->
+    let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+    let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+    let controller=Owner.For_testing.create ~sw ~fs:env#fs ~registry:store
+      ~cgroup_parent_path:"/sys/fs/cgroup" ~new_id:(fresh fixture)
+      ~resolve_execution:(fun _ -> Ok fixture.execution) ~before_request:(fun () -> ())
+      ~after_commit:(fun () -> Eio.Promise.resolve signal ();Eio.Promise.await resume) in
+    let binding,spec=prepare fixture 905 "printf x >> handoff-ran; printf original; exit 7" in
+    let operation=Owner.admit controller ~binding ~spec |> owner in
+    let waiting,resolve=Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve (Owner.await_result operation));
+    Fun.protect ~finally:unblock (fun () ->
+      let activation=Owner.activate operation in
+      Eio.Promise.await entered;
+      let committed=Owner.inspect_original operation |> owner in
+      (match R.launch_state committed with
+       | R.Requested _ -> ()
+       | R.Not_requested -> Alcotest.fail "handoff interleave did not commit its original launch");
+      check "own committed launch does not become a cold-launch error"
+        (Eio.Promise.peek waiting=None);
+      check "activation remains pending before native handoff"
+        (not (Sys.file_exists (Filename.concat fixture.work "handoff-ran")));
+      unblock ();
+      Owner.await_request activation |> owner;
+      let digest=Owner.await_result operation |> owner in
+      check "pre-activation waiter receives the original publication"
+        (Eio.Promise.await waiting=Ok digest);
+      let loaded=Owner.load_result ~sw ~expected_sha256:(Some digest) operation |> owner in
+      let output=D.read_output loaded ~stream:P.Stdout ~offset:0L ~max_bytes:64 |> result_read in
+      Alcotest.(check string) "handoff preserves original output" "original" output.data;
+      Alcotest.(check string) "handoff runs the original once" "x"
+        (read (Filename.concat fixture.work "handoff-ran"))))
+
 let portable_cases=[
   "missing original never readmits",(fun () -> captured_original_survives_missing_or_replaced_files ~owned:false Missing_original ());
   "replacement job never rebinds",(fun () -> captured_original_survives_missing_or_replaced_files ~owned:false Replaced_job ());
@@ -1019,6 +1055,7 @@ let native_cases=[
   "second activation preserves native result",second_activation_during_native_startup_preserves_original_result;
   "native publication failure remains observable",native_publication_failure_remains_observable_after_revalidation;
   "failed actor retains native cancellation and result",failed_actor_keeps_native_cancellation_and_historical_result;
+  "own committed launch preserves pre-activation observers",own_committed_launch_keeps_pre_activation_observers;
 ]
 
 let () =

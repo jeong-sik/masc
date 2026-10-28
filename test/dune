@@ -2878,6 +2878,10 @@
 
 (include stanzas/test_fleet_stream.inc)
 
+(include stanzas/test_fleet_stream_health_section.inc)
+
+(include stanzas/test_fleet_stream_hub.inc)
+
 (include stanzas/test_fs_atomic_orphan_sweep_10130.inc)
 
 (include stanzas/test_fs_compat_append_jsonl_atomicity.inc)

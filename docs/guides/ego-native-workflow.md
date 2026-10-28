@@ -122,7 +122,10 @@ subsequent `info()` read, that read cannot distinguish the two outcomes.
 `keyboard.press` and `keyboard.paste` are observed actions: the SDK returns a receipt
 for them (`{}`, `{popups}`, or `{dialog}` when a dialog interrupts the action;
 [source](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L620-L639)),
-so only `keyboard.type` is receipt-less here.
+so only `keyboard.type` is receipt-less among these three. The other keyboard calls
+`keyboard.insertText`, `keyboard.down` and `keyboard.up` also return void at that commit
+([source](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L612-L643)),
+so they declare nothing either.
 The workflow therefore stops at a receipt-less holding step, leaves it outside
 the completed prefix and retains `inputReleased=false`; no later step or final
 snapshot runs. This also requires explicit recovery after ordinary void-returning

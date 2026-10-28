@@ -9,7 +9,8 @@
     are samples of the page, not answers of the SDK, and are never evidence.
 
     This premise was read at [citrolabs/ego-lite@aecc5831fc5a] in
-    [package/ego-browser/src/page-model.ts]: the receipt type at lines
+    [package/ego-browser/src/page-model.ts]. The line numbers below hold only
+    at that commit: the receipt type at lines
     411-414, where [dialog] is filled at 2777-2784, and the raw calls at
     512-568 and 2674-2687; and in [src/browser-runtime.ts], where
     [PageDialogOpenedError] always carries an object [dialog] (115-146).

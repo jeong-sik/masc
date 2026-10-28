@@ -57,7 +57,7 @@ let dashboard_board_payload
      the work to a worker domain and keeps user requests on the
      cache fast-path so they never wait for this refresh. *)
   Dashboard_cache.get_or_compute_payload cache_key ~ttl:dashboard_projection_cache_ttl_s
-    (Pool_work.io (fun () ->
+    (Pool_work.cpu (fun () ->
       let base_fetch =
         board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset
       in
@@ -186,7 +186,7 @@ let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
       approval_queue_revision
   in
   let compute =
-    Pool_work.io (fun () ->
+    Pool_work.cpu (fun () ->
       Dashboard_gate.dashboard_json ~base_path ~limit ~window_minutes)
   in
   if force then Dashboard_cache.invalidate cache_key;
@@ -211,7 +211,7 @@ let dashboard_gate_tool_events_http_json request ~base_path : Yojson.Safe.t =
 
    Same fix pattern as PR #18991 / #18993 / #18994: wrap in
    [Dashboard_cache.get_or_compute] for stale-while-revalidate, which
-   submits the compute to a worker as [Pool_work.io], so the main domain
+   submits the compute to a worker as [Pool_work.cpu], so the main domain
    keeps serving requests during refresh. *)
 let dashboard_proof_compute ~config ~limit () : Yojson.Safe.t =
   let base_path = config.Workspace.base_path in
@@ -286,7 +286,7 @@ let dashboard_scheduled_automation_http_json ~(config : Workspace.config) :
   Dashboard_cache.get_or_compute
     (Server_dashboard_http_core_cache.scheduled_automation_cache_key config)
     ~ttl:Server_dashboard_http_core_cache.live_cache_ttl_s
-    (Pool_work.io (fun () ->
+    (Pool_work.cpu (fun () ->
       Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
         config))
 ;;
@@ -323,7 +323,7 @@ let dashboard_proof_http_json ~config request : Yojson.Safe.t =
   let key =
     Printf.sprintf "dashboard.proof:%s;%d" config.Workspace.base_path limit
   in
-  Dashboard_cache.get_or_compute key ~ttl:dashboard_projection_cache_ttl_s (Pool_work.io (fun () ->
+  Dashboard_cache.get_or_compute key ~ttl:dashboard_projection_cache_ttl_s (Pool_work.cpu (fun () ->
     dashboard_proof_compute ~config ~limit ()))
 ;;
 
@@ -856,7 +856,7 @@ let dashboard_bootstrap_http_json
         Printf.sprintf "planning:%s" (Mcp_server.workspace_config state).base_path
       in
       (Dashboard_cache.get_or_compute_payload cache_key
-         ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.io (fun () ->
+         ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.cpu (fun () ->
            dashboard_planning_http_json ~config:(Mcp_server.workspace_config state))))
         .json)
   in
@@ -902,7 +902,7 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
       (* fire-and-forget: pre-warm planning cache *)
       ignore
         (Dashboard_cache.get_or_compute_payload cache_key
-           ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.io (fun () ->
+           ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.cpu (fun () ->
              dashboard_planning_http_json ~config)));
       Log.Dashboard.info "planning surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
     with
@@ -929,7 +929,7 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
       (* fire-and-forget: pre-warm keeper-memory-health cache *)
       ignore
         (Dashboard_cache.get_or_compute_payload cache_key
-           ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.io (fun () ->
+           ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.cpu (fun () ->
              Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json ~base_path)));
       Log.Dashboard.info "keeper-memory-health surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
     with

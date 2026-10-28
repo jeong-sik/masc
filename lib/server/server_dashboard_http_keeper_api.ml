@@ -1142,7 +1142,7 @@ let handle_keeper_get_subroutes state req request reqd =
         Dashboard_cache.get_or_compute_payload
           cache_key
           ~ttl:keeper_file_changes_cache_ttl_s
-          (Pool_work.io (fun () ->
+          (Pool_work.cpu (fun () ->
             (* Folds what the store gained since the last call rather than reading
                the window again: this route answered 1.8-8.8s per call on
                2026-09-06 and was the profile's top allocator. *)
@@ -1243,7 +1243,7 @@ let handle_keeper_get_subroutes state req request reqd =
         Printf.sprintf "keeper:tool-stats:%s:%s:%d" masc_root name window_hours
       in
       let payload =
-        Dashboard_cache.get_or_compute_payload cache_key ~ttl:standard_cache_ttl_s (Pool_work.io (fun () ->
+        Dashboard_cache.get_or_compute_payload cache_key ~ttl:standard_cache_ttl_s (Pool_work.cpu (fun () ->
           let since =
             Time_compat.now ()
             -. (float_of_int window_hours *. Masc_time_constants.hour)
@@ -2105,7 +2105,7 @@ let handle_keeper_get_subroutes state req request reqd =
              tail_scan_lines
          in
          let payload =
-           Dashboard_cache.get_or_compute_payload cache_key ~ttl:keeper_hot_path_cache_ttl_s (Pool_work.io (fun () ->
+           Dashboard_cache.get_or_compute_payload cache_key ~ttl:keeper_hot_path_cache_ttl_s (Pool_work.cpu (fun () ->
              let masc_root = Workspace.masc_dir config in
              let trajectory_lines =
                Trajectory.read_recent_lines ~masc_root ~keeper_name:m.name

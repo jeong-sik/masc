@@ -976,7 +976,7 @@ let add_routes ~sw ~clock router =
            Dashboard_cache.get_or_compute_payload
              cache_key
              ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
-             (Pool_work.io (fun () ->
+             (Pool_work.cpu (fun () ->
                 let hearths =
                   Board_dispatch.list_hearths
                     ~exclude_system ~exclude_automation ()

@@ -655,10 +655,10 @@ let dashboard_shell_http_json
        PRs #18991 / #18993 / #18994 / #19007 / #19015 / #19023 / #19024 /
        #19025 / #19031 fixed for the other dashboard projections.
 
-       [Dashboard_cache] runs this [Pool_work.io] compute on a
+       [Dashboard_cache] runs this [Pool_work.cpu] compute on a
        worker domain when the pool is wired, so the main HTTP domain
        keeps serving requests during the cold-shell refresh. *)
-    Pool_work.io (fun () ->
+    Pool_work.cpu (fun () ->
       dashboard_shell_payload_json ?timing ~light config)
   in
   let clock_opt =

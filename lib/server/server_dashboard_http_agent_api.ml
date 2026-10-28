@@ -90,7 +90,7 @@ let agent_activity_http_json ~(config : Workspace.config) ~hours : Yojson.Safe.t
   Dashboard_cache.get_or_compute
     cache_key
     ~ttl:Server_dashboard_http_core_cache.live_cache_ttl_s
-    (Pool_work.io (fun () ->
+    (Pool_work.cpu (fun () ->
       let since = Time_compat.now () -. (hours *. Masc_time_constants.hour) in
       let activities = Telemetry_eio.summarize_agent_activity config ~since in
       `Assoc

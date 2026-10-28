@@ -89,7 +89,7 @@ let dashboard_fleet_composite_json ~(config : Workspace.config) () : Yojson.Safe
   in
   Dashboard_cache.get_or_compute cache_key
     ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
-    (Pool_work.io (fun () ->
+    (Pool_work.cpu (fun () ->
       let entries = Keeper_registry.all ~base_path:config.base_path () in
       (* One tool-call window for the whole envelope. Every keeper's claim
          lookup used to read this same fleet-wide tail for itself, so the

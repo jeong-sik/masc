@@ -94,7 +94,7 @@ let handle_dashboard_task_history state req reqd =
         (Mcp_server.workspace_config state).base_path task_id limit
     in
     Server_routes_http_common.respond_cached_read ~request:req ~reqd ~cache_key
-      ~ttl:standard_cache_ttl_s (Pool_work.io (fun () ->
+      ~ttl:standard_cache_ttl_s (Pool_work.cpu (fun () ->
         Task.Tool.task_history_events_json (Mcp_server.workspace_config state)
           ~task_id ~limit))
 
@@ -128,5 +128,5 @@ let handle_dashboard_workspace state req reqd =
       (Option.value ~default:"" me)
   in
   Server_routes_http_common.respond_cached_read ~request:req ~reqd ~cache_key
-    ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s (Pool_work.io (fun () ->
+    ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s (Pool_work.cpu (fun () ->
       Dashboard_workspace.json ~config:(Mcp_server.workspace_config state) ?me ~limit ()))

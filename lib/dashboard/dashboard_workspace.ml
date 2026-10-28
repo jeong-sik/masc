@@ -231,5 +231,5 @@ let json ~config ?me ~limit () =
       limit
   in
   Dashboard_cache.get_or_compute key ~ttl:cache_ttl_sec
-    (Pool_work.io (fun () -> compute_json ~config ?me ~limit ()))
+    (Pool_work.cpu (fun () -> compute_json ~config ?me ~limit ()))
 ;;

@@ -1136,7 +1136,7 @@ let add_routes router =
            let payload =
              Dashboard_cache.get_or_compute_payload cache_key
                ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-               (Pool_work.io (fun () ->
+               (Pool_work.cpu (fun () ->
                   let nodes =
                     if not (Sys.file_exists base) then []
                     else
@@ -1285,7 +1285,7 @@ let add_routes router =
                 let payload =
                   Dashboard_cache.get_or_compute_payload cache_key
                     ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-                    (Pool_work.io (fun () ->
+                    (Pool_work.cpu (fun () ->
                        let is_dir =
                          workspace_or_default
                            ~warn_on_failure:false

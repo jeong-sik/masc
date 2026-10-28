@@ -2845,7 +2845,7 @@ let add_routes ~sw ~clock router =
        with_public_read (fun _state req reqd ->
          respond_cached_read ~request:req ~reqd ~cache_key:"provider_logs"
            ~ttl:live_cache_ttl_s
-           (Pool_work.io Provider_logs.dashboard_provider_logs_json)
+           (Pool_work.cpu Provider_logs.dashboard_provider_logs_json)
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/provider-logs/tail" (fun request reqd ->
          with_public_read (fun _state req reqd ->
@@ -2903,7 +2903,7 @@ let add_routes ~sw ~clock router =
        with_public_read (fun _state req reqd ->
          respond_cached_read ~request:req ~reqd ~cache_key:"config_introspect"
            ~ttl:config_cache_ttl_s
-           (Pool_work.io Env_config_introspect.to_json)
+           (Pool_work.cpu Env_config_introspect.to_json)
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/project-snapshot" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -2986,7 +2986,7 @@ let add_routes ~sw ~clock router =
          let base_path = (Mcp_server.workspace_config state).base_path in
          respond_cached_read ~request:req ~reqd
            ~cache_key:(Printf.sprintf "keeper_memory_health:%s" base_path)
-           ~ttl:standard_cache_ttl_s (Pool_work.io (fun () ->
+           ~ttl:standard_cache_ttl_s (Pool_work.cpu (fun () ->
              Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json
                ~base_path))
        ) request reqd)
@@ -3197,7 +3197,7 @@ let add_routes ~sw ~clock router =
              (Mcp_server.workspace_config state).base_path
          in
          respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
-           (Pool_work.io (fun () ->
+           (Pool_work.cpu (fun () ->
               dashboard_planning_http_json ~config:(Mcp_server.workspace_config state)))
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/bootstrap" (fun request reqd ->
@@ -3219,7 +3219,7 @@ let add_routes ~sw ~clock router =
              (Goal_projection_generation.current ())
          in
          respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
-           (Pool_work.io (fun () -> dashboard_goals_tree_http_json ~config))
+           (Pool_work.cpu (fun () -> dashboard_goals_tree_http_json ~config))
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/goals/measurements" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
@@ -3267,7 +3267,7 @@ let add_routes ~sw ~clock router =
                (Goal_projection_generation.current ())
            in
            respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
-             (Pool_work.io (fun () -> dashboard_goal_detail_http_json ~config ~goal_id))
+             (Pool_work.cpu (fun () -> dashboard_goal_detail_http_json ~config ~goal_id))
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tasks/search-text" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -3315,7 +3315,7 @@ let add_routes ~sw ~clock router =
              [ ("actor", dashboard_actor_cache_segment state req) ]
          in
          respond_cached_read ~request:req ~reqd ~cache_key ~ttl:live_cache_ttl_s
-           (Pool_work.io (fun () -> dashboard_briefing_http_json ~state ~sw ~clock req))
+           (Pool_work.cpu (fun () -> dashboard_briefing_http_json ~state ~sw ~clock req))
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tools" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -3395,7 +3395,7 @@ let add_routes ~sw ~clock router =
                [ ("actor", dashboard_actor_cache_segment state req) ]
            in
            respond_cached_read ~request:req ~reqd ~cache_key ~ttl:live_cache_ttl_s
-             (Pool_work.io (fun () -> dashboard_briefing_sections_http_json ~state ~sw ~clock req))
+             (Pool_work.cpu (fun () -> dashboard_briefing_sections_http_json ~state ~sw ~clock req))
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tool-quality" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -3439,7 +3439,7 @@ let add_routes ~sw ~clock router =
          let payload =
            match
              Dashboard_cache.get_or_compute_payload cache_key ~ttl:config_cache_ttl_s
-               (Pool_work.io (fun () ->
+               (Pool_work.cpu (fun () ->
                   match Dashboard_http_tool_quality.aggregate sampling with
                   | Ok json -> json
                   | Error (Keeper_tool_call_log.Index_unavailable detail) ->
@@ -3532,7 +3532,7 @@ let add_routes ~sw ~clock router =
              (Option.value ~default:"-" until)
          in
          respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
-           (Pool_work.io (fun () -> Dashboard_harness_health.json ?since ?until ()))
+           (Pool_work.cpu (fun () -> Dashboard_harness_health.json ?since ?until ()))
        ) _request reqd)
   (* An operator's own verdict on a harness row. The label is ground truth
      for judge calibration, so it takes the admin permission and the
@@ -3606,7 +3606,7 @@ let add_routes ~sw ~clock router =
              "eval_feed" (Yojson.Safe.to_string scope)
          in
          respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
-           (Pool_work.io compute)
+           (Pool_work.cpu compute)
        ) request reqd)
 
   (* ── Telemetry unified view ── *)

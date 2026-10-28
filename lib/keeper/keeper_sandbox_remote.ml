@@ -111,7 +111,9 @@ type probe_observations =
   }
 
 type probe_completion =
-  { result : (Exec_ssh_protocol.major, string) result }
+  { requests_before_start : int
+  ; result : (Exec_ssh_protocol.major, string) result
+  }
 
 type shared_state =
   { semaphore : Eio.Semaphore.t
@@ -121,8 +123,11 @@ type shared_state =
        backwards. The lock is shared with both Eio and non-Eio callers. *)
   ; probe_completion : probe_completion option Atomic.t
     (* Each completed probe publishes a fresh object under [probe_lock]. A
-       waiter may reuse only a completion newer than the one it saw when it
-       began waiting. A cancelled probe does not publish a completion. *)
+       normal waiter may reuse a completion observed while waiting. A forced
+       waiter may reuse only a probe that began after its own request. A
+       cancelled probe does not publish a completion. *)
+  ; probe_requests : int Atomic.t
+    (* Request order is process-local and is not an observation timestamp. *)
   ; first_dispatch_logged : bool Atomic.t
   ; probe_answer : probe_answer option Atomic.t
     (* What the endpoint's shim answered to [--probe], kept for the life of
@@ -174,6 +179,7 @@ let shared_state ((_, _, _, _, _, max_concurrent_sessions) as identity : endpoin
         { semaphore = Eio.Semaphore.make max_concurrent_sessions
         ; probe_lock = Cross_context_mutex.create ()
         ; probe_completion = Atomic.make None
+        ; probe_requests = Atomic.make 0
         ; first_dispatch_logged = Atomic.make false
         ; probe_answer = Atomic.make None
         ; probe_observations = Atomic.make
@@ -733,19 +739,23 @@ let run_probe_locked t =
 ;;
 
 let run_probe_coalescing ~force t =
+  let request_number = Atomic.fetch_and_add t.shared.probe_requests 1 in
   let before = Atomic.get t.shared.probe_completion in
   Cross_context_mutex.with_lock t.shared.probe_lock (fun () ->
     let after = Atomic.get t.shared.probe_completion in
     let completed_while_waiting =
       match before, after with
-      | None, Some completion -> Some completion
-      | Some previous, Some completion when previous != completion -> Some completion
-      | None, None | Some _, None | Some _, Some _ -> None in
-    match force, completed_while_waiting with
-    | false, Some completion -> completion.result
-    | true, (None | Some _) | false, None ->
+      | None, Some _ -> true
+      | Some previous, Some completion -> previous != completion
+      | None, None | Some _, None -> false in
+    match after with
+    | Some completion
+      when request_number < completion.requests_before_start
+           || (not force && completed_while_waiting) -> completion.result
+    | None | Some _ ->
+      let requests_before_start = Atomic.get t.shared.probe_requests in
       let result = run_probe_locked t in
-      Atomic.set t.shared.probe_completion (Some { result });
+      Atomic.set t.shared.probe_completion (Some { requests_before_start; result });
       result)
 ;;
 

@@ -712,8 +712,8 @@ let delayed_probe_fixture ~base_path ~fail_first ~fail_second =
   let cli = path "serial-probe-cli" in
   save cli
     (Printf.sprintf
-       "#!/bin/sh\nif mkdir %s 2>/dev/null; then\n  : > %s\n  while [ ! -e %s ]; do sleep 0.02; done\n  %s\nelse\n  : > %s\n  %s\nfi\n"
-       (shell_quote (path "first-owner")) (shell_quote first_started)
+       "#!/bin/sh\nprintf x >> %s\nif mkdir %s 2>/dev/null; then\n  : > %s\n  while [ ! -e %s ]; do sleep 0.02; done\n  %s\nelse\n  : > %s\n  %s\nfi\n"
+       (shell_quote (path "probe-invocations")) (shell_quote (path "first-owner")) (shell_quote first_started)
        (shell_quote release_first) first_response
        (shell_quote second_started) second_response);
   Unix.chmod cli 0o700;
@@ -808,7 +808,7 @@ let test_concurrent_failed_probes_are_shared () =
    | Probe_not_asked | Probe_failed _ -> fail "later recovery was not observed")
 ;;
 
-let test_forced_preflight_does_not_reuse_waiting_probe () =
+let test_forced_preflights_share_only_a_new_probe () =
   with_eio_env @@ fun env ->
   let base_path = temp_dir () in
   let first, second, first_started, second_started, release_first, _, _ =
@@ -816,25 +816,33 @@ let test_forced_preflight_does_not_reuse_waiting_probe () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let first_result, finish_first = Eio.Promise.create () in
-  let forced_entered, enter_forced = Eio.Promise.create () in
-  let forced_result, finish_forced = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Promise.resolve finish_first (Keeper_sandbox_remote.For_testing.run_probe first));
   await_fixture_file clock first_started;
-  Eio.Fiber.fork ~sw (fun () ->
-    Eio.Promise.resolve enter_forced ();
-    Eio.Promise.resolve finish_forced (Keeper_sandbox_remote.check_preflight ~force:true second));
-  Eio.Promise.await forced_entered;
+  let forced = List.init 4 (fun _ ->
+    let entered, enter = Eio.Promise.create () in
+    let result, finish = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Promise.resolve enter ();
+      Eio.Promise.resolve finish (Keeper_sandbox_remote.check_preflight ~force:true second));
+    entered, result) in
+  List.iter (fun (entered, _) -> Eio.Promise.await entered) forced;
   Eio.Time.sleep clock 0.1;
   check bool "forced probe still waits for the active probe" false (Sys.file_exists second_started);
   save release_first "release";
   (match Eio.Promise.await first_result with Error error ->
      check bool "first failure came from first probe" true (contains "first-offline" error)
    | Ok _ -> fail "the first probe should fail");
-  (match Eio.Promise.await forced_result with Error error ->
-     check bool "forced preflight observes its own failure" true (contains "second-offline" error)
-   | Ok () -> fail "the forced probe should fail");
-  check bool "force starts a fresh probe" true (Sys.file_exists second_started)
+  List.iter (fun (_, result) -> match Eio.Promise.await result with Error error ->
+      check bool "forced preflight observes the newer probe" true (contains "second-offline" error)
+    | Ok () -> fail "the forced probe should fail") forced;
+  check bool "force starts a fresh probe" true (Sys.file_exists second_started);
+  let count () = String.length (read_file (Filename.concat base_path "probe-invocations")) in
+  check int "four forced waiters shared one new probe" 2 (count ());
+  (match Keeper_sandbox_remote.check_preflight ~force:true second with Error error ->
+     check bool "sequential force observes its own probe" true (contains "second-offline" error)
+   | Ok () -> fail "the later forced probe should fail");
+  check int "a later forced call starts another probe" 3 (count ())
 ;;
 
 let test_cancelled_probe_waiter_releases_ownership () =
@@ -1320,7 +1328,7 @@ let () =
           ; test_case "latest probe and boot comparison" `Quick test_fresh_probe_and_boot_comparison
           ; test_case "shared endpoint probes cannot reorder boots" `Quick test_concurrent_probes_do_not_reorder_boots
           ; test_case "concurrent failed probes share one result" `Quick test_concurrent_failed_probes_are_shared
-          ; test_case "forced preflight starts its own probe" `Quick test_forced_preflight_does_not_reuse_waiting_probe
+          ; test_case "forced preflights share only a new probe" `Quick test_forced_preflights_share_only_a_new_probe
           ; test_case "cancelled probe waiter leaves lock reusable" `Quick test_cancelled_probe_waiter_releases_ownership
           ; test_case "cancelled probe owner leaves lock reusable" `Quick test_cancelled_probe_owner_releases_ownership
           ; test_case "caller cannot replace runner-owned env" `Quick

@@ -882,6 +882,7 @@ let queue_panel_layout state (panel : queue_panel) =
     (* Reserve status, a possible receipt and a possible selection note when
        choosing placement, so selecting or receiving a result does not move it. *)
     ~queue_fixed_rows:3
+    ~queue_item_rows:(List.length (queue_panel_items state panel))
 
 let queue_panel_list_budget state panel =
   let terminal_rows, _ = get_terminal_size () in

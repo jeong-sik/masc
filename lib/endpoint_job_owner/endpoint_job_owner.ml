@@ -197,12 +197,16 @@ let bridge_result operation job =
     | exception ex -> finish result_cell (Error (Controller_failed ex));`Stop_daemon)
 
 let start_intent operation intent execution =
-  Atomic.set operation.source (R.launch_record intent);
-  let job=C.start_effect_workspace ~sw:operation.controller.sw ~fs:operation.controller.fs
-    ~cgroup_parent_path:operation.controller.cgroup_parent_path ~execution intent in
-  Atomic.set operation.execution (Owned job);
-  bridge_result operation job;
-  Ok (),None
+  match R.attach_launch_source intent operation.source with
+  | Error error ->
+    mark_launch_unknown operation;
+    Error (Registry_error error),None
+  | Ok () ->
+    let job=C.start_effect_workspace ~sw:operation.controller.sw ~fs:operation.controller.fs
+      ~cgroup_parent_path:operation.controller.cgroup_parent_path ~execution intent in
+    Atomic.set operation.execution (Owned job);
+    bridge_result operation job;
+    Ok (),None
 
 let reconcile_activation_error operation error =
   match refresh operation with
@@ -416,7 +420,7 @@ let make_operation controller record =
   in
   let operation={
     controller;
-    source=Atomic.make record;
+    source=Atomic.make (R.with_owner_guard record);
     execution=Atomic.make execution;
     result=Atomic.make (completion ());
     active=Atomic.make None;
@@ -535,8 +539,9 @@ let lookup controller original =
   let* operation=match reserved with
     | `Existing operation ->
         let* operation=validate_lookup original operation in
-        let* _=refresh operation in
-        Ok operation
+        (match refresh operation with
+         | Ok _ | Error (Registry_error R.Cancel_reconciliation_required) -> Ok operation
+         | Error error -> Error error)
     | `Conflict -> Error Binding_mismatch
     | `Join pending -> Eio.Promise.await pending.value
     | `Run pending -> run_admission controller key pending (fun () ->

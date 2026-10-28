@@ -1023,6 +1023,160 @@ let own_committed_launch_keeps_pre_activation_observers =
       Alcotest.(check string) "handoff runs the original once" "x"
         (read (Filename.concat fixture.work "handoff-ran"))))
 
+let cancellation_during_handoff_preserves_pin rollback =
+  with_fixture (fun ~env ~sw ~store fixture ->
+    let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+    let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+    let controller=Owner.For_testing.create ~sw ~fs:env#fs ~registry:store
+      ~cgroup_parent_path:"/sys/fs/cgroup" ~new_id:(fresh fixture)
+      ~resolve_execution:(fun _ -> Ok fixture.execution) ~before_request:(fun () -> ())
+      ~after_commit:(fun () -> Eio.Promise.resolve signal ();Eio.Promise.await resume) in
+    let binding,spec=prepare fixture 906 "printf x >> handoff-cancel-ran" in
+    let operation=Owner.admit controller ~binding ~spec |> owner in
+    Fun.protect ~finally:unblock (fun () ->
+      let activation=Owner.activate operation in
+      Eio.Promise.await entered;
+      let committed=Owner.inspect_original operation |> owner in
+      let launch_id=match R.launch_state committed with
+        | R.Requested id -> id
+        | R.Not_requested -> Alcotest.fail "launch was not committed before handoff" in
+      let claim=claim_path fixture binding in
+      let launch_bytes=read claim in
+      ignore (R.request_cancel committed ~confirmed_admission_id:(R.admission_id committed) |> registry);
+      let cancelled=Owner.inspect_original operation |> owner in
+      check "concurrent observer captured the original cancellation"
+        (R.cancellation_state cancelled=R.Cancellation_requested);
+      let saved=claim ^ ".cancelled" in
+      if rollback then (
+        Unix.rename claim saved;
+        Out_channel.with_open_bin claim (fun channel -> output_string channel launch_bytes);
+        Unix.chmod claim 0o400);
+      Fun.protect ~finally:(fun () -> if rollback then Unix.rename saved claim) (fun () ->
+        unblock ();
+        Owner.await_request activation |> owner;
+        if rollback then (
+          (match Owner.await_result operation with
+           | Error (Owner.Lifetime_error (Owner.C.Supervisor_error (S.Registry_error R.Stale_record))) -> ()
+           | Ok _ -> Alcotest.fail "rolled-back launch produced a result"
+           | Error error -> Alcotest.fail (Owner.error_to_string error));
+          (match Owner.inspect_original operation with
+           | Error (Owner.Registry_error R.Stale_record) -> ()
+           | Ok _ -> Alcotest.fail "handoff erased the observed cancellation"
+           | Error error -> Alcotest.fail (Owner.error_to_string error));
+          check "stale authority never creates a terminal receipt"
+            (not (Sys.file_exists (job_leaf fixture binding R.Terminal_receipt))))
+        else (
+          let digest=Owner.await_result operation |> owner in
+          let loaded=Owner.load_result ~sw ~expected_sha256:(Some digest) operation |> owner in
+          (match D.process loaded with
+           | D.Not_created {launch_id=Some actual} -> check "no-child receipt retains launch" (actual=launch_id)
+           | D.Not_created {launch_id=None} | D.Child _ ->
+             Alcotest.fail "cancelled handoff did not publish the original no-child receipt"));
+        check "cancelled handoff never runs the payload"
+          (not (Sys.file_exists (Filename.concat fixture.work "handoff-cancel-ran"))))))
+
+let uncertain_cancel_can_reconcile_the_held_original =
+  with_fixture (fun ~env ~sw ~store fixture ->
+    let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+    let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+    let fail_next=ref false in
+    let controller=Owner.For_testing.create ~sw ~fs:env#fs ~registry:store
+      ~cgroup_parent_path:"/sys/fs/cgroup" ~new_id:(fresh fixture)
+      ~resolve_execution:(fun _ -> Ok fixture.execution)
+      ~before_request:(fun () -> if !fail_next then (fail_next:=false;raise Injected_controller_failure))
+      ~after_commit:(fun () -> Eio.Promise.resolve signal ();Eio.Promise.await resume) in
+    let binding,spec=prepare fixture 907 "printf x >> uncertain-ran" in
+    let operation=Owner.admit controller ~binding ~spec |> owner in
+    Fun.protect ~finally:unblock (fun () ->
+      let activation=Owner.activate operation in
+      Eio.Promise.await entered;
+      let committed=Owner.inspect_original operation |> owner in
+      let launch_id=match R.launch_state committed with
+        | R.Requested id -> id
+        | R.Not_requested -> Alcotest.fail "launch was not committed before handoff" in
+      let claim=claim_path fixture binding in
+      let launch_bytes=read claim in
+      let fault=match Recovery_test.lane_scope_release_fault
+          ~owner:(P.Id.to_string binding.operation_id) ~exception_:(Failure "injected lane release") with
+        | Ok fault -> fault
+        | Error _ -> Alcotest.fail "invalid fault owner" in
+      (match Recovery_test.with_lane_scope_release_fault fault (fun () ->
+          R.request_cancel committed ~confirmed_admission_id:(R.admission_id committed)) with
+       | Error (R.Commit_unconfirmed _) -> ()
+       | Error error -> Alcotest.fail (R.error_to_string error)
+       | Ok _ -> Alcotest.fail "failed cancellation release was acknowledged");
+      Unix.rename claim (claim ^ ".uncertain");
+      Out_channel.with_open_bin claim (fun channel -> output_string channel launch_bytes);
+      Unix.chmod claim 0o400;
+      let unchanged=Recovery_test.replace_dispatch_fault ~stage:Recovery_test.Before_publish_replace
+        ~exception_:(Unix.Unix_error (Unix.EIO,"rename","cancel claim")) in
+      (match Recovery_test.with_replace_dispatch_fault unchanged (fun () ->
+          R.request_cancel committed ~confirmed_admission_id:(R.admission_id committed)) with
+       | Error (R.Publication_failed failure) ->
+         check "a later failed cancellation did not change the claim"
+           (failure.target_effect=Fs_compat.Target_unchanged)
+       | Error error -> Alcotest.fail (R.error_to_string error)
+       | Ok _ -> Alcotest.fail "failed second cancellation was acknowledged");
+      (match Owner.inspect_original operation with
+       | Error (Owner.Registry_error R.Cancel_reconciliation_required) -> ()
+       | Error error -> Alcotest.fail (Owner.error_to_string error)
+       | Ok _ -> Alcotest.fail "uncertain cancellation appeared as a current original");
+      let original=Owner.original operation in
+      let looked=Owner.lookup controller original |> owner in
+      check "held lookup returns the same original operation" (looked==operation);
+      let wrong=P.original ~binding ~admission_id:(id 999994) in
+      (match Owner.lookup controller wrong with
+       | Error Owner.Admission_mismatch -> ()
+       | Error error -> Alcotest.fail (Owner.error_to_string error)
+       | Ok _ -> Alcotest.fail "held lookup adopted another admission");
+      let missing=claim ^ ".lookup-missing" in
+      Unix.rename claim missing;
+      Fun.protect ~finally:(fun () -> Unix.rename missing claim) (fun () ->
+        match Owner.lookup controller original with
+        | Error (Owner.Registry_error R.Missing_original) -> ()
+        | Error error -> Alcotest.fail (Owner.error_to_string error)
+        | Ok _ -> Alcotest.fail "held lookup accepted missing original authority");
+      let waiting,resolve=Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve (Owner.await_result operation));
+      unblock ();
+      Owner.await_request activation |> owner;
+      (match Owner.For_testing.await_startup operation with
+       | Some (Ok (S.Not_performed {error=S.Registry_error R.Cancel_reconciliation_required;pipe_cleanup_errors=_})) -> ()
+       | Some (Ok _) -> Alcotest.fail "uncertain original entered native startup"
+       | Some (Error error) -> Alcotest.fail (Owner.error_to_string error)
+       | None -> Alcotest.fail "held original lost its native lifetime");
+      check "held result remains pending for explicit reconciliation" (Eio.Promise.peek waiting=None);
+      (match Owner.await_request (Owner.activate looked) with
+       | Error (Owner.Registry_error R.Cancel_reconciliation_required) -> ()
+       | Error error -> Alcotest.fail (Owner.error_to_string error)
+       | Ok () -> Alcotest.fail "held lookup restored launch authority");
+      check "failed activation cannot settle the held original" (Eio.Promise.peek waiting=None);
+      fail_next:=true;
+      (match Owner.await_request (Owner.cancel looked) with
+       | Error (Owner.Controller_failed Injected_controller_failure) -> ()
+       | Error error -> Alcotest.fail (Owner.error_to_string error)
+       | Ok () -> Alcotest.fail "injected owner failure became successful cancellation");
+      check "owner failure does not replace the held result" (Eio.Promise.peek waiting=None);
+      let receipt=job_leaf fixture binding R.Terminal_receipt in
+      Out_channel.with_open_bin receipt (fun channel -> output_string channel "conflicting receipt");
+      Unix.chmod receipt 0o400;
+      (match Owner.await_request (Owner.cancel looked) with
+       | Error (Owner.Result_error _) -> ()
+       | Error error -> Alcotest.fail (Owner.error_to_string error)
+       | Ok () -> Alcotest.fail "conflicting receipt was reported as successful reconciliation");
+      check "failed publication retains the pending original result" (Eio.Promise.peek waiting=None);
+      Unix.unlink receipt;
+      Owner.await_request (Owner.cancel looked) |> owner;
+      let digest=Owner.await_result operation |> owner in
+      check "preexisting result observer receives reconciled receipt" (Eio.Promise.await waiting=Ok digest);
+      let loaded=Owner.load_result ~sw ~expected_sha256:(Some digest) operation |> owner in
+      (match D.process loaded with
+       | D.Not_created {launch_id=Some actual} -> check "receipt retains the original launch" (actual=launch_id)
+       | D.Not_created {launch_id=None} | D.Child _ ->
+         Alcotest.fail "reconciled original did not publish its actual no-child receipt");
+      check "reconciliation never runs the payload"
+        (not (Sys.file_exists (Filename.concat fixture.work "uncertain-ran")))))
+
 let portable_cases=[
   "missing original never readmits",(fun () -> captured_original_survives_missing_or_replaced_files ~owned:false Missing_original ());
   "replacement job never rebinds",(fun () -> captured_original_survives_missing_or_replaced_files ~owned:false Replaced_job ());
@@ -1056,6 +1210,9 @@ let native_cases=[
   "native publication failure remains observable",native_publication_failure_remains_observable_after_revalidation;
   "failed actor retains native cancellation and result",failed_actor_keeps_native_cancellation_and_historical_result;
   "own committed launch preserves pre-activation observers",own_committed_launch_keeps_pre_activation_observers;
+  "handoff preserves a concurrent cancellation",(fun () -> cancellation_during_handoff_preserves_pin false ());
+  "handoff refuses rollback after observed cancellation",(fun () -> cancellation_during_handoff_preserves_pin true ());
+  "uncertain cancellation reconciles the held original",uncertain_cancel_can_reconcile_the_held_original;
 ]
 
 let () =

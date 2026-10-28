@@ -15,7 +15,7 @@ type error =
   | Busy | Binding_mismatch | Invalid_request of P.codec_error | Execution_identity_changed
   | Endpoint_replaced | Missing_original | Admission_incomplete
   | Unsupported_version of { expected : int; actual : int } | Corrupt_original of string
-  | Launch_already_requested | Launch_cancelled | Launch_intent_spent | Stale_record
+  | Launch_already_requested | Launch_cancelled | Launch_intent_spent | Cancel_reconciliation_required | Stale_record
   | Cleanup_failed of { primary : error option; cause : File_lock_eio.durable_lock_error }
 
 let rec error_to_string = function
@@ -46,6 +46,7 @@ let rec error_to_string = function
   | Launch_already_requested -> "endpoint launch is already requested; reconcile original handle"
   | Launch_cancelled -> "endpoint original launch was cancelled"
   | Launch_intent_spent -> "endpoint launch permit was already consumed"
+  | Cancel_reconciliation_required -> "endpoint cancellation publication requires explicit reconciliation"
   | Stale_record -> "endpoint original record changed"
   | Cleanup_failed {primary;cause} ->
     (match primary with None -> "endpoint transaction cleanup failed"
@@ -66,14 +67,20 @@ type t =
   ; root_path : string; root : identity; controller_uid : int; payload_uid : int
   ; route : P.route; owner : P.owner; recovery : Fs_compat.Publication_recovery.registry }
 
-type record = { registry : t; claim : claim; spec : P.spec }
+type cancellation_guard = { seen : bool Atomic.t; uncertain : bool Atomic.t }
+type record = { registry : t; claim : claim; spec : P.spec; cancellation_seen : cancellation_guard option }
 type storage = { record : record; directory : Eio.Fs.dir_ty Eio.Path.t }
 type unlaunched = { original_storage : storage }
 let storage_record (storage : storage) = storage.record
 let storage_path (storage : storage) = storage.directory
 let unlaunched_storage proof = proof.original_storage
-type launch_use = Unused | Callback_reserved | Retired_without_callback
-type launch_intent = { original : record; launch_id : P.Id.t; use : launch_use Atomic.t }
+type launch_use = Unused | Attaching_source | Callback_reserved | Retired_without_callback
+type launch_intent = {
+  original : record;
+  launch_id : P.Id.t;
+  use : launch_use Atomic.t;
+  observed : record Atomic.t option Atomic.t;
+}
 let launch_record (intent : launch_intent) = intent.original
 type launch_state = Not_requested | Requested of P.Id.t
 let binding record = record.claim.binding
@@ -286,7 +293,7 @@ let read_record (registry : t) (binding : P.binding) =
     | P.Start _ | P.Reconcile_admission _ | P.Activate _ | P.Inspect _ | P.Read_output _ | P.Cancel _ | P.Release _ -> corrupt "original Start binding" in
   let* after=inspect_job registry binding in
   let* ()=if observed=after then validate_root registry else Error (Protection_refused Root_identity_changed) in
-  Ok {registry;claim;spec}
+  Ok {registry;claim;spec;cancellation_seen=None}
 
 let settle_lock = function
   | File_lock_eio.Lock_held_elsewhere -> Error Busy
@@ -347,7 +354,8 @@ let already_exists ?(directory=false) = function
   | Protection_refused _ | Authority_unavailable _ | Recovery_unavailable _
   | Lock_failed _ | Commit_unconfirmed _ | Busy | Binding_mismatch | Invalid_request _
   | Execution_identity_changed | Endpoint_replaced | Missing_original | Admission_incomplete
-  | Unsupported_version _ | Corrupt_original _ | Launch_already_requested | Launch_cancelled | Launch_intent_spent | Stale_record | Cleanup_failed _ -> false
+  | Unsupported_version _ | Corrupt_original _ | Launch_already_requested | Launch_cancelled | Launch_intent_spent
+  | Cancel_reconciliation_required | Stale_record | Cleanup_failed _ -> false
 
 let create_job (registry : t) (claim : claim) =
   let* ()=validate_root registry in
@@ -463,12 +471,95 @@ let same_original (original : record) (current : record) =
   && same_execution_progress original.claim.state current.claim.state
   && original.spec=current.spec
 
+let with_owner_guard (original : record) =
+  match original.cancellation_seen with
+  | Some _ -> original
+  | None ->
+    let cancelled=match original.claim.state with
+      | Cancel_requested _ -> true
+      | Preparing | Ready _ | Launch_requested _ -> false in
+    {original with cancellation_seen=Some {seen=Atomic.make cancelled;uncertain=Atomic.make false}}
+
+let retain_guard original current =
+  (match original.cancellation_seen,current.claim.state with
+   | Some guard,Cancel_requested _ -> Atomic.set guard.seen true
+   | Some _,(Preparing | Ready _ | Launch_requested _)
+   | None,(Preparing | Ready _ | Launch_requested _ | Cancel_requested _) -> ());
+  {current with cancellation_seen=original.cancellation_seen}
+
+let guard_allows original current =
+  match original.cancellation_seen,current.claim.state with
+  | Some guard,(Preparing | Ready _ | Launch_requested _) ->
+    not (Atomic.get guard.seen || Atomic.get guard.uncertain)
+  | Some _,Cancel_requested _
+  | None,(Preparing | Ready _ | Launch_requested _ | Cancel_requested _) -> true
+
+let guard_allows_cancel original current =
+  match original.cancellation_seen,current.claim.state with
+  | Some guard,(Preparing | Ready _ | Launch_requested _) -> not (Atomic.get guard.seen)
+  | Some _,Cancel_requested _
+  | None,(Preparing | Ready _ | Launch_requested _ | Cancel_requested _) -> true
+
+let note_uncertain_cancel original =
+  Option.iter (fun guard -> Atomic.set guard.uncertain true) original.cancellation_seen
+
+let note_cancel_publication_failure original = function
+  | Publication_failed {target_effect=Fs_compat.Target_unchanged;_} -> ()
+  | Publication_failed {target_effect=Fs_compat.Target_replaced;_} ->
+    Option.iter (fun guard -> Atomic.set guard.seen true) original.cancellation_seen
+  | Publication_failed {target_effect=(Fs_compat.Target_created | Fs_compat.Target_state_unknown);_}
+  | Protection_refused _ | Authority_unavailable _ | Recovery_unavailable _
+  | Lock_failed _ | Commit_unconfirmed _ | Busy | Binding_mismatch | Invalid_request _
+  | Execution_identity_changed | Endpoint_replaced | Missing_original | Admission_incomplete
+  | Unsupported_version _ | Corrupt_original _ | Launch_already_requested | Launch_cancelled
+  | Launch_intent_spent | Cancel_reconciliation_required | Stale_record | Cleanup_failed _ -> note_uncertain_cancel original
+
+let attach_launch_source (intent : launch_intent) source =
+  let rec advance () =
+    let observed=Atomic.get source in
+    let same_guard=match observed.cancellation_seen,intent.original.cancellation_seen with
+      | None,None -> true
+      | Some left,Some right -> left==right
+      | None,Some _ | Some _,None -> false in
+    if not same_guard then Error Stale_record
+    else if same_original observed intent.original then
+      if Atomic.compare_and_set source observed intent.original then Ok () else advance ()
+    else if same_original intent.original observed then Ok ()
+    else Error Stale_record in
+  if not (Atomic.compare_and_set intent.use Unused Attaching_source) then Error Launch_intent_spent
+  else
+    let result=match Atomic.get intent.observed with
+      | Some _ -> Error Launch_intent_spent
+      | None ->
+        let* ()=advance () in
+        Atomic.set intent.observed (Some source);
+        Ok () in
+    Atomic.set intent.use Unused;
+    result
+
+let validate_observed_guard original current =
+  match original.cancellation_seen,current.claim.state with
+    | Some guard,(Preparing | Ready _ | Launch_requested _)
+      when Atomic.get guard.seen -> Error Stale_record
+    | Some guard,(Preparing | Ready _ | Launch_requested _)
+      when Atomic.get guard.uncertain -> Error Cancel_reconciliation_required
+    | Some _,(Preparing | Ready _ | Launch_requested _ | Cancel_requested _)
+    | None,(Preparing | Ready _ | Launch_requested _ | Cancel_requested _) -> Ok ()
+
+let validate_launch_source intent current =
+  let* ()=validate_observed_guard intent.original current in
+  match Atomic.get intent.observed with
+  | None -> Ok ()
+  | Some source -> if same_original (Atomic.get source) current then Ok () else Error Stale_record
+
 let refresh_with_hook ~after_lock (original : record) =
   let registry=original.registry and binding=original.claim.binding in
   read_locked registry binding (fun () ->
     after_lock ();
     let* current=read_record registry binding in
-    if same_original original current then Ok current else Error Stale_record)
+    let* ()=if same_original original current then Ok () else Error Stale_record in
+    let* ()=validate_observed_guard original current in
+    Ok (retain_guard original current))
 let refresh original = refresh_with_hook ~after_lock:(fun () -> ()) original
 
 let resync_cancel ~before_parent_sync (current : record) =
@@ -492,19 +583,30 @@ let request_cancel_with_hook ~before_resync_parent ~after_publication (original 
        && current.claim.admission_id=confirmed_admission_id then Ok () else Error Binding_mismatch in
     let* ()=if current.claim.payload_uid=registry.payload_uid
        && current.claim.payload_uid=original.claim.payload_uid then Ok () else Error Execution_identity_changed in
-    let* ()=if same_original original current then Ok () else Error Stale_record in
+    let* ()=if same_original original current && guard_allows_cancel original current then Ok () else Error Stale_record in
+    let current=retain_guard original current in
     let publish job launch_id =
       let claim={current.claim with revision=Int64.succ current.claim.revision;
         state=Cancel_requested {job;launch_id}} in
-      let* ()=publish_claim registry ~exclusive:false claim in
+      let publication=match publish_claim registry ~exclusive:false claim with
+        | result -> result
+        | exception ex ->
+          let bt=Printexc.get_raw_backtrace () in
+          note_uncertain_cancel original;
+          Printexc.raise_with_backtrace ex bt in
+      let* ()=match publication with
+        | Ok () -> Ok ()
+        | Error error -> note_cancel_publication_failure original error;Error error in
+      ignore (retain_guard original {current with claim});
       after_publication ();
       let* committed=read_record registry binding in
       if committed.claim=claim && committed.spec=current.spec then Ok committed else Error Stale_record in
-    match current.claim.state with
+    let* current=match current.claim.state with
     | Preparing -> Error Admission_incomplete
     | Cancel_requested _ -> resync_cancel ~before_parent_sync:before_resync_parent current
     | Ready job -> publish job None
-    | Launch_requested {job;launch_id} -> publish job (Some launch_id))
+    | Launch_requested {job;launch_id} -> publish job (Some launch_id) in
+    Ok (retain_guard original current))
 
 let commit_launch_with_hook ~after_publication (original : record) ~confirmed_admission_id ~launch_id =
   let registry=original.registry and binding=original.claim.binding in
@@ -513,6 +615,8 @@ let commit_launch_with_hook ~after_publication (original : record) ~confirmed_ad
     let* current=read_record registry binding in
     let* ()=if current.claim.admission_id=confirmed_admission_id then Ok () else Error Binding_mismatch in
     let* ()=if current.claim.payload_uid=registry.payload_uid then Ok () else Error Execution_identity_changed in
+    let* ()=if guard_allows original current then Ok () else Error Stale_record in
+    let current=if same_original original current then retain_guard original current else current in
     match current.claim.state with
     | Launch_requested _ -> Error Launch_already_requested
     | Cancel_requested _ -> Error Launch_cancelled
@@ -524,7 +628,8 @@ let commit_launch_with_hook ~after_publication (original : record) ~confirmed_ad
       after_publication ();
       let* committed=read_record registry binding in
       let* ()=if committed.claim=claim then Ok () else Error Stale_record in
-      Ok {original=committed;launch_id;use=Atomic.make Unused})
+      let committed=retain_guard original committed in
+      Ok {original=committed;launch_id;use=Atomic.make Unused;observed=Atomic.make None})
 
 let original_storage ~sw (current : record) =
   Eio.Switch.check sw;
@@ -549,7 +654,8 @@ let open_storage ~sw (original : record) =
   let registry=original.registry and binding=original.claim.binding in
   read_locked registry binding (fun () ->
     let* current=read_record registry binding in
-    let* ()=if same_original original current then Ok () else Error Stale_record in
+    let* ()=if same_original original current && guard_allows original current then Ok () else Error Stale_record in
+    let current=retain_guard original current in
     let* directory=original_storage ~sw current in
     Ok {record=current;directory})
 
@@ -562,11 +668,12 @@ let settle_cancelled_admission_with_hook ~before_resync_parent ~sw (original : r
   let registry=original.registry and binding=original.claim.binding in
   locked registry binding (fun () ->
     let* current=read_record registry binding in
-    let* ()=if same_original original current then Ok () else Error Stale_record in
+    let* ()=if same_original original current && guard_allows original current then Ok () else Error Stale_record in
+    let current=retain_guard original current in
     match current.claim.state with
     | Cancel_requested {launch_id=None;_} ->
       let* current=resync_cancel ~before_parent_sync:before_resync_parent current in
-      unlaunched ~sw current
+      unlaunched ~sw (retain_guard original current)
     | Cancel_requested {launch_id=Some _;_} | Launch_requested _ -> Error Launch_already_requested
     | Preparing | Ready _ -> Error Stale_record)
 
@@ -579,18 +686,21 @@ let retire_cancelled_launch_with_hook ~before_resync_parent ~after_retirement ~s
   let registry=original.registry and binding=original.claim.binding in
   locked registry binding (fun () ->
     let* current=read_record registry binding in
-    let* ()=if same_original original current then Ok () else Error Stale_record in
+    let* ()=if same_original original current && guard_allows original current then Ok () else Error Stale_record in
+    let* ()=validate_launch_source intent current in
+    let current=retain_guard original current in
     let* ()=match current.claim.state with
       | Cancel_requested {launch_id;_} -> (match launch_id with
           | Some actual when actual=intent.launch_id -> Ok ()
           | None | Some _ -> Error Stale_record)
       | Preparing | Ready _ | Launch_requested _ -> Error Stale_record in
     let* ()=match Atomic.get intent.use with
-      | Callback_reserved -> Error Launch_intent_spent
+      | Attaching_source | Callback_reserved -> Error Launch_intent_spent
       | Unused | Retired_without_callback -> Ok () in
     let* current=resync_cancel ~before_parent_sync:before_resync_parent current in
+    let* ()=validate_launch_source intent current in
     let* ()=match Atomic.get intent.use with
-      | Callback_reserved -> Error Launch_intent_spent
+      | Attaching_source | Callback_reserved -> Error Launch_intent_spent
       | Retired_without_callback -> Ok ()
       | Unused ->
         if Atomic.compare_and_set intent.use Unused Retired_without_callback then Ok ()
@@ -598,7 +708,7 @@ let retire_cancelled_launch_with_hook ~before_resync_parent ~after_retirement ~s
     after_retirement ();
     (* Retirement survives a cancelled or failed storage open. It can only
        reopen this cancelled original; callback entry never becomes fresh. *)
-    unlaunched ~sw current)
+    unlaunched ~sw (retain_guard original current))
 
 let retire_cancelled_launch ~sw intent =
   retire_cancelled_launch_with_hook ~before_resync_parent:(fun () -> ()) ~after_retirement:(fun () -> ()) ~sw intent
@@ -709,6 +819,8 @@ let with_launch_with_hook ~after_original ~sw (intent : launch_intent) perform =
     let attempt=File_lock_eio.try_with_liveness_lock_observed ~lock_path:(lock_path registry binding) (fun () ->
       let* current=read_record registry binding in
       let* ()=if same_original original current then Ok () else Error Stale_record in
+      let* ()=validate_launch_source intent current in
+      let current=retain_guard original current in
       let* ()=match current.claim.state with
         | Cancel_requested _ -> Error Launch_cancelled
         | Preparing | Ready _ | Launch_requested _ -> Ok () in
@@ -718,6 +830,8 @@ let with_launch_with_hook ~after_original ~sw (intent : launch_intent) perform =
       else (
         after_original ();
         let* storage=original_storage ~sw current in
+        let* ()=validate_launch_source intent current in
+        let current=retain_guard original current in
         Ok (perform {binding;spec=current.spec;admission_id=current.claim.admission_id;
           launch_id=intent.launch_id;payload_uid=current.claim.payload_uid;original_record=current} ~storage))) in
     match attempt with

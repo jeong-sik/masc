@@ -24,7 +24,7 @@ let classify_original_error : R.error -> original_error = function
   | Recovery_unavailable _ | Lock_failed _ | Commit_unconfirmed _
   | Binding_mismatch | Invalid_request _ | Execution_identity_changed
   | Endpoint_replaced | Missing_original | Admission_incomplete | Corrupt_original _
-  | Launch_already_requested | Launch_intent_spent | Stale_record | Cleanup_failed _
+  | Launch_already_requested | Launch_intent_spent | Cancel_reconciliation_required | Stale_record | Cleanup_failed _
   | Unsupported_version _ -> Unavailable
 let classify_startup_error : S.error -> original_error = function
   | S.Registry_error error -> classify_original_error error
@@ -46,9 +46,11 @@ type cancellation = (R.record,error) result completion
 type t = {
   endpoint : Eio.Switch.t;
   source : R.record;
+  intent : R.launch_intent;
   startup : (S.launch_outcome,error) result completion;
   result : (P.Sha256.t,error) result completion;
   cancellation : cancellation option Atomic.t;
+  reconcile_cancel : bool Atomic.t;
 }
 let original t=P.original ~binding:(R.binding t.source) ~admission_id:(R.admission_id t.source)
 let await_startup t=Eio.Promise.await t.startup.value
@@ -81,8 +83,8 @@ let terminal_result t ~sw intent = function
     Ok receipt.sha256
 let start_effect_workspace ~sw ~fs ~cgroup_parent_path ~execution intent =
   Eio.Switch.check sw;
-  let t={endpoint=sw;source=R.launch_record intent;startup=completion ();result=completion ();
-    cancellation=Atomic.make None} in
+  let t={endpoint=sw;source=R.launch_record intent;intent;startup=completion ();result=completion ();
+    cancellation=Atomic.make None;reconcile_cancel=Atomic.make false} in
   Eio.Switch.on_release sw (fun () -> stop t Owner_stopped);
   Eio.Switch.check sw;
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -90,8 +92,14 @@ let start_effect_workspace ~sw ~fs ~cgroup_parent_path ~execution intent =
       Eio.Fiber.yield ();
       Eio.Switch.run (fun job_sw ->
         let outcome=S.launch_effect_workspace ~sw:job_sw ~fs ~cgroup_parent_path ~execution intent in
+        let held=match outcome with
+          | S.Not_performed {error=S.Registry_error R.Cancel_reconciliation_required;pipe_cleanup_errors=_} -> true
+          | S.Not_performed {error=S.Registry_error (R.Cleanup_failed
+              {primary=Some R.Cancel_reconciliation_required;cause=_});pipe_cleanup_errors=_} -> true
+          | S.Not_performed _ | S.Performed _ -> false in
+        if held then Atomic.set t.reconcile_cancel true;
         finish t.startup (Ok outcome);
-        finish t.result (terminal_result t ~sw:job_sw intent outcome);
+        if not held then finish t.result (terminal_result t ~sw:job_sw intent outcome);
         (* No control observer owns these resources. Release will require a
            separate digest-bound durable host-consumption capability. *)
         Eio.Fiber.await_cancel ())
@@ -141,12 +149,22 @@ let cancel t =
         let hook=Eio.Switch.on_release_cancellable t.endpoint (fun () -> complete (Error Owner_stopped)) in
         Eio.Switch.check t.endpoint;
         Eio.Fiber.fork_daemon ~sw:t.endpoint (fun () ->
-          (match (Eio.Fiber.yield ();cancel_original t) with
-           | value -> complete value
-           | exception (Eio.Cancel.Cancelled _ as ex) ->
+          (try
+             let value=(Eio.Fiber.yield ();cancel_original t) in
+             match value with
+             | Ok _ when Atomic.get t.reconcile_cancel ->
+               (match Eio.Switch.run (fun sw -> retire_unlaunched ~sw t.intent) with
+                | Ok digest ->
+                  Atomic.set t.reconcile_cancel false;
+                  finish t.result (Ok digest);
+                  complete value
+                | Error error -> complete (Error error))
+             | Ok _ | Error _ -> complete value
+           with
+           | Eio.Cancel.Cancelled _ as ex ->
              let bt=Printexc.get_raw_backtrace () in complete (Error Owner_stopped);
              Eio.Switch.remove_hook hook;Printexc.raise_with_backtrace ex bt
-           | exception ex -> complete (Error (Job_failed ex)));
+           | ex -> complete (Error (Job_failed ex)));
           Eio.Switch.remove_hook hook;
           `Stop_daemon);
         Eio.Switch.check t.endpoint

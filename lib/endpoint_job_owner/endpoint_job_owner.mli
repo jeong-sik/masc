@@ -48,7 +48,10 @@ val lookup : t -> P.original -> (operation,error) result
     registry. Cold known launches remain unknown live ownership; this function
     creates neither a new admission nor a recovered kernel handle. Existing entries
     validate their captured physical original; a newly loaded matching binding
-    never replaces it. Concurrent cold lookup/admission share one reservation. *)
+    never replaces it. If that validation finds an uncertain cancellation write,
+    lookup returns the same existing operation for explicit reconciliation;
+    inspection still reports the hold, and lookup grants no new launch authority.
+    Concurrent cold lookup/admission share one reservation. *)
 val original : operation -> P.original
 val inspect_original : operation -> (R.record,error) result
 (** Current source only, without waiting for startup, process exit or output.

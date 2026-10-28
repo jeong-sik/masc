@@ -189,9 +189,11 @@ val record_terminal_error :
     the terminal takes the sequence after the last complete row and the append
     cuts the fragment, so a crashed append does not leave the journal without
     its terminal. An [Operation_settlement] whose terminal is already the last
-    row is answered from a bounded tail of the journal; the rest of the journal
-    is then neither read nor validated, since nothing is written. Every other
-    case reads the whole journal. [Error] names a journal that could not be
+    row and fits in a bounded tail window is answered from that tail. The rows
+    before it are then not decoded or validated, since nothing is written: a
+    journal whose earlier rows the full read would refuse still answers with
+    its terminal. Every other case, including a failed tail read, reads the
+    whole journal. [Error] names a journal that could not be
     read or appended; the caller decides whether that blocks anything. [ts] is
     the caller's clock, as for {!append}. *)
 

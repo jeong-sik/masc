@@ -1283,13 +1283,14 @@ let terminal_tail_bytes = 64 * 1024
    bounded tail answers it without reading the whole journal. Anything the
    tail cannot settle (a missing or unreadable store, no complete row in the
    window, a row that does not decode, or a last row that is not this
-   settlement's terminal) falls back to the full read, which reports its own
-   read failures. A descriptor cleanup failure is logged as the full reader
-   logs it. *)
+   settlement's terminal) falls back to the full read, which reports what it
+   finds. The tail logs only what the full read will not see again: its own
+   read failure, a cleanup failure, and a torn tail it answered past. *)
 let operation_terminal_from_tail settlement journal =
+  let path = journal.path in
   let of_tail = function
     | Fs_compat.Private_jsonl_tail.Tail_missing -> None
-    | Fs_compat.Private_jsonl_tail.Tail_present { rows; _ } ->
+    | Fs_compat.Private_jsonl_tail.Tail_present { rows; incomplete_tail; end_offset; _ } ->
       let last =
         String.split_on_char '\n' rows
         |> List.filter (fun line -> not (String.equal (String.trim line) ""))
@@ -1298,17 +1299,36 @@ let operation_terminal_from_tail settlement journal =
        | [] -> None
        | line :: _ ->
          (match journaled_envelope_of_json (Yojson.Safe.from_string line) with
-          | Ok envelope -> existing_operation_terminal settlement [envelope]
+          | Ok envelope ->
+            let receipt = existing_operation_terminal settlement [envelope] in
+            if incomplete_tail && Option.is_some receipt
+            then
+              Log.Keeper.warn
+                "keeper_chat_event_log: journal has a torn tail path=%s end_offset=%d: bytes after its settled terminal are an append that never completed; the terminal stands"
+                path
+                end_offset;
+            receipt
           | Error (Unsupported_version _ | Malformed _) -> None
           | exception Yojson.Json_error _ -> None)) in
-  match Fs_compat.read_private_jsonl_tail_locked_result journal.path ~max_bytes:terminal_tail_bytes with
+  let log_tail_failure error =
+    Log.Keeper.warn
+      "keeper_chat_event_log: journal tail read failed path=%s: %s; reading the whole journal"
+      path
+      (Fs_compat.Private_jsonl_tail.error_to_string error) in
+  match Fs_compat.read_private_jsonl_tail_locked_result path ~max_bytes:terminal_tail_bytes with
   | Fs_compat.Private_file_succeeded tail -> of_tail tail
   | Fs_compat.Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
-    log_settlement_failure ~path:journal.path cleanup_failure;
+    log_settlement_failure ~path cleanup_failure;
     of_tail value
-  | Fs_compat.Private_file_failed _ -> None
-  | Fs_compat.Private_file_failed_with_cleanup_failure { cleanup_failure; _ } ->
-    log_settlement_failure ~path:journal.path cleanup_failure;
+  | Fs_compat.Private_file_failed error ->
+    log_tail_failure error;
+    None
+  | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    log_tail_failure error;
+    Log.Keeper.error
+      "keeper_chat_event_log: journal tail read failed and its descriptor settlement failed path=%s: %s"
+      path
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
     None
 ;;
 

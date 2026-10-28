@@ -913,6 +913,31 @@ let test_operation_settlement_reads_its_terminal_from_the_journal_tail () =
    | Error detail -> fail ("the tail did not answer: " ^ detail));
   check string "nothing was written" corrupted (In_channel.with_open_bin path In_channel.input_all)
 
+(* A crash can cut an append written after the settled terminal. The terminal
+   still answers, as the full read answers it, and the fragment is left for
+   the next append to cut. *)
+let test_operation_settlement_terminal_stands_before_a_torn_fragment () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "terminal-tail-torn" and operation_id = "op-terminal-tail-torn" in
+  let id = match Keeper_chat_operation.Operation_id.of_string operation_id with
+    | Ok id -> id | Error detail -> fail detail in
+  let settlement : Journal.operation_settlement = {operation_id=id;completed_at=3.} in
+  let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+  let settle ts = Journal.record_terminal_error ~segment:(Operation_settlement settlement) journal ~ts ~message:"cut by restart" in
+  (match settle 3. with
+   | Ok (Recorded_terminal_error {seq=0;_}) -> ()
+   | Ok _ | Error _ -> fail "the first settlement must append");
+  let path = Journal.journal_path ~base_dir:base_path ~keeper_name ~operation_id in
+  Out_channel.with_open_gen [ Open_append; Open_wronly; Open_binary ] 0o600 path
+    (fun oc -> Out_channel.output_string oc "{\"v\":2,\"seq\":1,\"ts\":4.0,\"event\":{\"type\":\"text_del");
+  let torn = In_channel.with_open_bin path In_channel.input_all in
+  (match settle 99. with
+   | Ok (Existing_terminal_error {seq=0;ts=3.;_}) -> ()
+   | Ok (Existing_terminal_error _) -> fail "another row stood in for the terminal"
+   | Ok (Recorded_terminal_error _) -> fail "a second terminal was appended"
+   | Error detail -> fail ("the torn journal refused its terminal: " ^ detail));
+  check string "nothing was written" torn (In_channel.with_open_bin path In_channel.input_all)
+
 (* A last row that is another settlement of the same operation does not stand
    in for this one: the tail gives no answer and the full read appends. *)
 let test_operation_settlement_tail_of_another_settlement_still_appends () =
@@ -985,5 +1010,7 @@ let () =
             test_operation_settlement_reads_its_terminal_from_the_journal_tail
         ; test_case "tail of another settlement still appends" `Quick
             test_operation_settlement_tail_of_another_settlement_still_appends
+        ; test_case "settled terminal stands before a torn fragment" `Quick
+            test_operation_settlement_terminal_stands_before_a_torn_fragment
         ] )
     ]

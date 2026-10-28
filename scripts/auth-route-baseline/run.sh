@@ -12,6 +12,11 @@
 # path under <work-dir>, no keepers and loopback only. Probes send POST, PUT and DELETE to
 # every route, so the script refuses to run when <port> already has a listener, checks
 # that the listener is the server it started, and stops only that process.
+#
+# With AUTH_BASELINE_CREDENTIALS=1 in the script's own environment, it mints a Worker and
+# an Admin token with `login` in the fresh base path before the server starts, and probe.py
+# also sends them and keeps the scrubbed response bodies in <out-dir>/bodies (see probe.py).
+# The tokens live under <work-dir> and are not copied to <out-dir>.
 set -u
 
 abspath() { echo "$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; }
@@ -36,6 +41,18 @@ fi
 
 rm -rf "$WORK"; mkdir -p "$WORK/home" "$OUT"; touch "$WORK/$MARKER"
 
+PROBE_ARGS=()
+if [ "${AUTH_BASELINE_CREDENTIALS:-0}" = 1 ]; then
+  mint() {
+    (cd "$WORK/home" && env -i PATH=/usr/bin:/bin HOME="$WORK/home" "$SERVER" login --agent "a1-$1" --role "$1" \
+       --base-path "$WORK" --client-env A1_TOKEN --no-expiry --json 2> "$WORK/login-$1.err") \
+      | python3 -I -c 'import json, sys; print(json.load(sys.stdin)["bearer_token"])'
+  }
+  worker=$(mint worker) && admin=$(mint admin) || fail "could not mint the Worker and Admin tokens; see $WORK/login-*.err"
+  (umask 077; printf '{"worker": "%s", "admin": "%s"}\n' "$worker" "$admin" > "$WORK/tokens.json")
+  PROBE_ARGS=(--tokens "$WORK/tokens.json" --work-dir "$WORK" --keep-bodies)
+fi
+
 (cd "$WORK/home" && env -i PATH=/usr/bin:/bin HOME="$WORK/home" MASC_BASE_PATH="$WORK" "$INVENTORY") \
   > "$WORK/routes.json" 2> "$WORK/routes.err" || fail "inventory failed; see $WORK/routes.err"
 
@@ -56,6 +73,6 @@ done
 LISTENER=$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t | head -1)
 [ "$LISTENER" = "$PID" ] || fail "the listener on port $PORT (pid ${LISTENER:-none}) is not the server this script started (pid $PID)"
 
-python3 -I "$HERE/probe.py" --routes "$WORK/routes.json" --base-url "$URL" --out "$OUT"
+python3 -I "$HERE/probe.py" --routes "$WORK/routes.json" --base-url "$URL" --out "$OUT" ${PROBE_ARGS[@]+"${PROBE_ARGS[@]}"}
 python3 -I "$HERE/probe_extra.py" --base-url "$URL" --out "$OUT"
 cp "$WORK/routes.json" "$OUT/routes.json"

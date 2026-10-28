@@ -13,7 +13,7 @@ type t = {
   diagrams : Masc_tui_resource_diagrams.t option;
 }
 let create ~entry ~contents ~error ~requested ~image_cursor ~text_cursor
-    ~revisions ~presentation ~metadata_expanded ~confirmation ?(shared = None) ~diagrams =
+    ~revisions ~presentation ~metadata_expanded ~confirmation ~shared ~diagrams =
   {entry;contents;error;requested;image_cursor;text_cursor;revisions;presentation;
    metadata_expanded;confirmation;shared;diagrams}
 let searchable reading = match reading.contents, reading.error with

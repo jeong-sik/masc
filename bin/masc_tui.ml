@@ -20218,7 +20218,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
             | Some ((Masc_tui_resource_catalog.Report_revision current as key), _)
               when String.equal current.id label ->
                 launch_resources_read state ~mailbox ~key
-            | _ -> ())
+            | Some ((Masc_tui_resource_catalog.Report_revision _
+                    | Masc_tui_resource_catalog.Mcp_uri _), _) | None -> ())
        | Error detail -> report_action state "error" (label ^ ": " ^ detail))
   | Resource_read (request, result) ->
       Masc_tui_resources_updates.read_done state ~request result

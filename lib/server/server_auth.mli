@@ -12,6 +12,11 @@
 
 type agent_quota = Exempt_observation | Metered_operation
 val read_request_quota : Httpun.Method.t -> agent_quota
+val check_agent_rate_limit :
+  quota:agent_quota -> Httpun.Request.t -> Httpun.Reqd.t -> (unit, unit) result
+(** Consumes the caller's agent operation bucket when [quota] is
+    [Metered_operation]; on refusal the 429 response is already written and
+    [Error ()] is returned. *)
 (** For an already classified read endpoint, GET/HEAD use the ingress IP
     limiter without consuming the agent operation bucket. Other methods stay
     metered. This does not grant read authorization. *)

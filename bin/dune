@@ -1897,7 +1897,7 @@
  (name masc_tui_resource_export)
  (wrapped false)
  (modules masc_tui_resource_export)
- (libraries masc_tui_resource_catalog masc masc.masc_tool_blob_store masc.fs_compat  masc.agent_core.digest uri eio unix))
+ (libraries masc_tui_resource_catalog masc masc.config masc.masc_tool_blob_store masc.fs_compat  masc.agent_core.digest uri ipaddr eio unix))
 
 (library
  (name masc_tui_resource_document)
@@ -1905,7 +1905,7 @@
  (modules masc_tui_resource_document)
  (libraries masc_tui_scroll masc_tui_image_viewport masc_tui_resource_diagrams masc_tui_resource_export masc_tui_resource_reading masc_tui_markdown masc_tui_detail_reading masc_tui_pick_list masc_tui_artifact_html masc_tui_artifact_html_rows masc_tui_types masc_tui_ansi masc_tui_message_layout masc_tui_text_block
   masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_mcp masc_tui_resource_images
-  masc_tui_markdown_theme masc_tui_roster_pane masc_tui_theme masc yojson))
+  masc_tui_markdown_theme masc_tui_roster_pane masc_tui_theme masc masc.config yojson))
 
 (library
  (name masc_tui_surface_search)

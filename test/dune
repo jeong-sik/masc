@@ -6707,7 +6707,7 @@
  (name test_tui_resource_copy)
  (modules test_tui_resource_copy)
  (libraries masc_tui_resource_reading masc_tui_scroll alcotest base64 masc masc_tui_link masc_tui_types masc_tui_resource_document
-  masc_tui_resource_catalog masc_tui_resources_updates masc_tui_mcp))
+  masc_tui_resource_catalog masc_tui_resources_updates masc_tui_mcp masc.masc_tool_blob_store unix))
 
 (test
  (name test_tui_image_payload)

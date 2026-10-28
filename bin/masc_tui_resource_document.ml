@@ -16,7 +16,14 @@ let current (state : state) =
   let shown_key = match state.resource_pending_key,
       state.resource_content_error, state.resource_content with
     | Some key, _, _ | None, Some (key, _), _ | None, None, Some (key, _) -> Some key
-    | None, None, None -> Option.map Catalog.key selected in
+    | None, None, None ->
+      (match state.resource_share_pending, selected with
+       | Some request, Some (Catalog.Report report)
+         when request.share_workspace = state.workspace_authority
+              && String.equal request.share_report.id report.id ->
+         Some (Catalog.Report_revision request.share_report)
+       | (Some _ | None), Some (Catalog.Report _ | Catalog.Mcp _) -> Option.map Catalog.key selected
+       | (Some _ | None), None -> None) in
   Option.bind shown_key (fun key ->
     Option.map (fun entry ->
       let contents = match state.resource_content with
@@ -28,6 +35,21 @@ let current (state : state) =
       let requested = match state.resource_pending_key with
         | Some current -> Catalog.equal_key current key
         | None -> false in
+      let share_uncertain = match entry with
+        | Catalog.Report report -> resource_share_uncertain state report
+        | Catalog.Mcp _ -> false in
+      let has_original_text = match contents with
+        | Some [part] ->
+          (match part.Masc_tui_mcp.rc_kind with
+           | Resource_text _ -> true | Resource_blob _ -> false)
+        | Some [] | Some (_ :: _ :: _) | None -> false in
+      let public_url = match entry, has_original_text, error, requested, state.resource_shared with
+        | Catalog.Report report, true, None, false, Some true
+          when server_authority_ready state && not share_uncertain ->
+          Some (Masc_tui_resource_export.public_url ~report
+            ~base_url:(Env_config_core.masc_http_base_url_opt ()))
+        | (Catalog.Mcp _ | Catalog.Report _), (true | false), (Some _ | None),
+          (true | false), (Some _ | None) -> None in
       Reading.create ~entry ~contents ~error ~requested
         ~image_cursor:state.resource_image_cursor ~text_cursor:state.resource_text_cursor
         ~revisions:state.resource_revision_history ~presentation:state.resource_presentation
@@ -42,7 +64,9 @@ let current (state : state) =
         ~confirmation:(match entry with Catalog.Mcp _ -> None
           | Report report -> Some (resource_check_status state report))
         ~shared:(match entry with Catalog.Mcp _ -> None
-          | Report _ -> state.resource_shared))
+          | Report _ -> if share_uncertain then None else state.resource_shared)
+        ~share_uncertain
+        ~public_url)
       (Catalog.entry_for_key entries key))
 
 let text_parts parts =
@@ -87,6 +111,35 @@ let export_source state =
       Masc_tui_resource_export.create ~report ~source
   | Some (Catalog.Mcp _, _) -> Error "Select a published report revision"
   | Some (Catalog.Report _, _) | None -> Error "The report has no single admitted original body"
+
+let copy_public_url state =
+  let open Result.Syntax in
+  let* () = match current state with
+    | Some { share_uncertain = true; _ } ->
+      Error "External sharing result is unconfirmed; P and Y are disabled for this artifact during this TUI session"
+    | Some _ | None -> Ok () in
+  let* _ = export_source state in
+  match state.resource_shared, current state with
+  | Some true, Some { public_url = Some result; _ } -> result
+  | Some true, (Some _ | None) -> Error "Press R to reread the report before copying its public link"
+  | Some false, (Some _ | None) -> Error "External sharing is off; press P to enable it"
+  | None, (Some _ | None) -> Error "External sharing is unknown; press R to reread the report"
+
+let external_share_change state =
+  let open Result.Syntax in
+  if not (server_authority_ready state) then Error "Confirm the workspace before changing external sharing"
+  else if state.view <> Resources || state.resource_focus <> Right_pane then
+    Error "Focus a published report to change external sharing"
+  else match current state, state.resource_shared with
+    | Some { entry = Catalog.Report _; share_uncertain = true; _ }, (Some _ | None) ->
+      Error "External sharing result is unconfirmed; P and Y are disabled for this artifact during this TUI session"
+    | Some { entry = Catalog.Report report; _ }, Some true -> Ok (report, false)
+    | Some { entry = Catalog.Report report; _ }, Some false ->
+      let* _ = export_source state in Ok (report, true)
+    | Some { entry = Catalog.Report _; _ }, None ->
+      Error "External sharing is unknown; press R to reread the report"
+    | (Some { entry = Catalog.Mcp _; _ } | None), (Some _ | None) ->
+      Error "Open a published report to change external sharing"
 
 let fenced_pretty_json text =
   let pretty =
@@ -136,7 +189,7 @@ type origin = Metadata | Selection | Part_heading of int | Part_body of int
   | Read_status | Progress | Failure of int
 
 let resource_document entry
-    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions ~presentation ~metadata_expanded ~confirmation ~shared =
+    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions ~presentation ~metadata_expanded ~confirmation ~shared ~share_uncertain ~public_url =
   let resource = Catalog.metadata entry in
   let present = function
     | Some text when String.trim text <> "" -> text
@@ -213,11 +266,18 @@ let resource_document entry
   let confirmation = match confirmation with
     | None -> ""
     | Some status -> "\n\n**Confirmation:** " ^ Masc_tui_artifact_checks.description status in
-  let sharing = match shared with
-    | None -> ""
-    | Some true -> "\n\n**External sharing:** enabled (P: revoke)"
-    | Some false -> "\n\n**External sharing:** private (P: enable)" in
-  (Metadata, Markdown_text (metadata ^ confirmation ^ sharing ^ "\n\n---")) :: body
+  let sharing = match entry, share_uncertain, shared with
+    | Catalog.Mcp _, (true | false), (Some _ | None) -> ""
+    | Catalog.Report _, true, (Some _ | None) ->
+      "\n\n**External sharing:** change unconfirmed; it may still apply. P and Y are disabled for this artifact during this TUI session."
+    | Catalog.Report _, false, None -> "\n\n**External sharing:** unknown (R: reread this revision)"
+    | Catalog.Report _, false, Some true -> "\n\n**External sharing:** enabled (P: revoke)"
+    | Catalog.Report _, false, Some false -> "\n\n**External sharing:** private (P: enable)" in
+  let public_link = match public_url with
+    | Some (Ok url) -> "\n\n**Public link:** `" ^ url ^ "` · Y: copy (origin not verified)"
+    | Some (Error detail) -> "\n\n**Public link unavailable:** " ^ detail
+    | None -> "" in
+  (Metadata, Markdown_text (metadata ^ confirmation ^ sharing ^ public_link ^ "\n\n---")) :: body
 
 type diagram = {
   first_row : int;
@@ -243,7 +303,8 @@ let anchored_layout ~cols (reading : t) =
     ~requested:reading.requested ~image_cursor:reading.image_cursor
     ~text_cursor:reading.text_cursor ~revisions:reading.revisions
     ~presentation:reading.presentation ~metadata_expanded:reading.metadata_expanded
-    ~confirmation:reading.confirmation ~shared:reading.shared in
+    ~confirmation:reading.confirmation ~shared:reading.shared ~share_uncertain:reading.share_uncertain
+    ~public_url:reading.public_url in
   let pieces = match reading.diagrams with
     | None -> pieces
     | Some diagrams ->

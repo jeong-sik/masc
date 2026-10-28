@@ -1035,6 +1035,12 @@ let for_surface = function
           ~help:"choose a local destination; exclusively create the selected report revision's exact bytes"
       ; b Act "o" "open Dashboard" ~detail:Detail_only
           ~help:"open the selected fixed report revision; the browser uses its own authentication"
+      ; b Act "P" "external sharing" ~detail:Detail_only
+          ~help:"enable or revoke external access to all revisions of this report"
+      ; b Act "Y" "copy public link" ~detail:Detail_only
+          ~help:"copy the selected revision's link when external sharing is enabled"
+      ; b Act "R" "reread revision" ~detail:Detail_only
+          ~help:"reread the exact open resource, including an older report revision"
       ; b Act "y" "copy source" ~detail:Detail_only
           ~help:"send the selected text part's original bytes via OSC 52; terminal support is unconfirmed"
       ; b Act "Esc" "back"

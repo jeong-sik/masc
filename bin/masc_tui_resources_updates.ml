@@ -107,6 +107,68 @@ let reset_document_position state =
   state.resource_scroll <- Masc_tui_scroll.Position.first;
   state.resource_search_position <- Masc_tui_resource_reading.first
 
+let retain_unread_revision state key =
+  match state.resource_content, state.resource_content_error with
+  | None, None ->
+    (* A retired read can be the only owner of this fixed revision. *)
+    state.resource_content_error <- Some
+      (key, "Report is not currently read; press R to reread this revision")
+  | (Some _ | None), (Some _ | None) -> ()
+
+let begin_share_change state ~report ~shared =
+  if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
+  else if resource_share_uncertain state report then
+    Error "External sharing outcome is unconfirmed; an operation receipt is required"
+  else match state.resource_share_pending with
+  | Some _ -> Error "An external sharing change is still pending"
+  | None ->
+    let request = { share_owner = ref (); share_workspace = state.workspace_authority;
+      share_report = report; share_target = shared } in
+    state.resource_share_pending <- Some request;
+    state.resource_shared <- None;
+    (match state.resource_pending_key with
+     | Some key when Catalog.equal_key key (Catalog.Report_revision report) ->
+       retain_unread_revision state key
+     | Some _ | None -> ());
+    state.resource_pending_key <- None;
+    state.resource_read_owner <- None;
+    Ok request
+
+(* Sharing belongs to the artifact, including every fixed revision. Keep the
+   guard across authority changes too: a read in a successor generation may
+   have started before the older write settled against the same workspace. *)
+let share_matches_key request = function
+  | Catalog.Report_revision report ->
+    String.equal request.share_report.id report.id
+  | Catalog.Mcp_uri _ -> false
+
+let share_changed state request ~result =
+  match state.resource_share_pending with
+  | Some current when current.share_owner == request.share_owner ->
+    let request = current in
+    let current_key = match Masc_tui_resource_document.current state with
+      | Some { entry = Catalog.Report report; _ }
+        when share_matches_key request (Catalog.Report_revision report) ->
+        Some (Catalog.Report_revision report)
+      | Some _ | None -> None in
+    (match result with
+     | Error _ when not (resource_share_uncertain state request.share_report) ->
+       state.resource_share_uncertain_ids <- request.share_report.id :: state.resource_share_uncertain_ids
+     | Ok _ | Error _ -> ());
+    state.resource_share_pending <- None;
+    (* Even a read launched after the POST can have observed its old state.
+       Retire it on settlement before a caller asks for a fresh observation. *)
+    (match state.resource_pending_key with
+     | Some key when share_matches_key request key ->
+       retain_unread_revision state key;
+       state.resource_pending_key <- None;
+       state.resource_read_owner <- None
+     | Some _ | None -> ());
+    Option.iter (fun _ -> state.resource_shared <- None) current_key;
+    if request.share_workspace = state.workspace_authority && server_authority_ready state
+    then current_key else None
+  | Some _ | None -> None
+
 let toggle_layout state =
   state.resource_layout <- (match state.resource_layout with
     | Catalog.Full_width -> Catalog.Side_by_side
@@ -129,7 +191,11 @@ let read_done state ~(request : Catalog.read_request) result =
        (* Acquisition retains original bytes; only display copies are sanitized. *)
        state.resource_content <- Some (key, reading.parts);
        state.resource_revision_history <- reading.revisions;
-       state.resource_shared <- reading.shared;
+       state.resource_shared <- (match state.resource_share_pending, key with
+         | Some pending, _ when share_matches_key pending key -> None
+         | (Some _ | None), Catalog.Report_revision report
+           when resource_share_uncertain state report -> None
+         | (Some _ | None), (Catalog.Report_revision _ | Catalog.Mcp_uri _) -> reading.shared);
        state.resource_image_cursor <- 0;
        state.resource_text_cursor <- 0;
        state.resource_search_position <- Masc_tui_resource_reading.first;

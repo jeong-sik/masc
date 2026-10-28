@@ -35,11 +35,30 @@ val check_changed : Masc_tui_types.state -> Masc_tui_artifact_check_action.reque
     A retired write cannot update a new owner's view. No receipt is adopted as
     inventory state. The caller reports the outcome and launches that read. *)
 
+val begin_share_change : Masc_tui_types.state ->
+  report:Masc_tui_resource_catalog.report -> shared:bool ->
+  (Masc_tui_types.resource_share_request, string) result
+(** Allocate a workspace-bound owner before dispatch, allowing at most one
+    outstanding share mutation. Refuse an artifact whose prior write has an
+    unknown outcome. Retire the previous share observation and pending read. *)
+
+val share_changed : Masc_tui_types.state -> Masc_tui_types.resource_share_request ->
+  result:(bool, string) result ->
+  Masc_tui_resource_catalog.key option
+(** Consume only the matching operation owner and retire reads for that report
+    started while the write was pending, even after an authority change.
+    An error marks the artifact ID uncertain for this TUI session; a later GET
+    cannot settle it. Return the current fixed report key only when the original
+    workspace still owns it; the caller may reread only after confirmed success. *)
+
 val read_done :
   Masc_tui_types.state -> request:Masc_tui_resource_catalog.read_request ->
   (Masc_tui_resource_catalog.reading, string) result -> unit
-(** Only the pending key and exact request owner consume the response. Text, metadata and blob payloads remain byte-for-byte
-    unchanged in the retained content list. A refused read retains the previous content. *)
+(** Only the pending key and exact request owner consume the response. Text,
+    metadata and blob payloads remain byte-for-byte unchanged in the retained
+    content list. A refused read retains the previous content. A read of a
+    report with a pending or uncertain share mutation does not admit its share
+    observation. *)
 
 val open_selected :
   Masc_tui_types.state -> read:(key:Masc_tui_resource_catalog.key -> unit) -> unit

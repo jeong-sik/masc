@@ -729,6 +729,7 @@ type async_msg =
       Masc_tui_types.code_lsp_query Masc_tui_fetched.request
       * (Masc.Tui_decode.lsp_answer, string) result
   | Resource_exported of string * (string, string) result
+  | Resource_share_changed of Masc_tui_types.resource_share_request * (bool, string) result
   | Resource_read of
       Masc_tui_resource_catalog.read_request * (Masc_tui_resource_catalog.reading, string) result
   | Github_identity_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
@@ -877,7 +878,7 @@ end = struct
 end
 
 let rec workspace_message_is_read = function
-  | Code_draft_saved _ | Board_attachment_saved _ | Resource_exported _ | Verification_evidence_exported _ -> false
+  | Code_draft_saved _ | Board_attachment_saved _ | Resource_exported _ | Resource_share_changed _ | Verification_evidence_exported _ -> false
   | Keeper_logs_loaded _ -> true
   | Chat_search_finished _ -> true
   | Workspace_scoped (_, _, message)
@@ -1207,7 +1208,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
     | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
     | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _)
-    | Code_lsp_answered (_, _) | Resource_exported _ | Resource_read (_, _) | Resource_diagram_ready _
+    | Code_lsp_answered (_, _) | Resource_exported _ | Resource_share_changed _ | Resource_read (_, _) | Resource_diagram_ready _
     | Github_identity_view_loaded (_, _) | Identity_providers_loaded (_, _, _)
     | Identity_switch_set (_, _, _, _) | Identity_login_started (_, _)
     | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)
@@ -1343,7 +1344,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
   | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
   | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _)
-  | Code_lsp_answered (_, _) | Resource_exported _ | Resource_read (_, _) | Resource_diagram_ready _
+  | Code_lsp_answered (_, _) | Resource_exported _ | Resource_share_changed _ | Resource_read (_, _) | Resource_diagram_ready _
   | Github_identity_view_loaded (_, _) | Identity_providers_loaded (_, _, _)
   | Identity_switch_set (_, _, _, _) | Identity_login_started (_, _)
   | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)

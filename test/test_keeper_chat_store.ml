@@ -2962,6 +2962,130 @@ let test_duplicate_provenance_poisons_whole_delivery_key () =
           detail)
 ;;
 
+let settled_failure key content =
+  { K.Settled_failure.delivery_key = operation_delivery_key key
+  ; content
+  ; route = lazy K.Row_route.none
+  }
+;;
+
+let settled_failure_rows path =
+  read_file path |> String.split_on_char '\n'
+  |> List.filter (fun line -> String.trim line <> "")
+  |> List.length
+;;
+
+(* One read answers every failure as the single append would: an earlier row
+   is found, a missing one is appended once, and a key repeated in the batch
+   reuses the row the batch added. A second batch changes nothing. *)
+let test_settled_failure_batch_answers_each_failure_once () =
+  let base_dir = temp_base_path "keeper-chat-store-settled-failure-batch" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-settled-failure-batch" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let earlier =
+        match
+          K.append_settled_failure_once ~base_dir ~keeper_name
+            ~delivery_key:(operation_delivery_key "kmsg-batch-earlier")
+            ~content:"earlier failure" ~route:(lazy K.Row_route.none) ()
+        with
+        | Ok (K.Appended { row_id }) -> row_id
+        | Ok (K.Already_present _) -> Alcotest.fail "the earlier failure already existed"
+        | Error detail -> Alcotest.fail detail
+      in
+      let batch =
+        [ "earlier", settled_failure "kmsg-batch-earlier" "earlier failure"
+        ; "first", settled_failure "kmsg-batch-new" "new failure"
+        ; "repeat", settled_failure "kmsg-batch-new" "new failure"
+        ; "second", settled_failure "kmsg-batch-other" "other failure"
+        ]
+      in
+      let answers =
+        match K.append_settled_failures_once ~base_dir ~keeper_name batch with
+        | Ok answers -> answers
+        | Error detail -> Alcotest.fail detail
+      in
+      let answer tag =
+        match List.assoc_opt tag answers with
+        | Some (Ok answer) -> answer
+        | Some (Error detail) -> Alcotest.failf "%s was refused: %s" tag detail
+        | None -> Alcotest.failf "%s has no answer" tag
+      in
+      Alcotest.(check (list string)) "every failure is answered beside its tag"
+        [ "earlier"; "first"; "repeat"; "second" ] (List.map fst answers);
+      (match answer "earlier" with
+       | K.Already_present { row_id } ->
+         Alcotest.(check string) "the earlier row answers" earlier row_id
+       | K.Appended _ -> Alcotest.fail "the earlier failure was appended again");
+      let first =
+        match answer "first" with
+        | K.Appended { row_id } -> row_id
+        | K.Already_present _ -> Alcotest.fail "the new failure already existed"
+      in
+      (match answer "repeat" with
+       | K.Already_present { row_id } ->
+         Alcotest.(check string) "a repeated key reuses the batch's row" first row_id
+       | K.Appended _ -> Alcotest.fail "a repeated key was appended twice");
+      (match answer "second" with
+       | K.Appended _ -> ()
+       | K.Already_present _ -> Alcotest.fail "the other failure already existed");
+      Alcotest.(check int) "one row per failure" 3 (settled_failure_rows path);
+      let before = read_file path in
+      (match K.append_settled_failures_once ~base_dir ~keeper_name batch with
+       | Ok answers ->
+         List.iter (fun (tag, answer) -> match answer with
+           | Ok (K.Already_present _) -> ()
+           | Ok (K.Appended _) -> Alcotest.failf "%s was appended again" tag
+           | Error detail -> Alcotest.failf "%s was refused: %s" tag detail) answers
+       | Error detail -> Alcotest.fail detail);
+      Alcotest.(check string) "a second batch leaves the transcript unchanged" before
+        (read_file path))
+;;
+
+(* A quarantined key refuses only its own failure; the rest of the batch is
+   appended and the quarantined rows stay as they were. *)
+let test_settled_failure_batch_refuses_only_a_quarantined_key () =
+  let base_dir = temp_base_path "keeper-chat-store-settled-failure-quarantine" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-settled-failure-quarantine" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let row id =
+        persisted_provenance_row ~id ~role:"user" ~content:"hello"
+          ~delivery_key:(operation_delivery_key "kmsg-batch-quarantined")
+          ~transcript_slot:Keeper_chat_delivery_identity.Accepted_user ()
+      in
+      let quarantined =
+        String.concat "\n"
+          [ Yojson.Safe.to_string (row "duplicate-a")
+          ; Yojson.Safe.to_string (row "duplicate-b")
+          ]
+        ^ "\n"
+      in
+      write_file path quarantined;
+      match
+        K.append_settled_failures_once ~base_dir ~keeper_name
+          [ "quarantined", settled_failure "kmsg-batch-quarantined" "must not append"
+          ; "fresh", settled_failure "kmsg-batch-fresh" "fresh failure"
+          ]
+      with
+      | Error detail -> Alcotest.failf "one quarantined key refused the batch: %s" detail
+      | Ok answers ->
+        (match List.assoc_opt "quarantined" answers with
+         | Some (Error _) -> ()
+         | Some (Ok _) | None -> Alcotest.fail "a quarantined key accepted a failure");
+        (match List.assoc_opt "fresh" answers with
+         | Some (Ok (K.Appended _)) -> ()
+         | Some (Ok (K.Already_present _)) | Some (Error _) | None ->
+           Alcotest.fail "the fresh failure was not appended");
+        Alcotest.(check bool) "the quarantined rows stay as they were" true
+          (String.starts_with ~prefix:quarantined (read_file path));
+        Alcotest.(check int) "only the fresh failure was added" 3 (settled_failure_rows path))
+;;
+
 let test_duplicate_tool_ordinal_poisons_whole_delivery_key () =
   let base_dir = temp_base_path "keeper-chat-store-duplicate-tool-ordinal" in
   Fun.protect
@@ -3975,6 +4099,10 @@ let () =
             `Quick test_half_provenance_blocks_append_once;
           Alcotest.test_case "duplicate provenance poisons its delivery key"
             `Quick test_duplicate_provenance_poisons_whole_delivery_key;
+          Alcotest.test_case "settled failure batch answers each failure once"
+            `Quick test_settled_failure_batch_answers_each_failure_once;
+          Alcotest.test_case "settled failure batch refuses only a quarantined key"
+            `Quick test_settled_failure_batch_refuses_only_a_quarantined_key;
           Alcotest.test_case "duplicate tool ordinal poisons its delivery key"
             `Quick test_duplicate_tool_ordinal_poisons_whole_delivery_key;
           Alcotest.test_case "execution id cannot cross delivery keys" `Quick

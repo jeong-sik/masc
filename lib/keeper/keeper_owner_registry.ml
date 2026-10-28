@@ -169,22 +169,24 @@ let prepare_operation_store_path pool keeper_name =
 
 (* Immutable Failed rows are the retained intent for both projections. A
    process may stop after either append, so every start retries the same facts,
-   not just failures whose cause happens to be Interrupted_by_restart. *)
+   not just failures whose cause happens to be Interrupted_by_restart. The
+   transcript is read once for all of them, not once per failure. *)
 let record_failed_operations pool ~keeper_name owner =
-  List.iter (fun (operation : Keeper_chat_operation.t) ->
+  Keeper_chat_failure_projection.persist_all
+    ~base_path:pool.config.Workspace.base_path ~keeper_name
+    (Keeper_owner.failed_operations_at_start owner)
+  |> List.iter (fun ((operation : Keeper_chat_operation.t), outcome) ->
     let log_pending error =
       Log.Keeper.warn ~keeper_name
         "failed operation projection pending operation=%s: %s"
         (Keeper_chat_operation.Operation_id.to_string operation.operation_id)
         (Keeper_chat_failure_projection.error_to_string error) in
-    match Keeper_chat_failure_projection.persist
-      ~base_path:pool.config.Workspace.base_path ~keeper_name operation with
-    | Ok Not_failed -> ()
+    match outcome with
+    | Ok Keeper_chat_failure_projection.Not_failed -> ()
     | Ok (Projected {transcript; journal}) ->
       (match transcript with Ok () -> () | Error error -> log_pending error);
       (match journal with Ok _ -> () | Error error -> log_pending error)
     | Error error -> log_pending error)
-    (Keeper_owner.failed_operations_at_start owner)
 ;;
 
 let start_owner pool ~keeper_name ~initial_meta =

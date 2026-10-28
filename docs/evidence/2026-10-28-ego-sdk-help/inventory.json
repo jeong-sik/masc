@@ -1,6 +1,6 @@
 {
   "source": "installed help() v2.1.0 metadata only",
-  "help_sha256": "891d2f472bb48baf7f305db3f8998b186f6967780be11b2644371d38552bda6e",
+  "help_sha256": "1de5048c8eccfd7ffeffbf4e6cbf2fd94d22e08c3c4c900c5ef44bcf66619d93",
   "help_entries": 74,
   "unique_help_entries": 74,
   "coverage_rows": 74,
@@ -81,5 +81,10 @@
     "Page.keyboard.type",
     "Page.keyboard.insertText",
     "Page.keyboard.paste"
-  ]
+  ],
+  "raw_capture_sha256": "891d2f472bb48baf7f305db3f8998b186f6967780be11b2644371d38552bda6e",
+  "raw_capture_source_commit": "9c957679beca167878ac0e10eb6a13d7d276b029",
+  "normalization": "Remove exactly one final LF from the raw capture; all other bytes unchanged.",
+  "help_lines": 444,
+  "raw_capture_lines": 445
 }

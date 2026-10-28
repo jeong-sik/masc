@@ -54,22 +54,6 @@ let discover ~store ~base_path ~keepers_dir ~keeper_id =
       let* request=io (fun () -> Request.restore ~owner record) |> rejected in
       restore ((record,request)::found) rest in
   restore [] records
-let confirm_destination ~config ~reserved (destination:Request.destination) =
-  let snapshot=Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved in
-  let* ()=match List.find_opt (fun (conflict:Lane_addon_tool_export.conflict) -> conflict.name=destination.tool)
-      snapshot.conflicts with
-    | Some conflict -> Error (Rejected (Lane_addon_tool_export.conflict_to_string conflict))
-    | None -> Ok () in
-  let* export=match List.find_opt (fun (export:Runtime.tool_export) -> export.tool.name=destination.tool) snapshot.exports with
-    | Some export -> Ok export
-    | None -> Error (Unavailable "Original history Add-on export is unavailable") in
-  Runtime.with_tool_request_destination ~config ~access:Lane_addon_sources.Operator_configuration ~reserved ~export
-    ~publish:(fun (actual:Runtime.tool_request_destination) ->
-      if actual.installation_id=destination.installation_id && actual.package_id=destination.package_id
-        && actual.tool=destination.tool && actual.configuration_revision=destination.configuration_revision
-      then Ok () else Error (Runtime.Host_refusal (Lane_addon_call_context.Rejected
-        "Fresh history destination differs from its original semantic configuration")))
-  |> Result.map_error Submit.error_of_runtime
 let original_judgment (record:Owner.retained) =
   match Progress.phase record.progress with
   | Progress.Judged judgment -> Ok judgment
@@ -131,7 +115,7 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:c
   let destination=Request.destination request in
   let prepare () =
     let* ()=confirm_live_owner () in
-    confirm_destination ~config ~reserved destination in
+    Keeper_librarian_durable_edge.confirm_destination ~config ~reserved destination in
   let call ~arguments =
     match prepare () with
     | Error error -> Error (Submit.Not_sent error)

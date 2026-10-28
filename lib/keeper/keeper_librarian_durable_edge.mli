@@ -25,3 +25,8 @@ val call : config:Workspace.config -> reserved:string list ->
   (Mcp_protocol.Mcp_types.tool_result, Lane_addon_submit_once.call_error) result
 (** Submit the retained [original] to the worker of [expected]'s configuration.
     Only failures before the worker RPC are [Not_sent]. *)
+val confirm_destination : config:Workspace.config -> reserved:string list ->
+  Keeper_librarian_durable_request.destination -> (unit, Lane_addon_submit_once.error) result
+(** The configuration still publishes [destination]'s installation, package,
+    tool and semantic revision. A missing export is [Unavailable]: the Add-on is
+    off or not ready. A conflicting export or a changed configuration is [Rejected]. *)

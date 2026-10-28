@@ -53,3 +53,19 @@ let call ~config ~reserved ~(expected : Request.destination) ~(original : Retain
       ~installation_id:expected.installation_id ~package_id:expected.package_id
       ~tool:expected.tool ~configuration_revision:expected.configuration_revision ~original ~arguments
     |> Result.map_error Submit.call_error_of_runtime
+let confirm_destination ~config ~reserved (destination:Request.destination) =
+  let snapshot=Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved in
+  let* ()=match List.find_opt (fun (conflict:Lane_addon_tool_export.conflict) -> conflict.name=destination.tool)
+      snapshot.conflicts with
+    | Some conflict -> Error (Submit.Rejected (Lane_addon_tool_export.conflict_to_string conflict))
+    | None -> Ok () in
+  let* export=match List.find_opt (fun (export:Runtime.tool_export) -> export.tool.name=destination.tool) snapshot.exports with
+    | Some export -> Ok export
+    | None -> Error (Submit.Unavailable "Original history Add-on export is unavailable") in
+  Runtime.with_tool_request_destination ~config ~access:Lane_addon_sources.Operator_configuration ~reserved ~export
+    ~publish:(fun (actual:Runtime.tool_request_destination) ->
+      if actual.installation_id=destination.installation_id && actual.package_id=destination.package_id
+        && actual.tool=destination.tool && actual.configuration_revision=destination.configuration_revision
+      then Ok () else Error (Runtime.Host_refusal (Lane_addon_call_context.Rejected
+        "Fresh history destination differs from its original semantic configuration")))
+  |> Result.map_error Submit.error_of_runtime

@@ -1175,6 +1175,22 @@ let seed_stale_if_missing key ~stale_for value =
   end;
   clear_timeout_circuit key
 
+let seed_stale_from_if_missing key ~from ~stale_for =
+  match peek_entry from with
+  | None -> ()
+  | Some source ->
+    (* The source's prepared bytes and entity tag travel with it: the seed
+       is the same page, so it is neither serialized nor hashed again. *)
+    let ts = now () in
+    atomic_update table (fun map ->
+        match SMap.find_opt key map with
+        | Some _ -> ((), map)
+        | None ->
+            ((), SMap.add key
+              (Ready { source with expires_at = ts; stale_until = ts +. stale_for })
+              map));
+    clear_timeout_circuit key
+
 let invalidate key =
   atomic_update table (fun map -> ((), SMap.remove key map));
   clear_timeout_circuit key

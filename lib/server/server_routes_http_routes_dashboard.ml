@@ -3213,13 +3213,8 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/goals" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let config = Mcp_server.workspace_config state in
-         let cache_key =
-           Printf.sprintf "goals_tree:%s:%d" config.base_path
-             (Goal_projection_generation.current ())
-         in
-         respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
-           (Pool_work.cpu ~name:__FUNCTION__ (fun () -> dashboard_goals_tree_http_json ~config))
+         Server_cached_read_http.respond ~request:req reqd
+           (cached_goals_tree_payload ~config:(Mcp_server.workspace_config state))
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/goals/measurements" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin

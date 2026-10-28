@@ -103,7 +103,7 @@ type _ auth =
   | `Subpath_dispatch` | `/api/v1/keepers/` prefix의 GET·POST | 핸들러가 하위 경로에 따라 래퍼를 골라요. 하위 경로별 종류는 경로표에 없어요 |
 
   `Subpath_dispatch`는 "종류가 없다"를 이름으로 적은 것이에요. 이 두 등록을 하위 경로마다 나누는 일은 따로 해요.
-- `Public_read_on_canonical_host`는 `Public_read`와 같은 접근이라서 경로 표에는 `public_read`로 적혀요. 다른 점은 순서 하나예요. `localhost`처럼 정규 호스트의 별칭으로 오는 요청을 서버 준비 상태, workspace precondition, 자격을 보기 전에 정규 호스트로 리다이렉트해요(`with_canonical_loopback_host`는 인증 검사가 아니라 호스트 이름 검사예요). `/dashboard` 페이지 3곳이 원래 이 순서였고, 그대로 두려고 이 종류를 더했어요. 호스트 검사를 `Public_read` 안쪽에 두면 별칭 호스트에서 서버가 준비되기 전에는 503, workspace precondition이 틀리면 400과 409를 받고, 맞으면 리다이렉트에 `x-masc-workspace-read` 헤더가 붙어요.
+- `Public_read_on_canonical_host`는 `Public_read`와 같은 접근이라서 경로 표에는 `public_read`로 적혀요. 다른 점은 순서 하나예요. `localhost`처럼 정규 호스트의 별칭으로 오는 요청을 서버 준비 상태, workspace precondition, 자격을 보기 전에 정규 호스트로 리다이렉트해요(`with_canonical_loopback_host`는 인증 검사가 아니라 호스트 이름 검사예요). `/dashboard` 페이지 3곳이 원래 이 순서였고, 그대로 두려고 이 종류를 더했어요. 호스트 검사를 `Public_read` 안쪽에 두면 별칭 호스트에서 서버가 준비되기 전에는 503, workspace precondition이 틀리면 400과 409를 받아요.
 
 ### 3.2 등록 함수
 
@@ -113,7 +113,7 @@ val Server_route.get : 'h auth -> string -> 'h -> Router.t -> Router.t
 
 `get`, `post`, `add`, `prefix_get`, `prefix_post`, `prefix_put`, `prefix_delete`가 있어요. 코드에서 쓰이는 등록 함수만 만들었어요. 정확한 경로의 `put`, `delete`, `any`는 쓰는 곳이 없어서 없고, 쓰게 되면 그때 더해요. `ws_get`은 업그레이드 핸들러가 직접 인증하므로 종류를 받지 않고 항상 `Self_authenticated Websocket_upgrade`를 기록해요.
 
-등록 함수는 종류에 맞는 `Server_auth` 래퍼를 핸들러에 씌우고, 종류를 같은 호출에서 기록해요. 종류와 핸들러를 따로 받는 함수는 라우터가 공개하지 않아요. 그래서 `Permission`이라 적고 인증 없는 핸들러를 넘기는 등록은 쓸 수 없어요. 등록 함수는 라우터 모듈의 함수자 `Router.Make_typed`가 만들어요. `Server_auth`는 `masc.server`에 있어서 라우터가 직접 부를 수 없으니, 래퍼 일곱 개를 함수자 인자(`Router.Wrappers`)로 받아요. `Server_route`가 이 함수자를 `Server_auth`로 적용하는 유일한 곳이에요. 아무것도 검사하지 않는 래퍼로 함수자를 적용하면 이 보장을 우회할 수 있어요. 그것은 타입이 아니라 리뷰가 막고, 적용이 한 곳뿐인지는 `rg Make_typed`로 보여요. 라우터의 `route` 레코드에는 `access : Route_access.t` 필드가 있고 인벤토리가 이것을 읽어요. 라우터의 옛 등록 함수(`Router.get` 등)는 `Route_access.Unclassified`를 기록하고, 마지막 층(A4d)에서 지워요. 그 뒤에는 모든 경로의 `access`가 이 함수자를 거친 값이에요.
+등록 함수는 종류에 맞는 `Server_auth` 래퍼를 핸들러에 씌우고, 종류를 같은 호출에서 기록해요. 종류와 핸들러를 따로 받는 함수는 라우터가 공개하지 않아요. 그래서 `Permission`이라 적고 인증 없는 핸들러를 넘기는 등록은 쓸 수 없어요. 등록 함수는 라우터 모듈의 함수자 `Router.Make_typed`가 만들어요. `Server_auth`는 `masc.server`에 있어서 라우터가 직접 부를 수 없으니, 래퍼 여덟 개(`Server_auth`의 일곱 개와 호스트 검사 `with_canonical_loopback_host`)를 함수자 인자(`Router.Wrappers`)로 받아요. `Server_route`가 이 함수자를 `Server_auth`로 적용하는 유일한 곳이에요. 아무것도 검사하지 않는 래퍼로 함수자를 적용하면 이 보장을 우회할 수 있어요. 그것은 타입이 아니라 리뷰가 막고, 적용이 한 곳뿐인지는 `rg Make_typed`로 보여요. 라우터의 `route` 레코드에는 `access : Route_access.t` 필드가 있고 인벤토리가 이것을 읽어요. 라우터의 옛 등록 함수(`Router.get` 등)는 `Route_access.Unclassified`를 기록하고, 마지막 층(A4d)에서 지워요. 그 뒤에는 모든 경로의 `access`가 이 함수자를 거친 값이에요.
 
 ### 3.2.1 경로표는 하나의 상태예요
 

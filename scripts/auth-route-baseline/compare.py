@@ -353,7 +353,7 @@ def main() -> int:
 
     if args.csv is not None:
         with args.csv.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.writer(handle)
+            writer = csv.writer(handle, lineterminator="\n")
             writer.writerow(
                 ["mode", "method", "route_path", "probed_path"]
                 + [f"before_{field}" for field in STATUS_FIELDS]
@@ -362,7 +362,7 @@ def main() -> int:
             writer.writerows(csv_rows)
     if args.responses_csv is not None:
         with args.responses_csv.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.writer(handle)
+            writer = csv.writer(handle, lineterminator="\n")
             writer.writerow(
                 ["mode", "method", "route_path", "probed_path", "identity", "before_status", "after_status",
                  "skipped", "body", "fields_checked", "problems"]

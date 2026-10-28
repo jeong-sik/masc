@@ -78,8 +78,7 @@ type carried =
   ; origin : Keeper_carried_front.origin
   ; counted_tokens : int option
         (** The ledger's measured total for its last sample, a request
-            without the turn context, when known; what the marks are read
-            against. *)
+            without the turn context, when known. *)
   }
 
 (** One piece of the request in the position it travels. The order is the
@@ -130,10 +129,6 @@ val walk_refusal_to_string : walk_refusal -> string
 type candidate =
   { runtime_id : string
   ; lane : (unit, lane_refusal) result
-  ; marks : Runtime_schema.context_marks option
-        (** As the binding declares them. They do not move this forecast's
-            range: the driver judges them only on a request with no
-            continuity choice, and a Keeper turn on a trace always has one. *)
   ; parts : (measured_parts, parts_refusal) result
   ; history_atoms : int  (** Atoms in the checkpoint plus the wake line. *)
   ; carried : carried option  (** [None] when [lane] is refused. *)
@@ -154,7 +149,7 @@ type t =
   ; walk : (walk, walk_refusal) result
   ; candidates : candidate list
         (** Every candidate of the keeper's lane, in the order the next
-            fresh cycle walks them; each with its own ledger front and marks,
+            fresh cycle walks them; each with its own ledger front,
             and the seed the trace gives them alike when the pair has no
             ledger. Empty when [walk] is refused. *)
   }

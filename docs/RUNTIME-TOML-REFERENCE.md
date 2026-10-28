@@ -34,7 +34,7 @@ different questions. Knowing which side owns a fact decides what you write.
 | --- | --- |
 | Provider dialect (`kind`), request path, default API-key env | catalog `[[providers]]` row with a matching `id` (`request-path` may still override the row's path, §2) |
 | Model context window, output ceiling, effort ladder, pricing, thinking-control policy | catalog `[[models]]` rows, matched by longest `id_prefix` |
-| Endpoint URL, credentials, timeouts, concurrency, eviction marks | `runtime.toml` |
+| Endpoint URL, credentials, timeouts, concurrency | `runtime.toml` |
 
 A provider whose `id` equals a catalog `[[providers]]` `id` is *catalogued*:
 the catalog row answers its dialect, request path, and default credential env,
@@ -197,7 +197,6 @@ assignments. Unknown keys are load errors.
 | --- | --- | --- |
 | `max-context` | positive int | per-binding window override |
 | `max-concurrent` | positive int | static client-side cap. **Omitted means no cap and no admission at all**: the binding dispatches straight out and stops only when the provider itself refuses (HTTP 429). Whether HTTP bindings should be required to declare it is open (#25401). `0` or negative is a load error |
-| `context-high-water-tokens` + `context-low-water-tokens` | positive ints, `low < high` | eviction marks, as a pair — one without the other is a load error. After a response, when the whole request (fixed prefix + history) exceeds high, old bundles are dropped until the total is at or below low (#36828, RFC keeper-context-window-in-tokens) |
 | `max-tokens` | positive int | per-request output budget; omitted lets the provider default decide (ollama.com/v1 defaults to 65536) |
 | `disable-parallel-tool-use` | bool, default `false` | limit responses to one tool call |
 | `price-input`, `price-output` | float | per-million pricing override (catalog otherwise) |
@@ -272,8 +271,6 @@ thinking-support = true
 streaming = true
 
 [claude.claude-sonnet-5-5]
-context-high-water-tokens = 100000
-context-low-water-tokens = 70000
 max-concurrent = 4
 ```
 
@@ -306,7 +303,6 @@ An uncatalogued Anthropic-dialect endpoint instead states `kind =
 | missing `account-home` on `muse-serve`; `account-home` outside the three account clients | the client cannot be addressed / the key belongs elsewhere |
 | `healthcheck.path` not starting with `/` | must be absolute |
 | `reasoning-effort` + `reasoning-uncontrolled` together | two contradictory requests |
-| half-declared water marks, or `low ≥ high` | eviction marks travel as a pair |
 | `max-concurrent` ≤ 0, `max-tokens` ≤ 0, non-positive `max-context` | meaningless values are rejected, not downgraded |
 | negative/non-finite `turn-timeout-s` | only absent (adapter default) or ≥ 0 (0 removes the deadline) |
 | `admission-priority-run-limit` on an official-client provider, or with no `max-concurrent` binding | nothing waits in the permit queue it would order |

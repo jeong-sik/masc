@@ -1164,7 +1164,6 @@ let test_the_json_carries_the_walk_and_each_place () =
   let candidate runtime_id place : Keeper_next_request_forecast.candidate =
     { runtime_id
     ; lane = Ok ()
-    ; marks = None
     ; parts = Error (Keeper_next_request_forecast.No_composition_on_runtime { records_read = 0 })
     ; history_atoms = 1
     ; carried = None
@@ -1195,7 +1194,7 @@ let test_the_json_carries_the_walk_and_each_place () =
   in
   let json = Keeper_next_request_forecast.to_json forecast in
   let open Yojson.Safe.Util in
-  Alcotest.(check string) "the schema names the shape" "masc.keeper.next-request-forecast.v5"
+  Alcotest.(check string) "the schema names the shape" "masc.keeper.next-request-forecast.v6"
     (json |> member "schema" |> to_string);
   Alcotest.(check string) "the lane rides with the walk" "glm"
     (json |> member "walk" |> member "lane_id" |> to_string);
@@ -1216,7 +1215,7 @@ let test_the_json_carries_the_walk_and_each_place () =
     "the assignment names no configured lane or runtime"
     (refused |> member "walk" |> member "refusal" |> to_string)
 
-let test_observed_boundary_forecast ~marks ~samples ~expected_front () =
+let test_observed_boundary_forecast ~samples ~expected_front () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
@@ -1251,14 +1250,8 @@ let test_observed_boundary_forecast ~marks ~samples ~expected_front () =
   Llm_provider.Model_catalog.load_file catalog_path |> unwrap
   |> Llm_provider.Model_catalog.set_global;
   let config_path = Filename.concat base_path "runtime.toml" in
-  let marks_text = match marks with
-    | None -> ""
-    | Some (marks : Runtime_schema.context_marks) ->
-      Printf.sprintf "context-high-water-tokens = %d\ncontext-low-water-tokens = %d\n"
-        marks.high_water_tokens marks.low_water_tokens
-  in
   write config_path
-    ("[runtime]\ndefault = \"fixture.sample\"\n[providers.fixture]\nprotocol = \"openai-compatible-http\"\nendpoint = \"http://127.0.0.1:1/v1\"\n[models.sample]\napi-name = \"forecast-model\"\nmax-context = 4096\n[fixture.sample]\n" ^ marks_text);
+    ("[runtime]\ndefault = \"fixture.sample\"\n[providers.fixture]\nprotocol = \"openai-compatible-http\"\nendpoint = \"http://127.0.0.1:1/v1\"\n[models.sample]\napi-name = \"forecast-model\"\nmax-context = 4096\n[fixture.sample]\n");
   (match Runtime.init_default_degraded_report ~config_path with
    | Ok Runtime.Initialized -> ()
    | Ok (Runtime.Initialized_degraded _) -> Alcotest.fail "fixture runtime must materialize"
@@ -1321,8 +1314,7 @@ let test_observed_boundary_forecast ~marks ~samples ~expected_front () =
   Alcotest.(check bool) "forecast preserves the complete observed Table value" true
     (lookup () = observed);
   match forecast.candidates with
-  | [ { carried = Some carried; marks = declared_marks; _ } ] ->
-    Alcotest.(check bool) "the actual candidate retains its declared marks" true (declared_marks = marks);
+  | [ { carried = Some carried; _ } ] ->
     Alcotest.(check (option int)) "last counted stays the actual observation"
       observed.total_tokens carried.counted_tokens;
     Alcotest.(check int) "forecast opens on the ledger's front, as the driver does" expected_front
@@ -1336,17 +1328,12 @@ let test_observed_boundary_forecast ~marks ~samples ~expected_front () =
 let () =
   Alcotest.run "keeper_next_request_forecast"
     [ ( "boundary"
-      , let marks high = Some { Runtime_schema.high_water_tokens = high; low_water_tokens = 600 } in
-        (* An initial prefix-only observation then three four-atom blocks,
-           each counted at 400 tokens, gives total 1300. Forecasting reports
-           the actual candidate's declared marks while preserving the complete
-           observed ledger and its front at atom 0. *)
+      , (* An initial prefix-only observation then three four-atom blocks,
+           each counted at 400 tokens, gives total 1300. Forecasting preserves
+           the complete observed ledger and its front at atom 0. *)
         let samples = [ 0, Some 100; 4, Some 500; 8, Some 900; 12, Some 1300 ] in
-        [ Alcotest.test_case "declared marks preserve the observed front" `Quick
-            (test_observed_boundary_forecast ~marks:(marks 1200) ~samples
-               ~expected_front:0)
-        ; Alcotest.test_case "no marks preserve the observed front" `Quick
-            (test_observed_boundary_forecast ~marks:None ~samples ~expected_front:0)
+        [ Alcotest.test_case "the forecast preserves the observed front" `Quick
+            (test_observed_boundary_forecast ~samples ~expected_front:0)
         ] )
     ; ( "parts"
       , [ Alcotest.test_case "a first-round composition yields the fixed and pinned parts"

@@ -66,6 +66,7 @@ let reading ?degraded ~revision:n ~measured_at fleet : Client.reading =
 
 let describe_view : Client.view -> string = function
   | Client.Awaiting_first_reading -> "awaiting first reading"
+  | Client.Unreachable { since } -> Printf.sprintf "unreachable since %g" since
   | Client.Reading { reading; trouble } ->
     Printf.sprintf
       "reading r%d running=%d %s"
@@ -114,9 +115,29 @@ let test_a_client_that_has_read_nothing_awaits_the_first_reading () =
   let client = Client.create () in
   check view_t "new" Client.Awaiting_first_reading (Client.view client);
   Client.started client;
-  check view_t "connected, nothing yet" Client.Awaiting_first_reading (Client.view client);
+  check view_t "connected, nothing yet" Client.Awaiting_first_reading (Client.view client)
+;;
+
+(* A connection that never delivers a snapshot is not the wait for the first
+   scan: the screen has to say the stream is down. *)
+let test_a_loss_before_any_reading_is_unreachable_until_a_snapshot () =
+  let client = Client.create () in
+  Client.started client;
   Client.lost client ~now:5.0;
-  check view_t "a loss before any reading" Client.Awaiting_first_reading (Client.view client)
+  check view_t "a loss before any reading" (Client.Unreachable { since = 5.0 })
+    (Client.view client);
+  Client.started client;
+  check view_t "reconnecting keeps the loss" (Client.Unreachable { since = 5.0 })
+    (Client.view client);
+  Client.lost client ~now:9.0;
+  check view_t "a repeated loss keeps the first time" (Client.Unreachable { since = 5.0 })
+    (Client.view client);
+  Client.started client;
+  check step_t "the snapshot" Client.Keep_reading
+    (Client.feed client (frame (snapshot ~revision:1 ~measured_at:10.0 (fleet ~running:1 ()))));
+  (match Client.view client with
+   | Client.Reading { trouble = None; _ } -> ()
+   | other -> fail ("a snapshot ends the loss: " ^ describe_view other))
 ;;
 
 let test_first_scan_failure_is_visible_until_a_real_reading () =
@@ -379,7 +400,8 @@ let test_a_schema_this_build_does_not_read_is_refused_until_a_good_snapshot () =
 let test_a_frame_this_build_cannot_read_asks_for_a_new_connection () =
   let is_rejected = function
     | Client.Cannot_read (Client.Frame_rejected _) -> true
-    | Client.Awaiting_first_reading | Client.Reading _ | Client.Unavailable _
+    | Client.Awaiting_first_reading | Client.Unreachable _ | Client.Reading _
+    | Client.Unavailable _
     | Client.Cannot_read (Client.Refused _ | Client.Schema_mismatch _) -> false
   in
   List.iter
@@ -469,7 +491,7 @@ let test_a_client_ends_with_the_hubs_state_under_random_operations_and_chunks ()
      | Some (F.Unavailable_snapshot { degradation; _ }), Client.Unavailable observed ->
        check bool (label ^ ": first failure") true
          (observed.degradation = degradation && observed.disconnected_since = None)
-     | Some (F.Unavailable_snapshot _), (Client.Awaiting_first_reading | Client.Reading _ | Client.Cannot_read _) ->
+     | Some (F.Unavailable_snapshot _), (Client.Awaiting_first_reading | Client.Unreachable _ | Client.Reading _ | Client.Cannot_read _) ->
        fail (label ^ ": the hub is unavailable and the client does not show it")
      | Some (F.Snapshot { revision; measured_at; fleet; degraded }), Client.Reading { reading; trouble } ->
        check bool (label ^ ": revision") true (F.Revision.equal revision reading.revision);
@@ -480,7 +502,7 @@ let test_a_client_ends_with_the_hubs_state_under_random_operations_and_chunks ()
        check bool (label ^ ": time") true (reading.measured_at <= measured_at);
        check bool (label ^ ": trouble is the outage") true
          (trouble = Option.map (fun degradation -> Client.Scans_failing degradation) degraded)
-     | Some (F.Snapshot _), (Client.Awaiting_first_reading | Client.Unavailable _ | Client.Cannot_read _) ->
+     | Some (F.Snapshot _), (Client.Awaiting_first_reading | Client.Unreachable _ | Client.Unavailable _ | Client.Cannot_read _) ->
        fail (label ^ ": the hub has a reading and the client does not")
      | Some (F.Changed _ | F.Degraded _), _ -> fail "current is a Snapshot")
   done
@@ -492,6 +514,8 @@ let () =
     [ ( "following"
       , [ test_case "a client that has read nothing awaits the first reading" `Quick
             test_a_client_that_has_read_nothing_awaits_the_first_reading
+        ; test_case "a loss before any reading is unreachable until a snapshot" `Quick
+            test_a_loss_before_any_reading_is_unreachable_until_a_snapshot
         ; test_case "first scan failure remains visible until a reading" `Quick
             test_first_scan_failure_is_visible_until_a_real_reading
         ; test_case "server restart replaces a previous reading with unavailable" `Quick

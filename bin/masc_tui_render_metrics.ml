@@ -547,6 +547,8 @@ let render_section_resources ~cols (state : state) =
     | Masc_tui_fleet_stream.Cannot_read failure ->
       [ "    Execution readiness: " ^ Masc_tui_fleet_line.failure_text failure ]
     | Masc_tui_fleet_stream.Awaiting_first_reading -> [ "    Execution readiness not observed" ]
+    | Masc_tui_fleet_stream.Unreachable { since } ->
+      [ "    Execution readiness: " ^ Masc_tui_fleet_line.unreachable_text ~now ~since ]
     | Masc_tui_fleet_stream.Unavailable { degradation; disconnected_since } ->
       [ "    Execution readiness: "
         ^ Masc_tui_fleet_line.unavailable_text ~now ~degradation ~disconnected_since ]

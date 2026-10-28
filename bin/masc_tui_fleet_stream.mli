@@ -34,6 +34,11 @@ type failure =
 
 type view =
   | Awaiting_first_reading
+      (** Nothing was told yet and no connection has been lost. *)
+  | Unreachable of { since : float }
+      (** Nothing was ever told, and the connection is down since [since]:
+          the stream could not be reached, which is not the wait for the first
+          scan. It lasts until a connection delivers a [Snapshot]. *)
   | Reading of { reading : reading; trouble : trouble option }
   | Unavailable of
       { degradation : Masc.Fleet_stream.degradation

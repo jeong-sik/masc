@@ -76,6 +76,13 @@ let unavailable_text ~now ~(degradation : F.degradation) ~disconnected_since =
     in
     scan ^ " · " ^ loss
 
+(* No reading was ever told and the stream is down, so nothing was observed
+   and the screen says the stream is the reason, not a scan. *)
+let unreachable_text ~now ~since =
+  match Masc_tui_message_layout.age_text ~now ~since with
+  | Some age -> "not observed \xc2\xb7 stream lost " ^ age ^ " ago"
+  | None -> "not observed \xc2\xb7 stream lost"
+
 (* While the scans fail or the stream is down, the counts beside this are the
    last reading (#38499). The age is taken from [now] at draw time, so it keeps
    growing between events instead of freezing at the age the event had. A

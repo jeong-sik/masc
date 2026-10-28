@@ -579,6 +579,11 @@ let render_keeper_list (state : state) =
 
   (match state.fleet_stream_view with
    | Masc_tui_fleet_stream.Awaiting_first_reading -> ()
+   | Masc_tui_fleet_stream.Unreachable { since } ->
+       box_line buf cols
+         ((Theme.warn ()) ^ "  fleet: "
+          ^ Masc_tui_fleet_line.unreachable_text ~now:now_unix ~since
+          ^ Ansi.reset)
    | Masc_tui_fleet_stream.Cannot_read failure ->
        box_line buf cols
          ((Theme.bad ()) ^ "  fleet: " ^ Masc_tui_fleet_line.failure_text failure

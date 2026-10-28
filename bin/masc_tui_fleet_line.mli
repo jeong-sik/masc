@@ -23,6 +23,10 @@ val unavailable_text :
   disconnected_since:float option -> string
 (** A failed first scan and, if present, the separate connection loss. *)
 
+val unreachable_text : now:float -> since:float -> string
+(** No reading was ever told and the stream is down: [not observed · stream
+    lost <age> ago]. The age is left out when [now] is behind [since]. *)
+
 val trouble_text : now:float -> Masc_tui_fleet_stream.trouble -> string
 (** What is wrong with the reading drawn beside it: [stale · scans failing for
     <age> (<reason>)] while the server's scans fail, [stale · stream lost <age>

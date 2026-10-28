@@ -18,6 +18,7 @@ type failure =
 
 type view =
   | Awaiting_first_reading
+  | Unreachable of { since : float }
   | Reading of { reading : reading; trouble : trouble option }
   | Unavailable of { degradation : F.degradation; disconnected_since : float option }
   | Cannot_read of failure
@@ -149,7 +150,10 @@ let feed t chunk =
 let view t =
   match t.failure, t.reading, t.unavailable with
   | Some failure, (Some _ | None), (Some _ | None) -> Cannot_read failure
-  | None, None, None -> Awaiting_first_reading
+  | None, None, None ->
+    (match t.down_since with
+     | None -> Awaiting_first_reading
+     | Some since -> Unreachable { since })
   | None, None, Some degradation ->
     Unavailable { degradation; disconnected_since = t.down_since }
   | None, Some reading, (Some _ | None) ->

@@ -8299,6 +8299,28 @@ type keeper_composer_draft = {
   kcd_since : image_observation option;
 }
 
+type quit_inflight_phase =
+  | Quit_preflight of Masc_tui_keeper_chat_queue.item
+  | Quit_streaming
+  | Quit_reconciling
+
+(* Exit authority captures the immutable values that can change what a quit
+   would discard. The composer already provides an edit revision; the other
+   collections are replaced, not mutated, when their contents change. *)
+type quit_arm = {
+  qa_confirmation : Masc_tui_action_notice.quit_confirmation;
+  qa_composer_revision : Masc_tui_message_input.revision;
+  qa_attachments : Masc_tui_keeper_chat_projection.attachment list;
+  qa_references : Masc_tui_keeper_chat_projection.image_reference list;
+  qa_drafts : ((workspace_input_identity option * string) * keeper_composer_draft) list;
+  qa_queue : Masc_tui_keeper_chat_queue.t;
+  qa_suspended : (workspace_input_identity option * suspended_keeper_input) list;
+  qa_inflight : (Masc_tui_keeper_chat_projection.request * quit_inflight_phase) list;
+  qa_code_drafts : Masc_tui_code_draft.t list;
+  qa_target : string option;
+  qa_workspace : workspace_authority;
+}
+
 (* Home links identify destinations, never an inferred approval target. The
    approval/agenda screens still own the exact request and its decision. *)
 type home_request =
@@ -9308,7 +9330,7 @@ type state = {
   mutable voice_floor: float option;
   (* A top-level [q] arms exit instead of ending the TUI immediately. The next
      unrelated input clears it; a second [q] exits. *)
-  mutable quit_armed: bool;
+  mutable quit_armed: quit_arm option;
   (* What the last key the operator pressed actually did, and the clock
      reading it was set at. The session log is drawn by Metrics alone, so the
      operator who pressed [a] on Workspace could not read there whether the
@@ -10424,6 +10446,47 @@ let dismiss_latest_preset_save_receipt (state : state) =
 
 let set_last_action (state : state) action =
   state.last_action <- Masc_tui_action_notice.set_ordinary state.last_action action
+
+let quit_inflight_snapshot (state : state) =
+  List.map (fun (entry : inflight) ->
+      let phase = match entry.phase with
+        | Turn_preflight item -> Quit_preflight item
+        | Turn_streaming -> Quit_streaming
+        | Turn_reconciling -> Quit_reconciling in
+      entry.sent_request, phase) state.msg_inflight
+
+let quit_arm_matches (state : state) arm =
+  Masc_tui_message_input.has_revision state.msg_input arm.qa_composer_revision
+  && state.msg_attachments == arm.qa_attachments
+  && state.msg_references == arm.qa_references
+  && state.msg_drafts == arm.qa_drafts
+  && state.msg_queued == arm.qa_queue
+  && state.suspended_keeper_inputs == arm.qa_suspended
+  && List.equal (fun (left, left_phase) (right, right_phase) ->
+       left == right &&
+       match left_phase, right_phase with
+       | Quit_preflight left, Quit_preflight right -> left == right
+       | Quit_streaming, Quit_streaming | Quit_reconciling, Quit_reconciling -> true
+       | Quit_preflight _, (Quit_streaming | Quit_reconciling)
+       | Quit_streaming, (Quit_preflight _ | Quit_reconciling)
+       | Quit_reconciling, (Quit_preflight _ | Quit_streaming) -> false)
+       arm.qa_inflight (quit_inflight_snapshot state)
+  && state.code_drafts == arm.qa_code_drafts
+  && state.msg_target_keeper_name = arm.qa_target
+  && state.workspace_authority = arm.qa_workspace
+
+let current_quit_confirmation (state : state) ~now =
+  match state.quit_armed,
+        Masc_tui_action_notice.ordinary_visible state.last_action
+          ~now ~window:last_action_window_s with
+  | Some arm, Some ordinary
+    when quit_arm_matches state arm
+         && not (Masc_tui_action_notice.csi_active state.last_action)
+         && Option.is_none (Masc_tui_action_notice.rejection state.last_action
+               ~now ~window:last_action_window_s)
+         && ordinary == Masc_tui_action_notice.quit_ordinary arm.qa_confirmation ->
+      Some arm.qa_confirmation
+  | (Some _ | None), (Some _ | None) -> None
 
 let queue_panel_items (state : state) (panel : queue_panel) =
   let module Inbox = Masc_tui_queue_inspection in
@@ -16963,7 +17026,7 @@ let create_state
   voice_capture_withdrawn = false;
   voice_continuous = None;
   voice_floor = None;
-  quit_armed = false;
+  quit_armed = None;
   last_action = Masc_tui_action_notice.empty;
   fleet_stream_reader = Fleet_stream_idle;
   connection_status = Disconnected;

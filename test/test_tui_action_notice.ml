@@ -139,3 +139,49 @@ let () =
   require (visible dismissed 4001. = None) "the next operator input can dismiss a shown notice";
   let expired = Notice.after_input shown ~input_seen:false ~operator_input:false ~currently_visible:None ~now:4012.1 ~window:12. in
   require (visible expired 4012.1 = None) "an expired notice does not become pending again"
+
+let () =
+  let notice = ("confirmation", 10.) in
+  let first = Notice.arm_quit ~kind:Notice.Quit_key ~ordinary:notice in
+  let authorized confirmation kind visible ordinary now =
+    Notice.quit_authorized confirmation ~kind ~currently_visible:visible
+      ~ordinary_before:ordinary ~now ~window:12. in
+  require (not (authorized first Notice.Quit_key None (Some notice) 11.))
+    "a confirmation that has not been shown cannot authorize exit";
+  let buffered = Notice.quit_presented first ~visible:(Some first) ~was_visible:false
+      ~input_pending:true in
+  require (not (authorized buffered Notice.Quit_key (Some first) (Some notice) 11.))
+    "input already pending at presentation cannot confirm";
+  let still_buffered = Notice.quit_after_drain buffered ~currently_visible:(Some first)
+      ~input_pending:true in
+  require (not (authorized still_buffered Notice.Quit_key (Some first) (Some notice) 11.))
+    "a remaining buffered event keeps confirmation draining";
+  let shown = Notice.quit_after_drain buffered ~currently_visible:(Some first)
+      ~input_pending:false in
+  require (authorized shown Notice.Quit_key (Some first) (Some notice) 11.)
+    "the same complete frame after drain permits a new confirmation";
+  require (not (authorized shown Notice.Interrupt (Some first) (Some notice) 11.))
+    "q and Ctrl-C have distinct confirmation authority";
+  require (not (authorized shown Notice.Quit_key None (Some notice) 11.))
+    "a hidden or invalidated frame cannot authorize exit";
+  require (not (authorized shown Notice.Quit_key (Some first) (Some notice) 22.1))
+    "an expired ordinary notice cannot authorize exit";
+  let equal_but_new = (fst notice, snd notice +. Sys.opaque_identity 0.) in
+  require (equal_but_new = notice && equal_but_new != notice)
+    "fixture creates a distinct ordinary identity";
+  require (not (authorized shown Notice.Quit_key (Some first) (Some equal_but_new) 11.))
+    "a later identical ordinary notice cannot replace the armed one";
+  let next = Notice.arm_quit ~kind:Notice.Quit_key ~ordinary:equal_but_new in
+  require (not (Notice.same_quit first next)) "a new identical confirmation has new authority";
+  require (not (authorized shown Notice.Quit_key (Some next) (Some notice) 11.))
+    "a new identical frame cannot prove the previous confirmation";
+  let hidden = Notice.quit_after_drain buffered ~currently_visible:None ~input_pending:false in
+  require (not (authorized hidden Notice.Quit_key (Some first) (Some notice) 11.))
+    "draining after the frame was hidden does not authorize exit";
+  let repainted = Notice.quit_presented hidden ~visible:(Some first) ~was_visible:false
+      ~input_pending:false in
+  require (authorized repainted Notice.Quit_key (Some first) (Some notice) 11.)
+    "a fresh complete presentation restores authority";
+  let obscured = Notice.quit_after_drain shown ~currently_visible:None ~input_pending:false in
+  require (not (authorized obscured Notice.Quit_key (Some first) (Some notice) 11.))
+    "a previously visible confirmation loses authority when hidden"

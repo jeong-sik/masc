@@ -6,6 +6,28 @@ type rejection
 type t
 type preferred = No_preferred | Csi_recovery | Rejection of rejection
 
+(** A quit confirmation is tied to the exact ordinary notice created by the
+    first gesture. Its presentation and input-drain state are immutable. *)
+type quit_kind = Quit_key | Interrupt
+type quit_confirmation
+val arm_quit : kind:quit_kind -> ordinary:(string * float) -> quit_confirmation
+val quit_kind : quit_confirmation -> quit_kind
+val quit_ordinary : quit_confirmation -> string * float
+val same_quit : quit_confirmation -> quit_confirmation -> bool
+val quit_presented :
+  quit_confirmation -> visible:quit_confirmation option -> was_visible:bool ->
+  input_pending:bool -> quit_confirmation
+val quit_after_drain :
+  quit_confirmation -> currently_visible:quit_confirmation option ->
+  input_pending:bool -> quit_confirmation
+val quit_authorized :
+  quit_confirmation -> kind:quit_kind -> currently_visible:quit_confirmation option ->
+  ordinary_before:(string * float) option -> now:float -> window:float -> bool
+(** A confirmation is authorized only after its exact notice was completely
+    presented, any input already pending at presentation was drained, and the
+    original ordinary notice has not been replaced or expired. Call before
+    clearing the ordinary notice for the current input. *)
+
 val empty : t
 val ordinary : t -> (string * float) option
 val ordinary_visible : t -> now:float -> window:float -> (string * float) option

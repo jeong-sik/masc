@@ -10726,7 +10726,7 @@ let handle_collab_action state ~mailbox view action =
   let owner = Masc_tui_collab.owner view in
   match action with
   | Masc_tui_collab.Stay -> ()
-  | Close -> state.collab <- None; state.quit_armed <- false
+  | Close -> state.collab <- None; state.quit_armed <- None
   | Watch Masc.Machine_lane.Msx -> open_msx_spectator state ~mailbox
   | Watch Masc.Machine_lane.Dos -> open_dos_screen state ~mailbox
   | Game_menu -> open_msx_screen state ~mailbox
@@ -15605,7 +15605,7 @@ let apply_ui_language state ~base_path lang =
 
 let press_marked_target state ~base_path ~mailbox (target : press_target) =
   match target with
-  | Press_input_rejection _ -> ()
+  | Press_input_rejection _ | Press_quit_confirmation _ -> ()
   | Press_surface surface ->
       if surface <> state.view then goto_surface state ~mailbox surface
   | Press_ring_edge Ring_before -> cycle_surface state ~mailbox ~backwards:true
@@ -23474,32 +23474,65 @@ let copy_reference_to_terminal render_schedule reference =
   request_console_write_repair render_schedule
 
 let session_quit_notice (state : state) ~key =
-  let waiting = Masc_tui_keeper_chat_queue.length state.msg_queued in
-  let drafts, unconfirmed_save =
-    List.fold_left
-      (fun (count, unconfirmed) draft ->
-        let unresolved =
-          match Masc_tui_code_draft.phase draft with
-          | Masc_tui_code_draft.Saving _
-          | Masc_tui_code_draft.Needs_review (Masc_tui_code_draft.Uncertain _, _) -> true
-          | Masc_tui_code_draft.Editable | Masc_tui_code_draft.Rejected _
-          | Masc_tui_code_draft.Needs_review (Masc_tui_code_draft.Conflict _, _) -> false
-        in
-        count + 1, unconfirmed || unresolved)
-      (0, false) state.code_drafts
-  in
-  match drafts with
-  | 0 -> Masc_tui_exit_signals.quit_notice ~key ~waiting
-  | count ->
-      (* Put consequences before instructions: the footer can truncate the
-         notice. A submitted save may still commit after this process exits. *)
-      let queued =
-        if waiting = 0 then "" else Printf.sprintf " + %d queued" waiting
-      in
-      let pending = if unconfirmed_save then "; save unconfirmed" else "" in
-      Printf.sprintf
-        "%s: lose %d Code draft(s)%s%s · press again to quit; any other key stays"
-        key count queued pending
+  let queued =
+    List.fold_left (fun count (_, held) ->
+        count + Masc_tui_keeper_chat_queue.length held.ski_queue)
+      (Masc_tui_keeper_chat_queue.length state.msg_queued) state.suspended_keeper_inputs in
+  let waiting, sending = List.fold_left (fun (waiting, sending) (entry : inflight) ->
+      match entry.phase with
+      | Turn_preflight _ -> waiting + 1, sending
+      | Turn_streaming | Turn_reconciling -> waiting, sending + 1)
+      (queued, 0) state.msg_inflight in
+  let unconfirmed_save = List.exists (fun draft ->
+      match Masc_tui_code_draft.phase draft with
+      | Masc_tui_code_draft.Saving _
+      | Masc_tui_code_draft.Needs_review (Masc_tui_code_draft.Uncertain _, _) -> true
+      | Masc_tui_code_draft.Editable | Masc_tui_code_draft.Rejected _
+      | Masc_tui_code_draft.Needs_review (Masc_tui_code_draft.Conflict _, _) -> false)
+      state.code_drafts in
+  let chat_draft = not (keeper_message_draft_empty state) || state.msg_drafts <> [] in
+  let loss = match chat_draft, state.code_drafts <> [] with
+    | true, true -> "chat/Code/other drafts"
+    | true, false -> "chat/other drafts"
+    | false, true -> "Code/other drafts"
+    | false, false -> "unsaved work" in
+  let details = if waiting > 0 then Printf.sprintf " +%d unsent" waiting else "" in
+  let pending = match sending > 0, unconfirmed_save with
+    | true, true -> "; send/save may run"
+    | true, false -> "; send may run"
+    | false, true -> "; save may run"
+    | false, false -> "" in
+  Printf.sprintf "Quit loses %s%s%s; %s again" loss details pending key
+
+let arm_session_quit (state : state) ~kind ~key =
+  match Masc_tui_ansi.probe_terminal_size () with
+  | Some (rows, cols) when rows > 0 && cols > 0 ->
+      report_action state "system" (session_quit_notice state ~key);
+      state.quit_armed <- Option.map (fun ordinary ->
+      { qa_confirmation = Masc_tui_action_notice.arm_quit ~kind ~ordinary;
+        qa_composer_revision = Masc_tui_message_input.revision state.msg_input;
+        qa_attachments = state.msg_attachments;
+        qa_references = state.msg_references;
+        qa_drafts = state.msg_drafts;
+        qa_queue = state.msg_queued;
+        qa_suspended = state.suspended_keeper_inputs;
+        qa_inflight = quit_inflight_snapshot state;
+        qa_code_drafts = state.code_drafts;
+        qa_target = state.msg_target_keeper_name;
+        qa_workspace = state.workspace_authority })
+        (Masc_tui_action_notice.ordinary state.last_action)
+  | None | Some (_, _) ->
+      state.quit_armed <- None;
+      report_action state "error"
+        "Cannot confirm quit: terminal size unavailable; resize or reconnect"
+
+let withdraw_session_quit (state : state) =
+  (match state.quit_armed, Masc_tui_action_notice.ordinary state.last_action with
+   | Some arm, Some ordinary
+     when ordinary == Masc_tui_action_notice.quit_ordinary arm.qa_confirmation ->
+       set_last_action state None
+   | (Some _ | None), (Some _ | None) -> ());
+  state.quit_armed <- None
 
 (* One enable/disable pair for SGR mouse reports. Without tracking the
    terminal keeps the wheel for its own scrollback -- which scrolls past the
@@ -24139,6 +24172,18 @@ let main
         let _, cols = Masc_tui_ansi.get_terminal_size () in
         presented_input_rejection ~rows:(List.length rows) ~cols (!presented).presses
   in
+  let last_visible_quit () =
+    match state.image_open || state.msx_open,
+          Frame_presenter.presented_rows frame_presenter,
+          Masc_tui_ansi.probe_terminal_size () with
+    | false, Some rows, Some (physical_rows, physical_cols)
+      when not (Terminal_write_repair.damage_pending ())
+           && not (Atomic.get resize_requested)
+           && (physical_rows, physical_cols) = Masc_tui_ansi.get_terminal_size () ->
+        presented_quit_confirmation ~rows:(List.length rows)
+          ~cols:physical_cols (!presented).presses
+    | (true | false), (Some _ | None), (Some _ | None) -> None
+  in
   let present_frame frame approval presses panes ~input_pending ~write ~flush reader =
     let damaged = Terminal_write_repair.consume_damage () in
     let candidate_rejection = presented_input_rejection
@@ -24146,6 +24191,12 @@ let main
         ~cols:(max 1 frame.Frame_presenter.terminal_cols) presses in
     let rejection_changed = not (Option.equal Masc_tui_action_notice.same_rejection
         (last_visible_rejection ()) candidate_rejection) in
+    let previous_quit = if damaged then None else last_visible_quit () in
+    let candidate_quit = presented_quit_confirmation
+        ~rows:(max 1 frame.Frame_presenter.terminal_rows)
+        ~cols:(max 1 frame.Frame_presenter.terminal_cols) presses in
+    let quit_changed = not (Option.equal Masc_tui_action_notice.same_quit
+        previous_quit candidate_quit) in
     let owned_reader reader =
       Option.is_some (queue_owner_of_reader reader)
       || Option.is_some (play_card_of_reader reader)
@@ -24170,7 +24221,7 @@ let main
       | Masc_tui_pane_selection.Pressed _ | Masc_tui_pane_selection.Drag_without_pane -> frame
     in
     let presentation_changed = owner_changed || rejection_changed in
-    let authority_changed = presentation_changed ||
+    let authority_changed = presentation_changed || quit_changed ||
       Approval_authority.authority_changed
         ~presented:(!presented).approval ~candidate:approval in
     let preset_confirmation_changed = match reader with
@@ -24227,6 +24278,14 @@ let main
         let input_pending = input_pending () in
         presented := Presented.presented !presented ~approval ~presses ~panes ~reader
             ~owner_changed ~input_pending;
+        state.quit_armed <- Option.map (fun arm ->
+            let was_visible = Option.exists (fun previous ->
+                Masc_tui_action_notice.same_quit previous arm.qa_confirmation) previous_quit in
+            { arm with qa_confirmation =
+                Masc_tui_action_notice.quit_presented arm.qa_confirmation
+                  ~visible:candidate_quit ~was_visible
+                  ~input_pending:(input_pending || Masc_tui_exit_signals.interrupt_pending exit_signals) })
+            state.quit_armed;
         Option.iter (fun notice ->
           state.last_action <- Masc_tui_action_notice.presented state.last_action notice
               ~at:(Unix.gettimeofday ()) ~input_pending) candidate_rejection
@@ -25821,8 +25880,12 @@ and is loaded on demand through keeper_skill.
               | Some signal -> Masc_tui_exit_reason.Terminate signal
               | None -> Masc_tui_exit_reason.Interrupt);
            raise Break
-       | Masc_tui_exit_signals.Interrupt_armed ->
-           state.quit_armed <- false;
+       | (Masc_tui_exit_signals.Interrupt_armed
+         | Masc_tui_exit_signals.Interrupt_again) as interrupt ->
+           (match paste_phase input_reader, input_holds_incomplete_sequence input_reader with
+            | No_paste, false -> ()
+            | No_paste, true | Pasting _, (true | false) | Draining_tail _, (true | false) ->
+                withdraw_session_quit state);
            (match paste_phase input_reader,
                   input_holds_incomplete_sequence input_reader with
             | Draining_tail tail, _
@@ -25890,8 +25953,28 @@ and is loaded on demand through keeper_skill.
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None
             | No_paste, false ->
-                report_action state "system"
-                  (session_quit_notice state ~key:"Ctrl-C");
+                let confirmed = match interrupt, state.quit_armed,
+                    current_quit_confirmation state ~now:(Unix.gettimeofday ()) with
+                  | Masc_tui_exit_signals.Interrupt_again, Some arm, Some current ->
+                      Masc_tui_action_notice.same_quit arm.qa_confirmation current
+                      && quit_arm_matches state arm
+                      && not (input_unsettled ())
+                      && Masc_tui_action_notice.quit_authorized current
+                           ~kind:Masc_tui_action_notice.Interrupt
+                           ~currently_visible:(last_visible_quit ())
+                           ~ordinary_before:(Masc_tui_action_notice.ordinary state.last_action)
+                           ~now:(Unix.gettimeofday ()) ~window:last_action_window_s
+                  | (Masc_tui_exit_signals.Interrupt_armed | Masc_tui_exit_signals.Interrupt_again),
+                    (Some _ | None), (Some _ | None) -> false
+                  | (Masc_tui_exit_signals.Continue | Masc_tui_exit_signals.Quit),
+                    (Some _ | None), (Some _ | None) -> false in
+                if confirmed then begin
+                  note_exit_reason Masc_tui_exit_reason.Interrupt;
+                  raise Break
+                end;
+                arm_session_quit state ~kind:Masc_tui_action_notice.Interrupt ~key:"Ctrl-C";
+                if Option.is_none state.quit_armed then
+                  Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None)
        | Masc_tui_exit_signals.Continue -> None
@@ -26217,6 +26300,15 @@ and is loaded on demand through keeper_skill.
          operator moved on hid the hints of the screen they moved to. A key
          that has something to say sets its own. A rejected gesture cancels
          ordinary confirmations too, but cannot acknowledge a rejection. *)
+      let quit_before_input =
+        match current_quit_confirmation state ~now:(Unix.gettimeofday ()) with
+        | Some confirmation
+          when Masc_tui_action_notice.quit_authorized confirmation
+              ~kind:Masc_tui_action_notice.Quit_key
+              ~currently_visible:(last_visible_quit ())
+              ~ordinary_before:(Masc_tui_action_notice.ordinary state.last_action)
+              ~now:(Unix.gettimeofday ()) ~window:last_action_window_s -> Some confirmation
+        | Some _ | None -> None in
       state.last_action <-
         if rejected_operator_input then
           Masc_tui_action_notice.after_rejected_input state.last_action
@@ -27392,17 +27484,28 @@ and is loaded on demand through keeper_skill.
         | None -> false
       in
       let handle_quit_key () =
-        if state.quit_armed then begin
+        let confirmed = match quit_before_input, state.quit_armed with
+          | Some before, Some arm ->
+              Masc_tui_action_notice.same_quit before arm.qa_confirmation
+              && quit_arm_matches state arm
+              && Option.exists (Masc_tui_action_notice.same_quit before) (last_visible_quit ())
+              && (match Masc_tui_action_notice.ordinary state.last_action with
+                  | None -> true
+                  | Some ordinary -> ordinary == Masc_tui_action_notice.quit_ordinary before)
+              && Unix.gettimeofday () -. snd (Masc_tui_action_notice.quit_ordinary before)
+                 <= last_action_window_s
+              && not (Masc_tui_exit_signals.interrupt_pending exit_signals)
+          | (Some _ | None), (Some _ | None) -> false in
+        if confirmed then begin
           note_exit_reason Masc_tui_exit_reason.Quit_key;
           raise Break
         end else begin
-          state.quit_armed <- true;
-          report_action state "system" (session_quit_notice state ~key:"q")
+          arm_session_quit state ~kind:Masc_tui_action_notice.Quit_key ~key:"q"
         end in
       let input_seen = Option.is_some input || rejected_operator_input in
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
          a mouse report, or any other key means the operator stayed. *)
-      if input_seen && not quit_key then state.quit_armed <- false;
+      if input_seen && not quit_key then withdraw_session_quit state;
       (* An armed shutdown expires on the next unrelated input. Otherwise it
          waits indefinitely and a later press of the same key -- after the
          cursor has moved, after a refresh -- submits work the operator armed
@@ -27668,7 +27771,7 @@ and is loaded on demand through keeper_skill.
               && not (String.equal k toggle_mouse_tracking_key) ->
            (match k, Masc_tui_types.play_card_shown state with
             | ("esc" | "q" | "Q"), Some _ ->
-                state.quit_armed <- false;
+                state.quit_armed <- None;
                 state.play_invite <- { state.play_invite with shown_name = None }
             | ("y" | "Y"), Some card ->
                 copy_reference_to_terminal render_schedule
@@ -27702,7 +27805,7 @@ and is loaded on demand through keeper_skill.
             | Some session ->
               let set session = Masc_tui_types.put_machine_activity state session in
               (match key with
-               | "esc" | "q" | "Q" -> state.machine_activity_open <- None; state.quit_armed <- false
+               | "esc" | "q" | "Q" -> state.machine_activity_open <- None; state.quit_armed <- None
                | "?" -> state.help_open <- true; state.help_scroll <- 0
                | " " | "space" -> if not compact_viewport then set (Masc_tui_machine_activity.toggle session)
                | "s" | "S" -> if not compact_viewport then launch_machine_activity_save state ~mailbox:async_messages session
@@ -27722,7 +27825,7 @@ and is loaded on demand through keeper_skill.
             | Some session ->
               let set session = Masc_tui_types.put_exact_activity state session in
               (match key with
-               | "esc" | "q" | "Q" -> state.exact_activity_open <- None; state.quit_armed <- false
+               | "esc" | "q" | "Q" -> state.exact_activity_open <- None; state.quit_armed <- None
                | "?" -> state.help_open <- true; state.help_scroll <- 0
                | " " | "space" -> if not compact_viewport then set (Masc_tui_exact_activity.toggle session)
                | "s" | "S" -> if not compact_viewport then launch_exact_activity_save state ~mailbox:async_messages session
@@ -28525,12 +28628,12 @@ and is loaded on demand through keeper_skill.
        | Some "esc" when state.about_open ->
            state.about_open <- false;
            state.emblem_frame <- -1;
-           state.quit_armed <- false
+           state.quit_armed <- None
        | Some _ when state.about_open
                      && Masc_tui_emblem_screen.drawn () = Masc_tui_emblem_screen.Moving
                      && state.emblem_frame < Masc_tui_emblem_screen.final_frame ->
            state.emblem_frame <- Masc_tui_emblem_screen.final_frame;
-           state.quit_armed <- false;
+           state.quit_armed <- None;
            Render_schedule.request render_schedule Render_schedule.Force
        (* [quit_key] is already false while anything is taking typed text, the
           row search and the Board draft among them, so this asks nothing more
@@ -35721,6 +35824,22 @@ and is loaded on demand through keeper_skill.
         Render_schedule.request render_schedule Render_schedule.Background
       end;
 
+      (* A confirmation sees the event just handled in its old phase. Only
+         after that event is finished may a drained confirmation become ready. *)
+      state.quit_armed <- Option.map (fun arm ->
+          { arm with qa_confirmation =
+              Masc_tui_action_notice.quit_after_drain arm.qa_confirmation
+                ~currently_visible:(last_visible_quit ())
+                ~input_pending:(input_unsettled ()
+                  || Masc_tui_exit_signals.interrupt_pending exit_signals) }) state.quit_armed;
+      (match state.quit_armed with
+       | Some arm when Option.is_none (current_quit_confirmation state ~now:(Unix.gettimeofday ())) ->
+           let kind = Masc_tui_action_notice.quit_kind arm.qa_confirmation in
+           withdraw_session_quit state;
+           (match kind with
+            | Masc_tui_action_notice.Interrupt -> Masc_tui_exit_signals.withdraw_interrupt exit_signals
+            | Masc_tui_action_notice.Quit_key -> ())
+       | Some _ | None -> ());
       let ready_input = input_reader_has_ready_input input_reader || not (Queue.is_empty hangul_latin_queue) in
       (* An incomplete sequence with no ready bytes must not starve recovery
          frames. A post-presentation hold keeps its eventual tail quarantined. *)

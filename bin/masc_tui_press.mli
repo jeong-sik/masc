@@ -35,6 +35,8 @@ type press_target =
       (** The selected row of a Queue list, if that row reached the frame. *)
   | Press_input_rejection of Masc_tui_action_notice.rejection
       (** Evidence of the complete rejection notice, not a clickable action. *)
+  | Press_quit_confirmation of Masc_tui_action_notice.quit_confirmation
+      (** Evidence of the complete exit confirmation, not a clickable action. *)
 
 val press_changes_the_surface : press_target -> bool
 (** Whether a press changes what the surface shows. An overlay keeps its own
@@ -105,3 +107,8 @@ val presented_input_rejection :
   Masc_tui_action_notice.rejection option
 (** Only an explicitly closed, full-width mark inside the presented frame
     proves that the rejection notice reached the terminal. *)
+
+val presented_quit_confirmation :
+  rows:int -> cols:int -> press_target Masc_tui_hit.zones ->
+  Masc_tui_action_notice.quit_confirmation option
+(** Only a complete confirmation within the frame grants presentation evidence. *)

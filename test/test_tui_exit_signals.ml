@@ -1,8 +1,7 @@
 (* The rule the TUI loop reads once per pass to decide whether this pass is
    the last: a terminate signal ends the session, a first Ctrl-C only arms, a
-   second one ends it, and any key in between withdraws the first. The loop
-   turns [Quit] into [Break], the exit the q key takes, so this is the one
-   place every signal's way out is decided. *)
+   second one asks the loop to validate the displayed confirmation, and any
+   key in between withdraws the first. Explicit termination stays immediate. *)
 
 open Alcotest
 module Signals = Masc_tui_exit_signals
@@ -14,6 +13,7 @@ let verdict : Signals.verdict testable =
         (match v with
          | Signals.Continue -> "Continue"
          | Signals.Interrupt_armed -> "Interrupt_armed"
+         | Signals.Interrupt_again -> "Interrupt_again"
          | Signals.Quit -> "Quit"))
     (fun a b -> a = b)
 
@@ -40,24 +40,32 @@ let test_terminate_outranks_a_first_ctrl_c () =
   check (option string) "and the cause is the terminate, not the Ctrl-C"
     (Some "SIGHUP") (Signals.terminate_signal t)
 
-(* A second Ctrl-C quits too, but no signal asked for it: the exit line must
-   read that as an interrupt, not as a terminate. *)
+(* A second Ctrl-C is not an explicit terminate signal. *)
 let test_a_second_ctrl_c_leaves_no_terminate_signal () =
   let t = Signals.create () in
   Signals.request_interrupt t;
   ignore (Signals.poll t);
   Signals.request_interrupt t;
-  check verdict "second Ctrl-C quits" Signals.Quit (Signals.poll t);
+  check verdict "second Ctrl-C requires display admission" Signals.Interrupt_again (Signals.poll t);
   check (option string) "no signal asked for this end" None
     (Signals.terminate_signal t)
 
-let test_first_ctrl_c_arms_and_second_quits () =
+let test_first_ctrl_c_arms_and_second_needs_admission () =
   let t = Signals.create () in
   Signals.request_interrupt t;
   check verdict "first Ctrl-C arms" Signals.Interrupt_armed (Signals.poll t);
   check verdict "the request is consumed" Signals.Continue (Signals.poll t);
   Signals.request_interrupt t;
-  check verdict "second Ctrl-C quits" Signals.Quit (Signals.poll t)
+  check verdict "second Ctrl-C requires display admission" Signals.Interrupt_again (Signals.poll t)
+
+let test_interrupt_pending_is_not_consumed_by_observation () =
+  let t = Signals.create () in
+  check bool "initially clear" false (Signals.interrupt_pending t);
+  Signals.request_interrupt t;
+  check bool "interrupt is pending" true (Signals.interrupt_pending t);
+  check bool "a second observation is read-only" true (Signals.interrupt_pending t);
+  check verdict "poll consumes and arms" Signals.Interrupt_armed (Signals.poll t);
+  check bool "poll consumed the request" false (Signals.interrupt_pending t)
 
 let test_input_withdraws_a_standing_ctrl_c () =
   let t = Signals.create () in
@@ -85,7 +93,7 @@ let test_a_delivered_sigterm_reaches_quit () =
       let rec settle passes =
         match Signals.poll t with
         | Signals.Quit -> ()
-        | Signals.Continue | Signals.Interrupt_armed ->
+        | Signals.Continue | Signals.Interrupt_armed | Signals.Interrupt_again ->
             if passes = 0 then fail "SIGTERM never reached the loop's poll"
             else begin
               Unix.sleepf 0.001;
@@ -107,13 +115,12 @@ let () =
             test_terminate_outranks_a_first_ctrl_c;
           test_case "a second Ctrl-C leaves no terminate signal" `Quick
             test_a_second_ctrl_c_leaves_no_terminate_signal;
-          test_case "a first Ctrl-C arms and a second quits" `Quick
-            test_first_ctrl_c_arms_and_second_quits;
+          test_case "a second Ctrl-C requires admission" `Quick
+            test_first_ctrl_c_arms_and_second_needs_admission;
           test_case "input withdraws a standing Ctrl-C" `Quick
             test_input_withdraws_a_standing_ctrl_c;
-        ] );
-      ( "notice",
-        [
+          test_case "pending observation does not consume an interrupt" `Quick
+            test_interrupt_pending_is_not_consumed_by_observation;
         ] );
       ( "delivery",
         [

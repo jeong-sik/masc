@@ -3,6 +3,45 @@ type rejection = { kind : rejection_kind; generation : int list }
 type preferred = No_preferred | Csi_recovery | Rejection of rejection
 type lifetime = Pending of rejection | Draining of rejection | Presented of rejection * float
 type csi = Csi_inactive | Csi_active of (string * float) option
+type quit_kind = Quit_key | Interrupt
+type quit_phase = Quit_pending | Quit_draining | Quit_visible
+type quit_confirmation = {
+  quit_kind : quit_kind;
+  quit_ordinary : string * float;
+  quit_phase : quit_phase;
+}
+
+let arm_quit ~kind ~ordinary =
+  { quit_kind = kind; quit_ordinary = ordinary; quit_phase = Quit_pending }
+let quit_kind confirmation = confirmation.quit_kind
+let quit_ordinary confirmation = confirmation.quit_ordinary
+let same_quit left right =
+  left.quit_kind = right.quit_kind && left.quit_ordinary == right.quit_ordinary
+
+let quit_presented confirmation ~visible ~was_visible ~input_pending =
+  match visible with
+  | Some shown when same_quit confirmation shown ->
+      (match confirmation.quit_phase with
+       | Quit_visible when was_visible -> confirmation
+       | Quit_pending | Quit_draining | Quit_visible ->
+           { confirmation with quit_phase = if input_pending then Quit_draining else Quit_visible })
+  | Some _ | None -> { confirmation with quit_phase = Quit_pending }
+
+let quit_after_drain confirmation ~currently_visible ~input_pending =
+  let visible = Option.exists (same_quit confirmation) currently_visible in
+  match confirmation.quit_phase with
+  | Quit_draining when not input_pending && visible ->
+      { confirmation with quit_phase = Quit_visible }
+  | Quit_visible when not visible -> { confirmation with quit_phase = Quit_pending }
+  | Quit_pending | Quit_draining | Quit_visible -> confirmation
+
+let quit_authorized confirmation ~kind ~currently_visible ~ordinary_before ~now ~window =
+  confirmation.quit_kind = kind
+  && confirmation.quit_phase = Quit_visible
+  && Option.exists (same_quit confirmation) currently_visible
+  && Option.exists (fun ordinary -> ordinary == confirmation.quit_ordinary) ordinary_before
+  && now -. snd confirmation.quit_ordinary <= window
+
 type t = {
   ordinary : (string * float) option;
   rejection : lifetime option;

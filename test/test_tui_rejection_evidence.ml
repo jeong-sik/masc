@@ -39,3 +39,25 @@ let () =
   require (Option.exists (Notice.same_rejection notice)
              (Press.presented_input_rejection ~rows:2 ~cols:width combined))
     "excluding the notice from pointer dispatch does not erase its presentation evidence"
+
+let () =
+  let original = ("quit confirmation", 1.) in
+  let confirmation = Notice.arm_quit ~kind:Notice.Quit_key ~ordinary:original in
+  let registry = Hit.registry () in
+  let marker = Hit.mark registry (Press.Press_quit_confirmation confirmation) (fst original) in
+  let _, zones = Hit.extract registry [marker] in
+  let width = Masc_tui_message_layout.display_width (fst original) in
+  require (Option.exists (Notice.same_quit confirmation)
+             (Press.presented_quit_confirmation ~rows:1 ~cols:width zones))
+    "a complete in-bounds confirmation grants display evidence";
+  require (Press.presented_quit_confirmation ~rows:0 ~cols:width zones = None)
+    "an out-of-frame confirmation grants no display evidence";
+  require (Press.presented_quit_confirmation ~rows:1 ~cols:(width - 1) zones = None)
+    "an out-of-bounds confirmation grants no display evidence";
+  let closing_mark = "\027[=2m" in
+  let unclosed = String.sub marker 0 (String.length marker - String.length closing_mark) in
+  let _, cut_zones = Hit.extract registry [unclosed] in
+  require (Press.presented_quit_confirmation ~rows:1 ~cols:width cut_zones = None)
+    "a partially drawn confirmation grants no display evidence";
+  require (not (Press.press_is_interactive (Press.Press_quit_confirmation confirmation)))
+    "confirmation evidence cannot intercept mouse input"

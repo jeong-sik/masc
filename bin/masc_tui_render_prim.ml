@@ -517,6 +517,11 @@ let task_creation_status (state : state) =
     Some (Masc_tui_footer.Task_creation {keeper=Terminal_text.single_line intent.keeper;phase}))
 
 
+type recovery_row = {
+  recovery_text : string;
+  recovery_quit : Masc_tui_action_notice.quit_confirmation option;
+}
+
 let recovery_slot (state : state) ~max_cells =
   let module Notice = Masc_tui_action_notice in
   let now = Unix.gettimeofday () in
@@ -525,23 +530,39 @@ let recovery_slot (state : state) ~max_cells =
   let rejection_fits =
     Option.exists (fun notice -> fits (Notice.rejection_text notice))
       (Notice.rejection state.last_action ~now ~window) in
-  match Notice.recovery_slot state.last_action ~now ~window
-          ~csi_fits:(fits Notice.csi_recovery_text) ~rejection_fits with
-  | No_preferred -> None
-  | Csi_recovery -> Some Notice.csi_recovery_text
-  | Rejection notice ->
-      Some (pressable (Press_input_rejection notice) (Notice.rejection_text notice))
+  let quit = current_quit_confirmation state ~now in
+  let recovery = Notice.recovery_slot state.last_action ~now ~window
+      ~csi_fits:(fits Notice.csi_recovery_text) ~rejection_fits in
+  match recovery, quit with
+  | (Csi_recovery | No_preferred), (Some _ | None)
+    when Notice.csi_active state.last_action ->
+      (match recovery with
+       | Csi_recovery -> Some { recovery_text = Notice.csi_recovery_text; recovery_quit = None }
+       | No_preferred -> None
+       | Rejection _ -> None)
+  | No_preferred, Some confirmation
+    when fits (fst (Notice.quit_ordinary confirmation)) ->
+      let text = fst (Notice.quit_ordinary confirmation) in
+      Some { recovery_text = pressable (Press_quit_confirmation confirmation) text;
+             recovery_quit = Some confirmation }
+  | (No_preferred | Rejection _ | Csi_recovery), (Some _ | None) ->
+      (match recovery with
+       | No_preferred -> None
+       | Csi_recovery -> Some { recovery_text = Notice.csi_recovery_text; recovery_quit = None }
+       | Rejection notice ->
+           Some { recovery_text = pressable (Press_input_rejection notice) (Notice.rejection_text notice);
+                  recovery_quit = None })
 
 let draw_box_bottom_with_recovery buf ~cols = function
   | None -> box_bottom buf cols
-  | Some text -> box_line_styled buf cols ~style:(Theme.warn ()) text
+  | Some row -> box_line_styled buf cols ~style:(Theme.warn ()) row.recovery_text
 
 let recovery_box_bottom state buf ~cols =
   let selected = recovery_slot state ~max_cells:(framed_inner_width cols) in
   draw_box_bottom_with_recovery buf ~cols selected;
-  Option.is_some selected
+  selected
 
-let footer_line ?(status = []) ?position ?(recovery_in_slot = false)
+let footer_line ?(status = []) ?position ?(recovery_in_slot = None)
     (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room; "?:help" stays as the
      door back. One seam for every surface, which is what makes the setting
@@ -588,39 +609,57 @@ let footer_line ?(status = []) ?position ?(recovery_in_slot = false)
           (Printf.sprintf "Loading image (any key cancels): %s" pending.sir_name))
     | Some _ | None -> None
   in
-  let action_text =
+  let current_quit = current_quit_confirmation state ~now:(Unix.gettimeofday ()) in
+  let quit_in_slot = Option.bind recovery_in_slot (fun row -> row.recovery_quit) in
+  let action_text, quit_action =
     match Masc_tui_types.runtime_form_save_notice state with
-    | Some notice -> Some (Terminal_text.single_line notice)
+    | Some notice -> Some (Terminal_text.single_line notice), None
     | None -> (match Masc_tui_types.runtime_assignment_notice state with
-    | Some notice -> Some (Terminal_text.single_line notice)
+    | Some notice -> Some (Terminal_text.single_line notice), None
     | None -> (match Masc_tui_types.keeper_settings_editor_notice state with
-    | Some notice -> Some (Terminal_text.single_line notice)
+    | Some notice -> Some (Terminal_text.single_line notice), None
     | None -> (match Masc_tui_types.keeper_settings_save_notice state with
-    | Some notice -> Some (Terminal_text.single_line notice)
+    | Some notice -> Some (Terminal_text.single_line notice), None
     | None -> (match image_progress with
-    | Some _ -> image_progress
+    | Some _ -> image_progress, None
     | None -> (match Masc_tui_action_notice.ordinary_visible state.last_action
         ~now:(Unix.gettimeofday ()) ~window:Masc_tui_types.last_action_window_s with
-    | Some _ when recovery_in_slot
-                  && Masc_tui_action_notice.ordinary_is_csi state.last_action -> None
-    | Some (text, _)
+    | Some _ when Option.is_some recovery_in_slot
+                  && Masc_tui_action_notice.ordinary_is_csi state.last_action -> None, None
+    | Some ((text, _) as ordinary)
       when (not
                  (String.starts_with
                     ~prefix:Masc_tui_types.armed_ask_submit_notice_prefix text)
                || Masc_tui_types.ask_submit_is_armed state) ->
-      Some text
-    | Some _ | None -> None)))))
+      (match state.quit_armed with
+       | Some arm when ordinary == Masc_tui_action_notice.quit_ordinary arm.qa_confirmation ->
+           (match current_quit with
+            | Some confirmation ->
+                if Option.exists (Masc_tui_action_notice.same_quit confirmation) quit_in_slot
+                then None, None
+                else Some "Resize to confirm quit", Some confirmation
+            | None when Masc_tui_action_notice.csi_active state.last_action
+                        || Option.is_some (Masc_tui_action_notice.rejection state.last_action
+                             ~now:(Unix.gettimeofday ()) ~window:last_action_window_s) ->
+                None, None
+            | None -> Some "Quit changed; retry", None)
+       | Some _ | None -> Some text, None)
+    | Some _ | None -> None, None)))))
   in
   let preferred_action =
-    if recovery_in_slot then None else
-    match Masc_tui_action_notice.preferred state.last_action
+    match quit_action with
+    | Some confirmation ->
+        Some (fst (Masc_tui_action_notice.quit_ordinary confirmation),
+              pressable (Press_quit_confirmation confirmation))
+    | None when Option.is_some recovery_in_slot -> None
+    | None -> (match Masc_tui_action_notice.preferred state.last_action
             ~existing_action:(Option.is_some action_text)
             ~now:(Unix.gettimeofday ()) ~window:Masc_tui_types.last_action_window_s with
     | No_preferred -> None
     | Csi_recovery -> Some (Masc_tui_action_notice.csi_recovery_text, Fun.id)
     | Rejection notice ->
         Some (Masc_tui_action_notice.rejection_text notice,
-              pressable (Press_input_rejection notice)) in
+              pressable (Press_input_rejection notice))) in
   let identity =
     match state.server_identity with
     | None -> []
@@ -1340,7 +1379,7 @@ type acting_pane_footer =
    The footer is drawn here rather than by each frame, because these frames
    draw no agenda row: an open question would otherwise be on screen nowhere
    while the operator chats, which is where a Keeper's question goes unseen. *)
-let finish_frame_beside_acting_pane (state : state) ?clamped ?roster ?(recovery_in_slot = false)
+let finish_frame_beside_acting_pane (state : state) ?clamped ?roster ?(recovery_in_slot = None)
     ~surface_key ~cursor ~rows ~cols ~footer buf =
   (match footer with
    | No_footer -> ()
@@ -1533,7 +1572,8 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : 
   (match recovery_in_slot, frame with
    | selected, Chrome_screen -> draw_box_bottom_with_recovery buf ~cols selected
    | None, Chrome_overlay -> bottom buf cols
-   | Some text, Chrome_overlay ->
+   | Some row, Chrome_overlay ->
+       let text = row.recovery_text in
        let remaining = max 0 (framed_rule_width cols - Message_layout.display_width text) in
        Buffer.add_string buf
          (Ansi.gray ^ Ansi.box_bl ^ Ansi.reset ^ Theme.warn () ^ text ^ Ansi.reset
@@ -1548,7 +1588,7 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : 
         combined
   in
   Buffer.add_string buf
-    (footer_line ?status ~recovery_in_slot:(Option.is_some recovery_in_slot)
+    (footer_line ?status ~recovery_in_slot
        state ~max_cells:full_cols ~hints);
   Masc_tui_frame_timing.finish_stage ~name:"surface.materialize" materialize_started;
   finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols:full_cols buf

@@ -1149,8 +1149,22 @@ let render_terminal_too_small state ~recovery_notice ~rows ~cols =
   let ordinary =
     Masc_tui_action_notice.ordinary_visible state.last_action
       ~now ~window in
+  let ordinary_text = Option.bind ordinary (fun ((text, _) as ordinary) ->
+      let text = Terminal_text.single_line text in
+      match state.quit_armed with
+      | Some arm when ordinary == Masc_tui_action_notice.quit_ordinary arm.qa_confirmation ->
+          (match current_quit_confirmation state ~now with
+           | Some confirmation ->
+               Some (if Message_layout.display_width text <= cols then
+                   pressable (Press_quit_confirmation confirmation) text
+                 else "Resize to confirm quit")
+           | None when Masc_tui_action_notice.csi_active state.last_action
+                       || Option.is_some (Masc_tui_action_notice.rejection state.last_action
+                            ~now ~window) -> None
+           | None -> Some "Quit changed; retry")
+      | Some _ | None -> Some text) in
   let rejection =
-    match recovery_notice, ordinary with
+    match recovery_notice, ordinary_text with
     | Some _, _ | None, Some _ -> None
     | None, None ->
         (match Masc_tui_action_notice.rejection state.last_action ~now ~window with
@@ -1161,13 +1175,12 @@ let render_terminal_too_small state ~recovery_notice ~rows ~cols =
   let notice = match recovery_notice, rejection with
     | Some text, _ -> Some (text, None)
     | None, Some notice -> Some (Masc_tui_action_notice.rejection_text notice, Some notice)
-    | None, None -> Option.map (fun (text, _) -> text, None) ordinary in
+    | None, None -> Option.map (fun text -> text, None) ordinary_text in
   let resize_hint =
     Printf.sprintf "terminal too small -- resize to at least %d rows; q: quit"
       minimum_terminal_rows in
   let buf = Buffer.create 64 in
   let rendered (text, marked) =
-    let text = Terminal_text.single_line text in
     match marked with
     | Some notice -> pressable (Press_input_rejection notice) text
     | None -> text in
@@ -1180,10 +1193,16 @@ let render_terminal_too_small state ~recovery_notice ~rows ~cols =
           let text = Masc_tui_action_notice.csi_recovery_text in
           if Message_layout.display_width text <= cols then Some text else None
       | None when Masc_tui_action_notice.csi_active state.last_action -> None
-      | None -> recovery_slot state ~max_cells:cols in
-  let extra_ordinary = match ordinary, recovery_notice with
+      | None ->
+          (match Masc_tui_action_notice.rejection state.last_action ~now ~window with
+           | Some notice when
+               Message_layout.display_width (Masc_tui_action_notice.rejection_text notice) <= cols ->
+               Some (pressable (Press_input_rejection notice)
+                       (Masc_tui_action_notice.rejection_text notice))
+           | Some _ | None -> None) in
+  let extra_ordinary = match ordinary_text, recovery_notice with
     | Some _, Some _ when Masc_tui_action_notice.ordinary_is_csi state.last_action -> None
-    | Some (text, _), (Some _ | None) -> Some text
+    | Some text, (Some _ | None) -> Some text
     | None, (Some _ | None) -> None in
   let extra_rejection = match extra_recovery, recovery_notice with
     | Some _, Some _ when rows >= 3 + (if Option.is_some extra_ordinary then 1 else 0) ->

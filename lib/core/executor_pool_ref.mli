@@ -48,14 +48,6 @@ type strict_submit_error =
 
 val strict_submit_error_to_string : strict_submit_error -> string
 
-val read_job_weight : float
-(** The weight a job takes on the read pool when its caller names none: 0.2,
-    the share of a core a read was measured to use while it runs (RFC-0474
-    L4). Eio's executor admits work until its jobs' weights reach 1.0, so
-    a worker holds five such reads and a read that waits does not keep the
-    worker from the next one. A job on the shared pool that names no weight
-    takes 1.0. *)
-
 val submit_strict :
   ?weight:float ->
   (unit -> 'a) ->
@@ -68,10 +60,7 @@ val submit_strict :
     closure is never replayed inline. Cancellation is re-raised with its
     original backtrace at both layers. Entered worker cleanup is joined
     before caller cancellation returns; blocking or protected work can
-    delay it. Pending entry is retired when cancellation wins its entry race.
-
-    [weight] defaults to {!read_job_weight} on the read pool and to 1.0 on
-    the shared pool. *)
+    delay it. Pending entry is retired when cancellation wins its entry race. *)
 
 val submit_or_inline : ?weight:float -> (unit -> 'a) -> 'a
 (** Run [f] on an Executor_pool worker (a real Eio fiber under
@@ -93,6 +82,4 @@ val submit_or_inline : ?weight:float -> (unit -> 'a) -> 'a
     Unlike [Eio_unix.run_in_systhread], the closure runs with a live
     [Cancel.Get_context] handler, so code that takes an [Eio.Mutex]
     (e.g. via [Keeper_fs.ensure_dir]) does not raise [Effect.Unhandled]
-    and cannot poison the mutex.  Re-raises [Eio.Cancel.Cancelled].
-
-    [weight] defaults as in {!submit_strict}. *)
+    and cannot poison the mutex.  Re-raises [Eio.Cancel.Cancelled]. *)

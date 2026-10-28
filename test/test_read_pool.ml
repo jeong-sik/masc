@@ -70,39 +70,6 @@ let test_a_read_starts_while_the_background_pool_is_full () =
         | Error error -> fail (Executor_pool_ref.strict_submit_error_to_string error))))
 ;;
 
-(* RFC-0474 L4. A read that names no weight takes a fifth of its worker, so a
-   read that only waits leaves room for the next one. At the old 1.0 default
-   the waiting read filled the read pool's only worker and the next read
-   waited for it; the timeout only ends that old behaviour. *)
-let test_a_waiting_read_leaves_room_for_the_next () =
-  with_pools (fun env sw _background read_domain ->
-    let started, start = Eio.Promise.create () in
-    let release, release_read = Eio.Promise.create () in
-    let waiting =
-      Eio.Fiber.fork_promise ~sw (fun () ->
-        Pool_lane.with_read (fun () ->
-          Executor_pool_ref.submit_or_inline (fun () ->
-            Eio.Promise.resolve start ();
-            Eio.Promise.await release)))
-    in
-    Eio.Promise.await started;
-    Fun.protect
-      ~finally:(fun () ->
-        Eio.Promise.resolve release_read ();
-        Eio.Promise.await_exn waiting)
-      (fun () ->
-        let check_submit name submit =
-          match starts_beside_held_background env submit with
-          | None -> fail (name ^ ": the next read waited behind a read that only waits")
-          | Some where -> check int (name ^ ": the next read ran on the read pool") read_domain where
-        in
-        check_submit "Executor_pool_ref.submit_or_inline" (fun f -> Executor_pool_ref.submit_or_inline f);
-        check_submit "Executor_pool_ref.submit_strict" (fun f ->
-          match Executor_pool_ref.submit_strict f with
-          | Ok where -> where
-          | Error error -> fail (Executor_pool_ref.strict_submit_error_to_string error))))
-;;
-
 (* Background work keeps the background pool, and a read's nested submit
    runs inline on the read worker instead of queueing again. *)
 let test_background_work_and_nested_reads_stay_put () =
@@ -146,8 +113,6 @@ let () =
             test_background_work_and_nested_reads_stay_put
         ; test_case "without a read pool reads use the shared pool" `Quick
             test_without_a_read_pool_reads_use_the_shared_pool
-        ; test_case "a waiting read leaves room for the next" `Quick
-            test_a_waiting_read_leaves_room_for_the_next
         ] )
     ]
 ;;

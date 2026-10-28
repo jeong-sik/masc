@@ -41,9 +41,13 @@ exception Release_failed of error
 type decision = Undecided | Activate_requested | Abort_requested
 
 type preparation = Pending | Ready | Rejected of { stage : stage; error : Unix.error }
-type control = Open | Ended
+type control_failure = Protocol_violation | Receive_failed of Unix.error
+type control = Open | Ended | Failed of control_failure
 type boundary = { preparation : preparation; decision : decision; control : control }
-(** Ended is descriptor EOF/closure, not proof that exec succeeded. *)
+(** Ended is descriptor EOF/closure, not proof that exec succeeded. Failed is
+    the first private-channel failure; nothing is read after it, so the other
+    fields may be cut short and never prove a non-start. *)
+val control_failure_error : control_failure -> error
 
 type exit_status = Exited of int | Signaled of int
 (** Signal numbers are actual host numbers, not OCaml's abstract signal codes. *)
@@ -71,9 +75,11 @@ val create :
     Unsupported kernels/platforms refuse instead of using a numeric PID fallback. *)
 
 val observe_boundary : t -> (boundary, error) result
-(** Nonblocking; consumes/caches private child setup/error observations. *)
+(** Nonblocking; consumes/caches private child setup/error observations. A
+    failed channel is reported as control=Failed, not as an error. *)
 val await_ready : t -> (unit, error) result
-(** Cancellable Eio wait. Cancelling this waiter never cancels the child. *)
+(** Cancellable Eio wait. Cancelling this waiter never cancels the child. A
+    failed channel is an error here, before any preparation. *)
 val activate : t -> (unit, error) result
 val abort : t -> (unit, error) result
 (** A single gate decision. Abort can precede readiness. Repeating/changing a
@@ -89,10 +95,13 @@ val poll_exit : t -> (exit_observation option, error) result
 (** None means the original child has not been reaped by this owner yet.
     Lost wait authority is an error, never a successful exit or fresh PID lookup. *)
 val await_exit : t -> (exit_observation, error) result
-(** Cancellable Eio wait; the cached original status survives reaping. *)
+(** Cancellable Eio wait; the cached original status survives reaping. A private
+    control failure seen after the reap is kept in its boundary as Failed. *)
 val release : t -> (exit_observation, error) result
 (** Explicit endpoint-owner teardown: SIGKILL the original main process, reap
     through its pidfd and close private descriptors. Idempotent after settlement.
+    If the signal fails, the descriptors still close without a reap and that
+    failure is the settlement.
     It does not claim descendant cleanup, complete output or Task/Goal success. *)
 
 module For_testing : sig
@@ -106,4 +115,10 @@ module For_testing : sig
       perform Eio effects; exceptions propagate before any child exists. *)
   val linux_build : bool
   (** Compilation platform only, never a functioning kernel capability probe. *)
+  val release_with_signal_failure : Unix.error -> t -> (exit_observation, error) result
+  (** [release] whose original pidfd signal fails with this error. The wait,
+      close and settlement cache are the real ones. *)
+  val await_exit_with_control_failure : Unix.error -> t -> (exit_observation, error) result
+  (** [await_exit] whose private control receives fail with this error. The
+      pidfd wait and reap are the real ones. *)
 end

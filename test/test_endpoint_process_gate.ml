@@ -176,6 +176,33 @@ let invalid_owner = run (fun fixture -> Eio.Switch.run (fun sw ->
         ~stdin:fixture.input ~stdout:fixture.output ~stderr:fixture.output in
     check "root payload refused before any child" (result = Error (G.Invalid_input G.Payload_uid))))
 
+let signal_failure_still_closes = run (fun fixture ->
+    let expected = G.Syscall_failed {stage=G.Signal_main; error=Unix.EPERM} in
+    (match Eio.Switch.run (fun sw ->
+         let child = get (spawn ~sw fixture ": > activated") in
+         get (G.await_ready child);
+         let waiter = Eio.Fiber.fork_promise ~sw (fun () -> G.await_exit child) in
+         let released = G.For_testing.release_with_signal_failure Unix.EPERM child in
+         check "signal failure is the release result" (released = Error expected);
+         check "failed release closed the handle" (G.observe_boundary child = Error G.Closed);
+         check "blocked waiter released by the close" (Eio.Promise.await_exn waiter = Error G.Closed);
+         check "failed settlement is cached" (G.release child = released)) with
+     | () -> Alcotest.fail "switch cleanup must report the failed release"
+     | exception G.Release_failed error -> check "switch cleanup reports that failure" (error = expected));
+    check "closed gate prevented payload" (not (Sys.file_exists fixture.marker)))
+
+let control_failure_keeps_reaped_status = run (fun fixture -> Eio.Switch.run (fun sw ->
+    let child = get (spawn ~sw fixture ": > activated") in
+    get (G.await_ready child);
+    check "original kill requested" (get (G.signal_main child G.Kill) = G.Requested);
+    let failed = G.Failed (G.Receive_failed Unix.ECONNRESET) in
+    let exit = get (G.For_testing.await_exit_with_control_failure Unix.ECONNRESET child) in
+    check_exit (-9) exit;
+    check "reaped status carries the channel failure" (exit.boundary.control = failed);
+    check "boundary reports the same failure" ((get (G.observe_boundary child)).control = failed);
+    check "release settles the same observation" (get (G.release child) = exit);
+    check "observation after close keeps the failure" (G.poll_exit child = Ok (Some exit))))
+
 let unsupported () = Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
     let result = G.create ~sw ~executable:"/bin/sh" ~argv:[|"/bin/sh"|] ~env:[||] ~cwd:"/"
         ~payload_uid:1 ~payload_gid:1 ~stdin:Unix.stdin ~stdout:Unix.stdout ~stderr:Unix.stderr in
@@ -205,6 +232,8 @@ let () =
           "original handle never selects another process", original_handle;
           "wait cancellation and independent progress", waiter_cancellation_and_progress;
           "owner teardown settles paused main", owner_teardown;
+          "failed release signal still closes the handle", signal_failure_still_closes;
+          "control failure keeps the reaped status", control_failure_keeps_reaped_status;
           "source mutation cannot replace validated inputs", frozen_inputs;
           "root payload refusal", invalid_owner] in
   Alcotest.run "Endpoint process gate" ["kernel", List.map (fun (name, test) -> Alcotest.test_case name `Quick test) cases]

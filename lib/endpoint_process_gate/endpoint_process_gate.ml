@@ -49,8 +49,12 @@ exception Release_failed of error
 
 type decision = Undecided | Activate_requested | Abort_requested
 type preparation = Pending | Ready | Rejected of { stage : stage; error : Unix.error }
-type control = Open | Ended
+type control_failure = Protocol_violation | Receive_failed of Unix.error
+type control = Open | Ended | Failed of control_failure
 type boundary = { preparation : preparation; decision : decision; control : control }
+let control_failure_error = function
+  | Protocol_violation -> Protocol_error
+  | Receive_failed error -> Syscall_failed {stage=Control_io; error}
 type exit_status = Exited of int | Signaled of int
 type exit_observation = { status : exit_status; boundary : boundary }
 type termination = Terminate | Kill
@@ -73,7 +77,6 @@ type t = {
   raw : raw;
   mutex : Mutex.t;
   mutable boundary : boundary;
-  mutable control_error : error option;
   mutable terminal : (exit_observation, error) result option;
   mutable closed : bool;
   closed_signal : unit Eio.Promise.t;
@@ -95,36 +98,33 @@ let stage_of_code = function
   | 20 -> Some Close_handle | 21 -> Some Duplicate_watch | _ -> None
 
 (* All calls while locked are nonblocking. In particular, no fiber wait or
-   blocking system-thread submission happens while holding this mutex. *)
-let rec drain_control t =
-  match t.control_error with
-  | Some error -> Error error
-  | None ->
-      match t.boundary.control with
-      | Ended -> Ok ()
-      | Open ->
-          let kind, code, error = control_raw t.raw in
-          let protocol_error () = t.control_error <- Some Protocol_error; Error Protocol_error in
-          match kind, code, error with
-          | 0, 0, None -> Ok ()
-          | 1, 0, None ->
-              (match t.boundary.preparation with
-               | Pending -> t.boundary <- {t.boundary with preparation=Ready}; drain_control t
-               | Ready | Rejected _ -> protocol_error ())
-          | 2, _, Some error ->
-              (match stage_of_code code, t.boundary.preparation with
-               | Some stage, (Pending | Ready) ->
-                   t.boundary <- {t.boundary with preparation=Rejected {stage; error}};
-                   drain_control t
-               | None, (Pending | Ready | Rejected _) | Some _, Rejected _ -> protocol_error ())
-          | 3, 0, None -> t.boundary <- {t.boundary with control=Ended}; Ok ()
-          | 4, _, Some error ->
-              let error = Syscall_failed {stage=Control_io; error} in
-              t.control_error <- Some error; Error error
-          | _ -> protocol_error ()
+   blocking system-thread submission happens while holding this mutex.
+   A channel failure becomes control=Failed, after which nothing is read. *)
+let rec drain_control_with control t =
+  match t.boundary.control with
+  | Ended | Failed _ -> ()
+  | Open ->
+      let kind, code, error = control t.raw in
+      let fail failure = t.boundary <- {t.boundary with control=Failed failure} in
+      match kind, code, error with
+      | 0, 0, None -> ()
+      | 1, 0, None ->
+          (match t.boundary.preparation with
+           | Pending -> t.boundary <- {t.boundary with preparation=Ready}; drain_control_with control t
+           | Ready | Rejected _ -> fail Protocol_violation)
+      | 2, _, Some error ->
+          (match stage_of_code code, t.boundary.preparation with
+           | Some stage, (Pending | Ready) ->
+               t.boundary <- {t.boundary with preparation=Rejected {stage; error}};
+               drain_control_with control t
+           | None, (Pending | Ready | Rejected _) | Some _, Rejected _ -> fail Protocol_violation)
+      | 3, 0, None -> t.boundary <- {t.boundary with control=Ended}
+      | 4, _, Some error -> fail (Receive_failed error)
+      | _ -> fail Protocol_violation
+let drain_control = drain_control_with control_raw
 
 let observe_boundary t = locked t (fun () ->
-    if t.closed then Error Closed else let* () = drain_control t in Ok t.boundary)
+    if t.closed then Error Closed else (drain_control t; Ok t.boundary))
 
 let wait_readable t ~exit =
   let watcher = locked t (fun () ->
@@ -142,13 +142,13 @@ let wait_readable t ~exit =
 
 let rec await_ready t =
   let* boundary = observe_boundary t in
-  match boundary.preparation with
-  | Ready -> Ok ()
-  | Rejected {stage; error} -> Error (Child_rejected {stage; error})
-  | Pending ->
-      match boundary.control with
-      | Ended -> Error Control_lost
-      | Open -> let* () = wait_readable t ~exit:false in await_ready t
+  (* A failed channel is reported before any preparation it may have cut short. *)
+  match boundary.control, boundary.preparation with
+  | Failed failure, (Pending | Ready | Rejected _) -> Error (control_failure_error failure)
+  | (Open | Ended), Ready -> Ok ()
+  | (Open | Ended), Rejected {stage; error} -> Error (Child_rejected {stage; error})
+  | Ended, Pending -> Error Control_lost
+  | Open, Pending -> let* () = wait_readable t ~exit:false in await_ready t
 
 let decide t activation = locked t (fun () ->
     if t.closed then Error Closed else
@@ -156,8 +156,9 @@ let decide t activation = locked t (fun () ->
       match t.boundary.decision with
       | Activate_requested | Abort_requested -> Error Already_decided
       | Undecided ->
-          let* () = drain_control t in
+          drain_control t;
           match t.boundary.control, t.boundary.preparation with
+          | Failed failure, (Pending | Ready | Rejected _) -> Error (control_failure_error failure)
           | Ended, (Pending | Ready | Rejected _) -> Error Control_lost
           | Open, Rejected {stage; error} -> Error (Child_rejected {stage; error})
           | Open, Pending when activation -> Error Not_ready
@@ -173,19 +174,20 @@ let decide t activation = locked t (fun () ->
 let activate t = decide t true
 let abort t = decide t false
 
-let signal_main t termination = locked t (fun () ->
+let signal_main_with signal t termination = locked t (fun () ->
     match t.terminal with
     | Some (Ok _) -> Ok Already_exited
     | None | Some (Error _) ->
         if t.closed then Error Closed else
           let kill = match termination with Terminate -> false | Kill -> true in
-          match signal_raw t.raw kill with
+          match signal t.raw kill with
           | None -> Ok Requested
           | Some error ->
               if error = Unix.ESRCH then Ok Already_exited
               else Error (Syscall_failed {stage=Signal_main; error}))
+let signal_main = signal_main_with signal_raw
 
-let poll_exit t = locked t (fun () ->
+let poll_exit_with control t = locked t (fun () ->
     match t.terminal with
     | Some (Ok exit) -> Ok (Some exit)
     | Some (Error error) -> Error error
@@ -195,34 +197,37 @@ let poll_exit t = locked t (fun () ->
           match kind, error with
           | 0, None -> Ok None
           | (1 | 2), None ->
-              let result =
-                let* () = drain_control t in
-                let status = if kind = 1 then Exited status else Signaled status in
-                Ok {status; boundary=t.boundary} in
-              t.terminal <- Some result;
-              Result.map Option.some result
+              (* The reaped status cannot be read again. A control failure is
+                 kept beside it as control=Failed and never replaces it. *)
+              drain_control_with control t;
+              let status = if kind = 1 then Exited status else Signaled status in
+              let exit = {status; boundary=t.boundary} in
+              t.terminal <- Some (Ok exit);
+              Ok (Some exit)
           | _, Some error ->
               let error = if error = Unix.ECHILD then Exit_unavailable
                 else Syscall_failed {stage=Wait_main; error} in
               t.terminal <- Some (Error error); Error error
           | _, None -> t.terminal <- Some (Error Protocol_error); Error Protocol_error)
+let poll_exit = poll_exit_with control_raw
 
-let rec await_exit t =
-  let* exit = poll_exit t in
+let rec await_exit_with control t =
+  let* exit = poll_exit_with control t in
   match exit with
   | Some exit -> Ok exit
   | None ->
       (* A release can close the handle between observation and watch creation.
          Its cached settlement is read again rather than losing that result. *)
       match wait_readable t ~exit:true with
-      | Ok () -> Eio.Fiber.yield (); await_exit t
+      | Ok () -> Eio.Fiber.yield (); await_exit_with control t
       | Error error ->
           if error = Closed then
-            (match poll_exit t with
+            (match poll_exit_with control t with
              | Ok (Some exit) -> Ok exit
              | Ok None -> Error Closed
              | Error error -> Error error)
           else Error error
+let await_exit = await_exit_with control_raw
 
 let close_settled t primary =
   let error, notify = locked t (fun () ->
@@ -238,15 +243,21 @@ let close_settled t primary =
       let primary = match primary with Ok _ -> None | Error error -> Some error in
       Error (Cleanup_failed {primary; error})
 
-let release t = Eio.Cancel.protect (fun () ->
+let release_with signal t = Eio.Cancel.protect (fun () ->
     Eio.Mutex.use_rw ~protect:true t.release_mutex (fun () ->
         match t.release_result with
         | Some result -> result
         | None ->
-            let* _ = signal_main t Kill in
-            let result = close_settled t (await_exit t) in
+            (* A failed signal still closes: an open handle would leave every
+               closed_signal waiter blocked. Waiting for an exit the signal did
+               not cause could block forever, so the signal failure is primary. *)
+            let settled = match signal_main_with signal t Kill with
+              | Ok (Requested | Already_exited) -> await_exit t
+              | Error error -> Error error in
+            let result = close_settled t settled in
             t.release_result <- Some result;
             result))
+let release = release_with signal_raw
 
 let valid_string s = not (String.contains s '\000')
 let absolute s = String.length s > 0 && s.[0] = '/' && valid_string s
@@ -285,7 +296,7 @@ let create_with_hook ~before_spawn_in_worker ~sw ~executable ~argv ~env ~cwd ~pa
                 let closed_signal, closed_resolver = Eio.Promise.create () in
                 let t = {raw; mutex=Mutex.create ();
                          boundary={preparation=Pending; decision=Undecided; control=Open};
-                         control_error=None; terminal=None; closed=false; closed_signal; closed_resolver;
+                         terminal=None; closed=false; closed_signal; closed_resolver;
                          release_mutex=Eio.Mutex.create (); release_result=None} in
                 (* If sw finished concurrently, on_release runs cleanup immediately
                    before raising. In either case the child has an owner. *)
@@ -299,4 +310,7 @@ let create = create_with_hook ~before_spawn_in_worker:(fun () -> ())
 module For_testing = struct
   let linux_build = linux_build ()
   let create = create_with_hook
+  let release_with_signal_failure error = release_with (fun _ _ -> Some error)
+  (* Kind 4 is the stub's receive-failure reading, matched in drain_control. *)
+  let await_exit_with_control_failure error = await_exit_with (fun _ -> 4, 0, Some error)
 end

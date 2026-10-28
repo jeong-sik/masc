@@ -18,6 +18,11 @@
   alcotest eio_main unix yojson httpun))
 
 (test
+ (name test_published_artifact_share)
+ (modules test_published_artifact_share)
+ (libraries masc alcotest yojson))
+
+(test
  (name test_published_artifact_checks)
  (modules test_published_artifact_checks)
  (libraries masc masc.server masc.masc_core masc.masc_tool_blob_store masc.fs_compat

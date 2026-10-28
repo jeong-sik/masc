@@ -1,6 +1,6 @@
 (* HIGH-RISK-UNREVIEWED: this module reads and writes the file that tells a
-   boot where the external high-water store is. A record that reads as absent
-   when it should not lets a boot treat a reverted installation as a new one. *)
+   boot where the external store is. A record that reads as absent when it
+   should not lets a boot treat a reverted installation as a new one. *)
 
 let ( let* ) = Result.bind
 
@@ -147,9 +147,9 @@ let process_owner_uid () = Unix.geteuid ()
    it and before a record is read from it. [dir] has no symbolic link left, so
    [lstat] sees the directory itself. The owner-checked read of [Fs_compat]
    applies the same test to the directory of the file: it must belong to the
-   uid of this process and the group and others must not be able to write it.
-   [write] runs this test first, so a record that [write] puts in a directory is
-   a record that [read] accepts there. *)
+   effective uid of this process and the group and others must not be able to
+   write it. [write] runs this test first, so a record that [write] puts in a
+   directory is a record that [read] accepts there. *)
 let check_config_dir dir =
   match Unix.lstat dir with
   | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
@@ -169,11 +169,11 @@ let check_config_dir dir =
 ;;
 
 (* [Unix.realpath] fails with ENOENT when nothing is there, and also when a
-   symbolic link on the way leads nowhere. Only the first is an absent record.
-   A link that leads nowhere may hide the record, for instance when the config
-   directory lives on a volume that is not mounted. The walk goes up to the
-   nearest component that [lstat] finds and demands that a link there leads
-   somewhere. *)
+   symbolic link on the way is dangling. Only the first is an absent record.
+   A dangling link may hide the record, for instance when the config directory
+   lives on a volume that is not mounted. The walk goes up to the nearest
+   component that [lstat] finds and demands that a link there is not
+   dangling. *)
 let rec absent_config_dir dir =
   match Unix.lstat dir with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
@@ -185,7 +185,7 @@ let rec absent_config_dir dir =
      | _ -> Ok ()
      | exception Unix.Unix_error (error, _, _) ->
        Error
-         (Printf.sprintf "the symbolic link %s leads nowhere: %s" dir (Unix.error_message error)))
+         (Printf.sprintf "the symbolic link %s is dangling: %s" dir (Unix.error_message error)))
   | { Unix.st_kind = Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK; _ }
     -> Ok ()
 ;;

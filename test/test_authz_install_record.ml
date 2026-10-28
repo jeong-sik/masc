@@ -334,7 +334,7 @@ let config_dir_of_another_user_is_refused () =
       ~external_store:"/stores/one")
 ;;
 
-let config_dir_under_a_link_that_leads_somewhere_may_be_absent () =
+let absent_config_dir_below_a_resolving_link () =
   with_dirs (fun dirs ->
     let real = Filename.concat dirs.root "dotfiles" in
     Unix.mkdir real 0o700;
@@ -348,14 +348,14 @@ let config_dir_under_a_link_that_leads_somewhere_may_be_absent () =
     Alcotest.(check (option string)) "read back" (Some "/stores/one") (read_ok located))
 ;;
 
-(* A link that leads nowhere is not an absent directory: the record may be
-   behind it. The write side is closed too. *)
+(* A dangling link is not an absent directory: the record may be behind it.
+   The write side is closed too. *)
 let dangling_config_dir_link_is_unreadable () =
   with_dirs (fun dirs ->
     let gone = Filename.concat dirs.root "gone" in
     Unix.symlink gone dirs.config;
     let located = locate_in dirs ~base_path:dirs.base in
-    check_read_error "a config directory link that leads nowhere" "unreadable" located;
+    check_read_error "a dangling config directory link" "unreadable" located;
     check_write_error "nothing is written behind it" "config_dir_unusable" located
       ~external_store:"/stores/one";
     Alcotest.(check bool) "the target was not created" false (Sys.file_exists gone))
@@ -369,7 +369,7 @@ let dangling_ancestor_link_is_unreadable () =
     let located =
       get_located (I.locate ~config_dir:(Some (Filename.concat home "masc")) ~base_path:dirs.base)
     in
-    check_read_error "a link on the way that leads nowhere" "unreadable" located;
+    check_read_error "a dangling link on the way" "unreadable" located;
     check_write_error "nothing is written behind it" "config_dir_unusable" located
       ~external_store:"/stores/one";
     Alcotest.(check bool) "the target was not created" false (Sys.file_exists gone))
@@ -528,12 +528,12 @@ let () =
       , [ Alcotest.test_case "modes" `Quick config_dir_modes_decide_write_and_read_alike
         ; Alcotest.test_case "another user" `Quick config_dir_of_another_user_is_refused
         ; Alcotest.test_case
-            "behind a link that leads somewhere"
+            "below a resolving link"
             `Quick
-            config_dir_under_a_link_that_leads_somewhere_may_be_absent
-        ; Alcotest.test_case "link that leads nowhere" `Quick dangling_config_dir_link_is_unreadable
+            absent_config_dir_below_a_resolving_link
+        ; Alcotest.test_case "dangling link" `Quick dangling_config_dir_link_is_unreadable
         ; Alcotest.test_case
-            "link on the way that leads nowhere"
+            "dangling link on the way"
             `Quick
             dangling_ancestor_link_is_unreadable
         ] )

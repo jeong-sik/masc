@@ -474,10 +474,12 @@ let restore_durable_step_preparation ~context ~source_input ~parsing_now ~policy
   let step={context;preparation={source_input;parsing_now;policy;rule_prompt;prompt;variables;
     rendered_prompt;output_schema}} in
   let+ ()=validate_durable_step_preparation step in step
+(* A floor step reads the input the Runtime floor's volatile Memory pass reads.
+   The pass's state and unread arguments do not change that input. *)
+let durable_step_source_input input = input_for_pass (Volatile_memory_pass (None,[])) input
 let prepare_durable_step ~now ~context input =
   let open Result.Syntax in
-  let source_input=input_for_pass
-    (Volatile_memory_pass (context.previous_state,context.unread_messages)) input in
+  let source_input=durable_step_source_input input in
   let* preparation=prepare_durable_with ~continuity:(durable_step_continuity context)
     ~output_schema:Keeper_structured_output_schema.librarian_continuity_output_schema ~now source_input in
   let step={context;preparation} in

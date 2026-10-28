@@ -694,6 +694,27 @@ let test_the_lane_status_names_who_acts () =
     (Yojson.Safe.Util.to_string (field "failure" (field "last_dispatch" version_skew)));
   check bool "the action says who replaces the shim" true
     (contains "operator has to replace the shim" (Yojson.Safe.Util.to_string (field "operator_action" version_skew)));
+  let timeout_action failure =
+    report
+      (Some (Keeper_sandbox_remote.Dispatch_failed { at; failure; detail = "timeout" }))
+      (Keeper_sandbox_remote.Probe_answered
+         { major = Exec_ssh_protocol.V3; capabilities = []; release = Some Build_version.current
+         ; observed_at = 0.5 })
+    |> field "operator_action"
+    |> Yojson.Safe.Util.to_string
+  in
+  let local_timeout = timeout_action Keeper_sandbox_remote.Local_timeout in
+  check bool "a local timeout keeps payload execution and effects unknown" true
+    (contains "unknown" local_timeout && contains "before retrying" local_timeout);
+  check bool "an old probe does not prove current health" true
+    (contains "earlier probe does not prove" local_timeout);
+  check bool "a local timeout does not claim the lane worked" false
+    (contains "lane itself worked" local_timeout);
+  let remote_timeout = timeout_action Keeper_sandbox_remote.Remote_timeout in
+  check bool "a remote timeout is attributed to the shim" true
+    (contains "shim reported" remote_timeout && contains "before retrying" remote_timeout);
+  check bool "local and remote timeouts have distinct guidance" false
+    (String.equal local_timeout remote_timeout);
   let finished =
     report (Some (Keeper_sandbox_remote.Payload_finished { at; status = Unix.WEXITED 0 })) Keeper_sandbox_remote.Probe_not_asked
   in

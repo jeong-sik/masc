@@ -222,6 +222,14 @@ module For_testing_microvm : sig
     -> meta:Keeper_meta_contract.keeper_meta
     -> unit
     -> unit
+
+  val ensure_work_volume_mounted
+    :  ?timeout_sec:float
+    -> t
+    -> backend:Keeper_microvm_backend.t
+    -> container_name:string
+    -> (unit, string) result
+  (** Exercise the same guest mount admission used during boot and adoption. *)
 end
 
 val container_cwd_of_host :

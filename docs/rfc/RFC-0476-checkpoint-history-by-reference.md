@@ -137,18 +137,21 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
 - purge 와 history clear 는 고친 턴 묶음만 새로 쓴다. purge 는 내용을 지우려는 운영자 의도라서, 옛 묶음을 가리키는 보관 head 도 함께 지운다.
 
 **참조로 바꾸는 자리.** media 가 history 에 들어오는 순간 바꾼다. 저장할 때 바꾸면 메모리의 history 는 `Base64`, 다시 읽은 history 는 `Stored` 가 된다. 그러면 같은 대화가 프로세스 안팎에서 다른 모양이 되고, 앞부분 비교가 재시작마다 어긋난다.
-- 들어오는 곳은 다음과 같다. D5 의 큰 모양이면 컴파일러가 나머지를 찾아 준다.
+- 들어오는 곳은 다음과 같다. history 타입에 `Base64` 가 없으므로(D5) 컴파일러가 나머지를 찾아 준다.
   - tool 결과(`Tool_projection.to_agent_core_typed_result` 의 `content_blocks`)
   - 사용자가 첨부한 media(keeper_multimodal_input.ml:625-637, :685-692)
   - 레인 add-on MCP 의 media(keeper_lane_addon_runtime.ml:15-21)
   - `keeper_image_read`, 검증 도구의 렌더 페이지
-- store 의 encoder 세 곳(§2.1)은 바꾸지 않는다. `Base64` media 가 오면 typed 오류로 거절한다. 그래서 history 에 `Base64` 가 남아 있으면 저장이 바로 실패해서 드러난다.
+- history 타입에는 `Base64` 가 없으므로, store 의 encoder 세 곳(§2.1)이 바꾸거나 거절할 일이 없다.
 
 **exact ref.** `expected_source_ref` 와 accepted-checkpoints, Gate 의 `canonical_checkpoint_bytes` 는 head 바이트가 된다. head 가 모든 객체 digest 를 담으므로 history 전체를 가리키는 값이다. 비교 비용은 head 크기를 따른다.
 
 ### 3.4 media 참조와 resolver
 
-**타입.** media `source` 에 `Stored of { sha256 : string; bytes : int }` 를 더한다. 지금처럼 `source_type` 이 `data` 의 뜻을 정하는 모양 대신 payload 를 가진 합타입으로 바꾼다(D5).
+**타입(D5).** history 의 media 와 provider 로 가는 media 를 다른 타입으로 둔다.
+- history 쪽 media 는 `Stored of { sha256 : string; bytes : int }` 하나뿐이다.
+- provider 쪽 media 는 지금의 `Base64`·`Url`·`File_id` 를 payload 를 가진 합타입으로 둔다. 지금처럼 `source_type` 이 `data` 의 뜻을 정하는 모양은 버린다.
+- 둘 사이는 resolver 만 건넌다. 그래서 backend 에 `Stored` 가 가는 상태도, history 에 `Base64` 가 남는 상태도 컴파일되지 않는다.
 
 **resolver 는 하나다.** `Stored` 를 바이트로 되돌리는 함수 하나를 둔다. blob 이 없으면 typed 오류다. 그 이미지를 조용히 빼지 않는다. 부르는 자리는 아래와 같다. 타입이 바뀌면 컴파일러가 빠짐없이 찾아 준다.
 - provider 요청: 범위 안 메시지만 되돌린다. backend 와 tool 결과 media projector 보다 앞이다.
@@ -187,10 +190,15 @@ blob 정리는 L1 과 같은 stack 에 들어간다. `Tool_blob_maintenance` 의
 
 ## 4. 고려했다 버린 것
 
-- **SQLite 에 메시지 행으로 저장.** OpenAI Agents SDK 의 `SQLiteSession` 같은 방식이다. masc 도 이미 SQLite 를 쓴다(chat operations, tool call index).
-  - 장점: 크래시 안전성과 부분 쓰기를 거저 얻는다. 진행 중인 턴을 행 단위로 쓸 수 있다.
-  - 버린 이유: checkpoint 소비자들이 "값 하나 = 해시 하나"에 기댄다(CAS ref, Librarian digest, accepted-checkpoints, Gate 바이트). Merkle head 는 이것을 그대로 지킨다. SQLite 로 가면 소비자마다 기준을 버전 번호로 바꿔야 한다.
-  - 사용자가 SQLite 를 원하면 §3.2~§3.3 만 바뀌고 나머지는 그대로다(D6).
+- **객체를 SQLite 에 담기.** OpenAI Agents SDK 의 `SQLiteSession` 처럼 DB 에 두는 방식이다. 같은 객체·head 모델을 DB 행으로 담을 수 있으므로 "값 하나 = 해시 하나"는 어느 쪽이든 지켜진다. 고르는 것은 그릇이다(D6).
+  - 얻는 것: 객체와 head 를 transaction 하나로 commit 한다. checkpoint 객체 정리를 서버를 켠 채로 할 수 있다.
+  - 잃는 것:
+    - media 는 여전히 파일이라 그릇이 둘이 된다.
+    - 쓰는 쪽과 읽는 쪽이 잠금을 다툰다. chat-operations 저장소는 SQLITE_BUSY 로 chat 이 막힌 적이 있다(keeper_chat_operation_store.ml:722-727 주석).
+    - 지워도 파일이 줄지 않아 공간 회수 작업이 하나 더 생긴다.
+    - 운영자가 jq·rg 로 바로 볼 수 없다.
+  - fsync 도 크게 줄지 않는다. masc 의 SQLite 규약은 `journal_mode=DELETE`, `synchronous=EXTRA` 라서 commit 한 번에 fsync 를 여러 번 한다(:728-738).
+  - "바뀌지 않는 객체를 먼저 쓰고 head 를 마지막에 rename" 하면 한 번에 commit 하는 것과 같은 보장을 얻는다. Git 과 `Tool_blob_store` 가 쓰는 방식이다.
 - **append-only 연산 로그.** agent_core `Checkpoint_delta` 의 splice 연산이다. 검증 해시가 checkpoint 전체에 대한 MD5 라서 쓸 때마다 전체 비용이 든다. 처음부터 재생해야 하고 로그를 접는 일이 따로 필요하다.
 - **메시지마다 파일 하나.** 약 13만 개 파일이 생기고, head 가 메시지 수만큼 커진다. 사용자 판단(D2)대로 닫힌 턴을 묶는다.
 - **진행 중인 턴도 묶음 하나로 다시 쓰기.** 메시지 3,341개 턴에서는 그 턴 안에서만 GB 단위를 쓴다. 그래서 진행 중인 턴은 loose 객체로 둔다.
@@ -207,7 +215,7 @@ blob 정리는 L1 과 같은 stack 에 들어간다. `Tool_blob_maintenance` 의
    - 저장마다 쓴 바이트, 읽기마다 읽은 바이트, 기동 단계 시간을 같은 이름으로 남긴다.
    - checkpoint 저장·읽기 bench 를 `test/` 에 둔다. 지금 형식으로 먼저 잰다.
 2. **L1, native stack 하나.**
-   1. 타입과 codec v16: `Stored`, head, 묶음.
+   1. 타입과 codec v16: history·provider media 타입 분리(D5), head, 묶음.
    2. store: 객체 쓰기·읽기, head, 참조로 바꾸는 함수, `Saved` 반환값.
    3. resolver 와 부르는 자리(§3.4).
    4. head 로 읽기(§3.5).
@@ -246,7 +254,5 @@ blob 정리는 L1 과 같은 stack 에 들어간다. `Tool_blob_maintenance` 의
 - **D2. 묶음.** 결정됨(2026-10-28, 사용자 판단 "묶어야"). 닫힌 턴은 묶고, 진행 중인 턴은 메시지 객체로 둔다.
 - **D3. 문서·오디오.** 결정됨(2026-10-28, 사용자). 같은 참조 규칙에 넣는다.
 - **D4. head 단계.** D2 로 풀렸다. head 는 턴 묶음 목록이다.
-- **D5. 타입 경계.** 열려 있다.
-  - 가장 단단한 모양은 history 의 media 와 provider 로 가는 media 를 다른 타입으로 두는 것이다. 그러면 backend 에 `Stored` 가 가는 상태도, history 에 `Base64` 가 남는 상태도 표현할 수 없다. 대신 agent_core 의 메시지 타입을 쓰는 모든 곳을 바꿔야 한다.
-  - 작은 모양은 `Stored` 를 같은 타입에 두고, backend 가 받으면 typed 오류로 거절하는 것이다. 이 RFC 는 큰 모양을 권한다. 비용이 너무 크면 작은 모양으로 시작하고 바꿀 이슈를 남긴다.
-- **D6. 저장 방식.** Git 방식(이 RFC)인가 SQLite 행인가. 이 RFC 는 Git 방식을 권한다(§4).
+- **D5. 타입 경계.** 결정됨(2026-10-28, 사용자). history 의 media 와 provider 로 가는 media 를 다른 타입으로 둔다. backend 에 `Stored` 가 가는 상태도, history 에 `Base64` 가 남는 상태도 표현할 수 없다. agent_core 의 메시지 타입을 쓰는 곳을 모두 바꾸는 비용을 받아들인다.
+- **D6. 그릇.** 결정됨(2026-10-28, 사용자). 객체마다 파일 하나와 head 파일 하나로 둔다(§3.2). SQLite 를 버린 이유는 §4 에 있다. L0 bench 에서 파일 방식의 저장 지연이 문제로 나오면 다시 연다.

@@ -1,0 +1,2 @@
+terminal too small -- resize to at least 15 rows; q: quit
+q: press again to quit, or any other key to stay

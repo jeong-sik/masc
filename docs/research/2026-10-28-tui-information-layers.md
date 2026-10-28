@@ -179,8 +179,10 @@ happened first.
 
 Source review also found a pre-existing quit-confirmation concern: a `q`
 confirmation can remain armed after its ordinary notice expires, so a later `q`
-can exit without that reminder. Unsent input or drafts could be lost. This was
-not reproduced in the fixture and is not fixed by the notice-row changes.
+can exit without that reminder. A [manual observation of 234b647](../evidence/research/tui-information-layers-2026-10-28/populated-fixture/candidate-234b647-quit/README.md)
+reproduced that sequence in compact mode: a synthetic unsent chat draft was
+absent after the TUI exited and restarted. It is not proof of a later candidate
+and is not fixed by the notice-row changes.
 
 A separate source review found an existing chat row-budget discrepancy: with
 a folded turn, full tool visibility and pending gate effects, the budget omits

@@ -115,7 +115,7 @@ let text_entry_open view =
       | Some { form = Some _; _ } -> true
       | Some _ | None -> false)
   || Option.is_some view.draft
-let ( let* ) = Result.bind
+open Result.Syntax
 let field name = function
   | `Assoc fields -> (match List.assoc_opt name fields with Some v -> Ok v | None -> Error ("missing " ^ name))
   | _ -> Error "expected object"

@@ -12,7 +12,7 @@ type target =
   }
 
 let target ~journal ~execution_id ~reply_turn_ref =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* turn_ref, operation_id = match Log.source journal with
     | Log.Autonomous_turn turn_ref -> Ok (turn_ref, None)
     | Operation _ ->
@@ -71,7 +71,7 @@ let nonnegative = function
 ;;
 
 let decode ~target json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* keeper = field "keeper" json in
   let* trace = field "trace_id" json in
   let* turn = field "turn_id" json in

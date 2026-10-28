@@ -80,7 +80,7 @@ let copy_source state =
       | None -> Error "No selected text part in the current resource reading"
 
 let export_source state =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* _label, _source = copy_source state in
   match admitted_text_parts state with
   | Some (Catalog.Report report, [(_, source)]) ->

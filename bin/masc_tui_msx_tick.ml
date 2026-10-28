@@ -111,7 +111,7 @@ let decode_mark fields =
   | _ -> Error "MSX tick: invalid change mark"
 
 let decode_frame previous json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match json with
   | `Assoc fields ->
       let names = List.map fst fields in

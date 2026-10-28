@@ -76,7 +76,7 @@ let begin_check state ~report =
   else match state.artifact_check_pending with
   | Some _ -> Error "A confirmation change is still pending"
   | None ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* request = Masc_tui_artifact_check_action.prepare state.artifact_checks report in
     state.artifact_check_pending <- Some request;
     state.artifact_checks <- Masc_tui_fetched.clear state.artifact_checks;
@@ -156,7 +156,7 @@ let step_revision state ~direction ~read =
   | Some (Catalog.Mcp_uri _) | None -> ()
 
 let select_next_unchecked state =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () =
     if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
     else if Option.is_some state.artifact_check_pending then

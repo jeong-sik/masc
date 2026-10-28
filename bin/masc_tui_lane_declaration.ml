@@ -15,7 +15,7 @@ type session = {
 type request = Read of string | Save of session
 type response = Read_document of document | Written of receipt | Rejected of failure
 let template = "enabled = true\nid = \"\"\nrun_id = \"\"\nmanifest_path = \"\"\n\n[binding]\nsources = []\n"
-let ( let* ) = Result.bind
+open Result.Syntax
 let field name = function
   | `Assoc fields -> (match List.assoc_opt name fields with Some value -> Ok value | None -> Error ("missing " ^ name))
   | _ -> Error "expected object"

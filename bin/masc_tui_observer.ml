@@ -276,7 +276,7 @@ let agent_core_kind ~event_type payload =
   | "telemetry_event" -> Ok Telemetry
   | other -> Ok (Agent_core_other other)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let agent_core_prefix = "agent_core:"
 

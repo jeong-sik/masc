@@ -18,7 +18,7 @@ type history = Loading | Unavailable
   store_note : string; runtimes : stats list;
 }
 type t = { history : history; specifications : specification list }
-let ( let* ) = Result.bind
+open Result.Syntax
 let field name = function `Assoc fields -> List.assoc_opt name fields | _ -> None
 let required name json = match field name json with
   | Some value -> Ok value | None -> Error ("runtime evidence missing " ^ name)

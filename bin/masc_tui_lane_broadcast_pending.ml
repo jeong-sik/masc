@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let nonblank = function `String text when String.trim text<>"" -> Ok text
   | _ -> Error "Broadcast recovery identity must be nonblank text"

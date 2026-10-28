@@ -8,7 +8,7 @@ type phase = Browse of int | Keeper of int | Output of string * int
 type t = {keepers:string list; targets:target list; snapshot:snapshot option; phase:phase; error:string option}
 let initial ~keepers ~targets = {keepers=List.sort_uniq String.compare keepers;targets;
   snapshot=None;phase=Browse 0;error=None}
-let ( let* ) = Result.bind
+open Result.Syntax
 let field key = function `Assoc fields -> (match List.assoc_opt key fields with
   | Some value -> Ok value | None -> Error ("missing subscription " ^ key))
   | _ -> Error "expected subscription object"

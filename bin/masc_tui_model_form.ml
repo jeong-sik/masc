@@ -120,7 +120,7 @@ let rows ?(input_locked=false) ~width ~height t =
 
 let path parts = String.concat "." (List.map Edit_text.render_key parts)
 let errors errors = String.concat "; " (List.map (fun (e:Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors)
-let ( let* ) = Result.bind
+open Result.Syntax
 let optional_positive name text =
   if text = "" then Ok None else match int_of_string_opt text with
     | Some n when n > 0 -> Ok (Some n) | _ -> Error (name ^ " must be a positive integer, or blank")

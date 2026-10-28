@@ -408,7 +408,7 @@ let notify ~post t ~method_ =
     (request ~post t ~include_protocol_version:true ~method_ ~name:None ~extra_headers:[] ~body)
 
 let connect_legacy ~post ~url ~access_token () =
-  let offered = Mcp_transport_protocol.default_protocol_version in
+  let offered = Mcp_transport_protocol.legacy_default_protocol_version in
   let opening =
     { url
     ; access_token

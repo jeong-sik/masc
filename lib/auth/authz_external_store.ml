@@ -36,6 +36,10 @@ module Change = struct
         ; workspace_id : Workspace_id.t
         }
 
+  (* The label functions below name every constructor, so the compiler stops at
+     a new one. These two lists are what a label is read back through: a
+     constructor that is missing here is written, read back as
+     [Invalid_change], and refused by [append] with nothing written. *)
   let authz_events =
     [ Grant; Revoke; Disable; Delete; Block; Purge; Policy_revoke; Credential_replace ]
   ;;
@@ -152,7 +156,9 @@ type violation =
   | Committed_other_digest
   | Aborted_without_intent
   | Aborted_other_intent
-  | Bootstrap_committed_again
+  | Intent_before_bootstrap
+  | Bootstrap_already_committed
+  | Workspace_mismatch
 
 let violation_to_string = function
   | Intent_while_pending -> "an intent is already pending"
@@ -160,23 +166,37 @@ let violation_to_string = function
   | Committed_other_digest -> "the hash is not the one that the pending intent named"
   | Aborted_without_intent -> "no intent is pending to abort"
   | Aborted_other_intent -> "it is not the pending intent"
-  | Bootstrap_committed_again -> "a fresh bootstrap is already committed"
+  | Intent_before_bootstrap -> "only a fresh bootstrap can come before one is committed"
+  | Bootstrap_already_committed -> "a fresh bootstrap is already committed"
+  | Workspace_mismatch -> "the workspace is not the one of the committed bootstrap"
 ;;
 
-(* The rules of the file. [Intent_pending] needs the file to be at rest, and an
-   answer needs the intent it answers. *)
+(* What an intent may be about, given whether a fresh bootstrap is committed
+   (design 5.1 and 8.4: a store starts with a fresh bootstrap, and the workspace
+   of the committed one is the only valid one). Every pair is named. *)
+let check_change (state : State.t) (change : Change.t) =
+  match state.State.workspace_id, change with
+  | None, Change.Mode { event = Change.Fresh_bootstrap; workspace_id = _ } -> Ok ()
+  | None, Change.Mode { event = Change.Off | Change.Reactivate; workspace_id = _ }
+  | None, Change.Authz { event = _; subject = _ } -> Error Intent_before_bootstrap
+  | Some _, Change.Mode { event = Change.Fresh_bootstrap; workspace_id = _ } ->
+    Error Bootstrap_already_committed
+  | Some bootstrapped, Change.Mode { event = Change.Off | Change.Reactivate; workspace_id } ->
+    if Workspace_id.equal bootstrapped workspace_id then Ok () else Error Workspace_mismatch
+  | Some _, Change.Authz { event = _; subject = _ } -> Ok ()
+;;
+
+(* The rules of the file. [Intent_pending] needs the file to be at rest and a
+   change that fits the file, and an answer needs the intent it answers. *)
 let check (state : State.t) entry =
   match entry, state.State.pending with
   | Intent_pending _, Some _ -> Error Intent_while_pending
-  | Intent_pending _, None -> Ok ()
+  | Intent_pending intent, None -> check_change state intent.change
   | Committed _, None -> Error Committed_without_intent
   | Committed { record_hash }, Some pending ->
-    if not (Hash.equal record_hash pending.intended_next_record_digest)
-    then Error Committed_other_digest
-    else (
-      match bootstrapped_workspace pending.change, state.State.workspace_id with
-      | Some _, Some _ -> Error Bootstrap_committed_again
-      | Some _, None | None, Some _ | None, None -> Ok ())
+    if Hash.equal record_hash pending.intended_next_record_digest
+    then Ok ()
+    else Error Committed_other_digest
   | Aborted_intent _, None -> Error Aborted_without_intent
   | Aborted_intent intent, Some pending ->
     if intent_equal intent pending then Ok () else Error Aborted_other_intent

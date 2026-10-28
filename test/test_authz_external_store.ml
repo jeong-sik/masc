@@ -48,6 +48,11 @@ let pending ?previous ?digest change = S.Intent_pending (intent ?previous ?diges
 let aborted ?previous ?digest change = S.Aborted_intent (intent ?previous ?digest change)
 let committed record_hash = S.Committed { record_hash }
 
+(* The first two lines of a store that is set up: a bootstrap and its answer.
+   Every change but a bootstrap needs them in front. *)
+let boot_digest = hash_of 'f'
+let bootstrap_entries = [ pending ~digest:boot_digest bootstrap; committed boot_digest ]
+
 (* ---- text and files ---- *)
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
@@ -92,6 +97,14 @@ let find_sub ~sub text =
 
 let contains ~sub text = Option.is_some (find_sub ~sub text)
 
+let replace ~sub ~by text =
+  match find_sub ~sub text with
+  | None -> Alcotest.failf "fixture text does not hold %s" sub
+  | Some at ->
+    let after = at + String.length sub in
+    String.sub text 0 at ^ by ^ String.sub text after (String.length text - after)
+;;
+
 (* ---- names, so that a new constructor fails to compile until it is placed ---- *)
 
 let violation_name : S.violation -> string = function
@@ -100,7 +113,9 @@ let violation_name : S.violation -> string = function
   | S.Committed_other_digest -> "Committed_other_digest"
   | S.Aborted_without_intent -> "Aborted_without_intent"
   | S.Aborted_other_intent -> "Aborted_other_intent"
-  | S.Bootstrap_committed_again -> "Bootstrap_committed_again"
+  | S.Intent_before_bootstrap -> "Intent_before_bootstrap"
+  | S.Bootstrap_already_committed -> "Bootstrap_already_committed"
+  | S.Workspace_mismatch -> "Workspace_mismatch"
 ;;
 
 let line_error_name : S.line_error -> string = function
@@ -226,6 +241,11 @@ let lines_are_pinned () =
      ^ {|{"type":"authz","event":"disable","subject":{"type":"principal","principal":{"type":"human","id":"alice"}}}}|})
     (pending (authz C.Disable human));
   check
+    "an intent about a service"
+    (intent_prefix "intent_pending"
+     ^ {|{"type":"authz","event":"disable","subject":{"type":"principal","principal":{"type":"service","id":"keeper-1"}}}}|})
+    (pending (authz C.Disable service));
+  check
     "an intent about the mode"
     (intent_prefix "intent_pending"
      ^ {|{"type":"mode","event":"fresh_bootstrap","workspace_id":"workspace-1"}}|})
@@ -285,32 +305,67 @@ let all_changes =
   @ List.map (fun event -> mode event workspace) C.mode_events
 ;;
 
+(* The entries hold hashes, ids and variants only, so [=] compares every member. *)
+let check_reads_back label state entry =
+  let line = S.to_line entry in
+  match S.of_line state line with
+  | Ok read ->
+    Alcotest.(check string) label line (S.to_line read);
+    Alcotest.(check bool) (label ^ ": the same entry") true (read = entry)
+  | Error error -> Alcotest.failf "%s: %s" label (S.line_error_to_string error)
+;;
+
 let every_change_reads_back () =
   Alcotest.(check int)
     "eight authorization events with five subjects each, and three mode events"
     43
     (List.length all_changes);
-  List.iter
-    (fun change ->
-      let line = S.to_line (pending change) in
-      match S.of_line S.State.empty line with
-      | Ok read -> Alcotest.(check string) (C.to_string change) line (S.to_line read)
-      | Error error ->
-        Alcotest.failf "%s: %s" (C.to_string change) (S.line_error_to_string error))
-    all_changes
+  with_path (fun path ->
+    let store, _, _ = open_ok ~path in
+    let bootstrapped = append_ok store bootstrap_entries in
+    List.iter
+      (fun change ->
+        (* A bootstrap reads at the start of a store, every other change after one. *)
+        let state = if C.equal change bootstrap then S.State.empty else bootstrapped in
+        check_reads_back (C.to_string change) state (pending change))
+      all_changes)
 ;;
 
 let answers_read_back_after_their_intent () =
   with_path (fun path ->
     let store, _, _ = open_ok ~path in
-    let state = append_ok store [ pending revoke_grant ] in
+    let state = append_ok store [ pending bootstrap ] in
     List.iter
-      (fun entry ->
-        let line = S.to_line entry in
-        match S.of_line state line with
-        | Ok read -> Alcotest.(check string) "the line" line (S.to_line read)
-        | Error error -> Alcotest.failf "refused: %s" (S.line_error_to_string error))
-      [ committed digest; aborted revoke_grant ])
+      (fun entry -> check_reads_back "an answer" state entry)
+      [ committed digest; aborted bootstrap ])
+;;
+
+(* Every change goes through [append], which reads each line back and compares
+   it with the entry, and through the replay of a reopened file. *)
+let every_change_is_appended_and_replayed () =
+  with_path (fun path ->
+    let store, _, _ = open_ok ~path in
+    ignore (append_ok store [ pending bootstrap; aborted bootstrap ] : S.State.t);
+    ignore (append_ok store bootstrap_entries : S.State.t);
+    let others = List.filter (fun change -> not (C.equal change bootstrap)) all_changes in
+    let state =
+      append_ok store (List.concat_map (fun change -> [ pending change; aborted change ]) others)
+    in
+    let expected = List.map (fun change -> intent change) (bootstrap :: others) in
+    check_intents "every change is kept, in file order" expected (S.State.aborted state);
+    let reopened, entries, _ = open_ok ~path in
+    Alcotest.(check int)
+      "every line is replayed"
+      (4 + (2 * List.length others))
+      (List.length entries);
+    let again = state_of reopened in
+    check_intents "a reopened file adds up to the same" expected (S.State.aborted again);
+    check_hash "with the commit of the bootstrap" (Some boot_digest) (S.State.last_committed again);
+    check_pending "and nothing pending" None again;
+    Alcotest.(check bool) "and the workspace of the bootstrap" true
+      (match S.State.workspace_id again with
+       | Some id -> Workspace_id.equal id workspace
+       | None -> false))
 ;;
 
 (* ---- what a change is ---- *)
@@ -360,8 +415,9 @@ let rules_when_appending () =
     check_append "an answer needs an intent" "Rejected index=0 Committed_without_intent" store [ committed digest ];
     check_append "an abort needs an intent" "Rejected index=0 Aborted_without_intent" store [ aborted revoke_grant ];
     Alcotest.(check bool) "nothing was written" false (Sys.file_exists path);
+    ignore (append_ok store bootstrap_entries : S.State.t);
     ignore (append_ok store [ pending revoke_grant ] : S.State.t);
-    let one_intent = text_of [ pending revoke_grant ] in
+    let one_intent = text_of (bootstrap_entries @ [ pending revoke_grant ]) in
     check_append "a second intent while one is pending" "Rejected index=0 Intent_while_pending" store [ pending block_runtime ];
     check_append "an answer with another hash" "Rejected index=0 Committed_other_digest" store [ committed other_digest ];
     List.iter
@@ -383,18 +439,56 @@ let rules_when_appending () =
     check_append "an intent and its answer in one list" "Ok" store [ pending ~digest:other_digest block_runtime; committed other_digest ])
 ;;
 
-let second_bootstrap_is_refused_when_it_is_committed () =
+(* A store starts with a bootstrap. Until one is committed the file takes only a
+   bootstrap. After it, a second bootstrap is refused, and a switch off or a
+   reactivation names the workspace that the bootstrap set up. *)
+let a_store_starts_with_a_bootstrap () =
   with_path (fun path ->
     let store, _, _ = open_ok ~path in
-    ignore (append_ok store [ pending bootstrap; committed digest ] : S.State.t);
-    let again = mode C.Fresh_bootstrap other_workspace in
-    check_append "an intent for another bootstrap is only an intent" "Ok" store [ pending ~digest:other_digest again ];
-    check_append "its commit is refused" "Rejected index=0 Bootstrap_committed_again" store [ committed other_digest ];
-    ignore (append_ok store [ aborted ~digest:other_digest again ] : S.State.t);
-    Alcotest.(check bool) "the workspace of the first one stays" true
+    List.iter
+      (fun (label, change) ->
+        check_append label "Rejected index=0 Intent_before_bootstrap" store [ pending change ])
+      [ "a revocation first", revoke_grant
+      ; "a grant first", authz C.Grant human
+      ; "a switch off first", mode C.Off workspace
+      ; "a reactivation first", mode C.Reactivate workspace
+      ];
+    Alcotest.(check bool) "nothing was written" false (Sys.file_exists path);
+    ignore (append_ok store [ pending bootstrap; aborted bootstrap ] : S.State.t);
+    check_append
+      "a bootstrap that is given up does not open the file"
+      "Rejected index=0 Intent_before_bootstrap"
+      store
+      [ pending revoke_grant ];
+    let second = mode C.Fresh_bootstrap other_workspace in
+    ignore (append_ok store [ pending ~digest:other_digest second; committed other_digest ] : S.State.t);
+    Alcotest.(check bool) "the committed bootstrap sets the workspace" true
       (match S.State.workspace_id (state_of store) with
-       | Some id -> Workspace_id.equal id workspace
-       | None -> false))
+       | Some id -> Workspace_id.equal id other_workspace
+       | None -> false);
+    List.iter
+      (fun (label, change) ->
+        check_append label "Rejected index=0 Bootstrap_already_committed" store [ pending change ])
+      [ "a second bootstrap for the same workspace", second
+      ; "a second bootstrap for another workspace", bootstrap
+      ];
+    List.iter
+      (fun (label, change) ->
+        check_append label "Rejected index=0 Workspace_mismatch" store [ pending change ])
+      [ "a switch off for another workspace", mode C.Off workspace
+      ; "a reactivation for another workspace", mode C.Reactivate workspace
+      ];
+    check_append "an authorization change" "Ok" store [ pending revoke_grant; aborted revoke_grant ];
+    List.iter
+      (fun (label, change) -> check_append label "Ok" store [ pending change; aborted change ])
+      [ "a switch off for the workspace", mode C.Off other_workspace
+      ; "a reactivation for the workspace", mode C.Reactivate other_workspace
+      ];
+    check_append
+      "an abort of a mode change that differs only in the workspace"
+      "Rejected index=1 Aborted_other_intent"
+      store
+      [ pending (mode C.Off other_workspace); aborted (mode C.Off workspace) ])
 ;;
 
 (* ---- what the lines add up to ---- *)
@@ -409,11 +503,13 @@ let state_follows_the_lines () =
     check_pending "no intent in an empty file" None empty;
     check_hash "no commit" None (S.State.last_committed empty);
     check_intents "no abort" [] (S.State.aborted empty);
+    let state = append_ok store bootstrap_entries in
+    check_hash "the commit of the bootstrap" (Some boot_digest) (S.State.last_committed state);
     check_pending "an intent is pending" (Some first) (append_ok store [ S.Intent_pending first ]);
     let state = append_ok store [ S.Aborted_intent first ] in
     check_pending "an abort answers it" None state;
     check_intents "and is kept" [ first ] (S.State.aborted state);
-    check_hash "without a commit" None (S.State.last_committed state);
+    check_hash "without a new commit" (Some boot_digest) (S.State.last_committed state);
     ignore (append_ok store [ S.Intent_pending second ] : S.State.t);
     let state = append_ok store [ committed other_digest ] in
     check_pending "a commit answers the next one" None state;
@@ -446,7 +542,7 @@ let workspace_is_set_by_the_committed_bootstrap () =
       "workspace-1"
       (workspace_name (append_ok store [ pending bootstrap; committed digest ]));
     Alcotest.(check string)
-      "kept by a later mode change"
+      "the same after a later mode change"
       "workspace-1"
       (workspace_name
          (append_ok
@@ -464,12 +560,12 @@ let first_append_creates_the_file_and_reopening_keeps_the_state () =
     Alcotest.(check string) "no file" "Missing" (contents_name recovered.S.contents);
     Alcotest.(check int) "nothing replayed" 0 (List.length entries);
     Alcotest.(check bool) "opening does not create the file" false (Sys.file_exists path);
-    ignore (append_ok store [ pending revoke_grant ] : S.State.t);
-    Alcotest.(check string) "the bytes of the file" (text_of [ pending revoke_grant ]) (read_file path);
+    ignore (append_ok store [ pending bootstrap ] : S.State.t);
+    Alcotest.(check string) "the bytes of the file" (text_of [ pending bootstrap ]) (read_file path);
     let reopened, entries, recovered = open_ok ~path in
     Alcotest.(check string) "one line" "Lines 1" (contents_name recovered.S.contents);
-    Alcotest.(check (list string)) "the entry" [ S.to_line (pending revoke_grant) ] (List.map S.to_line entries);
-    check_pending "the intent is still pending" (Some (intent revoke_grant)) (state_of reopened);
+    Alcotest.(check (list string)) "the entry" [ S.to_line (pending bootstrap) ] (List.map S.to_line entries);
+    check_pending "the intent is still pending" (Some (intent bootstrap)) (state_of reopened);
     ignore (append_ok reopened [ committed digest ] : S.State.t);
     let again, _, _ = open_ok ~path in
     let state = state_of again in
@@ -479,7 +575,7 @@ let first_append_creates_the_file_and_reopening_keeps_the_state () =
 
 let torn_last_entry_is_cut () =
   with_path (fun path ->
-    let complete = text_of [ pending revoke_grant ] in
+    let complete = text_of [ pending bootstrap ] in
     let answer = S.to_line (committed digest) in
     let fragment = String.sub answer 0 (String.length answer / 2) in
     write_file path (complete ^ fragment);
@@ -492,7 +588,7 @@ let torn_last_entry_is_cut () =
      | S.Complete -> Alcotest.fail "the torn tail was not reported");
     Alcotest.(check int) "the entries before it" 1 (List.length entries);
     Alcotest.(check string) "the file ends after the last complete line" complete (read_file path);
-    check_pending "the intent is still pending" (Some (intent revoke_grant)) (state_of store);
+    check_pending "the intent is still pending" (Some (intent bootstrap)) (state_of store);
     ignore (append_ok store [ committed digest ] : S.State.t);
     let again, _, _ = open_ok ~path in
     check_hash "the answer written after the cut" (Some digest) (S.State.last_committed (state_of again)))
@@ -500,7 +596,7 @@ let torn_last_entry_is_cut () =
 
 let fold_refusal_names_the_line () =
   with_path (fun path ->
-    write_file path (text_of [ pending revoke_grant; committed digest ]);
+    write_file path (text_of [ pending bootstrap; committed digest ]);
     match
       S.open_at_start
         ~path
@@ -528,38 +624,33 @@ let files_that_break_the_rules () =
       , text_of [ committed digest ]
       , "Line_rejected line=1 Breaks_a_rule Committed_without_intent" )
     ; ( "an abort first"
-      , text_of [ aborted revoke_grant ]
+      , text_of [ aborted bootstrap ]
       , "Line_rejected line=1 Breaks_a_rule Aborted_without_intent" )
     ; ( "two intents"
-      , text_of [ pending revoke_grant; pending block_runtime ]
+      , text_of [ pending bootstrap; pending ~digest:other_digest bootstrap ]
       , "Line_rejected line=2 Breaks_a_rule Intent_while_pending" )
     ; ( "a commit that names another hash"
-      , text_of [ pending revoke_grant; committed other_digest ]
+      , text_of [ pending bootstrap; committed other_digest ]
       , "Line_rejected line=2 Breaks_a_rule Committed_other_digest" )
     ; ( "an abort of another intent"
-      , text_of [ pending revoke_grant; aborted block_runtime ]
+      , text_of [ pending bootstrap; aborted again ]
       , "Line_rejected line=2 Breaks_a_rule Aborted_other_intent" )
-    ; ( "a second committed bootstrap"
-      , text_of
-          [ pending bootstrap
-          ; committed digest
-          ; pending ~digest:other_digest again
-          ; committed other_digest
-          ]
-      , "Line_rejected line=4 Breaks_a_rule Bootstrap_committed_again" )
+    ; ( "an intent that is not a bootstrap, first"
+      , text_of [ pending revoke_grant ]
+      , "Line_rejected line=1 Breaks_a_rule Intent_before_bootstrap" )
+    ; ( "a second bootstrap after a committed one"
+      , text_of (bootstrap_entries @ [ pending ~digest:other_digest again ])
+      , "Line_rejected line=3 Breaks_a_rule Bootstrap_already_committed" )
+    ; ( "a switch off for another workspace"
+      , text_of (bootstrap_entries @ [ pending ~digest:other_digest (mode C.Off other_workspace) ])
+      , "Line_rejected line=3 Breaks_a_rule Workspace_mismatch" )
     ]
 ;;
 
 let lines_that_are_not_entries () =
   let committed_text = S.to_line (committed digest) in
   let intent_text = S.to_line (pending revoke_grant) in
-  let replace ~sub ~by text =
-    match find_sub ~sub text with
-    | None -> Alcotest.failf "fixture text does not hold %s" sub
-    | Some at ->
-      let after = at + String.length sub in
-      String.sub text 0 at ^ by ^ String.sub text after (String.length text - after)
-  in
+  let bootstrap_text = S.to_line (pending bootstrap) in
   List.iter
     (fun (label, line, expected) ->
       with_path (fun path ->
@@ -567,14 +658,19 @@ let lines_that_are_not_entries () =
         check_open_error label ("Line_rejected line=1 " ^ expected) ~path))
     [ "not json", "{", "Not_json"
     ; "an unknown kind", replace ~sub:"committed" ~by:"expired" committed_text, "Unknown_kind expired"
+    ; "an unknown kind comes before the members", {|{"kind":"expired","at":1}|}, "Unknown_kind expired"
     ; "a member too many", replace ~sub:{|"}|} ~by:{|","at":1}|} committed_text, "Unexpected_shape"
     ; ( "members in another order"
       , Printf.sprintf {|{"record_hash":"%s","kind":"committed"}|} b64
+      , "Unexpected_shape" )
+    ; ( "an intent without its change"
+      , replace ~sub:{|,"change":|} ~by:{|,"modification":|} bootstrap_text
       , "Unexpected_shape" )
     ; "a short hash", {|{"kind":"committed","record_hash":"abc"}|}, "Invalid_hash"
     ; ( "a hash in upper case"
       , Printf.sprintf {|{"kind":"committed","record_hash":"%s"}|} (String.make 64 'B')
       , "Invalid_hash" )
+    ; "a short hash in an intent", replace ~sub:a64 ~by:"abc" bootstrap_text, "Invalid_hash"
     ; "an unknown event", replace ~sub:"revoke" ~by:"erase" intent_text, "Invalid_change"
     ; "a subject of another shape", replace ~sub:{|"type":"grant"|} ~by:{|"type":"team"|} intent_text, "Invalid_change"
     ; ( "an authorization event on a mode change"
@@ -583,7 +679,10 @@ let lines_that_are_not_entries () =
     ; ( "a mode event with a subject"
       , replace ~sub:{|"type":"authz","event":"revoke","subject":{"type":"grant","id":"grant-1"}|} ~by:{|"type":"authz","event":"off","subject":{"type":"grant","id":"grant-1"}|} intent_text
       , "Invalid_change" )
-    ; "a space after a colon", replace ~sub:{|"kind":"|} ~by:{|"kind": "|} intent_text, "Non_canonical"
+    ; ( "a rule is read before the form of the text"
+      , replace ~sub:{|"kind":"|} ~by:{|"kind": "|} intent_text
+      , "Breaks_a_rule Intent_before_bootstrap" )
+    ; "a space after a colon", replace ~sub:{|"kind":"|} ~by:{|"kind": "|} bootstrap_text, "Non_canonical"
     ]
 ;;
 
@@ -600,7 +699,7 @@ let texts_name_the_file_the_line_and_the_rule () =
   List.iter
     (fun needle ->
       Alcotest.(check bool) ("the text of a rejected line holds " ^ needle) true (contains ~sub:needle open_text))
-    [ "external store"; path; "3"; S.violation_to_string S.Intent_while_pending ];
+    [ path; "3"; S.violation_to_string S.Intent_while_pending ];
   let append_text =
     S.append_error_to_string (S.Rejected { index = 2; reject = S.Committed_other_digest })
   in
@@ -614,7 +713,9 @@ let texts_name_the_file_the_line_and_the_rule () =
     ; S.Committed_other_digest
     ; S.Aborted_without_intent
     ; S.Aborted_other_intent
-    ; S.Bootstrap_committed_again
+    ; S.Intent_before_bootstrap
+    ; S.Bootstrap_already_committed
+    ; S.Workspace_mismatch
     ]
   in
   Alcotest.(check int)
@@ -631,6 +732,10 @@ let () =
         ; Alcotest.test_case "event words" `Quick event_words_are_pinned
         ; Alcotest.test_case "every change reads back" `Quick every_change_reads_back
         ; Alcotest.test_case "answers read back" `Quick answers_read_back_after_their_intent
+        ; Alcotest.test_case
+            "every change is appended and replayed"
+            `Quick
+            every_change_is_appended_and_replayed
         ] )
     ; ( "change"
       , [ Alcotest.test_case "reductions" `Quick reductions
@@ -638,7 +743,7 @@ let () =
         ] )
     ; ( "rules"
       , [ Alcotest.test_case "appending" `Quick rules_when_appending
-        ; Alcotest.test_case "second bootstrap" `Quick second_bootstrap_is_refused_when_it_is_committed
+        ; Alcotest.test_case "a store starts with a bootstrap" `Quick a_store_starts_with_a_bootstrap
         ] )
     ; ( "state"
       , [ Alcotest.test_case "follows the lines" `Quick state_follows_the_lines

@@ -24,9 +24,12 @@
     {b Rules.} At most one intent is pending. An [Intent_pending] comes only
     when none is pending. A [Committed] closes the pending intent and carries
     the hash that the intent named. An [Aborted_intent] closes the pending
-    intent and repeats it exactly. A second committed [Fresh_bootstrap] is
-    refused. A line that breaks a rule is refused when it is appended
-    ({!Rejected}) and when the file is opened ({!Line_rejected}). *)
+    intent and repeats it exactly. A store starts with a [Fresh_bootstrap]
+    (design 8.4): until one is committed, the only intent that comes is a
+    [Fresh_bootstrap]. Once one is committed, a second [Fresh_bootstrap] is
+    refused, and an [Off] or [Reactivate] names the workspace that it set up.
+    A line that breaks a rule is refused when it is appended ({!Rejected}) and
+    when the file is opened ({!Line_rejected}). *)
 
 (** What an intent is about to change (design 8.2). *)
 module Change : sig
@@ -49,7 +52,9 @@ module Change : sig
 
   (** An authorization event is about a {!Authz_records.Subject.t}. A mode event
       is about the workspace. Neither can be paired with the other kind of
-      subject. *)
+      subject. The design does not say which authorization event applies to
+      which subject, so every pair is a change; the layer that first writes an
+      event decides the pairs it writes. *)
   type t =
     | Authz of
         { event : authz_event
@@ -116,8 +121,14 @@ type violation =
   | Aborted_without_intent  (** An [Aborted_intent] while none is pending. *)
   | Aborted_other_intent
       (** An [Aborted_intent] that is not the pending intent, field for field. *)
-  | Bootstrap_committed_again
-      (** A [Committed] that closes a [Fresh_bootstrap] when one is committed. *)
+  | Intent_before_bootstrap
+      (** An [Intent_pending] that is not a [Fresh_bootstrap], while no
+          [Fresh_bootstrap] is committed. *)
+  | Bootstrap_already_committed
+      (** An [Intent_pending] for a [Fresh_bootstrap] while one is committed. *)
+  | Workspace_mismatch
+      (** An [Intent_pending] for [Off] or [Reactivate] that names another
+          workspace than the committed [Fresh_bootstrap]. *)
 
 val violation_to_string : violation -> string
 
@@ -138,8 +149,10 @@ val to_line : entry -> string
 
 (** Reads a line that is expected after the lines that [State.t] adds up. The
     line must be the exact bytes {!to_line} writes for the entry it names. The
-    checks run in the order of the constructors of {!line_error}, and the first
-    failure is the result. *)
+    first check that fails is the result: the line is JSON, its [kind] is one
+    of the three (an unknown kind is [Unknown_kind] whatever follows it), its
+    members are those of the kind, its hashes and change read, the entry
+    follows the rules, and the text is the one {!to_line} writes. *)
 val of_line : State.t -> string -> (entry, line_error) result
 
 type t
@@ -239,5 +252,11 @@ val append_error_to_string : append_error -> string
 
 (** Writes the entries, in order, with one write call and one sync, and returns
     the state after the last one. Each entry must follow the rules against the
-    entries before it. See {!Authz_jsonl_file.Make.append}. *)
+    entries before it. See {!Authz_jsonl_file.Make.append}.
+
+    A missing file and its directory are created by the first append, and the
+    rules let only a [Fresh_bootstrap] intent be the first entry. The creation
+    is not exclusive: it does not fail when the path already holds a file. The
+    exclusive creation that design 8.4 asks of a fresh bootstrap belongs to the
+    layer that sets the store up. It creates the file before the first append. *)
 val append : writer -> entry list -> (State.t, append_error) result

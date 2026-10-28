@@ -27,7 +27,7 @@ let fresh : Chain.fresh =
 
 let run_once fixture ~owner ~range ?(messages = messages) ?(fresh = fresh) () =
   Chain.run ~store:fixture.store ~config:fixture.config ~reserved:(Edge.reserved ()) ~owner ~range
-    ~input:(input_over messages) ~sources:(sources_of messages) ~fresh
+    ~input:(input_over messages) ~sources:(sources_of messages) ~fresh:(fun () -> Ok fresh)
     ~unread_message:(unread_message messages)
 
 (* Run the chain as the consumer's wakes do: a chain that waits on a worker runs
@@ -223,6 +223,30 @@ let test_a_chain_that_starts_from_facts_gets_them_back_on_restart () = with_fixt
     (Yojson.Safe.equal (Program.to_json elsewhere.program) (Program.to_json first.program));
   check int "none of them asks the provider anything" calls (F.post_count fixture.server))
 
+(* The Memory of the moment is read when a chain begins and never again. *)
+let test_a_chain_asks_for_its_start_only_while_it_has_no_step () = with_fixture (fun fixture ->
+  fixture.respond := answering ();
+  let owner = owner fixture and range = range_link (owner fixture) in
+  let asked = ref 0 in
+  let run_chain start =
+    Chain.run ~store:fixture.store ~config:fixture.config ~reserved:(Edge.reserved ()) ~owner ~range
+      ~input:(input_over messages) ~sources:(sources_of messages) ~fresh:start
+      ~unread_message:(unread_message messages) in
+  (* A start that cannot be read is the chain's error, and nothing was made. *)
+  (match run_chain (fun () -> Error "the Memory of the moment is unreadable") with
+   | Error detail -> check string "its error is the chain's" "the Memory of the moment is unreadable" detail
+   | Ok _ -> fail "a chain began without a start");
+  check int "and no step was made" 0 (List.length (steps_of fixture ~owner));
+  let rec drive_chain attempts =
+    let before = !(fixture.deliveries) in
+    match run_chain (fun () -> incr asked; Ok fresh) with
+    | Ok (Chain.Pending _) when attempts > 0 -> await_delivery fixture ~after:before; drive_chain (attempts - 1)
+    | result -> result in
+  ignore (finished (drive_chain 12) : Machine.finished);
+  check int "the chain asked once, while it had no step" 1 !asked;
+  ignore (finished (drive_chain 12) : Machine.finished);
+  check int "and a restart never asks" 1 !asked)
+
 let () =
   run "keeper_librarian_floor_chain"
     [ ( "chain"
@@ -241,5 +265,7 @@ let () =
         ; test_case "a step the floor never asked about is refused" `Slow
             test_a_step_the_floor_never_asked_about_is_refused
         ; test_case "chains of other ranges do not mix" `Slow test_chains_of_other_ranges_do_not_mix
+        ; test_case "a chain asks for its start only while it has no step" `Slow
+            test_a_chain_asks_for_its_start_only_while_it_has_no_step
         ] )
     ]

@@ -38,13 +38,16 @@ type outcome =
 val run :
   store:Lane_addon_store.t -> config:Workspace.config -> reserved:string list ->
   owner:Keeper_librarian_durable_request.owner -> range:Keeper_librarian_floor_step_request.link ->
-  input:Keeper_librarian.input -> sources:Keeper_librarian_unread.source list -> fresh:fresh ->
+  input:Keeper_librarian.input -> sources:Keeper_librarian_unread.source list ->
+  fresh:(unit -> (fresh, string) result) ->
   unread_message:(Keeper_librarian_unread.source ->
     reasons:Keeper_librarian_input_refusal.t list -> (Keeper_librarian_unread.t, string) result) ->
   (outcome, string) result
 (** [input] and [sources] are the range's complete input and one source per
     message, as {!Keeper_librarian_message_floor.Machine.read} takes them; [range]
-    names the range's original, which every step links to. [unread_message] builds
+    names the range's original, which every step links to. [fresh] is called
+    only when the chain has no step yet, so a restart never reads the Memory of
+    the moment; an error from it is the chain's error. [unread_message] builds
     the hole of a message from its source and the refusal causes. An error is a
     chain that disagrees with itself or its range: two steps at one position, a
     step the floor never asked about, a step that is not the question the machine

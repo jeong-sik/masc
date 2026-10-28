@@ -57,7 +57,7 @@ let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~unread_me
      messages it carried in. The caller's [fresh] names a chain's start only
      once, so a restart cannot start the same range from another Memory. *)
   let* start = match Positions.find_opt 0 retained with
-    | None -> Ok fresh
+    | None -> fresh ()
     | Some (record, _) ->
       let* first = Step.restore ~owner record in
       let step = Step.step first in

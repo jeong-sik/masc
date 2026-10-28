@@ -6827,3 +6827,5 @@
 (include stanzas/test_domain_budget.inc)
 
 (include stanzas/test_authz_scope.inc)
+
+(include stanzas/test_authz_decision.inc)

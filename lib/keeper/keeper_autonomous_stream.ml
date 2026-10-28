@@ -3,6 +3,9 @@ module Journal = Keeper_chat_event_log
 module Bridge = Keeper_chat_agent_core_stream_bridge
 module Accum = Keeper_stream_tool_accum
 
+type open_stream = { mutable bridge : Bridge.state }
+type stream_state = Open of open_stream | Closed
+
 type t =
   { base_path : string
   ; keeper_name : string
@@ -14,8 +17,7 @@ type t =
   ; text : Keeper_stream_text_redaction.Scoped.t
   ; redact_text : string -> string
   ; mutex : Eio.Mutex.t
-  ; mutable bridge : Bridge.state
-  ; mutable closed : bool
+  ; mutable stream : stream_state
   }
 
 let current_turns : ((string * string), Ids.Turn_ref.t) Hashtbl.t = Hashtbl.create 16
@@ -73,8 +75,8 @@ let create ~base_path ~keeper_name ~turn_ref = Eio.Cancel.protect (fun () ->
         ~source:(Keeper_native_task_journal.Autonomous_turn turn_ref)
         ~redact_text:(Keeper_secret_redaction.redact_text redaction);
       redact_text = Keeper_secret_redaction.redact_text redaction;
-      mutex = Eio.Mutex.create (); bridge = Bridge.empty_state
-        ~generation:content_generation (); closed = false }
+      mutex = Eio.Mutex.create ();
+      stream = Open {bridge = Bridge.empty_state ~generation:content_generation ()} }
   in
   Option.iter (fun _ -> with_current (fun () ->
     Hashtbl.replace current_turns (base_path, keeper_name) turn_ref)) events;
@@ -94,18 +96,18 @@ let with_stream t f =
     (fun () -> Eio.Cancel.protect f)
 
 let with_open_stream t f =
-  with_stream t (fun () -> if not t.closed then f ())
+  with_stream t (fun () -> match t.stream with Open stream -> f stream | Closed -> ())
 
-let apply t (translated : Bridge.translated_event) =
-  t.bridge <- translated.bridge_state;
+let apply t stream (translated : Bridge.translated_event) =
+  stream.bridge <- translated.bridge_state;
   List.iter (publish t) translated.chat_events
 
-let forward t scoped =
+let forward t stream scoped =
   List.iter (fun (stream_scope, event) ->
-    apply t (Bridge.translate ~redact_text:t.redact_text ~base_dir:t.base_path
-      ~stream_scope t.bridge event)) scoped
+    apply t stream (Bridge.translate ~redact_text:t.redact_text ~base_dir:t.base_path
+      ~stream_scope stream.bridge event)) scoped
 
-let flush t = forward t (Keeper_stream_text_redaction.Scoped.flush t.text)
+let flush t stream = forward t stream (Keeper_stream_text_redaction.Scoped.flush t.text)
 
 let mapping_failed t detail =
   publish t (Events.Agent_core_stream_protocol_error
@@ -113,62 +115,62 @@ let mapping_failed t detail =
       index = None; tool_call_id = None; event_type = None;
       reason = Some (t.redact_text detail); raw_bytes = None })
 
-let result_ready t ~tool_call_id ~execution_id = function
+let result_ready t stream ~tool_call_id ~execution_id = function
   | Error detail -> mapping_failed t detail
   | Ok occurrence ->
-      t.bridge <- Bridge.record_tool_result t.bridge occurrence;
+      stream.bridge <- Bridge.record_tool_result stream.bridge occurrence;
       publish t (Events.Tool_result_ready {occurrence; tool_call_id; execution_id})
 
-let on_event t event = with_open_stream t (fun () ->
+let on_event t event = with_open_stream t (fun stream ->
   Accum.on_event t.accum event;
   let stream_scope = Accum.current_stream_scope t.accum in
-  forward t (Keeper_stream_text_redaction.Scoped.on_event t.text ~stream_scope event);
+  forward t stream (Keeper_stream_text_redaction.Scoped.on_event t.text ~stream_scope event);
   ignore (Accum.take_protocol_errors t.accum))
 
-let on_tool_stream_observation t observation =
-  let protect_observation = match observation with
-    | Keeper_hooks_agent_core.Child_content_observed _
-    | Keeper_hooks_agent_core.Native_task_observed _ ->
-        (* Preserve admitted persistence through its health/report outcome,
-           without holding the unrelated root publication mutex. *)
-        Eio.Cancel.protect
-    | Provider_retry_observed _ | Runtime_attempt_started _ | Turn_collected _ | Turn_closed_without_sources _
-    | Native_tool_progress _ | Native_tool_completion _ | Official_tool_result _ ->
-        with_open_stream t in
-  protect_observation (fun () -> match observation with
-  | Keeper_hooks_agent_core.Provider_retry_observed {attempt; retry} ->
-      publish t (Events.Provider_retry_observed {attempt; retry})
-  | Keeper_hooks_agent_core.Runtime_attempt_started {runtime_id; lane_attempt_index; _} ->
-      flush t;
-      let previous_scope = Accum.start_runtime_attempt t.accum in
-      apply t (Bridge.start_runtime_attempt ~runtime_id ~attempt_index:lane_attempt_index
-        ~previous_scope t.bridge)
-  | Keeper_hooks_agent_core.Turn_collected {turn; tool_source_map} ->
-      (match Accum.seal_turn t.accum ~turn ~tool_source_map with
-       | Ok events -> List.iter (publish t) events | Error detail -> mapping_failed t detail)
-  | Keeper_hooks_agent_core.Turn_closed_without_sources {turn} ->
-      (match Accum.close_turn_without_sources t.accum ~turn with
-       | Ok () -> () | Error detail -> mapping_failed t detail)
+let on_tool_stream_observation t = function
+  (* Bound observations remain independently durable after the root stream
+     closes; do not hold the unrelated publication mutex around them. *)
   | Keeper_hooks_agent_core.Child_content_observed {attempt; observation} ->
-      Keeper_child_content_journal.observe t.child_journal ~attempt observation
-      |> Keeper_child_content_journal.report ~keeper_name:t.keeper_name
+      Eio.Cancel.protect (fun () ->
+        Keeper_child_content_journal.observe t.child_journal ~attempt observation
+        |> Keeper_child_content_journal.report ~keeper_name:t.keeper_name)
   | Keeper_hooks_agent_core.Native_task_observed {attempt; bound} ->
-      Keeper_native_task_journal.observe t.task_journal ~attempt bound
-      |> Keeper_native_task_journal.report ~keeper_name:t.keeper_name
+      Eio.Cancel.protect (fun () ->
+        Keeper_native_task_journal.observe t.task_journal ~attempt bound
+        |> Keeper_native_task_journal.report ~keeper_name:t.keeper_name)
+  | Keeper_hooks_agent_core.Provider_retry_observed {attempt; retry} ->
+      with_open_stream t (fun _ -> publish t (Events.Provider_retry_observed {attempt; retry}))
+  | Keeper_hooks_agent_core.Runtime_attempt_started {runtime_id; lane_attempt_index; _} ->
+      with_open_stream t (fun stream ->
+        flush t stream;
+        let previous_scope = Accum.start_runtime_attempt t.accum in
+        apply t stream (Bridge.start_runtime_attempt ~runtime_id ~attempt_index:lane_attempt_index
+          ~previous_scope stream.bridge))
+  | Keeper_hooks_agent_core.Turn_collected {turn; tool_source_map} ->
+      with_open_stream t (fun _ ->
+      (match Accum.seal_turn t.accum ~turn ~tool_source_map with
+       | Ok events -> List.iter (publish t) events | Error detail -> mapping_failed t detail))
+  | Keeper_hooks_agent_core.Turn_closed_without_sources {turn} ->
+      with_open_stream t (fun _ ->
+      (match Accum.close_turn_without_sources t.accum ~turn with
+       | Ok () -> () | Error detail -> mapping_failed t detail))
   | Keeper_hooks_agent_core.Native_tool_progress {block_index; tool_call_id; progress} ->
       (* This observation updates an existing native row. It is not a model
          content boundary: keep any partial secret held across later deltas. *)
-      apply t (Bridge.progress_native_tool ~redact_text:t.redact_text
-        ~stream_scope:(Accum.current_stream_scope t.accum) ~block_index ~tool_call_id progress t.bridge)
+      with_open_stream t (fun stream ->
+        apply t stream (Bridge.progress_native_tool ~redact_text:t.redact_text
+          ~stream_scope:(Accum.current_stream_scope t.accum) ~block_index ~tool_call_id progress stream.bridge))
   | Keeper_hooks_agent_core.Native_tool_completion {block_index; tool_call_id; completion} ->
-      apply t (Bridge.finish_native_tool ~redact_text:t.redact_text
-        ~stream_scope:(Accum.current_stream_scope t.accum) ~block_index ~tool_call_id completion t.bridge)
+      with_open_stream t (fun stream ->
+        apply t stream (Bridge.finish_native_tool ~redact_text:t.redact_text
+          ~stream_scope:(Accum.current_stream_scope t.accum) ~block_index ~tool_call_id completion stream.bridge))
   | Keeper_hooks_agent_core.Official_tool_result {block_index; tool_call_id; execution_id} ->
-      result_ready t ~tool_call_id:(Some tool_call_id) ~execution_id
-        (Accum.record_official_execution_id t.accum ~block_index ~tool_call_id ~execution_id))
+      with_open_stream t (fun stream ->
+        result_ready t stream ~tool_call_id:(Some tool_call_id) ~execution_id
+          (Accum.record_official_execution_id t.accum ~block_index ~tool_call_id ~execution_id))
 
-let on_tool_result_ready t ~tool_call_id ~turn ~planned_index ~execution_id = with_open_stream t (fun () ->
-  result_ready t ~tool_call_id:(if String.equal tool_call_id "" then None else Some tool_call_id) ~execution_id
+let on_tool_result_ready t ~tool_call_id ~turn ~planned_index ~execution_id = with_open_stream t (fun stream ->
+  result_ready t stream ~tool_call_id:(if String.equal tool_call_id "" then None else Some tool_call_id) ~execution_id
     (Accum.record_execution_id t.accum ~tool_call_id ~turn ~planned_index ~execution_id))
 
 type ending =
@@ -176,27 +178,29 @@ type ending =
   | Failed of string
   | Cancelled
 
-let publish_committed_tool_ownerships t ownerships = with_open_stream t (fun () ->
+let publish_committed_tool_ownerships t ownerships = with_open_stream t (fun _ ->
   List.iter (fun (delivery_key, ({execution_id; ordinal} : Keeper_chat_store.tool_ownership)) ->
     publish t (Events.Tool_transcript_committed {delivery_key; execution_id; ordinal})) ownerships)
 
 let finish t ending =
-  Eio.Cancel.protect (fun () -> with_stream t (fun () -> if not t.closed then
+  Eio.Cancel.protect (fun () -> with_stream t (fun () -> match t.stream with
+   | Closed -> ()
+   | Open stream ->
     Fun.protect ~finally:(fun () ->
-      t.closed <- true;
+      t.stream <- Closed;
       Option.iter Events.close t.events;
       with_current (fun () ->
         match Hashtbl.find_opt current_turns (t.base_path, t.keeper_name) with
         | Some turn_ref when Ids.Turn_ref.equal turn_ref t.turn_ref ->
             Hashtbl.remove current_turns (t.base_path, t.keeper_name)
         | Some _ | None -> ())) (fun () ->
-      flush t;
+      flush t stream;
       (match ending with
        | Completed {reply; turn_outcome} ->
            publish t (Events.Reply_details { reply = t.redact_text reply; turn_outcome; turn_ref = t.turn_ref;
-             terminal_stream_scope = Bridge.terminal_text_scope t.bridge })
-       | Failed message -> apply t (Bridge.fail_stream t.bridge ~reason:(t.redact_text message))
-       | Cancelled -> apply t (Bridge.fail_stream t.bridge ~reason:"Autonomous turn cancelled"));
+             terminal_stream_scope = Bridge.terminal_text_scope stream.bridge })
+       | Failed message -> apply t stream (Bridge.fail_stream stream.bridge ~reason:(t.redact_text message))
+       | Cancelled -> apply t stream (Bridge.fail_stream stream.bridge ~reason:"Autonomous turn cancelled"));
       publish t Events.Text_message_end;
       publish t (match ending with
         | Completed _ -> Events.Run_finished {run_id = Ids.Turn_ref.to_string t.turn_ref}

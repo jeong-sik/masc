@@ -67,13 +67,15 @@ let filename json =
   Domain_pool_ref.submit_cpu_or_inline (fun () ->
     Agent_core_sha256.(digest_string (Yojson.Safe.to_string json) |> to_hex) ^ ".json")
 
+let decode path body = Safe_ops.parse_json_off_fiber ~context:path body
+
 let read path =
   let* body = Fs_compat.load_owned_regular_file ~ownership_root:(Filename.dirname path) path
     |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
   match body with
   | None -> Ok None
   | Some body ->
-    let* json = Safe_ops.parse_json_off_fiber ~context:path body in
+    let* json = decode path body in
     Ok (Some json)
 
 let validate path json =
@@ -113,6 +115,14 @@ let retain_json ~base_path ~keeper_name json =
   let* directory = directory ~base_path ~keeper_name in
   let path = Filename.concat directory (filename json) in
   let* () = validate path json in
+  (* [load] validates every file in this directory on each Keeper request, so
+     a committed receipt that reads back different from its name blocks the
+     Keeper until someone removes it. Prove the round trip on the bytes that
+     [save_json_durable_atomic] writes before any file exists. *)
+  let* () = match decode path (Yojson.Safe.to_string json) with
+    | Ok decoded when decoded = json -> Ok ()
+    | Ok _ -> Error "tool outbox receipt changes when read back"
+    | Error detail -> Error detail in
   let temp_dir = Filename.concat (Filename.dirname directory) ".undelivered-tools-staging" in
   let* () = Keeper_fs.save_json_durable_atomic ~ownership_root:base_path ~temp_dir
       ~pretty:false path json

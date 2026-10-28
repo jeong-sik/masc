@@ -215,8 +215,7 @@ let test_message_of_request () =
        assert (String.equal img.media_type "image/png");
        assert (
          String.equal
-           (Agent_core.Types.media_source_kind_to_string
-              (Agent_core.Types.media_source_kind_of_source img.source))
+           (Agent_core.Types.media_source_wire_tag img.source)
            "base64");
        let data = Agent_core.Types.media_source_payload img.source in
        assert (String.equal data (Base64.encode_string bytes));
@@ -1864,15 +1863,10 @@ let test_cancelled_candidate_leaves_start_and_cancelled_rows () =
       assert (row_top_string cancelled_row "tool_use_id" = "call-vision-cancel")))
 
 let test_fallback_reference_projection_is_explicitly_unread () =
-  let image source_type data =
-    Agent_core.Types.Image
-      { source = Agent_core.Types.media_source_of_kind source_type data
-      ; media_type = "image/png"
-      }
-  in
+  let image source = Agent_core.Types.Image { source; media_type = "image/png" } in
   let original =
-    [ image Agent_core.Types.Url "https://example.invalid/screenshot.png"
-    ; image Agent_core.Types.File_id "file-screen-123" ]
+    [ image (Agent_core.Types.Url "https://example.invalid/screenshot.png")
+    ; image (Agent_core.Types.File_id "file-screen-123") ]
   in
   let project = Vi.fallback_projector ~keeper_name:"vision-reference-projection" () in
   let projected = project ~mode:Vi.Eager original in
@@ -1962,8 +1956,8 @@ let test_delegate_eviction_bad_base64_surfaces_redacted_text_error () =
    placeholder the reader cannot act on. *)
 let test_delegate_eviction_passes_reference_source_through () =
   List.iter
-    (fun source_type ->
-      let source_name = Agent_core.Types.media_source_kind_to_string source_type in
+    (fun source ->
+      let source_name = Agent_core.Types.media_source_wire_tag source in
       let metric_labels =
         [ "mode", "store_only"; "result", "ok"; "reason", "reference_passthrough" ]
       in
@@ -1975,14 +1969,7 @@ let test_delegate_eviction_passes_reference_source_through () =
           ~mode:Vi.Store_only
           ~delegate:true
           ~keeper_name:("vision-ingest-source-" ^ source_name)
-          [ Agent_core.Types.Image
-              { media_type = "image/png"
-              ; source =
-                  Agent_core.Types.media_source_of_kind
-                    source_type
-                    "https://example.invalid/image.png"
-              }
-          ]
+          [ Agent_core.Types.Image { media_type = "image/png"; source } ]
       with
       | [ Agent_core.Types.Image img ] ->
         assert (
@@ -1990,17 +1977,14 @@ let test_delegate_eviction_passes_reference_source_through () =
             (Agent_core.Types.media_source_payload img.source)
             "https://example.invalid/image.png");
         assert (String.equal img.media_type "image/png");
-        assert (
-          String.equal
-            (Agent_core.Types.media_source_kind_to_string
-               (Agent_core.Types.media_source_kind_of_source img.source))
-            source_name);
+        assert (String.equal (Agent_core.Types.media_source_wire_tag img.source) source_name);
         assert_metric_increment
           ("vision_ingest reference_passthrough " ^ source_name)
           before
           (metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels)
       | _ -> failwith "a reference-carrying image block must pass through unchanged")
-    [ Agent_core.Types.Url; Agent_core.Types.File_id ]
+    [ Agent_core.Types.Url "https://example.invalid/image.png"
+    ; Agent_core.Types.File_id "https://example.invalid/image.png" ]
 
 let test_non_delegate_eviction_preserves_inline_image () =
   let bytes = "raw-image" in

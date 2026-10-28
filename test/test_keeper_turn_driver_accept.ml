@@ -2054,7 +2054,7 @@ let test_sse_event_progress_kind_classifies_known_deltas () =
             index = 0;
             delta =
               MediaDelta
-                { media_type = "image/png"; source_type = Base64; data = "abcd" };
+                { media_type = "image/png"; source = Base64 "abcd" };
           }));
   Alcotest.(check (option string))
     "empty text delta falls back to carrier progress"

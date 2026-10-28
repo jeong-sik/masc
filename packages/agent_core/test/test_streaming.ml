@@ -748,7 +748,7 @@ let test_synthetic_image_media_delta () =
   match List.nth events 2 with
   | ContentBlockDelta
       { delta =
-          MediaDelta { media_type = "image/png"; source_type = Base64; data = "abc" }
+          MediaDelta { media_type = "image/png"; source = Base64 "abc" }
       ; _
       } -> ()
   | _ -> Alcotest.fail "expected image MediaDelta"

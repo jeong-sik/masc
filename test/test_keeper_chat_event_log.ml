@@ -113,7 +113,7 @@ let all_events : E.keeper_chat_event list =
   ; E.Agent_core_media_delta
       { index = 4
       ; media_type = "image/png"
-      ; source_type = Agent_core.Types.Base64
+      ; source_type = Agent_core.Types.Base64_kind
       ; media_ref = "/api/v1/media/tok-1"
       ; response = {response_generation=3; response_scope=2}
       }
@@ -1184,7 +1184,7 @@ let golden_events : E.keeper_chat_event list =
   ; E.Agent_core_media_delta
       { index = 2
       ; media_type = "image/png"
-      ; source_type = Agent_core.Types.Url
+      ; source_type = Agent_core.Types.Url_kind
       ; media_ref = "/api/v1/media/tok-golden"
       ; response = {response_generation=0; response_scope=0}
       }

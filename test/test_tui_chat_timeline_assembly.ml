@@ -500,7 +500,7 @@ let test_generated_media_partial_and_failure_coverage () =
   let module E = Masc.Keeper_chat_events in
   let source = Masc_tui_keeper_chat_log.Operation "original" in
   let media : E.generated_media = {index=0;media_type="image/png";
-    source_type=Agent_core.Types.Base64;media_ref="/api/v1/media/one";
+    source_type=Agent_core.Types.Base64_kind;media_ref="/api/v1/media/one";
     response={response_generation=4;response_scope=0}} in
   let second = {media with index=1} in
   let block = Masc_tui_chat_media.of_generated media in

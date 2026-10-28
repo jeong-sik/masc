@@ -35,7 +35,7 @@ let test_image_media_persisted_as_block () =
           index = 0;
           delta =
             MediaDelta
-              { media_type = "image/png"; source_type = Base64; data = encoded_media };
+              { media_type = "image/png"; source = Base64 encoded_media };
         };
       ContentBlockStop { index = 0 };
     ];
@@ -62,8 +62,7 @@ let test_audio_media_as_voice_block () =
             MediaDelta
               {
                 media_type = "audio/mpeg";
-                source_type = Base64;
-                data = Base64.encode_string "audio bytes";
+                source = Base64 (Base64.encode_string "audio bytes");
               };
         };
       ContentBlockStop { index = 0 };
@@ -83,8 +82,7 @@ let test_runtime_attempt_discards_unfinished_media () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source_type = Base64
-             ; data = Base64.encode_string "stale"
+             ; source = Base64 (Base64.encode_string "stale")
              }
        });
   A.start_runtime_attempt accum;
@@ -95,8 +93,7 @@ let test_runtime_attempt_discards_unfinished_media () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source_type = Base64
-             ; data = Base64.encode_string fresh
+             ; source = Base64 (Base64.encode_string fresh)
              }
        });
   A.on_event accum (ContentBlockStop { index = 0 });
@@ -122,8 +119,7 @@ let test_timeout_discards_unfinished_media () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source_type = Base64
-             ; data = Base64.encode_string "timed out"
+             ; source = Base64 (Base64.encode_string "timed out")
              }
        });
   A.on_event accum (Timeout "idle timeout after 120.0s");
@@ -147,8 +143,7 @@ let test_open_media_finalized_on_message_stop () =
           delta =
             MediaDelta
               { media_type = "audio/mpeg";
-                source_type = Base64;
-                data = Base64.encode_string "audio"
+                source = Base64 (Base64.encode_string "audio")
               }
         }
     ; ContentBlockDelta
@@ -156,8 +151,7 @@ let test_open_media_finalized_on_message_stop () =
           delta =
             MediaDelta
               { media_type = "image/png";
-                source_type = Base64;
-                data = Base64.encode_string raw_media
+                source = Base64 (Base64.encode_string raw_media)
               }
         }
     ];
@@ -181,8 +175,7 @@ let test_stop_reason_finalizes_media_until_next_exact_scope () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source_type = Base64
-             ; data = Base64.encode_string "first"
+             ; source = Base64 (Base64.encode_string "first")
              }
        });
   A.on_event ~stream_scope:0 accum
@@ -193,8 +186,7 @@ let test_stop_reason_finalizes_media_until_next_exact_scope () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source_type = Base64
-             ; data = Base64.encode_string "late"
+             ; source = Base64 (Base64.encode_string "late")
              }
        });
   A.on_event ~stream_scope:1 accum
@@ -203,8 +195,7 @@ let test_stop_reason_finalizes_media_until_next_exact_scope () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source_type = Base64
-             ; data = Base64.encode_string "second"
+             ; source = Base64 (Base64.encode_string "second")
              }
        });
   A.on_event ~stream_scope:1 accum (ContentBlockStop { index = 0 });
@@ -240,8 +231,7 @@ let test_tool_block_media_not_persisted () =
             MediaDelta
               {
                 media_type = "image/png";
-                source_type = Base64;
-                data = Base64.encode_string "must not persist";
+                source = Base64 (Base64.encode_string "must not persist");
               };
         };
       ContentBlockStop { index = 0 };
@@ -264,8 +254,7 @@ let test_metadata_drift_preserves_first_media_block () =
             MediaDelta
               {
                 media_type = "image/png";
-                source_type = Base64;
-                data = Base64.encode_string raw_media;
+                source = Base64 (Base64.encode_string raw_media);
               };
         };
       ContentBlockDelta
@@ -275,8 +264,7 @@ let test_metadata_drift_preserves_first_media_block () =
             MediaDelta
               {
                 media_type = "audio/mpeg";
-                source_type = Base64;
-                data = Base64.encode_string "drift";
+                source = Base64 (Base64.encode_string "drift");
               };
         };
       ContentBlockStop { index = 0 };
@@ -307,7 +295,7 @@ let test_oversize_media_surfaces_as_dropped_placeholder () =
             index = 0;
             delta =
               MediaDelta
-                { media_type = "image/png"; source_type = Base64; data = oversized };
+                { media_type = "image/png"; source = Base64 oversized };
         };
         ContentBlockStop { index = 0 };
       ];
@@ -348,8 +336,7 @@ let test_media_persist_failure_surfaces_as_placeholder () =
           delta =
             MediaDelta
               { media_type = "image/png";
-                source_type = Base64;
-                data = invalid_base64
+                source = Base64 invalid_base64
               }
         }
     ; ContentBlockStop { index = 0 }
@@ -380,8 +367,7 @@ let test_dropped_and_persisted_media_keep_stream_order () =
             delta =
               MediaDelta
                 { media_type = "image/png";
-                  source_type = Base64;
-                  data = oversized
+                  source = Base64 oversized
                 }
           }
       ; ContentBlockStop { index = 0 }
@@ -390,8 +376,7 @@ let test_dropped_and_persisted_media_keep_stream_order () =
             delta =
               MediaDelta
                 { media_type = "image/png";
-                  source_type = Base64;
-                  data = Base64.encode_string "x"
+                  source = Base64 (Base64.encode_string "x")
                 }
           }
       ; ContentBlockStop { index = 1 }
@@ -458,7 +443,7 @@ let test_failed_request_reloads_completed_media_across_attempts () =
           (fun data ->
             on_event
               (ContentBlockDelta
-                 { index; delta = MediaDelta { media_type; source_type = Base64; data } }))
+                 { index; delta = MediaDelta { media_type; source = Base64 data } }))
           [ String.sub encoded 0 split
           ; String.sub encoded split (String.length encoded - split)
           ]

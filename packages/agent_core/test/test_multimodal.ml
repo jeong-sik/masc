@@ -89,13 +89,12 @@ let test_image_parse_nested_source () =
   match Llm_provider.Api_common.content_block_of_json json with
   | Some (Types.Image { media_type; source }) ->
     let data = Types.media_source_payload source in
-    let source_type = Types.media_source_kind_of_source source in
     Alcotest.(check string) "media_type" "image/jpeg" media_type;
     Alcotest.(check string) "data" "abc123" data;
     Alcotest.(check string)
       "source_type"
       "base64"
-      (Types.media_source_kind_to_string source_type)
+      (Types.media_source_wire_tag source)
   | Some _ -> Alcotest.fail "expected Image variant"
   | None -> Alcotest.fail "content_block_of_json returned None"
 ;;
@@ -119,13 +118,12 @@ let test_document_parse_nested_source () =
   match Llm_provider.Api_common.content_block_of_json json with
   | Some (Types.Document { media_type; source }) ->
     let data = Types.media_source_payload source in
-    let source_type = Types.media_source_kind_of_source source in
     Alcotest.(check string) "media_type" "application/pdf" media_type;
     Alcotest.(check string) "data" "pdf_data_here" data;
     Alcotest.(check string)
       "source_type"
       "base64"
-      (Types.media_source_kind_to_string source_type)
+      (Types.media_source_wire_tag source)
   | Some _ -> Alcotest.fail "expected Document variant"
   | None -> Alcotest.fail "content_block_of_json returned None"
 ;;

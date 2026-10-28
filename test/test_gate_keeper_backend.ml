@@ -575,7 +575,7 @@ let test_keeper_multimodal_input_converts_user_blocks_to_agent_core_blocks () =
       check string "media type" "image/png" media_type;
       check string "data" "abc123" (Agent_core.Types.media_source_payload source);
       check bool "source type" true
-        (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64);
+        (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64_kind);
       check string "text" "describe this" text
   | Ok _ -> fail "expected image then text AGENT_CORE blocks"
   | Error err -> fail ("expected AGENT_CORE block conversion: " ^ err)
@@ -879,7 +879,7 @@ let test_keeper_multimodal_input_preserves_binary_document () =
       check string "media type" "application/pdf" media_type;
       check string "base64 payload" payload (Agent_core.Types.media_source_payload source);
       check bool "source type" true
-        (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64)
+        (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64_kind)
   | Ok _ -> fail "PDF should remain one AGENT_CORE document block"
   | Error err -> fail ("PDF document projection failed: " ^ err)
 
@@ -951,7 +951,7 @@ let test_keeper_multimodal_input_accepts_mixed_case_data_url () =
       check string "media type" "image/png" media_type;
       check string "data" "abc123" (Agent_core.Types.media_source_payload source);
       check bool "source type" true
-        (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64)
+        (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64_kind)
   | Ok _ -> fail "expected image AGENT_CORE block"
   | Error err -> fail ("expected mixed-case data URL conversion: " ^ err)
 
@@ -986,7 +986,7 @@ let test_keeper_multimodal_input_normalizes_inferred_data_url_mime () =
       check string "media type" "image/png" media_type;
       check string "data" "abc123" (Agent_core.Types.media_source_payload source);
       check bool "source type" true
-        (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64)
+        (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64_kind)
   | Ok _ -> fail "expected image AGENT_CORE block"
   | Error err -> fail ("expected inferred data URL MIME conversion: " ^ err)
 
@@ -2597,8 +2597,7 @@ let test_keeper_stream_bridge_preserves_typed_media_source () =
               MediaDelta
                 {
                   media_type = "image/png";
-                  source_type = Base64;
-                  data = encoded_media;
+                  source = Base64 encoded_media;
                 };
           };
         ContentBlockStop { index = 0 };
@@ -2622,7 +2621,7 @@ let test_keeper_stream_bridge_preserves_typed_media_source () =
       check int "producer generation" 0 response.response_generation;
       check int "producer scope" 0 response.response_scope;
       check string "media type" "image/png" media_type;
-      check bool "source type" true (source_type = Base64);
+      check bool "source type" true (source_type = Base64_kind);
       check string "media ref is the persisted URL" expected_ref media_ref
   | _ -> fail "expected typed AGENT_CORE media delta carrying the persisted URL"
 
@@ -2643,8 +2642,7 @@ let test_keeper_stream_bridge_rejects_media_delta_for_tool_block () =
               MediaDelta
                 {
                   media_type = "image/png";
-                  source_type = Base64;
-                  data = Base64.encode_string "image";
+                  source = Base64 (Base64.encode_string "image");
                 };
           };
         ContentBlockDelta { index = 2; delta = InputJsonDelta "{\"q\":\"ok\"}" };
@@ -2691,7 +2689,7 @@ let test_keeper_stream_bridge_surfaces_bad_media_base64 () =
             index = 0;
             delta =
               MediaDelta
-                { media_type = "image/png"; source_type = Base64; data = "not base64!" };
+                { media_type = "image/png"; source = Base64 "not base64!" };
           };
         ContentBlockStop { index = 0 };
       ]
@@ -2723,8 +2721,7 @@ let test_keeper_stream_bridge_rejects_oversize_media_payload () =
                 MediaDelta
                   {
                     media_type = "image/png";
-                    source_type = Base64;
-                    data = oversized;
+                    source = Base64 oversized;
                   };
             };
           ContentBlockStop { index = 0 };
@@ -2757,8 +2754,7 @@ let test_keeper_stream_bridge_suppresses_media_after_oversize () =
                 MediaDelta
                   {
                     media_type = "image/png";
-                    source_type = Base64;
-                    data = oversized;
+                    source = Base64 oversized;
                   };
             };
           ContentBlockDelta
@@ -2768,8 +2764,7 @@ let test_keeper_stream_bridge_suppresses_media_after_oversize () =
                 MediaDelta
                   {
                     media_type = "image/png";
-                    source_type = Base64;
-                    data = "QQ==";
+                    source = Base64 "QQ==";
                   };
             };
           ContentBlockStop { index = 0 };
@@ -2808,8 +2803,7 @@ let test_keeper_stream_bridge_rejects_unsupported_media_source () =
               MediaDelta
                 {
                   media_type = "image/png";
-                  source_type = Url;
-                  data = "https://example.invalid/image.png";
+                  source = Url "https://example.invalid/image.png";
                 };
           };
         ContentBlockStop { index = 0 };
@@ -2842,8 +2836,7 @@ let test_keeper_stream_bridge_masks_media_write_failure_reason () =
                 delta =
                   MediaDelta
                     { media_type = "image/png";
-                      source_type = Base64;
-                      data = Base64.encode_string "image" } };
+                      source = Base64 (Base64.encode_string "image") } };
             ContentBlockStop { index = 0 } ]
       in
       match events with
@@ -3855,7 +3848,7 @@ let test_runtime_run_blocks_appends_multimodal_input_to_agent_core_agent () =
               check string "image media type" "image/png" media_type;
               check string "image data" "img" (Agent_core.Types.media_source_payload source);
               check bool "source type" true
-                (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64)
+                (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64_kind)
           | _ -> fail "stored user input lost multimodal block shape")
       | _ -> fail "missing appended AGENT_CORE user message")
 

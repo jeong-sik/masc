@@ -810,7 +810,7 @@ let test_tool_use_rejects_non_input_delta_kinds () =
       , ReasoningDetailsDelta { reasoning_content = Some "not args"; details = [] } )
     ; ( "media"
       , MediaDelta
-          { media_type = "image/png"; source_type = Base64; data = "not args" } )
+          { media_type = "image/png"; source = Base64 "not args" } )
     ; "thinking signature", ThinkingSignatureDelta "not args"
     ; "redacted snapshot", RedactedThinkingSnapshot "not args"
     ]
@@ -1056,12 +1056,12 @@ let test_media_metadata_is_frozen_by_first_delta () =
     ; ContentBlockDelta
         { index = 1
         ; delta =
-            MediaDelta { media_type = "image/png"; source_type = Base64; data = "a" }
+            MediaDelta { media_type = "image/png"; source = Base64 "a" }
         }
     ; ContentBlockDelta
         { index = 1
         ; delta =
-            MediaDelta { media_type = "image/png"; source_type = Base64; data = "b" }
+            MediaDelta { media_type = "image/png"; source = Base64 "b" }
         }
     ];
   let accepted_response = finalize_with_end_turn accepted in
@@ -1075,7 +1075,7 @@ let test_media_metadata_is_frozen_by_first_delta () =
   Streaming.accumulate_event acc
     (ContentBlockDelta
        { index = 2
-       ; delta = MediaDelta { media_type = "image/png"; source_type = Base64; data = "a" }
+       ; delta = MediaDelta { media_type = "image/png"; source = Base64 "a" }
        });
   (match
      Streaming.resolve_event acc
@@ -1083,7 +1083,7 @@ let test_media_metadata_is_frozen_by_first_delta () =
           { index = 2
           ; delta =
               MediaDelta
-                { media_type = "image/jpeg"; source_type = Base64; data = "b" }
+                { media_type = "image/jpeg"; source = Base64 "b" }
           })
    with
    | Stream_event_rejected

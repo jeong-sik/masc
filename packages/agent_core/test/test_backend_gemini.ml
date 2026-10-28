@@ -1622,7 +1622,7 @@ let test_gemini_stream_signed_inline_image () =
            { index = 1
            ; delta =
                MediaDelta
-                 { media_type = "image/png"; source_type = Base64; data = "iVBORw0KGgo=" }
+                 { media_type = "image/png"; source = Base64 "iVBORw0KGgo=" }
            }
        ; MessageDelta { stop_reason = Some EndTurn; _ }
        ; MessageStop

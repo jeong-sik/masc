@@ -431,7 +431,7 @@ let golden : E.keeper_chat_event list =
   ; E.Agent_core_thinking_delta {response=None; index = 0; delta = "weighing it" }
   ; E.Agent_core_thinking_signature_delta { index = 0; signature_bytes = 42 }
   ; E.Agent_core_media_delta {index=3; media_type="image/png";
-      source_type=Agent_core.Types.Base64; media_ref="/api/v1/media/golden";
+      source_type=Agent_core.Types.Base64_kind; media_ref="/api/v1/media/golden";
       response={response_generation=7; response_scope=0}}
   ; E.Model_content_activity {content_generation=0; content_scope=0; content_index=0;
       content_provider_message_id=None; channel=E.Model_thinking; state=E.Content_observed}

@@ -283,6 +283,9 @@ scripts/review/approve-guard.sh --repo "$repo" --pr "$pr" --head "$head" \
 게시에는 `--body`, `--review-base`, `--review-diff`가 모두 필요합니다. guard는 검사 중
 변경된 범위를 거부합니다. 변경 내용이 달라지면 다시 리뷰하고 증거를 캡처하세요.
 읽지 않은 변경을 승인하기 위해 digest만 갱신하지 마세요.
+가드가 `review-scope:`와 `approve-guard:` 줄을 직접 붙이므로 `--body`에 넣지 마세요.
+`--print-footer` 출력도 본문에 복사하지 않습니다. 게시 후 재조회가 실패하면 재시도 전에
+게시된 리뷰를 확인하세요. 계정 불일치는 게시 후에 보고되며 게시된 리뷰를 취소하지 않습니다.
 
 작성하거나 push한 세션은 그 PR을 독립 승인할 수 없습니다. Release 판정에는 같은 head의 완료된 전체
 검증을 가리키는 `run: <full-CI-run-id>`를 추가합니다. 위는 형식이며 판정이 아닙니다.

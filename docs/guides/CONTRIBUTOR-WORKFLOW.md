@@ -308,6 +308,10 @@ scripts/review/approve-guard.sh --repo "$repo" --pr "$pr" --head "$head" \
 Publishing requires `--body`, `--review-base` and `--review-diff`. The guard rejects
 scope changes during admission. If the change differs, review it again and capture
 new evidence; do not refresh the digest merely to approve unreviewed changes.
+The guard appends `review-scope:` and `approve-guard:` lines itself: leave them out
+of `--body`, including the output of `--print-footer`. If readback fails after a
+review is posted, inspect that review before retrying. An account mismatch is
+reported after publication; this does not undo the published review.
 
 An author or a session that pushed the PR cannot independently
 approve it. Release verdicts additionally cite `run: <full-CI-run-id>` for

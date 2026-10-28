@@ -563,6 +563,103 @@ print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
             args += ["--replace-own-cr", str(rid)]
         return self.run_guard(*args)
 
+    def test_body_with_guard_metadata_is_refused_before_post(self):
+        self.install_publication_fake()
+        body = self.tmp / "body.md"
+        for marker in (f"review-scope: {SCOPE}", footer_line(),
+                       f"notes\rreview-scope: {SCOPE}",
+                       f"notes\u2028review-scope: {SCOPE}"):
+            for check in (False, True):
+                with self.subTest(marker=marker, check=check):
+                    body.write_text(f"verdict: PASS head: {HEAD} by: reviewer-keeper\n"
+                                    f"independent source review\n{marker}\n")
+                    args = ["--review-base", BASE, "--review-diff", DIFF, "--body", str(body)]
+                    if check:
+                        args.append("--check")
+                    result = self.run_guard(*args)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn("guard adds", result.stderr)
+                    self.assertNotIn("POST", (self.data / "calls.log").read_text())
+
+    def test_publication_scope_is_accepted_by_source_receipt(self):
+        self.install_publication_fake()
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        review = json.loads((self.data / "reviews.json").read_text())[0]
+        self.assertEqual(sum(line.startswith("review-scope: ") for line in review["body"].splitlines()), 1)
+        receipt = self.run_guard("--source-receipt")
+        self.assertEqual(receipt.returncode, 0, receipt.stderr)
+        self.assertEqual(json.loads(receipt.stdout)["approval_ids"], [review["id"]])
+
+    def test_duplicate_scope_in_post_readback_does_not_report_success(self):
+        self.install_publication_fake()
+        post = self.tmp / "post.py"
+        tamper = ("review['body'] = review['body'].replace("
+                  "'\\nreview-scope: ', " + repr("\nreview-scope: " + SCOPE + "\nreview-scope: ") + ", 1)\n")
+        post.write_text(post.read_text().replace("reviews.append(review)\n", tamper + "reviews.append(review)\n"))
+        result = self.publish()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("APPROVED #41487", result.stdout)
+        self.assertIn("posted", result.stderr)
+        self.assertIn("scope", result.stderr)
+        self.assertIn("before retry", result.stderr)
+        self.assertIn("POST repos/o/r/pulls/41487/reviews", (self.data / "calls.log").read_text())
+        receipt = self.run_guard("--source-receipt")
+        self.assertEqual(receipt.returncode, 2, receipt.stderr)
+
+    def test_publication_does_not_report_success_for_a_different_actor(self):
+        self.install_publication_fake()
+        post = self.tmp / "post.py"
+        post.write_text(post.read_text().replace(
+            "reviews.append(review)\n", "review['user'] = {'login': 'other-account'}\nreviews.append(review)\n"))
+        result = self.publish()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("APPROVED #41487", result.stdout)
+        self.assertIn("other-account", result.stderr)
+        self.assertIn("reviewer-account", result.stderr)
+        self.assertIn("before retry", result.stderr)
+        self.assertIn("POST repos/o/r/pulls/41487/reviews", (self.data / "calls.log").read_text())
+
+    def test_malformed_author_readback_reports_that_review_was_posted(self):
+        self.install_publication_fake()
+        post = self.tmp / "post.py"
+        post.write_text(post.read_text().replace(
+            "reviews.append(review)\n", "review['user'] = 'corrupt'\nreviews.append(review)\n"))
+        result = self.publish()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("APPROVED #41487", result.stdout)
+        self.assertIn("was posted", result.stderr)
+        self.assertIn("author could not be read", result.stderr)
+        self.assertIn("before retry", result.stderr)
+
+    def test_pr_moving_after_publication_does_not_report_success(self):
+        self.install_publication_fake()
+        post = self.tmp / "post.py"
+        move = ("pr = json.loads((p / 'pr.json').read_text())\n"
+                "pr['head']['sha'] = 'a' * 40\n"
+                "(p / 'pr.json').write_text(json.dumps(pr))\n")
+        post.write_text(post.read_text().replace("reviews.append(review)\n", move + "reviews.append(review)\n"))
+        result = self.publish()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("APPROVED #41487", result.stdout)
+        self.assertIn("posted", result.stderr)
+        self.assertIn("before retry", result.stderr)
+        self.assertEqual(json.loads((self.data / "reviews.json").read_text())[0]["commit_id"], HEAD)
+
+    def test_lost_publication_response_requires_inspection_before_retry(self):
+        self.install_publication_fake()
+        post = self.tmp / "post.py"
+        post.write_text(post.read_text().replace(
+            "print(f'{rid}\\tAPPROVED\\t{review[\"commit_id\"]}')", "sys.exit(9)"))
+        result = self.publish()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("APPROVED #41487", result.stdout)
+        self.assertIn("outcome is unknown", result.stderr)
+        self.assertIn("before retry", result.stderr)
+        reviews = json.loads((self.data / "reviews.json").read_text())
+        self.assertEqual(len(reviews), 1)  # Fake accepted the write before losing the reply.
+        self.assertEqual(self.run_guard("--source-receipt").returncode, 0)
+
     def test_two_reviewers_can_replace_their_crs_without_dismissing_each_other(self):
         self.reviews(self.negative_review(), self.negative_review(rid=89, login="another-reviewer"))
         self.install_publication_fake()

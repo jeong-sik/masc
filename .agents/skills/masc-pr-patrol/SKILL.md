@@ -58,6 +58,8 @@ bash scripts/review/approve-guard.sh --repo "$repo" --pr "$pr" --head "$head" \
 
 게시에는 `--body`, `--review-base`, `--review-diff` 가 모두 필요하다. 변경 범위가 달라지면 다시 리뷰하고
 증거를 캡처한다. 읽지 않은 변경을 승인하려고 diff 식별자만 갱신하지 않는다.
+가드는 `review-scope:`와 `approve-guard:` 줄을 자동으로 붙인다. `--body`에 이 줄이나
+`--print-footer` 출력을 넣지 않는다. 게시 뒤 결과가 불명확하면 리뷰를 조회한 뒤에만 후속 처리한다.
 
 `approve-guard.sh`의 게시 경로는 본인의 독립성·검토한 head/base/diff·본문을 검사한다.
 기존 CR이나 FAIL/HOLD는 새 판정 게시를 막지 않으며, 본인 CR은 `--replace-own-cr ID`로 명시한다(여러 ID는 옵션 반복).

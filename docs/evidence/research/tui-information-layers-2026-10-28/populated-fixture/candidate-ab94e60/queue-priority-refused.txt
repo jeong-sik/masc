@@ -1,0 +1,24 @@
+ 대시보드  작업  ▸키퍼  사용량  보드  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ MASC Queue  fixture                                                          │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  Snapshot unavailable · r retries                                            │
+│  HTTP 405: fixture is read-only                                              │
+│  Local unsent messages · 0                                                   │
+│  Queue open · busy · 18 pending · 1 running · 1 scheduled                    │
+│  Events wait while the current chat holds the turn                           │
+│  Pending events may already be in the current turn                           │
+│    15:46  현재 PR 검토 · running                                             │
+│    15:46  대기 이벤트 01 · 변경 사항과 리뷰 내용을 확인 · unacknowledged 6h0…│
+│    15:46  대기 이벤트 02 · 변경 사항과 리뷰 내용을 확인 · unacknowledged 6h0…│
+│    15:46  대기 이벤트 03 · 변경 사항과 리뷰 내용을 확인 · unacknowledged 6h0…│
+│    15:46  대기 이벤트 04 · 변경 사항과 리뷰 내용을 확인 · unacknowledged 6h0…│
+│    15:46  대기 이벤트 05 · 변경 사항과 리뷰 내용을 확인 · unacknowledged 6h0…│
+│    15:46  대기 이벤트 06 · 변경 사항과 리뷰 내용을 확인 · unacknowledged 6h0…│
+│    15:46  대기 이벤트 07 · 변경 사항과 리뷰 내용을 확인 · unacknowledged 6h0…│
+│    15:46  대기 이벤트 08 · 변경 사항과 리뷰 내용을 확인 · unacknowledged 6h0…│
+│    15:46  대기 이벤트 09 · 변경 사항과 리뷰 내용을 확인 · unacknowledged 6h0…│
+│    15:46  대기 이벤트 10 · 변경 사항과 리뷰 내용을 확인 · unacknowledged 6h0…│
+└──────────────────────────────────────────────────────────────────────────────┘
+  TUI ab94e60 ≠ server fixture (generations differ)  ?:help
+ › to fixture   (i to write)

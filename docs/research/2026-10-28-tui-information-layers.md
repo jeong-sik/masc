@@ -154,19 +154,24 @@ through later ordinary notices and input until a complete, identity-bound
 notice reaches a successfully flushed frame. A rejected paste is not retained,
 and a flush does not prove that a person saw the notice.
 
-The feedback still has an unresolved visibility issue. Existing action and
-form/save feedback keep priority so a pending retry notice cannot hide a
-two-press confirmation; this can also keep the retry or Ctrl-C recovery hint
-out of view even at a normal width. Separately, a one-off observation of the
-actual footer fitter with dependency stubs found that, at 80 columns, a
-workspace-unconfirmed warning, the Config form's Enter/Esc keys and a `/hello`
-search prefix leave no room for either complete hint when it is offered. This
-calculation isolates the fitter; it is not a rendering of the current form,
-where its existing result would take priority first. If a displayed notice is
-hidden immediately before its timeout but the next observation is after it,
-the state transition cannot determine which event happened first. These are
-source/probe observations, not an actual terminal verification. The barrier and
-recovery behavior have not run in the current candidate terminal.
+The follow-up gives Queue and supported Keeper chat their own notice space in
+an existing border or padding row, leaving the footer and its confirmation
+intact. This later change is source/probe evidence and has not been exercised
+in a terminal. Elsewhere, existing action and form/save feedback keep priority
+so a pending retry or Ctrl-C recovery hint can remain out of view even at a
+normal width. A one-off observation of the actual footer fitter with dependency
+stubs found that, at 80 columns, a workspace-unconfirmed warning, Config's
+Enter/Esc keys and a `/hello` search prefix leave no room for either complete
+hint when offered. Unsupported chat, external image/MSX screens and very narrow
+Queue widths also remain outside the separate-row coverage. If a displayed
+notice is hidden immediately before its timeout but the next observation is
+after it, the state transition cannot determine which event happened first.
+
+A separate source review found an existing chat row-budget discrepancy: with
+a folded turn, full tool visibility and pending gate effects, the budget omits
+the gate row while the renderer draws it. That can push the footer past the
+frame. This predates the separate-row change and was not reproduced in the
+terminal fixture; it remains outside the evidence for this follow-up.
 
 Input can still arrive after the post-output observation, and the terminal does
 not report when the person saw the new frame. A late tail after a forced CSI
@@ -191,6 +196,12 @@ truncated; at 120×36 and 160×40 all 18 were visible without event-line
 truncation. The frame replaced the chat body at every measured size. These
 observations use the real candidate binary, while the side and bottom
 comparisons below are static sketches and do not have the same renderer.
+
+The later [ab94e60 candidate observation](../evidence/research/tui-information-layers-2026-10-28/populated-fixture/candidate-ab94e60/README.md)
+confirmed Queue Help and selection restoration, a literal Hangul key in Help,
+detail, a read-only priority refusal, a rejected paste notice and retained chat
+draft in the synthetic terminal. It does not cover the subsequent separate-row
+change, successful server reordering or physical IME input.
 
 The [static sketches](../evidence/research/tui-information-layers-2026-10-28/prototype/README.md)
 put the same synthetic chat and 18 queue rows into three arrangements. They

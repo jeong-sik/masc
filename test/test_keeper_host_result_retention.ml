@@ -240,6 +240,111 @@ let test_producer_identity_and_vendor_coexistence () = with_workspace (fun base_
   check int "replacement host and vendor sources retain their own identities" 4
     (List.length (Outbox.receipt_ids (load base_path))))
 
+let test_shared_context_preserves_each_retained_result () = with_workspace (fun base_path ->
+  let first = get (Outbox.host_producer ~base_path ~keeper_name ~runtime_label:"client-a" ~turn_count:1)
+  and second = get (Outbox.host_producer ~base_path ~keeper_name ~runtime_label:"client-b" ~turn_count:1) in
+  let arguments = `Assoc ["page",`String (String.make 4096 'a'); "offset",`Int 0] in
+  let response = `Assoc ["ok",`Bool true; "content",`String "retained \"original\" 한글"] in
+  for index = 0 to 19 do
+    get (Outbox.retain_host_result first ~invocation_index:index ~call_id:"reused-id"
+      ~tool_name:"Read" ~arguments ~response)
+  done;
+  get (Outbox.retain_host_result second ~invocation_index:0 ~call_id:"reused-id"
+    ~tool_name:"Read" ~arguments ~response:(`Assoc ["ok",`Bool false; "error",`String "not executed"]));
+  get (Outbox.retain ~base_path ~keeper_name
+    {thread_id="vendor-thread";turn_id="vendor-turn";call_id="vendor-call";
+     tool_name="Read";arguments;response});
+  let snapshot = load base_path in
+  let ids = Outbox.receipt_ids snapshot in
+  check int "physical calls and both producer kinds remain distinct" 22 (List.length ids);
+  let session = get (Keeper_official_client_session_store.path ~base_path ~keeper_name) in
+  let directory = Filename.concat (Filename.dirname session) "undelivered-tools" in
+  let originals = List.map (fun id -> Yojson.Safe.from_file (Filename.concat directory (id ^ ".json"))) ids in
+  let context = match Outbox.developer_context snapshot with
+    | [context] -> context | _ -> fail "one retained-results context expected" in
+  let json_start = String.rindex context '\n' + 1 in
+  let json = String.sub context json_start (String.length context - json_start) in
+  let payload = Yojson.Safe.from_string json in
+  let shared, references = match payload with
+    | `Assoc fields ->
+      (match List.assoc_opt "shared" fields, List.assoc_opt "receipts" fields with
+       | Some (`List shared), Some (`List references) -> Array.of_list shared, references
+       | _ -> fail "missing shared receipt data")
+    | _ -> fail "repeated large receipts should use shared data" in
+  let unpack reference =
+    let index, fields = match reference with
+      | `List [`Int index; `String call_id] -> index, ["call_id", `String call_id]
+      | `List [`Int index; `String call_id; `Int physical_index] ->
+        index, ["call_id", `String call_id; "host_invocation_index", `Int physical_index]
+      | _ -> fail "invalid receipt reference" in
+    if index < 0 || index >= Array.length shared then fail "invalid shared index";
+    match shared.(index) with
+    | `Assoc common -> `Assoc (fields @ common)
+    | _ -> fail "shared result must be an object" in
+  let reconstructed = List.map unpack references in
+  check bool "every original survives in snapshot order, including failures and identity" true
+    (Yojson.Safe.equal (Yojson.Safe.sort (`List originals)) (Yojson.Safe.sort (`List reconstructed)));
+  check bool "shared context including its explanation is smaller" true
+    (String.length Keeper_client_tool_outbox_encoding.shared_description + String.length json
+     < String.length (Yojson.Safe.to_string (`List originals)));
+  check (list string) "producing context changes no durable acknowledgements" ids
+    (Outbox.receipt_ids (load base_path)))
+
+let test_ambiguous_receipt_shape_is_not_shared () =
+  let payload = `String (String.make 4096 'x') in
+  let rows = List.init 4 (fun index ->
+    `Assoc ["call_id",`String "first"; "call_id",`String (string_of_int index); "response",payload]) in
+  match Keeper_client_tool_outbox_encoding.encode rows with
+  | Individual json ->
+    check bool "fallback preserves ambiguous fields" true
+      (Yojson.Safe.equal (`List rows) (Yojson.Safe.from_string json))
+  | Shared _ -> fail "ambiguous identities must not use shared encoding"
+
+let test_small_shared_json_does_not_expand_context () =
+  let response = `String (String.make 50 'x') in
+  let rows = List.map (fun call_id ->
+    `Assoc ["thread_id",`String "t"; "turn_id",`String "u"; "tool_name",`String "Read";
+      "call_id",`String call_id; "arguments",`Assoc []; "response",response]) ["a";"b"] in
+  match Keeper_client_tool_outbox_encoding.encode rows with
+  | Individual json ->
+    check bool "individual retains the complete inputs" true
+      (Yojson.Safe.equal (`List rows) (Yojson.Safe.from_string json))
+  | Shared _ -> fail "shared explanation would make this input larger"
+
+let test_unique_results_remain_individual () =
+  let payload = `String (String.make 4096 'x') in
+  let rows = List.init 8 (fun index ->
+    `Assoc ["call_id",`String (string_of_int index);
+      "response",`Assoc ["sequence",`Int index; "payload",payload]]) in
+  match Keeper_client_tool_outbox_encoding.encode rows with
+  | Individual json ->
+    check bool "unique results remain complete" true
+      (Yojson.Safe.equal (`List rows) (Yojson.Safe.from_string json))
+  | Shared _ -> fail "unrepeated results should remain individual"
+
+let test_shared_nested_signed_zero () =
+  let payload = `String (String.make 4096 'x') in
+  let rows = List.init 4 (fun index ->
+    let number = if index mod 2 = 0 then 0.0 else -0.0 in
+    `Assoc ["call_id",`String (string_of_int index);
+      "response",`Assoc ["nested",`List [`Float number]; "payload",payload]]) in
+  let json = match Keeper_client_tool_outbox_encoding.encode rows with
+    | Shared json -> Yojson.Safe.from_string json
+    | Individual _ -> fail "the repeated large results should be shared" in
+  let open Yojson.Safe.Util in
+  let shared = json |> member "shared" |> to_list |> Array.of_list in
+  let refs = json |> member "receipts" |> to_list in
+  check int "each input has one shared reference" 4 (List.length refs);
+  List.iteri (fun index row ->
+    let shared_index = match row with
+      | `List [`Int shared_index; `String _] -> shared_index
+      | _ -> fail "invalid shared reference" in
+    let value = shared.(shared_index) |> member "response" |> member "nested" |> to_list in
+    let actual = match value with [`Float number] -> Int64.bits_of_float number
+      | _ -> fail "missing nested number" in
+    let expected = Int64.bits_of_float (if index mod 2 = 0 then 0.0 else -0.0) in
+    check bool "each receipt retains the bit pattern of its nested zero" true (expected = actual)) refs
+
 let test_mcp_reused_string_id_keeps_physical_invocations () = with_workspace (fun base_path ->
   let module Mcp = Runtime_official_client_mcp in
   let effects = ref 0 and invocations = ref [] and pending_stops = ref [] in
@@ -351,4 +456,9 @@ let () = run "Original official-client host result retention"
     test_case "MCP reused string id keeps each physical invocation" `Quick test_mcp_reused_string_id_keeps_physical_invocations;
     test_case "host invocation index schema is strict" `Quick test_host_invocation_index_validation;
     test_case "original that reads back different creates no receipt" `Quick test_original_that_reads_back_different_creates_no_receipt;
-    test_case "source identity deduplicates exact originals across mixed producers" `Quick test_producer_identity_and_vendor_coexistence]]
+    test_case "source identity deduplicates exact originals across mixed producers" `Quick test_producer_identity_and_vendor_coexistence;
+    test_case "shared context preserves retained originals in order" `Quick test_shared_context_preserves_each_retained_result;
+    test_case "ambiguous receipt shape remains individual" `Quick test_ambiguous_receipt_shape_is_not_shared;
+    test_case "small shared JSON does not expand context" `Quick test_small_shared_json_does_not_expand_context;
+    test_case "unique results remain individual" `Quick test_unique_results_remain_individual;
+    test_case "nested signed zero stays distinct" `Quick test_shared_nested_signed_zero]]

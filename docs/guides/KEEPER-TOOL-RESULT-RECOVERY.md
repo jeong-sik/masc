@@ -18,6 +18,18 @@ failed results remain available for the next recovery turn. A matching client
 completion establishes client receipt, not that the final model input included
 the result.
 
+When retained results have identical fields apart from call identity, the
+model-facing context can represent their common data once and list every
+receipt separately in snapshot order. That order does not establish execution
+or completion order. Each reference retains its call ID and, for a host
+receipt, its producer-scoped physical invocation index. This representation
+preserves arguments, responses and source identity; it does not combine tool
+effects, alter retained files or acknowledge results. The ordinary individual
+representation is used when no common data repeats, when sharing and its
+explanation would not reduce the context size, or when a shape cannot be
+represented safely. A smaller context does not establish that a particular
+model consumed or interpreted the results.
+
 Normal Keeper lifecycle decisions still apply. Recovery does not start an absent owner, unpause a Keeper, override desired state, or restart container services. Startup owner restoration follows the configured activation mode and existing lifecycle. The automatic model wake currently requires a nonempty Codex-only route: every reachable candidate must resolve to Codex. Quota ordering and fallback may select another candidate, so a Codex entry alone is insufficient. Mixed routes, other clients, and unavailable or unknown candidates retain their receipts. A previously queued notification for an unsupported current route is retired without deleting the receipt or blocking unrelated work; returning to a Codex-only route makes the receipt discoverable again.
 
 Malformed or unreadable outbox entries fail closed and remain on disk with a Warn diagnostic. The recovery process does not fabricate a missing response, discard corrupt evidence, or repair unknown data by rerunning a command.

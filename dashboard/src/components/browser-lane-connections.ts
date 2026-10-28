@@ -33,6 +33,9 @@ export function BrowserLaneConnections({ row, instances }: {
     ${observation.kind === 'unreadable' ? html`<p role="status">Browser connection observation unreadable. Original fields remain available.</p>`
       : html`<div class="space-y-3">
         <p>Worker state at observation: ${observation.value.state}</p>
+        ${observation.value.unavailable?.map((item, index) => html`<p key=${index} aria-label="Ego connection unavailable">
+          Ego connection unavailable at ${formatLaneTime(item.observedAt)}: the name ${item.space} matched a user-owned Space.
+          This observation is rechecked on worker restart.</p>`)}
         ${observation.value.clients.length === 0 && html`<p>No live connections recorded in this observation.</p>`}
         ${observation.value.clients.map(client => html`<article key=${client.clientId} class="border border-[var(--border)] rounded p-2 space-y-1"
           aria-label=${`Browser client ${client.clientId}`}>

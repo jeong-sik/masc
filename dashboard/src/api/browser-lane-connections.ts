@@ -24,11 +24,18 @@ const client = Schema.Union(
   }).pipe(Schema.filter(client => client.spaceObservation === null || client.spaceObservation.spaceId === client.space.id)),
   Schema.Struct({ ...common, transport: Schema.Literal('web_extension', 'webdriver_bidi'), space: Schema.Null, spaceObservation: Schema.Null }),
 )
+const unavailable = Schema.Struct({
+  backend: Schema.Literal('ego'), reason: Schema.Literal('user_owned_name'),
+  space: Schema.NonEmptyString,
+  observedAt: Schema.Number.pipe(Schema.filter(value => Number.isFinite(value) && value >= 0)),
+  recheck: Schema.Literal('worker_restart'),
+})
 const connections = Schema.Struct({
   state: Schema.Literal('serving', 'retired'),
   clients: Schema.Array(client).pipe(Schema.filter(clients => new Set(clients.map(item => item.clientId)).size === clients.length)),
   // Backends have their own inventory surface; they are not live connections.
   owned_backends: Schema.Unknown,
+  unavailable: Schema.optional(Schema.Array(unavailable)),
 })
 export type BrowserConnection = Schema.Schema.Type<typeof client>
 export type BrowserInteraction = Schema.Schema.Type<typeof work>

@@ -9,6 +9,7 @@ const client = { clientId: 'b932c512-51e0-45bc-9fcb-3fde7bd2767b', browser: 'ego
   version: '0.6.1.11', engineVersion: 'chromium', transport: 'ego_task_space', space: { id: 32, name: 'Research' }, spaceObservation: null,
   interactions: [work, { ...work, requestId: 'request-2', actor: 'agent/helper', phase: 'queued', tabId: null }],
   lastActivities: [{ work: { ...work, requestId: 'previous', actor: 'operator' }, outcome: 'unknown' }] }
+const unavailable = { backend: 'ego', reason: 'user_owned_name', space: 'Research', observedAt: 42, recheck: 'worker_restart' }
 const instance = { instance_id: 'worker', run_id: 'run', addon_id: 'browser', title: 'Browser connections',
   revision: 'revision', runtime_presence: 'live', incarnation: 'original', action_schema: null,
   configuration: null, phase: { kind: 'attached' }, observation_seq: 1, rows_count: 1,
@@ -24,6 +25,39 @@ function show(fields = row.fields, runtime_presence = 'live') {
 afterEach(cleanup)
 
 describe('browser caller observations', () => {
+  it('preserves healthy clients alongside a dated Ego connection refusal', () => {
+    const firefox = { ...client, clientId: 'firefox', browser: 'firefox', transport: 'webdriver_bidi',
+      space: null, interactions: [], lastActivities: [] }
+    const view = show({ ...row.fields, clients: [firefox], unavailable: [unavailable] }, 'retained')
+    expect(view.getByLabelText('Browser client firefox')).toBeTruthy()
+    expect(view.getByText('Firefox · WebDriver BiDi')).toBeTruthy()
+    expect(view.queryByText(/observation unreadable/)).toBeNull()
+    const refusal = view.getByLabelText('Ego connection unavailable')
+    expect(refusal.textContent).toContain('Research')
+    expect(refusal.textContent).toContain('1970-01-01T00:00:42.000Z')
+    expect(refusal.textContent).toContain('user-owned Space')
+    expect(refusal.textContent).toContain('worker restart')
+    expect(view.queryByText(/Last SDK control observation/)).toBeNull()
+    expect(view.container.querySelector('button')).toBeNull()
+  })
+  it('shows an unavailable Ego connection without inventing a client or caller', () => {
+    const view = show({ ...row.fields, clients: [], unavailable: [{ ...unavailable, space: '<b>Research</b>' }] })
+    expect(view.getByText('No live connections recorded in this observation.')).toBeTruthy()
+    expect(view.getByLabelText('Ego connection unavailable').textContent).toContain('<b>Research</b>')
+    expect(view.container.querySelector('b')).toBeNull()
+    expect(view.queryByText(/keeper\/research/)).toBeNull()
+    view.unmount()
+    expect(show({ ...row.fields, unavailable: [] }).getByLabelText(`Browser client ${client.clientId}`)).toBeTruthy()
+  })
+  it.each([
+    null, {}, [null], [{ ...unavailable, backend: 'other' }], [{ ...unavailable, reason: 'other' }],
+    [{ ...unavailable, space: '' }], [{ ...unavailable, observedAt: -1 }],
+    [{ ...unavailable, observedAt: Infinity }], [{ ...unavailable, observedAt: Number.NaN }],
+    [{ ...unavailable, observedAt: '42' }], [{ ...unavailable, recheck: 'automatic' }],
+    [{ ...unavailable, authority: 'agent' }], [{ backend: 'ego', reason: 'user_owned_name', space: 'Research' }],
+  ])('keeps malformed unavailable records unreadable', invalid => {
+    expect(show({ ...row.fields, unavailable: invalid }).getByRole('status').textContent).toContain('observation unreadable')
+  })
   it('renders host caller, Space and request scopes even when the aggregate row actor is absent', () => {
     const view = show()
     const connection = within(view.getByLabelText(`Browser client ${client.clientId}`))

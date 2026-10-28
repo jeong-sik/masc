@@ -51,6 +51,17 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let cleanup_fixture_dir dir =
+  let rec writable path =
+    if Sys.file_exists path then (
+      (try Unix.chmod path 0o700 with Unix.Unix_error _ -> ());
+      if (Unix.lstat path).Unix.st_kind = Unix.S_DIR
+      then Array.iter (fun name -> writable (Filename.concat path name)) (Sys.readdir path))
+  in
+  writable dir;
+  cleanup_dir dir
+;;
+
 let write_file path content =
   let oc = open_out_bin path in
   Fun.protect ~finally:(fun () -> close_out oc) @@ fun () ->
@@ -536,14 +547,7 @@ let test_attached_guest_endpoint_names_the_derived_guest () =
   Fun.protect
     ~finally:(fun () ->
       Eio_context.restore_state context;
-      let rec writable path =
-        if Sys.file_exists path then (
-          (try Unix.chmod path 0o700 with Unix.Unix_error _ -> ());
-          if (Unix.lstat path).Unix.st_kind = Unix.S_DIR
-          then Array.iter (fun name -> writable (Filename.concat path name)) (Sys.readdir path))
-      in
-      writable base;
-      cleanup_dir base;
+      cleanup_fixture_dir base;
       cleanup_dir bin_dir)
   @@ fun () ->
   with_env "PATH" path (fun () -> initialize_apple_attached_read_fixture ~base ~config ~meta:microvm);
@@ -1520,7 +1524,7 @@ let test_read_and_grep_report_the_endpoint_profile () =
   in
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
   let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> []) in
-  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  Fun.protect ~finally:(fun () -> cleanup_fixture_dir base) @@ fun () ->
   with_fake_ssh fake_ssh_success_script (fun () ->
     check_results ~config ~meta ~expected:"remote_ssh");
   let meta =
@@ -1539,7 +1543,14 @@ sandbox_profile = "microvm"
   write_file cli_path fake_ssh_success_script;
   Unix.chmod cli_path 0o755;
   let path = cli_dir ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH") in
+  let context = Eio_context.snapshot_state () in
+  Fun.protect ~finally:(fun () -> Eio_context.restore_state context) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_env "PATH" path (fun () ->
+    initialize_apple_attached_read_fixture ~base ~config ~meta;
     check_results ~config ~meta ~expected:"microvm")
 
 let test_read_of_a_declared_path_asks_the_endpoint_for_that_path () =

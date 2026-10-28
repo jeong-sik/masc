@@ -41,6 +41,13 @@ let entry = function
   | Superseded -> (superseded_glyph, "criterion changed")
   | Unreadable -> (unreadable_glyph, "unreadable")
 
+let entry_korean = function
+  | Waiting -> (waiting_glyph, "판정 대기")
+  | Proven -> (proven_glyph, "검증 통과")
+  | Refused -> (refused_glyph, "거절 · 진행으로 복귀")
+  | Superseded -> (superseded_glyph, "기준 변경")
+  | Unreadable -> (unreadable_glyph, "판정 기록 읽기 실패")
+
 (* The order a goal travels, so the legend reads the same whichever subset of
    it a screen needs. *)
 let kinds = [ Waiting; Proven; Refused; Superseded; Unreadable ]
@@ -58,13 +65,15 @@ let legend_for proofs =
     (fun kind -> if List.mem kind present then Some (entry kind) else None)
     kinds
 
-let legend_rows ~max_cells ~max_rows proofs =
-  let label = "  JUDGE  " in
+let legend_rows ?(ko = false) ~max_cells ~max_rows proofs =
+  let label = if ko then "  판정  " else "  JUDGE  " in
   let label_cells = Masc_tui_message_layout.display_width label in
   if max_cells <= label_cells || max_rows <= 0 then []
   else
     let text =
-      legend_for proofs
+      (let present = List.filter_map kind_of_proof proofs in
+       List.filter_map (fun kind ->
+         if List.mem kind present then Some ((if ko then entry_korean else entry) kind) else None) kinds)
       |> List.map (fun (mark, word) -> mark ^ " " ^ word)
       |> String.concat "  "
     in

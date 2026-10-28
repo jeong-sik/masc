@@ -23365,7 +23365,7 @@ let main
          | Some (Harness_detail_scroll _) | Some (Fusion_detail_scroll _)
          | Some (Runtime_detail_scroll _) | Some (Runtime_params_scroll _)
          | Some (System_log_detail_scroll _) | Some (Planning_confirmation_scroll (_, _))
-         | Some (Planning_detail_scroll _) | Some (Lane_run_detail_scroll _)
+         | Some (Planning_detail_scroll _) | Some (Planning_list_page_rows _) | Some (Lane_run_detail_scroll _)
          | Some (Changes_diff_scroll _) | Some (Repository_changes_diff_scroll _)
          | Some (Resource_scroll _) | Some (Metrics_scroll _) | Some (Approval_detail_scroll _)
          | Some (Patch_modal_scroll (_, _)) | Some (Link_modal_scroll _)
@@ -31325,7 +31325,10 @@ and is loaded on demand through keeper_skill.
            move_list_to_edge state ~to_bottom:(key = Some "end")
        | Some ("pageup" | "pagedown") ->
            let page =
-             if state.view = Repositories then
+             if state.view = Planning && state.planning_mode = Planning_list
+                && not (Masc_tui_overview_tasks.is_focused state.task_focus)
+             then state.planning_list_page_rows
+             else if state.view = Repositories then
                let _, cols = get_terminal_size () in
                Masc_tui_render.repository_studio_content_height state ~cols
                  ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))

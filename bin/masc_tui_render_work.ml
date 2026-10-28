@@ -406,7 +406,8 @@ let planning_next_step (goal : planning_goal) =
 (* The line under the list, for the goal the cursor is on. A verdict without its
    reason is a colour and nothing else; the reason is what the judge produced
    and the only thing that says what to do next. *)
-let planning_proof_detail (goal : planning_goal) =
+let planning_proof_detail ~ko (goal : planning_goal) =
+  let text korean english = if ko then korean else english in
   match goal.pg_verifier_unreconciled with
   | Some blocked ->
     (* The judge's last word is not what holds this goal: the latest verifier
@@ -414,44 +415,48 @@ let planning_proof_detail (goal : planning_goal) =
     Some
       ( Theme.bad ()
       , Printf.sprintf "%s: %s"
-          (Planning_detail.unreconciled_heading blocked.vu_step)
+          (if ko then match blocked.vu_step with
+           | Goal_reconcile_step.Reconcile_proof -> "검증기가 확정 증거를 적용하지 못함"
+           | Goal_reconcile_step.Rearm_proof -> "검증기가 요청을 다시 준비하지 못함"
+           | Goal_reconcile_step.Read_original -> "검증기가 보존된 요청을 읽지 못함"
+           else Planning_detail.unreconciled_heading blocked.vu_step)
           (Terminal_text.single_line blocked.vu_detail) )
   | None ->
   match goal.pg_proof with
-  | Tui_decode.Proof_proven None -> Some ((Theme.ok ()), "proven")
+  | Tui_decode.Proof_proven None -> Some ((Theme.ok ()), text "검증 통과" "proven")
   | Tui_decode.Proof_proven (Some evidence) ->
-      Some ((Theme.ok ()), "proven: " ^ Terminal_text.single_line evidence)
-  | Tui_decode.Proof_refuted None -> Some ((Theme.bad ()), "refused")
+      Some ((Theme.ok ()), text "검증 통과: " "proven: " ^ Terminal_text.single_line evidence)
+  | Tui_decode.Proof_refuted None -> Some ((Theme.bad ()), text "검증 거절" "refused")
   | Tui_decode.Proof_refuted (Some reason) ->
-      Some ((Theme.bad ()), "refused: " ^ Terminal_text.single_line reason)
-  | Tui_decode.Proof_pending -> Some ((Theme.warn ()), "waiting for the completion judge")
+      Some ((Theme.bad ()), text "검증 거절: " "refused: " ^ Terminal_text.single_line reason)
+  | Tui_decode.Proof_pending -> Some ((Theme.warn ()), text "완료 판정 대기" "waiting for the completion judge")
   | Tui_decode.Proof_stale _ ->
-      Some ((Theme.warn ()), "criterion changed; previous proof is historical")
+      Some ((Theme.warn ()), text "기준 변경 · 이전 증거는 이력" "criterion changed; previous proof is historical")
   | Tui_decode.Proof_unreadable None ->
-      Some ((Theme.warn ()), "verification ledger unreadable")
+      Some ((Theme.warn ()), text "검증 기록 읽기 실패" "verification ledger unreadable")
   | Tui_decode.Proof_unreadable (Some detail) ->
-      Some ((Theme.warn ()), "verification ledger unreadable: " ^ Terminal_text.single_line detail)
+      Some ((Theme.warn ()), text "검증 기록 읽기 실패: " "verification ledger unreadable: " ^ Terminal_text.single_line detail)
   | Tui_decode.Proof_idle ->
       (* Nothing from the judge. A keeper's own note is the next best thing the
          row has to say, and it is what the operator wrote there to be read. *)
       Option.map
-        (fun note -> (Ansi.dim, "note: " ^ note))
+        (fun note -> (Ansi.dim, text "메모: " "note: " ^ note))
         (Terminal_text.optional_single_line goal.pg_last_review_note)
 ;;
 
-let planning_selected_detail (goal : planning_goal) =
+let planning_selected_detail ~ko (goal : planning_goal) =
   let metric =
     match
       Terminal_text.optional_single_line goal.pg_metric,
       Terminal_text.optional_single_line goal.pg_target_value
     with
     | Some name, Some target ->
-        Printf.sprintf "metric: %s \xe2\x86\x92 %s" name target
-    | Some name, None -> "metric: " ^ name
-    | None, Some target -> "target: " ^ target
-    | None, None -> "metric: \xe2\x80\x94"
+        Printf.sprintf (if ko then "지표: %s → %s" else "metric: %s → %s") name target
+    | Some name, None -> (if ko then "지표: " else "metric: ") ^ name
+    | None, Some target -> (if ko then "목표값: " else "target: ") ^ target
+    | None, None -> if ko then "지표: —" else "metric: —"
   in
-  match planning_proof_detail goal with
+  match planning_proof_detail ~ko goal with
   | None -> Ansi.dim, Printf.sprintf "%s \xc2\xb7 %s" goal.pg_id metric
   | Some (colour, proof) ->
       colour,
@@ -484,10 +489,11 @@ let planning_updated_age ~now (goal : planning_goal) =
    warning outside the scrollable proof body so proof presentation indices
    still refer to the same body rows. Header and viewport use the same rows. *)
 let planning_stale_notice_rows (state : state) ~cols =
+  let ko = state.ui_language = Lang_ko in
   let notice = match state.workspace_identity, state.planning_error with
-    | Workspace_identity_match_unconfirmed detail, _ -> Some ("Workspace unconfirmed", detail)
+    | Workspace_identity_match_unconfirmed detail, _ -> Some ((if ko then "워크스페이스 미확인" else "Workspace unconfirmed"), detail)
     | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _), Some error ->
-        Some ("Refresh failed", error)
+        Some ((if ko then "새로고침 실패" else "Refresh failed"), error)
     | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _), None -> None
   in
   match state.planning, notice with
@@ -495,7 +501,7 @@ let planning_stale_notice_rows (state : state) ~cols =
       let width = max 1 (framed_inner_width cols - 2) in
       let rows text = Message_layout.wrap_words ~max_cells:width text
         |> List.map (fun line -> Theme.warn () ^ "  " ^ line ^ Ansi.reset) in
-      rows (status ^ " · showing snapshot "
+      rows (status ^ (if ko then " · 표시 중인 스냅샷 " else " · showing snapshot ")
         ^ Terminal_text.single_line snapshot.pl_generated_at)
       @ (match Terminal_text.optional_single_line (Some error) with
          | None -> []
@@ -586,10 +592,14 @@ let planning_compact_summary ~cols (state : state) (p : planning_snapshot) =
   let clauses =
     [ if ko then "b:전체 요약" else "b:full summary"
     ; Printf.sprintf (if ko then "목표 %d" else "%d goals") total
-    ; Printf.sprintf (if ko then "완료 단계 %d" else "%d in completed phase") r.pr_done
     ]
+    @ (if r.pr_awaiting_confirmation = 0 then [] else
+         [Printf.sprintf (if ko then "확인 대기 %d" else "%d awaiting confirmation") r.pr_awaiting_confirmation])
     @ (if r.pr_blocked = 0 then [] else
          [Printf.sprintf (if ko then "막힘 %d" else "%d blocked") r.pr_blocked])
+    @ (if r.pr_verifying = 0 then [] else
+         [Printf.sprintf (if ko then "검증 중 %d" else "%d verifying") r.pr_verifying])
+    @ [Printf.sprintf (if ko then "완료 단계 %d" else "%d in completed phase") r.pr_done]
     @ (if p.pl_goal_history = [] then [] else
          [Printf.sprintf (if ko then "목록 밖 %d" else "%d no longer listed") (List.length p.pl_goal_history)])
   in
@@ -601,6 +611,7 @@ let planning_compact_summary ~cols (state : state) (p : planning_snapshot) =
 let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let ko = state.ui_language = Lang_ko in
+  let list_page_rows = ref 1 in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -619,7 +630,7 @@ let render_planning_list (state : state) =
         | Planning_sort_updated -> "최근 갱신"
         | Planning_sort_due -> "기한" in
       let filter = match state.planning_filter with
-        | Planning_filter_all -> "전체" | Planning_filter_active -> "진행 중"
+        | Planning_filter_all -> "전체" | Planning_filter_active -> "미종결"
         | Planning_filter_completed -> "완료" | Planning_filter_dropped -> "중단" in
       Printf.sprintf "정렬:%s  필터:%s" sort filter
     else Printf.sprintf "sort:%s  filter:%s"
@@ -729,6 +740,7 @@ let render_planning_list (state : state) =
              goal_layout.Masc_tui_table.shown
          then
            Masc_tui_planning_proof_mark.legend_rows
+             ~ko
              ~max_cells:(framed_inner_width cols)
              ~max_rows:(rows - count_frame_lines buf - rows_after_legend)
              (List.map (fun (g : planning_goal) -> g.pg_proof) goals)
@@ -773,6 +785,7 @@ let render_planning_list (state : state) =
              Masc_tui_scroll.content_height ~rows:content_height ~chrome:0
                ~count ~preview_keep:None ~overflow_takes_row:true
          in
+         list_page_rows := max 1 list_rows;
          let overflowing = content_height > 1 && count > list_rows in
          let scroll_offset =
            if list_rows = 0 then 0
@@ -852,11 +865,24 @@ let render_planning_list (state : state) =
                           | Types_core.Cancelled _ -> false)
                     in
                     let total = List.length linked in
+                    let with_activity activity ~ko_word ~en_word =
+                      let full =
+                        if ko then Printf.sprintf "%d열림 %d%s" total activity ko_word
+                        else Printf.sprintf "%d open %d %s" total activity en_word in
+                      if Message_layout.display_width full <= Render_schedule.planning_open_width then full
+                      else
+                        let short = if ko then Printf.sprintf "%s %d" ko_word activity
+                          else Printf.sprintf "%s %d" en_word activity in
+                        if Message_layout.display_width short <= Render_schedule.planning_open_width then short
+                        else if ko then ko_word ^ " 있음" else en_word ^ " present" in
                     if awaiting > 0 then
-                      Printf.sprintf "%d open %d ver" total awaiting, (Theme.warn ())
+                      with_activity awaiting ~ko_word:"검증" ~en_word:"ver", (Theme.warn ())
                     else if running > 0 then
-                      Printf.sprintf "%d open %d run" total running, (Theme.info ())
-                    else Printf.sprintf "%d open" total, Ansi.dim
+                      with_activity running ~ko_word:"진행" ~en_word:"run", (Theme.info ())
+                    else
+                      let open_only = Printf.sprintf (if ko then "%d열림" else "%d open") total in
+                      (if Message_layout.display_width open_only <= Render_schedule.planning_open_width then open_only
+                       else if ko then "열린 작업 있음" else "open tasks"), Ansi.dim
              in
              let priority_style =
                match g.pg_priority with
@@ -893,14 +919,15 @@ let render_planning_list (state : state) =
          match List.nth_opt goals state.planning_cursor with
          | None -> box_empty buf cols
          | Some selected ->
-             let colour, text = planning_selected_detail selected in
+             let colour, text = planning_selected_detail ~ko selected in
              box_line buf cols
                (colour ^ "  " ^ Terminal_text.single_line text ^ Ansi.reset)
        end);
 
   Buffer.add_buffer buf tail;
 
-  finish_surface state ~surface_key:"planning-list" ~rows:terminal_rows
+  finish_surface state ~clamped:(Planning_list_page_rows !list_page_rows)
+      ~surface_key:"planning-list" ~rows:terminal_rows
       ~cols buf
 
 let planning_measurement_lines (state : state) (goal : planning_goal) =

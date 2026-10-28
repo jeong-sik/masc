@@ -135,6 +135,7 @@ let clamped_scroll_now (state : state) = function
   | System_log_detail_scroll _ ->
       System_log_detail_scroll (system_logs_page state).lp_detail_scroll
   | Planning_detail_scroll _ | Planning_confirmation_scroll _ -> Planning_detail_scroll state.planning_scroll
+  | Planning_list_page_rows _ -> Planning_list_page_rows state.planning_list_page_rows
   | Lane_run_detail_scroll _ ->
       Lane_run_detail_scroll
         { scroll = state.lane_run_detail_scroll;
@@ -216,7 +217,7 @@ let reader_after_wheel (reader : clamped_scroll)
   (* Logs use their own bounded Metrics_tail movement through the key path. *)
   | Keeper_logs_scroll _ -> None
   (* List scrolls: the notch moves the list's cursor as the arrow does. *)
-  | Acting _ | Acting_selection _ | Keeper_list_scroll _ -> None
+  | Acting _ | Acting_selection _ | Keeper_list_scroll _ | Planning_list_page_rows _ -> None
   (* Resources has panes of its own that [h] and [l] move between. *)
   | Resource_scroll _ -> None
 

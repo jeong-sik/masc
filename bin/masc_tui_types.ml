@@ -10546,7 +10546,7 @@ let withdraw_queue_panel_server_selection panel =
 let queue_panel_selection_note ~items panel =
   match queue_panel_selected_id ~items panel with
   | Some (Masc_tui_queue_inspection.Server_message _) ->
-      Some "Message priority waits for the current turn"
+      Some "Message priority does not interrupt the current turn"
   | Some (Masc_tui_queue_inspection.Event _) ->
       Some "Event urgency is not exact ordering"
   | Some (Masc_tui_queue_inspection.Local_message _ | Running_message _ | Schedule _)

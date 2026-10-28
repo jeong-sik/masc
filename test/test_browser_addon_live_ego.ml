@@ -278,9 +278,26 @@ def run(script,answer):
         answer({'urlBefore':'https://fixture.test/','receipt':{},'error':None,'pointerReleased':True,
             'tab':{'url':'https://fixture.test/','title':'Fixture'}})
     elif step=='page.native_workflow':
+        if mode=='recovery':
+            assert args['label']=='p1' and args['tabId']==1
+            selector=args['steps'][0]['selector']
+            with open(root/'recovery-inputs','a') as log:log.write(selector+'\n')
+            completed=[{'index':0,'method':'click','receipt':{}}]
+            if selector=='#dialog':
+                dialog={'type':'alert','message':'check'}
+                completed[0]['receipt']={'dialog':dialog}
+                answer({'completed':completed,'effectStarted':True,'completedEffect':True,'inputReleased':False,
+                    'failure':{'index':0,'method':'click','message':'answer dialog','dialog':dialog}})
+            else:
+                assert selector=='#continue'
+                answer({'completed':completed,'effectStarted':True,'completedEffect':True,'inputReleased':True,'failure':None,
+                    'urlBefore':'https://fixture.test/','url':'https://fixture.test/','title':'Fixture',
+                    'snapshot':'root','truncated':False,'chars':4})
+            return
         time.sleep(0.03)
         answer({'completed':[],'effectStarted':False,'completedEffect':False,'inputReleased':True,'failure':None,
             'urlBefore':'https://fixture.test/','url':'https://fixture.test/','title':'Fixture','snapshot':'root','truncated':False,'chars':4})
+    elif step=='page.dialog':answer({'dialog':{'type':'alert','message':'check'}})
     elif step=='page.activate':
         answer({'spaceId':51,'label':'p1','targetId':'T1','urlBefore':'https://fixture.test/',
             'url':'https://fixture.test/','title':'Fixture','active':True,
@@ -394,6 +411,52 @@ let scenario mode =
           check bool "within the SDK stop grace" true (Eio.Time.now clock -. started < 10.);
           check bool "retirement preserves the task" false (finished ());
           ignore (Eio.Promise.await_exn reading))
+        else if mode = "recovery" then (
+          let field=Yojson.Safe.Util.member in
+          let workflow selector=B.Page_native_workflow (ok (B.Native_workflow.of_json (`Assoc [
+            "tabId",`Int 1;"expectedUrl",`String "https://fixture.test/";"maxChars",`Int 1000;
+            "steps",`List [`Assoc ["method",`String "click";"selector",`String selector]]]))) in
+          let first=answered (issue (workflow "#dialog")) in
+          check bool "original dialog input retains its partial outcome" true
+            (field "ok" first=`Bool false && field "effectPhase" first=`String "partial");
+          ignore(answered (issue (B.Page_act (B.Action.On_tab {tab_id=1;frame_path=[];
+            interaction=B.Action.Accept_dialog None}))));
+          let blocked=answered (issue (workflow "#continue")) in
+          check bool "answering the dialog does not invent input release proof" true
+            (field "ok" blocked=`Bool false && field "effectPhase" blocked=`String "not_started");
+          let private_call action arguments=ok (Owner.operator owner
+            (`Assoc ["action",`String action;"arguments",arguments])) in
+          let view=private_call "view" (`Assoc []) in
+          let action=match field "actions" view with
+            | `List [action] -> action | _ -> fail "original worker has no pending-input operator form" in
+          let arguments=field "arguments" action in
+          check bool "attached worker form binds its original live client and Space" true
+            (field "clientId" arguments=`String (B.client_id_to_string client.client_id)
+              && field "spaceId" arguments=`String "51");
+          let before=lines (Filename.concat root "steps") in
+          let replace key value=match arguments with
+            | `Assoc fields -> `Assoc ((key,`String value)::List.remove_assoc key fields)
+            | _ -> fail "operator form arguments must be an object" in
+          List.iter (fun arguments -> check bool "worker form rejects stale or foreign confirmation" true
+            (field "outcome" (private_call "assert_input_reset" arguments)=`String "not_applied"))
+            [replace "clientId" "another-client";replace "spaceId" "52";
+             replace "generation" "stale";replace "confirmation" "go"];
+          check bool "actual attached worker applies the exact operator assertion" true
+            (field "outcome" (private_call "assert_input_reset" arguments)=`String "operator_asserted");
+          check (list string) "private form and reset send no SDK commands" before
+            (lines (Filename.concat root "steps"));
+          let continued=answered (issue (workflow "#continue")) in
+          let data=field "data" continued in
+          check bool "same worker completes a distinct normal click after reset" true
+            (field "ok" continued=`Bool true && field "tabId" data=`Int 1
+              && field "inputReleased" data=`Bool true && field "completedEffect" data=`Bool true);
+          let settled=private_call "view" (`Assoc []) in
+          check bool "new input settles the attached Peer without another confirmation" true
+            (field "actions" settled=`List []);
+          check (list string) "original input was never replayed" ["#dialog";"#continue"]
+            (lines (Filename.concat root "recovery-inputs"));
+          ignore(answered (issue (B.Page_act (B.Action.Control (B.Action.Finish_space [])))));
+          check bool "completed recovery fixture retires cleanly" true (dispatch W.Retire=W.Receipt))
         else (
         let shot = answered (issue (B.Page_capture {tab_id=1;options=None})) in
         check string "the screenshot" (Base64.encode_string "\137PNG\r\n\026\nfixture")
@@ -477,8 +540,8 @@ let scenario mode =
       let failure = try Ego.run ~env ~owner ~downloads:(Broker.downloads_directory ~directory:root) {command; space=Browser_configuration.Named_space "masc"} work; None with
         | Invalid_argument detail | Sys_error detail -> Some detail in
       (match mode, failure with
-       | ("normal" | "retained" | "late" | "retire"), None -> ()
-       | ("normal" | "retained" | "late" | "retire"), Some detail -> failf "the connection failed: %s" detail
+       | ("normal" | "retained" | "late" | "retire" | "recovery"), None -> ()
+       | ("normal" | "retained" | "late" | "retire" | "recovery"), Some detail -> failf "the connection failed: %s" detail
        | ("no-version" | "in-use"), Some detail ->
          check bool "says why" true
            (String_util.contains_substring detail (if mode = "in-use" then "EGO_TASK_SPACE_NAME_IN_USE" else "not signed in"))
@@ -489,6 +552,12 @@ let scenario mode =
     let processes = List.length (lines (Filename.concat root "processes")) in
     check (array string) "nothing is left of the screenshot directory" [||] (Sys.readdir temporary);
     match mode with
+    | "recovery" ->
+      check bool "recovery caller work ran" true !entered;
+      check int "same session process handles recovery and resumed input" 1 processes;
+      check int "only original and new input reached the SDK workflow" 2
+        (List.length (List.filter (String.equal "page.native_workflow") steps));
+      check int "dialog was answered once" 1 (List.length (List.filter (String.equal "page.dialog") steps))
     | "normal"|"retained" ->
       check bool "caller work ran" true !entered;
       let dispatched name = List.length (List.filter (String.equal name) steps) in
@@ -540,6 +609,7 @@ let () =
       test_case "a start on a cancelled connection starts nothing" `Quick test_a_start_on_a_cancelled_connection_starts_nothing;
       test_case "explicit completion permits worker file cleanup" `Quick (child "normal");
       test_case "retirement preserves Space and browser-backed files" `Quick (child "retained");
+      test_case "attached worker operator reset resumes real input without replay" `Quick (child "recovery");
       test_case "a result delivered after the caller stopped waiting does not end the connection" `Quick (child "late");
       test_case "retirement stops a running command and preserves the Space" `Quick (child "retire");
       test_case "an ego that names no version fails the start" `Quick (child "no-version");

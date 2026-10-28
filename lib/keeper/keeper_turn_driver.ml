@@ -3164,10 +3164,10 @@ let run_named
           let request_serialized = ref false in
           let on_request_wire_observation =
             Some
-              (fun ~runtime_id ~body_bytes ~serialized ->
+              (fun ~runtime_id ~body_bytes ~serialized ~projected_messages ->
                  request_serialized := true;
                  Option.iter
-                   (fun observe -> observe ~runtime_id ~body_bytes ~serialized)
+                   (fun observe -> observe ~runtime_id ~body_bytes ~serialized ~projected_messages)
                    on_request_wire_observation)
           in
           let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx =

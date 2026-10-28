@@ -278,6 +278,11 @@ type attempt_input =
     publication and official-session ownership after admission, before provider
     effects. Its typed reference distinguishes these capabilities. A
     direct-native binding cannot be replaced by this owner callback.
+    [on_request_wire_observation] reports the Agent Core lane's final
+    successful projection together with the serialization observation. The
+    messages are serializer input, not provider-specific wire bytes or proof
+    of delivery. [None] means no matching projection was observed.
+
     This is not a nested Agent-call entry point. *)
 val run_named :
   ?input_policy:Keeper_input_policy.t ->
@@ -329,6 +334,7 @@ val run_named :
     (runtime_id:string ->
      body_bytes:int ->
      serialized:Llm_provider.Request_wire_observer.observation option ->
+     projected_messages:Agent_core.Types.message list option ->
      unit) ->
   ?on_request_attribution:
     (runtime_id:string ->

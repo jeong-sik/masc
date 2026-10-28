@@ -15,8 +15,10 @@ let rec remove path =
 
 let start_context_refusal_server ~sw ~net =
   let requests = Atomic.make 0 in
+  let bodies = ref [] in
   let callback _connection _request body =
-    ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) : string);
+    let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    bodies := body :: !bodies;
     ignore (Atomic.fetch_and_add requests 1 : int);
     Cohttp_eio.Server.respond_string ~status:`OK
       ~body:{|{"id":"fixture-overflow","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"model_context_window_exceeded"}],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}|} ()
@@ -28,7 +30,7 @@ let start_context_refusal_server ~sw ~net =
   let server = Cohttp_eio.Server.make ~callback () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     Cohttp_eio.Server.run socket server ~on_error:(fun error -> raise error));
-  Printf.sprintf "http://127.0.0.1:%d" port, requests
+  Printf.sprintf "http://127.0.0.1:%d" port, requests, bodies
 
 let test_a_large_request_reaches_the_peer_and_a_refusal_moves_the_lane () =
   Eio_main.run @@ fun env ->
@@ -102,6 +104,8 @@ streaming = false
    | Ok _ -> fail "expected exactly one projected runtime"
    | Error detail -> fail detail);
   let observations = ref [] in
+  let projected_requests = ref [] in
+  let projection_count = ref 0 in
   let model_input_windows = ref 0 in
   let response_observed_model_inputs = ref [] in
   let attempt_errors = ref [] in
@@ -110,6 +114,10 @@ streaming = false
       ~system_prompt:"No body gate fixture."
       ~runtime_id ~keeper_name:"no-body-gate-proof" ~base_path
       ~agent_core_tools:[] ~goal ~sw ~net:env#net
+      ~model_input_projection:(fun messages ->
+        incr projection_count;
+        Ok (messages @ [Agent_core.Types.user_msg
+          (Printf.sprintf "projection-fixture-%d" !projection_count)]))
       ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ ~dispatch:_ error ->
         attempt_errors := (runtime_id, error) :: !attempt_errors)
       ~on_model_input_window_observation:(fun ~measurement:_ _ ->
@@ -117,8 +125,9 @@ streaming = false
       ~on_response_observed_model_input:(fun observed ->
         response_observed_model_inputs :=
           observed :: !response_observed_model_inputs)
-      ~on_request_wire_observation:(fun ~runtime_id:_ ~body_bytes ~serialized ->
-        observations := (body_bytes, Option.is_some serialized) :: !observations)
+      ~on_request_wire_observation:(fun ~runtime_id ~body_bytes ~serialized ~projected_messages ->
+        observations := (body_bytes, Option.is_some serialized) :: !observations;
+        projected_requests := (runtime_id, projected_messages) :: !projected_requests)
       ()
   in
   let succeed goal = match run goal with
@@ -141,7 +150,7 @@ streaming = false
   check int "a short request reaches the peer too" 2 (Exact_output_fixture.post_count server);
   check int "the second response certifies its window" 2
     (List.length !response_observed_model_inputs);
-  let refused_url, refused_requests = start_context_refusal_server ~sw ~net:env#net in
+  let refused_url, refused_requests, refused_bodies = start_context_refusal_server ~sw ~net:env#net in
   let recovery_config = config_text ^ Printf.sprintf {|
 [providers.overflow]
 protocol = "openai-compatible-http"
@@ -163,6 +172,30 @@ candidates = ["overflow.sample", "fixture.sample"]
     (Exact_output_fixture.post_count server);
   check int "the typed refusal did not certify its attempted window" 3
     (List.length !response_observed_model_inputs);
+  (match !projected_requests with
+   | ("fixture.sample", Some accepted) :: ("overflow.sample", Some refused) :: _ ->
+     List.iter (fun messages ->
+       check bool "each lane's serialized request carries the current input" true
+         (List.exists (fun message ->
+           String_util.contains_substring (Agent_core.Types.text_of_message message) "recover") messages))
+       [refused; accepted];
+     let marker messages = match List.rev messages with
+       | message :: _ -> Agent_core.Types.text_of_message message
+       | [] -> fail "final projection has no marker" in
+     let refused_marker = marker refused and accepted_marker = marker accepted in
+     check bool "different attempts have different projections" true
+       (refused_marker <> accepted_marker);
+     let refused_body = match !refused_bodies with
+       | [body] -> body | [] | _ :: _ :: _ -> fail "expected one refused request body" in
+     let accepted_body = match List.rev (Exact_output_fixture.request_bodies server) with
+       | body :: _ -> body | [] -> fail "accepted request body absent" in
+     check bool "refused body matches only the refused projection" true
+       (String_util.contains_substring refused_body refused_marker &&
+        not (String_util.contains_substring refused_body accepted_marker));
+     check bool "accepted body matches only the accepted projection" true
+       (String_util.contains_substring accepted_body accepted_marker &&
+        not (String_util.contains_substring accepted_body refused_marker))
+   | _ -> fail "each serialized lane must report its own final projection");
   match !response_observed_model_inputs with
   | latest :: _ ->
     check string "the fallback response names its own runtime"

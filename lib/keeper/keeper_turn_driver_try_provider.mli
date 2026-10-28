@@ -419,6 +419,7 @@ type try_provider_ctx =
       (runtime_id:string ->
        body_bytes:int ->
        serialized:Llm_provider.Request_wire_observer.observation option ->
+       projected_messages:Agent_core.Types.message list option ->
        unit)
         option
   ; on_model_input_window_observation :

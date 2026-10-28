@@ -519,6 +519,7 @@ type try_provider_ctx =
       (runtime_id:string ->
        body_bytes:int ->
        serialized:Llm_provider.Request_wire_observer.observation option ->
+       projected_messages:Agent_core.Types.message list option ->
        unit)
         option
   ; on_model_input_window_observation :
@@ -2115,6 +2116,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
   let observed_provider_turn_ordinal = ref None in
   let saved_provider_turn_ordinal = ref None in
   let retained_results_projected = ref false in
+  let final_projected_messages = ref None in
   let capture_provider_ordinal (config : Runtime_agent.config) =
     let capture = { Agent_core.Hooks.empty with after_turn = Some (function
       | Agent_core.Hooks.AfterTurn { turn; _ } ->
@@ -2398,7 +2400,8 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                           ~body_bytes:
                             observation
                               .Llm_provider.Request_wire_observer.body_bytes
-                          ~serialized:(Some observation))
+                          ~serialized:(Some observation)
+                          ~projected_messages:!final_projected_messages)
                      ctx.on_request_wire_observation;
                    Ok ())
           ; raw_trace = ctx.raw_trace
@@ -2454,8 +2457,10 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
       { config with
         model_input_projection =
           Some
-            (fun messages -> Result.map (fun messages ->
-               match retained_message with
+            (fun messages ->
+              final_projected_messages := None;
+              Result.map (fun messages ->
+               let messages = match retained_message with
                | None -> messages
                | Some message ->
                  retained_results_projected := true;
@@ -2469,7 +2474,9 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                  state.request_range := Option.map (fun range ->
                    {range with Keeper_continuity_request.custom_projection_changed=true}) !(state.request_range);
                  List.filter (fun message -> not (Keeper_client_tool_outbox.is_context_message message))
-                   messages @ [message]) (project messages))
+                   messages @ [message] in
+               final_projected_messages := Some messages;
+               messages) (project messages))
       }
     in
     (* Explicit stream stall detection is handled by AGENT_CORE's

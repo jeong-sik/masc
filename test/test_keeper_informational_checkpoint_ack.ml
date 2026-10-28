@@ -6,6 +6,8 @@ let require condition detail = if not condition then failwith detail
 let get render = function Ok value -> value | Error error -> failwith (render error)
 let save path text = Fs_compat.mkdir_p (Filename.dirname path); Fs_compat.save_file path text
 let keeper_name = "informational-checkpoint-probe"
+let retained_marker = "retained-response-26165"
+let unread_trace = "trace-unread-source-26165"
 
 let initialize_runtime ~base_path (server : Exact_output_fixture.test_server) =
   let model_id = "informational-protocol-fixture" in
@@ -112,12 +114,66 @@ let check_delivery_journal config meta =
      Compare it with the production journal's sealed serialization witness. *)
   let body = Fs_compat.load_file (captured_request_path config) in
   check_sources_visible body;
+  require (Astring.String.is_infix ~affix:retained_marker body)
+    "HTTP request omitted the retained result";
+  require (Astring.String.is_infix ~affix:unread_trace body)
+    "HTTP request omitted the unread evidence";
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
   let record = match Dated_jsonl.read_recent_result store 1 |> get Dated_jsonl.read_error_to_string with
     | [Dated_jsonl.Parsed row] -> Turn_record.of_json row |> get Fun.id
     | [] | _::_ -> failwith "one strict actual TurnRecord is required" in
   require (record.trace_id=Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id)
     "delivery record belongs to a different trace";
+  let manifest = Keeper_provider_input_snapshot.read_manifest
+    ~config ~keeper:keeper_name ~turn_ref:record.turn_ref
+    |> get Keeper_provider_input_snapshot.read_error_to_string in
+  (match record.request_wire_observation with
+   | Some observation ->
+     require (manifest.mf_snapshot.runtime_profile=observation.runtime_profile)
+       "provider-input snapshot belongs to another runtime"
+   | None -> failwith "wire runtime observation is absent");
+  require (manifest.mf_snapshot.wire.body_bytes=String.length body &&
+    manifest.mf_snapshot.wire.body_sha256=Agent_core_sha256.(digest_string body |> to_hex))
+    "provider-input snapshot is bound to another HTTP request";
+  let messages = List.filter_map (fun (part : Keeper_provider_input_snapshot.part) ->
+    match part.part_kind with
+    | Keeper_provider_input_snapshot.Message {role} ->
+      let content = Keeper_provider_input_snapshot.read_part
+        ~config ~keeper:keeper_name ~turn_ref:record.turn_ref ~index:part.part_index
+        |> get Keeper_provider_input_snapshot.read_error_to_string in
+      Some (role, content.pc_text)
+    | System_prompt | Tool_schema _ -> None) manifest.mf_parts in
+  let find marker = List.filter (fun (_,text) ->
+    Astring.String.is_infix ~affix:marker text) messages in
+  let retained_text = match find retained_marker with
+    | [("system", text)] -> text
+    | [] | _::_ -> failwith "snapshot lacks the single retained system message" in
+  (match find unread_trace with
+   | [("user", _)] -> ()
+   | [] | _::_ -> failwith "snapshot lacks the single unread user message");
+  let retained_content_bytes = Yojson.Safe.Util.(
+    Yojson.Safe.from_string retained_text |> member "content_blocks" |> to_list
+    |> List.fold_left (fun sum block -> sum + String.length (block |> member "text" |> to_string)) 0) in
+  let components = match record.input_components with
+    | Some components -> components | None -> failwith "input attribution missing" in
+  let text_bytes_for wanted_role = List.fold_left (fun total (role,text) ->
+    let json = Yojson.Safe.from_string text in
+    if role<>wanted_role || Yojson.Safe.Util.member "origin" json=`String "system_context" then total
+    else Yojson.Safe.Util.(json |> member "content_blocks" |> to_list
+      |> List.fold_left (fun sum block ->
+        match member "type" block with
+        | `String "text" -> sum + String.length
+            (Inference_utils.sanitize_text_utf8 (block |> member "text" |> to_string))
+        | _ -> sum) total)) 0 messages in
+  let system_bytes = text_bytes_for "system" in
+  require (system_bytes >= retained_content_bytes &&
+    List.exists (fun (component : Turn_record.input_component) ->
+      component.component=Turn_record.Message_system && component.bytes=system_bytes)
+      components) "input attribution omitted retained-result bytes";
+  let user_bytes = text_bytes_for "user" in
+  require (List.exists (fun (component : Turn_record.input_component) ->
+    component.component=Turn_record.Message_user && component.bytes=user_bytes)
+    components) "input attribution omitted unread-message bytes";
   let observation = match record.request_observations with
     | [observation] -> observation
     | [] | _::_ -> failwith "expected one native request observation" in
@@ -228,6 +284,24 @@ data: [DONE]
   ignore (Keeper_owner_registry.install_from_store ~sw ~operation_runner:(Some operation_runner)
     ~on_turn_slot_released:None config |> get Keeper_owner_registry.install_error_to_string);
   let meta, registry_entry = install_keeper config keeper_name in
+  Keeper_client_tool_outbox.retain ~base_path ~keeper_name
+    { thread_id="prior-thread-26165"; turn_id="prior-turn-26165";
+      call_id="prior-call-26165"; tool_name="fixture-tool";
+      arguments=`Assoc []; response=`Assoc ["content", `String retained_marker] }
+    |> get Fun.id;
+  let unread = Keeper_librarian_unread.for_official_turn
+    ~turn_ref:(Ids.Turn_ref.make ~trace_id:unread_trace ~absolute_turn:1)
+    ~boundary_line:1 ~message_in_turn:0
+    ~messages:[Agent_core.Types.user_msg "unread source"]
+    ~reasons:[Keeper_librarian_input_refusal.Input_capacity] |> get Fun.id in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id:keeper_name
+    (fun () ->
+      let ledger = Keeper_memory_os_current.unread_ledger_path ~keepers_dir ~keeper_id:keeper_name in
+      Fs_compat.save_file_atomic_strict ledger
+        (Yojson.Safe.to_string (`Assoc ["schema_version", `Int 1;
+          "unread_messages", Keeper_librarian_unread.list_to_json [unread]])))
+    |> get Fun.id;
   Eio.Switch.on_release sw (fun () ->
     Keeper_turn_sandbox_runtime.teardown_keeper_sandbox
       ~timeout_sec:Exact_output_fixture.fixture_wait_seconds ~config ~meta () |> get Fun.id);

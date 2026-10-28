@@ -1137,6 +1137,7 @@ let memory_overview_reading ~cols (state : state) =
             keeper.mkh_alerts) snapshot.mhs_keepers
   in
   Masc_tui_detail_reading.create
+    ~ko
     ~title:(if ko then "메모리 관측 상세" else "Memory observation details")
     ([section (if ko then "전체 메모리" else "Fleet memory")
         (observed @ memory_fleet_header_rows ~cols state)]

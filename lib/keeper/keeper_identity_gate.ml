@@ -7,19 +7,54 @@ open Result.Syntax
 
 let gate_operation = Keeper_gate.identity_call_gate_operation
 
-let gate_input ~provider_id ~remote_name ~arguments =
+(* The declaration snapshot is ordered and versioned. Only its fingerprint
+   is persisted, so neither URLs with private query values nor OAuth parameters
+   are copied into approval records. Credential contents are intentionally not
+   included: their account identity requires a separate provider capability. *)
+let provider_authority_sha256 (provider : Provider.t) =
+  let credential_source =
+    match provider.Provider.credential_source with
+    | Provider.Oauth_exchange -> `Assoc [ "type", `String "oauth_exchange" ]
+    | Provider.Github_cli { hostname } ->
+      `Assoc [ "type", `String "github_cli"; "hostname", `String hostname ]
+  in
+  let authority = `Assoc
+    [ "version", `Int 1
+    ; "id", `String provider.id
+    ; "mcp_url", `String provider.mcp_url
+    ; "client_group", `String provider.client_group
+    ; "credential_source", credential_source
+    ; "access_token_env", `String provider.access_token_env
+    ; "expires_at_env", `String provider.expires_at_env
+    ; "refresh_token_file", `String provider.refresh_token_file
+    ; "renew_before_sec", `Int provider.renew_before_sec
+    ; "authorize_params", `List
+        (provider.authorize_params
+         |> List.sort compare
+         |> List.map (fun (key, value) -> `List [ `String key; `String value ]))
+    ] in
+  Agent_core_sha256.(authority |> Yojson.Safe.to_string |> digest_string |> to_hex)
+;;
+
+let gate_input ~provider ~remote_name ~arguments ~input_schema ~read_only =
   `Assoc
-    [ "provider_id", `String provider_id
+    [ "provider_id", `String provider.Provider.id
+    ; "provider_authority_sha256", `String (provider_authority_sha256 provider)
     ; "remote_name", `String remote_name
     ; "arguments", arguments
+    ; "input_schema", input_schema
+    ; "read_only", (match read_only with Some value -> `Bool value | None -> `Null)
     ]
 ;;
 
 type replay_call = {
   input : Yojson.Safe.t;
   provider_id : string;
+  provider_authority_sha256 : string option;
   remote_name : string;
   arguments : Yojson.Safe.t;
+  input_schema : Yojson.Safe.t option;
+  read_only : bool option;
 }
 
 let replay_of_gate_input input =
@@ -62,13 +97,52 @@ let replay_of_gate_input input =
   match input with
   | `Assoc fields ->
     let* provider_id = required_string "provider_id" fields in
+    let* provider_authority_sha256 =
+      match field "provider_authority_sha256" fields with
+      | [] -> Ok None
+      | [ `String value ]
+        when String.length value = 64
+             && String.for_all
+                  (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
+                  value -> Ok (Some value)
+      | [ _ ] -> Error "approved identity_call provider_authority_sha256 is invalid"
+      | _ -> Error "approved identity_call repeats provider_authority_sha256"
+    in
     let* remote_name = required_string "remote_name" fields in
     let* arguments = required "arguments" fields in
-    let* () =
-      reject_unknown ~allowed:[ "provider_id"; "remote_name"; "arguments" ] fields
+    let* input_schema =
+      match field "input_schema" fields with
+      | [] -> Ok None
+      | [ value ] -> Ok (Some value)
+      | _ -> Error "approved identity_call repeats input_schema"
     in
-    Ok { input; provider_id; remote_name; arguments }
+    let* read_only =
+      match field "read_only" fields with
+      | [] | [ `Null ] -> Ok None
+      | [ `Bool value ] -> Ok (Some value)
+      | [ _ ] -> Error "approved identity_call read_only must be a boolean or null"
+      | _ -> Error "approved identity_call repeats read_only"
+    in
+    let* () =
+      reject_unknown
+        ~allowed:[ "provider_id"; "provider_authority_sha256"; "remote_name";
+                   "arguments"; "input_schema"; "read_only" ] fields
+    in
+    Ok { input; provider_id; provider_authority_sha256; remote_name; arguments;
+         input_schema; read_only }
   | _ -> Error "approved identity_call input must be an object"
+;;
+
+let validate_replay_provider ~(provider : Provider.t) (call : replay_call) =
+  if not (String.equal provider.id call.provider_id) then
+    Error "the approved provider ID no longer matches; a new approval is required"
+  else
+    match call.input_schema, call.provider_authority_sha256 with
+    | None, _ -> Error "the approval has no tool schema; a new approval is required"
+    | _, None -> Error "the approval has no provider declaration binding; a new approval is required"
+    | Some _, Some fingerprint ->
+      if String.equal fingerprint (provider_authority_sha256 provider) then Ok ()
+      else Error "the provider declaration changed; a new approval is required"
 ;;
 
 (* What an identity_call approval is about, in one line: the provider surface
@@ -143,6 +217,8 @@ let send_call
       ~provider
       ~remote_name
       ~arguments
+      ~input_schema
+      ~read_only
       ()
   =
   match resolve_transports ?transports ?clock () with
@@ -155,6 +231,9 @@ let send_call
       ~provider
       ~remote_name
       ~arguments
+      ~catalog_authority:
+        (Mcp_client.Bound
+           (Option.map (fun input_schema -> { Mcp_client.input_schema; read_only }) input_schema))
       ()
 ;;
 
@@ -177,27 +256,29 @@ let agent_tool
       ~provider:offered.Keeper_identity_tools.provider
       ~remote_name:offered.Keeper_identity_tools.remote_name
       ~arguments
+      ~input_schema:(Some offered.Keeper_identity_tools.remote_input_schema)
+      ~read_only:offered.Keeper_identity_tools.read_only
       ()
   in
   let run_raw arguments =
     Keeper_identity_tools.tool_result_of_call
-      ~read_only:offered.Keeper_identity_tools.read_only
       (send arguments)
   in
   let gated arguments =
-    match offered.Keeper_identity_tools.read_only with
-    (* The provider's own word, written down at attach time. Only an
-       explicit "this tool only reads" runs unasked; silence is not
-       permission, and the durable Gate is where the rest gets decided. *)
-    | Some true -> run_raw arguments
-    | Some false | None ->
-      let provider_id = offered.Keeper_identity_tools.provider.Provider.id in
+    (* Provider annotations are hints, not authority to bypass this lane. *)
+      let provider = offered.Keeper_identity_tools.provider in
+      let provider_id = provider.Provider.id in
       let remote_name = offered.Keeper_identity_tools.remote_name in
       let call =
-        { input = gate_input ~provider_id ~remote_name ~arguments
+        { input = gate_input ~provider ~remote_name ~arguments
+                    ~input_schema:offered.Keeper_identity_tools.remote_input_schema
+                    ~read_only:offered.Keeper_identity_tools.read_only
         ; provider_id
+        ; provider_authority_sha256 = Some (provider_authority_sha256 provider)
         ; remote_name
         ; arguments
+        ; input_schema = Some offered.Keeper_identity_tools.remote_input_schema
+        ; read_only = offered.Keeper_identity_tools.read_only
         }
       in
       (match
@@ -263,15 +344,12 @@ let execution_of_call_result result =
   | Ok (answer : Mcp_client.tool_result) ->
     if answer.Mcp_client.is_error
     then
-      (* MCP [isError] is the server's own statement that the tool failed.
-         Read as no effect — the same reading the model-facing adapter
-         gives it. A service that half-applied and then errored reports
-         through its own state on the next read, not through this field. *)
+      (* A failed tool may have applied an effect before reporting its error. *)
       Keeper_tool_execution.failure
         ~class_:Tool_result.Runtime_failure
-        ~effect_disposition:Tool_result.Proven_pre_effect
-        answer.Mcp_client.text
-    else Keeper_tool_execution.success answer.Mcp_client.text
+        ~effect_disposition:Tool_result.Effect_outcome_unknown
+        (Mcp_client.model_text answer)
+    else Keeper_tool_execution.success (Mcp_client.model_text answer)
   | Error call_error ->
     (* The disposition is the call's own statement of what it proves; the
        model-facing result reads the same one for retry safety. *)
@@ -301,6 +379,13 @@ let replay_call_with_outcome
          "provider %s is no longer declared; the approved call cannot run"
          call.provider_id)
   | Some provider ->
+    (match validate_replay_provider ~provider call with
+     | Error reason ->
+       Keeper_tool_execution.failure
+         ~class_:Tool_result.Runtime_failure
+         ~effect_disposition:Tool_result.Proven_pre_effect
+         reason
+     | Ok () ->
     (* The stored input verbatim, through the same Gate and lane: an exact
        match consumes the one-shot grant, and anything else follows the
        ordinary Gate instead of inventing a second replay constraint. *)
@@ -339,5 +424,7 @@ let replay_call_with_outcome
                ~provider
                ~remote_name:call.remote_name
                ~arguments:call.arguments
-               ())))
+               ~input_schema:call.input_schema
+               ~read_only:call.read_only
+               ()))))
 ;;

@@ -283,8 +283,8 @@ let contains ~needle haystack =
   n = 0 || scan 0
 ;;
 
-let recoverable ~read_only answer =
-  match Keeper_identity_tools.tool_result_of_call ~read_only answer with
+let recoverable answer =
+  match Keeper_identity_tools.tool_result_of_call answer with
   | Ok output -> failf "the call did not fail: %s" output.Agent_core.Types.content
   | Error err -> err.Agent_core.Types.recoverable
 ;;
@@ -300,7 +300,7 @@ let test_a_deadline_before_the_session_opened_is_a_safe_retry () =
       "nothing was sent"
       Tool_result.Proven_pre_effect
       (Keeper_identity_tools.effect_disposition_of_call_error call_error);
-    check bool "a write may be sent again" true (recoverable ~read_only:(Some false) answer)
+    check bool "a request not yet sent may be retried" true (recoverable answer)
   | Error (Keeper_identity_tools.Mcp { error; _ }) ->
     failf "not a transport fault before send: %s" (Mcp_client.error_to_string error)
   | Error (Keeper_identity_tools.Precondition message)
@@ -322,20 +322,10 @@ let test_a_deadline_on_the_call_itself_is_not_a_blind_retry () =
       (Keeper_identity_tools.effect_disposition_of_call_error call_error);
     check
       bool
-      "a write is not offered for a second send"
+      "an unknown outcome is not offered for a second send"
       false
-      (recoverable ~read_only:(Some false) answer);
-    check
-      bool
-      "a tool the provider did not call read-only is treated as a write"
-      false
-      (recoverable ~read_only:None answer);
-    check
-      bool
-      "a read-only tool may be called again"
-      true
-      (recoverable ~read_only:(Some true) answer);
-    (match Keeper_identity_tools.tool_result_of_call ~read_only:(Some false) answer with
+      (recoverable answer);
+    (match Keeper_identity_tools.tool_result_of_call answer with
      | Error err ->
        check
          bool

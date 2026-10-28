@@ -13,24 +13,81 @@ type entry =
   { filter : Mcp_transport_protocol.subscription_filter
   ; subscription_id : Yojson.Safe.t
   ; send : Yojson.Safe.t -> bool
+  ; send_mutex : Eio.Mutex.t
+  ; active : bool Atomic.t
   }
 
-type token = int
+type token = { id : int; entry : entry }
+type retired = entry
 
 let mutex = Eio.Mutex.create ()
 let with_lock f = Eio_guard.with_mutex mutex f
-let entries : (token, entry) Hashtbl.t = Hashtbl.create 16
+let entries : (int, entry) Hashtbl.t = Hashtbl.create 16
 let next_token = ref 0
 
-let register ~subscription_id ~filter ~send =
-  with_lock (fun () ->
+let make_entry ~subscription_id ~filter ~send =
+  { filter; subscription_id; send; send_mutex = Eio.Mutex.create ()
+  ; active = Atomic.make true }
+
+let register_unlocked entry =
     let token = !next_token in
     incr next_token;
-    Hashtbl.replace entries token { filter; subscription_id; send };
-    token)
+    Hashtbl.replace entries token entry;
+    { id = token; entry }
+
+let register ~subscription_id ~filter ~send =
+  let entry = make_entry ~subscription_id ~filter ~send in
+  with_lock (fun () -> register_unlocked entry)
 ;;
 
-let unregister token = with_lock (fun () -> Hashtbl.remove entries token)
+let remove token =
+  with_lock (fun () ->
+    match Hashtbl.find_opt entries token.id with
+    | None -> None
+    | Some entry ->
+      Atomic.set entry.active false;
+      Hashtbl.remove entries token.id;
+      Some entry)
+;;
+
+(* Transport writes must remain cancellable. Their callers catch exceptions
+   inside this per-entry lock and re-raise after it is released, so Eio does
+   not poison a lock needed by a concurrent publisher. *)
+let with_send_lock mutex f =
+  match Eio_guard.is_ready (), Eio_guard.execution_context () with
+  | false, _ -> f ()
+  | true, Eio_guard.Eio_fiber -> Eio.Mutex.use_rw ~protect:false mutex f
+  | true, Eio_guard.Non_eio ->
+    raise (Eio_guard.Non_eio_mutex_context Eio_guard.Read_write)
+
+let register_after_ack ~subscription_id ~filter ~send ~acknowledge =
+  let entry = make_entry ~subscription_id ~filter ~send in
+  let outcome =
+    with_send_lock entry.send_mutex (fun () ->
+      let token = with_lock (fun () -> register_unlocked entry) in
+      match (try Ok (acknowledge ()) with exn -> Error exn) with
+      | Ok true -> Ok (Some token)
+      | Ok false ->
+        Eio.Cancel.protect (fun () -> ignore (remove token : entry option));
+        Ok None
+      | Error exn ->
+        Eio.Cancel.protect (fun () -> ignore (remove token : entry option));
+        Error exn)
+  in
+  match outcome with Ok result -> result | Error exn -> raise exn
+;;
+
+let retire token =
+  ignore (remove token : entry option);
+  token.entry
+
+let await_retired entry =
+  (* A snapshot may already be writing this subscriber. Wait for that
+     delivery without retaining the shared registry mutex. *)
+  Eio_guard.with_mutex entry.send_mutex (fun () -> ())
+
+let unregister token =
+  await_retired (retire token)
 let count () = with_lock (fun () -> Hashtbl.length entries)
 
 (* A send that fails means the peer is gone. Dropping the entry here keeps a
@@ -38,23 +95,34 @@ let count () = with_lock (fun () -> Hashtbl.length entries)
    also unregisters on close, and [Hashtbl.remove] on an absent key is a no-op,
    so the two paths do not fight. *)
 let deliver ~wants notification =
-  let dead =
+  let targets =
     with_lock (fun () ->
       Hashtbl.fold
-        (fun token entry dead ->
+        (fun token entry targets ->
            if not (wants entry.filter)
-           then dead
-           else (
-             let tagged =
-               Mcp_transport_protocol.tag_notification_with_subscription
-                 ~subscription_id:entry.subscription_id
-                 notification
-             in
-             if entry.send tagged then dead else token :: dead))
+           then targets
+           else ({ id = token; entry }, entry) :: targets)
         entries
         [])
   in
-  List.iter unregister dead
+  List.iter
+    (fun (token, entry) ->
+       let outcome =
+         with_send_lock entry.send_mutex (fun () ->
+           if not (Atomic.get entry.active) then Ok true
+           else
+             let tagged =
+               Mcp_transport_protocol.tag_notification_with_subscription
+                 ~subscription_id:entry.subscription_id notification
+             in
+             try Ok (entry.send tagged) with exn -> Error exn)
+       in
+       match outcome with
+       | Ok true -> ()
+       | Ok false -> unregister token
+       | Error (Eio.Cancel.Cancelled _ as exn) -> raise exn
+       | Error _ -> unregister token)
+    targets
 ;;
 
 let notify_tools_list_changed notification =
@@ -127,4 +195,6 @@ let graceful_closure ~subscription_id =
       ])
 ;;
 
-let reset_for_test () = with_lock (fun () -> Hashtbl.reset entries)
+let reset_for_test () = with_lock (fun () ->
+  Hashtbl.iter (fun _ entry -> Atomic.set entry.active false) entries;
+  Hashtbl.reset entries)

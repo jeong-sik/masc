@@ -242,38 +242,160 @@ let resource_notifications=`Assoc ["resourceSubscriptions",`List [`String resour
 let filter notifications=Protocol.subscription_filter_of_params
   (Some (`Assoc ["notifications",notifications])) |> Subs.honoured_filter
 
-(* The stateful protocol revision scopes a subscription to a session: the
-   client initializes first and presents the session id it was given. *)
-let initialize_session client ~port =
-  let body=Yojson.Safe.to_string (`Assoc ["jsonrpc",`String "2.0";"id",`String "initialize";
-    "method",`String "initialize";
-    "params",`Assoc ["protocolVersion",`String Protocol.default_protocol_version;
-      "capabilities",`Assoc [];
-      "clientInfo",`Assoc ["name",`String "resource-fixture";"version",`String "0"]]]) in
-  let exchange=request client ~port "/mcp" ~body ~headers:[
-    "accept","application/json, text/event-stream";"content-type","application/json";
-    "mcp-protocol-version",Protocol.default_protocol_version] in
-  let init_response=response exchange in
-  check int "initialize opens a session" 200 (H2.Status.to_code init_response.response.status);
-  let session_id=match H2.Headers.get init_response.response.headers "mcp-session-id" with
-    | Some value -> value
-    | None -> fail "initialize returned no mcp-session-id header" in
-  ignore (read_complete init_response);
-  session_id
-
-let subscribe ?(notifications=tools_notifications) ~session_id client ~port id =
+let subscribe ?(notifications=tools_notifications) client ~port id =
   let params=`Assoc [
     "notifications",notifications;
-    "_meta",`Assoc [Protocol.protocol_version_meta_key,`String Protocol.default_protocol_version;
+    "_meta",`Assoc [Protocol.protocol_version_meta_key,`String Protocol.protocol_version_2026_07_28;
       Protocol.client_capabilities_meta_key,`Assoc []]] in
   let body=Yojson.Safe.to_string (`Assoc ["jsonrpc",`String "2.0";"id",id;
     "method",`String "subscriptions/listen";"params",params]) in
   request client ~port "/mcp" ~body ~headers:[
     "accept","application/json, text/event-stream";"content-type","application/json";
-    "mcp-protocol-version",Protocol.default_protocol_version;"mcp-method","subscriptions/listen";
-    "mcp-session-id",session_id]
+    "mcp-protocol-version",Protocol.protocol_version_2026_07_28;"mcp-method","subscriptions/listen"]
 
 let rec until predicate = if not (predicate ()) then (Eio.Fiber.yield ();until predicate)
+
+let test_actual_modern_admission_errors () =
+  let make_handler ~gateway = gateway in
+  with_listener H2_only ~capacity:65536 make_handler (fun ~connect ~port ->
+    Subs.reset_for_test ();
+    Fun.protect ~finally:Subs.reset_for_test (fun () ->
+      let client = connect () in
+      let meta version = `Assoc
+        [ Protocol.protocol_version_meta_key, `String version
+        ; Protocol.client_capabilities_meta_key, `Assoc [] ] in
+      let post ~header_version ~method_ ?name body =
+        let headers =
+          [ "accept", "application/json, text/event-stream"
+          ; "content-type", "application/json"
+          ; "mcp-protocol-version", header_version
+          ; "mcp-method", method_ ]
+          @ (match name with Some name -> [ "mcp-name", name ] | None -> [])
+        in
+        request client ~port "/mcp" ~headers ~body:(Yojson.Safe.to_string body)
+        |> response
+      in
+      let check_error label ~status ~code ~id reply =
+        check int (label ^ " HTTP status") status (H2.Status.to_code reply.response.status);
+        let json = Yojson.Safe.from_string (read_complete reply) in
+        check int (label ^ " JSON-RPC code") code
+          Yojson.Safe.Util.(json |> member "error" |> member "code" |> to_int);
+        check bool (label ^ " request ID") true (Yojson.Safe.Util.member "id" json = id)
+      in
+      let discover id version = `Assoc
+        [ "jsonrpc", `String "2.0"; "id", id; "method", `String "server/discover"
+        ; "params", `Assoc [ "_meta", meta version ] ] in
+      check_error "unsupported version" ~status:400 ~code:(-32022) ~id:(`Int 81)
+        (post ~header_version:"2099-01-01" ~method_:"server/discover"
+           (discover (`Int 81) "2099-01-01"));
+      check_error "mismatched version" ~status:400 ~code:(-32020) ~id:(`Int 82)
+        (post ~header_version:"2099-01-01" ~method_:"server/discover"
+           (discover (`Int 82) "2026-07-28"));
+      let unknown = `Assoc
+        [ "jsonrpc", `String "2.0"; "id", `Int 83; "method", `String "unknown/method"
+        ; "params", `Assoc [ "_meta", meta "2026-07-28" ] ] in
+      check_error "unknown modern method" ~status:404 ~code:(-32601) ~id:(`Int 83)
+        (post ~header_version:"2026-07-28" ~method_:"unknown/method" unknown);
+      let invalid_listen = `Assoc
+        [ "jsonrpc", `String "2.0"; "id", `Bool true; "method", `String "subscriptions/listen"
+        ; "params", `Assoc [ "_meta", meta "2026-07-28" ] ] in
+      check_error "invalid listen ID" ~status:400 ~code:(-32600) ~id:`Null
+        (post ~header_version:"2026-07-28" ~method_:"subscriptions/listen" invalid_listen);
+      check int "invalid listen did not open a stream" 0 (Subs.count ());
+      let duplicate_meta = `Assoc
+        [ "jsonrpc", `String "2.0"; "id", `Int 84; "method", `String "subscriptions/listen"
+        ; "params", `Assoc [ "_meta", meta "2026-07-28"; "_meta", meta "2026-07-28" ] ] in
+      check_error "duplicate metadata" ~status:400 ~code:(-32602) ~id:(`Int 84)
+        (post ~header_version:"2026-07-28" ~method_:"subscriptions/listen" duplicate_meta);
+      check int "invalid metadata did not open a stream" 0 (Subs.count ());
+      let invalid_filter = `Assoc
+        [ "jsonrpc", `String "2.0"; "id", `Int 85; "method", `String "subscriptions/listen"
+        ; "params", `Assoc [ "_meta", meta "2026-07-28"; "notifications", `String "all" ] ] in
+      check_error "invalid notification filter" ~status:400 ~code:(-32602) ~id:(`Int 85)
+        (post ~header_version:"2026-07-28" ~method_:"subscriptions/listen" invalid_filter);
+      check int "invalid filter did not open a stream" 0 (Subs.count ());
+      let unknown_state = `Assoc
+        [ "jsonrpc", `String "2.0"; "id", `Int 87; "method", `String "tools/call"
+        ; "params", `Assoc [ "_meta", meta "2026-07-28"; "name", `String "masc_status"
+                            ; "arguments", `Assoc []; "requestState", `String "opaque" ] ] in
+      check_error "unrecognized continuation" ~status:400 ~code:(-32602) ~id:(`Int 87)
+        (post ~header_version:"2026-07-28" ~method_:"tools/call" ~name:"masc_status" unknown_state);
+      let unknown_responses = `Assoc
+        [ "jsonrpc", `String "2.0"; "id", `Int 88; "method", `String "tools/call"
+        ; "params", `Assoc [ "_meta", meta "2026-07-28"; "name", `String "masc_status"
+                            ; "arguments", `Assoc []; "inputResponses", `Assoc [] ] ] in
+      check_error "unrecognized continuation inputs" ~status:400 ~code:(-32602) ~id:(`Int 88)
+        (post ~header_version:"2026-07-28" ~method_:"tools/call" ~name:"masc_status" unknown_responses);
+      List.iter (fun (id, method_, field, name) ->
+        let body = `Assoc
+          [ "jsonrpc", `String "2.0"; "id", `Int id; "method", `String method_
+          ; "params", `Assoc [ "_meta", meta "2026-07-28"; field, `String name
+                              ; "requestState", `String "opaque" ] ] in
+        check_error "unrecognized read continuation" ~status:400 ~code:(-32602) ~id:(`Int id)
+          (post ~header_version:"2026-07-28" ~method_ ~name body))
+        [ 89, "resources/read", "uri", "masc://status.json"
+        ; 90, "prompts/get", "name", "tool_help" ];
+      let headers =
+        [ "accept", "application/json, text/event-stream"; "content-type", "application/json"
+        ; "mcp-protocol-version", "2026-07-28"; "mcp-method", "server/discover" ] in
+      check_error "malformed JSON" ~status:400 ~code:(-32700) ~id:`Null
+        (request client ~port "/mcp" ~headers ~body:"{" |> response);
+      let invalid_accept_headers =
+        [ "accept", "application/json"; "content-type", "application/json"
+        ; "mcp-protocol-version", "2026-07-28"; "mcp-method", "server/discover" ] in
+      check_error "invalid Accept" ~status:400 ~code:(-32600) ~id:(`Int 86)
+        (request client ~port "/mcp" ~headers:invalid_accept_headers
+           ~body:(Yojson.Safe.to_string (discover (`Int 86) "2026-07-28")) |> response)))
+
+let test_modern_requests_ignore_legacy_session_state () =
+  let module Session = Server_mcp_transport_http_session in
+  let make_handler ~gateway = gateway in
+  with_listener H2_only ~capacity:65536 make_handler (fun ~connect ~port ->
+    let legacy_id = "test-modern-legacy-profile-collision" in
+    Session.forget_mcp_session legacy_id;
+    Fun.protect ~finally:(fun () -> Session.forget_mcp_session legacy_id) (fun () ->
+      Session.remember_protocol_version legacy_id "2025-11-25";
+      Session.remember_mcp_profile legacy_id Server_mcp_transport_http_types.Seat;
+      let profiles_before = Session.For_testing.profile_count () in
+      let identities_before = Client_registry_eio.total_count () in
+      let client = connect () in
+      let meta = `Assoc
+        [ Protocol.protocol_version_meta_key, `String "2026-07-28"
+        ; Protocol.client_capabilities_meta_key, `Assoc [] ] in
+      let headers method_ =
+        [ "accept", "application/json, text/event-stream"; "content-type", "application/json"
+        ; "mcp-protocol-version", "2026-07-28"; "mcp-method", method_
+        ; "mcp-session-id", legacy_id; "cookie", "mcp-session-id=" ^ legacy_id ] in
+      let discover = `Assoc
+        [ "jsonrpc", `String "2.0"; "id", `Int 91; "method", `String "server/discover"
+        ; "params", `Assoc [ "_meta", meta ] ] in
+      let reply = request client ~port "/mcp" ~headers:(headers "server/discover")
+          ~body:(Yojson.Safe.to_string discover) |> response in
+      check int "legacy profile and version do not block modern discovery" 200
+        (H2.Status.to_code reply.response.status);
+      check (option string) "modern response has no session header" None
+        (H2.Headers.get reply.response.headers "mcp-session-id");
+      let json = Yojson.Safe.from_string (read_complete reply) in
+      check bool "discovery succeeds" true
+        (Yojson.Safe.Util.member "result" json <> `Null);
+      for id = 92 to 94 do
+        let call = `Assoc
+          [ "jsonrpc", `String "2.0"; "id", `Int id; "method", `String "tools/call"
+          ; "params", `Assoc [ "_meta", meta; "name", `String "masc_status"
+                             ; "arguments", `Assoc [] ] ] in
+        let reply = request client ~port "/mcp/managed"
+            ~headers:(("mcp-name", "masc_status") :: headers "tools/call")
+            ~body:(Yojson.Safe.to_string call) |> response in
+        check int "stateless managed call receives a response" 200
+          (H2.Status.to_code reply.response.status);
+        let json = Yojson.Safe.from_string (read_complete reply) in
+        check bool "managed call reached the tool" true
+          (Yojson.Safe.Util.member "result" json <> `Null)
+      done;
+      check int "modern requests do not register synthetic profiles" profiles_before
+        (Session.For_testing.profile_count ());
+      check int "modern calls do not register synthetic client identities" identities_before
+        (Client_registry_eio.total_count ())))
 
 let test_actual_subscription_route () =
   let capacity=65536 in
@@ -283,8 +405,7 @@ let test_actual_subscription_route () =
     Fun.protect ~finally:Subs.reset_for_test (fun () ->
       let blocked=connect ~window:1024l () and healthy=connect ~window:1024l () in
       let blocked_id=`String "blocked" in
-      let blocked_session=initialize_session blocked ~port in
-      let held=subscribe ~session_id:blocked_session blocked ~port blocked_id in
+      let held=subscribe blocked ~port blocked_id in
       let held_response=response held in
       check int "actual MCP route opens a subscription" 200
         (H2.Status.to_code held_response.response.status);
@@ -295,8 +416,7 @@ let test_actual_subscription_route () =
          mutex. Its distinct filter lets the unread tools subscriber fill
          capacity without offering that same burst to the healthy stream. *)
       let healthy_id=`String "healthy" in
-      let healthy_session=initialize_session healthy ~port in
-      let live=subscribe ~session_id:healthy_session ~notifications:resource_notifications healthy ~port healthy_id in
+      let live=subscribe ~notifications:resource_notifications healthy ~port healthy_id in
       let live_response=response live in
       check int "healthy sibling was admitted before overflow" 200
         (H2.Status.to_code live_response.response.status);
@@ -339,4 +459,6 @@ let ()=run "H2 listener response resources" ["actual listeners and MCP",[
   test_case "auto listener shares capacity across detected H2 connections" `Quick (test_listener_shares_capacity Auto);
   test_case "H2 listener refuses excess streams and reuses only released slots" `Quick (test_listener_stream_admission H2_only);
   test_case "auto listener refuses excess streams and reuses only released slots" `Quick (test_listener_stream_admission Auto);
+  test_case "actual modern MCP admission errors" `Quick test_actual_modern_admission_errors;
+  test_case "modern requests ignore legacy session state" `Quick test_modern_requests_ignore_legacy_session_state;
   test_case "actual subscription overflow and slow sibling delivery" `Quick test_actual_subscription_route]]

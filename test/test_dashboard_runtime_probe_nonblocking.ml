@@ -299,7 +299,6 @@ let fanout_binding ~provider_id ~is_default =
   ; max_context = None
   ; max_concurrent = None
   ; disable_parallel_tool_use = false
-  ; context_marks = None
   ; max_tokens = None
   ; price_input = None
   ; price_output = None

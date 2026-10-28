@@ -109,8 +109,12 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         (Mcp_transport_protocol.subscription_filter_of_params
            (Server_mcp_transport_http.body_jsonrpc_params body_str))
     in
-    if send (Mcp_subscriptions.acknowledgement ~subscription_id filter) then (
-      let token = Mcp_subscriptions.register ~subscription_id ~filter ~send in
+    (match
+       Mcp_subscriptions.register_after_ack ~subscription_id ~filter ~send
+         ~acknowledge:(fun () ->
+           send (Mcp_subscriptions.acknowledgement ~subscription_id filter))
+     with
+     | Some token ->
       Eio.Switch.on_release sw (fun () -> Mcp_subscriptions.unregister token);
       Eio.Fiber.fork_daemon ~sw (fun () ->
         let rec beat () =
@@ -123,8 +127,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          Overflow interrupts a flush blocked by flow control and raises to the
          request boundary, producing a reset instead of a successful short SSE. *)
       (try Server_h2_response_resources.run stream with
-       | Server_h2_response_resources.Response_writer_closed -> ()))
-    else raise Server_h2_response_resources.Response_capacity_exhausted;
+       | Server_h2_response_resources.Response_writer_closed -> ())
+     | None -> raise Server_h2_response_resources.Response_capacity_exhausted);
     (* Cancellation travels as an exception in Eio, so a wildcard that ate it
        here would report a clean exit from a fiber the switch had cancelled. *)
     (try h2_close_after_flush writer with
@@ -229,7 +233,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         ~extra_headers:[ "cache-control", "no-store"; "pragma", "no-cache" ]
     in
     let with_h2_oauth f =
-      if Auth_oauth.enabled () && Server_oauth_metadata.loopback_authority request_authority
+      if Server_oauth_metadata.loopback_authority request_authority
       then f ()
       else h2_respond_text h2_reqd "Not Found" ~status:`Not_found
     in
@@ -239,12 +243,21 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         | Ok state -> f (Mcp_server.workspace_config state).base_path
         | Error _ -> h2_respond_oauth_error Auth_oauth.Temporarily_unavailable)
     in
+    let with_h2_oauth_authorize_context f =
+      with_h2_oauth (fun () ->
+        match get_server_state_result () with
+        | Ok state ->
+          f
+            ~base_path:(Mcp_server.workspace_config state).base_path
+            ~fetch_client_metadata:(Server_oauth_client_metadata_fetch.of_server_state state)
+        | Error _ -> h2_respond_oauth_error Auth_oauth.Temporarily_unavailable)
+    in
     let h2_respond_oauth_form ?(status = `OK) ?error authorization_request =
       h2_respond_html
         h2_reqd
         (Server_oauth_service.render_authorization_form ?error authorization_request)
         ~status
-        ~extra_headers:Server_oauth_service.authorization_form_headers
+        ~extra_headers:(Server_oauth_service.authorization_form_headers authorization_request)
     in
     let h2_respond_oauth_redirect location =
       h2_respond_empty
@@ -498,7 +511,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               h2_respond_oauth_form authorization_request)
 
       | `POST, "/oauth/authorize" ->
-          with_h2_oauth_base_path (fun base_path ->
+          with_h2_oauth_authorize_context (fun ~base_path ~fetch_client_metadata ->
             match
               ensure_same_origin_browser_request
                 ~request_authority
@@ -511,6 +524,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                   Server_oauth_service.authorize_post
                     ~base_path
                     ~authority:request_authority
+                    ~fetch_client_metadata
                     ~body
                 with
                 | Error error -> h2_respond_oauth_error error
@@ -608,6 +622,12 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | `POST, "/mcp/managed"
       | `POST, "/mcp/operator"
       | `POST, "/mcp/play" ->
+          let session_id_opt =
+            if Server_mcp_transport_http_headers.header_selects_per_request_protocol
+                 httpun_request
+            then None
+            else session_id_opt
+          in
           let session_id = match session_id_opt with
             | Some id -> id
             | None -> Mcp_session.generate ()
@@ -649,6 +669,18 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
           let auth_ms =
             Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) auth_started) /. 1e6
           in
+          let respond_auth_failure failure =
+            Server_mcp_transport_http_respond.record_mcp_auth_reject
+              ~endpoint:("h2 POST " ^ Server_mcp_transport_http.profile_label profile)
+              ~claimed_agent:(agent_from_request httpun_request)
+              ~token_presented:(Option.is_some auth_token)
+              ~session_id:(Some session_id) failure;
+            let body = mcp_auth_error_body failure in
+            h2_respond_json h2_reqd body ~status:`Unauthorized
+              ~extra_headers:
+                (("www-authenticate", Server_oauth_metadata.challenge_for_authority
+                    request_authority) :: cors)
+          in
           (match validate_mcp_session_profile ~profile session_id with
            | Error msg ->
                let body = json_rpc_error Mcp_error_code.Invalid_request msg in
@@ -657,39 +689,28 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                (match Server_mcp_transport_http.validate_protocol_version_continuity
                         ~session_id httpun_request with
                 | Error rejection ->
-                    let body =
-                      Server_mcp_transport_http
-                      .protocol_version_rejection_body rejection
-                    in
-                    h2_respond_json h2_reqd body ~status:`Bad_request
-                      ~extra_headers:(cors @ mcp_headers session_id protocol_version)
+                    (match auth_result with
+                     | Error failure -> respond_auth_failure failure
+                     | Ok _ -> h2_read_body h2_reqd (fun request_body ->
+                      let body =
+                        match
+                          Server_mcp_transport_http_headers.validate_2026_request_headers
+                            httpun_request request_body
+                        with
+                        | Error header_error ->
+                          Server_mcp_transport_http_headers.header_rejection_body
+                            request_body header_error
+                        | Ok () ->
+                          Server_mcp_transport_http
+                          .protocol_version_rejection_body_for_request
+                            ~request_body rejection
+                      in
+                      h2_respond_json h2_reqd body ~status:`Bad_request
+                        ~extra_headers:(cors @ mcp_headers session_id protocol_version)))
                 | Ok () ->
                     (match auth_result with
-                     | Error failure ->
-                         Server_mcp_transport_http_respond
-                         .record_mcp_auth_reject
-                           ~endpoint:
-                             ("h2 POST "
-                             ^ Server_mcp_transport_http.profile_label profile)
-                           ~claimed_agent:(agent_from_request httpun_request)
-                           ~token_presented:(Option.is_some auth_token)
-                           ~session_id:(Some session_id) failure;
-                         let body = mcp_auth_error_body failure in
-                         h2_respond_json h2_reqd body ~status:`Unauthorized
-                           ~extra_headers:
-                             (( "www-authenticate"
-                              , Server_oauth_metadata.challenge_for_authority
-                                  request_authority )
-                              :: cors)
+                     | Error failure -> respond_auth_failure failure
                      | Ok _cred_opt ->
-                         let otel_transport_context =
-                           Otel_dispatch_hook.http_transport_context
-                             ~protocol_version:"2"
-                         in
-                         remember_mcp_profile
-                           ~otel_transport_context
-                           session_id
-                           profile;
                          h2_read_body h2_reqd (fun body_str ->
                              match
                                Server_mcp_request_context.decide_post_body
@@ -702,7 +723,9 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                              | Error
                                  (Server_mcp_request_context.Session_required msg)
                                ->
-                                 let body = json_rpc_error Mcp_error_code.Invalid_request msg in
+                                 let body = json_rpc_error Mcp_error_code.Invalid_request msg
+                                   |> Server_mcp_transport_http_session.correlate_error_body_to_request
+                                        ~request_body:body_str in
                                  h2_respond_json h2_reqd body
                                    ~status:`Bad_request
                                    ~extra_headers:
@@ -713,7 +736,9 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                  (Server_mcp_request_context.Unknown_session msg)
                                ->
                                   let new_session_id = Mcp_session.generate () in
-                                  let body = json_rpc_error Mcp_error_code.Invalid_request msg in
+                                  let body = json_rpc_error Mcp_error_code.Invalid_request msg
+                                    |> Server_mcp_transport_http_session.correlate_error_body_to_request
+                                         ~request_body:body_str in
                                   h2_respond_json h2_reqd body
                                     ~status:`Not_found
                                     ~extra_headers:
@@ -723,7 +748,9 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                              | Error
                                  (Server_mcp_request_context.Invalid_accept msg)
                                ->
-                                 let body = json_rpc_error Mcp_error_code.Invalid_request msg in
+                                 let body = json_rpc_error Mcp_error_code.Invalid_request msg
+                                   |> Server_mcp_transport_http_session.correlate_error_body_to_request
+                                        ~request_body:body_str in
                                  h2_respond_json h2_reqd body ~status:`Bad_request
                                    ~extra_headers:(cors @ mcp_headers session_id protocol_version)
                              | Error
@@ -736,6 +763,18 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                  h2_respond_json h2_reqd body ~status:`Bad_request
                                    ~extra_headers:(cors @ mcp_headers session_id protocol_version)
                              | Ok post_context ->
+                                 let stateless_request =
+                                   Server_mcp_transport_http_headers
+                                   .request_uses_stateless_protocol
+                                     httpun_request post_context.body_str
+                                 in
+                                 if not stateless_request then (
+                                   let otel_transport_context =
+                                     Otel_dispatch_hook.http_transport_context
+                                       ~protocol_version:"2"
+                                   in
+                                   remember_mcp_profile ~otel_transport_context
+                                     session_id profile);
                                  with_server_state h2_reqd (fun state ->
                                    let serves_listen =
                                      Server_mcp_transport_http
@@ -745,12 +784,6 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                    let profile =
                                      mcp_eio_profile_of_transport_profile profile
                                    in
-                                   if serves_listen
-                                   then
-                                     serve_subscriptions_listen_h2 ~sw:request_sw ~clock
-                                       ~cors ~body_str:post_context.body_str
-                                       h2_reqd
-                                   else
                                    let timing = Server_timing.create () in
                                    Server_timing.record_ms timing Mcp_http_auth auth_ms;
                                    let response_json =
@@ -779,7 +812,9 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                          in
                                          Server_timing.measure timing Mcp_dispatch (fun () ->
                                            Mcp_eio.handle_request ~clock ~sw ~profile
-                                             ~mcp_session_id:session_id ?auth_token
+                                             ?mcp_session_id:
+                                               (if stateless_request then None
+                                                else Some session_id) ?auth_token
                                              ~otel_mcp_protocol_version:protocol_version
                                              ~otel_transport_context
                                              ~internal_keeper_runtime state
@@ -802,15 +837,34 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                      mcp_headers session_id protocol_version @ cors
                                      @ Server_timing.extra_header timing
                                    in
-                                   match response_json with
+                                   if serves_listen
+                                      && (match response_json with
+                                          | `Assoc fields -> List.mem_assoc "result" fields
+                                          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+                                          | `String _ | `List _ -> false)
+                                   then
+                                     serve_subscriptions_listen_h2 ~sw:request_sw ~clock
+                                       ~cors ~body_str:post_context.body_str h2_reqd
+                                   else match response_json with
                                    | `Null ->
                                        h2_respond_empty h2_reqd ~status:`Accepted
                                          ~extra_headers:mcp_hdrs
-                                   | json when Mcp_error_code.is_http_error_response json ->
-                                       h2_respond_json_value h2_reqd json ~status:`Bad_request
-                                         ~extra_headers:mcp_hdrs
                                    | json ->
-                                       h2_respond_json_value h2_reqd json ~extra_headers:mcp_hdrs)))))
+                                       (match
+                                          Server_mcp_transport_http_headers
+                                          .modern_response_http_error_status
+                                            ~request:httpun_request
+                                            ~body_str:post_context.body_str json
+                                        with
+                                        | Some status ->
+                                          h2_respond_json_value h2_reqd json
+                                            ~status:(status :> H2.Status.t)
+                                            ~extra_headers:mcp_hdrs
+                                        | None when Mcp_error_code.is_http_error_response json ->
+                                          h2_respond_json_value h2_reqd json ~status:`Bad_request
+                                            ~extra_headers:mcp_hdrs
+                                        | None ->
+                                          h2_respond_json_value h2_reqd json ~extra_headers:mcp_hdrs))))))
 
       | `DELETE, "/mcp"
       | `DELETE, "/mcp/managed"
@@ -1215,11 +1269,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
 
       | `GET, "/api/v1/dashboard/goals" ->
           with_h2_public_read h2_reqd (fun state ->
-            let json =
-              dashboard_goals_tree_http_json
-                ~config:(Mcp_server.workspace_config state)
+            let payload =
+              cached_goals_tree_payload ~config:(Mcp_server.workspace_config state)
             in
-            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+            h2_respond_json_value h2_reqd payload.json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/goals/detail" ->
           with_h2_public_read h2_reqd (fun state ->

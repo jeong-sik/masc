@@ -281,7 +281,8 @@ let is_method_not_found_error = function
      | Some (Mcp_error_code.Backpressure_shed) | Some (Mcp_error_code.Session_evicted)
      | Some (Mcp_error_code.Header_mismatch) | Some (Mcp_error_code.Unsupported_protocol_version)
      | Some (Mcp_error_code.Quiet _) -> false)
-  | Mcp_client.Transport _ | Mcp_client.Unauthorized _ | Mcp_client.Http _ | Mcp_client.Malformed _ -> false
+  | Mcp_client.Transport _ | Mcp_client.Unauthorized _ | Mcp_client.Http _
+  | Mcp_client.Malformed _ | Mcp_client.Input_required _ | Mcp_client.Before_tool_call _ -> false
 ;;
 
 (* What changed between the catalog a turn was assembled from and what the
@@ -308,6 +309,7 @@ let catalog_contains tools name =
 
 type offered_tool = {
   schema : Agent_core.Types.tool_schema;
+  remote_input_schema : Yojson.Safe.t;
   read_only : bool option;
   provider : Provider.t;
   remote_name : string;
@@ -342,25 +344,6 @@ let failed ~recoverable ~error_class message =
   Error { Agent_core.Types.message; recoverable; error_class }
 ;;
 
-(* JSON-RPC error codes the server sends before it runs any tool: the
-   request never became a tool execution, so no effect happened. Every other
-   post-send failure keeps the honest answer, which is "unknown". Decided
-   over the typed code sum, not bare literals: the same numbers written out
-   here were the exact "magic number repetition" the [Mcp_error_code.t] sum
-   was introduced to close. *)
-let rpc_rejects_before_execution code =
-  match Mcp_error_code.of_wire_code code with
-  | Some
-      ( Mcp_error_code.Invalid_request | Mcp_error_code.Method_not_found
-      | Mcp_error_code.Invalid_params ) -> true
-  | Some (Mcp_error_code.Parse_error) | None | Some (Mcp_error_code.Internal_error)
-  | Some (Mcp_error_code.Auth_error) | Some (Mcp_error_code.Not_ready)
-  | Some (Mcp_error_code.Provider_timeout) | Some (Mcp_error_code.Tool_dispatch_failure)
-  | Some (Mcp_error_code.Backpressure_shed) | Some (Mcp_error_code.Session_evicted)
-  | Some (Mcp_error_code.Header_mismatch) | Some (Mcp_error_code.Unsupported_protocol_version)
-  | Some (Mcp_error_code.Quiet _) -> false
-;;
-
 type call_proof =
   | Effect_never_began
   | Outcome_unknown
@@ -369,20 +352,14 @@ let call_proof_of_call_error : call_error -> call_proof = function
   | Precondition _ | Transient_precondition _ -> Effect_never_began
   (* A session that never came up carries proof the call was not sent. *)
   | Mcp { phase = Session_open; _ } -> Effect_never_began
-  (* The server refused the token; auth precedes the tool run. *)
-  | Mcp { phase = Tool_call; error = Mcp_client.Unauthorized _ } -> Effect_never_began
-  | Mcp { phase = Tool_call; error = Mcp_client.Rpc { code; _ } }
-    when rpc_rejects_before_execution code -> Effect_never_began
-  (* Once the tools/call was handed to the transport, no other failure
-     proves anything: a transport error here may be the connection step of
-     the tools/call itself, and an HTTP status, any other JSON-RPC code, or
-     an answer that does not parse all follow a request the service may
-     have applied. *)
+  | Mcp { phase = Tool_call; error = Mcp_client.Before_tool_call _ } -> Effect_never_began
+  (* After send, neither a remote error code nor an HTTP status proves that
+     an untrusted provider performed no effect. *)
   | Mcp
       { phase = Tool_call
       ; error =
-          Mcp_client.Rpc _ | Mcp_client.Http _ | Mcp_client.Malformed _
-          | Mcp_client.Transport _
+          Mcp_client.Unauthorized _ | Mcp_client.Rpc _ | Mcp_client.Http _ | Mcp_client.Malformed _
+          | Mcp_client.Transport _ | Mcp_client.Input_required _
       } -> Outcome_unknown
 ;;
 
@@ -397,27 +374,37 @@ let call_error_to_string = function
   | Mcp { error; _ } -> Mcp_client.error_to_string error
 ;;
 
-let tool_result_of_call ~read_only answer =
+let tool_result_of_call answer =
   match answer with
   | Ok (result : Mcp_client.tool_result) ->
     if result.Mcp_client.is_error
     then
-      (* The tool ran and said no. The model can try other arguments, and
-         nothing about that is this process's failure. *)
-      failed ~recoverable:true ~error_class:(Some Agent_core.Types.Unknown)
-        result.Mcp_client.text
-    else Ok { Agent_core.Types.content = result.Mcp_client.text; content_blocks = None; _meta = None }
+      (* An error reported by the tool does not prove that no effect occurred. *)
+      failed ~recoverable:false ~error_class:(Some Agent_core.Types.Unknown)
+        (Mcp_client.model_text result ^
+         "\nThe service may have applied an effect; check its state before retrying.")
+    else Ok { Agent_core.Types.content = Mcp_client.model_text result; content_blocks = None; _meta = None }
   | Error (Precondition message) ->
     failed ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
       message
   | Error (Transient_precondition message) ->
     failed ~recoverable:true ~error_class:(Some Agent_core.Types.Transient) message
-  | Error (Mcp { error = Mcp_client.Unauthorized _; _ }) ->
+  | Error (Mcp { phase = Tool_call; error = Mcp_client.Unauthorized _ }) ->
+    failed ~recoverable:false ~error_class:(Some Agent_core.Types.Unknown)
+      "the service returned an authorization error after the request was sent; the effect may have occurred, so check its state before retrying"
+  | Error (Mcp { phase = Session_open; error = Mcp_client.Unauthorized _ })
+  | Error (Mcp { phase = (Session_open | Tool_call); error = Mcp_client.Before_tool_call (Mcp_client.Unauthorized _) }) ->
     (* Not something the model can fix by trying again. Whoever attached
        this Keeper has to attach it again. *)
     failed ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
       "this keeper's credential for that service is no longer accepted; attach \
        it again"
+  | Error (Mcp { error = Mcp_client.Input_required _; _ }) ->
+    failed ~recoverable:false ~error_class:(Some Agent_core.Types.Unknown)
+      "the service requires additional input; this operation has not completed and may already have applied effects, so check its state before starting it again"
+  | Error (Mcp { error = Mcp_client.Before_tool_call error; _ }) ->
+    failed ~recoverable:true ~error_class:(Some Agent_core.Types.Deterministic)
+      ("the tool request was not sent: " ^ Mcp_client.error_to_string error)
   | Error
       (Mcp
          { error =
@@ -430,18 +417,14 @@ let tool_result_of_call ~read_only answer =
       match error with
       | Mcp_client.Transport _ -> Agent_core.Types.Transient
       | Mcp_client.Rpc _ | Mcp_client.Http _ | Mcp_client.Malformed _
-      | Mcp_client.Unauthorized _ -> Agent_core.Types.Deterministic
+      | Mcp_client.Unauthorized _ | Mcp_client.Input_required _ | Mcp_client.Before_tool_call _ -> Agent_core.Types.Deterministic
     in
-    (* "Recoverable" tells the model a second call is safe. It is safe when
-       the provider said the tool only reads (its explicit word, as at the
-       gate: silence is not that), or when the failure proves the effect
-       never began; the proof is the same fact replay reads. A write the
-       transport took and did not answer for may have applied, and a model
-       told to retry it would apply it twice. *)
-    (match read_only, call_proof_of_call_error call_error with
-     | Some true, _ | (Some false | None), Effect_never_began ->
+    (* A remote annotation cannot prove an uncertain effect did not happen.
+       Use the same transport evidence that replay uses. *)
+    (match call_proof_of_call_error call_error with
+     | Effect_never_began ->
        failed ~recoverable:true ~error_class:(Some error_class) detail
-     | (Some false | None), Outcome_unknown ->
+     | Outcome_unknown ->
        failed
          ~recoverable:false
          ~error_class:(Some Agent_core.Types.Unknown)
@@ -617,7 +600,7 @@ let renew_if_needed ~token_post ~discover ~base_path ~keeper_name
 ;;
 
 let run_call_once ~transports ~(config : Workspace.config) ~keeper_name
-      ~(provider : Provider.t) ~remote_name ~arguments () =
+      ~(provider : Provider.t) ~remote_name ~arguments ~catalog_authority () =
   let base_path = config.Workspace.base_path in
   let { mcp_post; token_post; discover } = transports in
   match access_token_for ~config ~keeper_name ~provider with
@@ -642,13 +625,10 @@ let run_call_once ~transports ~(config : Workspace.config) ~keeper_name
          because replay reads the phase as the effect's disposition. *)
       | Error error -> Error (Mcp { phase = Session_open; error })
       | Ok client -> (
-        match Mcp_client.call_tool ~post:mcp_post client ~name:remote_name ~arguments with
+        match Mcp_client.call_tool ~post:mcp_post ~catalog_authority client ~name:remote_name ~arguments with
         | Error error when is_method_not_found_error error -> (
-          (* The wire error alone does not distinguish an unknown tools/call
-             method from a stale tool name.  Only investigate when the
-             catalog used to assemble this call advertised the name, then
-             ask the live session once.  A removed name is not called again;
-             a still-advertised name gets one bounded retry. *)
+          (* Refresh the catalog for subsequent decisions; never replay the
+             already-sent tool request based only on a remote error. *)
           match load ~base_path ~keeper_name ~provider_id:provider.Provider.id with
           | Ok (Some previous_catalog)
             when catalog_contains previous_catalog.tools remote_name -> (
@@ -688,17 +668,7 @@ let run_call_once ~transports ~(config : Workspace.config) ~keeper_name
                       "keeper_identity_tools: rediscovered %s catalog could \
                        not be saved: %s"
                       provider.Provider.id problem));
-              if not (catalog_contains tools remote_name)
-              then
-                (* Rediscovery proved that the old offer was stale.  Retrying
-                   a name the server no longer advertises would be a second
-                   predictable failure, not recovery. *)
-                Error (Mcp { phase = Tool_call; error })
-              else
-                match Mcp_client.call_tool ~post:mcp_post client ~name:remote_name ~arguments with
-                | Error retry_error ->
-                  Error (Mcp { phase = Tool_call; error = retry_error })
-                | Ok result -> Ok result)
+              Error (Mcp { phase = Tool_call; error }))
           | Error problem ->
             Log.Keeper.emit Log.Warn ~keeper_name
               (Printf.sprintf
@@ -711,21 +681,18 @@ let run_call_once ~transports ~(config : Workspace.config) ~keeper_name
         | Ok result -> Ok result)))
 ;;
 
-(* One reactive refresh. [run_call_once] renews proactively only when a stored
-   expiry says the token is old; a provider that issues no expiry never triggers
-   that, so a token it rejects with 401 would otherwise fail the call with
-   "attach it again" while a spendable refresh token sits unused. Force a refresh
-   and retry once. [force_refresh] stores the new token, so the retry reads it
-   back through [access_token_for]; any refresh failure keeps the original 401,
-   so the operator still learns to re-attach and there is no second retry. *)
+(* A 401 before the tool was sent can refresh and retry. A 401 from the tool
+   request itself has an unknown outcome and cannot authorize a replay. *)
 let run_call ~transports ~(config : Workspace.config) ~keeper_name
-      ~(provider : Provider.t) ~remote_name ~arguments () =
+      ~(provider : Provider.t) ~remote_name ~arguments
+      ?(catalog_authority = Mcp_client.Unbound) () =
   let base_path = config.Workspace.base_path in
   match
     run_call_once ~transports ~config ~keeper_name ~provider
-      ~remote_name ~arguments ()
+      ~remote_name ~arguments ~catalog_authority ()
   with
-  | Error (Mcp { error = Mcp_client.Unauthorized _; _ }) as unauthorized -> (
+  | (Error (Mcp { phase = Session_open; error = Mcp_client.Unauthorized _ })
+    | Error (Mcp { error = Mcp_client.Before_tool_call (Mcp_client.Unauthorized _); _ })) as unauthorized -> (
     match provider.Provider.credential_source with
     (* gh owns this credential and rewrites its own file; masc holds no refresh
        token to spend, so a 401 here is genuinely re-attach. *)
@@ -738,8 +705,13 @@ let run_call ~transports ~(config : Workspace.config) ~keeper_name
       | Error _ -> unauthorized
       | Ok _ ->
         run_call_once ~transports ~config ~keeper_name ~provider
-          ~remote_name ~arguments ()))
-  | (Error (Mcp { error = (Mcp_client.Transport _ | (Mcp_client.Http _ | (Mcp_client.Rpc _ | Mcp_client.Malformed _)));_}) | Error (Precondition _ | Transient_precondition _) | Ok _) as other -> other
+          ~remote_name ~arguments ~catalog_authority ()))
+  | (Ok _ | Error (Precondition _ | Transient_precondition _)
+    | Error (Mcp { phase = Tool_call; error = Mcp_client.Unauthorized _ })
+    | Error (Mcp { phase = (Session_open | Tool_call)
+                 ; error = (Mcp_client.Transport _ | Mcp_client.Http _ | Mcp_client.Rpc _
+                           | Mcp_client.Malformed _ | Mcp_client.Input_required _
+                           | Mcp_client.Before_tool_call _) })) as other -> other
 ;;
 
 let agent_tools ~(provider : Provider.t) catalog =
@@ -756,6 +728,7 @@ let agent_tools ~(provider : Provider.t) catalog =
       | Ok schema ->
         let offered_tool =
           { schema
+          ; remote_input_schema = tool.Mcp_client.input_schema
           ; read_only = tool.Mcp_client.read_only
           ; provider
           ; remote_name = tool.Mcp_client.name

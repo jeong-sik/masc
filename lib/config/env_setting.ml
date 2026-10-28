@@ -19,28 +19,6 @@ type row =
   ; description : string
   }
 
-module Bool_knob = struct
-  type t = Oauth_enabled [@@deriving enumerate]
-
-  let spec = function
-    | Oauth_enabled ->
-      ( "MASC_OAUTH_ENABLED"
-      , false
-      , "auth"
-      , "Enable the OAuth authorization server" )
-  ;;
-
-  let env_name t = let n, _, _, _ = spec t in n
-  let default t = let _, d, _, _ = spec t in d
-
-  let row t =
-    let env_name, default, category, description = spec t in
-    { env_name; default_display = string_of_bool default; category; description }
-  ;;
-
-  let get t = Env_config_core.get_bool ~default:(default t) (env_name t)
-end
-
 module Int_knob = struct
   type t =
     | Oauth_code_ttl_sec
@@ -254,8 +232,7 @@ module Float_knob = struct
 end
 
 let all_rows =
-  List.map Bool_knob.row Bool_knob.all
-  @ List.map Int_knob.row Int_knob.all
+  List.map Int_knob.row Int_knob.all
   @ List.map Float_knob.row Float_knob.all
   @ List.map String_opt_knob.row String_opt_knob.all
 ;;

@@ -118,19 +118,14 @@ val decode_exact_turn_transcript :
 
 (** What the next Agent Core request would carry, as the server computes it
     from the turn's own values without a turn
-    ([/api/v1/keepers/:name/next-request]). Live: the pair's carried front
-    and the binding's marks. As last measured, with the
+    ([/api/v1/keepers/:name/next-request]). Live: the pair's carried front.
+    As last measured, with the
     turn they were read from: the fixed prompt parts and the pinned blocks. *)
 type forecast_lane =
   | Lane_agent_core
   | Lane_not_applicable of string
       (** An official-client runtime: the spawned client owns its context
           and masc carries no range for it. *)
-
-type forecast_marks =
-  { high_water_tokens : int
-  ; low_water_tokens : int
-  }
 
 type forecast_parts =
   { reserved_measured_on_turn : int
@@ -224,8 +219,6 @@ type forecast_walk =
 type forecast_candidate =
   { runtime_id : string
   ; lane : forecast_lane
-  ; marks : forecast_marks option
-        (** As the binding declares them; [None] leaves eviction to a refusal. *)
   ; parts : (forecast_parts, string) result
         (** [Error] is the server's reason: no composition on this runtime,
             or only post-tool ones, which carry no pinned block. *)

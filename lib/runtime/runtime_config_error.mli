@@ -107,11 +107,6 @@ type load_failure =
           A gap the file already has does not refuse the save; a load keeps
           every gap as degraded state ({!exact_slot_degradation}) and the
           exact-output registry leaves those slots out. *)
-  | Context_marks_exceed_max_context of
-      { runtime_id : string
-      ; high_water_tokens : int
-      ; max_context : int
-      }
   | Exact_lane_cli_slot_unservable of exact_lane_cli_slot_unservable
       (** Why {!Runtime.load_list} refused a configuration. Closed, so a consumer
           decides per case instead of matching rendered text — the contract

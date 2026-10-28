@@ -670,7 +670,7 @@ let handle_tool_execute_typed
            typed_error_json
              ~class_:Tool_result.Dependency_unavailable
              ~extra_fields:
-               [ "error", `String "gate_unavailable"
+               [ "code", `String "gate_unavailable"
                ; "gate_reason"
                , `String (Keeper_gate.unavailable_reason_to_string reason)
                ]
@@ -698,7 +698,7 @@ let handle_tool_execute_typed
              authorized
                (typed_error_json
                   ~class_:Tool_result.Runtime_failure
-                  ~extra_fields:[ "error", `String "github_identity_snapshot_unavailable" ]
+                  ~extra_fields:[ "code", `String "github_identity_snapshot_unavailable" ]
                   ("GitHub identity snapshot unavailable: " ^ err))
            | Ok github_secret_files ->
           let output_redaction =

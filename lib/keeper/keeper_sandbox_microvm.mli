@@ -838,8 +838,10 @@ val work_volume_mounted_probe_argv_for
   :  Keeper_microvm_backend.t
   -> container_name:string
   -> string list
-(** Boot invariant (RFC-0052): exit 0 only when {!work_volume_guest_root} is a
-    mountpoint inside the guest, read from [/proc/mounts] as root.
+(** Boot invariant (RFC-0052): read [/proc/mounts] as root inside the guest.
+    A successful command emits an explicit mounted or not-mounted observation.
+    A failed command or an unrecognised response is not evidence of absence;
+    use {!work_volume_mount_probe_of_result} to interpret it.
 
     Runs before the mkdir and the write probe above because neither can tell
     a mounted volume from a writable directory on the guest rootfs: with the
@@ -849,6 +851,23 @@ val work_volume_mounted_probe_argv_for
     [mountpoint(1)], which the sandbox image does not ship; the pattern
     carries the mountpoint field's surrounding spaces so a prefix of the path
     cannot match. *)
+
+type work_volume_mount_probe =
+  | Work_volume_mounted
+  | Work_volume_not_mounted
+  | Work_volume_probe_unverified of
+      { status : Unix.process_status
+      ; stdout : string
+      ; stderr : string
+      }
+
+val work_volume_mount_probe_of_result
+  :  status:Unix.process_status
+  -> stdout:string
+  -> stderr:string
+  -> work_volume_mount_probe
+(** Decode only a successful probe's complete response. Transport failures,
+    timeouts, and invalid responses leave the mount state unverified. *)
 
 val keeper_vm_container_kind : string
 

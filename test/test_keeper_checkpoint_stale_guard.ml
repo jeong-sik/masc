@@ -90,6 +90,64 @@ let save_ok ~session_dir ckpt label =
   | Ok _ -> ()
   | Error e -> fail (label ^ " unexpectedly failed: " ^ e)
 
+let test_measured_save_counts_noop_and_fallback () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    let session_id = "measured-write" and keeper_name = "measured-keeper" in
+    let checkpoint turn = make_checkpoint ~session_id ~turn_count:turn ~marker:(string_of_int turn) in
+    let save ckpt =
+      match Keeper_checkpoint_store.For_testing.save_agent_core_for_keeper_measured
+          ~keeper_name ~session_dir ~history_retained:1 ckpt with
+      | Ok value -> value
+      | Error error -> fail error in
+    let canonical = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id in
+    (match save (checkpoint 2) with
+     | Keeper_checkpoint_store.Saved _, Some bytes ->
+       check int "hardlinked history adds no payload write" (Unix.stat canonical).Unix.st_size bytes
+     | Keeper_checkpoint_store.Saved _, None | Keeper_checkpoint_store.Stale_noop _, _ ->
+       fail "first write lacked an exact receipt");
+    (match save (checkpoint 1) with
+     | Keeper_checkpoint_store.Stale_noop _, Some bytes -> check int "stale no-op writes no payload" 0 bytes
+     | Keeper_checkpoint_store.Stale_noop _, None | Keeper_checkpoint_store.Saved _, _ ->
+       fail "stale save did not report an exact no-op");
+    let next = { (checkpoint 3) with Agent_core.Checkpoint.created_at = 1001.0 } in
+    let fallback = Keeper_checkpoint_store.For_testing.with_before_history_link
+      (fun () -> failwith "force history copy") (fun () -> save next) in
+    let history = Keeper_checkpoint_store.agent_core_history_path ~session_dir
+        ~snapshot_id:(Keeper_checkpoint_store.agent_core_history_snapshot_id_of_checkpoint next) in
+    (match fallback with
+    | Keeper_checkpoint_store.Saved _, Some bytes ->
+      check int "fallback counts canonical and actual history copy"
+        ((Unix.stat canonical).Unix.st_size + (Unix.stat history).Unix.st_size) bytes
+    | Keeper_checkpoint_store.Saved _, None | Keeper_checkpoint_store.Stale_noop _, _ ->
+      fail "fallback write lacked an exact receipt");
+    let blocked = { (checkpoint 4) with Agent_core.Checkpoint.created_at = 1002.0 } in
+    let blocked_history = Keeper_checkpoint_store.agent_core_history_path ~session_dir
+        ~snapshot_id:(Keeper_checkpoint_store.agent_core_history_snapshot_id_of_checkpoint blocked) in
+    Unix.mkdir blocked_history 0o700;
+    (match save blocked with
+     | Keeper_checkpoint_store.Saved _, None -> ()
+     | Keeper_checkpoint_store.Saved _, Some _ -> fail "failed fallback reported an exact byte count"
+     | Keeper_checkpoint_store.Stale_noop _, _ -> fail "newer blocked save became a stale no-op"))
+
+let test_retained_payload_counts_nested_files_once () =
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    let nested = Filename.concat session_dir "nested" in
+    Unix.mkdir nested 0o700;
+    let first = Filename.concat session_dir "first" in
+    let second = Filename.concat nested "second" in
+    Out_channel.with_open_bin first (fun channel -> output_string channel "abc");
+    Out_channel.with_open_bin second (fun channel -> output_string channel "defg");
+    Unix.link first (Filename.concat nested "linked");
+    let link = Filename.concat nested "symlink" in
+    Unix.symlink first link;
+    Fun.protect ~finally:(fun () -> Unix.unlink link) (fun () ->
+      check int "nested files count once per inode; symlinks are ignored" 7
+        (Keeper_checkpoint_store.For_testing.retained_payload_bytes ~directory:session_dir)))
+
 (* Three writers reach this store. Only one ran the structural check first --
    the mid-run sink and finalize assemble a checkpoint directly and called the
    store straight -- so a history with an orphan tool result was admitted by
@@ -2808,6 +2866,10 @@ let () =
             test_admitted_checkpoint_is_the_run_history_source;
           test_case "forward and equal saves pass, stale save is no-op" `Quick
             test_forward_equal_and_stale;
+          test_case "write receipt counts no-op and history fallback" `Quick
+            test_measured_save_counts_noop_and_fallback;
+          test_case "retained bytes include nested files and deduplicate hardlinks" `Quick
+            test_retained_payload_counts_nested_files_once;
           test_case "canonical disk is the watermark SSOT" `Quick
             test_disk_is_the_watermark_ssot;
           test_case "external canonical replacement is the watermark" `Quick

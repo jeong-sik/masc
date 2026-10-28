@@ -509,6 +509,12 @@ let zai_fake_post ~call_response requests =
     in
     requests := (meth, url, headers, json) :: !requests;
     match meth with
+    | "server/discover" ->
+      Ok
+        { Masc_http_client.status = 200
+        ; headers = [ ("content-type", "application/json") ]
+        ; body = {|{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}|}
+        }
     | "initialize" ->
       Ok
         { Masc_http_client.status = 200
@@ -550,7 +556,7 @@ let () = test "search_via_zai opens a session, calls the tool, and limits the ro
        ~query:"eio switch" ~limit:1
      = Ok [ zai_first_row ]);
   let seen = List.rev !requests in
-  assert (List.map (fun (m, _, _, _) -> m) seen = [ "initialize"; "notifications/initialized"; "tools/call" ]);
+  assert (List.map (fun (m, _, _, _) -> m) seen = [ "server/discover"; "initialize"; "notifications/initialized"; "tools/call" ]);
   List.iter
     (fun (_, url, headers, _) ->
       assert (url = "https://api.z.ai/api/mcp/web_search_prime/mcp");
@@ -573,6 +579,25 @@ let () = test "search_via_zai opens a session, calls the tool, and limits the ro
          | _ -> failwith "params missing")
       | _ -> failwith "call is not an object")
    | [] -> failwith "no requests")
+)
+
+let () = test "search_via_zai keeps text parseable when structured output is also present" (fun () ->
+  let requests = ref [] in
+  let call_response () =
+    Ok
+      { Masc_http_client.status = 200
+      ; headers = [ ("content-type", "application/json") ]
+      ; body = json_rpc_result 3
+          (`Assoc
+            [ "content", `List [ `Assoc [ "type", `String "text"; "text", `String zai_nested_text ] ]
+            ; "structuredContent", `Assoc [ "provider", `String "zai" ]
+            ])
+      }
+  in
+  let post = zai_fake_post ~call_response requests in
+  assert
+    (Tool_misc_web_search.search_via_zai_for_test ~post ~api_key:"zai-test-key"
+       ~query:"eio switch" ~limit:1 = Ok [ zai_first_row ])
 )
 
 let () = test "search_via_zai names each failure without echoing the answer" (fun () ->

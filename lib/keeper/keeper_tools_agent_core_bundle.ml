@@ -653,8 +653,7 @@ let make_tool_bundle_for_descriptors_with_policy
     List.map (fun (tool, _, _) -> tool) composition_tools_with_loading
   in
   (* Identity tools are external effects by definition; they join the turn
-     only behind the durable Gate. A row whose provider said "read only"
-     runs as before, everything else defers to the approvals queue. The
+     only behind the durable Gate, irrespective of provider annotations. The
      cycle's one-shot grant threads through so an approved exact call can be
      spent in the woken cycle.
 

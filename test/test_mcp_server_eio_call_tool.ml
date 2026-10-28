@@ -205,7 +205,34 @@ let test_invalid_call_params_do_not_reach_dispatch_handler () =
       ; `Assoc [ "name", `String " " ]
       ; `Assoc [ "name", `String "masc_status"; "name", `String "masc_status" ]
       ];
-    check int "invalid calls never reach dispatch" 0 !handler_calls)
+    check int "invalid calls never reach dispatch" 0 !handler_calls;
+    let meta = `Assoc
+      [ Mcp_transport_protocol.protocol_version_meta_key, `String "2026-07-28"
+      ; Mcp_transport_protocol.client_capabilities_meta_key, `Assoc [] ] in
+    List.iter
+      (fun (key, value) ->
+         let response =
+           Masc.Mcp_server_eio_protocol.handle_request
+             ~handle_call_tool_eio
+             ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
+             ~clock:(Eio.Stdenv.clock env) ~sw state
+             (request (`Assoc
+                 [ "_meta", meta; "name", `String "masc_status"; key, value ]))
+         in
+         check int "unissued modern continuation rejected" (-32602)
+           U.(response |> member "error" |> member "code" |> to_int);
+         check int "continuation preserves ID" 1 U.(response |> member "id" |> to_int))
+      [ "requestState", `String "opaque"; "inputResponses", `Assoc [] ];
+    check int "modern continuations never reach dispatch" 0 !handler_calls;
+    List.iter
+      (fun (key, value) ->
+         ignore (Masc.Mcp_server_eio_protocol.handle_request
+           ~handle_call_tool_eio
+           ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
+           ~clock:(Eio.Stdenv.clock env) ~sw state
+           (request (`Assoc [ "name", `String "masc_status"; key, value ]))))
+      [ "requestState", `String "legacy-extension"; "inputResponses", `Assoc [] ];
+    check int "legacy extensions still reach dispatch" 2 !handler_calls)
 ;;
 
 let call_with_result ?mcp_session_id ?observe_invocation ~env ~sw state result =

@@ -1063,11 +1063,10 @@ let test_connector_post_summary_names_where_and_what () =
 
 let test_identity_summary_is_the_provider_surface () =
   let input =
-    Masc.Keeper_identity_gate.gate_input
-      ~provider_id:"github"
-      ~remote_name:"issue_write"
-      ~arguments:
-        (`Assoc [ "command", `String "rm -rf /"; "title", `String "a title" ])
+    `Assoc
+      [ "provider_id", `String "github"; "remote_name", `String "issue_write"
+      ; "arguments", `Assoc [ "command", `String "rm -rf /"; "title", `String "a title" ]
+      ; "input_schema", `Assoc [ "type", `String "object" ]; "read_only", `Bool false ]
   in
   match Masc.Keeper_identity_gate.replay_of_gate_input input with
   | Error detail -> Alcotest.fail detail

@@ -132,7 +132,11 @@ let test_server_discover_is_public () =
          request
            ~id:(`String "discover-1")
            ~method_:"server/discover"
-           ~params:(`Assoc [ "_meta", `Assoc [] ])
+           ~params:
+             (`Assoc
+                [ "_meta", `Assoc
+                    [ Mcp_transport_protocol.protocol_version_meta_key, `String "2026-07-28"
+                    ; Mcp_transport_protocol.client_capabilities_meta_key, `Assoc [] ] ])
            ()
        in
        let response = run_request state req in

@@ -58,6 +58,64 @@ let test_protocol_version_from_body_invalid_normalizes () =
     (Mcp_transport_protocol.protocol_version_from_body
        {|{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2099-01-01"}}|})
 
+let test_initialize_does_not_negotiate_a_stateless_version () =
+  check (option string) "modern proposal gets a legacy counter-offer"
+    (Some "2025-11-25")
+    (Mcp_transport_protocol.protocol_version_from_body
+       {|{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2026-07-28"}}|})
+
+(* The latest differs from the newest legacy entry, so the result tells a kept
+   latest from the fallback. *)
+let test_legacy_default_keeps_a_legacy_latest () =
+  check (result string string) "a legacy latest is the counter-offer"
+    (Ok "2025-06-18")
+    (Mcp_transport_protocol.legacy_default_protocol_version_of
+       ~latest:"2025-06-18"
+       ~supported:
+         [ "2026-07-28"; "DRAFT-2026-v1"; "2024-11-05"; "2025-06-18"; "2025-11-25" ])
+
+(* The counter-offer given differs from the SDK's latest, so a fallback that
+   reads the SDK's default instead fails here. *)
+let test_negotiate_legacy_uses_the_given_counter_offer () =
+  let negotiate =
+    Mcp_transport_protocol.negotiate_legacy_protocol_version_with
+      ~legacy_default:"2025-06-18"
+  in
+  check string "a legacy proposal is kept" "2024-11-05" (negotiate "2024-11-05");
+  check string "a stateless proposal gets the counter-offer" "2025-06-18"
+    (negotiate "2026-07-28");
+  check string "an unknown proposal gets the counter-offer" "2025-06-18"
+    (negotiate "1999-01-01");
+  check string "the exported function counters with the legacy default"
+    Mcp_transport_protocol.legacy_default_protocol_version
+    (Mcp_transport_protocol.negotiate_legacy_protocol_version "2026-07-28")
+
+let test_legacy_default_skips_a_stateless_latest () =
+  check (result string string) "a stateless latest falls back to the newest legacy"
+    (Ok "2025-11-25")
+    (Mcp_transport_protocol.legacy_default_protocol_version_of
+       ~latest:"2026-07-28"
+       ~supported:[ "2026-07-28"; "DRAFT-2026-v1"; "2024-11-05"; "2025-11-25" ])
+
+let test_legacy_default_needs_a_legacy_version () =
+  check bool "no legacy version is an error" true
+    (Result.is_error
+       (Mcp_transport_protocol.legacy_default_protocol_version_of
+          ~latest:"2026-07-28" ~supported:[ "2026-07-28"; "DRAFT-2026-v1" ]))
+
+(* The fallback takes the last legacy entry as the newest, so the SDK has to
+   list legacy versions oldest first. A reordered SDK list fails here. *)
+let test_legacy_default_matches_the_sdk () =
+  check string "legacy counter-offer today" "2025-11-25"
+    Mcp_transport_protocol.legacy_default_protocol_version;
+  let legacy =
+    List.filter
+      (fun version -> not (Mcp_transport_protocol.is_stateless_protocol_version version))
+      Mcp_transport_protocol.supported_protocol_versions
+  in
+  check (list string) "legacy versions are listed oldest first"
+    (List.sort String.compare legacy) legacy
+
 let test_protocol_version_from_body_non_initialize () =
   check (option string) "non-initialize ignored" None
     (Mcp_transport_protocol.protocol_version_from_body
@@ -75,6 +133,55 @@ let test_protocol_version_from_request_meta_body () =
   check bool "body uses stateless protocol" true
     (Mcp_transport_protocol.body_uses_stateless_protocol
        {|{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}|})
+
+let test_request_protocol_admission () =
+  let module P = Mcp_transport_protocol in
+  let classify ?(require_stateless = false) ?(method_ = "tools/list") params =
+    P.classify_request_protocol ~require_stateless ~method_ ~params
+  in
+  let params version caps =
+    Some (`Assoc [ "_meta", `Assoc
+      [ P.protocol_version_meta_key, version
+      ; P.client_capabilities_meta_key, caps ] ])
+  in
+  let invalid_meta = function
+    | Error (P.Invalid_request_meta _) -> true
+    | Error (P.Unsupported_request_version _)
+    | Ok (P.Legacy_protocol | P.Stateless_protocol _) -> false
+  in
+  check bool "legacy request remains legacy" true
+    (classify None = Ok P.Legacy_protocol);
+  check bool "uninitialized stdio requires modern metadata" true
+    (invalid_meta (classify ~require_stateless:true None));
+  check bool "discover requires modern metadata even after initialization" true
+    (invalid_meta (classify ~method_:"server/discover" None));
+  check bool "valid modern request" true
+    (classify (params (`String "2026-07-28") (`Assoc []))
+     = Ok (P.Stateless_protocol "2026-07-28"));
+  check bool "unsupported version is identifiable" true
+    (classify (params (`String "2099-01-01") (`Assoc []))
+     = Error (P.Unsupported_request_version "2099-01-01"));
+  check bool "capabilities must be an object" true
+    (invalid_meta (classify (params (`String "2026-07-28") (`String "roots"))));
+  check bool "legacy versions are not per-request versions" true
+    (invalid_meta (classify (params (`String "2025-11-25") (`Assoc []))));
+  check bool "duplicate version fields are invalid" true
+    (invalid_meta (classify (Some (`Assoc [ "_meta", `Assoc
+       [ P.protocol_version_meta_key, `String "2026-07-28"
+       ; P.protocol_version_meta_key, `String "2099-01-01"
+       ; P.client_capabilities_meta_key, `Assoc [] ] ]))))
+
+let test_request_null_id_is_not_a_notification () =
+  let request = `Assoc
+    [ "jsonrpc", `String "2.0"; "id", `Null; "method", `String "tools/list"
+    ; "params", `Null ] in
+  match Mcp_transport_protocol.jsonrpc_request_of_yojson request with
+  | Error detail -> fail detail
+  | Ok parsed ->
+    check bool "explicit null is retained" true (parsed.id = Some `Null);
+    check bool "explicit null params are retained" true (parsed.params = Some `Null);
+    check bool "null ID is not a notification" false
+      (Mcp_transport_protocol.is_notification parsed)
 
 (* ============================================================
    accepts_json Tests (new: delegates to SDK with wildcard support)
@@ -442,6 +549,192 @@ let test_a_dead_stream_is_retired () =
   Alcotest.(check int) "and the entry is gone" 0 (Subs.count ());
   Subs.reset_for_test ()
 
+let test_acknowledgement_and_registration_are_atomic () =
+  Eio_main.run @@ fun _env ->
+  let was_ready = Eio_guard.is_ready () in
+  Eio_guard.enable ();
+  Fun.protect ~finally:(fun () -> if not was_ready then Eio_guard.disable ()) (fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Subs.reset_for_test ();
+  Fun.protect ~finally:Subs.reset_for_test (fun () ->
+    let events = ref [] in
+    let ack_finished = ref false and premature = ref false in
+    let sent, resolve = Eio.Promise.create () in
+    let filter = TP.subscription_filter_of_params
+      (listen_params (`Assoc [ "toolsListChanged", `Bool true ])) in
+    let token = Subs.register_after_ack ~subscription_id:(`Int 1) ~filter
+      ~send:(fun _ ->
+        if not !ack_finished then premature := true;
+        events := "change" :: !events; true)
+      ~acknowledge:(fun () ->
+        events := "ack" :: !events;
+        Eio.Fiber.fork ~sw (fun () ->
+          Subs.notify_tools_list_changed
+            (TP.jsonrpc_notification "notifications/tools/list_changed");
+          Eio.Promise.resolve resolve ());
+        Eio.Fiber.yield ();
+        ack_finished := true;
+        true) in
+    Eio.Promise.await sent;
+    Alcotest.(check (list string)) "a concurrent change follows the acknowledgement"
+      [ "ack"; "change" ] (List.rev !events);
+    Alcotest.(check bool) "notification waits until acknowledgement completes" false !premature;
+    (match token with Some token -> Subs.unregister token | None -> Alcotest.fail "ack failed");
+    let failed = Subs.register_after_ack ~subscription_id:(`Int 2) ~filter
+      ~send:(fun _ -> true) ~acknowledge:(fun () -> false) in
+    Alcotest.(check bool) "failed acknowledgement leaves no registration" true (failed = None);
+    Alcotest.(check int) "registry is empty" 0 (Subs.count ())))
+
+let test_subscription_filter_wire_validation () =
+  let accepted = listen_params (`Assoc
+    [ "toolsListChanged", `Bool true
+    ; "resourceSubscriptions", `List [ `String "masc://status" ] ]) in
+  (match TP.validate_subscription_filter_params accepted with
+   | Ok filter ->
+     Alcotest.(check bool) "requested tools notifications are retained" true filter.tools_list_changed;
+     Alcotest.(check (list string)) "resource subscriptions retained"
+       [ "masc://status" ] filter.resource_subscriptions
+   | Error detail -> Alcotest.fail detail);
+  List.iter
+    (fun (label, params) ->
+      match TP.validate_subscription_filter_params params with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.failf "%s should be rejected" label)
+    [ "missing filter", Some (`Assoc [])
+    ; "wrong boolean", listen_params (`Assoc [ "toolsListChanged", `String "yes" ])
+    ; "non-string URI", listen_params (`Assoc [ "resourceSubscriptions", `List [ `Int 1 ] ])
+    ; "duplicate field", listen_params (`Assoc [ "toolsListChanged", `Bool true; "toolsListChanged", `Bool false ]) ]
+
+let test_blocked_ack_does_not_lock_other_subscriptions () =
+  Eio_main.run @@ fun env ->
+  let was_ready = Eio_guard.is_ready () in
+  Eio_guard.enable ();
+  Fun.protect ~finally:(fun () -> if not was_ready then Eio_guard.disable ()) (fun () ->
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 2.0 @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Subs.reset_for_test ();
+  Fun.protect ~finally:Subs.reset_for_test (fun () ->
+    let ack_started, start_ack = Eio.Promise.create () in
+    let release_ack, release = Eio.Promise.create () in
+    let opened, opened_resolver = Eio.Promise.create () in
+    let tools = TP.subscription_filter_of_params
+      (listen_params (`Assoc [ "toolsListChanged", `Bool true ])) in
+    Eio.Fiber.fork ~sw (fun () ->
+      let token = Subs.register_after_ack ~subscription_id:(`Int 1) ~filter:tools
+        ~send:(fun _ -> true)
+        ~acknowledge:(fun () ->
+          Eio.Promise.resolve start_ack ();
+          Eio.Promise.await release_ack;
+          true) in
+      Eio.Promise.resolve opened_resolver token);
+    Eio.Promise.await ack_started;
+    let resources = TP.subscription_filter_of_params
+      (listen_params (`Assoc [ "resourceSubscriptions", `List [ `String "masc://status" ] ])) in
+    let delivered = ref false in
+    let sibling = Subs.register ~subscription_id:(`Int 2) ~filter:resources
+      ~send:(fun _ -> delivered := true; true) in
+    Subs.notify_resource_updated ~uri:"masc://status"
+      (TP.jsonrpc_notification "notifications/resources/updated");
+    Alcotest.(check bool) "unrelated subscriber receives while ACK is blocked" true !delivered;
+    Eio.Promise.resolve release ();
+    (match Eio.Promise.await opened with
+     | Some token -> Subs.unregister token
+     | None -> Alcotest.fail "acknowledgement unexpectedly failed");
+    Subs.unregister sibling))
+
+let test_failed_ack_does_not_poison_publishers () =
+  Eio_main.run @@ fun env ->
+  let was_ready = Eio_guard.is_ready () in
+  Eio_guard.enable ();
+  Fun.protect ~finally:(fun () -> if not was_ready then Eio_guard.disable ()) (fun () ->
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 2.0 @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Subs.reset_for_test ();
+  Fun.protect ~finally:Subs.reset_for_test (fun () ->
+    let started, start = Eio.Promise.create () in
+    let release, release_resolver = Eio.Promise.create () in
+    let ack_done, resolve_ack = Eio.Promise.create () in
+    let publish_done, resolve_publish = Eio.Promise.create () in
+    let filter = TP.subscription_filter_of_params
+      (listen_params (`Assoc [ "toolsListChanged", `Bool true ])) in
+    let sibling_count = ref 0 in
+    let sibling = Subs.register ~subscription_id:(`Int 2) ~filter
+      ~send:(fun _ -> incr sibling_count; true) in
+    Eio.Fiber.fork ~sw (fun () ->
+      let failed =
+        try
+          ignore (Subs.register_after_ack ~subscription_id:(`Int 1) ~filter
+            ~send:(fun _ -> true)
+            ~acknowledge:(fun () ->
+              Eio.Promise.resolve start ();
+              Eio.Promise.await release;
+              failwith "ack write failed") : Subs.token option);
+          false
+        with Failure _ -> true
+      in
+      Eio.Promise.resolve resolve_ack failed);
+    Eio.Promise.await started;
+    Eio.Fiber.fork ~sw (fun () ->
+      let outcome =
+        try
+          Subs.notify_tools_list_changed
+            (TP.jsonrpc_notification "notifications/tools/list_changed");
+          true
+        with _ -> false
+      in
+      Eio.Promise.resolve resolve_publish outcome);
+    Eio.Fiber.yield ();
+    Eio.Promise.resolve release_resolver ();
+    Alcotest.(check bool) "ACK failure reaches its caller" true (Eio.Promise.await ack_done);
+    Alcotest.(check bool) "publisher is not poisoned" true (Eio.Promise.await publish_done);
+    Alcotest.(check int) "healthy sibling receives the event" 1 !sibling_count;
+    Alcotest.(check int) "failed subscription removed" 1 (Subs.count ());
+    Subs.unregister sibling))
+
+let test_cancelled_ack_releases_subscription () =
+  Eio_main.run @@ fun env ->
+  let was_ready = Eio_guard.is_ready () in
+  Eio_guard.enable ();
+  Fun.protect ~finally:(fun () -> if not was_ready then Eio_guard.disable ()) (fun () ->
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 2.0 @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Subs.reset_for_test ();
+  Fun.protect ~finally:Subs.reset_for_test (fun () ->
+    let started, start = Eio.Promise.create () in
+    let release, release_ack = Eio.Promise.create () in
+    let publish_done, resolve_publish = Eio.Promise.create () in
+    let released = ref false in
+    let filter = TP.subscription_filter_of_params
+      (listen_params (`Assoc [ "toolsListChanged", `Bool true ])) in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      (* A fixture fallback prevents the broken cancellation case from hanging. *)
+      Eio.Time.sleep (Eio.Stdenv.clock env) 0.1;
+      released := true;
+      Eio.Promise.resolve release_ack ();
+      `Stop_daemon);
+    let result = Eio.Fiber.first
+      (fun () ->
+        ignore (Subs.register_after_ack ~subscription_id:(`Int 1) ~filter
+          ~send:(fun _ -> true)
+          ~acknowledge:(fun () ->
+            Eio.Promise.resolve start ();
+            Eio.Promise.await release;
+            true) : Subs.token option);
+        `Ack_returned)
+      (fun () ->
+        Eio.Promise.await started;
+        Eio.Fiber.fork ~sw (fun () ->
+          Subs.notify_tools_list_changed
+            (TP.jsonrpc_notification "notifications/tools/list_changed");
+          Eio.Promise.resolve resolve_publish ());
+        Eio.Fiber.yield ();
+        `Cancel_ack)
+    in
+    Alcotest.(check bool) "cancellation did not wait for the ACK fallback" false !released;
+    Alcotest.(check bool) "cancelling branch won" true (result = `Cancel_ack);
+    Eio.Promise.await publish_done;
+    Alcotest.(check int) "cancelled subscription removed" 0 (Subs.count ())))
+
 let () =
   run "Mcp_transport_protocol Coverage" [
     "constants", [
@@ -458,12 +751,26 @@ let () =
       test_case "from_body initialize" `Quick test_protocol_version_from_body_initialize;
       test_case "from_body invalid normalizes" `Quick
         test_protocol_version_from_body_invalid_normalizes;
+      test_case "initialize only negotiates legacy" `Quick
+        test_initialize_does_not_negotiate_a_stateless_version;
+      test_case "legacy default keeps a legacy latest" `Quick
+        test_legacy_default_keeps_a_legacy_latest;
+      test_case "negotiate legacy uses the given counter-offer" `Quick
+        test_negotiate_legacy_uses_the_given_counter_offer;
+      test_case "legacy default skips a stateless latest" `Quick
+        test_legacy_default_skips_a_stateless_latest;
+      test_case "legacy default needs a legacy version" `Quick
+        test_legacy_default_needs_a_legacy_version;
+      test_case "legacy default matches the sdk" `Quick
+        test_legacy_default_matches_the_sdk;
       test_case "from_body non_initialize" `Quick
         test_protocol_version_from_body_non_initialize;
       test_case "from_body missing jsonrpc" `Quick
         test_protocol_version_from_body_missing_jsonrpc;
       test_case "from_request_meta_body" `Quick
         test_protocol_version_from_request_meta_body;
+      test_case "request protocol admission" `Quick test_request_protocol_admission;
+      test_case "null ID is not a notification" `Quick test_request_null_id_is_not_a_notification;
     ];
     "accepts_json", [
       test_case "none" `Quick test_accepts_json_none;
@@ -522,6 +829,16 @@ let () =
         test_the_acknowledged_filter_omits_what_was_not_asked_for;
       test_case "a notification carries the subscription id" `Quick
         test_a_notification_carries_the_subscription_id;
+      test_case "acknowledgement and registration are atomic" `Quick
+        test_acknowledgement_and_registration_are_atomic;
+      test_case "subscription filter wire validation" `Quick
+        test_subscription_filter_wire_validation;
+      test_case "blocked acknowledgement does not lock other subscriptions" `Quick
+        test_blocked_ack_does_not_lock_other_subscriptions;
+      test_case "failed acknowledgement does not poison publishers" `Quick
+        test_failed_ack_does_not_poison_publishers;
+      test_case "cancelled acknowledgement removes the pending subscription" `Quick
+        test_cancelled_ack_releases_subscription;
       test_case "a stream receives only what it asked for" `Quick
         test_a_stream_receives_only_what_it_asked_for;
       test_case "a dead stream is retired" `Quick test_a_dead_stream_is_retired;

@@ -643,6 +643,7 @@ module Router = struct
     path: string;
     methods: Httpun.Method.t list;
     handler: route_target;
+    access: Route_access.t;
   }
 
   type resolution =
@@ -661,6 +662,15 @@ module Router = struct
     prefix_root: prefix_node;
   }
 
+  (* Every registration, newest first. It is shared state like the method
+     index and the prefix trie, so a router that was passed to a registration
+     function and is used afterwards describes the same table in [routes] and
+     in [resolve]. *)
+  type route_log = {
+    mutable entries: route list;
+    mutable count: int;
+  }
+
   type t = {
     get: method_routes;
     post: method_routes;
@@ -668,8 +678,7 @@ module Router = struct
     delete: method_routes;
     options: method_routes;
     exact_paths: (string, unit) Hashtbl.t;
-    routes: route list;
-    route_count: int;
+    log: route_log;
   }
 
   let create_prefix_node () =
@@ -690,13 +699,12 @@ module Router = struct
       delete = create_method_routes ();
       options = create_method_routes ();
       exact_paths = Hashtbl.create 128;
-      routes = [];
-      route_count = 0;
+      log = { entries = []; count = 0 };
     }
 
-  let route_count router = router.route_count
+  let route_count router = router.log.count
 
-  let routes router = List.rev router.routes
+  let routes router = List.rev router.log.entries
 
   let insert_prefix_route route routes =
     let route_len = String.length route.path in
@@ -745,8 +753,8 @@ module Router = struct
           insert_prefix_route route method_routes.prefix_routes;
         insert_prefix_trie route method_routes.prefix_root
 
-  let add_kind kind ~path ~methods ~handler router =
-    let route = { kind; path; methods; handler } in
+  let add_kind kind ~access ~path ~methods ~handler router =
+    let route = { kind; path; methods; handler; access } in
     (match kind with
      | Exact ->
          Hashtbl.replace router.exact_paths path ();
@@ -763,17 +771,42 @@ module Router = struct
               | Some routes -> add_to_method_routes Prefix route routes
               | None -> ())
            methods);
-    (* [add_kind] already returns the router and every caller threads it
-       (`router |> get ... |> post ...`), so the two fields the router owns
-       can come back on a new record. The method index and the prefix trie
-       stay in-place containers carried by [{ router with ... }]. *)
-    { router with
-      routes = route :: router.routes
-    ; route_count = router.route_count + 1
-    }
+    router.log.entries <- route :: router.log.entries;
+    router.log.count <- router.log.count + 1;
+    router
 
+  (* Dispatch gives a method and a path to the route registered last:
+     [Hashtbl.replace] for an exact path, and the newest route first among equal
+     prefixes. A registration that a later one replaced is still in [routes]. *)
+  let effective_routes router =
+    let seen = Hashtbl.create 256 in
+    let reachable method_ = Option.is_some (method_routes router method_) in
+    let replaced route method_ =
+      let key = route.kind, route.path, Httpun.Method.to_string method_ in
+      if Hashtbl.mem seen key
+      then true
+      else (
+        Hashtbl.add seen key ();
+        false)
+    in
+    List.filter_map
+      (fun route ->
+         match
+           List.filter
+             (fun method_ -> reachable method_ && not (replaced route method_))
+             route.methods
+         with
+         | [] -> None
+         | methods -> Some { route with methods })
+      router.log.entries
+    |> List.rev
+
+  (* The functions below record [Route_access.Unclassified]. They stay until the
+     last layer of the typed-route-auth stack moves every registration to
+     [Server_route] and deletes them (docs/rfc/RFC-typed-route-auth.md). *)
   let add ~path ~methods ~handler router =
-    add_kind Exact ~path ~methods ~handler:(Plain handler) router
+    add_kind Exact ~access:Route_access.Unclassified ~path ~methods
+      ~handler:(Plain handler) router
 
   let get path handler routes =
     add ~path ~methods:[`GET] ~handler routes
@@ -788,21 +821,188 @@ module Router = struct
       receives the Gluten [upgrade] capability so it can drive the
       post-101 connection.  RFC-0281. *)
   let ws_get path handler router =
-    add_kind Exact ~path ~methods:[`GET] ~handler:(Ws handler) router
+    add_kind Exact ~access:Route_access.Unclassified ~path ~methods:[`GET]
+      ~handler:(Ws handler) router
 
   (** Match by prefix: path field is treated as a prefix, not exact match.
       The suffix (path after the prefix) is available via [Request.path]. *)
   let prefix_get prefix handler routes =
-    add_kind Prefix ~path:prefix ~methods:[`GET] ~handler:(Plain handler) routes
+    add_kind Prefix ~access:Route_access.Unclassified ~path:prefix
+      ~methods:[`GET] ~handler:(Plain handler) routes
 
   let prefix_post prefix handler routes =
-    add_kind Prefix ~path:prefix ~methods:[`POST] ~handler:(Plain handler) routes
+    add_kind Prefix ~access:Route_access.Unclassified ~path:prefix
+      ~methods:[`POST] ~handler:(Plain handler) routes
 
   let prefix_delete prefix handler routes =
-    add_kind Prefix ~path:prefix ~methods:[`DELETE] ~handler:(Plain handler) routes
+    add_kind Prefix ~access:Route_access.Unclassified ~path:prefix
+      ~methods:[`DELETE] ~handler:(Plain handler) routes
 
   let prefix_put prefix handler routes =
-    add_kind Prefix ~path:prefix ~methods:[`PUT] ~handler:(Plain handler) routes
+    add_kind Prefix ~access:Route_access.Unclassified ~path:prefix
+      ~methods:[`PUT] ~handler:(Plain handler) routes
+
+  (* Typed registration. The only way to give a route an access other than
+     [Route_access.Unclassified] is [Make_typed]: it applies the wrapper that
+     goes with the kind to the handler and records the kind in the same call, so
+     a route cannot say [Permission] and run a handler that checks nothing.
+     [add_kind], the function that takes the access and the handler as separate
+     arguments, is not exported. *)
+  module type Wrappers = sig
+    type state
+
+    val with_public_read
+      :  (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+
+    val with_read_auth
+      :  (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+
+    val with_permission_auth
+      :  permission:Masc_domain.permission
+      -> (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+
+    val with_token_permission_auth
+      :  permission:Masc_domain.permission
+      -> (state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+
+    val with_private_token_permission_auth
+      :  permission:Masc_domain.permission
+      -> (state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+
+    val with_tool_auth
+      :  tool_name:string
+      -> (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+
+    val with_tool_actor_auth
+      :  tool_name:string
+      -> (state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+  end
+
+  module type Typed = sig
+    type state
+    type state_handler = state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+    type token_handler = state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+    type actor_handler = state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+
+    type _ auth =
+      | Always_public : request_handler auth
+      | Public_read : state_handler auth
+      | Read_auth : state_handler auth
+      | Permission : Masc_domain.permission -> state_handler auth
+      | Token_permission : Masc_domain.permission -> token_handler auth
+      | Private_token_permission : Masc_domain.permission -> token_handler auth
+      | Tool : { tool_name : string } -> state_handler auth
+      | Tool_actor : { tool_name : string } -> actor_handler auth
+      | Self_authenticated :
+          Route_access.self_authenticated_reason
+          -> request_handler auth
+
+    val access : _ auth -> Route_access.t
+    val get : 'h auth -> string -> 'h -> t -> t
+    val post : 'h auth -> string -> 'h -> t -> t
+
+    val add
+      :  'h auth
+      -> path:string
+      -> methods:Httpun.Method.t list
+      -> 'h
+      -> t
+      -> t
+
+    val prefix_get : 'h auth -> string -> 'h -> t -> t
+    val prefix_post : 'h auth -> string -> 'h -> t -> t
+    val prefix_put : 'h auth -> string -> 'h -> t -> t
+    val prefix_delete : 'h auth -> string -> 'h -> t -> t
+    val ws_get : string -> ws_handler -> t -> t
+  end
+
+  module Make_typed (W : Wrappers) : Typed with type state = W.state = struct
+    type state = W.state
+    type state_handler = state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+    type token_handler = state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+    type actor_handler = state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+
+    type _ auth =
+      | Always_public : request_handler auth
+      | Public_read : state_handler auth
+      | Read_auth : state_handler auth
+      | Permission : Masc_domain.permission -> state_handler auth
+      | Token_permission : Masc_domain.permission -> token_handler auth
+      | Private_token_permission : Masc_domain.permission -> token_handler auth
+      | Tool : { tool_name : string } -> state_handler auth
+      | Tool_actor : { tool_name : string } -> actor_handler auth
+      | Self_authenticated :
+          Route_access.self_authenticated_reason
+          -> request_handler auth
+
+    let access : type h. h auth -> Route_access.t = function
+      | Always_public -> Route_access.Always_public
+      | Public_read -> Route_access.Public_read
+      | Read_auth -> Route_access.Read_auth
+      | Permission permission -> Route_access.Permission permission
+      | Token_permission permission -> Route_access.Token_permission permission
+      | Private_token_permission permission ->
+        Route_access.Private_token_permission permission
+      | Tool { tool_name } -> Route_access.Tool { tool_name }
+      | Tool_actor { tool_name } -> Route_access.Tool_actor { tool_name }
+      | Self_authenticated reason -> Route_access.Self_authenticated reason
+
+    (* The handler a route runs: [handler] inside the wrapper the kind names.
+       The kinds that wrap nothing hand [handler] over unchanged. *)
+    let wrapped : type h. h auth -> h -> request_handler =
+      fun auth handler ->
+      match auth with
+      | Always_public -> handler
+      | Self_authenticated _ -> handler
+      | Public_read -> W.with_public_read handler
+      | Read_auth -> W.with_read_auth handler
+      | Permission permission -> W.with_permission_auth ~permission handler
+      | Token_permission permission ->
+        W.with_token_permission_auth ~permission handler
+      | Private_token_permission permission ->
+        W.with_private_token_permission_auth ~permission handler
+      | Tool { tool_name } -> W.with_tool_auth ~tool_name handler
+      | Tool_actor { tool_name } -> W.with_tool_actor_auth ~tool_name handler
+
+    let register auth ~kind ~path ~methods handler routes =
+      add_kind kind ~access:(access auth) ~path ~methods
+        ~handler:(Plain (wrapped auth handler)) routes
+
+    let get auth path handler routes =
+      register auth ~kind:Exact ~path ~methods:[`GET] handler routes
+
+    let post auth path handler routes =
+      register auth ~kind:Exact ~path ~methods:[`POST] handler routes
+
+    let add auth ~path ~methods handler routes =
+      register auth ~kind:Exact ~path ~methods handler routes
+
+    let prefix_get auth prefix handler routes =
+      register auth ~kind:Prefix ~path:prefix ~methods:[`GET] handler routes
+
+    let prefix_post auth prefix handler routes =
+      register auth ~kind:Prefix ~path:prefix ~methods:[`POST] handler routes
+
+    let prefix_put auth prefix handler routes =
+      register auth ~kind:Prefix ~path:prefix ~methods:[`PUT] handler routes
+
+    let prefix_delete auth prefix handler routes =
+      register auth ~kind:Prefix ~path:prefix ~methods:[`DELETE] handler routes
+
+    (* The handler checks the credential before it upgrades, so the only kind
+       that applies is [Self_authenticated Websocket_upgrade]. *)
+    let ws_get path handler routes =
+      add_kind Exact
+        ~access:(Route_access.Self_authenticated Route_access.Websocket_upgrade)
+        ~path ~methods:[`GET] ~handler:(Ws handler) routes
+  end
 
   let resolve_prefix routes req_path =
     let path_len = String.length req_path in

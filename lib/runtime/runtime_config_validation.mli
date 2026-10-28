@@ -30,5 +30,3 @@ val lanes_of_decls :
   Runtime_instance.t list -> Runtime_schema.lane_decl list ->
   (Runtime_lane.t list, Runtime_config_error.load_failure) result
 val validate_runtime_max_context : Runtime_instance.t list -> (unit, Runtime_config_error.load_failure) result
-val validate_runtime_context_marks : Runtime_instance.t list -> (unit, Runtime_config_error.load_failure) result
-(** Refuse a high-water mark above the materialized context window. *)

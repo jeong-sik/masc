@@ -25,10 +25,22 @@ type line =
 
 module Tui_decode = Masc.Tui_decode
 
+(** The metadata projection of one submitted original, as the confirmation
+    read carries it: identity, size and integrity without contents. A kind
+    this build does not know stays visible as [Original_unknown]. *)
+type submitted_original =
+  | Original_collaboration of { reference : string; sha256 : string; bytes : int }
+  | Original_note of { bytes : int }
+  | Original_artifact of { reference : string; bytes : int; truncated : bool }
+  | Original_binary of { reference : string; bytes : int; sha256 : string; format : string }
+  | Original_unreadable of { reference : string option; reason : string }
+  | Original_unknown of string
+
 type confirmation = {
   goal_id : string;
   phase : Goal_phase.t;
   verdict : Goal_verification.verdict;
+  submitted : submitted_original list;
 }
 
 type confirmation_state =

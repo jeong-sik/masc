@@ -4,6 +4,7 @@ module U = Yojson.Safe.Util
 
 type http_result = {
   status : int option;
+  headers : string;
   body : string;
   curl_exit : int;
   stderr : string;
@@ -44,7 +45,9 @@ let parse_status header_raw =
   in
   find_http lines
 
-let run_curl_post ?(max_time_sec = 8) ?(extra_headers = []) ~port ~path
+let run_curl_post ?(max_time_sec = 8) ?(extra_headers = [])
+    ?(accept = "application/json, text/event-stream")
+    ?(protocol_version = "2025-11-25") ?(include_session = true) ~port ~path
     ~session_id ~payload () =
   let header_file = Filename.temp_file "mcp-post-sse-header-" ".txt" in
   let body_file = Filename.temp_file "mcp-post-sse-body-" ".txt" in
@@ -71,12 +74,11 @@ let run_curl_post ?(max_time_sec = 8) ?(extra_headers = []) ~port ~path
          "-H";
          "Content-Type: application/json";
          "-H";
-         "Accept: application/json, text/event-stream";
+         "Accept: " ^ accept;
          "-H";
-         Printf.sprintf "Mcp-Session-Id: %s" session_id;
-         "-H";
-         "Mcp-Protocol-Version: 2025-11-25";
+         Printf.sprintf "Mcp-Protocol-Version: %s" protocol_version;
        ]
+      @ (if include_session then [ "-H"; Printf.sprintf "Mcp-Session-Id: %s" session_id ] else [])
       @ extra_header_args
       @ [
           "-o";
@@ -100,12 +102,13 @@ let run_curl_post ?(max_time_sec = 8) ?(extra_headers = []) ~port ~path
     | Unix.WSIGNALED code -> 128 + code
     | Unix.WSTOPPED code -> 256 + code
   in
-  let status = parse_status (read_file header_file) in
+  let headers = read_file header_file in
+  let status = parse_status headers in
   let body = read_file body_file in
   (try Sys.remove header_file with _ -> ());
   (try Sys.remove body_file with _ -> ());
   (try Sys.remove data_file with _ -> ());
-  { status; body; curl_exit; stderr }
+  { status; headers; body; curl_exit; stderr }
 
 let run_curl_get ?(max_time_sec = 1) ~port ~path () =
   let header_file = Filename.temp_file "mcp-post-sse-get-header-" ".txt" in
@@ -139,11 +142,23 @@ let run_curl_get ?(max_time_sec = 1) ~port ~path () =
     | Unix.WSIGNALED code -> 128 + code
     | Unix.WSTOPPED code -> 256 + code
   in
-  let status = parse_status (read_file header_file) in
+  let headers = read_file header_file in
+  let status = parse_status headers in
   let body = read_file body_file in
   (try Sys.remove header_file with _ -> ());
   (try Sys.remove body_file with _ -> ());
-  { status; body; curl_exit; stderr }
+  { status; headers; body; curl_exit; stderr }
+
+let response_header result name =
+  String.split_on_char '\n' result.headers
+  |> List.find_map (fun line ->
+       match String.index_opt line ':' with
+       | None -> None
+       | Some index ->
+         let key = String.sub line 0 index |> String.lowercase_ascii in
+         if String.equal key (String.lowercase_ascii name) then
+           Some (String.sub line (index + 1) (String.length line - index - 1) |> String.trim)
+         else None)
 
 let normalize_mcp_body body =
   let lines = String.split_on_char '\n' body |> List.map trim_cr in
@@ -378,6 +393,91 @@ let test_post_tools_call_preserves_explicit_tool_agent_name () =
   check bool "header actor not used as tool target agent_name" false
     (String_util.contains_substring text "Type: dashboard-header-actor")
 
+let test_modern_http_admission_and_status () =
+  with_server @@ fun ~port ->
+  let meta version = `Assoc
+    [ Mcp_transport_protocol.protocol_version_meta_key, `String version
+    ; Mcp_transport_protocol.client_capabilities_meta_key, `Assoc [] ] in
+  let send ~version ~method_ ?name payload =
+    let extra_headers = [ "Mcp-Method: " ^ method_ ]
+      @ (match name with Some name -> [ "Mcp-Name: " ^ name ] | None -> []) in
+    run_curl_post ~port ~path:"/mcp" ~session_id:"" ~include_session:false
+      ~protocol_version:version ~extra_headers ~payload:(Yojson.Safe.to_string payload) ()
+  in
+  let check_error label ~status ~code ~id result =
+    check (option int) (label ^ " HTTP status") (Some status) result.status;
+    let json = Yojson.Safe.from_string result.body in
+    check int (label ^ " JSON-RPC code") code U.(json |> member "error" |> member "code" |> to_int);
+    check bool (label ^ " request ID") true (U.member "id" json = id)
+  in
+  let discover version id = `Assoc
+    [ "jsonrpc", `String "2.0"; "id", id; "method", `String "server/discover"
+    ; "params", `Assoc [ "_meta", meta version ] ] in
+  check_error "unsupported version" ~status:400 ~code:(-32022) ~id:(`Int 81)
+    (send ~version:"2099-01-01" ~method_:"server/discover" (discover "2099-01-01" (`Int 81)));
+  let unknown = `Assoc
+    [ "jsonrpc", `String "2.0"; "id", `Int 82; "method", `String "unknown/method"
+    ; "params", `Assoc [ "_meta", meta "2026-07-28" ] ] in
+  check_error "unknown method" ~status:404 ~code:(-32601) ~id:(`Int 82)
+    (send ~version:"2026-07-28" ~method_:"unknown/method" unknown);
+  let invalid_call = `Assoc
+    [ "jsonrpc", `String "2.0"; "id", `Int 83; "method", `String "tools/call"
+    ; "params", `Assoc [ "_meta", meta "2026-07-28"; "name", `String "masc_status"
+                        ; "arguments", `List [] ] ] in
+  check_error "invalid streaming arguments" ~status:400 ~code:(-32602) ~id:(`Int 83)
+    (send ~version:"2026-07-28" ~method_:"tools/call" ~name:"masc_status" invalid_call);
+  let unknown_state = `Assoc
+    [ "jsonrpc", `String "2.0"; "id", `Int 87; "method", `String "tools/call"
+    ; "params", `Assoc [ "_meta", meta "2026-07-28"; "name", `String "masc_status"
+                        ; "arguments", `Assoc []; "requestState", `String "opaque" ] ] in
+  check_error "unrecognized continuation" ~status:400 ~code:(-32602) ~id:(`Int 87)
+    (send ~version:"2026-07-28" ~method_:"tools/call" ~name:"masc_status" unknown_state);
+  let unknown_responses = `Assoc
+    [ "jsonrpc", `String "2.0"; "id", `Int 88; "method", `String "tools/call"
+    ; "params", `Assoc [ "_meta", meta "2026-07-28"; "name", `String "masc_status"
+                        ; "arguments", `Assoc []; "inputResponses", `Assoc [] ] ] in
+  check_error "unrecognized continuation inputs" ~status:400 ~code:(-32602) ~id:(`Int 88)
+    (send ~version:"2026-07-28" ~method_:"tools/call" ~name:"masc_status" unknown_responses);
+  List.iter (fun (id, method_, field, name) ->
+    let body = `Assoc
+      [ "jsonrpc", `String "2.0"; "id", `Int id; "method", `String method_
+      ; "params", `Assoc [ "_meta", meta "2026-07-28"; field, `String name
+                          ; "requestState", `String "opaque" ] ] in
+    check_error "unrecognized read continuation" ~status:400 ~code:(-32602) ~id:(`Int id)
+      (send ~version:"2026-07-28" ~method_ ~name body))
+    [ 89, "resources/read", "uri", "masc://status.json"
+    ; 90, "prompts/get", "name", "tool_help" ];
+  check_error "malformed JSON" ~status:400 ~code:(-32700) ~id:`Null
+    (run_curl_post ~port ~path:"/mcp" ~session_id:"" ~include_session:false
+       ~protocol_version:"2026-07-28" ~extra_headers:[ "Mcp-Method: server/discover" ]
+       ~payload:"{" ());
+  check_error "invalid Accept" ~status:400 ~code:(-32600) ~id:(`Int 84)
+    (run_curl_post ~port ~path:"/mcp" ~session_id:"" ~include_session:false
+       ~protocol_version:"2026-07-28" ~accept:"application/json"
+       ~extra_headers:[ "Mcp-Method: server/discover" ]
+       ~payload:(Yojson.Safe.to_string (discover "2026-07-28" (`Int 84))) ());
+  let legacy_initialize = Yojson.Safe.to_string (`Assoc
+    [ "jsonrpc", `String "2.0"; "id", `Int 85; "method", `String "initialize"
+    ; "params", `Assoc [ "protocolVersion", `String "2025-11-25"
+                        ; "capabilities", `Assoc []
+                        ; "clientInfo", `Assoc [ "name", `String "test"; "version", `String "1" ] ] ]) in
+  let legacy = run_curl_post ~port ~path:"/mcp" ~session_id:"" ~include_session:false
+      ~payload:legacy_initialize () in
+  require_http_ok "legacy initialize" legacy;
+  let legacy_id = match response_header legacy "mcp-session-id" with
+    | Some value -> value
+    | None -> fail "legacy initialize did not return a session ID" in
+  let modern = run_curl_post ~port ~path:"/mcp" ~session_id:legacy_id
+      ~protocol_version:"2026-07-28"
+      ~extra_headers:[ "Mcp-Method: server/discover"; "Cookie: mcp-session-id=" ^ legacy_id ]
+      ~payload:(Yojson.Safe.to_string (discover "2026-07-28" (`Int 86))) () in
+  let modern_json = parse_json_body "modern request with legacy session" modern in
+  check bool "legacy session does not block discovery" true (U.member "result" modern_json <> `Null);
+  check (option string) "modern response omits session ID" None
+    (response_header modern "mcp-session-id");
+  check (option string) "modern response omits session cookie" None
+    (response_header modern "set-cookie")
+
 let () =
   run "mcp_post_sse_e2e"
     [
@@ -387,5 +487,7 @@ let () =
             test_post_tools_call_streams_sse_framing;
           test_case "post tools/call preserves explicit tool agent_name"
             `Slow test_post_tools_call_preserves_explicit_tool_agent_name;
+          test_case "modern HTTP admission and status" `Slow
+            test_modern_http_admission_and_status;
         ] );
     ]

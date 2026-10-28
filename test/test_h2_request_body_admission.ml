@@ -568,7 +568,6 @@ let test_auth_refusals_preserve_next_authenticated_post () =
   check bool "the next POST's query was executed" true (project <> `Null)
 
 let test_oauth_refusals_preserve_next_registration () =
-  Masc_test_deps.with_process_env "MASC_OAUTH_ENABLED" (Some "1") @@ fun () ->
   with_gateway @@ fun ~base_path:_ ~clock handler ->
   let session = create_session ~clock ~config:continuity_config ~handler () in
   let headers = [ "content-type", "application/json" ] in

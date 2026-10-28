@@ -6,11 +6,28 @@
 
     Every delivery is filtered before it is sent: the specification says a
     server {b MUST NOT} send a notification type the client did not request,
-    so the filter is consulted here rather than at each emitter. *)
+    so the filter is consulted here rather than at each emitter.
+
+    Concurrent registry operations require [Eio_guard] to remain enabled and
+    callers to run in Eio fibers. Before enablement, operations bypass locks
+    and are safe only when there is no concurrent access, such as serial
+    initialization. *)
 
 type token
 (** Handle for one open stream. The transport keeps it and returns it on
     close. *)
+
+type retired
+(** A removed stream whose already-started delivery may still be finishing. *)
+
+val retire : token -> retired
+(** Remove a stream from discovery immediately. A delivery that acquired its
+    send lock before retirement may still be in flight; [await_retired] drains
+    it. The token retains its entry even if another publisher already removed
+    it; repeated retirement is safe and returns the same drain authority. *)
+
+val await_retired : retired -> unit
+(** Wait until the retired stream's in-flight delivery has left its send lock. *)
 
 val register :
   subscription_id:Yojson.Safe.t ->
@@ -24,9 +41,23 @@ val register :
     for a writer: masc_server depends on masc, and the reverse edge would
     point the notification vocabulary at the transport. *)
 
+val register_after_ack :
+  subscription_id:Yojson.Safe.t ->
+  filter:Mcp_transport_protocol.subscription_filter ->
+  send:(Yojson.Safe.t -> bool) ->
+  acknowledge:(unit -> bool) ->
+  token option
+(** Register before acknowledging while serializing delivery for this one
+    subscription. The acknowledgement is first and no event can slip through
+    the gap; a failed acknowledgement leaves no registration. The registry's
+    shared mutex is not held while writing to a transport. A blocked write
+    remains cancellable and cleanup removes the pending entry. Callbacks must
+    not synchronously unregister their own subscription. *)
+
 val unregister : token -> unit
 (** Idempotent: the transport unregisters on close and a failed send retires
-    the same entry, and neither needs to know about the other. *)
+    the same entry, and neither needs to know about the other. Waits for any
+    in-flight delivery even if another caller already retired the entry. *)
 
 val count : unit -> int
 (** Open streams. For operator surfaces and tests. *)
@@ -56,7 +87,7 @@ val acknowledgement :
   Mcp_transport_protocol.subscription_filter ->
   Yojson.Safe.t
 (** The first message on a subscription, which no notification may precede —
-    so send it before {!register}. *)
+    use it with {!register_after_ack}. *)
 
 val graceful_closure : subscription_id:Yojson.Safe.t -> Yojson.Safe.t
 (** The JSON-RPC response to the long-lived request, marking a clean end. A

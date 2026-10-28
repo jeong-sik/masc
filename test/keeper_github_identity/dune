@@ -13,6 +13,8 @@
   time_compat
   keeper_github_identity
   test_keeper_github_identity)
+ (preprocess
+  (pps ppx_enumerate))
  (libraries
   alcotest
    masc.agent_core.digest

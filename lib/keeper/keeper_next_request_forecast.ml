@@ -6,8 +6,8 @@
    [Keeper_turn_driver_try_provider.choose_range_start] says -- a fitting
    Librarian snapshot, else the Librarian's read position, else the pair's
    front, else the turn start -- over the durable history with the wake line
-   appended as the newest atom. The Librarian's files, the front and the
-   binding's marks are read live; R (tool schemas + keeper
+   appended as the newest atom. The Librarian's files and the front
+   are read live; R (tool schemas + keeper
    instructions) and the pinned blocks (memory recall, dynamic context, ...)
    are taken from the turn records of completed turns on the same runtime,
    because a turn measures them with the encoder the composition uses and
@@ -112,7 +112,6 @@ let walk_refusal_to_string = Keeper_turn_driver.assignment_refusal_to_string
 type candidate =
   { runtime_id : string
   ; lane : (unit, lane_refusal) result
-  ; marks : Runtime_schema.context_marks option
   ; parts : (measured_parts, parts_refusal) result
   ; history_atoms : int
   ; carried : carried option
@@ -418,7 +417,6 @@ let candidate
   =
   let runtime = Runtime.get_runtime_by_id runtime_id in
   let lane = lane_for ~runtime_id runtime in
-  let marks = Runtime.context_marks_of_runtime_id runtime_id in
   let parts = select_parts ~runtime_id ~records_read readings in
   let carried =
     match lane with
@@ -458,7 +456,6 @@ let candidate
   in
   { runtime_id
   ; lane
-  ; marks
   ; parts
   ; history_atoms
   ; carried
@@ -635,14 +632,6 @@ let candidate_to_json (candidate : candidate) =
         | Ok () -> `Assoc [ "agent_core", `Bool true ]
         | Error refusal ->
           `Assoc [ "not_applicable", `String (lane_refusal_to_string refusal) ] )
-    ; ( "marks"
-      , option_json
-          (fun (marks : Runtime_schema.context_marks) ->
-             `Assoc
-               [ "high_water_tokens", `Int marks.high_water_tokens
-               ; "low_water_tokens", `Int marks.low_water_tokens
-               ])
-          candidate.marks )
     ; ( "parts"
       , match candidate.parts with
         | Ok (parts : measured_parts) ->
@@ -674,7 +663,7 @@ let walk_to_json (walk : walk) =
 
 let to_json forecast =
   `Assoc
-    [ "schema", `String "masc.keeper.next-request-forecast.v5"
+    [ "schema", `String "masc.keeper.next-request-forecast.v6"
     ; "keeper", `String forecast.keeper
     ; "trace_id", `String forecast.trace_id
     ; "checkpoint_messages", `Int forecast.checkpoint_messages

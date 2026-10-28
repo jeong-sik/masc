@@ -26,6 +26,8 @@ let get_id = Mcp_transport_protocol.get_id
 let is_valid_request_id = Mcp_transport_protocol.is_valid_request_id
 let jsonrpc_request_of_yojson = Mcp_transport_protocol.jsonrpc_request_of_yojson
 
+let has_unique_jsonrpc_fields = Mcp_transport_protocol.has_unique_jsonrpc_fields
+
 (** {1 Authentication gate}
 
     Every JSON-RPC method declares its requirement via {!Auth_requirement.t}.
@@ -154,6 +156,14 @@ let clear_resource_subscriptions_for_session session_id =
     Hashtbl.remove resource_subscriptions session_id)
 ;;
 
+module For_testing = struct
+  let resource_is_subscribed ~session_id ~uri =
+    with_resource_subscription_lock (fun () ->
+      match Hashtbl.find_opt resource_subscriptions session_id with
+      | None -> false
+      | Some uris -> Hashtbl.mem uris uri)
+end
+
 let jsonrpc_notification = Mcp_transport_protocol.jsonrpc_notification
 
 let resource_updated_notification uri =
@@ -251,10 +261,10 @@ let capabilities_for_profile = function
 let handle_initialize_eio ?(profile = Full) id params =
   match Mcp_transport_protocol.initialize_protocol_version params with
   | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
-  | Ok protocol_version ->
-    (match Mcp_transport_protocol.validate_protocol_version protocol_version with
-     | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
-     | Ok protocol_version ->
+  | Ok requested_version ->
+    let protocol_version =
+      Mcp_transport_protocol.negotiate_legacy_protocol_version requested_version
+    in
        make_response
          ~id
          (`Assoc
@@ -282,7 +292,7 @@ let handle_initialize_eio ?(profile = Full) id params =
                              | Operator_remote -> "operator_remote"
                              | Seat -> "seat") )
                       ]) )
-             ]))
+             ])
 ;;
 
 let profile_instructions = function
@@ -846,6 +856,27 @@ let mcp_tool_call_log_details ?outcome ~phase ~profile ~tool_name ~id ?mcp_sessi
      | None -> [])
 ;;
 
+let request_protocol_error_response ~id = function
+  | Mcp_transport_protocol.Invalid_request_meta message ->
+    make_error_typed ~id Mcp_error_code.Invalid_params message
+  | Mcp_transport_protocol.Unsupported_request_version requested ->
+    make_error_typed ~id
+      ~data:
+        (`Assoc
+          [ "supported", `List
+              (List.map (fun version -> `String version)
+                 Mcp_transport_protocol.supported_protocol_versions)
+          ; "requested", `String requested ])
+      Mcp_error_code.Unsupported_protocol_version
+      "Unsupported protocol version"
+;;
+
+let method_removed_from_stateless_protocol = function
+  | "initialize" | "initialized" | "notifications/initialized" | "ping"
+  | "resources/subscribe" | "resources/unsubscribe" | "logging/setLevel" -> true
+  | _ -> false
+;;
+
 (** Handle incoming JSON-RPC request - Pure Eio Native *)
 let handle_request
       ~handle_call_tool_eio
@@ -884,6 +915,8 @@ let handle_request
       then `Null
       else if not (is_jsonrpc_v2 json)
       then make_error_typed ~id:`Null Mcp_error_code.Invalid_request "Invalid Request: jsonrpc must be 2.0"
+      else if not (has_unique_jsonrpc_fields json)
+      then make_error_typed ~id:`Null Mcp_error_code.Invalid_request "Invalid Request: duplicate JSON-RPC field"
       else (
         match jsonrpc_request_of_yojson json with
         | Error msg ->
@@ -920,6 +953,23 @@ let handle_request
               Mcp_error_code.Invalid_request
               "Invalid Request: MCP id must be a string or integer"
           else (
+            match
+              Mcp_transport_protocol.classify_request_protocol
+                ~require_stateless:false ~method_:req.method_ ~params:req.params
+            with
+            | Error error -> request_protocol_error_response ~id error
+            | Ok (Stateless_protocol _) when
+                method_removed_from_stateless_protocol req.method_ ->
+              make_error_typed ~id Mcp_error_code.Method_not_found
+                ("Method not found: " ^ req.method_)
+            | Ok (Stateless_protocol _) when
+                (String.equal req.method_ "tools/call"
+                 || String.equal req.method_ "resources/read"
+                 || String.equal req.method_ "prompts/get")
+                && Mcp_transport_protocol.request_has_continuation_fields req.params ->
+              make_error_typed ~id Mcp_error_code.Invalid_params
+                "This server has no resumable request for the supplied continuation"
+            | Ok (Legacy_protocol | Stateless_protocol _) ->
             try
               match req.method_ with
               | "server/discover" ->
@@ -936,6 +986,36 @@ let handle_request
                   ~requirement:Auth_requirement.Public
                   ?auth_token
                   (fun _auth_token -> handle_initialize_eio ~profile id req.params)
+              | "ping" ->
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Public
+                  ?auth_token
+                  (fun _auth_token ->
+                    let valid_params =
+                      match req.params with
+                      | None -> true
+                      | Some (`Assoc fields) ->
+                        (match List.filter_map
+                                 (fun (key, value) -> if String.equal key "_meta" then Some value else None)
+                                 fields with
+                         | [] -> true
+                         | [ `Assoc meta ] ->
+                           (match List.filter_map
+                                    (fun (key, value) -> if String.equal key "progressToken" then Some value else None)
+                                    meta with
+                            | [] | [ `String _ ] | [ `Int _ ] | [ `Intlit _ ] -> true
+                            | [ `Float value ] -> Float.is_finite value && Float.floor value = value
+                            | _ -> false)
+                         | _ -> false)
+                      | Some _ -> false
+                    in
+                    if valid_params then
+                      `Assoc [ "jsonrpc", `String "2.0"; "id", id; "result", `Assoc [] ]
+                    else
+                      make_error_typed ~id Mcp_error_code.Invalid_params
+                        "Ping params or progress metadata are invalid")
               | "initialized" | "notifications/initialized" ->
                 with_required_auth
                   ~base_path
@@ -978,21 +1058,22 @@ let handle_request
                   ~requirement:Auth_requirement.Requires_auth
                   ?auth_token
                   (fun _auth_token ->
-                     (* The graceful-closure result. The transport answers with
-                        the open stream when it can; reaching here means it
-                        could not, and the specification has a server end a
-                        subscription with a completion result rather than a
-                        silent drop. *)
-                     make_response
-                       ~id
-                       (`Assoc
-                         [ ( "_meta"
-                           , `Assoc
-                               [ ( Mcp_transport_protocol
-                                   .subscription_id_meta_key
-                                 , id )
-                               ] )
-                         ]))
+                     match Mcp_transport_protocol.validate_subscription_filter_params req.params with
+                     | Error message ->
+                       make_error_typed ~id Mcp_error_code.Invalid_params message
+                     | Ok _filter ->
+                       (* The transport opens the long-lived stream only after
+                          this common admission succeeds. *)
+                       make_response
+                         ~id
+                         (`Assoc
+                           [ ( "_meta"
+                             , `Assoc
+                                 [ ( Mcp_transport_protocol
+                                     .subscription_id_meta_key
+                                   , id )
+                                 ] )
+                           ]))
               | "resources/subscribe" ->
                 with_required_auth
                   ~base_path
@@ -1365,6 +1446,20 @@ type transport_mode =
   | Framed (* Content-Length prefixed - MCP stdio mode *)
   | LineDelimited (* One JSON per line - simple mode *)
 
+type legacy_stdio_state =
+  | Awaiting_initialize
+  | Awaiting_initialized
+  | Legacy_ready
+
+type stdio_request_control =
+  { mutable cancelled : bool
+  ; mutable response_committed : bool
+  ; mutable cancel : (unit -> unit) option
+  }
+
+exception Stdio_request_cancelled
+exception Stdio_output_failed
+
 let detect_mode first_line =
   let lower = String.lowercase_ascii first_line in
   if String.starts_with lower ~prefix:"content-length" then Framed else LineDelimited
@@ -1393,6 +1488,8 @@ let write_line_message flow json =
 
 (** Run MCP server in stdio mode with Eio *)
 let run_stdio ~handle_request ~sw ~env state =
+  if not (Eio_guard.is_ready ()) then
+    invalid_arg "run_stdio requires Eio_guard.enable () for its entire lifetime";
   let stdin = Eio.Stdenv.stdin env in
   let stdout = Eio.Stdenv.stdout env in
   let clock = Eio.Stdenv.clock env in
@@ -1428,11 +1525,63 @@ let run_stdio ~handle_request ~sw ~env state =
      happened on. Two interleaved writes would splice one message into another,
      so every write to stdout goes through here. *)
   let write_mutex = Eio.Mutex.create () in
-  let write_json ~mode json =
-    Eio_guard.with_mutex write_mutex (fun () ->
+  let output_failed = Atomic.make false in
+  let output_error = Atomic.make None in
+  let output_failure, signal_output_failure = Eio.Promise.create () in
+  let write_json_unlocked ~mode json =
+    if Atomic.get output_failed then raise Stdio_output_failed;
+    try
       match mode with
       | Framed -> write_framed_message stdout json
-      | LineDelimited -> write_line_message stdout json)
+      | LineDelimited -> write_line_message stdout json
+    with exn ->
+      (* Some bytes may already be visible. No later writer may append to an
+         unknown partial frame, even if this sink later becomes writable. *)
+      let backtrace = Printexc.get_raw_backtrace () in
+      ignore (Atomic.compare_and_set output_error None (Some (exn, backtrace)));
+      Atomic.set output_failed true;
+      ignore (Eio.Promise.try_resolve signal_output_failure ());
+      Printexc.raise_with_backtrace exn backtrace
+  in
+  let with_output_lock f =
+    (* Parent cancellation and write errors must not poison the output lock. *)
+    match Eio.Mutex.use_rw ~protect:false write_mutex (fun () ->
+      try Ok (f ()) with exn -> Error exn) with
+    | Ok result -> result
+    | Error exn -> raise exn
+  in
+  let write_json ~mode json =
+    with_output_lock (fun () -> write_json_unlocked ~mode json)
+  in
+  (* A subscription publisher can be a fiber outside this stdio switch. Keep
+     a cancellation scope for each send so a cancelled owner can stop and
+     physically drain those sends without cancelling their whole publisher. *)
+  let output_stopping = Atomic.make false in
+  let active_sends = Atomic.make [] in
+  let rec update_sends f =
+    let old = Atomic.get active_sends in
+    if not (Atomic.compare_and_set active_sends old (f old)) then update_sends f
+  in
+  let track_send f =
+    let key = ref () in
+    let stop, signal_stop = Eio.Promise.create () in
+    let finished, finish = Eio.Promise.create () in
+    update_sends (fun sends -> (key, signal_stop, finished) :: sends);
+    Fun.protect
+      ~finally:(fun () ->
+        update_sends (List.filter (fun (other, _, _) -> other != key));
+        Eio.Promise.resolve finish ())
+      (fun () ->
+        (* A send that entered concurrently with retirement must not escape
+           the stopping owner's snapshot. Promises are safe across domains;
+           cancellation contexts belong to their original domain. *)
+        if Atomic.get output_stopping then false
+        else
+          (* Start the stop watcher first: if shutdown already signalled this
+             send, it must not start a new write before observing that signal. *)
+          Eio.Fiber.first
+            (fun () -> Eio.Promise.await stop; false)
+            (fun () -> if Atomic.get output_stopping then false else f ()))
   in
   let respond ~mode response =
     match response with `Null -> () | json -> write_json ~mode json
@@ -1444,65 +1593,134 @@ let run_stdio ~handle_request ~sw ~env state =
   let listen_tokens : (string, Mcp_subscriptions.token) Hashtbl.t =
     Hashtbl.create 4
   in
-  let json_field json name =
-    match json with `Assoc fields -> List.assoc_opt name fields | _ -> None
+  (* Retirements remain owned here until their in-flight send has left its
+     lock, including when cancellation interrupts a previous drain. *)
+  let retired_listens = ref [] in
+  let retire_listen token =
+    let entry = Mcp_subscriptions.retire token in
+    retired_listens := entry :: !retired_listens;
+    entry
   in
-  let close_listen ~mode key subscription_id =
+  let await_listen entry =
+    Mcp_subscriptions.await_retired entry;
+    retired_listens := List.filter (fun other -> other != entry) !retired_listens
+  in
+  let active_requests : (string, stdio_request_control) Hashtbl.t = Hashtbl.create 8 in
+  let cancel_request control =
+    if not control.cancelled && not control.response_committed then (
+      control.cancelled <- true;
+      Option.iter (fun cancel -> cancel ()) control.cancel)
+  in
+  let cancel_active key =
+    match Hashtbl.find_opt active_requests key with
+    | None -> false
+    | Some control -> cancel_request control; true
+  in
+  let cancel_all_active () =
+    Hashtbl.iter (fun _ control -> cancel_request control) active_requests
+  in
+  (* Legacy initialization belongs to this stdio process. Modern requests
+     remain stateless even when the process also serves a legacy client. *)
+  let legacy_state = ref Awaiting_initialize in
+  let cancellation_target = function
+    | Some (`Assoc fields) ->
+      let values key =
+        List.filter_map (fun (name, value) ->
+          if String.equal name key then Some value else None) fields
+      in
+      (match values "requestId", values "reason" with
+       | [ id ], ([] | [ `String _ ]) when is_valid_request_id id -> Some id
+       | _, _ -> None)
+    | Some _ | None -> None
+  in
+  let close_listen key =
     match Hashtbl.find_opt listen_tokens key with
     | None -> false
     | Some token ->
-      Hashtbl.remove listen_tokens key;
-      Mcp_subscriptions.unregister token;
-      write_json ~mode (Mcp_subscriptions.graceful_closure ~subscription_id);
+      let retired = Eio.Cancel.protect (fun () ->
+        Hashtbl.remove listen_tokens key;
+        retire_listen token) in
+      await_listen retired;
       true
   in
-  let serve_stdio_listen ~mode request_json =
-    match json_field request_json "id" with
-    (* JSON-RPC 2.0 requires a request id and 2026-07-28 forbids a null one, so
-       such a request has no identity to tag its notifications with. *)
-    | None | Some `Null ->
-      respond ~mode
-        (Mcp_transport_protocol.make_error ~id:`Null
-           (Mcp_error_code.to_wire_code Mcp_error_code.Invalid_request)
-           "subscriptions/listen requires a non-null request id")
-    | Some subscription_id ->
+  let serve_stdio_listen ~mode ~subscription_id ~params =
       let key = Yojson.Safe.to_string subscription_id in
-      (* A client re-listening on an id it already used replaces that
-         subscription: either way the id ends up bound to the filter this
-         request named. Matches the reconnect rule -- a client re-sends
-         subscriptions/listen and the server holds nothing across the gap. *)
-      (* fire-and-forget: whether one was already open is not interesting. *)
-      ignore (close_listen ~mode key subscription_id : bool);
       let filter =
         Mcp_subscriptions.honoured_filter
-          (Mcp_transport_protocol.subscription_filter_of_params
-             (json_field request_json "params"))
+          (Mcp_transport_protocol.subscription_filter_of_params params)
       in
-      write_json ~mode
-        (Mcp_subscriptions.acknowledgement ~subscription_id filter);
-      let token =
-        Mcp_subscriptions.register ~subscription_id ~filter ~send:(fun json ->
-          write_json ~mode json;
-          true)
-      in
-      Hashtbl.replace listen_tokens key token
+      let send json = track_send (fun () -> write_json ~mode json; true) in
+      (match
+         Mcp_subscriptions.register_after_ack ~subscription_id ~filter ~send
+           ~acknowledge:(fun () ->
+             send (Mcp_subscriptions.acknowledgement ~subscription_id filter))
+       with
+       | Some token -> Hashtbl.replace listen_tokens key token
+       | None -> ())
   in
-  let close_all_listens ~mode =
-    Hashtbl.iter
-      (fun _ token -> Mcp_subscriptions.unregister token)
-      listen_tokens;
-    Hashtbl.reset listen_tokens;
-    ignore mode
+  let close_all_listens () =
+    Eio.Cancel.protect (fun () ->
+      Hashtbl.iter (fun _ token -> ignore (retire_listen token)) listen_tokens;
+      Hashtbl.reset listen_tokens;
+    );
+    try List.iter await_listen !retired_listens with
+    | Eio.Cancel.Cancelled _ as cancelled ->
+      Eio.Cancel.protect (fun () ->
+        Atomic.set output_stopping true;
+        let sends = Atomic.get active_sends in
+        List.iter (fun (_, stop, _) -> ignore (Eio.Promise.try_resolve stop ())) sends;
+        List.iter (fun (_, _, finished) -> Eio.Promise.await finished) sends;
+        List.iter await_listen !retired_listens);
+      raise cancelled
   in
-  let rec loop mode_opt =
+  let start_request ~request_sw ~mode ~mcp_session_id ~id request_str =
+    let key = Yojson.Safe.to_string id in
+    let control = { cancelled = false; response_committed = false; cancel = None } in
+    Hashtbl.add active_requests key control;
+    let respond_if_live response =
+      match response with
+      | `Null -> ()
+      | json ->
+        with_output_lock (fun () ->
+          if not control.cancelled then (
+            (* Once output begins, a concurrent cancellation may no longer
+               withdraw an already-committed JSON-RPC message. *)
+            control.response_committed <- true;
+            write_json_unlocked ~mode json))
+    in
+    Eio.Fiber.fork ~sw:request_sw (fun () ->
+      Fun.protect
+        ~finally:(fun () ->
+          control.cancel <- None;
+          Hashtbl.remove active_requests key)
+        (fun () ->
+          try
+            if not control.cancelled then
+              Eio.Cancel.sub (fun context ->
+                control.cancel <- Some (fun () -> Eio.Cancel.cancel context Stdio_request_cancelled);
+                if control.cancelled then Eio.Cancel.cancel context Stdio_request_cancelled;
+                let response =
+                  Eio.Switch.run (fun call_sw ->
+                    handle_request ~clock ~sw:call_sw ~mcp_session_id state request_str)
+                in
+                respond_if_live response)
+          with
+          | Eio.Cancel.Cancelled _ when control.cancelled -> ()
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            Log.Mcp.error "Stdio request failed: %s" (Printexc.to_string exn);
+            if control.response_committed then raise exn
+            else respond_if_live
+              (make_error_typed ~id Mcp_error_code.Internal_error "Internal error")))
+  in
+  let rec loop request_sw mode_opt =
     match read_line_message buf with
     | None ->
-      Log.Mcp.info "EOF received, shutting down";
-      close_all_listens ~mode:LineDelimited
+      Log.Mcp.info "EOF received, shutting down"
     | Some first_line ->
       let first_line = String.trim first_line in
       if first_line = ""
-      then loop mode_opt
+      then loop request_sw mode_opt
       else (
         let mode =
           match mode_opt with
@@ -1524,59 +1742,156 @@ let run_stdio ~handle_request ~sw ~env state =
         in
         match request_opt with
         | None ->
-          Log.Mcp.info "EOF received, shutting down";
-          close_all_listens ~mode
-        | Some "" -> loop (Some mode)
+          Log.Mcp.info "EOF received, shutting down"
+        | Some "" -> loop request_sw (Some mode)
         | Some request_str -> (
           let parsed =
             match Yojson.Safe.from_string request_str with
             | json -> Some json
             | exception Yojson.Json_error _ -> None
           in
-          let method_of json =
-            match json_field json "method" with
-            | Some (`String m) -> Some m
+          let request =
+            match parsed with
+            | Some json when is_jsonrpc_v2 json && has_unique_jsonrpc_fields json
+                             && not (is_jsonrpc_response json) ->
+              Result.to_option (jsonrpc_request_of_yojson json)
             | Some _ | None -> None
           in
-          let dispatched =
-            (* Matching on the parsed body rather than on its method alone
-               keeps the JSON in scope, so neither arm has to reach back for a
-               value it knows is there. *)
-            match parsed with
-            | None -> false
-            | Some json -> (
-              match method_of json with
-              | Some "subscriptions/listen" ->
-                serve_stdio_listen ~mode json;
-                true
-              (* The stdio way to end a subscription: the client references the
-                 listen request's id. Answers false when no such subscription
-                 is open, because the same notification cancels ordinary
-                 requests and those still need the handler. *)
-              | Some "notifications/cancelled" -> (
-                match json_field json "params" with
-                | Some params -> (
-                  match json_field params "requestId" with
-                  | Some id -> close_listen ~mode (Yojson.Safe.to_string id) id
-                  | None -> false)
-                | None -> false)
-              | Some _ | None -> false)
+          (match request, !legacy_state with
+           | Some req, Awaiting_initialized
+             when Mcp_transport_protocol.is_notification req
+                  && String.equal req.method_ "notifications/initialized" ->
+             legacy_state := Legacy_ready
+           | (Some _ | None), (Awaiting_initialize | Awaiting_initialized | Legacy_ready) -> ());
+          let cancelled =
+            match request with
+            | Some req when Mcp_transport_protocol.is_notification req
+                            && String.equal req.method_ "notifications/cancelled" ->
+              (match cancellation_target req.params with
+               | Some id ->
+                 let key = Yojson.Safe.to_string id in
+                 close_listen key || cancel_active key
+               | None -> false)
+            | Some _ | None -> false
           in
-          if dispatched then loop (Some mode)
-          else
-            let response =
-              handle_request
-                ~clock
-                ~sw
-                ~mcp_session_id:transport_session_id
-                state
-                request_str
+          if cancelled then loop request_sw (Some mode)
+          else (
+            let admission_error =
+              match request with
+              | Some req when not (Mcp_transport_protocol.is_notification req)
+                              && is_valid_request_id (get_id req) ->
+                let id = get_id req in
+                if Hashtbl.mem listen_tokens (Yojson.Safe.to_string id)
+                   || Hashtbl.mem active_requests (Yojson.Safe.to_string id) then
+                  Some
+                    (make_error_typed ~id:`Null Mcp_error_code.Invalid_request
+                       "Request id is already in use")
+                else
+                  let allow_legacy =
+                    match !legacy_state with
+                    | Legacy_ready -> true
+                    | Awaiting_initialized -> String.equal req.method_ "ping"
+                    | Awaiting_initialize -> false
+                  in
+                  (match
+                     Mcp_transport_protocol.classify_request_protocol
+                       ~require_stateless:
+                         (not allow_legacy && not (String.equal req.method_ "initialize"))
+                       ~method_:req.method_ ~params:req.params
+                   with
+                   | Error error -> Some (request_protocol_error_response ~id error)
+                   | Ok (Legacy_protocol | Stateless_protocol _) -> None)
+              | Some _ | None -> None
             in
-            respond ~mode response;
-            loop (Some mode)))
+            match admission_error with
+            | Some response ->
+              respond ~mode response;
+              loop request_sw (Some mode)
+            | None ->
+              let mcp_session_id =
+                match request with
+                | Some req ->
+                  (match Mcp_transport_protocol.classify_request_protocol
+                           ~require_stateless:false ~method_:req.method_ ~params:req.params with
+                   | Ok (Stateless_protocol _) -> None
+                   | Ok Legacy_protocol | Error _ -> Some transport_session_id)
+                | None -> Some transport_session_id
+              in
+              (match request with
+               | Some req
+                 when not (Mcp_transport_protocol.is_notification req)
+                      && is_valid_request_id (get_id req)
+                      && List.mem req.method_ [ "tools/call"; "resources/read"; "prompts/get" ] ->
+                 start_request ~request_sw ~mode ~mcp_session_id ~id:(get_id req) request_str
+               | Some _ | None ->
+              let response =
+                handle_request
+                  ~clock
+                  ~sw
+                  ~mcp_session_id
+                  state
+                  request_str
+              in
+              (match request, response with
+               | Some req, `Assoc fields
+                 when String.equal req.method_ "subscriptions/listen"
+                      && not (Mcp_transport_protocol.is_notification req)
+                      && is_valid_request_id (get_id req)
+                      && List.mem_assoc "result" fields ->
+                 (* The ordinary handler owns JSON-RPC, protocol, profile and
+                    auth admission. Its success is only permission to open the
+                    transport stream, not the final response to the client. *)
+                 serve_stdio_listen ~mode ~subscription_id:(get_id req)
+                   ~params:req.params
+               | Some req, `Assoc fields when String.equal req.method_ "initialize" ->
+                 (match List.assoc_opt "result" fields with
+                  | Some (`Assoc result) ->
+                    (match List.assoc_opt "protocolVersion" result with
+                     | Some (`String version)
+                       when not (Mcp_transport_protocol.is_stateless_protocol_version version) ->
+                       legacy_state := Awaiting_initialized
+                     | Some _ | None -> ())
+                  | Some _ | None -> ());
+                 respond ~mode response
+               | (Some _ | None), _ -> respond ~mode response));
+              loop request_sw (Some mode))))
   in
-  try loop None with
-  | End_of_file -> Log.Mcp.info "Connection closed"
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Log.Mcp.error "Server error: %s" (Printexc.to_string exn)
+  let result =
+    try Ok (
+      Eio.Switch.run (fun request_sw ->
+        Fun.protect
+          ~finally:(fun () -> Eio.Cancel.protect cancel_all_active)
+          (fun () ->
+            try Eio.Fiber.first
+              (fun () -> loop request_sw None)
+              (fun () -> Eio.Promise.await output_failure; raise Stdio_output_failed)
+            with
+            | End_of_file -> Log.Mcp.info "Connection closed"
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | Stdio_output_failed as exn -> raise exn
+            | exn ->
+              if Atomic.get output_failed then raise exn
+              else Log.Mcp.error "Server error: %s" (Printexc.to_string exn))))
+    with exn -> Error (exn, Printexc.get_raw_backtrace ())
+  in
+  let close_result =
+    try Ok (close_all_listens ())
+    with exn -> Error (exn, Printexc.get_raw_backtrace ())
+  in
+  let clear_result =
+    try Ok (Eio.Cancel.protect (fun () ->
+      clear_resource_subscriptions_for_session transport_session_id;
+      Client_registry_eio.unregister_mcp_session transport_session_id))
+    with exn -> Error (exn, Printexc.get_raw_backtrace ())
+  in
+  (* Keep the original parent cancellation; a drain failure must not wrap it
+     in Fun.Finally_raised or hide it. Session cleanup still runs. *)
+  match result, close_result, clear_result, Atomic.get output_error with
+  | Error (Stdio_output_failed, _), _, _, Some (exn, bt) ->
+    Printexc.raise_with_backtrace exn bt
+  | Error (exn, bt), _, _, _
+  | Ok (), Error (exn, bt), _, _
+  | Ok (), Ok (), Error (exn, bt), _
+  | Ok (), Ok (), Ok (), Some (exn, bt) -> Printexc.raise_with_backtrace exn bt
+  | Ok (), Ok (), Ok (), None -> Eio.Fiber.check ()
 ;;

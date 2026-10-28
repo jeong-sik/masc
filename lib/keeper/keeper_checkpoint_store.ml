@@ -157,18 +157,58 @@ let hardlink_agent_core_history_from_canonical
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn -> Error (Printexc.to_string exn)
 
+(* A save-scoped capability is carried to each checkpoint payload writer. It
+   observes the pieces actually submitted to a successful canonical write and
+   the bytes submitted to a successful archive fallback. A failed archive can
+   have a partial effect, so its observation is unknown. *)
+module Checkpoint_payload_writer = struct
+  type t = Unmeasured | Measured of (int option -> unit)
+
+  let note capability observation =
+    match capability with
+    | Unmeasured -> ()
+    | Measured observe -> observe observation
+
+  let count_pieces pieces =
+    List.fold_left (fun total piece ->
+      match total with
+      | Some bytes when String.length piece <= max_int - bytes -> Some (bytes + String.length piece)
+      | Some _ | None -> None) (Some 0) pieces
+
+  let canonical capability ~write ~ownership_root path encode =
+    match capability with
+    | Unmeasured -> write ~ownership_root path encode
+    | Measured observe ->
+      let submitted = ref None in
+      let result = write ~ownership_root path (fun () ->
+        let pieces = encode () in
+        submitted := count_pieces pieces;
+        pieces) in
+      (match result with
+       | Ok _ -> observe !submitted
+       | Error _ -> ());
+      result
+
+  let archive capability path bytes =
+    let result = Keeper_fs.save_atomic path bytes in
+    (match result with
+     | Ok () -> note capability (Some (String.length bytes))
+     | Error _ -> note capability None);
+    result
+end
+
 (* A window of zero keeps nothing, so this writes nothing: the hardlink below
    is cheap but its fallback encodes the whole checkpoint, and the prune would
    delete either one again on the way out. *)
 let save_agent_core_history
-    ~(session_dir : string) ~(retained : int) (ckpt : Agent_core.Checkpoint.t) : unit =
+    ~payload_writer ~(session_dir : string) ~(retained : int) (ckpt : Agent_core.Checkpoint.t) : unit =
   if retained <= 0 then prune_agent_core_history ~session_dir ~retained
   else begin
   let snapshot_id = agent_core_history_snapshot_id_of_checkpoint ckpt in
   let save_snapshot_file () =
-    Keeper_fs.save_atomic
-      (agent_core_history_path ~session_dir ~snapshot_id)
-      (encode_checkpoint_string_off_scheduler ckpt)
+    let bytes = encode_checkpoint_string_off_scheduler ckpt in
+    Checkpoint_payload_writer.archive payload_writer
+      (agent_core_history_path ~session_dir ~snapshot_id) bytes
   in
   let save_result =
     match
@@ -955,10 +995,11 @@ let with_session_lock ~session_dir f =
   with_session_lock_typed ~session_dir (fun session_dir -> Ok (f session_dir))
   |> Result.map_error save_agent_core_error_to_string
 
-let archive_agent_core_history_best_effort ~session_dir ~retained ckpt =
-  try save_agent_core_history ~session_dir ~retained ckpt with
+let archive_agent_core_history_best_effort ~payload_writer ~session_dir ~retained ckpt =
+  try save_agent_core_history ~payload_writer ~session_dir ~retained ckpt with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
+    Checkpoint_payload_writer.note payload_writer None;
     Log.Keeper.warn "AGENT_CORE snapshot archive write failed for %s: %s"
       ckpt.session_id (Printexc.to_string exn);
     Otel_metric_store.inc_counter
@@ -2182,7 +2223,7 @@ type save_lineage =
    after the rename would name whatever file is there by then. *)
 let save_outcome_after_write
     ~session_dir ~canonical_path ~save_lineage ~memo ~written ~written_file ~known
-    ~history_retained ckpt
+    ~history_retained ~payload_writer ckpt
   =
   let identity = canonical_identity_of_stats written_file in
   publish_summary ~canonical_path (summary_of_checkpoint ~identity ckpt);
@@ -2190,7 +2231,7 @@ let save_outcome_after_write
    | Save_for_keeper keeper_name ->
      keep_lineage ~canonical_path ~identity ~memo ~keeper_name written
    | Save_without_lineage -> ());
-  archive_agent_core_history_best_effort ~session_dir ~retained:history_retained ckpt;
+  archive_agent_core_history_best_effort ~payload_writer ~session_dir ~retained:history_retained ckpt;
   Ok
     (Saved
        { relation = save_relation ~known ~incoming:ckpt.turn_count
@@ -2208,7 +2249,7 @@ let save_agent_core_classified_typed
        string ->
        (unit -> string list) ->
        (Unix.stats, Keeper_fs.durable_write_error) result)
-    ~save_lineage
+    ~save_lineage ~payload_writer
     ~(session_dir : string)
     ~(history_retained : int)
     (ckpt : Agent_core.Checkpoint.t)
@@ -2273,9 +2314,8 @@ let save_agent_core_classified_typed
         let written = ref None in
         let write payload =
           written := None;
-          write_canonical
-            ~ownership_root
-            canonical_path
+          Checkpoint_payload_writer.canonical payload_writer ~write:write_canonical
+            ~ownership_root canonical_path
             (fun () ->
                let pieces, decoded =
                  Agent_core.Checkpoint.to_pieces_with_encoding_memo memo payload
@@ -2287,7 +2327,7 @@ let save_agent_core_classified_typed
          | Ok written_file ->
            save_outcome_after_write
              ~session_dir ~canonical_path ~save_lineage ~memo ~written:!written ~written_file
-             ~known ~history_retained ckpt
+             ~known ~history_retained ~payload_writer ckpt
          (* #31677: a payload-encode refusal means the in-memory checkpoint
             carries a json payload the v10 contract cannot encode — a
             provider-authored duplicate key or non-finite float. Without
@@ -2311,7 +2351,7 @@ let save_agent_core_classified_typed
               | Ok written_file ->
                 save_outcome_after_write
                   ~session_dir ~canonical_path ~save_lineage ~memo ~written:!written
-                  ~written_file ~known ~history_retained recovered))
+                  ~written_file ~known ~history_retained ~payload_writer recovered))
          | Error
              ({ stage =
                   ( Keeper_fs.Directory_prepare
@@ -2330,7 +2370,7 @@ let save_agent_core_classified
   : (save_agent_core_outcome, string) result =
   save_agent_core_classified_typed
     ~write_canonical:write_canonical_durably
-    ~save_lineage:Save_without_lineage ~session_dir ~history_retained ckpt
+    ~save_lineage:Save_without_lineage ~payload_writer:Checkpoint_payload_writer.Unmeasured ~session_dir ~history_retained ckpt
   |> Result.map_error save_agent_core_error_to_string
 
 let save_agent_core_for_keeper
@@ -2338,10 +2378,42 @@ let save_agent_core_for_keeper
   : (save_agent_core_outcome, string) result =
   save_agent_core_classified_typed
     ~write_canonical:write_canonical_durably
-    ~save_lineage:(Save_for_keeper keeper_name) ~session_dir ~history_retained ckpt
+    ~save_lineage:(Save_for_keeper keeper_name) ~payload_writer:Checkpoint_payload_writer.Unmeasured ~session_dir ~history_retained ckpt
   |> Result.map_error save_agent_core_error_to_string
 
 module For_testing = struct
+  let retained_payload_bytes ~directory =
+    let seen = Hashtbl.create 16 in
+    let rec count total path =
+      let stat = Unix.lstat path in
+      match stat.Unix.st_kind with
+      | Unix.S_DIR ->
+        Array.fold_left (fun total leaf -> count total (Filename.concat path leaf))
+          total (Sys.readdir path)
+      | Unix.S_REG ->
+        let key = stat.Unix.st_dev, stat.Unix.st_ino in
+        if Hashtbl.mem seen key then total
+        else (
+          Hashtbl.add seen key ();
+          if stat.Unix.st_size > max_int - total then invalid_arg "retained payload byte count overflow";
+          total + stat.Unix.st_size)
+      | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> total
+    in
+    count 0 directory
+
+  let save_agent_core_for_keeper_measured ~keeper_name ~session_dir ~history_retained ckpt =
+    let bytes = ref (Some 0) in
+    let on_payload observation =
+      bytes := (match !bytes, observation with
+        | Some total, Some count when count <= max_int - total -> Some (total + count)
+        | Some _, Some _ | None, Some _ | Some _, None | None, None -> None)
+    in
+    save_agent_core_classified_typed
+      ~write_canonical:write_canonical_durably
+      ~save_lineage:(Save_for_keeper keeper_name) ~payload_writer:(Checkpoint_payload_writer.Measured on_payload) ~session_dir ~history_retained ckpt
+    |> Result.map (fun outcome -> outcome, !bytes)
+    |> Result.map_error save_agent_core_error_to_string
+
   let with_before_history_link hook f =
     let previous = Atomic.exchange before_history_link_hook (Some hook) in
     Fun.protect ~finally:(fun () -> Atomic.set before_history_link_hook previous) f
@@ -2454,7 +2526,7 @@ module For_testing = struct
       ~write_canonical:(fun ~ownership_root path encoded_source ->
         Keeper_fs.For_testing.save_encoded_durable_atomic_from
           ~before_stage ~ownership_root path encoded_source)
-      ~save_lineage:(Save_for_keeper keeper_name) ~session_dir ~history_retained ckpt
+      ~save_lineage:(Save_for_keeper keeper_name) ~payload_writer:Checkpoint_payload_writer.Unmeasured ~session_dir ~history_retained ckpt
     |> Result.map_error save_agent_core_error_to_string
   ;;
 end

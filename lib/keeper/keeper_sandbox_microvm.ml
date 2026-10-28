@@ -2222,7 +2222,16 @@ let keeper_work_root_mkdir_argv_for backend ~container_name ~keeper_name =
     (sandbox-images/ocaml/Dockerfile, ubuntu-24.04) ships grep as essential and
     util-linux's mountpoint is not in the apt list. Runs as root from [/] so
     the answer does not depend on the keeper's uid or a workdir that is the
-    very thing under test. *)
+    very thing under test. The guest writes an explicit result for both grep
+    outcomes: a failed container exec alone cannot prove that grep ran. *)
+let work_volume_mounted_probe_script =
+  "grep -qF -- \"$1\" \"$2\"; result=$?; \
+   case \"$result\" in \
+   0) printf 'mounted\\n' ;; \
+   1) printf 'not_mounted\\n' ;; \
+   *) exit \"$result\" ;; esac"
+;;
+
 let work_volume_mounted_probe_argv_for backend ~container_name =
   exec_argv_for
     backend
@@ -2232,7 +2241,28 @@ let work_volume_mounted_probe_argv_for backend ~container_name =
     ~container_cwd:"/"
     ~stdin:false
     ~command_argv:
-      [ "grep"; "-qF"; Printf.sprintf " %s " work_volume_guest_root; "/proc/mounts" ]
+      [ "sh"; "-c"; work_volume_mounted_probe_script; "masc-mount-probe"
+      ; Printf.sprintf " %s " work_volume_guest_root; "/proc/mounts" ]
+;;
+
+type work_volume_mount_probe =
+  | Work_volume_mounted
+  | Work_volume_not_mounted
+  | Work_volume_probe_unverified of
+      { status : Unix.process_status
+      ; stdout : string
+      ; stderr : string
+      }
+
+let work_volume_mount_probe_of_result ~status ~stdout ~stderr =
+  let unverified () = Work_volume_probe_unverified { status; stdout; stderr } in
+  match status with
+  | Unix.WEXITED 0 ->
+    (match stdout with
+     | "mounted\n" -> Work_volume_mounted
+     | "not_mounted\n" -> Work_volume_not_mounted
+     | _ -> unverified ())
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> unverified ()
 ;;
 
 (** The write that follows the mkdir, as the uid the keeper's commands run

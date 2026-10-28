@@ -774,10 +774,6 @@ val quota_scope_of_runtime_id : string -> Runtime_quota_window.scope option
     the runtime id is unknown. Consumed by
     {!Runtime_quota_window.demote_order} and the matching note site. *)
 
-val context_marks_of_runtime_id : string -> Runtime_schema.context_marks option
-(** The binding's eviction marks, or [None] when the binding declares none
-    (the keeper then evicts carried history only on a provider refusal). *)
-
 val top_p_of_runtime_id : string -> float option
 (** Request [top_p] from the materialized AGENT_CORE provider config for runtime [id],
     or [None] when the runtime is not configured or no explicit value is

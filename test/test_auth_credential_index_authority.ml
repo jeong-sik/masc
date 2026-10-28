@@ -11,12 +11,11 @@ let auth_ok = function
 
 let with_workspace f =
   let base_path = Filename.temp_dir "credential-index-authority-" "" in
-  Masc_test_deps.with_process_env "MASC_OAUTH_ENABLED" (Some "0") (fun () ->
-    Eio_main.run @@ fun env ->
-    Masc_test_deps.init_eio_clock env;
-    Fs_compat.set_fs (Eio.Stdenv.fs env);
-    Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path; Fs_compat.clear_fs ())
-      (fun () -> Auth.save_auth_config base_path D.default_auth_config; f base_path))
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path; Fs_compat.clear_fs ())
+    (fun () -> Auth.save_auth_config base_path D.default_auth_config; f base_path)
 
 let read path = In_channel.with_open_bin path In_channel.input_all
 let request token path = Httpun.Request.create

@@ -70,6 +70,11 @@ val remember_mcp_profile :
     ids do not start session-duration state. Profile and any known-session
     activity refresh commit together; the clock is sampled before the pure CAS. *)
 
+module For_testing : sig
+  val profile_count : unit -> int
+  (** Count profile entries, including entries without an initialized session. *)
+end
+
 val forget_mcp_session : string -> unit
 (** Removes all local fields for [session_id] in one transition after the
     existing duration/unregister lifecycle effects. *)
@@ -270,6 +275,15 @@ val protocol_version_rejection_body : protocol_version_rejection -> string
     {!Mcp_transport_protocol.supported_protocol_versions}; every transport
     answering a rejection MUST use this rather than assembling its own body,
     or a client reading the 4xx will classify this server as legacy. *)
+
+val correlate_error_body_to_request : request_body:string -> string -> string
+(** Attach the ID of a valid JSON-RPC request to an already-constructed error.
+    Omit [id] for a valid notification; use null for an unreadable or invalid
+    request ID. This is for POSTs whose body has actually been read. *)
+
+val protocol_version_rejection_body_for_request :
+  request_body:string -> protocol_version_rejection -> string
+(** As {!protocol_version_rejection_body}, correlated to the POST body. *)
 
 val validate_protocol_version_continuity :
   session_id:string ->

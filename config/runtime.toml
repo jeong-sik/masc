@@ -1773,12 +1773,6 @@ streaming = true
 max-output-tokens = 128000
 
 [glm-coding.glm-5-3]
-# These binding marks remain in the configuration and forecast metadata.
-# Keeper history starts at its checked continuity or accepted front;
-# completion review preserves its original evidence. Global declaration
-# removal follows RFC keeper-context-window-in-tokens §13.7 prerequisites.
-context-high-water-tokens = 100000
-context-low-water-tokens = 70000
 max-concurrent = 4
 # One of several glm-coding bindings now, so the wizard's pick is named.
 wizard-default = true
@@ -1795,8 +1789,6 @@ preserve-thinking = false
 streaming = true
 
 [glm-coding.glm-5-2]
-context-high-water-tokens = 100000
-context-low-water-tokens = 70000
 max-concurrent = 4
 
 [models.glm-5-1]
@@ -1807,8 +1799,6 @@ preserve-thinking = false
 streaming = true
 
 [glm-coding.glm-5-1]
-context-high-water-tokens = 100000
-context-low-water-tokens = 70000
 max-concurrent = 4
 
 [models.glm-5-turbo]
@@ -1819,8 +1809,6 @@ preserve-thinking = false
 streaming = true
 
 [glm-coding.glm-5-turbo]
-context-high-water-tokens = 100000
-context-low-water-tokens = 70000
 max-concurrent = 4
 
 [models.glm-5]
@@ -1831,8 +1819,6 @@ preserve-thinking = false
 streaming = true
 
 [glm-coding.glm-5]
-context-high-water-tokens = 100000
-context-low-water-tokens = 70000
 max-concurrent = 4
 
 [models.glm-4-7]
@@ -1843,8 +1829,6 @@ preserve-thinking = false
 streaming = true
 
 [glm-coding.glm-4-7]
-context-high-water-tokens = 100000
-context-low-water-tokens = 70000
 max-concurrent = 4
 
 [models.glm-4-6]
@@ -1855,8 +1839,6 @@ preserve-thinking = false
 streaming = true
 
 [glm-coding.glm-4-6]
-context-high-water-tokens = 100000
-context-low-water-tokens = 70000
 max-concurrent = 4
 
 [models.glm-4-5]
@@ -1867,8 +1849,6 @@ preserve-thinking = false
 streaming = true
 
 [glm-coding.glm-4-5]
-context-high-water-tokens = 100000
-context-low-water-tokens = 70000
 max-concurrent = 4
 
 [models.glm-4-5-air]
@@ -1879,8 +1859,6 @@ preserve-thinking = false
 streaming = true
 
 [glm-coding.glm-4-5-air]
-context-high-water-tokens = 100000
-context-low-water-tokens = 70000
 max-concurrent = 4
 
 # Kimi For Coding — second slot of the exact-output judgement lanes since the
@@ -1913,8 +1891,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [kimi_coding.kimi-k3]
-context-high-water-tokens = 100000
-context-low-water-tokens = 70000
 
 [models.kimi-k3-256k]
 api-name = "k3-256k"
@@ -1926,8 +1902,6 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [kimi_coding.kimi-k3-256k]
-context-high-water-tokens = 100000
-context-low-water-tokens = 70000
 
 # MiniMax M3 (Ollama Cloud) — chat/runtime binding. No wire schema guarantee:
 # the 2026-08-29 probe found ollama.com cloud ignores json_schema on /v1 and

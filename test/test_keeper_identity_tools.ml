@@ -123,7 +123,7 @@ let transports_of_post post =
 
 let execute_offered ?(post = never_post) ~base_path
     (offered : Identity_tools.offered_tool) arguments =
-  Identity_tools.tool_result_of_call ~read_only:offered.Identity_tools.read_only
+  Identity_tools.tool_result_of_call
     (Identity_tools.run_call ~transports:(transports_of_post post) ~config:(Masc.Workspace.default_config base_path)
        ~keeper_name:"acme-daycare" ~provider:offered.Identity_tools.provider
        ~remote_name:offered.Identity_tools.remote_name ~arguments ())
@@ -417,12 +417,23 @@ let test_a_keeper_with_no_token_gets_a_refusal_not_a_crash () =
 
 (* A transport that records what it was asked and answers whatever the test
    set. Nothing here reaches a network. *)
+let echo_request_id request answer =
+  match Yojson.Safe.from_string request, Yojson.Safe.from_string answer with
+  | `Assoc request_fields, `Assoc answer_fields ->
+    (match List.assoc_opt "id" request_fields with
+     | Some id -> Yojson.Safe.to_string (`Assoc (("id", id) :: List.remove_assoc "id" answer_fields))
+     | None -> answer)
+  | _, _ -> answer
+
 let recording_transport () =
   let sent = ref [] in
   let post ~url ~headers ~body =
     sent := (url, headers, body) :: !sent;
     let answer =
-      if String.length body > 0 && Str.string_match (Str.regexp ".*initialize") body 0
+      if Str.string_match (Str.regexp ".*server/discover") body 0 then
+        {|{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}|}
+      else if Str.string_match (Str.regexp ".*notifications/initialized") body 0 then "{}"
+      else if String.length body > 0 && Str.string_match (Str.regexp ".*initialize") body 0
       then
         Printf.sprintf
           {|{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":%S,"capabilities":{}}}|}
@@ -434,7 +445,7 @@ let recording_transport () =
       {
         Masc_http_client.status = 200;
         headers = [ ("content-type", "application/json") ];
-        body = answer;
+        body = echo_request_id body answer;
       }
   in
   (post, sent)
@@ -623,16 +634,18 @@ let test_the_projected_token_is_the_one_sent () =
 
 (* ── method-not-found: catalog reconciliation ────────────────────── *)
 
-(* Says -32601 for the first tools/call, then still advertises that tool with
-   one more catalog entry and answers the single retry. Nothing reaches a
-   network. *)
+(* Says -32601 on the first tools/call while still advertising the tool.
+   A second call would answer, making an accidental retry observable. *)
 let drifting_transport () =
   let sent = ref [] in
   let calls = ref 0 in
   let post ~url ~headers ~body =
     sent := (url, headers, body) :: !sent;
     let answer =
-      if String.length body > 0 && Str.string_match (Str.regexp ".*initialize") body 0
+      if Str.string_match (Str.regexp ".*server/discover") body 0 then
+        {|{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}|}
+      else if Str.string_match (Str.regexp ".*notifications/initialized") body 0 then "{}"
+      else if String.length body > 0 && Str.string_match (Str.regexp ".*initialize") body 0
       then
         Printf.sprintf
           {|{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":%S,"capabilities":{}}}|}
@@ -650,7 +663,7 @@ let drifting_transport () =
     Ok
       { Masc_http_client.status = 200;
         headers = [ ("content-type", "application/json") ];
-        body = answer;
+        body = echo_request_id body answer;
       }
   in
   (post, sent, calls)
@@ -664,22 +677,20 @@ let project_token ~base_path =
   | Ok () -> ()
   | Error message -> Alcotest.failf "could not project a token: %s" message
 
-let test_a_still_advertised_tool_is_retried_once () =
+let test_a_still_advertised_tool_is_not_retried () =
   (* The old and fresh catalogs both name the tool, so the -32601 is
      inconsistent with the server's live advertisement. What recovery owes:
-     one tools/list on the live session, one retry, the fresh catalog written
-     back, and a catalog time an operator can read. *)
+     refresh the catalog for later calls without replaying an uncertain effect. *)
   let base_path = temp_base () in
   Unix.putenv "ATLASSIAN_ACCESS_TOKEN" "this-process-token";
   write_catalog ~base_path ~keeper_name:"acme-daycare" [ tool ~read_only:true "getJiraIssue" ];
   project_token ~base_path;
   let post, sent, calls = drifting_transport () in
   match execute_offered ~post ~base_path (single_offered ~base_path) (`Assoc []) with
+  | Ok _ -> Alcotest.fail "an uncertain tool call was retried"
   | Error err ->
-    Alcotest.failf "the call did not recover: %s" err.Agent_core.Types.message
-  | Ok output ->
-    check str "the retried call answered" "PK-1" output.Agent_core.Types.content;
-    check Alcotest.int "exactly one failed call and one retry" 2 !calls;
+    check Alcotest.bool "remote error does not prove a safe retry" false err.Agent_core.Types.recoverable;
+    check Alcotest.int "exactly one tool request was sent" 1 !calls;
     check Alcotest.bool "a tools/list went out on the same session" true
       (List.exists
          (fun (_, _, body) -> Str.string_match (Str.regexp ".*tools/list") body 0)
@@ -703,7 +714,10 @@ let disappeared_transport () =
   let post ~url ~headers ~body =
     sent := (url, headers, body) :: !sent;
     let answer =
-      if String.length body > 0 && Str.string_match (Str.regexp ".*initialize") body 0
+      if Str.string_match (Str.regexp ".*server/discover") body 0 then
+        {|{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}|}
+      else if Str.string_match (Str.regexp ".*notifications/initialized") body 0 then "{}"
+      else if String.length body > 0 && Str.string_match (Str.regexp ".*initialize") body 0
       then
         Printf.sprintf
           {|{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":%S,"capabilities":{}}}|}
@@ -718,7 +732,7 @@ let disappeared_transport () =
     Ok
       { Masc_http_client.status = 200
       ; headers = [ "content-type", "application/json" ]
-      ; body = answer
+      ; body = echo_request_id body answer
       }
   in
   (post, sent, calls)
@@ -808,16 +822,18 @@ let test_the_policy_can_place_an_attached_tool () =
   check Alcotest.bool "classifiable" true
     (Policy.classifies ~identity_tool_index ~composition_plan_index:None ~tool_name:"atlassian_getJiraIssue")
 
-let test_a_read_only_tool_runs_unasked () =
+let test_a_read_only_hint_still_reaches_the_gate () =
   let base_path = temp_base () in
   let offering = offer ~base_path [ tool ~read_only:true "getJiraIssue" ] in
   let identity_tool_index = Index.of_tools offering.offered in
   match
     Policy.verdict_for ~identity_tool_index ~composition_plan_index:None ~tool_name:"atlassian_getJiraIssue" ~input:(`Assoc [])
   with
-  | Policy.Run _ -> ()
+  | Policy.Run { because } ->
+      check Alcotest.bool "the durable Gate owns the call" true
+        (Str.string_match (Str.regexp ".*durable Gate") because 0)
   | Policy.Ask { because } ->
-      Alcotest.failf "asked about a read the service declared: %s" because
+      Alcotest.failf "the stream policy duplicated the durable Gate: %s" because
 
 let test_a_writing_tool_belongs_to_the_durable_gate () =
   (* The stream policy no longer asks about identity writes: asking here too
@@ -840,9 +856,8 @@ let test_a_writing_tool_belongs_to_the_durable_gate () =
         because
 
 let test_silence_is_not_permission () =
-  (* Still true — enforced by the durable Gate now, which treats an
-     unannotated tool as a write and defers it. This policy's half is to
-     pass the call through to that Gate rather than answer first. *)
+  (* The stream policy passes an unannotated call to the durable Gate;
+     provider hints do not grant authority here. *)
   let base_path = temp_base () in
   let offering = offer ~base_path [ tool "somethingUnannotated" ] in
   let identity_tool_index = Index.of_tools offering.offered in
@@ -851,8 +866,8 @@ let test_silence_is_not_permission () =
       ~input:(`Assoc [])
   with
   | Policy.Run { because } ->
-      check Alcotest.bool "and the reason names the silence" true
-        (Str.string_match (Str.regexp ".*did not say") because 0)
+      check Alcotest.bool "the durable Gate owns the call" true
+        (Str.string_match (Str.regexp ".*durable Gate") because 0)
   | Policy.Ask { because } ->
       Alcotest.failf
         "the stream policy asked about a call the durable Gate owns: %s"
@@ -884,9 +899,14 @@ let test_turn_declarations_are_isolated () =
   let verdict identity_tool_index =
     Policy.verdict_for ~identity_tool_index ~composition_plan_index:None
       ~tool_name ~input:(`Assoc []) in
-  check Alcotest.bool "different declarations retain different policy reasons" false
-    (String.equal (Policy.verdict_because (verdict first_index))
-       (Policy.verdict_because (verdict second_index)));
+  List.iter
+    (fun index ->
+       match verdict index with
+       | Policy.Run { because } ->
+         check Alcotest.bool "both declarations reach the durable Gate" true
+           (Str.string_match (Str.regexp ".*durable Gate") because 0)
+       | Policy.Ask _ -> Alcotest.fail "stream policy must defer to the durable Gate")
+    [ first_index; second_index ];
   Eio_main.run (fun env ->
     let module Gate = Masc.Keeper_tool_approval_gate in
     let gate = Gate.create
@@ -1140,6 +1160,73 @@ let test_a_401_is_cleared_by_one_reactive_refresh () =
       result.Mcp_client.text
   | Error _ -> Alcotest.fail "a 401 a refresh could clear was not retried"
 
+let test_post_send_401_does_not_refresh_and_repeat () =
+  let base_path = temp_base () in
+  let keeper_name = "attaching-fixture" in
+  let provider = provider () in
+  (match Projection.set_env_entry ~base_path ~keeper_name ~scope:Projection.Keeper_secret
+           ~name:provider.Provider.access_token_env ~value:"active-token" with
+   | Ok () -> ()
+   | Error message -> Alcotest.fail message);
+  let calls = ref 0 in
+  let mcp_post ~url:_ ~headers:_ ~body =
+    let request = Yojson.Safe.from_string body in
+    let method_ = Yojson.Safe.Util.member "method" request in
+    if method_ = `String "tools/call" then (
+      incr calls;
+      Ok { Masc_http_client.status = 401; headers = []; body = "{}" })
+    else if method_ = `String "initialize" then
+      Ok { Masc_http_client.status = 200; headers = [];
+           body = Printf.sprintf
+             {|{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":%S,"capabilities":{}}}|}
+             Mcp_transport_protocol.default_protocol_version }
+    else if method_ = `String "server/discover" then
+      Ok { Masc_http_client.status = 200; headers = [];
+           body = {|{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"not found"}}|} }
+    else Ok { Masc_http_client.status = 200; headers = []; body = "{}" }
+  in
+  let token_post ~url:_ ~headers:_ ~body:_ = Alcotest.fail "post-send 401 triggered token refresh" in
+  let discover ~mcp_url:_ = Alcotest.fail "post-send 401 triggered OAuth discovery" in
+  (match Identity_tools.run_call ~transports:{ Identity_tools.mcp_post; token_post; discover }
+           ~config:(Masc.Workspace.default_config base_path) ~keeper_name ~provider
+           ~remote_name:"getJiraIssue" ~arguments:(`Assoc []) () with
+   | Error (Identity_tools.Mcp { phase = Identity_tools.Tool_call; error = Mcp_client.Unauthorized _ } as error) ->
+     check Alcotest.bool "effect remains unknown" true
+       (Identity_tools.effect_disposition_of_call_error error = Tool_result.Effect_outcome_unknown)
+   | Error error -> Alcotest.failf "wrong error: %s" (Identity_tools.call_error_to_string error)
+   | Ok _ -> Alcotest.fail "post-send 401 became success");
+  check Alcotest.int "tool request was sent only once" 1 !calls
+
+let test_tool_error_does_not_authorize_retry () =
+  let result : Mcp_client.tool_result =
+    { is_error = true; text = "provider failed"; content = `List []; structured_content = None }
+  in
+  match Identity_tools.tool_result_of_call (Ok result) with
+  | Error error ->
+    check Alcotest.bool "a partial external effect cannot be excluded" false
+      error.Agent_core.Types.recoverable
+  | Ok _ -> Alcotest.fail "a tool-reported error became success"
+
+let test_preflight_failure_proves_tool_was_not_sent () =
+  let error =
+    Identity_tools.Mcp
+      { phase = Identity_tools.Tool_call
+      ; error = Mcp_client.Before_tool_call (Mcp_client.Malformed "schema changed") }
+  in
+  check Alcotest.bool "preflight proves no tool request" true
+    (Identity_tools.effect_disposition_of_call_error error = Tool_result.Proven_pre_effect)
+
+let test_post_send_errors_do_not_prove_no_effect () =
+  List.iter (fun error ->
+    let call_error = Identity_tools.Mcp { phase = Identity_tools.Tool_call; error } in
+    check Alcotest.bool "post-send response leaves effect unknown" true
+      (Identity_tools.effect_disposition_of_call_error call_error = Tool_result.Effect_outcome_unknown);
+    match Identity_tools.tool_result_of_call (Error call_error) with
+    | Error result -> check Alcotest.bool "do not offer an automatic retry" false result.Agent_core.Types.recoverable
+    | Ok _ -> Alcotest.fail "remote error became success")
+    [ Mcp_client.Unauthorized { resource_metadata = None }
+    ; Mcp_client.Rpc { code = -32601; message = "method not found"; data = None; http_status = None } ]
+
 let () =
   Alcotest.run "keeper_identity_tools"
     [ ( "the on/off switch",
@@ -1175,12 +1262,14 @@ let () =
             `Quick test_a_transient_renewal_failure_is_marked_transient;
           Alcotest.test_case "a 401 is cleared by one reactive refresh" `Quick
             test_a_401_is_cleared_by_one_reactive_refresh;
+          Alcotest.test_case "post-send 401 does not repeat" `Quick
+            test_post_send_401_does_not_refresh_and_repeat;
         ] );
       ( "the approval policy",
         [ Alcotest.test_case "the policy can place an attached tool" `Quick
             test_the_policy_can_place_an_attached_tool;
-          Alcotest.test_case "a read-only tool runs unasked" `Quick
-            test_a_read_only_tool_runs_unasked;
+          Alcotest.test_case "a read-only hint still reaches the Gate" `Quick
+            test_a_read_only_hint_still_reaches_the_gate;
           Alcotest.test_case "a writing tool belongs to the durable Gate"
             `Quick test_a_writing_tool_belongs_to_the_durable_gate;
           Alcotest.test_case "silence is not permission" `Quick
@@ -1206,10 +1295,16 @@ let () =
             test_an_oauth_provider_ignores_the_gh_credential;
           Alcotest.test_case "the projected token is the one sent" `Quick
             test_the_projected_token_is_the_one_sent;
-          Alcotest.test_case "a still-advertised tool is retried once" `Quick
-            test_a_still_advertised_tool_is_retried_once;
+          Alcotest.test_case "a still-advertised tool is not retried" `Quick
+            test_a_still_advertised_tool_is_not_retried;
           Alcotest.test_case "a removed tool is not called twice" `Quick
             test_a_removed_tool_is_not_called_twice;
+          Alcotest.test_case "tool error does not authorize retry" `Quick
+            test_tool_error_does_not_authorize_retry;
+          Alcotest.test_case "preflight failure proves no tool request" `Quick
+            test_preflight_failure_proves_tool_was_not_sent;
+          Alcotest.test_case "post-send errors leave the effect unknown" `Quick
+            test_post_send_errors_do_not_prove_no_effect;
           Alcotest.test_case "an expected not-found leaves the catalog alone"
             `Quick test_an_expected_not_found_does_not_reach_for_the_catalog;
         ] );

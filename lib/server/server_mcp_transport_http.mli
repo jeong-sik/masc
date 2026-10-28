@@ -111,6 +111,8 @@ type protocol_version_rejection =
       }
 
 val protocol_version_rejection_body : protocol_version_rejection -> string
+val protocol_version_rejection_body_for_request :
+  request_body:string -> protocol_version_rejection -> string
 val protocol_version_rejection_code :
   protocol_version_rejection -> Mcp_error_code.t
 val protocol_version_rejection_message : protocol_version_rejection -> string

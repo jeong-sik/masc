@@ -2240,9 +2240,8 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   (* The keys a binding declares are the keys this function reads: every read
      below goes through these two readers, which note the key. Anything else
      under [<provider>.<model>] is refused, a nested table included -- a
-     misspelled [context-high-water-token] would otherwise load as a binding
-     without marks, and the provider's overflow refusal would then have
-     nothing declared to evict against. So every read below stays
+     misspelled [max-concurent] would otherwise load as a binding without
+     the cap the operator meant to declare. So every read below stays
      unconditional and bound before the check at the top of the [let*] chain:
      a read placed after it, or only in one branch, would refuse its own key. *)
   let read_keys = ref [] in
@@ -2295,44 +2294,6 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
               "max-concurrent must be a positive integer or omitted for no static cap; got %d"
               n))
     | Error _ as e -> e
-  in
-  (* The eviction marks travel as a pair: one without the other has no
-     meaning, so the parser refuses the half-declaration instead of inventing
-     the missing side. The upper bound against the model's max-context is
-     checked in [Runtime] once the model is resolved. *)
-  let context_marks_result =
-    let high =
-      typed_find "an integer" path tbl "context-high-water-tokens" Otoml.get_integer
-    in
-    let low = typed_find "an integer" path tbl "context-low-water-tokens" Otoml.get_integer in
-    match high, low with
-    | Ok None, Ok None -> Ok None
-    | Ok (Some high_water_tokens), Ok (Some low_water_tokens)
-      when 0 < low_water_tokens && low_water_tokens < high_water_tokens ->
-      Ok (Some { Runtime_schema.high_water_tokens; low_water_tokens })
-    | Ok (Some high_water_tokens), Ok (Some low_water_tokens) ->
-      Error
-        (error
-           (path ^ ".context-low-water-tokens")
-           (Printf.sprintf
-              "context-low-water-tokens must be positive and below \
-               context-high-water-tokens; got low=%d high=%d"
-              low_water_tokens
-              high_water_tokens))
-    | Ok (Some _), Ok None ->
-      Error
-        (error
-           (path ^ ".context-low-water-tokens")
-           "context-high-water-tokens is declared, so context-low-water-tokens must be \
-            declared too: it is where an eviction stops")
-    | Ok None, Ok (Some _) ->
-      Error
-        (error
-           (path ^ ".context-high-water-tokens")
-           "context-low-water-tokens is declared, so context-high-water-tokens must be \
-            declared too: it is where an eviction starts")
-    | Error high_errors, Error low_errors -> Error (high_errors @ low_errors)
-    | Error e, Ok _ | Ok _, Error e -> Error e
   in
   (* Request-side output budget. AGENT_CORE omits the wire field when this is
      absent, so the provider's own default decides -- 65536 on ollama.com/v1,
@@ -2406,7 +2367,6 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   let* max_context = max_context_result in
   let* max_concurrent = max_concurrent_result in
   let* disable_parallel_tool_use = disable_parallel_tool_use_result in
-  let* context_marks = context_marks_result in
   let* max_tokens = max_tokens_result in
   let* price_input = price_input_result in
   let* price_output = price_output_result in
@@ -2424,7 +2384,6 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     ; max_context
     ; max_concurrent
     ; disable_parallel_tool_use
-    ; context_marks
     ; max_tokens
     ; price_input
     ; price_output

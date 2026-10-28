@@ -43,11 +43,84 @@ let wrapped ~width tone text =
          (Masc.Tui_terminal_text.sanitize_terminal_text (without_line_end_cr line)))
   |> List.map (fun row -> { tone; text = row })
 
+(* The confirmation read answers with the metadata projection of each
+   submitted original, not the originals: identity, size and integrity reach
+   the operator while contents stay on the server. Each kind is parsed into
+   its own shape, and a kind this build does not know keeps its name on
+   screen instead of disappearing -- a newer server can add one without
+   stranding an older reader mid-confirmation. *)
+type submitted_original =
+  | Original_collaboration of { reference : string; sha256 : string; bytes : int }
+  | Original_note of { bytes : int }
+  | Original_artifact of { reference : string; bytes : int; truncated : bool }
+  | Original_binary of { reference : string; bytes : int; sha256 : string; format : string }
+  | Original_unreadable of { reference : string option; reason : string }
+  | Original_unknown of string
+
 type confirmation = {
   goal_id : string;
   phase : Goal_phase.t;
   verdict : Goal_verification.verdict;
+  submitted : submitted_original list;
 }
+
+(* Every field of a metadata item that is present is also well-formed: a
+   present-but-broken item fails the read, because the projection is written
+   by the same server that wrote the proof. *)
+let decode_submitted_original (item : Yojson.Safe.t) : (submitted_original, string) result =
+  let ( let* ) = Result.bind in
+  let field name = function
+    | `Assoc fields ->
+        (match List.assoc_opt name fields with
+         | Some value -> Ok value
+         | None -> Error ("submitted evidence: missing " ^ name))
+    | _ -> Error "submitted evidence: expected an object"
+  in
+  let string name = function
+    | `String value -> Ok value
+    | _ -> Error ("submitted evidence: " ^ name ^ " is not a string")
+  in
+  let int name = function
+    | `Int value -> Ok value
+    | _ -> Error ("submitted evidence: " ^ name ^ " is not an integer")
+  in
+  let bool name = function
+    | `Bool value -> Ok value
+    | _ -> Error ("submitted evidence: " ^ name ^ " is not a boolean")
+  in
+  let* kind = let* value = field "kind" item in string "kind" value in
+  match kind with
+  | "collaboration" ->
+      let* reference = (let* value = field "reference" item in string "reference" value) in
+      let* sha256 = (let* value = field "sha256" item in string "sha256" value) in
+      let* bytes = (let* value = field "bytes" item in int "bytes" value) in
+      Ok (Original_collaboration { reference; sha256; bytes })
+  | "note" ->
+      let* bytes = (let* value = field "bytes" item in int "bytes" value) in
+      Ok (Original_note { bytes })
+  | "artifact" ->
+      let* reference = (let* value = field "reference" item in string "reference" value) in
+      let* bytes = (let* value = field "bytes" item in int "bytes" value) in
+      let* truncated = (let* value = field "truncated" item in bool "truncated" value) in
+      Ok (Original_artifact { reference; bytes; truncated })
+  | "artifact_binary" ->
+      let* reference = (let* value = field "reference" item in string "reference" value) in
+      let* bytes = (let* value = field "bytes" item in int "bytes" value) in
+      let* sha256 = (let* value = field "sha256" item in string "sha256" value) in
+      let* format = (let* value = field "format" item in string "format" value) in
+      Ok (Original_binary { reference; bytes; sha256; format })
+  | "artifact_unreadable" ->
+      let* reason = let* value = field "reason" item in string "reason" value in
+      let reference =
+        match item with
+        | `Assoc fields ->
+            (match List.assoc_opt "reference" fields with
+             | Some (`String reference) -> Some reference
+             | _ -> None)
+        | _ -> None
+      in
+      Ok (Original_unreadable { reference; reason })
+  | other -> Ok (Original_unknown other)
 
 type confirmation_state =
   | Inspecting of (string, confirmation) Masc_tui_fetched.t
@@ -94,7 +167,29 @@ let decode_confirmation ~goal_id json =
   let* target = field "target_value" goal in
   let* criterion = Goal_store.criterion_of_yojson
       (`Assoc ["revision", revision; "title", title; "metric", metric; "target_value", target]) in
-  if Goal_store.criterion_equal criterion verdict.criterion then Ok { goal_id; phase; verdict }
+  if Goal_store.criterion_equal criterion verdict.criterion then
+    let submitted =
+      (* An answer from before the list existed carries no key; the originals
+         then simply do not draw. *)
+      match verification with
+      | `Assoc fields ->
+          (match List.assoc_opt "submitted_evidence" fields with
+           | None -> Ok []
+           | Some (`List items) ->
+               let rec all acc = function
+                 | [] -> Ok (List.rev acc)
+                 | item :: rest ->
+                     (match decode_submitted_original item with
+                      | Ok original -> all (original :: acc) rest
+                      | Error detail -> Error detail)
+               in
+               all [] items
+           | Some _ -> Error "submitted evidence: expected a list")
+      | _ -> Error "goal confirmation: expected object"
+    in
+    let ( let* ) = Result.bind in
+    let* submitted = submitted in
+    Ok { goal_id; phase; verdict; submitted }
   else Error "goal confirmation: criterion mismatch"
 
 let confirmation_body { goal_id; verdict; _ } =
@@ -120,7 +215,43 @@ let same_confirmation_binding left right =
    warn for the instruction, plain for what is read, dim for the binding fine
    print -- and the evidence stays the last group, so a presented frame still
    proves the operator scrolled through the whole proof. *)
-let confirmation_lines ~width ~ko { goal_id; verdict; _ } =
+(* The originals are provenance the operator may open, so they read at the
+   same plain volume as the evidence, as one labelled list under it. The list
+   ends the block when present, which keeps the presented-frame receipt
+   meaning "the end of the block". Shown sha length is a presentation choice
+   (board question pending); the full value stays one action away. *)
+let sha256_cells = 12
+
+let humanized_bytes bytes =
+  let kb = 1024 and mb = 1024 * 1024 in
+  if bytes >= mb then Printf.sprintf "%.1f MB" (float_of_int bytes /. float_of_int mb)
+  else if bytes >= kb then Printf.sprintf "%.1f KB" (float_of_int bytes /. float_of_int kb)
+  else Printf.sprintf "%d B" bytes
+
+let sha256_prefix sha256 =
+  String.sub sha256 0 (min (String.length sha256) sha256_cells)
+
+let submitted_original_text (original : submitted_original) =
+  match original with
+  | Original_collaboration { reference; sha256; bytes } ->
+      Printf.sprintf "collaboration %s · %s · sha256 %s"
+        reference (humanized_bytes bytes) (sha256_prefix sha256)
+  | Original_note { bytes } ->
+      Printf.sprintf "note · %s" (humanized_bytes bytes)
+  | Original_artifact { reference; bytes; truncated } ->
+      Printf.sprintf "artifact %s · %s%s" reference (humanized_bytes bytes)
+        (if truncated then " · truncated" else "")
+  | Original_binary { reference; bytes; sha256; format } ->
+      Printf.sprintf "binary %s · %s · %s · sha256 %s"
+        reference format (humanized_bytes bytes) (sha256_prefix sha256)
+  | Original_unreadable { reference; reason } ->
+      (match reference with
+       | Some reference -> "unreadable " ^ reference
+       | None -> "unreadable")
+      ^ " · " ^ reason
+  | Original_unknown kind -> "unknown kind " ^ kind
+
+let confirmation_lines ~width ~ko { goal_id; verdict; submitted; _ } =
   let Goal_store.Criterion criterion = verdict.Goal_verification.criterion in
   let line_of tone text = { tone; text } in
   let sanitize text =
@@ -170,9 +301,25 @@ let confirmation_lines ~width ~ko { goal_id; verdict; _ } =
   let evidence =
     line_of Plain "Evidence:" :: paragraph ~indent:2 Plain verdict.evidence
   in
+  let submitted =
+    match submitted with
+    | [] -> []
+    | originals ->
+        let cells = 10 in
+        List.concat_map
+          (fun original ->
+             Message_layout.wrap_words ~max_cells:(max 1 (width - cells))
+               (submitted_original_text original))
+          originals
+        |> List.mapi (fun index text ->
+               line_of Plain
+                 ((if index = 0 then Printf.sprintf "%-10s" "Submitted:" else String.make cells ' ')
+                  ^ text))
+  in
   let blank = [ line_of Quiet "" ] in
   header
-  :: (instruction @ blank @ promise @ blank @ binding @ blank @ evidence)
+  :: (instruction @ blank @ promise @ blank @ binding @ blank @ evidence
+      @ (match submitted with [] -> [] | _ -> blank @ submitted))
 
 (* A verdict is a headline and, when the judge left one, the measurement it
    rests on. They are separate rows because the reason wraps and the headline

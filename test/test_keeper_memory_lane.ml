@@ -201,6 +201,7 @@ let test_has_waiting_reads_the_latest_slot () =
   Alcotest.(check (option int)) "reading registered no entry" None
     (Lane.For_testing.pending ~base_path ~keeper_name);
   let seen_by_second = ref None in
+  let pending_by_second = ref None in
   Eio_main.run (fun _env ->
     Eio.Switch.run (fun sw ->
       Lane.init ~sw;
@@ -214,18 +215,27 @@ let test_has_waiting_reads_the_latest_slot () =
       Eio.Promise.await started;
       Alcotest.(check bool) "a running unit alone: nothing waits" false
         (Lane.has_waiting ~base_path ~keeper_name);
+      Alcotest.(check (option int)) "the current unit is pending" (Some 1)
+        (Lane.For_testing.pending ~base_path ~keeper_name);
       let (_ : Lane.outcome) =
         Lane.submit ~base_path ~keeper_name (fun () ->
-          seen_by_second := Some (Lane.has_waiting ~base_path ~keeper_name))
+          seen_by_second := Some (Lane.has_waiting ~base_path ~keeper_name);
+          pending_by_second := Lane.For_testing.pending ~base_path ~keeper_name)
       in
       Alcotest.(check bool) "a unit behind the running one waits" true
         (Lane.has_waiting ~base_path ~keeper_name);
+      Alcotest.(check (option int)) "current and latest units are pending" (Some 2)
+        (Lane.For_testing.pending ~base_path ~keeper_name);
       Eio.Promise.resolve set_release ();
       Lane.For_testing.await_idle ~base_path ~keeper_name;
       Alcotest.(check bool) "the lane drained: nothing waits" false
-        (Lane.has_waiting ~base_path ~keeper_name)));
+        (Lane.has_waiting ~base_path ~keeper_name);
+      Alcotest.(check (option int)) "the lane drained: none pending" (Some 0)
+        (Lane.For_testing.pending ~base_path ~keeper_name)));
   Alcotest.(check (option bool)) "the waiting unit ran and saw nothing behind it"
-    (Some false) !seen_by_second
+    (Some false) !seen_by_second;
+  Alcotest.(check (option int)) "the promoted latest is the current unit"
+    (Some 1) !pending_by_second
 ;;
 
 (* A unit for one keeper does not block a unit for another keeper. *)

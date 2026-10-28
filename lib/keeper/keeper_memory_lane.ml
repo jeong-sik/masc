@@ -10,6 +10,12 @@ type librarian_drain =
   ; owner_lane : Keeper_lane.t
   }
 
+(* An attached drain owns its current unit even before it starts. Its latest
+   slot is the only other unit that can be pending. *)
+let pending_in_drain drain =
+  1 + (if Option.is_some drain.latest then 1 else 0)
+;;
+
 type external_effect = {
   identity : unit ref;
   context : Eio.Cancel.t;
@@ -20,9 +26,8 @@ type external_effect = {
 
 type entry =
   { state_mu : Stdlib.Mutex.t
-    (* Guards the drain, pending counts, purge fence and active external
+    (* Guards the drain, purge fence and active external
        cancellation scopes. Critical sections never yield. *)
-  ; mutable pending : int
   ; mutable librarian_drain : librarian_drain option
   ; mutable last_owner_lane : Keeper_lane.t option
     (* The lane of the most recent drain, kept after [librarian_drain] is
@@ -60,7 +65,6 @@ let entry_key ~base_path ~keeper_name =
 
 let make_entry () =
   { state_mu = Stdlib.Mutex.create ()
-  ; pending = 0
   ; librarian_drain = None
   ; last_owner_lane = None
   ; external_effects = []
@@ -166,13 +170,11 @@ let librarian_reserve entry f =
       in
       entry.librarian_drain <- Some drain;
       entry.last_owner_lane <- Some drain.owner_lane;
-      entry.pending <- 1;
       Start_drain drain
     | Some drain ->
       (match drain.latest with
        | None ->
          drain.latest <- Some f;
-         entry.pending <- entry.pending + 1;
          Queue_latest
        | Some _ ->
          drain.latest <- Some f;
@@ -216,11 +218,10 @@ let detach_librarian_drain entry drain =
   Stdlib.Mutex.protect entry.state_mu (fun () ->
     match entry.librarian_drain with
     | Some current when current == drain ->
-      let pending = entry.pending in
+      let pending = pending_in_drain drain in
       let in_flight = drain.in_flight in
       let latest_pending = Option.is_some drain.latest in
       let hook = drain.switch_hook in
-      entry.pending <- 0;
       entry.librarian_drain <- None;
       drain.latest <- None;
       drain.in_flight <- false;
@@ -283,7 +284,6 @@ let librarian_finish_current ~keeper_name entry drain =
       | Some current when current == drain ->
         let in_flight = drain.in_flight in
         drain.in_flight <- false;
-        entry.pending <- entry.pending - 1;
         (match drain.latest with
          | Some next ->
            drain.latest <- None;
@@ -560,7 +560,11 @@ module For_testing = struct
   let pending ~base_path ~keeper_name =
     let key = entry_key ~base_path ~keeper_name in
     Stdlib.Mutex.protect registry_mu (fun () -> Hashtbl.find_opt entries key)
-    |> Option.map (fun e -> Stdlib.Mutex.protect e.state_mu (fun () -> e.pending))
+    |> Option.map (fun e ->
+      Stdlib.Mutex.protect e.state_mu (fun () ->
+        match e.librarian_drain with
+        | None -> 0
+        | Some drain -> pending_in_drain drain))
   ;;
 
   let external_active ~base_path ~keeper_name =

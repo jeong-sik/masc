@@ -37,7 +37,7 @@ type t =
   ; policy_providers : Model_catalog.provider_entry Ids.t
   }
 let normalize s = String.trim s |> String.lowercase_ascii
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let of_model_entry (entry : Model_catalog.provider_entry) =
   let label = Option.value entry.capabilities_base ~default:entry.id in

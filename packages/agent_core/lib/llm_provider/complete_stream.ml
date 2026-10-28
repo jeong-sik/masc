@@ -661,7 +661,7 @@ let complete_stream_http
                ; terminal
                }))
       in
-      let ( let* ) = Result.bind in
+      let open Result.Syntax in
       let* auth_headers = Provider_config.resolve_auth_headers config
         |> Result.map_error (fun reason -> Http_client.AcceptRejected { reason }) in
       match

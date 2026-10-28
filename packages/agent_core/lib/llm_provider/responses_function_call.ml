@@ -5,7 +5,7 @@ type t =
   ; arguments : string
   }
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let required_string ~field item =
   let value = match item with

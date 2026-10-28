@@ -1055,7 +1055,7 @@ module Response_replay = struct
   ;;
 
   let retain_metadata ~original_content ~content ~retained_indices metadata =
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* metadata = Inline_content_replay.retain_metadata
         ~original_content ~content ~retained_indices metadata in
     match of_metadata ~content:original_content metadata with
@@ -1133,7 +1133,7 @@ type api_response =
 [@@deriving show]
 
 let retain_response_content ~retained_indices ~content (response : api_response) =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match response.telemetry with
   | None -> Ok {response with content}
   | Some telemetry ->

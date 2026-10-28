@@ -64,7 +64,7 @@ let request_provenance_to_yojson provenance =
 ;;
 
 let request_provenance_of_yojson json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let fields ~keys = function
     | `Assoc fields when
         List.sort String.compare (List.map fst fields) = List.sort String.compare keys ->

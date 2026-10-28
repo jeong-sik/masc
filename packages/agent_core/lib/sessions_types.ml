@@ -137,7 +137,7 @@ let tool_contract_to_yojson contract =
 ;;
 
 let tool_contract_of_yojson json =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   match json with
   | `Assoc fields ->
     let allowed = [ "name"; "description"; "origin"; "execution_mode"; "completion" ] in

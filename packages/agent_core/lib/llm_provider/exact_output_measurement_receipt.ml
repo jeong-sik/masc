@@ -73,7 +73,7 @@ type measurement_receipt_transition =
   | Measurement_idempotent_replay
   | Measurement_transition_conflict of measurement_receipt_transition_conflict
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let flow_id_to_string (Flow_id value) = value
 let flow_visit_ordinal_to_int (Flow_visit_ordinal value) = value
 let measurement_operation_id_to_string (Measurement_operation_id value) = value

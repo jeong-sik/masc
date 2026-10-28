@@ -129,7 +129,7 @@ let validate_request (config : Provider_config.t) text voice =
     match voice with
     | Named value | Custom_id value -> value
   in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = validate_non_empty "text" text in
   let* () = validate_non_empty "model_id" config.model_id in
   let* () = validate_non_empty "voice" voice_value in
@@ -235,7 +235,7 @@ let optional_int = Gemini_interactions.optional_int ~parser:gemini_parser
 
 let audio_of_json expected json =
   let open Yojson.Safe.Util in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* media_type =
     match member "mime_type" json with
     | `String value when String.trim value <> "" -> Ok value
@@ -311,7 +311,7 @@ let generate
      | Error _ as error -> error
      | Ok body ->
        let url = config.base_url ^ config.request_path in
-       let ( let* ) = Result.bind in
+       let open Result.Syntax in
        let* auth_headers = Provider_config.resolve_auth_headers config
          |> Result.map_error (fun reason -> Http_client.AcceptRejected { reason }) in
        let headers = config.headers @ auth_headers in

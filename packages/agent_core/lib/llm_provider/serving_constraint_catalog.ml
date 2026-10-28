@@ -1,4 +1,4 @@
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let field ~entry_id ~expected getter key toml =
   try Ok (Otoml.find_opt toml getter [ key ]) with

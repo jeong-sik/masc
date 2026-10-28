@@ -481,7 +481,7 @@ let write_report_json ~write report =
 ;;
 
 (* Strict inverse. Field equality rejects duplicates as well as unknown fields. *)
-let ( let* ) = Result.bind
+open Result.Syntax
 let fields expected = function
   | `Assoc values when List.sort String.compare (List.map fst values) = List.sort String.compare expected -> Ok values
   | _ -> Error "schema observation object has missing, duplicate or unknown fields"

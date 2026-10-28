@@ -340,7 +340,7 @@ let compare_with_specs ~specs ~(baseline : run_metrics) ~(candidate : run_metric
           (Invalid_tolerance_pct
              { metric_name = spec.name; tolerance_pct = spec.tolerance_pct })
       else (
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let* baseline_metric =
           find_unique_metric
             ~duplicate_error:(fun name -> Duplicate_baseline_metric name)
@@ -373,7 +373,7 @@ let compare_with_specs ~specs ~(baseline : run_metrics) ~(candidate : run_metric
         in
         collect (spec.name :: seen) (delta :: deltas) rest)
   in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* deltas = collect [] [] specs in
   let regressions = List.filter (fun d -> d.direction = Regression) deltas in
   let improvements = List.filter (fun d -> d.direction = Improvement) deltas in

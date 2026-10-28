@@ -90,7 +90,7 @@ let validate_and_classify (messages : Types.message list) =
     | (message : Types.message) :: rest ->
       let classification = Types.Reasoning_source.classify message.metadata in
       let result =
-        let ( let* ) = Result.bind in
+        let open Result.Syntax in
         let* inline_replay = Inline_content_replay.of_metadata ~content:message.content message.metadata
           |> Result.map_error (fun detail -> Invalid_response_replay {message_index;detail}) in
         let* () = match inline_replay,message.role with
@@ -307,7 +307,7 @@ let validate_replay_continuity_for_provider_config
             | _ :: _ -> Source_change_admitted (List.rev exclusions) in
           Ok {capability=replay_capability; disposition}
         | (message_index, (message : Types.message), classification) :: rest ->
-          let ( let* ) = Result.bind in
+          let open Result.Syntax in
           let* inline_replay = Inline_content_replay.of_metadata
               ~content:message.content message.metadata
             |> Result.map_error (fun detail -> Invalid_response_replay {message_index;detail}) in

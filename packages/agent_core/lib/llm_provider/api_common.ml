@@ -558,7 +558,7 @@ let parse_media_block ~block_type ~make json =
      | None ->
        Error (Unsupported_media_source_kind { block_type; source_type = raw_source_type })
      | Some source_type ->
-       let ( let* ) = Result.bind in
+       let open Result.Syntax in
        let* media_type = required_string_field ~block_type ~field:"media_type" source in
        let* data = required_string_field ~block_type ~field:"data" source in
        Ok (make ~media_type ~data ~source_type))
@@ -577,7 +577,7 @@ let rec content_block_of_json_result ?(parse_tool_result_json = true) json =
       (fun content -> Thinking { content; signature })
       (required_string_field ~block_type:"thinking" ~field:"thinking" json)
   | Some "reasoning_details" ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let details_json = json |> member "details" in
     let* details =
       match details_json with
@@ -599,13 +599,13 @@ let rec content_block_of_json_result ?(parse_tool_result_json = true) json =
       (fun data -> RedactedThinking data)
       (required_string_field ~block_type:"redacted_thinking" ~field:"data" json)
   | Some "tool_use" ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* id = required_identifier_field ~block_type:"tool_use" ~field:"id" json in
     let* name = required_identifier_field ~block_type:"tool_use" ~field:"name" json in
     let input = json |> member "input" in
     Ok (ToolUse { id; name; input })
   | Some "tool_result" ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* tool_use_id =
       required_identifier_field ~block_type:"tool_result" ~field:"tool_use_id" json
     in

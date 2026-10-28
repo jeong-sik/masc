@@ -4,7 +4,7 @@
 open Masc
 module R = Lane_addon_runtime
 module Lease = Native_addon_lease
-let ( let* ) = Result.bind
+open Result.Syntax
 let require = function Ok x -> x | Error s -> failwith s
 (* The package of the owned live Firefox source (addons/browser/firefox),
    declared under its own id the way masc browser-lane-setup declares it. It

@@ -3,7 +3,7 @@ type error =
   | Unsupported_type of string
   | Invalid_schema
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let schema_keywords =
   [ "type"

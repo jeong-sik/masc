@@ -33,7 +33,7 @@ let pending_to_json pending =
         ]
     ]
 
-let ( let* ) = Result.bind
+open Result.Syntax
 let object_fields expected = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare expected ->
     Ok fields

@@ -71,7 +71,7 @@ let with_worker ?other_backend ~machine ~create ~clock ~sw ~base_path f =
                   on_dispatch ();
                   rpc ~name ~arguments |> Result.map (fun result -> on_result result;result))));
             observe=(fun ~binding ~sources -> Eio.Mutex.use_ro mutex (fun () ->
-              let ( let* ) = Result.bind in
+              let open Result.Syntax in
               let* result = rpc ~name:"lane_observe" ~arguments:(`Assoc ["binding",binding;"sources",sources]) in
               let* () = if result.is_error=Some true then Error (Agent_core.Mcp.text_of_tool_result result) else Ok () in
               let* output = match result.structured_content with

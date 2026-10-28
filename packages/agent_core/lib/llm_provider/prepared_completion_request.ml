@@ -86,7 +86,7 @@ let request prepared = prepared.request
 let admit_serialized_body ~stream prepared =
   let request = prepared.request in
   let config = request.Llm_transport.config in
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   let* () = Complete_common.validate_all config in
   let* serialized_request =
     Complete_common.serialize_final_http_request_unadmitted

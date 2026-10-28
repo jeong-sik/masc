@@ -73,7 +73,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 
 ## 3. 층 목록
 
-층은 모두 31개다. 크기가 20k token을 넘는 층은 시작할 때 쪼갠다. 도구가 만든 변환 층(A4b)은 diff의 대부분(296곳)을 사람이 읽지 않고 도구 출력과 결정표를 읽으므로 이 규칙을 적용하지 않는다. 사람이 고친 곳은 읽는다.
+층은 모두 31개다. 크기가 20k token을 넘는 층은 시작할 때 쪼갠다. A4b도 도구가 만든 변환과 사람이 고친 부분의 인증·바인딩 diff를 함께 읽고, 작업 단위가 이 한도를 넘으면 나눈다.
 
 ### A. 측정과 기반
 
@@ -85,7 +85,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 | A2 | `auth_config`에 닫힌 `account_mode`(`Single_user`, `Multi_account`)를 선택 필드로 두고, 부팅 때 모드를 한 번 정해 실행 중에 바꾸지 않는다. 파일이나 필드가 없으면 `Single_user`이고 알 수 없는 값은 부팅을 거부한다. 필드는 `save_auth_config`가 다시 쓰는 `auth_config` 레코드 안에 둔다. 설정을 `authz.jsonl`과 외부 고수위에 대조하는 판정은 설계 §5.1의 표가 정한다. `Multi_account`는 `enabled=false`, `require_token=false`, `MASC_ALLOW_ANONYMOUS_MUTATIONS=true`를 거부한다. 값을 써 넣는 단계는 없고, 변경 기록에 `Fresh state required`를 적지 않는다. 세부는 표 아래 A2 범위다. | §5.1, §5.3, §8.2~8.4 | B2 |
 | A3 | 권한 도메인의 닫힌 타입(Principal, Effect, Channel, Runtime_scope, Authorization_scope, ExecutionContext, grant, policy, record의 author)과 판정식 `allowed`. I/O 없는 순수 코드다. 시험은 deny 기본, `Empty`, `Not_pat`, scope·channel·effects 교집합을 표로 확인한다. | §4, §6.2, §6.3 | - |
 | A4a | 경로 인증 종류의 닫힌 타입을 만든다. `Route_access.t`는 라우터의 `route.access`가 들고 있는 데이터이고, `Server_route.auth`는 핸들러 타입을 나르는 GADT이며, 종류를 필수로 받는 등록 함수(`Server_route.get` 등)가 종류에 맞는 래퍼를 씌운다(`docs/rfc/RFC-typed-route-auth.md` §3). 옛 등록 함수는 이 스택 안에서만 `Unclassified` 종류로 이어 둔다. 변환 도구 `route_auth_codemod`를 함께 넣는다. 도구는 서버 코드와 닿지 않아 별도 PR로 낸다. 컴파일러 파서로 등록을 읽고 해당 글자 범위만 고쳐 쓰며(나머지 서식은 그대로), `--write`는 파일을 바꾸고 `--strict`는 바꾸지 못한 등록이 남으면 실패한다. 같은 경로라고 말할 수 있는 모양만 바꾸고 나머지는 이유와 함께 목록에 남긴다. 도구는 시험이 있다. 인벤토리 도구가 `access`를 출력한다. 동작은 바꾸지 않는다. | §5.3 | A1 |
-| A4b | 도구로 만든 변환 한 층. 등록 383곳(35개 파일, 2026-10-28 측정이다. §2의 382곳은 하루 전 값이고 그 뒤에도 늘고 있다)을 한 번에 바꾼다. 도구가 296곳(핸들러가 `fun request reqd -> W … request reqd` 모양이거나 래퍼를 부분 적용한 것)을 고쳐 쓴다. 그중 11곳은 `~tool_name`이 계산식이라 요청마다 하던 계산이 등록 때 한 번으로 바뀌므로, 사람이 도구가 출력한 목록을 읽고 `--allow-early-evaluation`으로 받아들인다. 나머지 87곳(도우미 호출 36, 이름 붙은 핸들러 33, 몸통이 래퍼 호출이 아닌 핸들러 16, `ws_get` 2)은 도구가 건드리지 않는다. 사람이 결정표에 종류(`Self_authenticated`의 사유, `Always_public`, 도우미 안쪽 래퍼의 종류)와 사유를 적고 직접 고친다. 리뷰는 도구 출력, 결정표, 사람이 고친 곳의 diff를 본다. 바꾼 뒤 컴파일러가 알려 주는 안 쓰게 된 `open Server_auth`를 지우고, A1 기준선을 다시 재서 상태 코드가 같음을 보이고 `GET /api/v1/board/flairs`(#46569)의 종류를 정한다. 병합 직전에 main 위에서 도구를 다시 돌려 그 사이 늘어난 등록을 반영한다. | §5.3 | A4a |
+| A4b | 도구로 만든 변환 한 층. 2026-10-28의 등록 383곳과 당시 도구 변환 296곳·수동 결정 87곳은 과거 집계다. 사용하려는 도구의 정확한 head에서 열린 변경 요청을 해소하고 독립 소스 리뷰를 받은 뒤, 고정한 서버 source와 도구 head에서 전체 등록·변환·보류 수를 다시 센다. 도구가 남긴 곳과 수동 변경은 결정표에 종류(`Self_authenticated`의 사유, `Always_public`, 도우미 안쪽 래퍼의 종류)와 사유를 적는다. 이름 붙은 핸들러는 다른 파일의 사용까지 확인하고, 모든 변환 diff에서 원래 래퍼와 인증 종류·식별자 바인딩을 검토한다. `--allow-early-evaluation`은 각 계산식의 호출 간 값 불변성, 부작용·예외 및 정의·등록 위치의 동일 바인딩 근거를 기록한 경우에만 쓴다. 근거가 없으면 자동 변환을 수락하지 않고 수동으로 결정한다. 바꾼 뒤 안 쓰게 된 `open Server_auth`를 지우고 A1 상태 코드를 다시 측정하며 인증된 허용·권한 부족 거부와 관련 prefix 및 H1/H2 시험을 확인한다. A1의 무자격 상태 코드 일치만으로 전체 권한 동등성을 주장하지 않는다. `GET /api/v1/board/flairs`(#46569)의 종류를 정하고, 병합 직전에 main 위에서 도구를 다시 돌려 새 등록을 반영한다. | §5.3 | A4a |
 | A4c | HTTP/2 게이트웨이(`server_h2_gateway.ml`, `server_h2_gateway_routes_extra.ml`, 약 72곳)가 같은 종류 타입을 쓴다. HTTP/1과 HTTP/2가 같은 경로를 다른 종류로 등록하면 실패하는 시험을 둔다. 한쪽에만 있는 경로는 시험 안에 사유와 함께 이름으로 적는다. | §5.3 | A4b |
 | A4d | 스택의 마지막 층. `Unclassified`, 옛 등록 함수, `is_public_read_path`, 결정표를 지운다. 이 층이 들어가면 main에는 종류 없는 등록이 없고 새 등록은 종류 없이 컴파일되지 않는다. 인벤토리의 route 표를 C4가 읽는다. A4a~A4d는 맨 위 PR로 한꺼번에 병합한다. 변환 도구는 이 스택에 들어가지 않고, 열려 있던 PR이 새 등록 함수로 옮겨진 뒤 따로 지운다. | §5.3, §11-1 | A4c |
 

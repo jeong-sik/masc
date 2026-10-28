@@ -146,7 +146,7 @@ let public_link () =
       check bool "another sharing change cannot overlap" true
         (Result.is_error (Updates.begin_share_change s ~report ~shared:true));
       Updates.read_done s ~request:{Catalog.key=report_key;owner}
-        (Ok {Catalog.parts=[text "test"];revisions=[report];shared=Some true});
+        (Ok {Catalog.parts=[text "test"];revisions=[report];shared=Some true;share_version=Some 1});
       check (option bool) "older read cannot restore the share state" None s.resource_shared;
       refused ();
       Types.retain_resource_read s ~key:older_key;
@@ -154,7 +154,7 @@ let public_link () =
       s.resource_read_owner <- Some during_owner;
       let during_parts = [text "body read during write"] in
       Updates.read_done s ~request:{Catalog.key=older_key;owner=during_owner}
-        (Ok {Catalog.parts=during_parts;revisions=[report;older];shared=Some true});
+        (Ok {Catalog.parts=during_parts;revisions=[report;older];shared=Some true;share_version=Some 1});
       check bool "a read during the write retains its body" true
         (match s.resource_content with Some (_, parts) -> parts == during_parts | None -> false);
       check (option bool) "a read during the write cannot admit sharing" None s.resource_shared;
@@ -176,7 +176,7 @@ let public_link () =
         (match Updates.share_changed s request ~result:(Ok false) with
          | Some key -> Catalog.equal_key key older_key | None -> false);
       Updates.read_done s ~request:{Catalog.key=older_key;owner=late_owner}
-        (Ok {Catalog.parts=[text "late"];revisions=[report;older];shared=Some true});
+        (Ok {Catalog.parts=[text "late"];revisions=[report;older];shared=Some true;share_version=Some 1});
       check (option bool) "a read launched during the write is retired on settlement" None s.resource_shared;
       check bool "operation settlement is consumed once" true
         (Option.is_none (Updates.share_changed s request ~result:(Error "late")));
@@ -186,7 +186,7 @@ let public_link () =
       let fresh_owner = ref () in
       s.resource_read_owner <- Some fresh_owner;
       Updates.read_done s ~request:{Catalog.key=older_key;owner=fresh_owner}
-        (Ok {Catalog.parts=[text "test"];revisions=[report;older];shared=Some false});
+        (Ok {Catalog.parts=[text "test"];revisions=[report;older];shared=Some false;share_version=Some 1});
       check (option bool) "a fresh post-settlement observation is admitted" (Some false) s.resource_shared;
       s.resource_shared <- Some true;
       s.resource_pending_key <- Some report_key; refused ();
@@ -213,7 +213,7 @@ let public_link () =
       let successor_owner = ref () in
       s.resource_read_owner <- Some successor_owner;
       Updates.read_done s ~request:{Catalog.key=report_key;owner=successor_owner}
-        (Ok {Catalog.parts=[text "successor"];revisions=[report];shared=Some true});
+        (Ok {Catalog.parts=[text "successor"];revisions=[report];shared=Some true;share_version=Some 1});
       check (option bool) "same-id reads remain unknown across authority changes" None s.resource_shared;
       Types.retain_resource_read s ~key:report_key;
       let successor_late_owner = ref () in
@@ -221,7 +221,7 @@ let public_link () =
       check bool "old workspace settlement cannot request a new workspace reread" true
         (Option.is_none (Updates.share_changed s old_workspace_request ~result:(Ok false)));
       Updates.read_done s ~request:{Catalog.key=report_key;owner=successor_late_owner}
-        (Ok {Catalog.parts=[text "stale successor"];revisions=[report];shared=Some true});
+        (Ok {Catalog.parts=[text "stale successor"];revisions=[report];shared=Some true;share_version=Some 1});
       check (option bool) "old workspace settlement retires a same-id in-flight read" None s.resource_shared;
       s.resource_shared <- Some true;
       let successor_request = match Updates.begin_share_change s ~report ~shared:false with
@@ -241,7 +241,7 @@ let public_link () =
       let other_owner = ref () in
       s.resource_read_owner <- Some other_owner;
       Updates.read_done s ~request:{Catalog.key=other_key;owner=other_owner}
-        (Ok {Catalog.parts=[text "other"];revisions=[other];shared=Some true});
+        (Ok {Catalog.parts=[text "other"];revisions=[other];shared=Some true;share_version=Some 1});
       check (option bool) "a different artifact can admit sharing during the write" (Some true) s.resource_shared;
       Types.retain_resource_read s ~key:other_key;
       let other_late_owner = ref () in
@@ -252,7 +252,7 @@ let public_link () =
         (match s.resource_read_owner with
          | Some owner -> owner == other_late_owner | None -> false);
       Updates.read_done s ~request:{Catalog.key=other_key;owner=other_late_owner}
-        (Ok {Catalog.parts=[text "other after"];revisions=[other];shared=Some false});
+        (Ok {Catalog.parts=[text "other after"];revisions=[other];shared=Some false;share_version=Some 1});
       check (option bool) "the other artifact can finish its read" (Some false) s.resource_shared;
       s.resources_list <- Some [Catalog.Report report];
       s.resource_content <- Some (report_key, [text "test"]);
@@ -301,7 +301,7 @@ let public_link () =
       let uncertain_read = ref () in
       interrupted.resource_read_owner <- Some uncertain_read;
       Updates.read_done interrupted ~request:{Catalog.key=older_key;owner=uncertain_read}
-        (Ok {Catalog.parts=[text "later GET"];revisions=[report;older];shared=Some true});
+        (Ok {Catalog.parts=[text "later GET"];revisions=[report;older];shared=Some true;share_version=Some 1});
       check (option bool) "a later GET cannot settle the uncertain write" None interrupted.resource_shared;
       check bool "an uncertain artifact cannot be toggled" true
         (Result.is_error (Updates.begin_share_change interrupted ~report ~shared:false));
@@ -312,14 +312,14 @@ let public_link () =
       let uncertain_successor_read = ref () in
       interrupted.resource_read_owner <- Some uncertain_successor_read;
       Updates.read_done interrupted ~request:{Catalog.key=older_key;owner=uncertain_successor_read}
-        (Ok {Catalog.parts=[text "successor GET"];revisions=[report;older];shared=Some true});
+        (Ok {Catalog.parts=[text "successor GET"];revisions=[report;older];shared=Some true;share_version=Some 1});
       check (option bool) "uncertainty survives a workspace authority change" None interrupted.resource_shared;
       interrupted.resources_list <- Some [Catalog.Report report; Catalog.Report other];
       Types.retain_resource_read interrupted ~key:other_key;
       let untainted_read = ref () in
       interrupted.resource_read_owner <- Some untainted_read;
       Updates.read_done interrupted ~request:{Catalog.key=other_key;owner=untainted_read}
-        (Ok {Catalog.parts=[text "other"];revisions=[other];shared=Some true});
+        (Ok {Catalog.parts=[text "other"];revisions=[other];shared=Some true;share_version=Some 1});
       check (option bool) "a different artifact remains usable" (Some true) interrupted.resource_shared;
       let other_request = match Updates.begin_share_change interrupted ~report:other ~shared:false with
         | Ok request -> request | Error detail -> fail detail in

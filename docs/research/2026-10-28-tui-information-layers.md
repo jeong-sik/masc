@@ -148,9 +148,11 @@ making the answer field behind it silently lose typed characters.
 The follow-up groups the previously separate presented approval, hit zones,
 panes and reader into one immutable snapshot. It rechecks input after output and
 holds input already observed at that boundary before dispatching the next
-owner's handlers. Source review found no additional confirmed P0–P2 after the
-reported fixes, but the barrier and recovery behavior have not run in the
-candidate terminal. A rejected paste is not retained; the user is told to retry.
+owner's handlers. Source review identified an unresolved visibility issue:
+existing form and save notices can outrank a rejected-input notice in the
+footer. The event list is bounded, so recording a retry notice does not prove
+that it was seen. A rejected paste is not retained. The barrier and recovery
+behavior have not run in the candidate terminal.
 
 Input can still arrive after the post-output observation, and the terminal does
 not report when the person saw the new frame. A late tail after a forced CSI
@@ -159,6 +161,13 @@ from the source-level race the barrier addresses. Manual verification should
 exercise queue close and Enter, selection and priority, a Play response during
 typing, resize with a truncated sequence, and incomplete-paste recovery in an
 isolated workspace.
+
+To avoid opening a MIDI editor while terminal input is pending, the existing
+pending-editor cancellation also applies during these transitions. The input
+reader can conservatively treat a terminal protocol reply as pending input, so
+it can cancel that open even without a decoded operator key. The cancellation
+is recorded in chat and a bounded session event; immediate footer visibility
+is not guaranteed.
 
 ### Synthetic comparison and provisional direction
 

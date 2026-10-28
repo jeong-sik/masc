@@ -664,7 +664,8 @@ type async_msg =
      [Preset_detail_loaded] with a cursor key; this one has a sink because a
      typed command answers where it was typed. *)
   | Preset_contents_shown of preset_sink * (Masc.Tui_decode.preset_detail, string) result
-  | Preset_saved of preset_sink * (Masc.Tui_decode.preset_manifest, string) result
+  | Preset_saved of preset_save_pending
+      * (Masc.Tui_decode.preset_manifest, preset_save_failure) result
   | Preset_restored of preset_sink * (Masc.Tui_decode.preset_restore_report, string) result
   | Preset_deleted of preset_sink * (string, string) result
   | Play_room_received of Masc_tui_play_room.request * (string * Masc.Play_room.snapshot, string) result

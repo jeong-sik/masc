@@ -12,21 +12,22 @@ val unreadable_rows : max_cells:int -> (string * string) list -> string list
 
 val saved_line : Masc.Tui_decode.preset_manifest -> string
 
-val pane_empty_line : Masc.Tui_decode.presets_snapshot -> string option
+val pane_empty_line : ko:bool -> Masc.Tui_decode.presets_snapshot -> string option
 (** The Config pane's row in place of an empty list, naming the pane's save
     key; the unreadable-rows line when only unreadable directories came back;
     [None] when there are presets to list. *)
 
-val pane_row : Masc.Tui_decode.preset_manifest -> string
-(** One row of the Config pane list: name, counts, saved-at. *)
+val pane_row : ko:bool -> max_cells:int -> Masc.Tui_decode.preset_manifest -> string
+(** A width-aware name and, when they fit, the snapshot counts. *)
 
-val contents_lines : Masc.Tui_decode.preset_detail -> string list
+val contents_lines : ko:bool -> Masc.Tui_decode.preset_detail -> string list
 (** What a preset holds, grouped by kind: its directory, whether the saved
     workspace settings still match, then one line per prompt, per override,
     per keeper instruction file, the keeper-to-runtime assignments and the
     lanes. The manifest says how many; this says which and how big. *)
 
 val detail_lines :
+  ko:bool ->
   selected:Masc.Tui_decode.preset_manifest option ->
   detail:Masc.Tui_decode.preset_detail Masc_tui_fetched.view ->
   report:Masc.Tui_decode.preset_restore_report option ->
@@ -40,7 +41,7 @@ val detail_lines :
     the answer to the selection is {!Masc_tui_fetched}'s job, so a late
     answer for a preset the cursor has left never reaches here. *)
 
-val restore_lines : Masc.Tui_decode.preset_restore_report -> string list
+val restore_lines : ko:bool -> Masc.Tui_decode.preset_restore_report -> string list
 (** The restored name and its autosave, then each surface with its effect
     and applied/skipped counts, every skipped key with its reason, and the
     runtime.toml outcome. *)

@@ -149,7 +149,7 @@ let clamped_scroll_now (state : state) = function
   | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
   | Play_invite_scroll _ -> Play_invite_scroll state.play_invite_scroll
   | Voice_scroll _ -> Voice_scroll state.config_scroll
-  | Preset_detail_scroll _ -> Preset_detail_scroll state.config_scroll
+  | Preset_detail_scroll _ -> Preset_detail_scroll (state.config_scroll, None)
   | Keeper_list_scroll _ -> Keeper_list_scroll state.keeper_list_scroll
   | Context_inspector_scroll _ ->
       Context_inspector_scroll state.context_inspector_scroll
@@ -199,7 +199,7 @@ let reader_after_wheel (reader : clamped_scroll)
   | Link_modal_scroll value -> Some (Link_modal_scroll (step value))
   | Play_invite_scroll value -> Some (Play_invite_scroll (step value))
   | Voice_scroll value -> Some (Voice_scroll (step value))
-  | Preset_detail_scroll value -> Some (Preset_detail_scroll (step value))
+  | Preset_detail_scroll (value, _) -> Some (Preset_detail_scroll (step value, None))
   | Context_inspector_scroll value ->
       Some (Context_inspector_scroll (step value))
   | Context_inspector_response_scroll value ->
@@ -3356,7 +3356,8 @@ let tools_scrolled_for_lines state display_lines =
 (* The two keys this row draws in front of its strip. Named here because the
    row has to count them when it decides what is left for the file it is
    reading, and a second copy of the spelling would drift from this one. *)
-let config_pane_keys = "9:Runtime  p:next  "
+let config_pane_keys (state : state) =
+  Masc_tui_types.ui_text state ~ko:"9:런타임  p:다음  " ~en:"9:Runtime  p:next  "
 
 (* A file's address said from a directory it is under. The Config panes read
    one file whose prefix is the server's masc root -- the same for every screen
@@ -3405,13 +3406,14 @@ let system_subnav_row (state : state) =
   ^ lang_chip
 
 let config_pane_strip ~cols ~before ~after (state : state) =
-  Ansi.dim ^ config_pane_keys ^ Ansi.reset
+  let keys = config_pane_keys state in
+  Ansi.dim ^ keys ^ Ansi.reset
   ^ tab_strip
       (* [before] carries its own trailing gap -- every pane spells this row
          that way -- and nothing else sits between it and the keys. Counting
          another gap here reserved two cells the row never draws, which came
          straight out of the strip. *)
-      ~width:(tab_strip_width ~cols ~before:(before ^ config_pane_keys) ~after)
+      ~width:(tab_strip_width ~cols ~before:(before ^ keys) ~after)
       ~press:(fun pane text -> pressable (Press_config_pane pane) text)
       (config_pane_tabs state)
 
@@ -3452,6 +3454,7 @@ let config_pane_title_head ~room ~name ~reading =
    half of "(load failed)" with it. Built once, the row knows both halves. *)
 let config_pane_title ~cols ~name ?(reading = "") ?(note = "") ?(clock = "")
     (state : state) =
+  let keys = config_pane_keys state in
   let piece text = if text = "" then "" else "  " ^ text in
   let cells text =
     Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
@@ -3482,7 +3485,7 @@ let config_pane_title ~cols ~name ?(reading = "") ?(note = "") ?(clock = "")
      the name whole. [config_pane_title_head] owns that order. *)
   let before =
     let room =
-      framed_inner_width cols - cells config_pane_keys - strip_floor - cells tail
+      framed_inner_width cols - cells keys - strip_floor - cells tail
     in
     config_pane_title_head ~room ~name ~reading
   in
@@ -3490,7 +3493,7 @@ let config_pane_title ~cols ~name ?(reading = "") ?(note = "") ?(clock = "")
     if note = "" then ""
     else
       let room =
-        framed_inner_width cols - cells before - cells config_pane_keys
+        framed_inner_width cols - cells before - cells keys
         - strip_floor - cells tail - cells "  "
       in
       Masc_tui_message_layout.truncate_middle (max 0 room) note

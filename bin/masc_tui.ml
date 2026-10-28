@@ -298,14 +298,15 @@ let runtime_config_row_near rows ~direction ~target =
         (fun selected row -> if row <= target then row else selected)
         first rows
 
-let set_runtime_config_cursor_near state ~direction ~target =
+let set_runtime_config_cursor_near ?(keep_scroll = false) state ~direction ~target =
   let rows = runtime_config_assignment_rows state in
   let cursor = runtime_config_row_near rows ~direction ~target in
   state.runtime_config_cursor <- cursor;
-  state.config_scroll <-
-    Masc_tui_scroll.ensure_visible ~cursor
-      ~height:(Masc_tui_render.config_content_height state)
-      state.config_scroll
+  if not keep_scroll then
+    state.config_scroll <-
+      Masc_tui_scroll.ensure_visible ~cursor
+        ~height:(Masc_tui_render.config_content_height state)
+        state.config_scroll
 
 (* The table header a lexed runtime.toml row opens, read by the TOML grammar:
    whitespace, quoted keys and a trailing comment are the parser's to settle,
@@ -338,6 +339,9 @@ let runtime_config_jump_context_rows = 3
    view then. *)
 let apply_runtime_config_jump state =
   match state.runtime_config_jump_section, state.runtime_config_view with
+  | Some _, _ when state.view <> Config || state.config_pane <> Config_runtime ->
+    state.runtime_config_jump_section <- None;
+    None
   | Some path, Some _ ->
     let rows = Masc_tui_types.runtime_config_active_rows state in
     state.runtime_config_jump_section <- None;
@@ -4672,6 +4676,81 @@ let launch_preset_call state ~mailbox ~call ~wrap =
   launch_workspace_request state ~mailbox ~boundary_error:Fun.id
     ~deliver:wrap (fun () -> call ~host ~port)
 
+let launch_preset_save state ~mailbox ~sink ~name ~description ~chat_input ~also_pane =
+  let identity = state.server_identity and authority = state.workspace_authority in
+  let reading = state.workspace_read_authority in
+  let workspace = workspace_input_identity_of_server identity in
+  let observe ~observation pending =
+    let pending = match sink with
+      | Preset_to_pane -> { pending with psp_pane_observer = Some (authority, observation) }
+      | Preset_to_chat target ->
+        let others = List.filter (fun (owner, keeper, _) ->
+          owner <> authority || keeper <> target) pending.psp_chat_observers in
+        { pending with psp_chat_observers = (authority, target, observation) :: others }
+    in
+    if also_pane then { pending with psp_pane_observer = Some (authority, observation) }
+    else pending
+  in
+  let existing = match workspace with
+    | None -> None
+    | Some _ -> List.find_opt (fun pending ->
+        pending.psp_workspace = workspace
+        && same_preset_save_name pending.psp_name name) state.preset_save_pending
+  in
+  match existing with
+  | Some pending ->
+      state.preset_save_pending <- List.map (fun current ->
+        if current.psp_token == pending.psp_token
+        then observe ~observation:Preset_save_shared current else current)
+        state.preset_save_pending;
+      report_action state "system"
+        (Printf.sprintf
+           (if state.ui_language = Lang_ko
+            then "%s 저장 대기 · 새 요청 미전송 · 입력 유지"
+            else "Waiting for %s · no new request sent · input retained") pending.psp_name)
+  | None ->
+      let token = ref () in
+      let phase = Atomic.make Preset_save_preparing in
+      let host = server_peer_host and port = state.port in
+      let pending = observe ~observation:Preset_save_original
+          { psp_token = token; psp_workspace = workspace; psp_name = name
+          ; psp_description = description; psp_chat_input = chat_input; psp_authority = authority
+          ; psp_reading = reading; psp_host = host; psp_port = port
+          ; psp_phase = phase
+          ; psp_pane_observer = None; psp_chat_observers = [] } in
+      state.preset_save_pending <- pending :: state.preset_save_pending;
+      let boundary_error detail =
+        match Atomic.get phase with
+        | Preset_save_preparing -> Preset_save_not_sent detail
+        | Preset_save_dispatching -> Preset_save_unconfirmed detail
+        | Preset_save_auth_refused -> Preset_save_auth_retry_not_sent detail
+      in
+      (* Workspace withdrawal must not cancel the original POST or discard
+         its receipt. It never grants the old request authority over a new
+         workspace; the worker still checks its captured identity before send. *)
+      Masc_tui_workspace_result.launch_session ~results:mailbox.workspace_results
+        ~boundary_error
+        ~deliver:(fun result -> Preset_saved (pending, result))
+        (fun () ->
+          match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+          | Error detail -> Error (Preset_save_not_sent detail)
+          | Ok () ->
+            (match workspace with
+            | None -> Error (Preset_save_not_sent "Workspace identity is unavailable")
+            | Some expected_workspace ->
+            Masc_tui_loader.save_preset ~host ~port ~name ~description
+              ~expected_workspace
+              ~after_auth_refused:(fun () -> Atomic.set phase Preset_save_auth_refused)
+              ~before_dispatch:(fun () ->
+                if reading != state.workspace_read_authority then
+                  Error (boundary_error "Workspace reading authority withdrawn")
+                else
+                  match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+                  | Error detail -> Error (boundary_error detail)
+                  | Ok () when reading != state.workspace_read_authority ->
+                    Error (boundary_error "Workspace reading authority withdrawn")
+                  | Ok () -> Atomic.set phase Preset_save_dispatching; Ok ())))
+
 let launch_chat_command_read state ~mailbox ~label ~call ~wrap =
   if not (server_authority_ready state) then
     report_action state "error" (label ^ " waits for confirmed workspace identity; retry after reconnecting")
@@ -7246,7 +7325,7 @@ let reading_pane (state : state) ~cols : (int -> Masc_tui_types.clamped_scroll) 
      while open. *)
   | Config when state.config_pane = Config_voice -> pane (fun v -> Voice_scroll v)
   | Config when state.config_pane = Config_params -> pane (fun v -> Runtime_params_scroll v)
-  | Config when state.config_pane = Config_presets -> pane (fun v -> Preset_detail_scroll v)
+  | Config when state.config_pane = Config_presets -> pane (fun v -> Preset_detail_scroll (v, None))
   (* Surfaces whose whole body is a row list, which [row_list] answers for,
      and the two panes that own every key while they are open. *)
   | Keepers Keeper_detail | Keepers Keeper_list | Keepers Keeper_logs
@@ -7494,6 +7573,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
    otherwise read as empty until the next tick. *)
 let goto_surface ?(from_reference = false) state ~mailbox (destination : surface) =
   state.code_hover <- None;
+  state.runtime_config_jump_section <- None;
   if destination <> Tools && state.tools_async_detail_open then close_tools_async_detail state;
   state.keeper_navigation_open <- false;
   state.keeper_message_focus <- Right_pane;
@@ -9674,6 +9754,38 @@ type notice_kind =
   | Notice_reply
   | Notice_failure
 
+let append_chat_local_message state ~keeper text =
+  let role = Message_local in
+  state.msg_history <-
+    state.msg_history
+    @ [ {
+          me_role = role;
+          me_identity =
+            Session_row
+              { request_id = ""
+              ; turn_phase = chat_turn_phase_of_role role
+              ; operation_seq = next_chat_operation_seq state ""
+              };
+          me_turn_phase = chat_turn_phase_of_role role;
+          me_turn_sequence = None;
+          me_operation_seq = next_chat_operation_seq state "";
+          me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
+          me_images = [];
+          me_media = [];
+          me_memory_summary = None;
+          me_memory_pass = Masc_tui_message_layout.No_pass;
+          me_journal = [];
+          me_gate = None;
+          me_submitted_at = None;
+          me_tool_block = None;
+          me_skill_block = [];
+          me_timestamp = current_clock_text ();
+          me_keeper_name = keeper;
+          me_request_id = "";
+          me_execution_source = None;
+          me_at = Unix.gettimeofday ();
+        } ]
+
 let chat_notice state ~keeper_name ~kind text =
   match kind, keeper_name with
   | Notice_failure, (Some _ | None) ->
@@ -9681,36 +9793,7 @@ let chat_notice state ~keeper_name ~kind text =
   | Notice_reply, None ->
       report_action state "system" (Terminal_text.single_line text)
   | Notice_reply, Some keeper ->
-      let role = Message_local in
-      state.msg_history <-
-        state.msg_history
-        @ [ {
-              me_role = role;
-              me_identity =
-                Session_row
-                  { request_id = ""
-                  ; turn_phase = chat_turn_phase_of_role role
-                  ; operation_seq = next_chat_operation_seq state ""
-                  };
-              me_turn_phase = chat_turn_phase_of_role role;
-              me_turn_sequence = None;
-              me_operation_seq = next_chat_operation_seq state "";
-              me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
-              me_images = [];
-              me_media = [];
-              me_memory_summary = None;
-              me_memory_pass = Masc_tui_message_layout.No_pass;
-              me_journal = [];
-              me_gate = None;
-              me_submitted_at = None;
-              me_tool_block = None;
-              me_skill_block = [];
-              me_timestamp = current_clock_text ();
-              me_keeper_name = keeper;
-              me_request_id = "";
-              me_execution_source = None;
-              me_at = Unix.gettimeofday ();
-            } ]
+      append_chat_local_message state ~keeper text
 
 let update_collab state owner update =
   match state.collab with
@@ -11787,6 +11870,43 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
     | None -> state.msg_target_keeper_name
   in
   let notice = chat_notice state ~keeper_name:target in
+  (* A large paste may replace even the slash command with a placeholder.
+     Peek only to recognize preset saves; all other commands keep their
+     existing spill handling. Materialize the retained input before parsing
+     or clearing it so the exact description survives a failed dispatch. *)
+  let candidate = match state.msg_spill with
+    | None -> text
+    | Some spill -> Option.value ~default:text
+        (Masc_tui_paste_spill.substituted spill
+           ~replacement:spill.Masc_tui_paste_spill.text text) in
+  let is_preset_save = match Masc_tui_command.parse candidate with
+    | Masc_tui_command.Preset_save _ | Preset_save_missing_name -> true
+    | Say _ | Task_for_keeper _ | Task_recover | Task_inspect | Task_missing_title | Help | Features
+    | Show_load_errors | About | Lane_addons _ | Play_invites | Play_link _ | Play_invite _
+    | Play_revoke _ | Play_invalid _ | Open_metrics | Account_login _ | Open_settings
+    | Open_diff | Open_patch_modal | Open_usage | Open_link_preview _ | Open_links_list
+    | Copy_latest_reply | Set_embeds _ | Open_changes | Toggle_acting_pane
+    | Show_acting_pane_tab _ | Acting_pane_tab_unknown _ | Set_acting_pane_call_order _
+    | Acting_pane_call_order_unknown _ | Scroll_acting_pane _ | Acting_pane_scroll_unknown _
+    | Switch_keeper _ | Switch_keeper_missing_name | Queue _ | Run_next | Priority _
+    | Answer_tool_approval _ | Interrupt_turn | Interrupt_keeper_turn _ | Steer_turn _
+    | Steer_missing_message | Set_thinking _ | Open_calls | Set_tools _ | Cycle_memory
+    | Open_fleet_memory | Find_in_chat _ | Find_next | Open_measurement _ | Measurement_missing_sha
+    | Inspect_context | View_image _ | View_image_missing_path | Attach_image _ | Attach_image_missing_path
+    | Attach_image_ref _ | Attach_image_ref_missing_value | Preset_list | Preset_restore _
+    | Preset_restore_missing_name | Preset_show _ | Preset_show_missing_name | Preset_delete _
+    | Preset_delete_missing_name | Listen | Open_artifacts | Open_music | Open_music_midi
+    | Music_invalid_arguments | Open_score _ | Score_invalid_index | Open_images _ | List_images
+    | Images_invalid_index | Unknown _ -> false in
+  let text = if is_preset_save then begin
+    let materialized = materialise_spilled_paste state text in
+    if not (String.equal materialized text)
+       && String.equal (Masc_tui_message_input.contents state.msg_input) text then begin
+      Masc_tui_message_input.clear state.msg_input;
+      Masc_tui_message_input.insert state.msg_input materialized
+    end;
+    materialized
+  end else text in
   let command = Masc_tui_command.parse text in
   if
     Option.is_some state.msg_recall_replaces
@@ -12431,11 +12551,47 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.Preset_save_missing_name ->
       notice ~kind:Notice_failure "/preset save needs a name on the same line"
   | Masc_tui_command.Preset_save { name; description } ->
-      Masc_tui_message_input.clear state.msg_input;
-      launch_preset_call state ~mailbox
-        ~call:(fun ~host ~port ->
-          Masc_tui_loader.save_preset ~host ~port ~name ~description)
-        ~wrap:(fun result -> Preset_saved (Preset_to_chat target, result))
+      if not (server_authority_ready state) then
+        notice ~kind:Notice_failure
+          (ui_text state ~ko:"작업 공간 확인 후 저장하세요 · 입력은 유지됩니다"
+             ~en:"Confirm the workspace before saving · input retained")
+      else if (state.preset_busy || workspace_preset_save_pending state <> [])
+              && not (preset_save_is_pending state name) then
+        notice ~kind:Notice_failure
+          (ui_text state ~ko:"진행 중인 프리셋 저장이 끝나면 다시 제출하세요 · 입력 유지"
+             ~en:"Wait for the pending preset save · input retained")
+      else if preset_save_is_unconfirmed state name && not (preset_save_is_pending state name) then
+        (match workspace_input_identity_of_server state.server_identity with
+         | None -> notice ~kind:Notice_failure
+             (ui_text state ~ko:"작업 공간 확인 후 저장하세요 · 입력은 유지됩니다"
+                ~en:"Confirm the workspace before saving · input retained")
+         | Some _ when state.preset_busy || Option.is_some state.preset_save_draft ->
+           notice ~kind:Notice_failure
+             (ui_text state ~ko:"기존 프리셋 입력을 마친 뒤 다시 제출하세요 · 채팅 입력 유지"
+                ~en:"Finish the existing preset draft first · chat input retained")
+         | Some workspace ->
+           let revision = Masc_tui_message_input.revision state.msg_input in
+           let authority = state.workspace_authority in
+           state.config_pane <- Config_presets;
+           goto_surface state ~mailbox Config;
+           state.preset_save_draft <- Some name;
+           state.preset_save_draft_description <- description;
+           state.preset_save_draft_source <- Preset_form_chat { target; input = text; revision; authority };
+           state.preset_save_draft_workspace <- Some workspace;
+           state.preset_armed <- Some (Save_armed name);
+           state.preset_confirmation_token <- Some (ref ());
+           state.preset_confirmation_presented <- None;
+           reveal_unconfirmed_preset_save state name;
+           state.config_scroll <- 0;
+           report_action state "system"
+             (ui_text state ~ko:"저장 경고와 채팅 설명을 확인한 뒤 재저장하세요"
+                ~en:"Review the save warning and chat description before retrying"))
+      else begin
+        if not (preset_save_is_pending state name) then
+          Masc_tui_message_input.clear state.msg_input;
+        launch_preset_save state ~mailbox ~sink:(Preset_to_chat target)
+          ~name ~description ~chat_input:(Some text) ~also_pane:false
+      end
   | Masc_tui_command.Preset_restore_missing_name ->
       notice ~kind:Notice_failure "/preset restore needs a name on the same line"
   | Masc_tui_command.Preset_show_missing_name ->
@@ -12448,21 +12604,33 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         ~call:(fun ~host ~port -> Masc_tui_loader.load_preset_detail ~host ~port ~name)
         ~wrap:(fun result -> Preset_contents_shown (Preset_to_chat target, result))
   | Masc_tui_command.Preset_restore name ->
+      if state.preset_busy || workspace_preset_save_pending state <> [] then
+        notice ~kind:Notice_failure
+          (ui_text state ~ko:"진행 중인 프리셋 저장이 끝나면 복원하세요 · 입력 유지"
+             ~en:"Wait for the pending preset save before restoring · input retained")
+      else begin
       Masc_tui_message_input.clear state.msg_input;
       notice ~kind:Notice_reply
         (Printf.sprintf "restoring preset %s — the live state is autosaved first" name);
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
         ~wrap:(fun result -> Preset_restored (Preset_to_chat target, result))
+      end
   | Masc_tui_command.Preset_delete_missing_name ->
       notice ~kind:Notice_failure "/preset delete needs a name on the same line"
   | Masc_tui_command.Preset_delete name ->
       (* Typing the name is the confirmation, as for restore. The name need
          not load: a preset listed with ! is deleted the same way. *)
+      if state.preset_busy || workspace_preset_save_pending state <> [] then
+        notice ~kind:Notice_failure
+          (ui_text state ~ko:"진행 중인 프리셋 저장이 끝나면 삭제하세요 · 입력 유지"
+             ~en:"Wait for the pending preset save before deleting · input retained")
+      else begin
       Masc_tui_message_input.clear state.msg_input;
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port -> Masc_tui_loader.delete_preset ~host ~port ~name)
         ~wrap:(fun result -> Preset_deleted (Preset_to_chat target, result))
+      end
   | Masc_tui_command.Play_invalid reason ->
       notice ~kind:Notice_failure reason
   | Masc_tui_command.Play_invites ->
@@ -13659,9 +13827,13 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.memory_health_cursor <- 0;
   state.memory_health_scroll <- 0;
   state.preset_save_draft <- None;
+  state.preset_save_draft_description <- "";
+  state.preset_save_draft_source <- Preset_form_local;
+  state.preset_save_draft_workspace <- None;
   state.preset_armed <- None;
   state.preset_report <- None;
   state.preset_busy <- false;
+  state.preset_save_copy_cursor <- 0;
   Masc_tui_types.withdraw_fusion_workspace state;
   state.dos_live <- Masc_tui_machine_live.Unread;
   state.dos_activity <- [];
@@ -14341,8 +14513,40 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
       , ( Workspace_identity_match | Workspace_identity_match_unconfirmed _
         | Workspace_identity_mismatch _ ) -> false
     in
+    (* Keep a name through initial confirmation or a temporary loss of its
+       original workspace, but never carry an A-owned name into B. An
+       unbound name still requires an explicit workspace confirmation. *)
+    let current_preset_workspace = workspace_input_identity_of_server state.server_identity in
+    let preserved_preset_draft =
+      match state.preset_save_draft, state.preset_save_draft_workspace,
+            current_preset_workspace with
+      | None, _, _ -> None
+      | Some draft, Some origin, Some current when origin <> current ->
+        let held = { psd_name = draft; psd_description = state.preset_save_draft_description
+                   ; psd_source = state.preset_save_draft_source } in
+        state.preset_save_suspended_drafts <- (origin, held) :: state.preset_save_suspended_drafts;
+        None
+      | Some draft, origin, _ ->
+        Some ({ psd_name = draft; psd_description = state.preset_save_draft_description
+              ; psd_source = state.preset_save_draft_source }, origin)
+    in
     withdraw_keeper_workspace_presentation state ~previous:withdrawn_workspace
       ~keep_detail_navigation;
+    let restore_preset_draft = match preserved_preset_draft, current_preset_workspace with
+      | Some _ as kept, _ -> kept
+      | None, None -> None
+      | None, Some workspace ->
+        (match List.assoc_opt workspace state.preset_save_suspended_drafts with
+         | None -> None
+         | Some draft ->
+           state.preset_save_suspended_drafts <-
+             List.remove_assoc workspace state.preset_save_suspended_drafts;
+           Some (draft, Some workspace)) in
+    Option.iter (fun (draft, origin) ->
+      state.preset_save_draft <- Some draft.psd_name;
+      state.preset_save_draft_description <- draft.psd_description;
+      state.preset_save_draft_source <- draft.psd_source;
+      state.preset_save_draft_workspace <- origin) restore_preset_draft;
     if preserve_chat then begin
       retarget_message state target;
       state.view <- Keepers Keeper_message;
@@ -14877,6 +15081,7 @@ let enter_keeper_detail_tab state ~mailbox tab =
    the press differ only in which pane they name. *)
 let enter_config_pane state ~mailbox pane =
   state.runtime_model_jump <- None;
+  state.runtime_config_jump_section <- None;
   state.config_pane <- pane;
   state.prompts_cursor <- 0;
   state.config_scroll <- 0;
@@ -14901,8 +15106,19 @@ let enter_config_pane state ~mailbox pane =
     launch_prompts_load state ~mailbox
   | Config_presets ->
     state.presets_cursor <- 0;
-    state.preset_save_draft <- None;
     state.preset_armed <- None;
+    (match state.preset_save_draft, workspace_input_identity_of_server state.server_identity with
+     | None, Some workspace ->
+       (match List.assoc_opt workspace state.preset_save_suspended_drafts with
+        | Some draft ->
+          state.preset_save_draft <- Some draft.psd_name;
+          state.preset_save_draft_description <- draft.psd_description;
+          state.preset_save_draft_source <- draft.psd_source;
+          state.preset_save_draft_workspace <- Some workspace;
+          state.preset_save_suspended_drafts <-
+            List.remove_assoc workspace state.preset_save_suspended_drafts
+        | None -> ())
+     | Some _, _ | None, None -> ());
     if state.presets_snapshot = None
     then launch_presets_load state ~mailbox
   | Config_params -> launch_runtime_params_load state ~mailbox
@@ -19707,8 +19923,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            let next_name = List.nth_opt snapshot.Tui_decode.pss_presets cursor
                |> Option.map (fun row -> row.Tui_decode.pm_name) in
            if not (Option.equal String.equal selected_name next_name) then begin
-             state.config_scroll <- 0;
-             state.preset_armed <- None
+             match state.preset_armed with
+             | Some (Save_armed _ | Save_workspace_armed _) -> ()
+             | Some (Restore_armed _ | Delete_armed _) | None ->
+               if state.view = Config && state.config_pane = Config_presets then
+                 state.config_scroll <- 0;
+               state.preset_armed <- None
            end;
            state.presets_snapshot <- Some snapshot;
            state.presets_error <- None;
@@ -19722,7 +19942,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
       (match sink, result with
        | Preset_to_chat target, Ok detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_reply
-             (String.concat "\n" (Masc_tui_preset_text.contents_lines detail))
+             (String.concat "\n" (Masc_tui_preset_text.contents_lines
+                ~ko:(state.ui_language = Lang_ko) detail))
        | Preset_to_chat target, Error detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure detail
        (* The pane reads its own detail through [Preset_detail_loaded], keyed
@@ -19819,20 +20040,81 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
        | Some keeper when String.equal keeper.k_name keeper_name ->
            launch_keeper_board_quarantines state ~mailbox keeper_name
        | Some _ | None -> ())
-  | Preset_saved (sink, result) ->
-      (match sink, result with
-       | Preset_to_chat target, Ok manifest ->
-           chat_notice state ~keeper_name:target ~kind:Notice_reply
-             (Masc_tui_preset_text.saved_line manifest)
-       | Preset_to_chat target, Error detail ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure detail
-       | Preset_to_pane, Ok manifest ->
-           state.preset_busy <- false;
-           report_action state "system" (Masc_tui_preset_text.saved_line manifest);
-           launch_presets_load state ~mailbox
-       | Preset_to_pane, Error detail ->
-           state.preset_busy <- false;
-           report_action state "error" ("preset save: " ^ detail))
+  | Preset_saved (original, result) ->
+      let pending = Option.value ~default:original
+          (List.find_opt (fun request -> request.psp_token == original.psp_token)
+             state.preset_save_pending) in
+      state.preset_save_pending <- List.filter (fun request -> request.psp_token != original.psp_token)
+          state.preset_save_pending;
+      let workspace = pending.psp_workspace in
+      let receipt = { psr_request = pending; psr_result = result; psr_visible = true } in
+      state.preset_save_receipts <- receipt :: state.preset_save_receipts;
+      let current_workspace =
+        workspace = workspace_input_identity_of_server state.server_identity in
+      if current_workspace then state.preset_save_copy_cursor <- 0;
+      if state.view = Config && state.config_pane = Config_presets
+         && current_workspace then
+        state.config_scroll <- 0;
+      List.iter (fun (authority, target, observation) ->
+          if current_workspace && authority = state.workspace_authority then
+            match result with
+            | Ok manifest ->
+              let saved = if state.ui_language = Lang_ko then
+                  Printf.sprintf "%s 프리셋 저장됨 · 프롬프트 %d · 키퍼 %d · 배정 %d · 레인 %d"
+                    manifest.Tui_decode.pm_name manifest.pm_override_count
+                    (List.length manifest.pm_keepers) manifest.pm_assignment_count manifest.pm_lane_count
+                else Masc_tui_preset_text.saved_line manifest in
+              chat_notice state ~keeper_name:target ~kind:Notice_reply
+                ((if observation = Preset_save_shared then ui_text state
+                    ~ko:"먼저 시작한 저장 결과 · 새 저장은 미전송\n"
+                    ~en:"Earlier save result · no new save was sent\n" else "")
+                 ^ saved)
+            | Error failure ->
+              let summary = match failure with
+                | Preset_save_not_sent _ ->
+                  ui_text state ~ko:"프리셋 저장 미전송 · 프리셋 알림 확인"
+                    ~en:"Preset save not sent · check Presets"
+                | Preset_save_refused _ ->
+                  ui_text state ~ko:"프리셋 저장 거절 · 프리셋 알림 확인"
+                    ~en:"Preset save refused · check Presets"
+                | Preset_save_auth_retry_not_sent _ ->
+                  ui_text state ~ko:"인증 거절 · 재시도 미전송"
+                    ~en:"Authentication refused · retry not sent"
+                | Preset_save_unconfirmed _ ->
+                  ui_text state ~ko:"프리셋 저장 미확인 · 프리셋 알림 확인"
+                    ~en:"Preset save unconfirmed · check Presets"
+              in
+              let shared = observation = Preset_save_shared in
+              chat_notice state ~keeper_name:target ~kind:Notice_failure
+                ((if shared then ui_text state ~ko:"기존 저장 결과 · 새 요청 미전송 · "
+                    ~en:"Earlier save · no new request sent · " else "") ^ summary);
+              Option.iter (fun keeper ->
+                let lines = Masc_tui_render_config.preset_save_receipt_lines
+                    ~ko:(state.ui_language = Lang_ko) receipt in
+                let prefix = if shared then [ui_text state
+                    ~ko:"먼저 시작한 저장 결과 · 새 저장은 보내지 않았습니다"
+                    ~en:"Earlier save result · no new save was sent"] else [] in
+                append_chat_local_message state ~keeper (String.concat "\n" (prefix @ lines))) target)
+        pending.psp_chat_observers;
+        if current_workspace && Option.fold ~none:false
+            ~some:(fun (authority, _) -> authority = state.workspace_authority)
+            pending.psp_pane_observer then begin
+          state.preset_busy <- false;
+          (match result with
+           | Ok manifest ->
+             let shared = match pending.psp_pane_observer with
+               | Some (_, Preset_save_shared) -> true
+               | Some (_, Preset_save_original) | None -> false in
+             report_action state "system"
+               ((if shared then ui_text state ~ko:"기존 저장 결과 · "
+                   ~en:"Earlier save result · " else "")
+                ^ Printf.sprintf (if state.ui_language = Lang_ko then "%s 저장됨" else "%s saved")
+                    manifest.Tui_decode.pm_name)
+           | Error _ ->
+             report_action state "error"
+               (ui_text state ~ko:"프리셋 저장 알림을 확인하세요" ~en:"Check the preset save notice"));
+          launch_presets_load state ~mailbox
+        end
   | Preset_restored (sink, result) ->
       (match sink, result with
        | Preset_to_chat target, Ok report ->
@@ -19841,10 +20123,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
               which, and a footer line could not hold them. *)
            state.preset_report <- Some report;
            chat_notice state ~keeper_name:target ~kind:Notice_reply
-             (String.concat "\n" (Masc_tui_preset_text.restore_lines report));
+             (String.concat "\n" (Masc_tui_preset_text.restore_lines
+                ~ko:(state.ui_language = Lang_ko) report));
            if not (Masc_tui_preset_text.restore_is_clean report) then
              report_action state "error"
-               "프리셋 복원 결과에 확인할 항목이 있습니다 · 상세 보고서를 확인하세요"
+               (ui_text state ~ko:"프리셋 복원 결과에 확인할 항목이 있습니다 · 상세 보고서를 확인하세요"
+                  ~en:"The restore needs attention · check the detailed report")
        | Preset_to_chat target, Error detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure detail
        | Preset_to_pane, Ok report ->
@@ -19852,12 +20136,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            state.preset_report <- Some report;
            report_action state
              (if Masc_tui_preset_text.restore_is_clean report then "system" else "error")
-             (Printf.sprintf "%s 복원 · 이전 상태는 %s"
+             (Printf.sprintf (if state.ui_language = Lang_ko then "%s 복원 결과 · 이전 상태는 %s" else "%s restore result · previous settings: %s")
                 report.Tui_decode.prr_restored report.Tui_decode.prr_autosave);
            launch_presets_load state ~mailbox
        | Preset_to_pane, Error detail ->
            state.preset_busy <- false;
-           report_action state "error" ("preset restore: " ^ detail))
+           report_action state "error" (ui_text state ~ko:"프리셋 복원: " ~en:"Preset restore: " ^ detail))
   | Preset_deleted (sink, result) ->
       (* The list is read again after a failure too: a refusal says the
          list was stale, and an unanswered delete may have landed. *)
@@ -19869,11 +20153,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            chat_notice state ~keeper_name:target ~kind:Notice_failure detail
        | Preset_to_pane, Ok name ->
            state.preset_busy <- false;
-           report_action state "system" (name ^ " 삭제");
+           report_action state "system" (name ^ ui_text state ~ko:" 삭제됨" ~en:" deleted");
            launch_presets_load state ~mailbox
        | Preset_to_pane, Error detail ->
            state.preset_busy <- false;
-           report_action state "error" ("preset delete: " ^ detail);
+           report_action state "error" (ui_text state ~ko:"프리셋 삭제: " ~en:"Preset delete: " ^ detail);
            launch_presets_load state ~mailbox)
   | Play_room_received (request, result) ->
       state.play_room <- Option.map (fun room ->
@@ -20020,7 +20304,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         state.prompts_librarian_input_loading <- false;
         (match state.prompts_librarian_input with
          | Some (key, _) when String.equal key prompt_key -> ()
-         | Some _ | None -> state.config_scroll <- 0);
+         | Some _ | None ->
+           if state.view = Config && state.config_pane = Config_prompts
+              && not state.prompts_show_runtime_assets then
+             state.config_scroll <- 0);
         match result with
         | Ok lines ->
             state.prompts_librarian_input <- Some (prompt_key, lines);
@@ -20049,7 +20336,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
             List.nth_opt rows cursor
             |> Option.map (fun (row : Tui_decode.runtime_param_row) -> row.rpr_key)
           in
-          if not (Option.equal String.equal selected_key next_key)
+          if state.view = Config && state.config_pane = Config_params
+             && not (Option.equal String.equal selected_key next_key)
           then state.config_scroll <- 0;
           state.runtime_params <- Some rows;
           state.runtime_params_cursor <- cursor;
@@ -20155,7 +20443,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                   report_action state "error" ("Model settings unreadable; edit runtime.toml: " ^ detail)
               | Some _ | None -> ());
              state.runtime_model_jump <- None);
-          set_runtime_config_cursor_near state ~direction:1
+          set_runtime_config_cursor_near
+            ~keep_scroll:(state.view <> Config || state.config_pane <> Config_runtime)
+            state ~direction:1
             ~target:state.runtime_config_cursor;
           (match Masc_tui_types.runtime_config_edit_session state with
            | None -> ()
@@ -23343,13 +23633,27 @@ let main
       Approval_authority.authority_changed
         ~presented:!presented_approval ~candidate:approval
     in
+    let preset_confirmation_changed = match reader with
+      | Some (Preset_detail_scroll (_, Some confirmation)) ->
+        preset_confirmation_needs_present state confirmation
+      | None | Some (Task_detail _ | Board_read _ | Message_scroll _
+        | Schedule_detail_scroll _ | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _
+        | Acting _ | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
+        | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
+        | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
+        | System_log_detail_scroll _ | Planning_confirmation_scroll _ | Planning_detail_scroll _
+        | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
+        | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _ | Patch_modal_scroll _
+        | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _
+        | Preset_detail_scroll (_, None) | Keeper_list_scroll _ | Context_inspector_scroll _
+        | Context_inspector_response_scroll _) -> false in
     (* A selected row's hidden token/call id can change while its clipped
        terminal text stays byte-identical. Only that authority transition
        forces a full presentation; ordinary async row updates stay
        differential. *)
     match
       Frame_presenter.present frame_presenter
-        ~invalidate_before:(damaged || authority_changed)
+        ~invalidate_before:(damaged || authority_changed || preset_confirmation_changed)
         ~write ~flush frame
     with
     | Frame_presenter.Presented _ as presented ->
@@ -23357,6 +23661,11 @@ let main
         (match reader with
          | Some (Planning_confirmation_scroll (_, Some confirmation)) ->
              state.goal_confirmation_presented <- Some confirmation
+         | Some (Preset_detail_scroll (_, Some confirmation)) ->
+             let was_ready = Masc_tui_render_config.preset_confirmation_ready state in
+             record_preset_confirmation_frame state confirmation;
+             if not was_ready && Masc_tui_render_config.preset_confirmation_ready state then
+               Render_schedule.request render_schedule Render_schedule.Input
          | Some (Task_detail _) | None | Some (Board_read _) | Some (Message_scroll _)
          | Some (Schedule_detail_scroll _) | Some (Keeper_detail _) | Some (Keeper_calls _)
          | Some (Keeper_logs_scroll _) | Some (Acting _) | Some (Acting_selection (_, _))
@@ -25794,6 +26103,18 @@ and is loaded on demand through keeper_skill.
                | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _)
         | None -> None
       in
+      let preset_confirmation_wheel = match wheel_reader with
+        | Some (Preset_detail_scroll _) -> true
+        | None | Some (Task_detail _ | Board_read _ | Message_scroll _
+          | Schedule_detail_scroll _ | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _
+          | Acting _ | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
+          | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
+          | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
+          | System_log_detail_scroll _ | Planning_confirmation_scroll _ | Planning_detail_scroll _
+          | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
+          | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _ | Patch_modal_scroll _
+          | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _ | Keeper_list_scroll _
+          | Context_inspector_scroll _ | Context_inspector_response_scroll _) -> false in
       let key =
         if dismissed_image || Option.is_some msx_key || gesture_cancelled then None
         else
@@ -26015,9 +26336,13 @@ and is loaded on demand through keeper_skill.
                      (fun prompt -> Masc_tui_message_input.insert prompt.rsp_path path)
                      state.resource_save_prompt)
             | Some Text_preset_name ->
-                state.preset_save_draft <-
-                  Some
-                    (Option.value state.preset_save_draft ~default:"" ^ text)
+                (match state.preset_save_draft_source with
+                 | Preset_form_local ->
+                   state.preset_save_draft <-
+                     Some (Option.value state.preset_save_draft ~default:"" ^ text)
+                 | Preset_form_chat _ -> report_action state "system"
+                     (ui_text state ~ko:"Esc로 닫고 채팅에서 명령을 수정하세요"
+                        ~en:"Press Esc, then edit the command in chat"))
             | Some Text_goal_drop_reason ->
                 (match state.goal_action_pending with
                  | Some (Goal_drop_reason entry) ->
@@ -26356,7 +26681,11 @@ and is loaded on demand through keeper_skill.
             | Some (Restore_armed _) ->
                 if cancelled [ "u"; "U" ] then state.preset_armed <- None
             | Some (Delete_armed _) ->
-                if cancelled [ "D" ] then state.preset_armed <- None)
+                if cancelled [ "D" ] then state.preset_armed <- None
+            | Some (Save_armed _ | Save_workspace_armed _) ->
+                if not preset_confirmation_wheel
+                   && cancelled [ "\r"; "\n"; "enter"; "pageup"; "pagedown"; "home"; "end" ]
+                then state.preset_armed <- None)
        | Runtime ->
            if cancelled [ "D" ] then state.runtime_lane_remove_armed <- None
        | Overview | Acting | Metrics | Lanes | Clients | Harness | Memory | Fusion
@@ -26921,26 +27250,135 @@ and is loaded on demand through keeper_skill.
               (match k with
                | "esc" ->
                  state.preset_save_draft <- None;
-                 report_action state "system" "프리셋 저장 취소"
+                 state.preset_save_draft_description <- "";
+                 state.preset_save_draft_source <- Preset_form_local;
+                 state.preset_save_draft_workspace <- None;
+                 state.preset_armed <- None;
+                 report_action state "system"
+                   (if state.preset_busy then
+                      ui_text state ~ko:"이름 입력 닫음 · 진행 중인 저장은 계속됩니다"
+                        ~en:"Name entry closed · the pending save continues"
+                    else ui_text state ~ko:"프리셋 저장 취소" ~en:"Preset save cancelled")
+               | ("pageup" | "pagedown" | "home" | "end") as move ->
+                 let count, height = Masc_tui_render_config.presets_viewport state in
+                 state.config_scroll <- (match move with
+                   | "home" -> 0
+                   | "end" -> Masc_tui_scroll.maximum ~count ~height
+                   | "pageup" -> Masc_tui_scroll.page_up ~count ~height state.config_scroll
+                   | "pagedown" -> Masc_tui_scroll.page_down ~count ~height state.config_scroll
+                   | _ -> state.config_scroll)
                | "\r" | "\n" | "enter" ->
                  let name = String.trim draft in
                  if String.equal name "" then
-                   report_action state "error" "프리셋 이름이 필요합니다"
-                 else begin
-                   state.preset_save_draft <- None;
-                   state.preset_busy <- true;
-                   report_action state "system" (name ^ " 저장 중");
-                   launch_preset_call state ~mailbox:async_messages
-                     ~call:(fun ~host ~port ->
-                       Masc_tui_loader.save_preset ~host ~port ~name ~description:"")
-                     ~wrap:(fun result -> Preset_saved (Preset_to_pane, result))
-                 end
+                   report_action state "error" (ui_text state ~ko:"프리셋 이름이 필요합니다" ~en:"A preset name is required")
+                 else if state.preset_busy then
+                   report_action state "system"
+                     (ui_text state ~ko:"프리셋 작업 완료 후 저장하세요 · 입력은 유지됩니다"
+                        ~en:"Wait for the preset operation to finish · input retained")
+                 else if workspace_preset_save_pending state <> []
+                         && not (preset_save_is_pending state name) then
+                   report_action state "system"
+                     (ui_text state ~ko:"진행 중인 프리셋 저장을 기다리세요 · 입력 유지"
+                        ~en:"Wait for the pending preset save · input retained")
+                 else if not (server_authority_ready state) then
+                   report_action state "error"
+                     (ui_text state ~ko:"작업 공간 확인 후 저장하세요 · 입력은 유지됩니다"
+                        ~en:"Confirm the workspace before saving · input retained")
+                 else (match workspace_input_identity_of_server state.server_identity with
+                   | None -> report_action state "error"
+                       (ui_text state ~ko:"작업 공간 확인 후 저장하세요"
+                          ~en:"Confirm the workspace before saving")
+                   | Some workspace ->
+                     if state.preset_save_draft_workspace = None
+                        && state.preset_armed <> Some (Save_workspace_armed (name, workspace)) then begin
+                       state.preset_armed <- Some (Save_workspace_armed (name, workspace));
+                       state.preset_confirmation_token <- Some (ref ());
+                       state.preset_confirmation_presented <- None;
+                       state.config_scroll <- 0;
+                       report_action state "system"
+                         (ui_text state ~ko:"저장할 작업 공간을 확인하고 Enter를 다시 누르세요"
+                            ~en:"Check the save workspace and press Enter again")
+                     end else if Option.fold ~none:false
+                         ~some:(fun origin -> origin <> workspace) state.preset_save_draft_workspace then
+                       report_action state "error"
+                         (ui_text state ~ko:"다른 작업 공간의 이름 초안입니다"
+                            ~en:"This name draft belongs to a different workspace")
+                     else if state.preset_armed = Some (Save_workspace_armed (name, workspace))
+                             && not (Masc_tui_render_config.preset_confirmation_ready state) then
+                       report_action state "system"
+                         (ui_text state ~ko:"Home 후 PgDn으로 작업 공간을 처음부터 확인하세요"
+                            ~en:"Use Home then PgDn to review the complete workspace confirmation")
+                     else begin
+                       if state.preset_save_draft_workspace = None then begin
+                         state.preset_save_draft_workspace <- Some workspace;
+                         state.preset_armed <- None
+                       end;
+                       if preset_save_is_unconfirmed state name
+                          && not (preset_save_is_pending state name)
+                          && state.preset_armed <> Some (Save_armed name) then begin
+                         state.preset_armed <- Some (Save_armed name);
+                         state.preset_confirmation_token <- Some (ref ());
+                         state.preset_confirmation_presented <- None;
+                         reveal_unconfirmed_preset_save state name;
+                         state.config_scroll <- 0;
+                         report_action state "error"
+                           (ui_text state
+                              ~ko:"저장 미확인 · Enter를 다시 누르면 같은 이름을 덮어씁니다"
+                              ~en:"Save unconfirmed · press Enter again to overwrite this name")
+                       end else if state.preset_armed = Some (Save_armed name)
+                                   && not (Masc_tui_render_config.preset_confirmation_ready state) then
+                         report_action state "system"
+                           (ui_text state ~ko:"Home 후 PgDn으로 저장 경고를 처음부터 확인하세요"
+                              ~en:"Use Home then PgDn to review the complete save warning")
+                       else begin
+                         state.preset_armed <- None;
+                         let description = state.preset_save_draft_description in
+                         let source = state.preset_save_draft_source in
+                         let sharing = preset_save_is_pending state name in
+                         if not sharing then begin
+                           state.preset_save_draft <- None;
+                           state.preset_save_draft_description <- "";
+                           state.preset_save_draft_source <- Preset_form_local;
+                           state.preset_save_draft_workspace <- None;
+                           (match source with
+                            | Preset_form_chat { target; input; revision; authority }
+                              when authority = state.workspace_authority
+                                   && state.msg_target_keeper_name = target
+                                   && chat_input_workspace state = Some workspace
+                                   && Masc_tui_message_input.has_revision state.msg_input revision
+                                   && String.equal (Masc_tui_message_input.contents state.msg_input) input ->
+                              Masc_tui_message_input.clear state.msg_input;
+                              save_message_draft state
+                            | Preset_form_chat _ | Preset_form_local -> ())
+                         end;
+                         state.preset_busy <- true;
+                         report_action state "system"
+                           (name ^ ui_text state ~ko:" 저장 중" ~en:" saving");
+                         (match source with
+                          | Preset_form_local ->
+                            launch_preset_save state ~mailbox:async_messages
+                              ~sink:Preset_to_pane ~name ~description ~chat_input:None ~also_pane:false
+                          | Preset_form_chat { target; input; revision = _; authority = _ } ->
+                            launch_preset_save state ~mailbox:async_messages
+                              ~sink:(Preset_to_chat target) ~name ~description
+                              ~chat_input:(Some input) ~also_pane:true)
+                       end
+                     end)
                | "\127" | "\b" | "backspace" ->
-                 let length = String.length draft in
-                 if length > 0 then
-                   state.preset_save_draft <- Some (String.sub draft 0 (length - 1))
+                 (match state.preset_save_draft_source with
+                  | Preset_form_local ->
+                    let length = String.length draft in
+                    if length > 0 then
+                      state.preset_save_draft <- Some (String.sub draft 0 (length - 1))
+                  | Preset_form_chat _ -> report_action state "system"
+                      (ui_text state ~ko:"Esc로 닫고 채팅에서 명령을 수정하세요"
+                         ~en:"Press Esc, then edit the command in chat"))
                | s when String.length s = 1 && Char.code s.[0] >= 32 ->
-                 state.preset_save_draft <- Some (draft ^ s)
+                 (match state.preset_save_draft_source with
+                  | Preset_form_local -> state.preset_save_draft <- Some (draft ^ s)
+                  | Preset_form_chat _ -> report_action state "system"
+                      (ui_text state ~ko:"Esc로 닫고 채팅에서 명령을 수정하세요"
+                         ~en:"Press Esc, then edit the command in chat"))
                | _ -> ()))
        (* Typing why a goal is dropped. Enter sends the drop with that
           reason; a blank reason stays open with the refusal on it, because
@@ -31222,10 +31660,34 @@ and is loaded on demand through keeper_skill.
                the live state, named in the line the pane opens. *)
             | Config when state.config_pane = Config_presets ->
                 if state.preset_busy then
-                  report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
+                  report_action state "system" (ui_text state ~ko:"프리셋 작업이 아직 끝나지 않았습니다" ~en:"A preset operation is still in progress")
                 else begin
                   state.preset_armed <- None;
-                  state.preset_save_draft <- Some ""
+                  let workspace = if server_authority_ready state
+                    then workspace_input_identity_of_server state.server_identity else None in
+                  match workspace with
+                  | Some origin ->
+                    (match List.assoc_opt origin state.preset_save_suspended_drafts with
+                     | Some draft ->
+                       state.preset_save_draft <- Some draft.psd_name;
+                       state.preset_save_draft_description <- draft.psd_description;
+                       state.preset_save_draft_source <- draft.psd_source;
+                       state.preset_save_draft_workspace <- Some origin;
+                       state.preset_save_suspended_drafts <-
+                         List.remove_assoc origin state.preset_save_suspended_drafts;
+                       report_action state "system"
+                         (ui_text state ~ko:"이 작업 공간의 저장 이름 초안을 복원했습니다"
+                            ~en:"Restored this workspace's preset name draft")
+                     | None ->
+                       state.preset_save_draft <- Some "";
+                       state.preset_save_draft_description <- "";
+                       state.preset_save_draft_source <- Preset_form_local;
+                       state.preset_save_draft_workspace <- Some origin)
+                  | None ->
+                    state.preset_save_draft <- Some "";
+                    state.preset_save_draft_description <- "";
+                    state.preset_save_draft_source <- Preset_form_local;
+                    state.preset_save_draft_workspace <- None
                 end
             | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
             | Planning
@@ -31616,18 +32078,45 @@ and is loaded on demand through keeper_skill.
           refresh, so the pane takes u, twice, for the destructive restore,
           and D, twice, for the delete. Its save key is n, answered inside
           the [n] dispatch below, which the surface list there requires. *)
+       | Some "v" when state.view = Config && state.config_pane = Config_presets ->
+           if recoverable_preset_save_commands state <> [] then begin
+             reveal_unsent_preset_save_receipts state;
+             state.config_scroll <- 0
+           end
+       | Some "c" when state.view = Config && state.config_pane = Config_presets ->
+           (match recoverable_preset_save_commands state with
+            | [] -> report_action state "system"
+                (ui_text state ~ko:"복사할 미전송 채팅 명령이 없습니다"
+                   ~en:"No unsent chat command to copy")
+            | commands ->
+              let index = state.preset_save_copy_cursor mod List.length commands in
+              let name, input = List.nth commands index in
+              copy_reference_to_terminal render_schedule input;
+              state.preset_save_copy_cursor <- (index + 1) mod List.length commands;
+              report_action state "system"
+                (Printf.sprintf
+                   (if state.ui_language = Lang_ko
+                    then "%s 명령 복사 요청 · 터미널 지원 여부는 미확인"
+                    else "Requested copy of %s command · terminal support unconfirmed")
+                   (Terminal_text.single_line name)))
+       | Some "x" | Some "X"
+         when state.view = Config && state.config_pane = Config_presets ->
+           if visible_preset_save_receipts state <> [] then begin
+             dismiss_latest_preset_save_receipt state;
+             state.config_scroll <- 0
+           end
        | Some "u" | Some "U"
          when state.view = Config && state.config_pane = Config_presets ->
            (match selected_preset_for_state state with
-            | None -> report_action state "error" "되돌릴 프리셋을 고르세요"
+            | None -> report_action state "error" (ui_text state ~ko:"복원할 프리셋을 고르세요" ~en:"Select a preset to restore")
             | Some manifest ->
               let name = manifest.Tui_decode.pm_name in
-              if state.preset_busy then
-                report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
+              if state.preset_busy || workspace_preset_save_pending state <> [] then
+                report_action state "system" (ui_text state ~ko:"프리셋 작업이 아직 끝나지 않았습니다" ~en:"A preset operation is still in progress")
               else if state.preset_armed = Some (Restore_armed name) then begin
                 state.preset_armed <- None;
                 state.preset_busy <- true;
-                report_action state "system" (name ^ " 복원 중 · 지금 상태는 먼저 저장됩니다");
+                report_action state "system" (name ^ ui_text state ~ko:" 복원 중 · 지금 상태는 먼저 저장됩니다" ~en:" restoring · current settings are backed up first");
                 launch_preset_call state ~mailbox:async_messages
                   ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
                   ~wrap:(fun result -> Preset_restored (Preset_to_pane, result))
@@ -31635,20 +32124,20 @@ and is loaded on demand through keeper_skill.
               else begin
                 state.preset_armed <- Some (Restore_armed name);
                 report_action state "system"
-                  (Printf.sprintf "u 를 한 번 더 누르면 %s 로 되돌립니다" name)
+                  (Printf.sprintf (if state.ui_language = Lang_ko then "u 를 한 번 더 누르면 %s 로 복원합니다" else "Press u again to restore %s") name)
               end)
        | Some "D"
          when state.view = Config && state.config_pane = Config_presets ->
            (match selected_preset_for_state state with
-            | None -> report_action state "error" "지울 프리셋을 고르세요"
+            | None -> report_action state "error" (ui_text state ~ko:"지울 프리셋을 고르세요" ~en:"Select a preset to delete")
             | Some manifest ->
               let name = manifest.Tui_decode.pm_name in
-              if state.preset_busy then
-                report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
+              if state.preset_busy || workspace_preset_save_pending state <> [] then
+                report_action state "system" (ui_text state ~ko:"프리셋 작업이 아직 끝나지 않았습니다" ~en:"A preset operation is still in progress")
               else if state.preset_armed = Some (Delete_armed name) then begin
                 state.preset_armed <- None;
                 state.preset_busy <- true;
-                report_action state "system" (name ^ " 삭제 중");
+                report_action state "system" (name ^ ui_text state ~ko:" 삭제 중" ~en:" deleting");
                 launch_preset_call state ~mailbox:async_messages
                   ~call:(fun ~host ~port -> Masc_tui_loader.delete_preset ~host ~port ~name)
                   ~wrap:(fun result -> Preset_deleted (Preset_to_pane, result))
@@ -31656,7 +32145,7 @@ and is loaded on demand through keeper_skill.
               else begin
                 state.preset_armed <- Some (Delete_armed name);
                 report_action state "system"
-                  (Printf.sprintf "D 를 한 번 더 누르면 %s 를 지웁니다" name)
+                  (Printf.sprintf (if state.ui_language = Lang_ko then "D 를 한 번 더 누르면 %s 를 지웁니다" else "Press D again to delete %s") name)
               end)
        | Some key when state.view = Planning
            && Option.is_some (goal_detail_on_screen state)
@@ -32066,7 +32555,10 @@ and is loaded on demand through keeper_skill.
                   close_tools_async_detail state;
                   launch_tools_load ~force:false state ~mailbox:async_messages
                 end else goto_surface state ~mailbox:async_messages Config
-            | Config -> state.runtime_model_jump <- None; state.view <- Overview)
+            | Config ->
+                state.runtime_model_jump <- None;
+                state.runtime_config_jump_section <- None;
+                state.view <- Overview)
        | Some "left" ->
            (* Left is the non-destructive structural back key. Unlike Esc it
               never interrupts a live chat turn; it only closes a detail the

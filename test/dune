@@ -6829,3 +6829,7 @@
 (include stanzas/test_authz_scope.inc)
 
 (include stanzas/test_authz_decision.inc)
+
+(include stanzas/test_authz_body.inc)
+
+(include stanzas/test_authz_record.inc)

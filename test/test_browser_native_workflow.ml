@@ -419,6 +419,17 @@ let release_is_judged_from_declared_answers () =
     check bool "one unreleased answer withholds the release" true
       (seen_input (Rel.judge [0,answer])=not_released 0 kind))
     [Rel.Receipt_with_dialog;Rel.Void_answer;Rel.Undeclared_answer;Rel.Never_returned]
+(* A failed step can be reported twice: by its receipt and by the failure label that names a dialog. *)
+let a_step_answered_twice_counts_once () =
+  let dialog=Rel.of_unreleased Rel.Receipt_with_dialog in
+  check bool "the same clean answer twice lists the step once" true
+    (seen_input (Rel.judge [0,clean;0,clean])=`Released [0]);
+  check bool "a dialog after a clean answer withholds the release" true
+    (seen_input (Rel.judge [0,clean;0,dialog])=not_released 0 Rel.Receipt_with_dialog);
+  check bool "a clean answer after a dialog does not undo it" true
+    (seen_input (Rel.judge [0,dialog;0,clean])=not_released 0 Rel.Receipt_with_dialog);
+  check bool "a repeated step keeps its first place" true
+    (seen_input (Rel.judge [0,clean;1,clean;0,clean])=`Released [0;1])
 (* A failure label is only believed at the position where the request can fail with it. *)
 let a_failure_label_must_match_its_position () =
   let two=request [click;wait] and three=request [click;click;wait] in
@@ -468,5 +479,6 @@ let () = if Array.length Sys.argv=3 && Sys.argv.(1)="--proof" then proof Sys.arg
   test_case "an initial URL failure holds nothing" `Quick an_initial_url_failure_holds_nothing;
   test_case "a workflow that never held input has nothing to release" `Quick a_workflow_that_never_held_input_has_nothing_to_release;
   test_case "release is judged from the answers the SDK declared" `Quick release_is_judged_from_declared_answers;
+  test_case "a step answered twice counts once" `Quick a_step_answered_twice_counts_once;
   test_case "a failure label must match its position" `Quick a_failure_label_must_match_its_position;
   test_case "malformed execution never proves success" `Quick malformed_receipts]]

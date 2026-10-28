@@ -1017,8 +1017,9 @@ let peek key =
    wait into an await point, so sibling fibers run. It is also the only
    sanctioned offload here: [Eio_guard.run_in_systhread] leaves the work with
    no Eio effect handler, which poisons the first process-shared mutex the
-   work takes through [use_rw] and takes keeper persistence down process-wide
-   (see the note in
+   work takes through [use_rw], such as the one
+   [Keeper_types_support.keeper_execution_receipt_store] takes, and takes
+   keeper persistence down process-wide (see the note in
    [server_routes_http_routes_provider_runs.ml], which already offloads its own
    dashboard compute this way). Pool workers run inside [Eio.Switch.run], so
    [Eio.Mutex.use_rw ~protect] resolves normally.

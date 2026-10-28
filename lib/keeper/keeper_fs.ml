@@ -1,15 +1,13 @@
 (** Keeper_fs — Centralized keeper filesystem operations.
 
     Provides atomic file writes (write-to-temp + rename) and
-    fiber-safe directory creation with caching. Consolidates the
-    four scattered ensure_dir implementations into one.
-
-    Mutable caches use either an Eio mutex or an immutable Atomic snapshot.
+    fiber-safe directory creation. Consolidates the four scattered
+    ensure_dir implementations into one.
 
     @since 2.162.0 — #3721 keeper stabilization *)
 
 (* ================================================================ *)
-(* Directory Cache (lock-free)                                      *)
+(* Directory Creation (no lock)                                     *)
 (* ================================================================ *)
 
 (* RFC-0474 L4g. [ensure_dir] held one process-wide Eio mutex while it
@@ -20,57 +18,41 @@
    read; on 2026-10-28 fibers waited 2,972 s on that mutex in 180 s, up to
    45 s for one wait, and [gate/keepers] spent 95% of its wall time waiting.
 
-   The cache is an immutable set swapped atomically, and the check and the
-   [mkdir_p] run outside any lock. [mkdir_p] accepts a directory that already
-   exists, so two callers racing on one path only stat twice. *)
-module Dir_set = Set.Make (String)
-
-let ensured_dirs = Atomic.make Dir_set.empty
-
-let rec update_ensured f =
-  let current = Atomic.get ensured_dirs in
-  let next = f current in
-  if not (Atomic.compare_and_set ensured_dirs current next) then update_ensured f
-;;
+   It now takes no lock and keeps no cache. A cached path was stat'ed on
+   every call anyway, so a directory removed outside would be made again;
+   one stat per call is what an existing directory costs now. [mkdir_p]
+   accepts a directory that already exists, so two callers racing on one
+   path only stat twice. *)
+let note_ensure_dir_failure ~site path =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string FsFailures)
+    ~labels:[("path", path); ("site", Keeper_fs_failure_site.to_label site)]
+    ()
 
 let ensure_dir (path : string) : string =
-  if Dir_set.mem path (Atomic.get ensured_dirs) && Fs_compat.file_exists path
+  if Fs_compat.file_exists path
   then path
   else
     match Fs_compat.mkdir_p path with
-    | () ->
-      update_ensured (Dir_set.add path);
-      path
+    | () -> path
     | exception (Eio.Cancel.Cancelled _ as exn) ->
       let backtrace = Printexc.get_raw_backtrace () in
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string FsFailures)
-        ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Ensure_dir_cancelled))]
-        ();
+      note_ensure_dir_failure ~site:Keeper_fs_failure_site.Ensure_dir_cancelled path;
       Log.Keeper.warn "filesystem_runtime: ensure_dir cancelled path=%s" path;
       Printexc.raise_with_backtrace exn backtrace
     | exception exn ->
       let backtrace = Printexc.get_raw_backtrace () in
-      Keeper_fd_pressure.note_exception
-        ~site:"filesystem_runtime.ensure_dir"
-        exn;
-      Keeper_disk_pressure.note_exception
-        ~site:"filesystem_runtime.ensure_dir"
-        exn;
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string FsFailures)
-        ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Ensure_dir_failed))]
-        ();
+      Keeper_fd_pressure.note_exception ~site:"filesystem_runtime.ensure_dir" exn;
+      Keeper_disk_pressure.note_exception ~site:"filesystem_runtime.ensure_dir" exn;
+      note_ensure_dir_failure ~site:Keeper_fs_failure_site.Ensure_dir_failed path;
       Log.Keeper.warn "filesystem_runtime: ensure_dir failed path=%s: %s"
         path (Printexc.to_string exn);
       Printexc.raise_with_backtrace exn backtrace
 
 let invalidate_dir (path : string) : unit =
-  update_ensured (Dir_set.remove path);
   Keeper_fs_durable_directory.invalidate path
 
 let clear_dir_cache () : unit =
-  Atomic.set ensured_dirs Dir_set.empty;
   Keeper_fs_durable_directory.clear ()
 
 (* ================================================================ *)

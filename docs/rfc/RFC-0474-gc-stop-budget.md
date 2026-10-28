@@ -367,14 +367,19 @@ L4d 배포 뒤 읽기 lane 실행 시간의 50%가 `gate/keepers` 였다(2시간
 
 설계:
 
-1. 디렉터리 캐시를 `Atomic` 안의 불변 set 으로 바꾼다. 확인과 `mkdir_p` 는 lock 밖에서 한다.
-2. 동작은 그대로다. 캐시에 있는 경로도 파일시스템에서 다시 확인하고, 없으면 다시 만든다. `mkdir_p` 는 이미 있는 디렉터리를 받아들이므로 같은 경로를 두 호출이 동시에 만들어도 된다.
-3. `dir_mu` 를 예로 든 주석 넷은 지금 있는 process 공용 mutex 를 예로 들게 고친다. 규칙(bare systhread 의 Eio 연산은 그 바깥 `use_rw` mutex 를 poison 한다)은 그대로다.
+1. 디렉터리 캐시를 없앤다. 캐시에 있는 경로도 매번 파일시스템에서 확인했으므로 캐시가 아끼는 것이 없었다. 확인과 `mkdir_p` 는 lock 없이 한다. 있는 디렉터리 하나에 드는 것은 `stat` 한 번으로 전과 같다.
+2. 동작은 그대로다. 밖에서 지운 디렉터리는 다시 만든다. `mkdir_p` 는 이미 있는 디렉터리를 받아들이므로 같은 경로를 두 호출이 동시에 만들어도 된다. `invalidate_dir`·`clear_dir_cache` 는 이제 durable 디렉터리 기록(`Keeper_fs_durable_directory`)만 지운다.
+3. `dir_mu` 를 예로 든 주석 넷에서 그 이름을 지운다. 지금 동작을 설명하는 두 곳(`dashboard_cache.ml`, `server_routes_http_routes_provider_runs.ml`)은 지금 있는 mutex(`Keeper_types_support.keeper_execution_receipt_store` 가 쥐는 것)를 예로 든다. 6월 사고를 적은 두 곳(`eio_guard.ml`, `test_executor_pool_eio_mutex.ml`)은 그 mutex 가 이제 없으므로 일반어로 적는다. 다른 mutex 이름을 넣으면 사고 기록이 틀려진다.
 
 검증:
 
-- 단위(`test_keeper_fs`): `invalidate_dir` 없이 바깥에서 지운 디렉터리를 다시 만든다. domain 넷이 같은 새 경로 여덟 개를 동시에 50번씩 보장해도 모든 호출이 경로를 돌려주고 디렉터리가 있다. mutant(캐시에 있으면 확인하지 않기)는 앞의 시험에서 실패한다.
-- bench: 실제 `.masc/keepers` 에 domain 8개 × fiber 4개가 16,000번 `ensure_dir` 를 불렀다(load 44, 번갈아 3번). 전체 2.9~4.4초 → 0.19~0.30초, p50 3.4~5.1 ms → 0.13~0.18 ms, p99 40~55 ms → 1.2~2.0 ms.
+- 단위(`test_keeper_fs`): 바깥에서 지운 디렉터리를 다시 만든다. domain 넷이 같은 새 경로 여덟 개를 동시에 50번씩 보장해도 모든 호출이 경로를 돌려주고 디렉터리가 있다. mutant 둘(만들지 않기, 확인 없이 돌려주기)은 모두 실패한다. 캐시를 비우면 다시 확인하는지 보던 시험 둘(`invalidate`, `clear cache`)은 캐시가 없어져 지웠다. 같은 동작은 "밖에서 지운 디렉터리" 시험이 본다.
+- bench: 실제 `.masc/keepers` 에 domain 8개 × fiber 4개가 16,000번 `ensure_dir` 를 불렀다. main 의 lock 경로를 그대로 옮긴 것과 번갈아 3번씩 돌렸다(2026-10-28 16:11Z, load 65~68).
+
+  | | 전체 | p50 | p99 |
+  |---|---|---|---|
+  | main | 0.97~1.60초 | 1.4~2.1 ms | 6.3~17.6 ms |
+  | L4g | 0.17~0.28초 | 0.19~0.35 ms | 0.9~2.4 ms |
 - 운영: 배포 뒤 `rtev_fibers` 로 같은 창을 다시 떠서 가장 많이 기다린 lock 과 `gate/keepers` 의 실행 비율을 본다. `by_name` 에서 `respond_keeper_tool_json` 의 실행 평균과 읽기 lane 의 대기를 본다.
 
 ## 5. 순서

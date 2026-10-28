@@ -22,3 +22,4 @@ Generate new reports under `artifacts/`; retain selected reports here. See the
 - [Exact authored musical timing](tui-exact-musical-position-20261023.md)
 - [Selected piano-roll timing and dynamics](tui-selected-note-transforms-20261023.md)
 - [Shared track/selection quantization](tui-shared-track-quantize-20261023.md)
+- [Sandbox implementation and safety audit — 2026-10-28](2026-10-28-sandbox-implementation-audit.md)

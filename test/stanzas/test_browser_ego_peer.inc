@@ -19,6 +19,11 @@
  (action (run node %{dep:test_browser_ego_takeover.cjs})))
 
 (rule
+ (alias runtest-test_browser_ego_drag)
+ (deps test_browser_ego_drag.cjs ../lib/browser_ego_peer.ml)
+ (action (run node --test %{dep:test_browser_ego_drag.cjs})))
+
+(rule
  (alias runtest-test_browser_ego_native_input)
  (deps test_browser_ego_native_input.cjs ../lib/browser_ego_peer.ml)
  (action (run node --test %{dep:test_browser_ego_native_input.cjs})))
@@ -39,6 +44,7 @@
   (alias runtest-ego-takeover-js)
   (alias runtest-test_browser_ego_target)
   (alias runtest-test_browser_ego_upload)
+  (alias runtest-test_browser_ego_drag)
   (alias runtest-test_browser_ego_native_input)
   (alias runtest-test_browser_ego_page_management)
   (alias runtest-ego-takeover-js)))

@@ -24,6 +24,13 @@ from `completed` and leaves input release unconfirmed even when no dialog is
 visible. Use the private operator recovery described below before a distinct
 next input. Do not repeat typing or silently substitute another input method.
 
+A `drag` between observed points, and a `drag_to` with waypoints or scene nodes,
+use the SDK's mouse calls, which return no receipt. Even a clean run leaves input
+release unconfirmed, so the connection refuses the next input until the operator
+confirms it as below. A `drag_to` between two selectors without waypoints uses the
+SDK's `dragAndDrop`, which returns a receipt, and releases the input when that
+receipt shows no dialog.
+
 Uploads use `BrowserAct` `action = "upload"` on the live ego connection
 (`lane = "live"` with its observed `clientId`) and the observed `tabId`. The
 host must first authorize and snapshot the requested files through the

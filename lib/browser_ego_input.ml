@@ -22,7 +22,7 @@ let begin_holding t ~tab_id ~page_label ~operation =
     let generation=Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
     t.state <- Pending {pending={generation;command_id;tab_id;page_label;operation};previous};
     Ok ()
-let command_settled t = match t.state with
+let command_settled t (_ : Browser_ego_release.proof) = match t.state with
   | Available _ -> ()
   | Pending _ -> t.state <- Available Command_settled
 let not_started t = match t.state with

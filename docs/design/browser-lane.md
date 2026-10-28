@@ -225,10 +225,15 @@ Ego serves `drag_to` and `drag` with its native mouse API on agent pages.
 It visits the supplied viewport waypoints, or the midpoint for an empty route,
 then the destination twice before release. `durationMs` must be zero: ego's
 mouse API exposes steps, not a movement duration, so MASC adds no timing loop.
-The observed URL/document/viewport guard runs before the gesture. Button release
-is attempted in `finally`, including when a button-down call fails. If release
-cannot be confirmed or the run loses its answer, this peer refuses further
-input. Reads and ending the task space remain available; end that space before
+The observed URL/document/viewport guard runs before the gesture. A drag between
+coordinates, or `drag_to` with waypoints or scene nodes, runs mouse calls. Button
+release is attempted in `finally`, including when a button-down call fails, but
+the SDK's mouse calls answer void, so the release is never confirmed. The result
+is an unknown outcome and this peer refuses further input until the operator's
+reset. A `drag_to` between two selectors without waypoints uses `dragAndDrop`,
+which answers a receipt, and only an object receipt without `dialog` lets the next
+input run. If the run loses its answer, this peer also refuses further input.
+Reads and ending the task space remain available; end that space before
 opening a fresh connection. This is a per-peer failure state, not a durable
 cross-process recovery record. A pointer receipt does not establish application
 drop acceptance or general HTML5 DataTransfer support.

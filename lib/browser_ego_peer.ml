@@ -1034,23 +1034,23 @@ let motion_fields = function
   | Wheel {x; y} -> ["dx",`Int x;"dy",`Int y]
 
 (* Native ego calls, not synthetic page events. A failed down may already
-   have pressed, so its finally block always attempts release. *)
+   have pressed, so its finally block always attempts release. mouse.down,
+   move and up answer void and swallow a dialog interruption, so nothing here
+   declares that the button came up and the result claims nothing about it. *)
 let drag_input = {js|
 async function dragInput(page, path, label) {
-  let error = null, released = true;
+  let error = null;
   const reason = failure => String(failure?.message ?? failure);
   try {
     await page.mouse.move(path[0].x, path[0].y, {label});
     try {
-      released = false;
       await page.mouse.down({button:'left'});
       for (const point of path.slice(1)) await page.mouse.move(point.x, point.y, {label});
     } finally {
       await page.mouse.up({button:'left'});
-      released = true;
     }
   } catch (failure) { error = reason(failure); }
-  return {error, released};
+  return {error};
 }
 |js}
 
@@ -1123,7 +1123,7 @@ let guarded_input ?(holds_button=false) t ~id ~label ~deadline ~verb ~step ~guar
       "    const guard = await page.evaluate(pageCall(args.guard, args.input));";
       "    if (guard.pageError !== undefined) emit({ok: false, before: true, error: guard.pageError});";
       "    else {";
-      "      let failure = null, pointerReleased = false;";
+      "      let failure = null;";
       "      try {" ] @ lines @ [
       "      } catch (error) { failure = reason(error); }";
       (* An unread dialog state is left to the receipt script, which ego
@@ -1132,22 +1132,27 @@ let guarded_input ?(holds_button=false) t ~id ~label ~deadline ~verb ~step ~guar
       "      try { opened = " ^ open_dialog "page" ^ "; } catch (error) { opened = null; }";
       "      if (opened !== null) {";
       "        const after = " ^ row_after ^ ";";
-      "        emit({ok: true, value: {guard, dialog: opened, tab: after === undefined ? null : {url: after.url, title: after.title}, error: failure, pointerReleased}});";
+      "        emit({ok: true, value: {guard, dialog: opened, tab: after === undefined ? null : {url: after.url, title: after.title}, error: failure}});";
       "      } else {";
       "        const receipt = await page.evaluate(pageCall(args.receipt, \"{}\"));";
-      "        emit({ok: true, value: {guard, receipt, error: failure, pointerReleased}});";
+      "        emit({ok: true, value: {guard, receipt, error: failure}});";
       "      }";
       "    }";
       "  }" ])) in
+  (* A button held through raw mouse calls is never settled here: the SDK
+     declares no outcome for them, so the input stays unconfirmed until the
+     operator's reset. *)
   if holds_button then (match response with
-    | Ok value when field "pointerReleased" value = Some (`Bool true) -> Input.command_settled t.input
     | Error (Refused _ | Unanswered (Unstarted _)) -> Input.not_started t.input
     | Ok _ | Error (Unanswered (Exited _ | Signaled _ | Timed_out | Output_exceeded | Unobserved _)
         | Unreadable _ | Failed _) -> ());
   match response with
   | Error failure -> Error (effect_failure ~unknown failure)
-  | Ok value when holds_button && field "pointerReleased" value <> Some (`Bool true) ->
-      Error (Live.Outcome_unknown ("ego drag did not confirm input release; " ^ unknown))
+  | Ok value when holds_button ->
+      let reported = match field "error" value with Some (`String error) -> head error ^ "; " | Some _ | None -> "" in
+      let opened = match field "dialog" value with
+        | Some (`Assoc _) -> "the page opened a JavaScript dialog; " | Some _ | None -> "" in
+      Error (Live.Outcome_unknown (reported ^ opened ^ "ego drag cannot confirm input release; " ^ unknown))
   | Ok value when (match field "dialog" value with Some (`Assoc _) -> true | Some _ | None -> false) ->
     dialog_receipt ~id ~verb ~unknown value
   | Ok value ->
@@ -1242,7 +1247,7 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
     return {before: true, error: "unsupported snapshot target action"};
   await checkUrl();
   if (refusal !== null) return {before: true, error: refusal};
-  let receipt = null, failure = null, pointerReleased = args.action !== "drag_to";
+  let receipt = null, failure = null;
   try {
     switch (args.action) {
       case "click": receipt = await page.click(args.target, {label: args.cursor}); break;
@@ -1250,7 +1255,7 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
       case "hover": receipt = await page.hover(args.target, {label: args.cursor}); break;
       case "double_click": receipt = await page.dblclick(args.target, {label: args.cursor}); break;
       case "select_option": receipt = {selectedValues: await page.selectOption(args.target, args.selection)}; break;
-      case "drag_to": receipt = await page.dragAndDrop(args.target, args.destination, {label: args.cursor}); pointerReleased = !receipt?.dialog; break;
+      case "drag_to": receipt = await page.dragAndDrop(args.target, args.destination, {label: args.cursor}); break;
     }
   } catch (error) {
     failure = reason(error);
@@ -1258,8 +1263,12 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
     // swallow a dialog interruption as void; another release could also
     // duplicate the SDK's original mouseup. Keep uncertainty on failure.
   }
-  return {urlBefore, receipt, error: failure, pointerReleased};
+  return {urlBefore, receipt, error: failure};
 }|js}
+(* An input the SDK showed released is settled. One that was never held keeps the readiness it had. *)
+let settle_input t = function
+  | Browser_ego_release.No_hold -> Input.not_started t.input
+  | Browser_ego_release.Released proof -> Input.command_settled t.input proof
 let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operation =
   let verb, text = match operation with
     | Target_click -> "click", `Null
@@ -1293,7 +1302,6 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
         "    }";
         "  }" ]) in
   if holds_button then (match response with
-    | Ok value when field "pointerReleased" value = Some (`Bool true) -> Input.command_settled t.input
     | Error (Refused _ | Unanswered (Unstarted _)) -> Input.not_started t.input
     | Ok _ | Error (Unanswered (Exited _ | Signaled _ | Timed_out | Output_exceeded | Unobserved _) | Failed _ | Unreadable _) -> ());
   match response with
@@ -1303,6 +1311,17 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
     match field "error" value, field "urlBefore" value, field "receipt" value, field "tab" value with
     | Some (`String error), _, _, _ -> outcome (head error)
     | Some `Null, Some (`String url_before), Some (`Assoc receipt), Some ((`Null | `Assoc _) as tab) ->
+      (* dragAndDrop answers with the SDK's receipt, and the drag settles only from a reply read whole. A receipt
+         with a member the SDK does not declare is not an answer, so it is read as neither released nor served. *)
+      let answer = Browser_ego_release.answer_of_json (`Assoc receipt) in
+      let declared = match operation with
+        | Target_drag _ ->
+          (match answer with
+           | Browser_ego_release.Unreleased Browser_ego_release.Undeclared_answer ->
+             Error "ego answered the drag with a receipt the SDK does not declare"
+           | Browser_ego_release.Receipt_without_dialog
+           | Browser_ego_release.Unreleased (Browser_ego_release.Receipt_with_dialog | Void_answer | Never_returned) -> Ok ())
+        | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_select _ -> Ok () in
       let popups = match List.assoc_opt "popups" receipt with
         | None -> Ok []
         | Some (`List popups) ->
@@ -1315,19 +1334,22 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
       let dialog = match List.assoc_opt "dialog" receipt with
         | None | Some `Null -> Ok []
         | Some json -> Result.map (fun dialog -> ["dialog",Browser_surface.dialog_json dialog]) (ego_dialog json) in
-      (match popups, dialog with
-       | Ok popups, Ok dialog ->
+      (match declared, popups, dialog with
+       | Ok (), Ok popups, Ok dialog ->
          let* selected = match operation, List.assoc_opt "selectedValues" receipt with
            | Target_select _, Some (`List values) when List.for_all (function `String _ -> true | _ -> false) values ->
              Ok ["selectedValues",`List values]
            | Target_select _, (None | Some _) -> outcome "ego answered selection without its selected values"
            | (Target_click | Target_fill _ | Target_hover | Target_double_click | Target_drag _), (None | Some _) -> Ok [] in
+         if holds_button then (match Browser_ego_release.judge [0,answer] with
+           | Browser_ego_release.Settled settled -> settle_input t settled
+           | Browser_ego_release.Unconfirmed _ -> ());
          Ok (obj (["tabId",`Int id;"action",str verb] @ reference @ ["urlBefore",str url_before]
                   @ tab_fields (Some tab)
                   @ (match popups with [] -> [] | _ :: _ -> ["popups",`List popups])
                   @ selected
                   @ dialog))
-       | Error detail, _ | _, Error detail -> outcome detail)
+       | Error detail, _, _ | _, Error detail, _ | _, _, Error detail -> outcome detail)
     | _ -> outcome "ego answered the input outside its answer frame"
 
 let activate_tab t ~id ~label ~expected_url =
@@ -1404,7 +1426,6 @@ let interact ?actor t args =
     guarded_input ~holds_button:true t ~id ~label ~deadline ~verb ~step:"page.drag"
       ~guard:Browser_interaction.pointer_guard_script ~input:(input ~expected_url action)
       ~lines:["        const outcome = await (" ^ drag_input ^ ")(page, args.path, args.cursor);";
-        "        pointerReleased = outcome.released;";
         "        if (outcome.error !== null) throw new Error(outcome.error);"]
       ~fields:["path",`List (List.map pixels path);cursor] in
   let on_target ~target operation = match expected_url with
@@ -1651,17 +1672,15 @@ let workflow ?actor t args =
   | Ok value ->
     let unknown detail = Live.Outcome_unknown (detail ^ "; read the same tab and do not replay the workflow") in
     let* outcome=Browser_ego_workflow.decode request value |> Result.map_error unknown in
-    let input_released=match outcome with Browser_ego_workflow.Completed _ -> true
-      | Stopped {input_released;_} -> input_released in
     if holds_input then (match outcome with
-      | Browser_ego_workflow.Stopped {effect_started=false;_} -> Input.not_started t.input
-      | Completed _|Stopped {effect_started=true;_} -> if input_released then Input.command_settled t.input);
+      | Browser_ego_workflow.Completed {input;_}|Stopped {input=Browser_ego_release.Settled input;_} -> settle_input t input
+      | Stopped {input=Browser_ego_release.Unconfirmed _;_} -> ());
     let receipt_of value=match value with
       | `Assoc fields -> Ok (obj (("tabId",`Int request.tab_id)::("action",str "workflow")::fields))
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error (unknown "workflow receipt is not an object") in
     match outcome with
-    | Browser_ego_workflow.Completed value -> receipt_of value
-    | Browser_ego_workflow.Stopped {receipt=value;message=detail;effect_started;completed_effect;input_released=_} ->
+    | Browser_ego_workflow.Completed {reply=value;input=_} -> receipt_of value
+    | Browser_ego_workflow.Stopped {receipt=value;message=detail;effect_started;completed_effect;input=_} ->
       let message=head detail ^ "; read the same tab before continuing; never replay the workflow" in
       if completed_effect then
         let* receipt=receipt_of value in Error (Live.Partial_failure {tab_id=request.tab_id;receipt;message})

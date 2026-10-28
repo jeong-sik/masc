@@ -275,7 +275,7 @@ def run(script,answer):
             'viewport':{'documentId':'d1','width':800,'height':600,'scrollX':0,'scrollY':0}})})
     elif step=='page.target_input':
         (root/'clicked').write_text(json.dumps([args['target'],args['cursor']]))
-        answer({'urlBefore':'https://fixture.test/','receipt':{},'error':None,'pointerReleased':True,
+        answer({'urlBefore':'https://fixture.test/','receipt':{},'error':None,
             'tab':{'url':'https://fixture.test/','title':'Fixture'}})
     elif step=='page.native_workflow':
         if mode=='recovery':
@@ -305,7 +305,7 @@ def run(script,answer):
     elif step=='page.pointer':
         page={'answer':json.dumps({'url':'https://fixture.test/','title':'Fixture','scrollX':0,'scrollY':0})}
         (root/'clicked').write_text(json.dumps([args['x'],args['y'],args['button'],args['cursor']]))
-        answer({'guard':page,'receipt':page,'error':None,'pointerReleased':True})
+        answer({'guard':page,'receipt':page,'error':None})
     elif step=='page.downloads':
         # What the page's download wait saved: <downloads>/<id>, in folders
         # no one else may write, as ego's saveAs makes them.

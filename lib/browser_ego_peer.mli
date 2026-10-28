@@ -165,9 +165,12 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     failure is uncertain, including a missing or stale target. Re-read a snapshot after page changes or input and on a native
     stale/unknown ref refusal. Selector drags without waypoints use native [dragAndDrop]. A native drag
     failure adds no synthetic mouse-up; a dialog or missing release proof preserves
-    the same release-uncertain state as raw drag. Coordinate and
-    scene drags retain the observed waypoint contract, require zero duration
-    and release the button in the same run.
+    the same release-uncertain state as raw drag, and only an object receipt
+    without a dialog settles it. Coordinate and scene drags retain the observed
+    waypoint contract and require zero duration. They attempt the release in the
+    same run, but the mouse calls answer void, so the release is never confirmed:
+    the result is an unknown outcome and the input stays pending until the
+    operator's reset.
     Unconfirmed release blocks further input on this peer; read/finish remain
     available. The private operator controls can record an explicit human
     check/reset assertion for this pending input generation and resume the

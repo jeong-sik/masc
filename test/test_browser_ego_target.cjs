@@ -54,10 +54,10 @@ test('native drag failures retain uncertain release without additional input or 
   let drags=0,ups=0;
   const p={url:async()=>url,dragAndDrop:async()=>{drags++;throw Error('drag interrupted');},mouse:{up:async()=>{ups++;}}};
   const result=await input(p,args('drag_to'));
-  assert.equal(drags,1);assert.equal(ups,0);assert.equal(result.pointerReleased,false);
+  assert.equal(drags,1);assert.equal(ups,0);
   assert.equal(result.receipt,null);assert.match(result.error,/drag interrupted/);
 });
 test('native drag interrupted by dialog has no Page follow-up and no release proof',async()=>{
  const p={url:async()=>url,dragAndDrop:async()=>({dialog:{type:'alert',message:'drag stopped'}})};
- const result=await input(p,args('drag_to'));assert.equal(result.pointerReleased,false);assert.equal(result.receipt.dialog.message,'drag stopped');
+ const result=await input(p,args('drag_to'));assert.equal(result.receipt.dialog.message,'drag stopped');
 });

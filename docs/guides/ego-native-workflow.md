@@ -89,9 +89,13 @@ selector click does not preserve its coordinates in the public mouse handle.
 Native workflows and selector `drag_to` therefore do not synthesize a release
 from that handle or call its void return a release acknowledgement. A failed
 selector drag preserves the original SDK failure and blocks further input until
-its unconfirmed input state is resolved. Coordinate-path drag has a separate
-manual-input implementation; this selector repair does not establish its release
-acknowledgement or safe recovery. A lost key press/type/paste response also
+its unconfirmed input state is resolved. A selector drag that returns normally
+unblocks input only when `dragAndDrop` answers with an object receipt that has
+no `dialog` (see below). Coordinate-path drag (`page.drag`) calls `mouse.down`,
+`mouse.move` and `mouse.up`, which return void and swallow a dialog interruption,
+so no SDK answer shows that the button came up. Once it ran, its result is an
+unknown outcome and it blocks further input until the operator's input reset. A
+guard that refuses it before any input leaves input usable. A lost key press/type/paste response also
 keeps release unconfirmed without guessing a key-up sequence. `keyboard.paste`
 uses the SDK's `ControlOrMeta+V` sequence, so it can leave a modifier held.
 `press` is included because its key sequence may be held if
@@ -102,7 +106,9 @@ reported before release: answering it alone does not prove that every original
 key or pointer button was released. An unconfirmed release prevents further
 input on that connection. The result reports `inputReleased` independently of completed
 effects; a guard does not make the failed action successful.
-Manual held-button and held-key workflows are not exposed.
+Manual held-button and held-key workflows are not exposed. A single `click`, `dblclick`,
+pointer or keyboard verb outside a workflow does not take the input, so only workflow steps
+and drags are judged by the rule below.
 
 `keyboard.type`, `keyboard.press` and `keyboard.paste` have no selector preflight.
 An exception after entering their SDK method cannot be classified as definitely
@@ -126,6 +132,76 @@ and do not verify application success. See the
 [SDK input boundary](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L2674),
 [pointer implementation](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/driver/page-actions.ts#L1183)
 and [keyboard implementation](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/driver/page-keyboard.ts#L115).
+
+The host does not take the script's `inputReleased` on trust. `decode` reads what
+the SDK declared for each holding step and builds the release state from that
+(`Browser_ego_release`):
+
+- an object receipt that has only the members `popups` and `dialog`, each at most
+  once, and no `dialog`, is `Receipt_without_dialog`, the only answer that releases
+  a step.
+  Its `popups` is a list of `{label, targetId}` objects whose two members are
+  strings that are not empty. Only `Browser_ego_release.answer_of_json` builds it;
+- an object receipt whose `dialog` is an object is `Receipt_with_dialog`;
+- `null` is `Void_answer`, which declares nothing;
+- any other value is `Undeclared_answer`: a non-object, a member the SDK does not
+  declare or that repeats a member, a `popups` that is not a list of such objects,
+  a popup with another or a repeated member, or a `dialog` that is not an object;
+- a step that was entered and gave no answer is `Never_returned`.
+
+The last four are the answers that release nothing (`Unreleased`). They are public
+and anyone may build them, so the type that names the first unreleased step cannot
+hold the one answer that releases.
+
+The script turns a void or non-object answer of a holding step into a failure
+before it records the step, so a real `keyboard.type` decodes as `Never_returned`.
+A `null` or non-object receipt (`Void_answer`, or `Undeclared_answer` for a
+non-object) therefore only comes from a reply the script did not produce. An object
+receipt with a member the SDK does not declare is recorded as it is and decodes as
+`Undeclared_answer`.
+
+A reply that claims release is accepted when every holding step that was entered
+is released. It carries their indices as `Released_by_receipts`, or `No_hold` when
+no holding step was entered, as when a `fill` fails before a `click`. Otherwise
+the reply is an unknown outcome that names the first step that is not released.
+A failed reply that reports a held input is `Stopped` with that step, or with
+`Held_by_script_report` when every answer is clean. A successful reply cannot
+report a held input.
+
+The peer settles its input from `Released`, and restores the readiness it had for
+`No_hold`. `Browser_ego_input.command_settled` takes the `proof`, which only
+`Browser_ego_release.judge` builds from answers read by `answer_of_json`, so a flag
+cannot settle an input. The types do not show that the JSON handed to
+`answer_of_json` is the SDK's answer for this pending input. A selector
+`drag_to` settles from the one receipt of its `dragAndDrop` call by the same rule:
+an object receipt goes through `answer_of_json` and `judge`, and only a reply read
+whole settles. A failure the script caught, and a receipt that is missing, `null` or
+not an object, end as an unknown outcome and settle nothing.
+
+The receipt's `dialog` is declared by the SDK: it is set from the dialog-opened
+error that unwound the driver
+([action boundary](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L2777-L2784),
+[receipt type](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L411-L414)),
+so an object receipt without it means the whole action ran. Raw keyboard calls
+such as `keyboard.type`, and `mouse.down`, `mouse.move` and `mouse.up`, swallow
+that error into void
+([raw action](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L2674-L2687),
+[mouse](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L512-L568)),
+so a typed run never releases and the operator's input reset applies.
+`Page.info()` and the Page's event buffer are samples of the page, not answers of
+the SDK, and `decode` does not use them as release evidence. The SDK documents no
+release acknowledgement, and a receipt does not prove that every key or button
+came up.
+
+This rests on the SDK implementation at the pinned commit, not on a documented
+guarantee. The receipt's `dialog` is `pendingDialog(sessionId) || actionError.dialog`;
+if both were empty the field would be `undefined`, JSON would drop it, and the host
+could not tell that receipt from a clean one. Whether `isPageDialogOpenedError`
+always carries `error.dialog` is decided in the SDK runtime, which was not read. The SDK's own usage text says a dialog may appear as `receipt.dialog`
+or in `page.info()`, and that a receipt describes only the dispatched action
+([usage text](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/skill-body/SKILL.md#L410-L422)).
+A newer SDK that adds a receipt member makes the receipt undeclared, so the input
+stays unconfirmed until this rule is read again.
 
 `url`, `title`, `info` and `snapshot` return the SDK's native value in that
 step's `receipt`. `snapshot` supports `scope: "full_page"`,

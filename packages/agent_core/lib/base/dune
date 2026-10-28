@@ -4,7 +4,16 @@
  (name agent_core_base)
  (public_name masc.agent_core.base)
  (wrapped true)
- (libraries agent_core_strings llm_provider yojson eio str mtime mtime.clock)
+ (libraries
+  agent_core_strings
+  llm_provider
+  masc.agent_core.digest
+  base64
+  yojson
+  eio
+  str
+  mtime
+  mtime.clock)
  (inline_tests)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_inline_test ppx_let))

@@ -265,9 +265,11 @@ type authorization_post_outcome =
       ; request : Auth_oauth.authorization_request
       }
 
-(* A denial redirects, so its document is verified first. An approval checks
-   the request and the bearer before it fetches anything, so only a request
-   carrying a valid MASC bearer makes this server fetch. *)
+(* Only an approval fetches the client_id URL, and only after the request and
+   the MASC bearer check out, so a request without a valid bearer never makes
+   this server fetch. A denial answers from the checked request alone: it
+   redirects to the loopback callback with [error=access_denied], [state] and
+   [iss], and sends no code, so the document is not needed. *)
 let authorize_post ~base_path ~authority ~fetch_client_metadata ~body =
   let* params = parse_form body in
   let validate client_document =
@@ -277,7 +279,7 @@ let authorize_post ~base_path ~authority ~fetch_client_metadata ~body =
   let issuer = Server_oauth_metadata.issuer authority in
   if Option.equal String.equal (param params "decision") (Some "deny")
   then
-    let* request = verified () in
+    let* request = validate Auth_oauth.Show_unverified in
     Ok
       (Authorization_redirect
          (redirect_with_error ~issuer request Auth_oauth.Access_denied))

@@ -540,6 +540,11 @@ let test_document_client_signs_in () =
 
 let test_document_client_refusals () =
   with_oauth_workspace (fun base_path ->
+    let bootstrap_token, _ =
+      match Auth.create_token base_path ~agent_name:"claude" ~role:Masc_domain.Worker with
+      | Ok created -> created
+      | Error error -> fail (Masc_domain.masc_error_to_string error)
+    in
     let challenge = String.make 43 'a' in
     let refused ~label ~fetch_client_metadata ~redirect_uri =
       let body =
@@ -547,7 +552,7 @@ let test_document_client_refusals () =
           ~client_id:claude_code_url
           ~redirect_uri
           ~challenge
-          ~extra:[ "decision", [ "deny" ] ]
+          ~extra:[ "bootstrap_token", [ bootstrap_token ]; "decision", [ "authorize" ] ]
           ()
       in
       match
@@ -588,7 +593,31 @@ let test_consent_policy_lets_the_callback_redirect_through () =
     (contains policy "form-action 'self' http://127.0.0.1:43123;")
 ;;
 
-let test_approval_without_a_bearer_fetches_nothing () =
+let test_a_denial_redirects_only_to_this_computer () =
+  with_oauth_workspace (fun base_path ->
+    let fetched, fetch_client_metadata = serving claude_code_document in
+    let body =
+      authorize_query
+        ~client_id:claude_code_url
+        ~redirect_uri:"https://attacker.example/cb"
+        ~challenge:(String.make 43 'a')
+        ~extra:[ "decision", [ "deny" ] ]
+        ()
+    in
+    (match
+       Server_oauth_service.authorize_post
+         ~base_path
+         ~authority:(authority ())
+         ~fetch_client_metadata
+         ~body
+     with
+     | Ok (Server_oauth_service.Authorization_redirect _) ->
+       fail "a denial redirected off this computer"
+     | Ok (Server_oauth_service.Authorization_form_error _) | Error _ -> ());
+    check (list string) "the refused denial fetched nothing" [] !fetched)
+;;
+
+let test_a_request_without_a_bearer_fetches_nothing () =
   with_oauth_workspace (fun base_path ->
     let fetched, fetch_client_metadata = serving claude_code_document in
     let post extra =
@@ -617,7 +646,7 @@ let test_approval_without_a_bearer_fetches_nothing () =
          (Uri.get_query_param (Uri.of_string location) "error")
      | Ok (Server_oauth_service.Authorization_form_error { message; _ }) -> fail message
      | Error error -> fail (Auth_oauth.show_error error));
-    check (list string) "the denial verified the document first" [ claude_code_url ] !fetched)
+    check (list string) "the denial fetched nothing either" [] !fetched)
 ;;
 
 let grant_types values = [ "grant_types", `List (List.map (fun v -> `String v) values) ]
@@ -702,9 +731,13 @@ let () =
             `Quick
             test_consent_policy_lets_the_callback_redirect_through
         ; test_case
-            "approval without a bearer fetches nothing"
+            "a denial redirects only to this computer"
             `Quick
-            test_approval_without_a_bearer_fetches_nothing
+            test_a_denial_redirects_only_to_this_computer
+        ; test_case
+            "a request without a bearer fetches nothing"
+            `Quick
+            test_a_request_without_a_bearer_fetches_nothing
         ; test_case
             "string subset rejects duplicates"
             `Quick

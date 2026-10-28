@@ -121,7 +121,10 @@ applies to approval receipts used by this worklist; it does not prove that the
 reviewer's actual session was independent. Existing conflicting requests and
 CR ownership remain visible and untouched; when appropriate a separate
 independent reviewer is proposed. Existing team requests are preserved without
-assuming their membership.
+assuming their membership. A separately validated current independent source
+approval avoids a redundant extra request even if another account's CR remains
+open; this does not clear the CR or grant merge admission. Release decisions
+still use their own CI policy.
 
 Assignments mean requested, not running or reviewed. Each action retains its
 head/base/stack identity. Before posting, the tool rereads PR/evidence and skips

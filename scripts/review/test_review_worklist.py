@@ -398,7 +398,7 @@ class WorklistFlow(unittest.TestCase):
         self.assertEqual(len(state['posts']), 1)
 
     def test_approved_path_uses_selected_gh_and_requires_independent_receipt(self):
-        review = {'id':7, 'state':'APPROVED', 'user':user('reviewer-a')}
+        review = {'id':7, 'state':'APPROVED', 'user':user('reviewer-a'), 'commit_id':HEAD}
         receipt = json.dumps({'pr':1, 'head':HEAD, 'approval_ids':[7],
                               'scope':M.review_scope(pull()), 'policy':'source'})
         for code in (0, 2):
@@ -411,6 +411,9 @@ class WorklistFlow(unittest.TestCase):
                         self.assertEqual(call.kwargs['env']['GUARD_GH'], '/fake/gh')
         with patch.object(M, 'command', return_value=M.CommandResult(0, receipt, '')):
             self.assertFalse(M.GitHub('o/r').admission(pull(), [review], [('old-login',uid('reviewer-a'))], True))
+            self.assertFalse(M.GitHub('o/r').admission(pull(), [review | {'commit_id':'e'*40}], [], True))
+            missing_commit = {k:v for k,v in review.items() if k != 'commit_id'}
+            self.assertFalse(M.GitHub('o/r').admission(pull(), [missing_commit], [], True))
             with self.assertRaises(M.Unavailable):
                 M.GitHub('o/r').admission(pull(), [review | {'id':8}], [], True)
         stale = json.dumps({'pr':1, 'head':HEAD, 'approval_ids':[7],
@@ -423,6 +426,55 @@ class WorklistFlow(unittest.TestCase):
         with patch.object(M, 'command', return_value=M.CommandResult(0, wrong_policy, '')):
             with self.assertRaises(M.Unavailable):
                 M.GitHub('o/r').admission(pull(), [review], [], True)
+
+    def test_independent_source_approval_preserves_separate_conflicting_cr(self):
+        digest = 'd' * 64
+        body = (f'verdict: PASS head: {HEAD} by: reviewer-b\n\n'
+                f'review-scope: {{"base_ref":"main","base_sha":"{BASE}","stack":null}}\n'
+                f'approve-guard: head `{HEAD}` · source review · reviewed base `{BASE}` · diff sha256 `{digest}`')
+        approved = {'id':10, 'state':'APPROVED', 'user':user('reviewer-b'), 'body':body, 'commit_id':HEAD,
+                    'author_association':'MEMBER', 'submitted_at':'2026-10-26T09:00:00Z'}
+        cr = {'id':11, 'state':'CHANGES_REQUESTED', 'user':user('reviewer-a')}
+        pr = pull()
+        pr['requested_reviewers'] = [user('reviewer-a')]
+        accounts = [('reviewer-a', uid('reviewer-a'))]
+        with patch.object(M, 'command', return_value=M.CommandResult(0, digest, '')) as run:
+            self.assertTrue(M.GitHub('o/r', '/fake/gh').independent_source_review(pr, [cr, approved], [], accounts, True))
+            self.assertEqual(run.call_args.kwargs['env']['GUARD_GH'], '/fake/gh')
+            stale = approved | {'body':body.replace(HEAD, 'e'*40)}
+            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, stale], [], accounts, True))
+            old_commit = approved | {'commit_id':'e'*40}
+            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, old_commit], [], accounts, True))
+            missing_commit = {k:v for k,v in approved.items() if k != 'commit_id'}
+            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, missing_commit], [], accounts, True))
+            superseded = approved | {'id':12, 'state':'CHANGES_REQUESTED'}
+            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, approved, superseded], [], accounts, True))
+            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, approved], [], accounts, False))
+            release = pr | {'head':{'sha':HEAD, 'ref':'release/v1'}}
+            self.assertFalse(M.GitHub('o/r').independent_source_review(release, [cr, approved], [], accounts, True))
+            later_fail = {'id':13, 'user':user('reviewer-b'), 'body':f'verdict: FAIL head: {HEAD} by: reviewer-b',
+                          'created_at':'2026-10-26T10:00:00Z', 'updated_at':'2026-10-26T10:00:00Z'}
+            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, approved], [later_fail], accounts, True))
+            other_fail = later_fail | {'user':user('reviewer-a')}
+            self.assertTrue(M.GitHub('o/r').independent_source_review(pr, [cr, approved], [other_fail], accounts, True))
+            unknown_fail = later_fail | {'user':None}
+            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, approved], [unknown_fail], accounts, True))
+            invalid_id = later_fail | {'user':{'login':'unknown','id':0}}
+            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, approved], [invalid_id], accounts, True))
+            invalid_known_login = later_fail | {'user':{'login':'reviewer-a','id':0}}
+            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, approved], [invalid_known_login], accounts, True))
+            later_pass = later_fail | {'id':14, 'user':user('reviewer-a'),
+                                       'body':f'verdict: PASS head: {HEAD} by: reviewer-a',
+                                       'author_association':'MEMBER', 'created_at':'2026-10-26T11:00:00Z',
+                                       'updated_at':'2026-10-26T11:00:00Z'}
+            self.assertFalse(M.GitHub('o/r').independent_source_review(
+                pr, [cr, approved], [invalid_known_login, later_pass], accounts, True))
+            valid_fail = later_fail | {'user':user('reviewer-a')}
+            invalid_pass = later_pass | {'user':{'login':'reviewer-a','id':0}}
+            self.assertFalse(M.GitHub('o/r').independent_source_review(
+                pr, [cr, approved], [valid_fail, invalid_pass], accounts, True))
+            renamed_commit = accounts + [('old-reviewer-b', uid('reviewer-b'))]
+            self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, approved], [], renamed_commit, True))
 
     def test_unreadable_diff_or_admission_never_means_unreviewed(self):
         for results in ([M.CommandResult(1, '', 'diff unavailable')],
@@ -441,7 +493,7 @@ class WorklistFlow(unittest.TestCase):
                                          (pull() | {'head':{'sha':HEAD, 'ref':'release/v1'}}, initial)):
             with self.subTest(after_pr=after_pr, after_accounts=after_accounts):
                 github = M.GitHub('o/r')
-                with patch.object(github, 'collection', side_effect=[[review], []]), \
+                with patch.object(github, 'collection', side_effect=[[review], [], [review], []]), \
                      patch.object(github, 'commit_accounts', side_effect=[(initial, True), (after_accounts, True)]), \
                      patch.object(github, 'admission', return_value=True), \
                      patch.object(github, 'api', return_value=after_pr):
@@ -450,10 +502,19 @@ class WorklistFlow(unittest.TestCase):
 
         github = M.GitHub('o/r')
         changed_final = pull() | {'head':{'sha':'c'*40, 'ref':'fix/1'}}
-        with patch.object(github, 'collection', side_effect=[[review], []]), \
+        with patch.object(github, 'collection', side_effect=[[review], [], [review], []]), \
              patch.object(github, 'commit_accounts', side_effect=[(initial, True), (initial, True)]), \
              patch.object(github, 'admission', return_value=True), \
              patch.object(github, 'api', side_effect=[pull(), changed_final]):
+            with self.assertRaises(M.Unavailable):
+                github.collect_pr(pull())
+
+        github = M.GitHub('o/r')
+        with patch.object(github, 'collection', side_effect=[[review], [], [review], [{'id':99}]]), \
+             patch.object(github, 'commit_accounts', side_effect=[(initial, True), (initial, True)]), \
+             patch.object(github, 'admission', return_value=False), \
+             patch.object(github, 'independent_source_review', return_value=True), \
+             patch.object(github, 'api', return_value=pull()):
             with self.assertRaises(M.Unavailable):
                 github.collect_pr(pull())
 

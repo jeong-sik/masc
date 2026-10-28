@@ -36,7 +36,7 @@ def pull(number=1, **changes):
            "base_ref": "main", "base_sha": BASE, "stack": None, "created_at": T1,
            "requested_reviewers": [], "requested_teams": [], "reviews": [],
            "commit_accounts": [], "commit_identities_complete": True,
-           "admission": False, "blockers": []}
+           "admission": False, "independent_source_review": False, "blockers": []}
     raw.update(changes)
     names = [raw['author'], 'alice', 'bob', *raw['requested_reviewers'], *raw['commit_accounts']]
     names.extend(r['user']['login'] for r in raw['reviews'])
@@ -160,6 +160,15 @@ class RoutingScenarios(unittest.TestCase):
         self.assertEqual({(a.reason, a.account) for a in result},
                          {(M.Reason.AWAITING_OWNER, "alice"),
                           (M.Reason.INDEPENDENT_REVIEW, "bob")})
+
+    def test_valid_independent_approval_does_not_displace_conflicting_cr(self):
+        row = pull(requested_reviewers=['alice'], reviews=[review('alice')],
+                   commit_accounts=['alice'], independent_source_review=True)
+        result = actions([row])
+        self.assertEqual([(a.reason, a.account, a.review_ids) for a in result],
+                         [(M.Reason.EXISTING_REQUEST, 'alice', (1,))])
+        self.assertTrue(result[0].to_json()['independent_source_review'])
+        self.assertFalse(any(a.assignment is M.Assignment.PROPOSED_USER for a in result))
 
     def test_current_cr_existing_independent_request_or_team_prevents_extra_request(self):
         rows = [pull(1, reviews=[review(head=HEAD)], commit_accounts=["alice"]),

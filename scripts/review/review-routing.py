@@ -118,6 +118,7 @@ class Pull:
     commit_identities_complete: bool
     reviews: tuple[Review, ...]
     admission: bool
+    independent_source_review: bool
     blockers: tuple[Blocker, ...]
 
 
@@ -131,6 +132,7 @@ class Action:
     team: str | None = None
     actionable: bool = False
     reviewer_eligibility: ReviewerEligibility | None = None
+    independent_source_review: bool = False
     review_ids: tuple[int, ...] = ()
     blockers: tuple[Blocker, ...] = ()
 
@@ -141,6 +143,7 @@ class Action:
                 "team": self.team, "actionable": self.actionable,
                 "reviewer_eligibility": (self.reviewer_eligibility.value
                                          if self.reviewer_eligibility else None),
+                "independent_source_review": self.independent_source_review,
                 "review_ids": list(self.review_ids),
                 "blockers": [json.loads(b.raw_json) for b in self.blockers]}
 
@@ -276,7 +279,7 @@ def parse_pull(raw: object) -> Pull:
                 "base_ref", "base_sha", "stack", "created_at", "requested_reviewers",
                 "requested_teams", "author_id", "account_ids", "commit_accounts",
                 "commit_actor_ids", "commit_identities_complete",
-                "reviews", "admission", "blockers"}
+                "reviews", "admission", "independent_source_review", "blockers"}
     missing = required.difference(raw)
     if missing:
         raise ValueError("pull missing fields: " + ",".join(sorted(missing)))
@@ -320,6 +323,7 @@ def parse_pull(raw: object) -> Pull:
                 commit_names, commit_ids, accounts,
                 boolean(raw["commit_identities_complete"], "commit_identities_complete"), reviews,
                 boolean(raw["admission"], "admission"),
+                boolean(raw["independent_source_review"], "independent_source_review"),
                 tuple(parse_blocker(b) for b in sequence(raw["blockers"], "blockers")))
 
 
@@ -393,6 +397,7 @@ def plan(snapshot: Sequence[dict], roster: Sequence[str]) -> Worklist:
         actions.append(Action(pull.identity, reason, assignment, account=account,
                               account_id=account_id, team=team, actionable=actionable,
                               reviewer_eligibility=eligibility,
+                              independent_source_review=pull.independent_source_review,
                               review_ids=tuple(r.review_id for r in reviews), blockers=tuple(blockers)))
 
     # Ownership routes are planned first so first-review balancing includes the
@@ -468,7 +473,8 @@ def plan(snapshot: Sequence[dict], roster: Sequence[str]) -> Worklist:
         independent_proposed = any(a.assignment is Assignment.PROPOSED_USER
                                    and a.reviewer_eligibility is ReviewerEligibility.ELIGIBLE
                                    for a in actions[first_action:])
-        if (conflicting and not pull.admission and not pull.requested_teams
+        if (conflicting and not pull.admission and not pull.independent_source_review
+                and not pull.requested_teams
                 and not independent_requested and not unknown_requested and not independent_proposed
                 and not any(r.head == pull.identity.head for r in crs)):
             unassigned.append((pull, Reason.INDEPENDENT_REVIEW))

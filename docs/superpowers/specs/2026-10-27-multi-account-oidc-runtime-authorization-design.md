@@ -222,7 +222,7 @@ Intent는 대상 없이 digest만 남기지 않는다. 중단된 회수가 어�
 
 `auth_config.account_mode = Single_user | Multi_account`를 둔다. 파일이나 값이 없으면 Single_user이고, 알 수 없는 값이면 부팅을 거부한다. `config.json`이 있는데 읽지 못하면 설정은 없는 것으로 읽는다. 지금 동작과 같고(요청 때 503), 아래 표의 다른 두 열이 `Multi_account`의 흔적을 거부하므로 조용한 강등이 되지 않는다. 값을 써 넣는 설치·업그레이드 단계는 두지 않는다. principal 수나 초대 수로 모드를 추론하지 않는다. 첫 bootstrap 전에도 Multi_account를 선택할 수 있다.
 
-설정 값은 요청이다. 부팅 때 설정을 `authz.jsonl`의 마지막 모드 사건과 외부 고수위(§8.2)에 대조해 모드를 한 번 정한다. 모드 사건은 셋이다. `Fresh_bootstrap`(§8.4)과 `reactivate`(§10.5)는 `Multi_account`를 만들고 `off`(§10.5)는 `off`를 만든다. 아래 표의 둘째 열은 사건 이름이 아니라 마지막 사건이 만든 모드다. 결과는 표를 따르고, 거부 사유가 여럿이면 모두 돌려준다. 조용한 강등은 읽지 못한 것이나 없는 것을 근거로 `Multi_account` 설치를 `Single_user`로 내리는 것이고, 이 문서에서는 거부한다.
+설정 값은 요청이다. 부팅 때 설정을 `authz.jsonl`의 마지막 모드 사건과 외부 고수위(§8.2)에 대조해 모드를 한 번 정한다. 외부 저장소는 backup 밖 append-only 저장소이고, 외부 고수위는 그 저장소에 적힌 값이다. 모드 사건은 셋이다. `Fresh_bootstrap`(§8.4)과 `reactivate`(§10.5)는 `Multi_account`를 만들고 `off`(§10.5)는 `off`를 만든다. 아래 표의 둘째 열은 사건 이름이 아니라 마지막 사건이 만든 모드다. 결과는 표를 따르고, 거부 사유가 여럿이면 모두 돌려준다. 조용한 강등은 읽지 못한 것이나 없는 것을 근거로 `Multi_account` 설치를 `Single_user`로 내리는 것이고, 이 문서에서는 거부한다.
 
 | 설정 | 마지막 모드 사건이 만든 모드 | 외부 고수위 | 결과 |
 |---|---|---|---|
@@ -485,7 +485,7 @@ Committed {
 
 ### 8.4 신규 설치와 읽기 실패
 
-외부 고수위 저장소의 `ENOENT`는 명시적 `Fresh_bootstrap`에서만 허용한다. §5.1이 `없음`으로 읽는 저장소(`Committed`가 없고 `Intent_pending`이 모두 `Fresh_bootstrap`의 `aborted_intent`인 것)도 같다. `Fresh_bootstrap`은 **Local_operator가 서명한** 새 workspace_id·새 account_mode(`Multi_account`)·빈 `authz.jsonl`·빈 Recovery_manifest·초기 generation이 같은 bootstrap append로 확인되어야 한다. workspace_id도 외부 저장소와 같은 append에 기록한다. `Fresh_bootstrap`이 확인하는 account_mode는 `Multi_account`뿐이다. `Multi_account`를 거친 적 없는 `Single_user`는 `authz.jsonl`을 쓰지 않는다(§9.2).
+외부 저장소의 `ENOENT`는 명시적 `Fresh_bootstrap`에서만 허용한다. §5.1이 `없음`으로 읽는 저장소(`Committed`가 없고 `Intent_pending`이 모두 `Fresh_bootstrap`의 `aborted_intent`인 것)도 같다. `Fresh_bootstrap`은 **Local_operator가 서명한** 새 workspace_id·새 account_mode(`Multi_account`)·빈 `authz.jsonl`·빈 Recovery_manifest·초기 generation이 같은 bootstrap append로 확인되어야 한다. workspace_id도 외부 저장소와 같은 append에 기록한다. `Fresh_bootstrap`이 확인하는 account_mode는 `Multi_account`뿐이다. `Multi_account`를 거친 적 없는 `Single_user`는 `authz.jsonl`을 쓰지 않는다(§9.2).
 
 `EACCES`·다른 I/O 오류·손상 JSON·디렉터리·심볼릭 링크·부모 경로 부재·workspace_id 불일치는 `AuthorizationUncertain`으로 거부한다. `Fresh_bootstrap`이 아닌데 저장소가 없거나 생성 규칙이 맞지 않으면 실행하지 않는다. 외부 고수위를 생략하고 legacy 경로로 부팅하지 않는다.
 

@@ -115,7 +115,7 @@ let test_default_drift_is_visible_without_failing_restore () =
   let report = { (report ~skipped:[] ~runtime:D.Preset_runtime_unchanged) with
     D.prr_default_prompts = Masc.Prompt_preset.Defaults_differ changes } in
   check bool "default drift leaves restore successful" true (Text.restore_is_clean report);
-  let lines = Text.restore_lines report in
+  let lines = Text.restore_lines ~ko:true report in
   List.iter (fun line -> check bool "changed prompt is visible" true (List.mem line lines))
     ["기본 프롬프트 · 차이 3건"; "  변경 · keeper"; "  추가 · judge"; "  없음 · removed"];
   let part = `Assoc ["effect", `String "immediate"; "applied", `List []; "skipped", `List []] in

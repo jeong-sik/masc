@@ -3626,8 +3626,8 @@ let fetch_preset_detail ~(host : string) ~(port : int) ~(name : string)
 (** POST /api/v1/presets — body {name, description}: snapshot the live
     prompt overrides, keeper instructions and runtime routing under [name]. *)
 let post_preset_save ~(host : string) ~(port : int) ~(name : string)
-    ~(description : string) : (Yojson.Safe.t, string) result =
-  post_json ~host ~port ~path:"/api/v1/presets"
+    ~(description : string) : post_outcome =
+  post_json_outcome ~host ~port ~path:"/api/v1/presets"
     ~body:
       (Yojson.Safe.to_string
          (`Assoc [ ("name", `String name); ("description", `String description) ]))

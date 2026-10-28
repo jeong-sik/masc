@@ -31,6 +31,7 @@ type detail_state =
 type binding = {
   key : string;
   label : string;      (** the footer's short word *)
+  label_ko : string option; (** Korean footer label when supplied *)
   help : string option;  (** the overlay's longer sentence; [label] if absent *)
   group : group;
   detail : detail_state;  (** which of a detail-owning surface's two states *)
@@ -144,7 +145,7 @@ val has_detail_scoped_keys : Masc_tui_types.surface -> bool
     Read by the test that keeps a new detail-owning surface from landing
     without it. *)
 
-val footer_hints_config : pane:Masc_tui_types.config_pane -> string
+val footer_hints_config : lang:Masc_tui_types.ui_language -> pane:Masc_tui_types.config_pane -> string
 (** Config bindings available on the active pane. The surface-wide help keeps
     the union, with pane restrictions explained by each binding. *)
 
@@ -170,7 +171,7 @@ val footer_hints_approval_detail : string
     ("y / n"), the spelling {!Masc_tui_footer} pins, so a narrow row gives up
     the scroll before it gives up the answer. *)
 
-val footer_hints_voice_agent : ?saving:bool -> unit -> string
+val footer_hints_voice_agent : lang:Masc_tui_types.ui_language -> ?saving:bool -> unit -> string
 (** The keeper-voice screen's own row: the keeper axis, the voice axis, the
     write and the way out. Its keys are not the Config pane's, so the row is
     the screen's rather than the pane's. *)
@@ -184,7 +185,7 @@ val footer_hints_runtime_account_saved : unit -> string
 (** The account form's row after a save: the copy of the sign-in command
     and the way out. *)
 
-val footer_hints_prompt_assets : string
+val footer_hints_prompt_assets : lang:Masc_tui_types.ui_language -> string
 (** The prompts pane while it shows the read-only runtime assets: its keys
     without the ones that edit the registry, and [o] named for the way back. *)
 

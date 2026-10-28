@@ -19722,7 +19722,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
       (match sink, result with
        | Preset_to_chat target, Ok detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_reply
-             (String.concat "\n" (Masc_tui_preset_text.contents_lines detail))
+             (String.concat "\n" (Masc_tui_preset_text.contents_lines
+                ~ko:(state.ui_language = Lang_ko) detail))
        | Preset_to_chat target, Error detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure detail
        (* The pane reads its own detail through [Preset_detail_loaded], keyed
@@ -19828,11 +19829,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            chat_notice state ~keeper_name:target ~kind:Notice_failure detail
        | Preset_to_pane, Ok manifest ->
            state.preset_busy <- false;
-           report_action state "system" (Masc_tui_preset_text.saved_line manifest);
+           report_action state "system"
+             (Printf.sprintf (if state.ui_language = Lang_ko then "%s 저장됨" else "%s saved")
+                manifest.Tui_decode.pm_name);
            launch_presets_load state ~mailbox
        | Preset_to_pane, Error detail ->
            state.preset_busy <- false;
-           report_action state "error" ("preset save: " ^ detail))
+           report_action state "error" (ui_text state ~ko:"프리셋 저장: " ~en:"Preset save: " ^ detail);
+           launch_presets_load state ~mailbox)
   | Preset_restored (sink, result) ->
       (match sink, result with
        | Preset_to_chat target, Ok report ->
@@ -19841,10 +19845,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
               which, and a footer line could not hold them. *)
            state.preset_report <- Some report;
            chat_notice state ~keeper_name:target ~kind:Notice_reply
-             (String.concat "\n" (Masc_tui_preset_text.restore_lines report));
+             (String.concat "\n" (Masc_tui_preset_text.restore_lines
+                ~ko:(state.ui_language = Lang_ko) report));
            if not (Masc_tui_preset_text.restore_is_clean report) then
              report_action state "error"
-               "프리셋 복원 결과에 확인할 항목이 있습니다 · 상세 보고서를 확인하세요"
+               (ui_text state ~ko:"프리셋 복원 결과에 확인할 항목이 있습니다 · 상세 보고서를 확인하세요"
+                  ~en:"The restore needs attention · check the detailed report")
        | Preset_to_chat target, Error detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure detail
        | Preset_to_pane, Ok report ->
@@ -19852,12 +19858,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            state.preset_report <- Some report;
            report_action state
              (if Masc_tui_preset_text.restore_is_clean report then "system" else "error")
-             (Printf.sprintf "%s 복원 · 이전 상태는 %s"
+             (Printf.sprintf (if state.ui_language = Lang_ko then "%s 복원 결과 · 이전 상태는 %s" else "%s restore result · previous settings: %s")
                 report.Tui_decode.prr_restored report.Tui_decode.prr_autosave);
            launch_presets_load state ~mailbox
        | Preset_to_pane, Error detail ->
            state.preset_busy <- false;
-           report_action state "error" ("preset restore: " ^ detail))
+           report_action state "error" (ui_text state ~ko:"프리셋 복원: " ~en:"Preset restore: " ^ detail))
   | Preset_deleted (sink, result) ->
       (* The list is read again after a failure too: a refusal says the
          list was stale, and an unanswered delete may have landed. *)
@@ -19869,11 +19875,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            chat_notice state ~keeper_name:target ~kind:Notice_failure detail
        | Preset_to_pane, Ok name ->
            state.preset_busy <- false;
-           report_action state "system" (name ^ " 삭제");
+           report_action state "system" (name ^ ui_text state ~ko:" 삭제됨" ~en:" deleted");
            launch_presets_load state ~mailbox
        | Preset_to_pane, Error detail ->
            state.preset_busy <- false;
-           report_action state "error" ("preset delete: " ^ detail);
+           report_action state "error" (ui_text state ~ko:"프리셋 삭제: " ~en:"Preset delete: " ^ detail);
            launch_presets_load state ~mailbox)
   | Play_room_received (request, result) ->
       state.play_room <- Option.map (fun room ->
@@ -26921,11 +26927,11 @@ and is loaded on demand through keeper_skill.
               (match k with
                | "esc" ->
                  state.preset_save_draft <- None;
-                 report_action state "system" "프리셋 저장 취소"
+                 report_action state "system" (ui_text state ~ko:"프리셋 저장 취소" ~en:"Preset save cancelled")
                | "\r" | "\n" | "enter" ->
                  let name = String.trim draft in
                  if String.equal name "" then
-                   report_action state "error" "프리셋 이름이 필요합니다"
+                   report_action state "error" (ui_text state ~ko:"프리셋 이름이 필요합니다" ~en:"A preset name is required")
                  else begin
                    state.preset_save_draft <- None;
                    state.preset_busy <- true;
@@ -31222,7 +31228,7 @@ and is loaded on demand through keeper_skill.
                the live state, named in the line the pane opens. *)
             | Config when state.config_pane = Config_presets ->
                 if state.preset_busy then
-                  report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
+                  report_action state "system" (ui_text state ~ko:"프리셋 작업이 아직 끝나지 않았습니다" ~en:"A preset operation is still in progress")
                 else begin
                   state.preset_armed <- None;
                   state.preset_save_draft <- Some ""
@@ -31619,15 +31625,15 @@ and is loaded on demand through keeper_skill.
        | Some "u" | Some "U"
          when state.view = Config && state.config_pane = Config_presets ->
            (match selected_preset_for_state state with
-            | None -> report_action state "error" "되돌릴 프리셋을 고르세요"
+            | None -> report_action state "error" (ui_text state ~ko:"복원할 프리셋을 고르세요" ~en:"Select a preset to restore")
             | Some manifest ->
               let name = manifest.Tui_decode.pm_name in
               if state.preset_busy then
-                report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
+                report_action state "system" (ui_text state ~ko:"프리셋 작업이 아직 끝나지 않았습니다" ~en:"A preset operation is still in progress")
               else if state.preset_armed = Some (Restore_armed name) then begin
                 state.preset_armed <- None;
                 state.preset_busy <- true;
-                report_action state "system" (name ^ " 복원 중 · 지금 상태는 먼저 저장됩니다");
+                report_action state "system" (name ^ ui_text state ~ko:" 복원 중 · 지금 상태는 먼저 저장됩니다" ~en:" restoring · current settings are backed up first");
                 launch_preset_call state ~mailbox:async_messages
                   ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
                   ~wrap:(fun result -> Preset_restored (Preset_to_pane, result))
@@ -31635,20 +31641,20 @@ and is loaded on demand through keeper_skill.
               else begin
                 state.preset_armed <- Some (Restore_armed name);
                 report_action state "system"
-                  (Printf.sprintf "u 를 한 번 더 누르면 %s 로 되돌립니다" name)
+                  (Printf.sprintf (if state.ui_language = Lang_ko then "u 를 한 번 더 누르면 %s 로 복원합니다" else "Press u again to restore %s") name)
               end)
        | Some "D"
          when state.view = Config && state.config_pane = Config_presets ->
            (match selected_preset_for_state state with
-            | None -> report_action state "error" "지울 프리셋을 고르세요"
+            | None -> report_action state "error" (ui_text state ~ko:"지울 프리셋을 고르세요" ~en:"Select a preset to delete")
             | Some manifest ->
               let name = manifest.Tui_decode.pm_name in
               if state.preset_busy then
-                report_action state "system" "프리셋 작업이 아직 끝나지 않았습니다"
+                report_action state "system" (ui_text state ~ko:"프리셋 작업이 아직 끝나지 않았습니다" ~en:"A preset operation is still in progress")
               else if state.preset_armed = Some (Delete_armed name) then begin
                 state.preset_armed <- None;
                 state.preset_busy <- true;
-                report_action state "system" (name ^ " 삭제 중");
+                report_action state "system" (name ^ ui_text state ~ko:" 삭제 중" ~en:" deleting");
                 launch_preset_call state ~mailbox:async_messages
                   ~call:(fun ~host ~port -> Masc_tui_loader.delete_preset ~host ~port ~name)
                   ~wrap:(fun result -> Preset_deleted (Preset_to_pane, result))
@@ -31656,7 +31662,7 @@ and is loaded on demand through keeper_skill.
               else begin
                 state.preset_armed <- Some (Delete_armed name);
                 report_action state "system"
-                  (Printf.sprintf "D 를 한 번 더 누르면 %s 를 지웁니다" name)
+                  (Printf.sprintf (if state.ui_language = Lang_ko then "D 를 한 번 더 누르면 %s 를 지웁니다" else "Press D again to delete %s") name)
               end)
        | Some key when state.view = Planning
            && Option.is_some (goal_detail_on_screen state)

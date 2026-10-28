@@ -23,45 +23,46 @@ type detail_state =
 type binding = {
   key : string;
   label : string;
+  label_ko : string option;
   help : string option;
   group : group;
   detail : detail_state;
 }
 
-let b ?help ?(detail = Either) group key label =
-  { key; label; help; group; detail }
+let b ?help ?ko ?(detail = Either) group key label =
+  { key; label; label_ko = ko; help; group; detail }
 
 (* [None] is shared by all Config panes; [Some panes] belongs only to those
    input handlers. Keep availability beside the binding, not in a second key
    list inferred from the rendered label. *)
 let config_bindings =
-  [ b Navigate "j/k" "select / scroll", Some
+  [ b ~ko:"선택 / 스크롤" Navigate "j/k" "select / scroll", Some
       [ Config_runtime; Config_models; Config_params; Config_prompts
       ; Config_presets; Config_themes; Config_voice ]
-  ; b Navigate "p" "next pane"
+  ; b ~ko:"다음 탭" Navigate "p" "next pane"
       ~help:"runtime.toml / models / params / prompts / presets / themes / voice", None
-  ; b Navigate "A" "activity"
+  ; b ~ko:"활동" Navigate "A" "activity"
       ~help:"event history under System", None
-  ; b Navigate "L" "logs"
+  ; b ~ko:"로그" Navigate "L" "logs"
       ~help:"server logs under System", None
-  ; b Navigate "PgUp/PgDn" "page"
+  ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
       ~help:"pages runtime.toml, the voice reading and the detail of params, prompts \
              and presets, and moves the selection a page on models and themes",
       Some [ Config_runtime; Config_models; Config_params; Config_prompts; Config_presets
            ; Config_themes; Config_voice ]
-  ; b Navigate "Home/End" "detail"
+  ; b ~ko:"상세 처음/끝" Navigate "Home/End" "detail"
       ~help:"first or last wrapped detail row of a selected preset, or of a prompt registry or asset document",
       Some [ Config_presets; Config_prompts ]
-  ; b Navigate "v" "read status"
+  ; b ~ko:"적용 상태" Navigate "v" "read status"
       ~help:"runtime.toml: source revision, validation issues, and application/restart details",
       Some [ Config_runtime ]
-  ; b Navigate "9" "Runtime"
+  ; b ~ko:"런타임" Navigate "9" "Runtime"
       ~help:"runtime status, lane routing, probes and connected clients", None
-  ; b Navigate "s" "resources"
+  ; b ~ko:"리소스" Navigate "s" "resources"
       ~help:"the MCP resource catalog, off the ring under System", None
-  ; b Navigate "t" "tools"
+  ; b ~ko:"도구" Navigate "t" "tools"
       ~help:"the tool catalog, receipts, and usage, off the ring under System", None
-  ; b Act "e" "edit"
+  ; b ~ko:"편집" Act "e" "edit"
       ~help:"runtime.toml previews; models open fields; prompts save an override; voice opens the setup wizard",
       Some [ Config_runtime; Config_models; Config_prompts; Config_voice ]
     (* One item, because they are one action: on params [e] and [Enter] both
@@ -71,23 +72,26 @@ let config_bindings =
        80 cells, the only other thing the pane does. A reader left with
        [e:edit] and [Enter:edit / use] would also read the pane as having one
        way to edit and no advanced one. *)
-  ; b Act "c" "copy model" ~help:"same account/API model, independent variant settings", Some [Config_models]
-  ; b Navigate "v" "full details" ~help:"read complete account/model settings without editing", Some [Config_models]
-  ; b Act "m" "model source", Some [Config_models]
-  ; b Act "e / Enter" "edit"
+  ; b ~ko:"모델 복사" Act "c" "copy model" ~help:"same account/API model, independent variant settings", Some [Config_models]
+  ; b ~ko:"전체 상세" Navigate "v" "full details" ~help:"read complete account/model settings without editing", Some [Config_models]
+  ; b ~ko:"모델 원본" Act "m" "model source", Some [Config_models]
+  ; b ~ko:"편집" Act "e / Enter" "edit"
       ~help:"on params: edit the selected value with a type-aware field",
       Some [ Config_params ]
-  ; b Act "E" "advanced JSON"
+  ; b ~ko:"JSON 편집" Act "E" "advanced JSON"
       ~help:"on params only: edit the exact JSON value", Some [ Config_params ]
     (* Split from the pair above. What [Enter] does on themes is not editing,
        and one label reading "edit / use" made each pane carry the other's
        word: a params reader met "use" with nothing to use. *)
-  ; b Act "Enter" "use"
+  ; b ~ko:"적용" Act "Enter" "use"
       ~help:"on themes, use that colour scheme", Some [ Config_themes ]
-  ; b Act "x" "default / clear"
-      ~help:"params return to default; prompts clear override; themes follow terminal colours",
-      Some [ Config_params; Config_prompts; Config_themes ]
-  ; b Act "f" "filter"
+  ; b ~ko:"기본값" Act "x" "default"
+      ~help:"parameters: return the selected value to its default", Some [ Config_params ]
+  ; b ~ko:"재정의 해제" Act "x" "clear override"
+      ~help:"prompts: clear the selected override", Some [ Config_prompts ]
+  ; b ~ko:"터미널 색상" Act "x" "terminal colours"
+      ~help:"themes: follow terminal colours", Some [ Config_themes ]
+  ; b ~ko:"필터" Act "f" "filter"
       ~help:"on themes, cycle All / Dark / Light schemes", Some [ Config_themes ]
     (* Pane-scoped writes. Each of these is the only key that does what it
        does, and none of them were listed: presets could be made and put
@@ -95,46 +99,45 @@ let config_bindings =
        with nothing on screen saying so. Short labels: the pane each belongs
        to and what it does are in the help, which the ? overlay draws in
        full. *)
-  ; b Act "n" "new"
+  ; b ~ko:"새로 저장" Act "n" "new"
       ~help:"on presets, name a preset holding the configuration as it stands",
       Some [ Config_presets ]
-  ; b Act "i" "input"
+  ; b ~ko:"입력" Act "i" "input"
       ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
-  ; b Act "a" "fragments / voice / account"
-      ~help:"on prompts, show or hide the internal pieces the main prompts \
-             are built from, though not on the runtime assets reading; on \
-             voice, give the selected keeper its own voice; on runtime.toml, \
-             declare one more Claude Code, Codex or Antigravity account by \
-             copying a provider the file declares",
-      Some [ Config_runtime; Config_prompts; Config_voice ]
+  ; b ~ko:"계정 추가" Act "a" "add account"
+      ~help:"runtime.toml: declare an account by copying a provider", Some [ Config_runtime ]
+  ; b ~ko:"조각" Act "a" "fragments"
+      ~help:"prompts: show or hide internal fragments", Some [ Config_prompts ]
+  ; b ~ko:"키퍼 목소리" Act "a" "keeper voices"
+      ~help:"voice: assign a voice to a keeper", Some [ Config_voice ]
     (* [u] and the retained-draft keys come after [a]: a cut row drops them
        first, and while a draft is retained the runtime.toml pane names them
        in its own heading. *)
-  ; b Act "u" "restore / adopt revision"
-      ~help:"on presets, put the selected one back; press twice to confirm; \
-             on runtime.toml, keep the draft and adopt the displayed current \
-             file revision; S saves",
-      Some [ Config_presets; Config_runtime ]
+  ; b ~ko:"복원" Act "u" "restore"
+      ~help:"presets: restore the selected preset; press twice to confirm", Some [ Config_presets ]
+  ; b ~ko:"리비전 채택" Act "u" "adopt revision"
+      ~help:"runtime.toml: keep the draft and adopt the displayed current file revision; S saves",
+      Some [ Config_runtime ]
     (* Upper case, as Runtime's lane removal: x on the other panes puts a
        default back, and a delete cannot be put back. *)
-  ; b Act "D" "delete"
+  ; b ~ko:"삭제" Act "D" "delete"
       ~help:"on presets, delete the selected one; press twice to confirm. \
              A preset listed with ! under a valid name is deleted with \
              /preset delete <name>",
       Some [ Config_presets ]
-  ; b Act "S" "save draft"
+  ; b ~ko:"초안 저장" Act "S" "save draft"
       ~help:"runtime.toml: retry the retained draft against its original or explicitly adopted revision",
       Some [ Config_runtime ]
-  ; b Act "C" "compare file"
+  ; b ~ko:"파일 비교" Act "C" "compare file"
       ~help:"runtime.toml: switch between the retained draft and the current file read with r",
       Some [ Config_runtime ]
-  ; b Act "U" "use current text"
+  ; b ~ko:"현재 본문 사용" Act "U" "use current text"
       ~help:"runtime.toml: replace the retained draft with the displayed current file without writing",
       Some [ Config_runtime ]
-  ; b Act "X" "discard draft"
+  ; b ~ko:"초안 버리기" Act "X" "discard draft"
       ~help:"runtime.toml: discard only the local draft and read the current file",
       Some [ Config_runtime ]
-  ; b Act "o" "assets"
+  ; b ~ko:"자산" Act "o" "assets"
       ~help:"on prompts, switch between the read-only runtime assets and \
              the registry you can override",
       Some [ Config_prompts ]
@@ -142,10 +145,10 @@ let config_bindings =
      each cell of its label comes out of the pane's own keys. Spelled
      "dashboard", params at 80 columns gave up [E], its only way to the JSON
      value. The help names where it goes. *)
-  ; b Act "Esc" "back" ~help:"back to Dashboard", None
-  ; b Meta "r" "reload", None
-  ; b Meta "Tab" "next", None
-  ; b Meta "q" "quit", None
+  ; b ~ko:"뒤로" Act "Esc" "back" ~help:"back to Dashboard", None
+  ; b ~ko:"새로고침" Meta "r" "reload", None
+  ; b ~ko:"다음" Meta "Tab" "next", None
+  ; b ~ko:"종료" Meta "q" "quit", None
   ]
 
 (* The Runtime keys, by the reading they act on. [p] goes somewhere different
@@ -1154,10 +1157,15 @@ let group_rank = function Navigate -> 0 | Act -> 1 | Search -> 2 | Meta -> 3
 (* Sort by group, then flatten to the footer's "key:label  key:label" form.
    Both the static per-surface footer and the Fusion detail footer (which
    appends a live scroll position) render through this one projection. *)
-let hints_of_bindings bindings =
+let hints_of_bindings ?(lang = Lang_en) bindings =
   bindings
   |> List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group))
-  |> List.map (fun { key; label; _ } -> key ^ ":" ^ label)
+  |> List.map (fun { key; label; label_ko; _ } ->
+      let label = match lang with
+        | Lang_ko -> Option.value label_ko ~default:label
+        | Lang_en -> label
+      in
+      key ^ ":" ^ label)
   |> String.concat "  "
 
 (* [detail_open] is how a surface that owns a detail says which of its two
@@ -1323,13 +1331,13 @@ let config_pane_bindings pane =
    as one list, the hops to Runtime, Resources and Tools outlived every key a
    pane answers itself: at 120 columns presets lost n and u, and the runtime
    assets lost o, their only way back to the registry. *)
-let config_row ~own ~shared =
+let config_row ~lang ~own ~shared =
   String.concat "  "
     (List.filter
        (fun row -> not (String.equal row ""))
-       [ hints_of_bindings own; hints_of_bindings shared ])
+       [ hints_of_bindings ~lang own; hints_of_bindings ~lang shared ])
 
-let footer_hints_config ~pane =
+let footer_hints_config ~lang ~pane =
   let own, shared = config_pane_bindings pane in
   match pane with
   | Config_params | Config_presets ->
@@ -1341,10 +1349,10 @@ let footer_hints_config ~pane =
     let actions, navigation =
       List.partition (fun binding -> binding.group = Act) own in
     String.concat "  "
-      [ hints_of_bindings actions; hints_of_bindings navigation
-      ; hints_of_bindings shared ]
+      [ hints_of_bindings ~lang actions; hints_of_bindings ~lang navigation
+      ; hints_of_bindings ~lang shared ]
   | Config_runtime | Config_models | Config_prompts | Config_themes | Config_voice ->
-    config_row ~own ~shared
+    config_row ~lang ~own ~shared
 
 (* The keeper-voice screen: two lists and one write. The keys are its own --
    the keeper walks under [j]/[k] and the voice under the arrows, so an
@@ -1352,13 +1360,13 @@ let footer_hints_config ~pane =
    followed -- and the row is built here rather than written as a string, so
    the spellings are the table's. *)
 let voice_agent_bindings =
-  [ b Navigate "j/k" "keeper"
-  ; b Navigate "\xe2\x86\x90/\xe2\x86\x92" "voice"
-  ; b Navigate "PgUp/PgDn" "metadata page"
-  ; b Navigate "Home/End" "metadata edges"
-  ; b Meta "?" "help"
-  ; b Act "Enter" "assign" ~help:"write this keeper's voice into voice.tts.agent_voices"
-  ; b Act "Esc" "back" ~help:"leave the screen; nothing is written"
+  [ b ~ko:"키퍼" Navigate "j/k" "keeper"
+  ; b ~ko:"목소리" Navigate "\xe2\x86\x90/\xe2\x86\x92" "voice"
+  ; b ~ko:"상세 페이지" Navigate "PgUp/PgDn" "metadata page"
+  ; b ~ko:"상세 처음/끝" Navigate "Home/End" "metadata edges"
+  ; b ~ko:"도움말" Meta "?" "help"
+  ; b ~ko:"배정" Act "Enter" "assign" ~help:"write this keeper's voice into voice.tts.agent_voices"
+  ; b ~ko:"뒤로" Act "Esc" "back" ~help:"leave the screen; nothing is written"
   ]
 
 let patch_review_bindings =
@@ -1388,11 +1396,11 @@ let footer_hints_runtime_detail ?(routes = false) () =
   hints_of_bindings (runtime_detail_bindings_for ~routes)
 
 let voice_agent_bindings_for_saving saving =
-  if saving then [ b Meta "?" "help"; b Act "Esc" "back" ]
+  if saving then [ b ~ko:"도움말" Meta "?" "help"; b ~ko:"뒤로" Act "Esc" "back" ]
   else voice_agent_bindings
 
-let footer_hints_voice_agent ?(saving = false) () =
-  hints_of_bindings (voice_agent_bindings_for_saving saving)
+let footer_hints_voice_agent ~lang ?(saving = false) () =
+  hints_of_bindings ~lang (voice_agent_bindings_for_saving saving)
 
 (* The account form on runtime.toml takes every key while it is open, so the
    pane's row -- [e], [r], [Tab], [q] -- would name keys that now type into a
@@ -1424,17 +1432,18 @@ let footer_hints_runtime_account_saved () =
    shipped with the binary, and there [a], [i], [e] and [x] answer with a
    notice rather than acting (masc_tui.ml), so the row leaves them out and
    names where [o] goes back to. *)
-let footer_hints_prompt_assets =
+let footer_hints_prompt_assets ~lang =
   let registry_only = [ "a"; "i"; "e"; "x" ] in
   let own, shared = config_pane_bindings Config_prompts in
   let own =
     own
     |> List.filter (fun binding -> not (List.mem binding.key registry_only))
     |> List.map (fun binding ->
-           if String.equal binding.key "o" then { binding with label = "registry" }
+           if String.equal binding.key "o" then
+             { binding with label = "registry"; label_ko = Some "프롬프트 목록" }
            else binding)
   in
-  config_row ~own ~shared
+  config_row ~lang ~own ~shared
 
 (* Work's task list, while it owns j/k. The Goals pane under the same
    surface reads [footer_hints Planning]; this is the other half of that one

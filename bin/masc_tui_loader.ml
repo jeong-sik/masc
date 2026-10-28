@@ -1593,9 +1593,17 @@ let load_preset_detail ~(host : string) ~(port : int) ~(name : string)
 (** POST /api/v1/presets — the manifest the server wrote. *)
 let save_preset ~(host : string) ~(port : int) ~(name : string) ~(description : string)
     : (Tui_decode.preset_manifest, string) result =
+  let unconfirmed detail =
+    Error ("preset save result unconfirmed — the preset may have been saved; \
+            check the preset list before retrying: " ^ detail)
+  in
   match Masc_tui_http.post_preset_save ~host ~port ~name ~description with
-  | Error err -> Error ("preset save failed: " ^ err)
-  | Ok json -> Tui_decode.decode_preset_saved json
+  | Post_refused detail -> Error ("preset save refused: " ^ detail)
+  | Post_unanswered detail -> unconfirmed detail
+  | Post_answered json ->
+    (match Tui_decode.decode_preset_saved json with
+     | Ok manifest -> Ok manifest
+     | Error detail -> unconfirmed detail)
 
 (** POST /api/v1/presets/restore — the per-surface report. A transport
     failure leaves the outcome unknown: the server writes an autosave and

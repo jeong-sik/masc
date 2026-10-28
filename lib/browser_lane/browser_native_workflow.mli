@@ -1,4 +1,4 @@
-(** A finite list of native Ego Page calls followed by one native snapshot.
+(** A finite list of native Ego Page/Download calls followed by one native snapshot.
     Locators and waits belong to the SDK. This is a browser capability, not
     host JavaScript, a ref registry or a composition interpreter. *)
 type element_state = Attached | Detached | Visible | Hidden

@@ -13,6 +13,7 @@ let choose preference ~has_context ~cols ~body_rows ~queue_fixed_rows =
   match preference with
   | Expanded -> Full
   | Adaptive when not has_context -> Full
+  | Adaptive when cols < Masc_tui_message_layout.chat_min_terminal_cols -> Full
   | Adaptive when cols >= 2 * prose_cols ->
       let context_cols = cols / 2 in
       Side {context_cols; queue_cols=cols-context_cols}
@@ -23,3 +24,18 @@ let choose preference ~has_context ~cols ~body_rows ~queue_fixed_rows =
 let queue_rows ~body_rows = function
   | Full | Side _ -> body_rows
   | Bottom {queue_rows; context_rows=_} -> queue_rows
+
+let panes placement ~cols ~first_row ~body_rows =
+  let module Pane = Masc_tui_pane_selection in
+  let bottom = first_row + body_rows - 1 in
+  let pane ~top ~bottom ~left ~right =
+    if bottom < top || right < left then []
+    else [Pane.{kind=Main; rect={top; bottom; left; right}}] in
+  match placement with
+  | Full -> pane ~top:first_row ~bottom ~left:1 ~right:cols
+  | Side {context_cols; queue_cols=_} ->
+      pane ~top:first_row ~bottom ~left:1 ~right:context_cols
+      @ pane ~top:first_row ~bottom ~left:(context_cols+1) ~right:cols
+  | Bottom {context_rows; queue_rows=_} ->
+      pane ~top:first_row ~bottom:(first_row+context_rows-1) ~left:1 ~right:cols
+      @ pane ~top:(first_row+context_rows+1) ~bottom ~left:1 ~right:cols

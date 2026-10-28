@@ -10260,10 +10260,7 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
         (resolve_queue_selection ~require_action_ready:true ~state ~panel ~items:(items ())) with
     | None -> notice ~failure:true "Queue selection changed or has not been shown; review the selected row and retry"
     | Some (Inbox.Local_message id) ->
-      if List.exists (fun (name, _, intervention) ->
-        String.equal name panel.qp_keeper && match intervention with
-        | Retained_before_dispatch -> true
-        | Retained_after_stop | Awaiting_control _ -> false) state.keeper_interactive_waiting then
+      if queue_local_reordering_held state ~keeper_name:panel.qp_keeper then
         notice "Unsent input is retained after a failed preflight; resume it before reordering"
       else (match command with
        | `Last ->
@@ -10327,6 +10324,7 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
       let old_height = max 0 (budget - queue_panel_fixed_rows ~items:rows panel) in
       let old_scroll = queue_panel_scroll ~items:rows ~height:old_height panel in
       let panel = {panel with qp_selected=None} in
+      let budget = Masc_tui_render_overlays.queue_panel_list_budget state panel in
       let height = max 1 (budget - queue_panel_fixed_rows ~items:rows panel) in
       let scroll = (match key with
         | "pageup" ->
@@ -24214,6 +24212,8 @@ let main
       queue_selection_authority_changed ~presented:(!presented).presses ~candidate:presses
       || queue_owner_authority_changed ~presented:(queue_owner_of_reader (!presented).reader)
            ~candidate:(queue_owner_of_reader reader)
+      || ((Option.is_some (queue_owner_of_reader (!presented).reader)
+           || Option.is_some (queue_owner_of_reader reader)) && (!presented).panes <> panes)
       || play_owner_authority_changed ~presented:(play_card_of_reader (!presented).reader)
            ~candidate:(play_card_of_reader reader)
       || Presented.panel_presentation_changed !presented ~current_owner:panel_owner

@@ -4309,9 +4309,12 @@ let queue_context_lines (state : state) ~keeper_name ~cols ~height =
   let preview = preview_snapshot Masc_tui_link_preview.get_preview in
   let markdown = cached_chat_markdown_with_preview ~preview
       ~link_previews_mode:state.link_previews_mode ~theme in
+  let source_body = source_body_lookup state ~keeper_name projection ~inner_width:cols ~theme ~preview in
+  let requested = requested_scroll_from_pin state ~keeper_name projection
+      ~markdown ~source_body ~inner_width:cols in
   let window = Message_layout.clamped_scrolled_rows ~markdown
       ~origin:state.msg_origin_display ~inner_width:cols ~height
-      ~requested:state.msg_scroll projection.layout_entries in
+      ~requested projection.layout_entries in
   let buf = Buffer.create 1024 in
   List.iter (render_chat_row ~theme ~origin:state.msg_origin_display buf chat_cols) window.rows;
   (* The preview has no interactive chat controls, including any marks a

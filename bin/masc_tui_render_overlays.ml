@@ -879,7 +879,9 @@ let queue_panel_layout state (panel : queue_panel) =
       && Option.is_none panel.qp_detail in
   Masc_tui_queue_layout.choose panel.qp_layout ~has_context ~cols
     ~body_rows:(surface_chrome_budget state ~terminal_rows)
-    ~queue_fixed_rows:(queue_panel_fixed_rows ~items:(queue_panel_items state panel) panel)
+    (* Reserve status, a possible receipt and a possible selection note when
+       choosing placement, so selecting or receiving a result does not move it. *)
+    ~queue_fixed_rows:3
 
 let queue_panel_list_budget state panel =
   let terminal_rows, _ = get_terminal_size () in
@@ -906,9 +908,13 @@ let render_queue_panel (state : state) (panel : queue_panel) =
   else
   let placement = queue_panel_layout state panel in
   let context_caption =
-    match state.msg_loaded_error with
-    | Some _ -> "Conversation · cached; history read failed"
-    | None -> "Conversation · Esc returns to chat" in
+    let partial = Option.is_some state.msg_loaded_error || state.msg_loaded_dropped > 0
+        || Option.is_some state.msg_memory_error || state.msg_memory_dropped > 0
+        || Option.is_some state.msg_older_error in
+    if partial then "Partial conversation · Esc:full chat"
+    else if state.msg_older_loading || Option.is_some state.msg_history_inflight then
+      "Reading conversation · Esc:full chat"
+    else "Conversation preview · Esc:full chat" in
   let context_lines ~cols ~height =
     Masc_tui_render_chat.queue_context_lines state ~keeper_name:panel.qp_keeper ~cols ~height in
   let sidebar = match placement with
@@ -941,7 +947,7 @@ let render_queue_panel (state : state) (panel : queue_panel) =
        | None -> "Queue observation unavailable · r retries")
     | Queue_unavailable, None -> "Snapshot unavailable · r retries" in
   let hints = Masc_tui_keys.footer_hints_queue state panel in
-  surface_chrome ~overflow:(Self_scrolled owner) state ~terminal_rows ~cols
+  let frame, clamped = surface_chrome ~overflow:(Self_scrolled owner) state ~terminal_rows ~cols
     ?sidebar
     ~surface_key:"keeper-queue" ~frame:Chrome_overlay
     ~title:(title " MASC Queue")
@@ -991,7 +997,13 @@ let render_queue_panel (state : state) (panel : queue_panel) =
               | None -> row
             else row in
           c.push row
-        end) items)
+        end) items) in
+  (* Shared chrome has three leading rows and two trailing rows. Its body
+     copies as separate documents, even though the terminal writes one row. *)
+  frame_panes := Masc_tui_queue_layout.panes placement ~cols
+      ~first_row:(strip_rows + surface_chrome_rows - 1)
+      ~body_rows:(surface_chrome_budget state ~terminal_rows);
+  frame, clamped
 
 (* The answering overlay, through the overlay contract. Drawn by hand, a short
    list closed the box right under the preview panel, so the footer stood on

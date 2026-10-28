@@ -3057,7 +3057,7 @@
  (name masc_tui_queue_layout)
  (wrapped false)
  (modules masc_tui_queue_layout)
- (libraries masc_tui_message_layout))
+ (libraries masc_tui_message_layout masc_tui_pane_selection))
 
 (library
  (name masc_tui_queue_inspection)

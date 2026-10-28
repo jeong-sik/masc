@@ -10600,6 +10600,12 @@ let queue_panel_selected_id ~items panel =
   | Some _ -> panel.qp_selected
   | None -> None
 
+let queue_local_reordering_held state ~keeper_name =
+  List.exists (fun (name, _, intervention) ->
+      String.equal name keeper_name && match intervention with
+      | Retained_before_dispatch -> true
+      | Retained_after_stop | Awaiting_control _ -> false) state.keeper_interactive_waiting
+
 type queue_panel_priority =
   | Queue_no_priority | Queue_local_order | Queue_server_order | Queue_event_urgency
 
@@ -10609,7 +10615,9 @@ let queue_panel_priority state ~items panel =
       (match List.find_opt (fun (item : Masc_tui_keeper_chat_queue.item) ->
           String.equal item.request.request_id id)
           (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name:panel.qp_keeper) with
-       | Some {intent=Next; _} -> Queue_local_order
+       | Some {intent=Next; _} ->
+           if queue_local_reordering_held state ~keeper_name:panel.qp_keeper then Queue_no_priority
+           else Queue_local_order
        | Some {intent=Steer_after_interrupt; _} | None -> Queue_no_priority)
   | Some (Server_message _) -> Queue_server_order
   | Some (Event _) -> Queue_event_urgency

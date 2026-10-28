@@ -15,3 +15,7 @@ val choose :
     conversation rows and a divider above Queue, only when Queue can still
     show its fixed facts and three list rows. Detail always uses Full. *)
 val queue_rows : body_rows:int -> placement -> int
+
+val panes :
+  placement -> cols:int -> first_row:int -> body_rows:int -> Masc_tui_pane_selection.layout
+(** Separate copy rectangles for the conversation preview and the active queue. *)

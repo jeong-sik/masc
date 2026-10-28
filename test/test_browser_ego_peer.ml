@@ -848,6 +848,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.close" -> answered (obj ["closed",`Bool true])
     | "page.dialog" -> answered (obj ["dialog",ego_dialog "alert" "hello"])
     | "space.hand_off" -> answered (obj ["spaceId",`Int 51;"spaceName",str "masc"])
+    | "space.adopt_tab" -> answered (obj ["label",str "adopted";"targetId",str "T9";"openedBy",str "unknown"])
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.target" -> answered resolved
@@ -890,6 +891,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Dialog_answer -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Dismiss_dialog})
     | Frame_read -> Page_context {tab_id=1;frame_path=[];mode=`Frames}
     | Operator_handoff -> Page_act (Action.Control Action.Hand_off)
+    | Page_management -> Page_act (Action.Control (Action.Adopt_tab {tab_id=2;label=None}))
     | Download_listing -> Page_downloads {tab_id=1}
     | File_upload -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Upload {target=Action.File_input "#file";paths=[upload_file]}})) in
   List.iter (fun capability ->
@@ -1202,7 +1204,8 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
    | Ok value -> check bool "wait observation names the same Space" true
        (value=obj ["action",str "wait_for_control";"spaceId",`Int 51;"spaceName",str "SDK Space";"controlAvailable",`Bool true])
    | Error _ -> fail "native control wait failed");
-  check bool "options reach the SDK unchanged" true (seen ()=`List [options]);
+  check bool "options reach the SDK unchanged" true
+    (seen ()=`List [obj ["interval",`Float 0.5;"timeout",`Int 100000]]);
   native_failure:=true;
   ignore (before_effect "SDK wait timeout sends no input" (wait (obj [])));
   native_failure:=false;ownership:="agentDelegatedToUser";
@@ -1217,6 +1220,84 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
   let before= !calls in
   ignore (before_effect "availability cannot clear uncertain input" (dispatch peer Live.Page_interact (interact_args (Lane.Click "#send"))));
   check int "no later native input was dispatched" before !calls
+
+let test_native_page_management () =
+  let ownership=ref "agent" and label=ref `Null and sdk_failure=ref false and native_calls=ref 0 and output=ref "" in
+  let run ~window_s script =
+    let sent=sent_of ~window_s script in
+    match sent.step with
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
+    | "tabs.list" -> answered (`List [tab_row ~origin:"unknown" ~label:!label ~target:"T9" ~title:"Mail" ~url:"https://mail.example/" ~active:true ()])
+    | "space.adopt_tab"|"space.release_tab" ->
+      check (float 0.) "SDK management uses the native runner" 0. sent.window_s;
+      incr native_calls;
+      let shim=Printf.sprintf {js|
+const seen=[];
+process.on('exit',()=>console.log('seen '+JSON.stringify(seen)));
+const handle={targetId:'T9',openedBy:'unknown'};
+const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
+  tabs:async()=>{seen.push('tabs');return [{label:%s,targetId:'T9',openedBy:'unknown',page:handle}];},
+  adopt:async(page,options)=>{if(page!==handle)throw Error('not the SDK handle');seen.push('adopt');%s return {label:options.as??'generated',targetId:'T9',openedBy:'unknown'};},
+  release:async label=>{seen.push('release');%s return handle;}});
+|js} (Yojson.Safe.to_string (str !ownership)) (Yojson.Safe.to_string !label)
+        (if !sdk_failure then "throw Error('SDK result lost');" else "")
+        (if !sdk_failure then "throw Error('SDK result lost');" else "") in
+      output:=in_node (shim ^ script);Ok !output
+    | "page.read" -> page_answer ~label:"borrowed" (obj ["url",str "https://mail.example/";"title",str "Mail"])
+    | "page.target_input" -> answered (obj ["urlBefore",str "https://mail.example/";"pointerReleased",`Bool false;
+        "receipt",obj [];"error",str "native drag interrupted";"tab",obj ["url",str "https://mail.example/";"title",str "Mail"]])
+    | other -> failf "unexpected Page management step %s" other in
+  let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
+      ~space:"masc" ~version:"fixture" ~capture_directory:(capture_directory ()) with
+    | Ok peer -> peer | Error detail -> fail detail in
+  let act control=dispatch peer Live.Page_act (act_args (Lane.Action.Control control)) in
+  let adopt=Lane.Action.Adopt_tab {tab_id=1;label=Some "borrowed"} and release=Lane.Action.Release_tab 1 in
+  let seen ()=match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
+    | Some line -> Yojson.Safe.from_string (after ~prefix:"seen " line)
+    | None -> fail "native stand-in emitted no calls" in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  ownership:="agentDelegatedToUser";
+  ignore (before_effect "a user-held Space is not adopted" (act adopt));
+  check bool "no tabs or SDK lifecycle call under user control" true (seen ()=`List []);
+  ownership:="agent";
+  (match act adopt with
+   | Ok receipt -> check bool "adoption retains tab identity and origin" true
+       (field "tabId" receipt=`Int 1 && field "spaceId" receipt=`Int 51
+        && field "egoPage" receipt=obj ["label",str "borrowed";"targetId",str "T9";"openedBy",str "unknown"])
+   | Error _ -> fail "adoption failed");
+  check bool "one SDK adoption after observing tabs" true (seen ()=`List [str "tabs";str "adopt"]);
+  label:=str "borrowed";
+  (match dispatch peer Live.Page_read (obj ["tabId",`Int 1]) with Ok _ -> () | Error _ -> fail "adopted Page was not readable");
+  let before= !native_calls in
+  ignore (before_effect "an adopted tab cannot be re-adopted" (act adopt));
+  check int "repeat did not reach SDK" before !native_calls;
+  ownership:="agentDelegatedToUser";
+  ignore (before_effect "a user-held Space is not released" (act release));
+  check bool "user-held release has no SDK calls" true (seen ()=`List []);
+  ownership:="agent";sdk_failure:=true;
+  check string "a lost release reply is uncertain" "unknown" (failure_kind (act release));
+  sdk_failure:=false;
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  (match act release with
+   | Ok receipt -> check bool "release retains unknown origin and the same target" true
+       (field "tabId" receipt=`Int 1 && field "egoPage" receipt=obj ["label",`Null;"targetId",str "T9";"openedBy",str "unknown"])
+   | Error _ -> fail "release failed");
+  ignore (before_effect "a released tab is no longer readable" (dispatch peer Live.Page_read (obj ["tabId",`Int 1])));
+  ignore (before_effect "a released tab cannot be released again" (act release));
+  label:=`Null;
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  sdk_failure:=true;
+  check string "a lost adoption reply is uncertain" "unknown" (failure_kind (act adopt));
+  sdk_failure:=false;
+  (* Retain the original uncertainty; management cannot act as input recovery. *)
+  label:=str "borrowed";
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let drag=Lane.Drag_to {source=Lane.Selector "@12";destination=Lane.Selector "#target";via=[];duration_ms=0} in
+  check string "an interrupted input remains uncertain" "unknown"
+    (failure_kind (dispatch peer Live.Page_interact (interact_args ~tab_id:2 drag)));
+  let before= !native_calls in
+  ignore (before_effect "management cannot clear uncertain input" (act (Lane.Action.Release_tab 2)));
+  check int "uncertain input never dispatches a lifecycle call" before !native_calls
 
 let test_the_space_goes_to_the_operator_and_back () =
   let ownership = ref "agent" and user_page = ref {|({label: "p2"})|} and output = ref "" in
@@ -2143,6 +2224,7 @@ let () =
       test_case "the dialog scripts run against a stand-in in node" `Quick test_dialog_scripts_in_node;
       test_case "a snapshot target is found by ego and checked first" `Quick test_a_snapshot_target_is_found_by_ego_and_checked_first;
       test_case "native control wait preserves ownership and uncertain input" `Quick test_native_space_control_wait;
+      test_case "native Page management preserves identity and operator control" `Quick test_native_page_management;
       test_case "the space goes to the operator and back" `Quick test_the_space_goes_to_the_operator_and_back;
       test_case "scene input preserves shared identity checks" `Quick test_input_acts_through_the_shared_page_scripts;
       test_case "selectors use ego SDK" `Quick test_selector_input_uses_ego_sdk;

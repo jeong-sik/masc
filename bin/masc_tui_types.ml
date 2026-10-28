@@ -6100,6 +6100,7 @@ module Browser_lane_view = struct
     | Dialog_answer -> "dialog answer"
     | Frame_read -> "frame read"
     | Operator_handoff -> "hand to operator"
+    | Page_management -> "adopt/release tab"
     | Download_listing -> "downloads"
     | File_upload -> "upload"
   (* What a live connection of this transport leaves out, read from the lane's

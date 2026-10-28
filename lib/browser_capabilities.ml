@@ -9,7 +9,7 @@ type operation =
   | Click | Double_click | Right_click | Middle_click | Pointer_down | Pointer_up | Hover | Pointer_drag | Html5_drop
   | Scroll_page | Scroll_at | Fill | Type_text | Press_key | Key_chord | Select_option
   | Read_frames | Frame_interaction | Read_dialog | Accept_dialog | Dismiss_dialog
-  | Hand_off | Take_over | Wait_for_control
+  | Hand_off | Take_over | Wait_for_control | Adopt_tab | Release_tab
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
   | Read_clipboard | Write_clipboard | Read_network | Intercept_network
   | Read_console | Read_storage | Write_storage | Emulate_environment | Sentence_action
@@ -67,6 +67,12 @@ let snapshot_target backend ~action = match backend with
   | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium ->
     Unsupported "Only an ego connection acts on its own snapshot targets; use selector or documentId/nodeId instead."
   | Safari_unavailable -> missing
+let manage_page backend ~action = match backend with
+  | Connected Browser_lane.Ego_task_space -> conditional ~action Act [observed;
+      "Requires exact clientId and tabId in an agent-controlled Space. Adoption explicitly manages an observed unmanaged tab; optional pageLabel is the native SDK as option. Release unmanages an unknown-origin Page without closing it; agent-created Pages must be closed.";
+      "Origin is preserved. Reads support adopted Pages; current mutation paths still require agent-created Pages. Neither action resolves uncertain input release; after a lost receipt list the same Space's tabs, never replay."]
+  | Connected (Browser_lane.Web_extension|Browser_lane.Webdriver_bidi)|Owned_gecko|Owned_chromium|Safari_unavailable ->
+      Unsupported "Only an ego connection provides native Page adoption and release."
 let support backend operation = match backend with
   | Safari_unavailable -> Unsupported "No Safari adapter is installed in MASC; installed Safari alone is not a connection."
   | (Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Owned_gecko | Owned_chromium) ->
@@ -326,6 +332,8 @@ let support backend operation = match backend with
            "controlOptions accepts positive finite interval/timeout milliseconds; omitted values keep SDK defaults. Availability is an observation, not permission for later input or proof of input release."]
       | Connected (Browser_lane.Web_extension|Browser_lane.Webdriver_bidi)|Owned_gecko|Owned_chromium|Safari_unavailable ->
           Unsupported "Only an ego connection provides the native Space control wait.")
+    | Adopt_tab -> manage_page backend ~action:"adopt_tab"
+    | Release_tab -> manage_page backend ~action:"release_tab"
     | Take_over -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"take_over" Act
           ["Requires the exact observed clientId. Only after the operator has said they are done; nothing checks that they did, so taking it early takes the browser from under them.";
@@ -410,6 +418,7 @@ let operation_name = function
   | Key_chord -> "key_chord" | Select_option -> "select_option" | Read_frames -> "read_frames"
   | Frame_interaction -> "frame_interaction" | Read_dialog -> "read_dialog"
   | Accept_dialog -> "accept_dialog" | Dismiss_dialog -> "dismiss_dialog" | Hand_off -> "hand_off" | Take_over -> "take_over" | Wait_for_control -> "wait_for_control"
+  | Adopt_tab -> "adopt_tab" | Release_tab -> "release_tab"
   | Upload_file -> "upload_file"
   | List_downloads -> "list_downloads" | Page_zoom -> "page_zoom" | Resize_viewport -> "resize_viewport"
   | Touch -> "touch" | Read_clipboard -> "read_clipboard" | Write_clipboard -> "write_clipboard"

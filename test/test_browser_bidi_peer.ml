@@ -985,6 +985,7 @@ let test_peer_serves_what_the_lane_table_says () =
       | Dialog_answer -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Dismiss_dialog})
       | Frame_read -> Page_context {tab_id=1;frame_path=[];mode=`Frames}
       | Operator_handoff -> Page_act (Action.Control Action.Hand_off)
+    | Page_management -> Page_act (Action.Control (Action.Adopt_tab {tab_id=2;label=None}))
       | Download_listing -> Page_downloads {tab_id=1}
       | File_upload -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Upload {target=Action.File_input "#file";paths=["/tmp/note.txt"]}})) in
     (* The names the native host forwards (Browser_host.decode_poll). *)

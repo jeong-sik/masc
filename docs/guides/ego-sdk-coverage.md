@@ -43,8 +43,8 @@ Neither means fully supported.
 | `TaskSpace.pages` | Managed pages known through tab enumeration | Direct lifecycle-aware managed inventory |
 | `TaskSpace.tabs` | `tabs.list` preserves label, target ID and `agent`/`unknown` origin for readable and unavailable tabs | Per-goal scope, lifecycle and installed-route proof |
 | `TaskSpace.newPage` | `page.act` open_tab | Per-goal Space and returned permanent label |
-| `TaskSpace.adopt` | None; unmanaged pages refused | Explicitly authorized adoption with conservative ownership |
-| `TaskSpace.release` | None | Return an unknown-origin managed page without closing it |
+| `TaskSpace.adopt` | Explicit `page.act` adopt_tab, observed tabId and clientId; native UnmanagedPage handle and optional pageLabel/as | Current mutations remain agent-origin only; real SDK/installed-route proof and per-goal scope |
+| `TaskSpace.release` | Explicit `page.act` release_tab unmanages an unknown-origin Page without closing it | Real SDK/installed-route proof and per-goal scope |
 | `TaskSpace.waitForControl` | `page.act` wait_for_control forwards native interval/timeout and uses the SDK clock within an agent-owned Space | Real SDK/installed-route proof; no handoff completion or takeover implied |
 | `TaskSpace.handOff` | `page.act` hand_off returns same-Space ID/name; Keeper guidance composes `masc_ask` and explicit-confirmation resume | Real Keeper login handoff, per-goal scope and UI control-state projection |
 | `TaskSpace.finish` | Internal connection teardown uses `keep:[]` | Goal completion with explicit keep policy and retained-page receipt |

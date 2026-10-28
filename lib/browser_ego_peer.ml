@@ -1397,6 +1397,59 @@ let wait_for_control t options =
      | (None|Some _),(None|Some _),(None|Some _) -> Error (Live.Before_effect "invalid native control wait observation"))
   | Ok _ -> Error (Live.Before_effect "invalid native control wait observation")
 
+let page_management_script = {js|async (task, args) => {
+  const tabs = await task.tabs();
+  let page;
+  if (args.action === "adopt_tab") {
+    const tab = tabs.find(row => row.targetId === args.targetId);
+    if (!tab || tab.label !== null || tab.openedBy !== "unknown")
+      return {ok:false,before:true,error:"the observed unmanaged tab changed; list tabs before adopting"};
+    page = await task.adopt(tab.page, args.pageLabel === undefined ? {} : {as: args.pageLabel});
+    if (page.targetId !== tab.targetId || page.openedBy !== tab.openedBy)
+      throw new Error("native adoption changed Page identity or origin");
+  } else if (args.action === "release_tab") {
+    const tab = tabs.find(row => row.label === args.label);
+    if (!tab || tab.openedBy !== "unknown")
+      return {ok:false,before:true,error:"only an observed unknown-origin managed Page can be released; agent-created Pages must be closed"};
+    page = await task.release(args.label);
+    if (page.targetId !== tab.targetId || page.openedBy !== tab.openedBy)
+      throw new Error("native release changed Page identity or origin");
+  } else throw new Error("unknown Page management action");
+  return {ok:true,value:{label:page.label ?? null,targetId:page.targetId,openedBy:page.openedBy}};
+}|js}
+
+type page_management = Adopt of string option | Release
+let manage_tab t ~tab_id operation =
+  let pre message=Error (Live.Before_effect message) in
+  let* ()=match t.input_state with
+    | Released -> Ok ()
+    | Release_uncertain -> pre "ego input release is unconfirmed; Page management cannot resolve it" in
+  let* previous=match List.find_opt (fun (_,id) -> id=tab_id) t.pages with
+    | Some (page,_) -> Ok page
+    | None -> pre "browser tab is no longer present; list this connection's tabs" in
+  let* action,args=match operation,previous with
+    | Adopt label,Unmanaged target_id -> Ok ("adopt_tab",
+        ["targetId",str target_id] @ Option.to_list (Option.map (fun value -> "pageLabel",str value) label))
+    | Release,Managed label -> Ok ("release_tab",["label",str label])
+    | Adopt _,Managed _ -> pre "this tab is already managed; adoption is explicit and never repeated"
+    | Release,Unmanaged _ -> pre "this tab is already unmanaged; release is never repeated" in
+  let unknown="Page management may have completed; list the same Space's tabs before continuing; never replay this action" in
+  let args=obj (("action",str action)::args) in
+  match run_native_step t ~step:("space." ^ action) ~args
+      ("    emit(await (" ^ page_management_script ^ ")(task,args));") with
+  | Error failure -> Error (effect_failure ~unknown failure)
+  | Ok value ->
+    let* provenance=Browser_surface.ego_page_of_json value
+      |> Result.map_error (fun detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown)) in
+    let* next=match operation,previous,provenance with
+      | Adopt requested,Unmanaged target_id,{label=Some label;target_id=observed;opened_by=Unknown_origin}
+        when target_id=observed && (match requested with None -> true | Some requested -> requested=label) -> Ok (Managed label)
+      | Release,Managed _,{label=None;target_id;opened_by=Unknown_origin} -> Ok (Unmanaged target_id)
+      | (Adopt _|Release),(Managed _|Unmanaged _),_ -> Error (Live.Outcome_unknown ("invalid native Page management observation; " ^ unknown)) in
+    t.pages <- List.map (fun (page,id) -> (if id=tab_id then next else page),id) t.pages;
+    Ok (obj ["action",str action;"tabId",`Int tab_id;"spaceId",`Int t.space.id;
+      "egoPage",Browser_surface.ego_page_to_json provenance])
+
 let act ?actor t args =
   match Browser_lane.Action.parse args with
   | Error detail -> Error (Live.Before_effect detail)
@@ -1404,6 +1457,8 @@ let act ?actor t args =
   | Ok (Browser_lane.Action.Control Browser_lane.Action.Hand_off) -> hand_off t
   | Ok (Browser_lane.Action.Control Browser_lane.Action.Take_over) -> take_over t
   | Ok (Browser_lane.Action.Control (Browser_lane.Action.Wait_for_control options)) -> wait_for_control t options
+  | Ok (Browser_lane.Action.Control (Browser_lane.Action.Adopt_tab {tab_id;label})) -> manage_tab t ~tab_id (Adopt label)
+  | Ok (Browser_lane.Action.Control (Browser_lane.Action.Release_tab tab_id)) -> manage_tab t ~tab_id Release
   | Ok (Browser_lane.Action.Open_window _) ->
     Error (Live.Before_effect "an ego connection does not open windows")
   | Ok (Browser_lane.Action.On_tab {frame_path = _ :: _; _}) ->
@@ -1425,7 +1480,7 @@ let act ?actor t args =
   | Ok (Browser_lane.Action.On_tab {frame_path = []; interaction = (Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
       | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation
       | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests); _}) ->
-    Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, accept_dialog, dismiss_dialog, upload, hand_off, take_over and wait_for_control only")
+    Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, accept_dialog, dismiss_dialog, upload, hand_off, take_over, wait_for_control, adopt_tab and release_tab only")
 
 let workflow ?actor t args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in

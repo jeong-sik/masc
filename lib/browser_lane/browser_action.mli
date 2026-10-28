@@ -46,9 +46,15 @@ type control_wait = { interval_ms : float option; timeout_ms : float option }
 (** Positive finite SDK milliseconds. Missing values keep SDK defaults. *)
 val control_wait_to_json : control_wait -> Yojson.Safe.t
 type control = Hand_off | Take_over | Wait_for_control of control_wait
+  | Adopt_tab of { tab_id : int; label : string option }
+  | Release_tab of int
 (** [Wait_for_control] calls the native SDK within the current agent-owned
     Space. It does not claim or take over a user-held Space, clear uncertain
-    input state, or authorize later commands. *)
+    input state, or authorize later commands.
+    [Adopt_tab] explicitly brings an observed unmanaged tab in this exact
+    Space under the SDK Page lifecycle; [None] lets Ego assign its label.
+    [Release_tab] returns an unknown-origin managed Page without closing it.
+    Neither transfers Space control or changes the Page's origin. *)
 type t = Open_tab of string | Open_window of string | Control of control
   | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
 (** Reply observation window shared by built-in and Add-on action callers.

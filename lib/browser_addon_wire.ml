@@ -119,7 +119,11 @@ let verb_of_json ~route value =
   | "page.goto" -> let* fields = fields ["url";"tabId"] in let* url = text_field fields "url" in
       let* tab_id = optional_tab fields in Ok (B.Page_goto {url;tab_id})
   | "page.act" ->
-      let* _ = object_fields ["action";"tabId";"framePath";"url";"selector";"text";"key";"value";"x";"y";"paths"] args in
+      (* The shared action parser owns each method's closed fields. Command
+         arguments cannot override the host's outer route. *)
+      let* ()=match args with
+        | `Assoc fields when not (List.mem_assoc "lane" fields || List.mem_assoc "clientId" fields) -> Ok ()
+        | _ -> Error "page.act arguments cannot override browser routing" in
       B.Action.parse args |> Result.map (fun action -> B.Page_act action)
   | "page.context" ->
       let* fields = fields ["tabId";"framePath";"mode";"maxChars";"within";"selector"] in

@@ -35879,11 +35879,12 @@ and is loaded on demand through keeper_skill.
         && panel_owner_current () = Some Presented.Context_search
         && panel_owner_matches (Some Presented.Context_search)
         && (match paste_phase input_reader with
-            | Pasting _ -> true
+            | Pasting paste -> not (cancel_armed paste)
             | No_paste | Draining_tail _ -> false) in
       (* Slash gives this unfinished paste to the query. Let that reader
          finish before committing the search frame, even between buffers;
-         unrelated incomplete sequences still allow recovery presentation. *)
+         an explicit cancel and unrelated incomplete sequences still allow
+         recovery instructions to be presented. *)
       let transition_input_pending = ready_input || Option.is_some interrupted_paste
         || granted_search_paste in
       let terminal_rows, _ = get_terminal_size () in

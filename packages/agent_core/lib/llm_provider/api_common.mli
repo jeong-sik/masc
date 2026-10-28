@@ -26,12 +26,12 @@ val error_message_of_body : string -> string option
     edge in front of the origin returns. *)
 
 (** Raise [Invalid_argument] for a media source carrier unsupported by a backend.
-    Backends should use this helper instead of silently reinterpreting [data] as
+    Backends should use this helper instead of silently reinterpreting the payload as
     another carrier. *)
 val unsupported_media_source
   :  backend:string
   -> block:string
-  -> Types.media_source_kind
+  -> Types.media_source
   -> 'a
 
 (** Convert a base64 media block into a data URL. Non-base64 carriers fail
@@ -40,8 +40,7 @@ val base64_media_data_url
   :  backend:string
   -> block:string
   -> media_type:string
-  -> data:string
-  -> Types.media_source_kind
+  -> Types.media_source
   -> string
 
 (** Return the raw base64 payload for backends whose wire format separates the
@@ -49,8 +48,7 @@ val base64_media_data_url
 val base64_media_payload
   :  backend:string
   -> block:string
-  -> data:string
-  -> Types.media_source_kind
+  -> Types.media_source
   -> string
 
 (** {2 Document admission}

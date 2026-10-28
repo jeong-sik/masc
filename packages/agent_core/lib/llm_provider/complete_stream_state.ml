@@ -938,7 +938,7 @@ let media_content ~index ~kind ~make block text =
   else (
     match block.media with
     | Some { media_type; source_type } when String.trim media_type <> "" ->
-      Ok (Some (make ~media_type ~data:text ~source_type))
+      Ok (Some (make ~media_type ~source:(Types.media_source_of_kind source_type text)))
     | Some _ | None ->
       stream_parse_failed
         ~reason:(Printf.sprintf "malformed_media_block:%s:index:%d" kind index)
@@ -1164,24 +1164,21 @@ let content_of_block ~disposition ~stop_reason (index, block) =
     media_content
       ~index
       ~kind:"image"
-      ~make:(fun ~media_type ~data ~source_type ->
-        Types.Image { media_type; data; source_type })
+      ~make:(fun ~media_type ~source -> Types.Image { media_type; source })
       block
       text
   | Announced { kind = Document_block; _ } ->
     media_content
       ~index
       ~kind:"document"
-      ~make:(fun ~media_type ~data ~source_type ->
-        Types.Document { media_type; data; source_type })
+      ~make:(fun ~media_type ~source -> Types.Document { media_type; source })
       block
       text
   | Announced { kind = Audio_block; _ } ->
     media_content
       ~index
       ~kind:"audio"
-      ~make:(fun ~media_type ~data ~source_type ->
-        Types.Audio { media_type; data; source_type })
+      ~make:(fun ~media_type ~source -> Types.Audio { media_type; source })
       block
       text
   | Announced { kind = Unknown_block kind; _ } ->

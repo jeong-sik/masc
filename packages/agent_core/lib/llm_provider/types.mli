@@ -247,8 +247,10 @@ val response_format_to_json : response_format -> Yojson.Safe.t
 
 (** {1 Content Types} *)
 
-(** Closed set of supported media source carriers. Unsupported provider/source
-    combinations must fail closed instead of reinterpreting [data] as base64. *)
+(** Closed set of supported media source carriers, without a payload: the tag
+    a streamed [MediaDelta] chunk carries and a wire [source.type] names.
+    Unsupported provider/source combinations must fail closed instead of
+    reinterpreting the payload as base64. *)
 type media_source_kind =
   | Base64
   | Url
@@ -257,6 +259,26 @@ type media_source_kind =
 
 val media_source_kind_to_string : media_source_kind -> string
 val media_source_kind_of_string : string -> media_source_kind option
+
+(** A media block's source: the carrier and its payload together, so the
+    meaning of the payload string is fixed by the constructor. *)
+type media_source =
+  | Base64 of string (** Base64-encoded bytes. *)
+  | Url of string
+  | File_id of string
+[@@deriving show]
+
+(** The carrier of a source, as written in a wire [source.type] field or a
+    streamed [MediaDelta]. *)
+val media_source_kind_of_source : media_source -> media_source_kind
+
+(** Pair a decoded carrier with its payload string. *)
+val media_source_of_kind : media_source_kind -> string -> media_source
+
+(** The payload string of a source, whatever its carrier: base64 bytes, a URL,
+    or a file id. For wire codecs that write {!media_source_kind_of_source}
+    beside it and for byte accounting. *)
+val media_source_payload : media_source -> string
 
 type reasoning_detail =
   { raw : Yojson.Safe.t
@@ -295,18 +317,15 @@ type content_block =
       }
   | Image of
       { media_type : string
-      ; data : string
-      ; source_type : media_source_kind
+      ; source : media_source
       }
   | Document of
       { media_type : string
-      ; data : string
-      ; source_type : media_source_kind
+      ; source : media_source
       }
   | Audio of
       { media_type : string
-      ; data : string
-      ; source_type : media_source_kind
+      ; source : media_source
       }
 [@@deriving show]
 
@@ -1039,26 +1058,11 @@ val make_message
 
 val text_block : string -> content_block
 
-val image_block
-  :  ?source_type:media_source_kind
-  -> media_type:string
-  -> data:string
-  -> unit
-  -> content_block
+val image_block : media_type:string -> source:media_source -> content_block
 
-val document_block
-  :  ?source_type:media_source_kind
-  -> media_type:string
-  -> data:string
-  -> unit
-  -> content_block
+val document_block : media_type:string -> source:media_source -> content_block
 
-val audio_block
-  :  ?source_type:media_source_kind
-  -> media_type:string
-  -> data:string
-  -> unit
-  -> content_block
+val audio_block : media_type:string -> source:media_source -> content_block
 
 val text_message : role -> string -> message
 val user_msg_blocks : content_block list -> message

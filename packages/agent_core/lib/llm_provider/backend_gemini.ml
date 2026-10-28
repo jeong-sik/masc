@@ -315,8 +315,8 @@ let gemini_tool_signatures_of_blocks blocks =
 
 (* ── Content block -> Gemini part ───────────────────── *)
 
-let inline_data_part ~block ~media_type ~data source_type =
-  let data = Api_common.base64_media_payload ~backend:"gemini" ~block ~data source_type in
+let inline_data_part ~block ~media_type source =
+  let data = Api_common.base64_media_payload ~backend:"gemini" ~block source in
   Some
     (`Assoc
         [ "inlineData", `Assoc [ "mimeType", `String media_type; "data", `String data ] ])
@@ -351,9 +351,9 @@ let media_content_block_of_inline_data = function
              (Printf.sprintf "Gemini inlineData has invalid MIME type %S" media_type))
     in
     (match top_level with
-     | "image" -> Gemini_image_part, Image { media_type; data; source_type = Base64 }
-     | "audio" -> Gemini_audio_part, Audio { media_type; data; source_type = Base64 }
-     | _ -> Gemini_document_part, Document { media_type; data; source_type = Base64 })
+     | "image" -> Gemini_image_part, Image { media_type; source = Base64 data }
+     | "audio" -> Gemini_audio_part, Audio { media_type; source = Base64 data }
+     | _ -> Gemini_document_part, Document { media_type; source = Base64 data })
   | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
     raise (Gemini_api_error "Gemini inlineData must be an object")
 ;;
@@ -371,12 +371,12 @@ let part_of_content_block tool_signatures (block, tool_result_name) =
     Some
       (`Assoc [ "thought", `Bool true; "text", `String (Utf8_sanitize.sanitize content) ])
   | ReasoningDetails _ -> None
-  | Image { media_type; data; source_type } ->
-    inline_data_part ~block:"image" ~media_type ~data source_type
-  | Audio { media_type; data; source_type } ->
-    inline_data_part ~block:"audio" ~media_type ~data source_type
-  | Document { media_type; data; source_type } ->
-    inline_data_part ~block:"document" ~media_type ~data source_type
+  | Image { media_type; source } ->
+    inline_data_part ~block:"image" ~media_type source
+  | Audio { media_type; source } ->
+    inline_data_part ~block:"audio" ~media_type source
+  | Document { media_type; source } ->
+    inline_data_part ~block:"document" ~media_type source
   | ToolUse { id; name; input } ->
     let fields =
       [ "functionCall", `Assoc [ "id", `String id; "name", `String name; "args", input ] ]

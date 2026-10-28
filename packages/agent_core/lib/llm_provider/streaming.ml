@@ -261,6 +261,16 @@ let sse_event_is_deliverable_progress_signal (e : sse_event) : bool =
   | StreamIncomplete _ -> false
 ;;
 
+(* One delta carrying a whole media block: its carrier as the delta tag and its
+   payload as the single chunk. *)
+let media_delta_of_source ~media_type source =
+  MediaDelta
+    { media_type
+    ; source_type = Types.media_source_kind_of_source source
+    ; data = Types.media_source_payload source
+    }
+;;
+
 (** Emit synthetic SSE events from a complete [api_response].
     Used as fallback for non-Anthropic providers that don't support SSE. *)
 let emit_synthetic_events (response : api_response) on_event =
@@ -297,15 +307,15 @@ let emit_synthetic_events (response : api_response) on_event =
           on_event
             (ContentBlockDelta
                { index; delta = InputJsonSnapshot (Yojson.Safe.to_string input) })
-        | Image { media_type; data; source_type }
-        | Document { media_type; data; source_type }
-        | Audio { media_type; data; source_type } ->
+        | Image { media_type; source }
+        | Document { media_type; source }
+        | Audio { media_type; source } ->
           (* Re-emit media payload through the typed media channel so a
              non-streamed media block survives an api_response -> synthetic SSE
              -> accumulator round-trip instead of collapsing to empty text. *)
           on_event
             (ContentBlockDelta
-               { index; delta = MediaDelta { media_type; source_type; data } })
+               { index; delta = media_delta_of_source ~media_type source })
         | RedactedThinking _ | ToolResult _ -> ());
        on_event (ContentBlockStop { index }))
     response.content;
@@ -327,7 +337,7 @@ let%test "emit_synthetic_events round-trips a media block through the accumulato
      media arms) and the image collapses to empty text, so this goes red. This is
      the real producer that keeps the new MediaDelta path from being dead code. *)
   let image =
-    Image { media_type = "image/png"; data = "iVBORw0KGgo="; source_type = Types.Base64 }
+    Image { media_type = "image/png"; source = Types.Base64 "iVBORw0KGgo=" }
   in
   let response : api_response =
     { id = "msg_rt"
@@ -3465,12 +3475,12 @@ let gemini_chunk_to_events_impl (state : openai_stream_state) (chunk : gemini_ch
          in
          let content_type, delta =
            match block with
-           | Image { media_type; source_type; data } ->
-             "image", MediaDelta { media_type; source_type; data }
-           | Audio { media_type; source_type; data } ->
-             "audio", MediaDelta { media_type; source_type; data }
-           | Document { media_type; source_type; data } ->
-             "document", MediaDelta { media_type; source_type; data }
+           | Image { media_type; source } ->
+             "image", media_delta_of_source ~media_type source
+           | Audio { media_type; source } ->
+             "audio", media_delta_of_source ~media_type source
+           | Document { media_type; source } ->
+             "document", media_delta_of_source ~media_type source
            | Text _
            | Thinking _
            | ReasoningDetails _

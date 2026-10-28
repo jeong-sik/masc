@@ -119,18 +119,42 @@ type media_source_kind =
   | File_id
 [@@deriving show]
 
-let media_source_kind_to_string = function
+let media_source_kind_to_string : media_source_kind -> string = function
   | Base64 -> "base64"
   | Url -> "url"
   | File_id -> "file_id"
 ;;
 
-let media_source_kind_of_string raw =
+let media_source_kind_of_string raw : media_source_kind option =
   match String.lowercase_ascii (String.trim raw) with
   | "base64" -> Some Base64
   | "url" -> Some Url
   | "file_id" -> Some File_id
   | _ -> None
+;;
+
+(** A media block's source: the carrier and its payload together. *)
+type media_source =
+  | Base64 of string (** Base64-encoded bytes. *)
+  | Url of string
+  | File_id of string
+[@@deriving show]
+
+let media_source_kind_of_source : media_source -> media_source_kind = function
+  | Base64 _ -> Base64
+  | Url _ -> Url
+  | File_id _ -> File_id
+;;
+
+let media_source_of_kind (kind : media_source_kind) payload : media_source =
+  match kind with
+  | Base64 -> Base64 payload
+  | Url -> Url payload
+  | File_id -> File_id payload
+;;
+
+let media_source_payload : media_source -> string = function
+  | Base64 payload | Url payload | File_id payload -> payload
 ;;
 
 type reasoning_detail =
@@ -187,18 +211,15 @@ type content_block =
       }
   | Image of
       { media_type : string
-      ; data : string
-      ; source_type : media_source_kind
+      ; source : media_source
       }
   | Document of
       { media_type : string
-      ; data : string
-      ; source_type : media_source_kind
+      ; source : media_source
       }
   | Audio of
       { media_type : string
-      ; data : string
-      ; source_type : media_source_kind
+      ; source : media_source
       }
 [@@deriving show]
 
@@ -635,9 +656,9 @@ module Message_value = struct
     | ToolUse { id; name; _ } -> mix (mix 5 (string_hint id)) (string_hint name)
     | ToolResult { tool_use_id; content; _ } ->
       mix (mix 6 (string_hint tool_use_id)) (string_hint content)
-    | Image { data; _ } -> mix 7 (string_hint data)
-    | Document { data; _ } -> mix 8 (string_hint data)
-    | Audio { data; _ } -> mix 9 (string_hint data)
+    | Image { source; _ } -> mix 7 (string_hint (media_source_payload source))
+    | Document { source; _ } -> mix 8 (string_hint (media_source_payload source))
+    | Audio { source; _ } -> mix 9 (string_hint (media_source_payload source))
   ;;
 
   let hash (message : t) =
@@ -1403,20 +1424,14 @@ let make_message ?name ?tool_call_id ?(origin = Conversation) ?(metadata = []) ~
 (** Create a text content block. *)
 let text_block text = Text text
 
-(** Create a base64-backed image content block by default. *)
-let image_block ?(source_type = Base64) ~media_type ~data () =
-  Image { media_type; data; source_type }
-;;
+(** Create an image content block. *)
+let image_block ~media_type ~source = Image { media_type; source }
 
-(** Create a base64-backed document content block by default. *)
-let document_block ?(source_type = Base64) ~media_type ~data () =
-  Document { media_type; data; source_type }
-;;
+(** Create a document content block. *)
+let document_block ~media_type ~source = Document { media_type; source }
 
-(** Create a base64-backed audio content block by default. *)
-let audio_block ?(source_type = Base64) ~media_type ~data () =
-  Audio { media_type; data; source_type }
-;;
+(** Create an audio content block. *)
+let audio_block ~media_type ~source = Audio { media_type; source }
 
 (** Create a text-only message. *)
 let text_message role text = make_message ~role [ Text text ]

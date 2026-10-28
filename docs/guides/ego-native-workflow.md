@@ -274,6 +274,16 @@ prove no external effect occurred. Read the same Page before deciding the next
 action. Receipt/SDK-stand-in checks do not establish actual Keeper navigation
 timeout behavior.
 
+After successful work, `BrowserAct action=finish_space` completes that native
+task once. `keepPages` accepts either a list of distinct observed permanent
+Page labels (default `[]`) or the native literal `"all"`. MASC forwards `"all"`
+without first enumerating Pages; the SDK retains the Space even when no managed
+Pages remain. Completion ends every former Page label, including retained
+Pages' labels. Only a validated native `closedSpace=true` receipt permits file
+cleanup; retained Spaces keep browser-backed files. A lost receipt stays
+uncertain and must not be replayed. Connection retirement, errors and login
+handoff are not successful task completion.
+
 For login, 2FA or captcha, hand the same live client to the operator with
 `BrowserAct action=hand_off`. Its receipt names `spaceId` and `spaceName` from
 that TaskSpace before handoff; no Page operation follows the handoff. Use those

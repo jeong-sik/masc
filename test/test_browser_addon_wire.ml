@@ -23,7 +23,8 @@ let roundtrips () =
     Page_context {tab_id=7;frame_path=["#frame"];mode=`Elements {within=Some "#sidebar";selector=None}};
     Page_act (B.Action.On_tab {tab_id=7;frame_path=["#frame"];interaction=B.Action.Upload {target=B.Action.File_input "#edit";paths=["/staged/a.txt"]}});
     Page_act (B.Action.Control B.Action.Space_status);
-    Page_act (B.Action.Control (B.Action.Finish_space ["p2"]));
+    Page_act (B.Action.Control (B.Action.Finish_space (B.Action.Keep_labels ["p2"])));
+    Page_act (B.Action.Control (B.Action.Finish_space B.Action.Keep_all));
     Page_act (B.Action.Control (B.Action.Wait_for_control {interval_ms=Some 0.5;timeout_ms=Some 100000.}));
     Page_act (B.Action.Control (B.Action.Adopt_tab {tab_id=7;label=Some "login"}));
     Page_act (B.Action.Control (B.Action.Release_tab 7));

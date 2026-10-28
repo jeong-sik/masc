@@ -527,7 +527,7 @@ let test_native_control_wait_contract () =
   check bool "Space metadata uses the SDK reply clock" true
     (Lane.ego_reply_policy (Lane.Page_act status)=Lane.Executor_owned);
   check string "Space status activity names its metadata operation" "space_status" (Lane.activity_name (Lane.Page_act status));
-  let finish=Lane.Action.Control (Lane.Action.Finish_space ["p2"]) in
+  let finish=Lane.Action.Control (Lane.Action.Finish_space (Lane.Action.Keep_labels ["p2"])) in
   check bool "Space completion retains requested permanent labels" true
     (Lane.Action.parse (Lane.Action.to_json finish)=Ok finish);
   check bool "Space completion uses native execution and explicit live identity" true
@@ -535,9 +535,16 @@ let test_native_control_wait_contract () =
       && Lane.live_capability (Lane.Page_act finish)=Some Lane.Operator_handoff);
   check (option int) "completion has Space scope" None (Lane.activity_scope (Lane.Page_act finish));
   check string "completion activity" "finish_space" (Lane.activity_name (Lane.Page_act finish));
+  let keep_all=Lane.Action.Control (Lane.Action.Finish_space Lane.Action.Keep_all) in
+  check bool "native all policy round-trips without enumerating labels" true
+    (Lane.Action.parse (Lane.Action.to_json keep_all)=Ok keep_all);
+  check bool "omission keeps default empty-label policy" true
+    (Lane.Action.parse (`Assoc ["action",`String "finish_space"])
+      =Ok (Lane.Action.Control (Lane.Action.Finish_space (Lane.Action.Keep_labels []))));
   List.iter (fun fields -> check bool "invalid retention policy is refused" true
     (Result.is_error (Lane.Action.parse (`Assoc (("action",`String "finish_space")::fields)))))
-    [["keepPages",`Null];["keepPages",`List [`String " "]];
+    [["keepPages",`Null];["keepPages",`String "ALL"];["keepPages",`String "p1"];
+     ["keepPages",`List [`String " "]];
      ["keepPages",`List [`String "p1";`String "p1"]];["tabId",`Int 1]];
   let parse fields=Lane.Action.parse (`Assoc (("action",`String "wait_for_control")::fields)) in
   let defaults=Lane.Action.Control (Lane.Action.Wait_for_control {interval_ms=None;timeout_ms=None}) in

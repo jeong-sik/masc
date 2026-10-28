@@ -47,15 +47,21 @@ type control_wait = { interval_ms : float option; timeout_ms : float option }
     reply window at the Ego peer, which refuses a longer one; a missing
     interval keeps the SDK default. *)
 val control_wait_to_json : control_wait -> Yojson.Safe.t
-type control = Hand_off | Take_over | Space_status | Finish_space of string list | Wait_for_control of control_wait
+type keep_pages = Keep_all | Keep_labels of string list
+(** Native terminal retention policy. [Keep_all] retains all current Pages,
+    including Pages discovered by the SDK at completion, without closing the
+    Space. [Keep_labels []] is the default completion policy. *)
+val keep_pages_to_json : keep_pages -> Yojson.Safe.t
+type control = Hand_off | Take_over | Space_status | Finish_space of keep_pages | Wait_for_control of control_wait
   | Adopt_tab of { tab_id : int; label : string option }
   | Release_tab of int
 (** [Space_status] reads metadata on the exact bound numeric Space, even when
     delegated, without Page calls or changing control. It is not admission.
     [Finish_space keep] explicitly completes a successful task through the SDK,
-    closing only agent-created Pages whose labels are absent from [keep].
+    closing only agent-created Pages whose labels are absent from [Keep_labels].
     Unknown-origin managed Pages and unmanaged tabs remain open, even with an
-    empty [keep] list. Completion ends all managed Page labels, including those
+    empty label list. [Keep_all] forwards the native literal policy rather than
+    enumerating a possibly stale list of labels. Completion ends all managed Page labels, including those
     of retained Pages.
     Connection retirement never implies task completion.
     [Wait_for_control] calls the native SDK within the current agent-owned

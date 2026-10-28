@@ -470,7 +470,7 @@ let scenario mode =
             (field "actions" settled=`List []);
           check (list string) "original input was never replayed" ["#dialog";"#continue"]
             (lines (Filename.concat root "recovery-inputs"));
-          ignore(answered (issue (B.Page_act (B.Action.Control (B.Action.Finish_space [])))));
+          ignore(answered (issue (B.Page_act (B.Action.Control (B.Action.Finish_space (B.Action.Keep_labels []))))));
           check bool "completed recovery fixture retires cleanly" true (dispatch W.Retire=W.Receipt))
         else (
         let shot = answered (issue (B.Page_capture {tab_id=1;options=None})) in
@@ -546,7 +546,7 @@ let scenario mode =
           check bool "retirement reports unconfirmed file cleanup" true (retirement_unconfirmed ());
           check bool "transport retirement never finishes the task" false (finished ()))
         else (
-          let completed=answered (issue (B.Page_act (B.Action.Control (B.Action.Finish_space [])))) in
+          let completed=answered (issue (B.Page_act (B.Action.Control (B.Action.Finish_space (B.Action.Keep_labels []))))) in
           check bool "explicit completion observes native Space closure" true
             Yojson.Safe.Util.(completed |> member "data" |> member "nativeReceipt" |> member "closedSpace" |> to_bool);
           check bool "explicit completion ran" true (finished ());

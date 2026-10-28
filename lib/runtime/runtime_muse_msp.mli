@@ -358,6 +358,11 @@ type turn_error =
 type terminal =
   | Terminal_completed
   | Terminal_failed of turn_error
+  | Terminal_host_died of { reason : string }
+      (** A "failed" terminal the host synthesized because it died mid-turn.
+          It carries [reason] instead of an error (the schema names `crash`,
+          `crash_inferred` and `incomplete`); the text is kept as the host
+          wrote it and is for diagnostics only. *)
   | Terminal_cancelled
   | Unrecognized_terminal of string
 

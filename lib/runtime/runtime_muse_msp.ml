@@ -693,6 +693,7 @@ type turn_error =
 type terminal =
   | Terminal_completed
   | Terminal_failed of turn_error
+  | Terminal_host_died of { reason : string }
   | Terminal_cancelled
   | Unrecognized_terminal of string
 
@@ -729,10 +730,14 @@ let parse_turn_error stage fields =
   Ok ({ kind = turn_error_kind_of_string kind; message; retryable } : turn_error)
 ;;
 
-(* A "failed" terminal must carry [error] (tdd SS4.5.1); one without it is a
-   host that broke its own contract, so it is refused rather than filled
-   in. The schema keeps [error] optional on the other terminals, so an
-   [error] beside "completed" or "cancelled" is not read: the terminal
+(* A "failed" terminal carries [error] (tdd SS4.5.1), except the one the host
+   synthesizes when it died mid-turn: that one carries [reason] instead
+   (ADR 36635 D2; the schema names `crash`, `crash_inferred` and
+   `incomplete`). [reason] is kept verbatim and never branched on, so the
+   terminal is told apart by which field is present. A "failed" terminal with
+   neither is a host that broke its own contract, so it is refused rather
+   than filled in. The schema keeps [error] optional on the other terminals,
+   so an [error] beside "completed" or "cancelled" is not read: the terminal
    decides the outcome. *)
 let parse_terminal stage fields =
   let* terminal = required_string stage "terminal" fields in
@@ -743,7 +748,11 @@ let parse_terminal stage fields =
   | "failed", Some error ->
     let* error = parse_turn_error stage error in
     Ok (Terminal_failed error)
-  | "failed", None -> fail stage "failed terminal carries no error"
+  | "failed", None ->
+    let* reason = optional_text stage "reason" fields in
+    (match reason with
+     | Some reason -> Ok (Terminal_host_died { reason })
+     | None -> fail stage "failed terminal carries neither error nor reason")
   | other, _ -> Ok (Unrecognized_terminal other)
 ;;
 

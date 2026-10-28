@@ -10881,6 +10881,11 @@ let recall_edit_for_keeper (state : state) keeper_name =
 let current_recall_edit (state : state) =
   Option.bind state.msg_target_keeper_name (recall_edit_for_keeper state)
 
+(* Once a recalled queued line is being edited, starting a new history walk
+   would set that edited text aside and release the original queued request. *)
+let recall_navigation_blocked (state : state) =
+  Option.is_some (current_recall_edit state) && Option.is_none state.msg_recall_walk
+
 let set_recall_edit (state : state) (item : Masc_tui_keeper_chat_queue.item) =
   let key = keeper_recall_workspace state, item.request.keeper_name in
   state.msg_recall_edits <- (key, item) :: List.remove_assoc key state.msg_recall_edits

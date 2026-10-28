@@ -117,7 +117,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 
 **B2 범위**
 
-- 모드 사건용 레코드 종류 `Mode_event`를 `Authz_record.Kind`에 더하고 작성자는 `Local_operator`로 정한다(`Authz_record.admits`가 컴파일을 멈춘다).
+- 모드 사건용 레코드 종류 `Mode_event`를 `Authz_record.Kind`에 더하고 작성자는 `Local_operator`로 정한다(`Authz_record.admits`가 컴파일을 멈춘다). 설계 §6.3은 `Fresh_bootstrap`만 `Local_operator`에게 주었고 `off`와 `reactivate`의 작성자는 F3이 정한다. 본문은 `event`와 `workspace_id` 두 멤버이고 이 순서가 아니면 거절한다. `event`는 `fresh_bootstrap`, `off`, `reactivate` 중 하나이고 외부 저장소의 `Change.Mode`와 같은 낱말이다. 모듈 `Authz_mode_event`가 본문을 읽고 쓴다. 사건이 만드는 모드(`Multi_account`, `off`)는 부팅을 판정하는 A2가 정한다. 설계 §8.4는 `Fresh_bootstrap`이 빈 Recovery_manifest와 초기 generation도 같은 append로 확인한다고 하는데, 그 둘은 아직 없는 층의 것이라 본문에 넣지 않는다. 필드가 늘면 하드 컷이다.
 - `Fresh_bootstrap`이 `Intent_pending`을 쓴 뒤 죽은 설치는 판정 3으로 닫고 `Fresh_bootstrap`을 다시 허용한다(설계 §5.1의 `없음`).
 - 외부 저장소는 끝이 잘린 마지막 항목(마지막 줄바꿈 뒤의 바이트)을 열 때(판정 1~5를 돌리기 전에) 잘라 내고, 잘라 낸 바이트 수와 남긴 바이트 수를 경고로 남긴다(B1b의 `Cut` 경고와 같은 모양).
 - `Authz_log`가 멈추면(`Authz_log.stopped`) 새 쓰기를 거절하고 `AuthorizationUncertain`으로 다룬다.

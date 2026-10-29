@@ -507,12 +507,13 @@ type async_msg =
       image_url : string;
       result : (string, string) result;
     }
-      (** A [v]-requested web image, downloaded and converted to PNG off the
-          render loop. [result] is the PNG bytes ready to draw, or why they
-          could not be produced. [title] is indented for the screen and is
-          never a location. [image_url] is what was fetched; [page_url] is the
-          link the operator chose, and the one a browser gets when drawing
-          fails (see [Masc_tui_browser.browser_url]). *)
+      (** A [v]-requested or /image-requested web image, downloaded and
+          converted to PNG off the render loop. [result] is the PNG bytes
+          ready to draw, or why they could not be produced. [title] is what
+          the screen shows: [v] indents a display title, /image passes the URL
+          itself. [image_url] is what was fetched; [page_url] is the link the
+          operator chose, and the one a browser gets when drawing fails
+          (see [Masc_tui_browser.browser_url]). *)
   | Keeper_turns_loaded of (string * int) list * (Masc.Tui_decode.keeper_turns_projection, string) result
   | Keeper_chat_control_received of string * int * string
       (** Which keepers are mid-turn right now, for the "answering now"

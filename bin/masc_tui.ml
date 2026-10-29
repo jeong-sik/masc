@@ -11418,10 +11418,6 @@ let download_remote_image url =
   Masc_tui_image_cache.download ~run:Unix.system
     ~cache_dir:(ensure_img_cache_dir ()) url
 
-let convert_to_png input_path =
-  Masc_tui_image_cache.convert_to_png ~run:Unix.system
-    ~cache_dir:(ensure_img_cache_dir ()) input_path
-
 (* Put a picture on the terminal, or say why not. The refusal is text for the
    pane: there is nothing to draw, and taking the screen away from the frame
    to say so would hide the only surface that can say it. *)
@@ -11501,42 +11497,6 @@ let retry_image_mosaic img =
           image_url_to_mosaic ~cols:mosaic_cols img));
       `Stop_daemon)
 
-let open_remote_image state ~notice url =
-  let refuse reason =
-    notice ~kind:Notice_failure (Printf.sprintf "/image %s: %s" url reason) in
-  if !terminal_draws_images = Some false then
-    match Masc_tui_browser.open_url url with
-    | Ok opener -> notice ~kind:Notice_reply
-        (Printf.sprintf "Opened in browser (%s): %s" opener url)
-    | Error err -> refuse (Printf.sprintf "Could not open browser: %s" err)
-  else match download_remote_image url with
-    | Error dl_err ->
-        (match Masc_tui_browser.open_url url with
-         | Ok opener -> notice ~kind:Notice_reply
-             (Printf.sprintf "Image download failed. Opened in browser (%s): %s" opener url)
-         | Error _ -> refuse (Masc_tui_image_cache.download_error_text dl_err))
-    | Ok local_path ->
-      match read_file_bytes local_path with
-      | Error detail -> refuse detail
-      | Ok data when String.length data = 0 -> refuse "the file is empty"
-      | Ok initial_data ->
-        let prepared_data =
-          match Masc.Keeper_vision_tool.sniff_image_media_type initial_data with
-          | Ok media when String.equal media Masc_tui_graphics.payload_media_type -> initial_data
-          | Ok _ | Error _ ->
-            (match convert_to_png local_path with
-             | Ok png_path -> (match read_file_bytes png_path with
-                 | Ok png_data -> png_data | Error _ -> initial_data)
-             | Error _ -> initial_data) in
-        match Masc.Keeper_vision_tool.sniff_image_media_type prepared_data with
-        | Ok media when String.equal media Masc_tui_graphics.payload_media_type ->
-          draw_image state ~refuse ~title:url prepared_data
-        | Ok _ | Error _ ->
-          match Masc_tui_browser.open_url url with
-          | Ok opener -> notice ~kind:Notice_reply
-              (Printf.sprintf "Terminal draws PNG only. Opened image in browser (%s): %s" opener url)
-          | Error _ -> draw_image state ~refuse ~title:url prepared_data
-
 (* Download a remote image and hand back PNG bytes ready for [draw_image], or
    why they could not be produced. Pure of the render loop: no terminal writes,
    so it is safe to run on a systhread. *)
@@ -11544,12 +11504,13 @@ let prepare_remote_image_bytes url =
   Masc_tui_image_cache.prepare_png ~run:Unix.system
     ~cache_dir:(ensure_img_cache_dir ()) url
 
-(* [v] on a link preview: download and convert the image OFF the render loop,
-   then hand the PNG bytes back through the mailbox so [draw_image] runs on the
-   render fiber, not here. The blocking curl/sips live inside run_in_systhread
-   so the domain keeps rendering; the loading line is shown at once so the
-   keypress is not silent. terminal_draws_images = false skips the download and
-   opens the page in a browser instead. *)
+(* [v] on a link preview, and /image with an HTTP(S) URL: download and
+   convert the image OFF the render loop, then hand the PNG bytes back through
+   the mailbox so [draw_image] runs on the render fiber, not here. The
+   blocking curl/sips live inside run_in_systhread so the domain keeps
+   rendering; the loading line is shown at once so the keypress is not silent.
+   terminal_draws_images = false skips the download and opens the page in a
+   browser instead. *)
 let launch_image_render _state ~mailbox ~notice ~title ~caption ~page_url image_url =
   if !terminal_draws_images = Some false then
     let url =
@@ -11793,7 +11754,9 @@ let prepare_inspected_frame state ~mailbox =
 let open_image state ~mailbox ~notice path =
   let uri = Uri.of_string path in
   match Uri.scheme uri, Uri.host uri with
-  | Some ("http" | "https"), Some _ -> open_remote_image state ~notice path
+  | Some ("http" | "https"), Some _ ->
+      launch_image_render state ~mailbox ~notice ~title:path ~caption:[]
+        ~page_url:path path
   | (Some _ | None), (Some _ | None) ->
     open_preview_image state ~mailbox ~notice ~name:path
       (Masc_tui_image_requests.Local_file path)

@@ -22,7 +22,35 @@ let list_voices_via_command = Voice_bridge_transport.list_voices_via_command
 let transcriber_of_kind = Voice_catalogue.transcriber_of_kind
 let transcript_of_stt_json = Voice_catalogue.transcript_of_stt_json
 
-let list_voices_via_command_endpoint endpoint = list_voices_via_command endpoint
+(* The catalogue row type lives in {!Voice_catalogue}; aliasing it here keeps
+   the record literals below in scope and the public surface unchanged. *)
+type catalogue_voice = Voice_catalogue.catalogue_voice = {
+  voice_id : string;
+  voice_name : string option;
+  voice_language : string option;
+  voice_aliases : string list;
+}
+
+let list_voices_via_command_endpoint endpoint =
+  let* output = list_voices_via_command endpoint in
+  match (Voice_runtime_overlay.adapter_for_endpoint endpoint).transport with
+  | Voice_runtime_overlay.Macos_say ->
+    Ok (Voice_catalogue.say_catalogue_of_output output)
+  | Voice_runtime_overlay.Espeak_ng ->
+    Ok (Voice_catalogue.espeak_catalogue_of_output output)
+  | Voice_runtime_overlay.Elevenlabs_direct
+  | Voice_runtime_overlay.Openai_compat
+  | Voice_runtime_overlay.Voice_mcp
+  | Voice_runtime_overlay.Whisper_cli ->
+    Error
+      (Printf.sprintf
+         "endpoint %s does not list voices through a command, so no command \
+          output holds a catalogue"
+         endpoint.Voice_config.id)
+
+let check_command_voice endpoint ~voice =
+  Voice_catalogue.check_command_voice
+    ~lister:list_voices_via_command_endpoint endpoint ~voice
 
 (* The [status] field of every capture result this module returns. One closed
    set, spelled here and read back by {!capture_outcome_of_json}, so a reader

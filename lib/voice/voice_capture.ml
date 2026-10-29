@@ -8,6 +8,9 @@
 let safe_agent_id = Voice_bridge_transport.safe_agent_id
 let play_tone = Voice_player.play_tone
 let transcribe_audio = Voice_probe.transcribe_audio
+let capture_status_to_string = Voice_probe.capture_status_to_string
+let capture_status_of_string = Voice_probe.capture_status_of_string
+let ( let* ) = Result.bind
 (** {1 Microphone record + transcribe} *)
 
 let capture_config () =
@@ -47,6 +50,8 @@ let default_capture_timeout_seconds = 15.0
    separation the thresholds have to work with. *)
 let db_of_amplitude v = if v > 0.0 then 20.0 *. log10 v else neg_infinity
 let amplitude_of_db d = if d = neg_infinity then 0.0 else 10.0 ** (d /. 20.0)
+
+let run_voice_status = Voice_bridge_transport.run_voice_status
 
 (* One short capture, recording the room as it is, for as long as a capture
    would spend calibrating. *)
@@ -633,5 +638,5 @@ let record_and_transcribe
 ;;
 
 module For_testing = struct
-  let with_timeout = with_timeout
+  let with_timeout = Voice_speak.with_timeout
 end

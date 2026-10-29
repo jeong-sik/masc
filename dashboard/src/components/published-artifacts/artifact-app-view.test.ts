@@ -1,13 +1,13 @@
 import { html } from 'htm/preact'
 import { act,cleanup,render,screen,fireEvent,waitFor } from '@testing-library/preact'
 import { beforeEach,afterEach,expect,it,vi } from 'vitest'
-import { setStoredToken,clearStoredToken,currentStoredTokenRevision,get,post } from '../../api/core'
+import { setStoredToken,clearStoredToken,currentStoredTokenRevision,get,getWithResponse,post } from '../../api/core'
 import type { ArtifactDocument } from '../../api/published-artifacts'
 import type { AppState,AppRequest } from '../../api/artifact-app-data'
 import { artifactAppFrame,type AppFrame } from '../../lib/artifact-app-frame'
 import { appInputRecoveries,discardAppInput } from '../../lib/artifact-app-recovery'
 import { ArtifactAppView } from './artifact-app-view'
-vi.mock('../../api/core',async original=>({...await original<typeof import('../../api/core')>(),get:vi.fn(),post:vi.fn()}))
+vi.mock('../../api/core',async original=>({...await original<typeof import('../../api/core')>(),get:vi.fn(),getWithResponse:vi.fn(),post:vi.fn()}))
 vi.mock('../../lib/artifact-app-frame',async original=>{const module=await original<typeof import('../../lib/artifact-app-frame')>();return {...module,artifactAppFrame:vi.fn(module.artifactAppFrame)}})
 const workspace={basePath:'/app-view',mascRoot:'/app-view/.masc'},target={artifact_id:`artifact-${'d'.repeat(32)}`,revision:1}
 const initial:AppState={schema:'masc.artifact_app_data.v1',target,actor:'human',version:0,data:{},receipts:[]}
@@ -15,8 +15,9 @@ const doc:ArtifactDocument={artifact:{id:target.artifact_id,revision:1,title:'�
 let server=initial
 const confirmDescriptor=Object.getOwnPropertyDescriptor(window,'confirm')
 beforeEach(()=>{
-  server=initial;vi.mocked(get).mockReset();vi.mocked(post).mockReset();vi.mocked(artifactAppFrame).mockClear();setStoredToken('app-view-credential')
+  server=initial;vi.mocked(get).mockReset();vi.mocked(getWithResponse).mockReset();vi.mocked(post).mockReset();vi.mocked(artifactAppFrame).mockClear();setStoredToken('app-view-credential')
   vi.mocked(get).mockImplementation(async path=>path==='/health?full=1'?{paths:{effective_base_path:workspace.basePath,effective_masc_root:workspace.mascRoot}}:server)
+  vi.mocked(getWithResponse).mockImplementation(async (path,options)=>({data:await get(path,options),headers:new Headers({'x-masc-workspace-read':'matched-v1'})}))
   vi.mocked(post).mockImplementation(async(_path,body)=>{
     const request=body as AppRequest
     server={...server,data:request.data,version:request.expected_version+1,receipts:[...server.receipts,{id:request.id,expected_version:request.expected_version,data_sha256:'a'.repeat(64),at:'now'}]}
@@ -26,7 +27,7 @@ beforeEach(()=>{
 afterEach(()=>{cleanup();clearStoredToken();for(const copy of appInputRecoveries(workspace,initial))discardAppInput(copy);localStorage.clear();vi.restoreAllMocks();if(confirmDescriptor)Object.defineProperty(window,'confirm',confirmDescriptor);else Reflect.deleteProperty(window,'confirm')})
 async function open(){
   const onPending=vi.fn(),isCurrent=()=>true
-  const result=render(html`<${ArtifactAppView} doc=${doc} workspaceRoot=${workspace.basePath} authRevision=${currentStoredTokenRevision()} isCurrent=${isCurrent} onPending=${onPending} />`)
+  const result=render(html`<${ArtifactAppView} doc=${doc} capturedWorkspace=${workspace} authRevision=${currentStoredTokenRevision()} isCurrent=${isCurrent} onPending=${onPending} />`)
   const iframe=await screen.findByTitle('메모') as HTMLIFrameElement
   const frame=vi.mocked(artifactAppFrame).mock.results.at(-1)!.value as AppFrame
   const send=async(fields:object,source:MessageEventSource|null=iframe.contentWindow)=>{
@@ -141,7 +142,7 @@ it('keeps connections closed after a lost response until GET confirms the exact 
 })
 it('refuses malformed stored resource authority instead of opening the frame',async()=>{
   server={...initial,data:{resource_origins:['https://good.example; connect-src *']}}
-  render(html`<${ArtifactAppView} doc=${doc} workspaceRoot=${workspace.basePath} authRevision=${currentStoredTokenRevision()} isCurrent=${()=>true} onPending=${()=>{}} />`)
+  render(html`<${ArtifactAppView} doc=${doc} capturedWorkspace=${workspace} authRevision=${currentStoredTokenRevision()} isCurrent=${()=>true} onPending=${()=>{}} />`)
   await screen.findByRole('alert')
   expect(screen.queryByTitle('메모')).toBeNull();expect(post).not.toHaveBeenCalled()
 })

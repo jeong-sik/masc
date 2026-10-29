@@ -3,12 +3,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import { route, navigate } from '../../router'
 import { ApiRequestError, currentStoredTokenRevision, getStoredToken } from '../../api/core'
 import { storedTokenRevision } from '../../api/token-revision'
-import { fetchPublishedArtifacts, fetchPublishedArtifact, fetchPublicArtifact, artifactHref, type ArtifactList, type ArtifactDocument, type ArtifactPublication } from '../../api/published-artifacts'
+import { ArtifactWorkspaceReadUnattested, captureArtifactWorkspace, fetchPublishedArtifacts, fetchPublishedArtifact, fetchWorkspacePublishedArtifact, fetchPublicArtifact, artifactHref, latestArtifactRevision, type ArtifactList, type ArtifactDocument, type ArtifactPublication, type ArtifactWorkspace } from '../../api/published-artifacts'
 import { artifactExternalSharing, type ShareObservation } from '../../lib/artifact-external-sharing'
 import { ExternalShareOutcomes } from './external-share-outcomes'
 import { fetchArtifactChecks, resolveArtifactCheck, type ArtifactCheckList, type ArtifactCheckState } from '../../api/published-artifact-checks'
 import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
-import { ArtifactReader } from './artifact-reader'
+import { ArtifactReader, type ArtifactShareSelection } from './artifact-reader'
 import { ArtifactPreview } from './artifact-preview'
 import { ArtifactCheckControl, type ArtifactCheckOutcome } from './artifact-check-control'
 import { executionWorkspaceAuthority } from '../../store'
@@ -16,10 +16,23 @@ import { ArtifactImport } from './artifact-import'
 import { downloadArtifactDraft, type ArtifactDraftRetention, type ArtifactDraftSnapshot, type ArtifactPublicationOutcome } from './artifact-composer'
 
 type Remote<T> = { key: object; kind: 'loaded'; data: T; receivedAt: number }
-  | { key: object; kind: 'error'; message: string; data?: T }
+  | { key: object; kind: 'error'; message: string; data?: T; revalidating?: boolean }
 const errorMessage = (error: unknown) => error instanceof ApiRequestError && error.status === 404
   ? '문서 또는 선택한 버전을 찾지 못했습니다.'
   : error instanceof Error ? error.message : '문서를 불러오지 못했습니다.'
+
+// An unauthenticated observation cannot grant authority, but it can show that
+// an in-flight bound response is older or inconsistent. Do not enable writes
+// until the operator explicitly obtains a consistent observation.
+function conflictsWithEarlierObservation(observed: ArtifactDocument, bound: ArtifactDocument): boolean {
+  const stale = (a: { revision: number; body: { _blob: { sha256: string } } }, b: typeof a) =>
+    a.revision > b.revision || (a.revision === b.revision && a.body._blob.sha256 !== b.body._blob.sha256)
+  const first = latestArtifactRevision(observed), second = latestArtifactRevision(bound)
+  return stale(observed.artifact, bound.artifact) || (!!first && !!second && stale(first, second))
+    || (observed.share_version !== undefined && bound.share_version !== undefined
+      && (observed.share_version > bound.share_version
+        || (observed.share_version === bound.share_version && observed.shared !== bound.shared)))
+}
 
 function isToday(timestamp: string, now: Date): boolean {
   const date = new Date(timestamp)
@@ -124,7 +137,7 @@ export function ArtifactsSurface() {
 
 const noopDraftRetention: ArtifactDraftRetention = { remember: () => {}, forget: () => {} }
 type ObservedDocument =
-  | { kind: 'operator'; document: ArtifactDocument; shareObservation: ShareObservation }
+  | { kind: 'operator'; document: ArtifactDocument; shareObservation?: ShareObservation; workspace?: ArtifactWorkspace }
   | { kind: 'public'; document: ArtifactDocument }
 type DocumentRemote = Remote<ObservedDocument> | { key: object; kind: 'public-loading' }
 
@@ -201,6 +214,8 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
   const [catalog, setCatalog] = useState<Remote<ArtifactList> | null>(null)
   const [document, setDocument] = useState<DocumentRemote | null>(null)
   const documentRef = useRef<DocumentRemote | null>(null)
+  const shareWaiters = useRef(new Set<(cancelled: boolean) => void>())
+  const notifyShareWaiters = (cancelled = false) => { for (const notify of [...shareWaiters.current]) notify(cancelled) }
   documentRef.current = document
   const [checks, setChecks] = useState<Remote<ArtifactCheckList> | null>(null)
   const catalogKey = useMemo(() => ({}), [])
@@ -214,7 +229,6 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
   activeDocumentKey.current = documentKey
   const readerAllowed = useRef(allowReader)
   readerAllowed.current = allowReader
-  const shareActivity = selectedId ? artifactExternalSharing.activity(selectedId) : 'ready'
   const shareReread = useRef<ShareObservation | null>(null)
   const active = useRef(true)
   const current = () => active.current && isCurrent()
@@ -252,18 +266,18 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
           if (active.current) setVisitEpoch(epoch => epoch + 1)
         }
         controller.abort()
+        notifyShareWaiters(true)
       }
     }
     const unsubscribeRoute = route.subscribe(retire)
     const unsubscribeWorkspace = executionWorkspaceAuthority.subscribe(retire)
     const unsubscribeCredential = storedTokenRevision.subscribe(retire)
     const publish = (next: DocumentRemote) => {
-      if (!controller.signal.aborted && currentDocument()) { documentRef.current = next; setDocument(next) }
+      if (!controller.signal.aborted && currentDocument()) { documentRef.current = next; setDocument(next); notifyShareWaiters() }
     }
-    const shareObservation = artifactExternalSharing.observe(selectedId)
-    void fetchPublishedArtifact(selectedId, revision, controller.signal).then(document => {
-      publish({ key: documentKey, kind: 'loaded', data: { kind: 'operator', document, shareObservation }, receivedAt: Date.now() })
-    }, error => {
+    let boundApplied = false
+    let publicRequested = false
+    const readFailed = (error: unknown) => {
       if (controller.signal.aborted || !currentDocument()) return
       const previous = documentRef.current
       const retained = previous?.key === documentKey && previous.kind !== 'public-loading'
@@ -273,22 +287,98 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
         publish({ key: documentKey, kind: 'error', message: errorMessage(error), data: retained })
         return
       }
-      publish({ key: documentKey, kind: 'public-loading' })
+      if (publicRequested) return
+      publicRequested = true
+      const publicOwner: DocumentRemote = { key: documentKey, kind: 'public-loading' }
+      publish(publicOwner)
       void fetchPublicArtifact(selectedId, revision, controller.signal).then(document => {
-        publish({ key: documentKey, kind: 'loaded', data: { kind: 'public', document }, receivedAt: Date.now() })
+        if (!boundApplied && documentRef.current === publicOwner) publish({ key: documentKey, kind: 'loaded', data: { kind: 'public', document }, receivedAt: Date.now() })
       }, publicError => {
-        publish({ key: documentKey, kind: 'error', message: errorMessage(publicError) })
+        if (!boundApplied && documentRef.current === publicOwner) publish({ key: documentKey, kind: 'error', message: errorMessage(publicError) })
       })
-    })
-    return () => { controller.abort(); unsubscribeRoute(); unsubscribeWorkspace(); unsubscribeCredential() }
+    }
+    const publishUnbound = (document: ArtifactDocument) => {
+      const previous = documentRef.current
+      const alreadyBound = previous?.key === documentKey && previous.kind !== 'public-loading'
+        && previous.data?.kind === 'operator' && previous.data.workspace !== undefined
+      if (boundApplied) return
+      if (alreadyBound && previous.kind === 'loaded') {
+        publish({ key: documentKey, kind: 'error', message: '작업 공간을 다시 확인하고 있습니다.', data: previous.data, revalidating: true })
+      } else if (!alreadyBound) publish({ key: documentKey, kind: 'loaded', data: { kind: 'operator', document }, receivedAt: Date.now() })
+    }
+    const prior = documentRef.current
+    const priorBound = prior?.key === documentKey && prior.kind !== 'public-loading'
+      && prior.data?.kind === 'operator' && prior.data.workspace !== undefined
+    if (priorBound) {
+      publish({ key: documentKey, kind: 'error', message: '작업 공간을 다시 확인하고 있습니다.', data: prior.data, revalidating: true })
+    } else {
+      // Viewing does not wait for a slow health response. Until the bound
+      // read is admitted, this observation has no mutation authority.
+      void fetchPublishedArtifact(selectedId, revision, controller.signal).then(publishUnbound, error => {
+        if (!boundApplied) readFailed(error)
+      })
+    }
+    void captureArtifactWorkspace(workspaceRoot).then(async workspace => {
+      if (controller.signal.aborted || !currentDocument()) return
+      const shareObservation = artifactExternalSharing.observe(selectedId, workspace)
+      try {
+        const document = await fetchWorkspacePublishedArtifact(selectedId, revision, workspace, controller.signal)
+        if (!controller.signal.aborted && currentDocument()) {
+          const previous = documentRef.current
+          const priorData = previous?.key === documentKey && previous.kind !== 'public-loading'
+            && previous.data?.kind === 'operator' ? previous.data : undefined
+          if (priorData?.workspace && (priorData.workspace.basePath !== workspace.basePath
+            || priorData.workspace.mascRoot !== workspace.mascRoot)) {
+            publish({ key: documentKey, kind: 'error', message: '서버의 작업 공간이 바뀌었습니다. 문서를 닫고 연결을 확인해 주세요.', data: priorData })
+            return
+          }
+          if (priorData && !priorData.workspace && conflictsWithEarlierObservation(priorData.document, document)) {
+            publish({ key: documentKey, kind: 'error', message: '문서 조회 결과가 서로 달라 작업 공간을 확인하지 못했습니다. 다시 확인해 주세요.', data: priorData })
+            return
+          }
+          boundApplied = true
+          publish({ key: documentKey, kind: 'loaded', data: { kind: 'operator', document, workspace, shareObservation }, receivedAt: Date.now() })
+        }
+      } catch (error) {
+        if (error instanceof ArtifactWorkspaceReadUnattested) {
+          const previous = documentRef.current
+          const alreadyBound = previous?.key === documentKey && previous.kind !== 'public-loading'
+            && previous.data?.kind === 'operator' && previous.data.workspace !== undefined
+          if (alreadyBound) readFailed(error)
+          else publishUnbound(error.document)
+        } else if (!boundApplied) readFailed(error)
+      }
+    }, error => { if (priorBound) readFailed(error) })
+    return () => { controller.abort(); notifyShareWaiters(true); unsubscribeRoute(); unsubscribeWorkspace(); unsubscribeCredential() }
   }, [authRevision, selectedId, revision, documentKey, visit, refresh, allowReader])
 
   const list = catalog?.key === catalogKey ? catalog : null
   const doc = document?.key === documentKey ? document : null
+  const observedWorkspace = doc && doc.kind !== 'public-loading' && doc.data?.kind === 'operator' ? doc.data.workspace : undefined
+  const shareActivity = selectedId && observedWorkspace ? artifactExternalSharing.activity(selectedId, observedWorkspace) : 'ready'
+  const currentShareSelection = (): ArtifactShareSelection | undefined => {
+    const current = documentRef.current
+    if (!currentDocument() || !current || current.key !== documentKey || current.kind === 'public-loading'
+      || current.data?.kind !== 'operator') return undefined
+    return { doc: current.data.document, fixedRevision: revision !== undefined, shareWorkspace: current.data.workspace,
+      ...(current.kind === 'error' && current.revalidating ? { revalidating: true } : {}),
+      ...(current.kind === 'error' && !current.revalidating ? { readError: current.message } : {}) }
+  }
+  const waitForShareSelection = (): Promise<ArtifactShareSelection | undefined> => new Promise(resolve => {
+    const notify = (cancelled: boolean) => {
+      const current = cancelled ? undefined : currentShareSelection()
+      if (!current?.revalidating) { shareWaiters.current.delete(notify); resolve(current) }
+    }
+    shareWaiters.current.add(notify)
+    notify(false)
+  })
   useEffect(() => {
     const observation = doc && doc.kind !== 'public-loading' && doc.data?.kind === 'operator'
       ? doc.data.shareObservation : undefined
-    if (selectedId && shareActivity === 'ready' && observation?.id === selectedId
+    const live = documentRef.current
+    if (selectedId && currentDocument() && live?.key === documentKey && live.kind !== 'public-loading'
+      && live.data?.kind === 'operator' && live.data.shareObservation === observation && observation?.id === selectedId
+      && artifactExternalSharing.activity(selectedId, observation.workspace) === 'ready'
       && !artifactExternalSharing.admits(observation) && shareReread.current !== observation && current()) {
       shareReread.current = observation
       setRefresh(n => n + 1)
@@ -406,6 +496,11 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
               isCurrent=${currentDocument} />`
           : html`<${ArtifactReader} key=${documentKey.visit} doc=${doc.data.document} fixedRevision=${revision !== undefined}
               draftRetention=${draftRetention} workspaceRoot=${workspaceRoot}
+              readOnly=${!doc.data.workspace} readOnlyLabel="작업 공간 미확인 · 읽기 전용"
+              readOnlyInteractive=${!!doc.data.workspace}
+              shareWorkspace=${doc.data.workspace}
+              currentShareSelection=${currentShareSelection}
+              waitForShareSelection=${waitForShareSelection}
               shareObservation=${doc.data.shareObservation}
               readError=${doc.kind === 'error' ? doc.message : undefined}
               checkState=${checkState(doc.data.document.artifact)} authRevision=${authRevision} isCurrent=${currentDocument} onMutation=${onMutation} onCheckChanged=${checkChanged}

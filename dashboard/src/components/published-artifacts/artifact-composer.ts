@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { ApiRequestError } from '../../api/core'
 import {
-  publishArtifact, readPublishedDraft, fetchPublishedArtifact, artifactHref, captureArtifactWorkspace,
+  publishArtifact, readPublishedDraft, fetchWorkspacePublishedArtifact, artifactHref, captureArtifactWorkspace,
   type ArtifactDocument, type ArtifactDraft, type ArtifactPublication, type ArtifactPublicationRequest, type ArtifactWorkspace,
 } from '../../api/published-artifacts'
 
@@ -84,11 +84,11 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDr
       publication = await publishArtifact(request, expectedWorkspace)
     } catch (error) {
       const message = error instanceof Error ? error.message : '저장 응답을 받지 못했습니다.'
-      // A parsed 4xx response is a definite refusal: the write did not happen.
-      // Only an unreadable outcome (network, timeout, 5xx) is unconfirmed.
+      // A proxy timeout can follow a committed write. Keep it unconfirmed.
+      // Other parsed 4xx responses are definite refusals.
       const refusalStatus = error instanceof ApiRequestError ? error.status : undefined
-      const definiteRefusal = refusalStatus !== undefined && refusalStatus >= 400 && refusalStatus < 500
-      if (error instanceof ApiRequestError && error.errorCode === 'workspace_precondition_failed') {
+      const definiteRefusal = refusalStatus !== undefined && refusalStatus >= 400 && refusalStatus < 500 && refusalStatus !== 408
+      if (definiteRefusal && error instanceof ApiRequestError && error.errorCode === 'workspace_precondition_failed') {
         sending.current = false
         if (current()) setState({ kind: 'ready', message: '서버의 작업 공간이 바뀌어 저장 요청이 거절되었습니다. 작성한 원고는 그대로 남아 있습니다.' })
         return
@@ -123,7 +123,7 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDr
     setLatestError('')
     try {
       if (workspace.kind !== 'ready') return
-      const latest = await fetchPublishedArtifact(base.artifact.id, undefined, undefined, workspace.value)
+      const latest = await fetchWorkspacePublishedArtifact(base.artifact.id, undefined, workspace.value)
       if (current()) setState({ kind: 'conflict', message: '최신 버전과 작성 중인 원고를 비교해 주세요. 원고는 자동으로 바뀌지 않습니다.', latest })
     } catch (error) {
       if (current()) setLatestError(error instanceof Error ? error.message : '최신 버전을 읽지 못했습니다.')

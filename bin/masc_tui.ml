@@ -2084,11 +2084,15 @@ let launch_artifact_check_change state ~mailbox =
           ~host ~port ~request)
 
 let toggle_resource_external_share state ~mailbox =
-  match Masc_tui_resource_document.external_share_change state, state.server_identity with
-  | Error detail, _ -> report_action state "error" detail
-  | Ok _, None ->
-      report_action state "error" "Workspace identity is unavailable"
-  | Ok (report, next_shared), Some expected_workspace ->
+  match Masc_tui_resource_document.external_share_change state, state.server_identity,
+        state.resource_share_version, state.resource_revision_history with
+  | Error detail, _, _, _ -> report_action state "error" detail
+  | Ok _, None, _, _ -> report_action state "error" "Workspace identity is unavailable"
+  | Ok _, Some _, None, _ | Ok _, Some _, Some _, [] ->
+      report_action state "error" "Share version or latest publication is unavailable; refresh this report"
+  | Ok (report, next_shared), Some expected_workspace, Some expected_version, latest :: _
+    when String.equal latest.id report.id ->
+      let operation_id = Random_id.uuid_v7 () in
       let credential = Masc_tui_http.bind_credential () in
       let host = server_peer_host and port = state.port in
       let id = report.id in
@@ -2102,7 +2106,14 @@ let toggle_resource_external_share state ~mailbox =
            ~deliver:(fun result -> Resource_share_changed (request, result))
            (fun () ->
              Masc_tui_http.post_artifact_share ~credential ~expected_workspace
-               ~host ~port ~id ~shared:next_shared))
+               ~host ~port ~id ~shared:next_shared ~operation_id ~expected_version
+               ~expected_artifact_revision:latest.revision.revision
+               ~expected_artifact_sha256:latest.revision.body.sha256
+             |> Result.map (function
+                  | Masc_tui_http.Artifact_share_applied shared -> Resource_share_applied shared
+                  | Artifact_share_conflict shared -> Resource_share_conflict shared)))
+  | Ok _, Some _, Some _, _ :: _ ->
+      report_action state "error" "Latest publication belongs to another artifact; refresh this report"
 
 let resource_share_is_owned state request =
   match state.resource_share_pending with
@@ -14299,6 +14310,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.resource_read_owner <- None;
   state.resource_revision_history <- [];
   state.resource_shared <- None;
+  state.resource_share_version <- None;
   state.resource_scroll <- Masc_tui_scroll.Position.first;
   state.resource_search_position <- Masc_tui_resource_reading.first;
   state.resource_image_cursor <- 0;
@@ -18727,11 +18739,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           ignore (Eio.Promise.try_resolve acknowledge ())
         | Workspace_operation (Resource_share_changed (request, result)) ->
           if resource_share_is_owned state request then begin
-            ignore (Masc_tui_resources_updates.share_changed state request ~result);
+            let settled = Result.map (function Resource_share_applied shared | Resource_share_conflict shared -> shared) result in
+            ignore (Masc_tui_resources_updates.share_changed state request ~result:settled);
             (match result with
-             | Ok shared -> report_action state "system"
-                 ((if shared then "External sharing enabled" else "External sharing revoked")
-                  ^ " in the previous workspace for " ^ request.share_report.id)
+             | Ok (Resource_share_applied shared) -> report_action state "system"
+                 ("External sharing request applied in the previous workspace for " ^ request.share_report.id
+                  ^ (if shared then "; enabled at response" else "; disabled at response"))
+             | Ok (Resource_share_conflict shared) -> report_action state "system"
+                 ("External sharing request conflicted in the previous workspace for " ^ request.share_report.id
+                  ^ (if shared then "; enabled at response" else "; disabled at response"))
              | Error detail -> report_action state "error"
                  ("Previous workspace external sharing result unconfirmed for " ^ request.share_report.id
                   ^ "; P and Y are disabled for this artifact during this TUI session: " ^ detail))
@@ -20995,12 +21011,19 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
        | Error detail -> report_action state "error" (label ^ ": " ^ detail))
   | Resource_share_changed (request, result) ->
       if resource_share_is_owned state request then begin
-        let read_key = Masc_tui_resources_updates.share_changed state request ~result in
+        let settled = Result.map (function Resource_share_applied shared | Resource_share_conflict shared -> shared) result in
+        let read_key = Masc_tui_resources_updates.share_changed state request ~result:settled in
         (match result with
-         | Ok shared ->
+         | Ok (Resource_share_applied shared) ->
              report_action state "system"
-               ((if shared then "External sharing enabled for " else "External sharing revoked for ")
-                ^ request.share_report.id);
+               ("External sharing request applied for " ^ request.share_report.id
+                ^ (if shared then "; enabled at response" else "; disabled at response"));
+             Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+         | Ok (Resource_share_conflict shared) ->
+             report_action state "system"
+               ("External sharing request conflicted for " ^ request.share_report.id
+                ^ (if shared then "; enabled at response" else "; disabled at response")
+                ^ "; refresh before retrying");
              Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
          | Error detail ->
              report_action state "error"

@@ -2,11 +2,12 @@ import { html } from 'htm/preact'
 import type { Signal } from '@preact/signals'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { ApiRequestError, get, getPublic, post, clearStoredToken, setStoredToken } from '../../api/core'
+import { ApiRequestError, get, getPublic, getWithResponse, post, clearStoredToken, setStoredToken } from '../../api/core'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../../store'
 import { route } from '../../router'
 import { ArtifactsSurface } from './artifacts-surface'
 import { copyToClipboard } from '../common/copyable-code'
+import { retainPendingShare } from '../../lib/artifact-share-recovery'
 
 const workspace = vi.hoisted(() => ({ current: null as unknown as Signal<ExecutionWorkspaceAuthority | null> }))
 vi.mock('../../store', async () => {
@@ -19,7 +20,7 @@ vi.mock('../../router', async () => {
   const route = signal({ tab: 'workspace', params: {} as Record<string, string>, postId: null })
   return { route, navigate: vi.fn((tab, params) => { route.value = { tab, params, postId: null } }) }
 })
-vi.mock('../../api/core', async original => ({ ...await original<typeof import('../../api/core')>(), get: vi.fn(), getPublic: vi.fn(), post: vi.fn() }))
+vi.mock('../../api/core', async original => ({ ...await original<typeof import('../../api/core')>(), get: vi.fn(), getPublic: vi.fn(), getWithResponse: vi.fn(), post: vi.fn() }))
 vi.mock('../common/markdown', () => ({ Markdown: ({ text }: { text: string }) => html`<div>${text}</div>` }))
 vi.mock('../common/copyable-code', () => ({ copyToClipboard: vi.fn(async () => true) }))
 
@@ -33,22 +34,42 @@ const firstId = `artifact-${'a'.repeat(32)}`, secondId = `artifact-${'b'.repeat(
 const first = { id: firstId, revision: 2, title: 'Original report', summary: 'report summary', format: 'markdown', author: 'writer',
   created_at: '2026-10-22T01:00:00Z', task_id: null, goal_id: null, url: '/dashboard', body: { _blob: { sha256: 'a'.repeat(64) } } }
 const second = { ...first, id: secondId, title: 'HTML report', format: 'html' }
-const document = (artifact = first, content = 'original body') => ({ artifact, content, revisions: [artifact], shared: false })
+const document = (artifact = first, content = 'original body') => ({ artifact, content, revisions: [artifact], shared: false, share_version: 0 })
 const listing = (artifacts = [first, second]) => ({ artifacts, diagnostics: [] })
 const select = (id?: string) => { route.value = { tab: 'workspace', params: { section: 'artifacts', ...(id ? { artifact: id } : {}) }, postId: null } }
 const checks = '/api/v1/published-artifact-checks'
 const list = '/api/v1/published-artifacts'
 const reads = () => vi.mocked(get).mock.calls.length
+function shareReply(id: string) {
+  const payload = vi.mocked(post).mock.calls.at(-1)?.[1] as { operation_id: string; expected_version: number; shared: boolean;
+    expected_artifact_revision: number; expected_artifact_sha256: string }
+  const snapshot = { version: payload.expected_version + 1, shared: payload.shared }
+  return { id, receipt: { operation_id: payload.operation_id, expected_version: payload.expected_version,
+    expected_artifact_revision: payload.expected_artifact_revision, expected_artifact_sha256: payload.expected_artifact_sha256,
+    publication_matches: true, requested: payload.shared, outcome: 'applied', snapshot }, current: snapshot }
+}
 const checkReceipt = { id: firstId, revision: 2, body_sha256: first.body._blob.sha256, checked: true,
   change_id: `check-${'c'.repeat(32)}`, changed_by: 'original-human', changed_at: '2026-10-22T01:00:00Z' }
 
 beforeEach(() => {
+  localStorage.clear()
+  window.dispatchEvent(new StorageEvent('storage'))
   expect(executionWorkspaceAuthority).toBe(workspace.current)
-  vi.mocked(get).mockReset(); vi.mocked(getPublic).mockReset(); vi.mocked(post).mockReset()
+  vi.mocked(get).mockReset(); vi.mocked(getPublic).mockReset(); vi.mocked(getWithResponse).mockReset(); vi.mocked(post).mockReset()
   vi.mocked(copyToClipboard).mockClear()
   setStoredToken('credential-a'); workspace.current.value = authority(); select()
-  vi.mocked(get).mockImplementation(async path => path === list ? listing() : path === checks
+  vi.mocked(get).mockImplementation(async path => path === '/health?full=1'
+    ? { paths: { effective_base_path: workspace.current.value?.workspaceRoot ?? '/workspace-a',
+      effective_masc_root: `${workspace.current.value?.workspaceRoot ?? '/workspace-a'}/.masc` } }
+    : path === list ? listing() : path === checks
     ? { checks: [], diagnostics: [] } : document(path.includes(secondId) ? second : first))
+  vi.mocked(getWithResponse).mockImplementation(async (path, options) => {
+    const url = new URL(path, window.location.origin)
+    url.searchParams.delete('expected_base_path'); url.searchParams.delete('expected_masc_root')
+    const query = url.searchParams.toString()
+    return { data: await get(`${url.pathname}${query ? `?${query}` : ''}`, options),
+      headers: new Headers({ 'x-masc-workspace-read': 'matched-v1' }) }
+  })
   vi.mocked(getPublic).mockRejectedValue(Object.assign(new Error('Unauthorized'), { status: 401 }))
 })
 afterEach(() => { cleanup(); clearStoredToken(); vi.unstubAllGlobals() })
@@ -316,7 +337,7 @@ it('keeps a retired draft visible before offering a public reader', async () => 
   vi.mocked(getPublic).mockResolvedValue({ ...document(), shared: true })
   select(firstId)
   render(html`<${ArtifactsSurface} />`)
-  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '문서 편집' }))
+  fireEvent.click(await within(await screen.findByRole('dialog')).findByRole('button', { name: '문서 편집' }))
   await act(async () => { workspace.current.value = null })
   expect(getPublic).not.toHaveBeenCalled()
   expect(screen.getByRole('region', { name: '이전 접근 상태의 원고' })).toBeTruthy()
@@ -326,7 +347,7 @@ it('keeps a retired draft visible before offering a tokenless public reader with
   vi.mocked(getPublic).mockResolvedValue({ ...document(), shared: true })
   select(firstId)
   render(html`<${ArtifactsSurface} />`)
-  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '문서 편집' }))
+  fireEvent.click(await within(await screen.findByRole('dialog')).findByRole('button', { name: '문서 편집' }))
   await act(async () => { clearStoredToken() })
   expect(workspace.current.value).not.toBeNull()
   expect(getPublic).not.toHaveBeenCalled()
@@ -338,7 +359,7 @@ it('retires a draft even when workspace A to B to A happens before rendering', a
   select(firstId)
   render(html`<${ArtifactsSurface} />`)
   const reader = within(await screen.findByRole('dialog'))
-  fireEvent.click(reader.getByRole('button', { name: '문서 편집' }))
+  fireEvent.click(await reader.findByRole('button', { name: '문서 편집' }))
   fireEvent.input(reader.getByLabelText('문서 본문'), { target: { value: 'retain this draft' } })
   const originalAuthority = workspace.current.value!
   await act(async () => {
@@ -360,7 +381,7 @@ it.each(['workspace', 'worker'] as const)('keeps recovery accessible before open
   select(firstId)
   render(html`<${ArtifactsSurface} />`)
   const reader = within(await screen.findByRole('dialog'))
-  fireEvent.click(reader.getByRole('button', { name: '문서 편집' }))
+  fireEvent.click(await reader.findByRole('button', { name: '문서 편집' }))
   fireEvent.input(reader.getByLabelText('문서 본문'), { target: { value: 'draft to recover' } })
   const selectedReadsBefore = vi.mocked(get).mock.calls.filter(([path]) => path === `${list}/${firstId}`).length
   await act(async () => {
@@ -391,59 +412,288 @@ it.each(['workspace', 'worker'] as const)('keeps recovery accessible before open
 
 it('toggles per-artifact opt-in external sharing from the authenticated reader', async () => {
   let shared = false
+  let version = 0
   vi.mocked(get).mockImplementation(async path => path === '/health?full=1'
     ? { paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } }
     : path === list ? listing() : path === checks ? { checks: [], diagnostics: [] }
-      : { ...document(), shared })
+      : { ...document(), shared, share_version: version })
   vi.mocked(post).mockImplementation(async (_path, body) => {
-    shared = (body as { shared: boolean }).shared
-    return { id: firstId, shared }
+    const payload = body as { shared: boolean; operation_id: string; expected_version: number;
+      expected_artifact_revision: number; expected_artifact_sha256: string }
+    shared = payload.shared
+    version++
+    const snapshot = { version, shared }
+    return { id: firstId, receipt: { operation_id: payload.operation_id, expected_version: payload.expected_version,
+      expected_artifact_revision: payload.expected_artifact_revision, expected_artifact_sha256: payload.expected_artifact_sha256,
+      publication_matches: true, requested: shared, outcome: 'applied', snapshot }, current: snapshot }
   })
   select(firstId)
   render(html`<${ArtifactsSurface} />`)
   const reader = within(await screen.findByRole('dialog'))
-  expect(reader.getByText('외부 공유는 이 문서의 모든 버전에 적용됩니다.')).toBeTruthy()
-  fireEvent.click(reader.getByRole('button', { name: '외부 공유 켜기' }))
+  expect(await reader.findByText('외부 공유는 이 문서의 모든 버전에 적용됩니다.')).toBeTruthy()
+  fireEvent.click(await reader.findByRole('button', { name: '외부 공유 켜기' }))
   const headers = { 'x-masc-expected-base-path': '/workspace-a', 'x-masc-expected-masc-root': '/workspace-a/.masc' }
   const expected_workspace = { base_path: '/workspace-a', masc_root: '/workspace-a/.masc' }
-  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/published-artifact-shares', { id: firstId, shared: true, expected_workspace }, headers))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/published-artifact-shares', expect.objectContaining({ id: firstId, shared: true, expected_version: 0, operation_id: expect.any(String), expected_workspace }), headers, 30_000, undefined, true))
   await waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith(
     `${window.location.origin}/dashboard/#/workspace?section=artifacts&artifact=${firstId}&revision=2`,
     screen.getByRole('dialog'),
   ))
   expect(await reader.findByRole('button', { name: '외부 공유 해제' })).toBeTruthy()
   fireEvent.click(reader.getByRole('button', { name: '외부 공유 해제' }))
-  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/published-artifact-shares', { id: firstId, shared: false, expected_workspace }, headers))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/published-artifact-shares', expect.objectContaining({ id: firstId, shared: false, expected_version: 1, operation_id: expect.any(String), expected_workspace }), headers, 30_000, undefined, true))
   expect(await reader.findByRole('button', { name: '외부 공유 켜기' })).toBeTruthy()
 })
 
 it('cannot infer private sharing from a response without a share state', async () => {
   const { shared: _omitted, ...unknown } = document()
-  vi.mocked(get).mockImplementation(async path => path === list ? listing() : path === checks
+  vi.mocked(get).mockImplementation(async path => path === '/health?full=1'
+    ? { paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } }
+    : path === list ? listing() : path === checks
     ? { checks: [], diagnostics: [] } : unknown)
   select(firstId)
   render(html`<${ArtifactsSurface} />`)
   const reader = within(await screen.findByRole('dialog'))
-  const toggle = reader.getByRole('button', { name: '외부 공유 상태 미확인' }) as HTMLButtonElement
+  const toggle = await reader.findByRole('button', { name: '외부 공유 상태 미확인' }) as HTMLButtonElement
   expect(toggle.disabled).toBe(true)
   fireEvent.click(toggle)
   expect(post).not.toHaveBeenCalled()
 })
 
-it('refuses to send a stale toggle after a workspace-bound reread changes state', async () => {
-  let reads = 0
+it('keeps the document read-only if the workspace receipt is missing', async () => {
   vi.mocked(get).mockImplementation(async path => path === '/health?full=1'
     ? { paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } }
-    : path === list ? listing() : path === checks ? { checks: [], diagnostics: [] }
-      : { ...document(), shared: ++reads > 1 })
+    : path === list ? listing() : path === checks ? { checks: [], diagnostics: [] } : document())
+  vi.mocked(getWithResponse).mockResolvedValueOnce({ data: document(), headers: new Headers() })
   select(firstId)
   render(html`<${ArtifactsSurface} />`)
   const reader = within(await screen.findByRole('dialog'))
-  fireEvent.click(reader.getByRole('button', { name: '외부 공유 켜기' }))
+  await waitFor(() => expect(getWithResponse).toHaveBeenCalledTimes(1))
+  expect(reader.getByText('original body')).toBeTruthy()
+  expect(reader.getByText('작업 공간 미확인 · 읽기 전용')).toBeTruthy()
+  expect(reader.queryByRole('button', { name: '외부 공유 켜기' })).toBeNull()
+  expect(reader.queryByRole('button', { name: '문서 편집' })).toBeNull()
+  expect(reader.queryByText(/요청이 나중에 적용될 수 있어/)).toBeNull()
+  expect(post).not.toHaveBeenCalled()
+})
+
+it('settles a missing workspace receipt on refresh and retains the previous bound document', async () => {
+  const normal = vi.mocked(getWithResponse).getMockImplementation()!
+  let reads = 0
+  vi.mocked(getWithResponse).mockImplementation((path, options) => ++reads === 2
+    ? Promise.resolve({ data: document(first, 'unattested replacement'), headers: new Headers() })
+    : normal(path, options))
+  select(firstId); render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  await reader.findByRole('button', { name: '문서 편집' })
+  fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+  await waitFor(() => expect(screen.getByRole('dialog').textContent).toContain('문서 조회의 작업 공간 확인 응답이 없어'))
+  expect(reader.getByText('original body')).toBeTruthy()
+  expect(reader.queryByText('unattested replacement')).toBeNull()
+  expect((reader.getByRole('button', { name: '문서 편집' }) as HTMLButtonElement).disabled).toBe(true)
+  expect((reader.getByRole('button', { name: '외부 공유 상태 미확인' }) as HTMLButtonElement).disabled).toBe(true)
+})
+
+it('opens the document read-only while workspace identity is delayed', async () => {
+  const health = pending()
+  vi.mocked(get).mockImplementation(path => path === '/health?full=1' ? health.promise
+    : Promise.resolve(path === list ? listing() : path === checks ? { checks: [], diagnostics: [] } : document()))
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  expect(reader.getByText('original body')).toBeTruthy()
+  expect(reader.getByText('작업 공간 미확인 · 읽기 전용')).toBeTruthy()
+  expect(reader.queryByRole('button', { name: '문서 편집' })).toBeNull()
+  await act(async () => { health.resolve({ paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } }) })
+  expect(await reader.findByRole('button', { name: '문서 편집' })).toBeTruthy()
+})
+
+it.each(['shared', 'revoked', 'interrupted'] as const)('waits for a pending refresh before deciding whether to copy a verified public link (%s)', async outcome => {
+  const id = `artifact-${'7'.repeat(32)}`, report = { ...first, id }
+  const verification = pending(), refresh = pending()
+  let shared = false, actionReads = 0, refreshStarted = false
+  vi.mocked(get).mockImplementation((path, options) => {
+    if (path === '/health?full=1') return Promise.resolve({ paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } })
+    if (path === list) return Promise.resolve(listing([report]))
+    if (path === checks) return Promise.resolve({ checks: [], diagnostics: [] })
+    if (options?.extraHeaders && !options.signal && ++actionReads === 2) return verification.promise
+    if (options?.extraHeaders && options.signal && shared) { refreshStarted = true; return refresh.promise }
+    return Promise.resolve({ ...document(report), shared, share_version: shared ? 1 : 0 })
+  })
+  vi.mocked(post).mockImplementation(async () => { shared = true; return shareReply(id) })
+  select(id); render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  fireEvent.click(await reader.findByRole('button', { name: '외부 공유 켜기' }))
+  await waitFor(() => expect(refreshStarted && actionReads === 2).toBe(true))
+  await act(async () => { verification.resolve({ ...document(report), shared: true, share_version: 1 }) })
+  await reader.findByText(/진행 중인 공유 상태 확인을 기다리고 있습니다/)
+  expect(copyToClipboard).not.toHaveBeenCalled()
+  if (outcome === 'interrupted') {
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    await reader.findByText(/공유 상태 확인이 중단되어 링크를 복사하지 못했습니다/)
+    await act(async () => { refresh.resolve({ ...document(report), shared: true, share_version: 1 }) })
+    expect(copyToClipboard).not.toHaveBeenCalled()
+    return
+  }
+  const stillShared = outcome === 'shared'
+  await act(async () => { refresh.resolve({ ...document(report), shared: stillShared, share_version: stillShared ? 1 : 2 }) })
+  if (stillShared) await waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith(
+    `${window.location.origin}/dashboard/#/workspace?section=artifacts&artifact=${id}&revision=2`, screen.getByRole('dialog')))
+  else {
+    await reader.findByText(/공유 상태가 바뀌었거나 확인되지 않아/)
+    expect(copyToClipboard).not.toHaveBeenCalled()
+  }
+})
+
+it('keeps a delayed unverified HTML document inert until the bound read completes', async () => {
+  const health = pending()
+  vi.mocked(get).mockImplementation(path => path === '/health?full=1' ? health.promise
+    : Promise.resolve(path === list ? listing() : path === checks ? { checks: [], diagnostics: [] }
+      : path.startsWith('/api/v1/artifact-app-data/')
+        ? { schema: 'masc.artifact_app_data.v1', target: { artifact_id: secondId, revision: 2 }, actor: 'human', version: 0, data: {}, receipts: [] }
+        : document(second, '<button>action</button>')))
+  select(secondId)
+  render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  const temporary = reader.getByTitle(second.title)
+  expect(temporary.getAttribute('sandbox')).toBe('')
+  expect(temporary.hasAttribute('inert')).toBe(true)
+  expect(reader.queryByRole('button', { name: '문서 편집' })).toBeNull()
+  await act(async () => { health.resolve({ paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } }) })
+  await waitFor(() => expect(reader.getByTitle(second.title).getAttribute('sandbox')).toBe('allow-scripts'))
+  expect(reader.getByTitle(second.title).hasAttribute('inert')).toBe(false)
+})
+
+it('does not grant mutation authority to a bound read older than the unbound observation', async () => {
+  const bound = pending()
+  const newer = { ...first, revision: 3, body: { _blob: { sha256: 'd'.repeat(64) } } }
+  vi.mocked(get).mockImplementation(async path => path === '/health?full=1'
+    ? { paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } }
+    : path === list ? listing() : path === checks ? { checks: [], diagnostics: [] } : document(newer, 'newer body'))
+  vi.mocked(getWithResponse).mockImplementationOnce(() => bound.promise as Promise<{ data: unknown; headers: Headers }>)
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  expect(reader.getByText('newer body')).toBeTruthy()
+  await act(async () => { bound.resolve({ data: document(), headers: new Headers({ 'x-masc-workspace-read': 'matched-v1' }) }) })
+  await reader.findByText(/문서 조회 결과가 서로 달라/)
+  expect(reader.getByText('newer body')).toBeTruthy()
+  expect(reader.queryByRole('button', { name: '문서 편집' })).toBeNull()
+  expect(reader.queryByRole('button', { name: '외부 공유 켜기' })).toBeNull()
+  expect(post).not.toHaveBeenCalled()
+})
+
+it('refuses to send a stale toggle after a workspace-bound reread changes state', async () => {
+  let changed = false
+  vi.mocked(get).mockImplementation(async (path, options) => path === '/health?full=1'
+    ? { paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } }
+    : path === list ? listing() : path === checks ? { checks: [], diagnostics: [] }
+      : (() => { if (options?.extraHeaders && !options.signal) changed = true
+        return { ...document(), shared: changed, share_version: changed ? 1 : 0 } })())
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  fireEvent.click(await reader.findByRole('button', { name: '외부 공유 켜기' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '외부 공유 해제' })).toBeTruthy())
   await reader.findByText(/요청을 보내지 않았습니다/)
   expect(post).not.toHaveBeenCalled()
   expect(await reader.findByRole('button', { name: '외부 공유 해제' })).toBeTruthy()
+})
+
+it('refuses an ABA sharing change even when the boolean returned to its earlier value', async () => {
+  let reads = 0
+  vi.mocked(get).mockImplementation(async (path, options) => path === '/health?full=1'
+    ? { paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } }
+    : path === list ? listing() : path === checks ? { checks: [], diagnostics: [] }
+      : { ...document(), share_version: options?.extraHeaders && !options.signal && ++reads > 0 ? 2 : 0 })
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  fireEvent.click(await reader.findByRole('button', { name: '외부 공유 켜기' }))
+  await reader.findByText(/요청을 보내지 않았습니다/)
+  expect(post).not.toHaveBeenCalled()
+})
+
+it('does not send a share request when browser recovery storage is unavailable', async () => {
+  const id = `artifact-${'5'.repeat(32)}`
+  const report = { ...first, id }
+  vi.stubGlobal('localStorage', { length: 0, key: () => null, getItem: () => null,
+    setItem: () => { throw new Error('quota') }, removeItem: () => {} })
+  vi.mocked(get).mockImplementation(async path => path === '/health?full=1'
+    ? { paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } }
+    : path === list ? listing([report]) : path === checks ? { checks: [], diagnostics: [] } : document(report))
+  select(id)
+  render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  fireEvent.click(await reader.findByRole('button', { name: '외부 공유 켜기' }))
+  expect((await reader.findAllByText(/이 탭은 요청을 보내지 않았지만/)).length).toBeGreaterThan(0)
+  const row = Array.from(screen.getByRole('dialog').querySelectorAll('p')).find(item => item.textContent?.includes(id) && item.textContent.includes('결과 미확인'))!
+  expect(within(row).getByRole('button', { name: '같은 요청 확인' })).toBeTruthy()
+  expect(post).not.toHaveBeenCalled()
+})
+
+it('retains an unconfirmed operation if storage readback fails after writing', async () => {
+  const id = `artifact-${'6'.repeat(32)}`
+  const report = { ...first, id }
+  let written: string | null = null
+  vi.stubGlobal('localStorage', { length: 0, key: () => null,
+    getItem: () => { if (written !== null) throw new Error('readback failed'); return null },
+    setItem: (_key: string, value: string) => { written = value }, removeItem: () => {} })
+  vi.mocked(get).mockImplementation(async path => path === '/health?full=1'
+    ? { paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } }
+    : path === list ? listing([report]) : path === checks ? { checks: [], diagnostics: [] } : document(report))
+  select(id)
+  render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  fireEvent.click(await reader.findByRole('button', { name: '외부 공유 켜기' }))
+  await waitFor(() => expect(written).not.toBeNull())
+  const row = Array.from(screen.getByRole('dialog').querySelectorAll('p')).find(item => item.textContent?.includes(id) && item.textContent.includes('결과 미확인'))!
+  expect(within(row).getByRole('button', { name: '같은 요청 확인' })).toBeTruthy()
+  expect(post).not.toHaveBeenCalled()
+})
+
+it('offers an already retained operation after a new reader is mounted', async () => {
+  const operation = { id: firstId, operationId: '01890e2a-4c8e-7b21-9f3c-000000000099', expectedVersion: 0, shared: true,
+    expectedArtifactRevision: 2, expectedArtifactSha256: first.body._blob.sha256 }
+  retainPendingShare({ operation, workspace: { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }, title: first.title, revision: 2 })
+  window.dispatchEvent(new StorageEvent('storage'))
+  vi.mocked(get).mockImplementation(async path => path === '/health?full=1'
+    ? { paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } }
+    : path === list ? listing() : path === checks ? { checks: [], diagnostics: [] } : document())
+  vi.mocked(post).mockImplementation(async () => shareReply(firstId))
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  expect((await reader.findByRole('button', { name: '외부 공유 상태 미확인' }) as HTMLButtonElement).disabled).toBe(true)
+  const pendingRow = Array.from(screen.getByRole('dialog').querySelectorAll('p')).find(item => item.textContent?.includes(firstId) && item.textContent.includes('결과 미확인'))!
+  fireEvent.click(within(pendingRow).getByRole('button', { name: '같은 요청 확인' }))
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/v1/published-artifact-shares', expect.objectContaining({
+    id: firstId, operation_id: operation.operationId, expected_version: 0, shared: true,
+  }), expect.any(Object), 30_000, undefined, true))
+  await waitFor(() => expect(Array.from(screen.getByRole('dialog').querySelectorAll('p')).some(item => item.textContent?.includes(firstId) && item.textContent.includes('결과 미확인'))).toBe(false))
+})
+
+it('settles a retained share conflict through the response parser', async () => {
+  const operation = { id: firstId, operationId: '01890e2a-4c8e-7b21-9f3c-000000000098', expectedVersion: 0, shared: true,
+    expectedArtifactRevision: 2, expectedArtifactSha256: first.body._blob.sha256 }
+  const captured = { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }
+  retainPendingShare({ operation, workspace: captured, title: first.title, revision: 2 })
+  window.dispatchEvent(new StorageEvent('storage'))
+  const receipt = { id: firstId, receipt: { operation_id: operation.operationId, expected_version: 0,
+    expected_artifact_revision: 2, expected_artifact_sha256: operation.expectedArtifactSha256,
+    publication_matches: false, requested: true, outcome: 'conflict', snapshot: { version: 0, shared: false } },
+    current: { version: 0, shared: false } }
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify(receipt), { status: 409 }))
+  vi.stubGlobal('fetch', fetchMock)
+  const realCore = await vi.importActual<typeof import('../../api/core')>('../../api/core')
+  vi.mocked(post).mockImplementation(realCore.post)
+  select(firstId); render(html`<${ArtifactsSurface} />`)
+  const dialog = await screen.findByRole('dialog')
+  const pendingRow = Array.from(dialog.querySelectorAll('p')).find(item => item.textContent?.includes(firstId) && item.textContent.includes('결과 미확인'))!
+  fireEvent.click(within(pendingRow).getByRole('button', { name: '같은 요청 확인' }))
+  await waitFor(() => expect(Array.from(dialog.querySelectorAll('p')).some(item => item.textContent?.includes(firstId) && item.textContent.includes('결과 미확인'))).toBe(false))
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+  expect(copyToClipboard).not.toHaveBeenCalled()
 })
 
 it('does not send a share change when the server reports a different workspace', async () => {
@@ -453,45 +703,62 @@ it('does not send a share change when the server reports a different workspace',
   select(firstId)
   render(html`<${ArtifactsSurface} />`)
   const reader = within(await screen.findByRole('dialog'))
-  fireEvent.click(reader.getByRole('button', { name: '외부 공유 켜기' }))
+  expect(reader.getByText('작업 공간 미확인 · 읽기 전용')).toBeTruthy()
+  expect(reader.queryByRole('button', { name: '문서 편집' })).toBeNull()
+  expect(post).not.toHaveBeenCalled()
+})
+
+it('does not share when the MASC root changes after the observed document', async () => {
+  let mascRoot = '/runtime-a'
+  vi.mocked(get).mockImplementation(async path => path === '/health?full=1'
+    ? { paths: { effective_base_path: '/workspace-a', effective_masc_root: mascRoot } }
+    : path === list ? listing() : path === checks ? { checks: [], diagnostics: [] } : document())
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  mascRoot = '/runtime-b'
+  fireEvent.click(await reader.findByRole('button', { name: '외부 공유 켜기' }))
   await reader.findByText(/요청을 보내지 않았습니다/)
   expect(post).not.toHaveBeenCalled()
 })
 
 it('does not share a newer latest revision that the operator has not opened', async () => {
-  let reads = 0
+  let changed = false
   const newer = { ...first, revision: 3, body: { _blob: { sha256: 'd'.repeat(64) } } }
-  vi.mocked(get).mockImplementation(async path => path === '/health?full=1'
+  vi.mocked(get).mockImplementation(async (path, options) => path === '/health?full=1'
     ? { paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } }
     : path === list ? listing() : path === checks ? { checks: [], diagnostics: [] }
-      : document(++reads > 1 ? newer : first))
+      : (() => { if (options?.extraHeaders && !options.signal) changed = true
+        return document(changed ? newer : first) })())
   select(firstId)
   render(html`<${ArtifactsSurface} />`)
   const reader = within(await screen.findByRole('dialog'))
-  fireEvent.click(reader.getByRole('button', { name: '외부 공유 켜기' }))
+  fireEvent.click(await reader.findByRole('button', { name: '외부 공유 켜기' }))
   await reader.findByText(/요청을 보내지 않았습니다/)
   await waitFor(() => expect(reader.getByRole('combobox', { name: '문서 버전' }).textContent).toContain('v3'))
   expect(reader.getByRole('status').textContent).toContain('요청을 보내지 않았습니다')
   expect(post).not.toHaveBeenCalled()
   expect(get).toHaveBeenCalledWith(`/api/v1/published-artifacts/${firstId}`, {
     signal: undefined,
+    consumeWithinTimeout: true,
     extraHeaders: { 'x-masc-expected-base-path': '/workspace-a', 'x-masc-expected-masc-root': '/workspace-a/.masc' },
   })
 })
 
 it('does not show a refused preflight in a different artifact reader', async () => {
   const preflight = pending()
+  let boundReads = 0
   vi.mocked(get).mockImplementation((path, options) => {
     if (path === '/health?full=1') return Promise.resolve({ paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } })
     if (path === list) return Promise.resolve(listing())
     if (path === checks) return Promise.resolve({ checks: [], diagnostics: [] })
-    if (path.includes(firstId) && options?.extraHeaders) return preflight.promise
+    if (path.includes(firstId) && options?.extraHeaders && !options.signal) { boundReads++; return preflight.promise }
     return Promise.resolve(document(path.includes(secondId) ? second : first))
   })
   select(firstId)
   render(html`<${ArtifactsSurface} />`)
-  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '외부 공유 켜기' }))
-  await waitFor(() => expect(vi.mocked(get).mock.calls.some(([path, options]) => path.includes(firstId) && !!options?.extraHeaders)).toBe(true))
+  fireEvent.click(await within(await screen.findByRole('dialog')).findByRole('button', { name: '외부 공유 켜기' }))
+  await waitFor(() => expect(boundReads).toBeGreaterThanOrEqual(1))
   await act(async () => { select(secondId) })
   await screen.findByRole('heading', { name: second.title })
   await act(async () => { preflight.resolve(document()) })
@@ -501,17 +768,18 @@ it('does not show a refused preflight in a different artifact reader', async () 
 
 it('does not send an old share preflight after a batched A to B to A visit', async () => {
   const preflight = pending()
+  let boundReads = 0
   vi.mocked(get).mockImplementation((path, options) => {
     if (path === '/health?full=1') return Promise.resolve({ paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } })
     if (path === list) return Promise.resolve(listing())
     if (path === checks) return Promise.resolve({ checks: [], diagnostics: [] })
-    if (path.includes(firstId) && options?.extraHeaders) return preflight.promise
+    if (path.includes(firstId) && options?.extraHeaders && !options.signal) { boundReads++; return preflight.promise }
     return Promise.resolve(document(path.includes(secondId) ? second : first))
   })
   select(firstId)
   render(html`<${ArtifactsSurface} />`)
-  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '외부 공유 켜기' }))
-  await waitFor(() => expect(vi.mocked(get).mock.calls.some(([path, options]) => path.includes(firstId) && !!options?.extraHeaders)).toBe(true))
+  fireEvent.click(await within(await screen.findByRole('dialog')).findByRole('button', { name: '외부 공유 켜기' }))
+  await waitFor(() => expect(boundReads).toBeGreaterThanOrEqual(1))
   await act(async () => {
     select(secondId)
     select(firstId)
@@ -529,17 +797,139 @@ it('keeps the operation and link copy through a same-revision refresh while the 
   vi.mocked(get).mockImplementation(async path => path === '/health?full=1'
     ? { paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } }
     : path === list ? listing() : path === checks ? { checks: [], diagnostics: [] }
-      : (reads++, { ...document(), shared }))
+      : (reads++, { ...document(), shared, share_version: shared ? 1 : 0 }))
   select(firstId)
   render(html`<${ArtifactsSurface} />`)
-  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '외부 공유 켜기' }))
+  fireEvent.click(await within(await screen.findByRole('dialog')).findByRole('button', { name: '외부 공유 켜기' }))
   await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
   const before = reads
   fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
   await waitFor(() => expect(reads).toBeGreaterThan(before))
   shared = true
-  await act(async () => { request.resolve({ id: firstId, shared: true }) })
+  await act(async () => { request.resolve(shareReply(firstId)) })
   await waitFor(() => expect(copyToClipboard).toHaveBeenCalledTimes(1))
+})
+
+it('does not copy a link from an older response after a newer revoke was observed', async () => {
+  const request = pending()
+  let version = 0
+  vi.mocked(post).mockReturnValue(request.promise)
+  vi.mocked(get).mockImplementation(async path => path === '/health?full=1'
+    ? { paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } }
+    : path === list ? listing() : path === checks ? { checks: [], diagnostics: [] }
+      : { ...document(), shared: false, share_version: version })
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  fireEvent.click(await reader.findByRole('button', { name: '외부 공유 켜기' }))
+  await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+  const before = reads()
+  version = 2
+  fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+  await waitFor(() => expect(reads()).toBeGreaterThan(before))
+  await act(async () => { request.resolve(shareReply(firstId)) })
+  await reader.findByText(/더 새로운 공유 상태|링크를 복사하지 않았습니다/)
+  expect(copyToClipboard).not.toHaveBeenCalled()
+})
+
+it('does not copy a delayed verification after a newer revoke is refreshed', async () => {
+  const verification = pending()
+  let boundReads = 0
+  let version = 0
+  vi.mocked(post).mockImplementation(async () => shareReply(firstId))
+  vi.mocked(get).mockImplementation((path, options) => {
+    if (path === '/health?full=1') return Promise.resolve({ paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } })
+    if (path === list) return Promise.resolve(listing())
+    if (path === checks) return Promise.resolve({ checks: [], diagnostics: [] })
+    if (options?.extraHeaders && !options.signal && ++boundReads === 2) return verification.promise
+    return Promise.resolve({ ...document(first, version === 2 ? 'refreshed revoke' : 'original body'), shared: false, share_version: version })
+  })
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  fireEvent.click(await reader.findByRole('button', { name: '외부 공유 켜기' }))
+  await waitFor(() => expect(boundReads).toBeGreaterThanOrEqual(2))
+  version = 2
+  fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+  await reader.findByText('refreshed revoke')
+  await act(async () => { verification.resolve({ ...document(), shared: true, share_version: 1 }) })
+  await reader.findByText(/링크를 복사하지 않았습니다/)
+  expect(copyToClipboard).not.toHaveBeenCalled()
+})
+
+it('uses a refresh admitted in the same batch as the delayed verification', async () => {
+  const verification = pending(), refresh = pending()
+  let actionReads = 0, holdRefresh = false, refreshStarted = false
+  vi.mocked(post).mockImplementation(async () => shareReply(firstId))
+  vi.mocked(get).mockImplementation((path, options) => {
+    if (path === '/health?full=1') return Promise.resolve({ paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } })
+    if (path === list) return Promise.resolve(listing())
+    if (path === checks) return Promise.resolve({ checks: [], diagnostics: [] })
+    if (options?.extraHeaders && options.signal && holdRefresh) { refreshStarted = true; return refresh.promise }
+    if (options?.extraHeaders && !options.signal && ++actionReads === 2) return verification.promise
+    return Promise.resolve(document())
+  })
+  select(firstId)
+  render(html`<${ArtifactsSurface} />`)
+  const reader = within(await screen.findByRole('dialog'))
+  fireEvent.click(await reader.findByRole('button', { name: '외부 공유 켜기' }))
+  await waitFor(() => expect(actionReads).toBe(2))
+  holdRefresh = true
+  fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+  await waitFor(() => expect(refreshStarted).toBe(true))
+  await act(async () => {
+    refresh.resolve({ ...document(), shared: false, share_version: 2 })
+    for (let i = 0; i < 12; i++) await Promise.resolve()
+    verification.resolve({ ...document(), shared: true, share_version: 1 })
+  })
+  await reader.findByText(/링크를 복사하지 않았습니다/)
+  expect(copyToClipboard).not.toHaveBeenCalled()
+})
+
+it('keeps a prior share result visible in the public reader after token removal', async () => {
+  const id = `artifact-${'3'.repeat(32)}`
+  const report = { ...first, id }
+  const request = pending()
+  vi.mocked(post).mockReturnValue(request.promise)
+  vi.mocked(get).mockImplementation(async path => path === '/health?full=1'
+    ? { paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } }
+    : path === list ? listing([report]) : path === checks ? { checks: [], diagnostics: [] } : document(report))
+  vi.mocked(getPublic).mockResolvedValue({ ...document(report, 'public body'), shared: true })
+  select(id)
+  render(html`<${ArtifactsSurface} />`)
+  fireEvent.click(await within(await screen.findByRole('dialog')).findByRole('button', { name: '외부 공유 켜기' }))
+  await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+  await act(async () => { clearStoredToken() })
+  const publicReader = within(await screen.findByRole('dialog'))
+  expect(publicReader.getByText('public body')).toBeTruthy()
+  await act(async () => { request.resolve(shareReply(id)) })
+  await waitFor(() => expect(publicReader.getByRole('region', { name: '외부 공유 요청 결과' }).textContent).toContain('요청 적용'))
+  expect(copyToClipboard).not.toHaveBeenCalled()
+})
+
+it('preserves a confirmed recovery receipt after token removal', async () => {
+  const id = `artifact-${'4'.repeat(32)}`
+  const report = { ...first, id }
+  const operation = { id, operationId: '01890e2a-4c8e-7b21-9f3c-000000000199', expectedVersion: 0, shared: true,
+    expectedArtifactRevision: 2, expectedArtifactSha256: first.body._blob.sha256 }
+  retainPendingShare({ operation, workspace: { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }, title: first.title, revision: 2 })
+  const request = pending()
+  vi.mocked(get).mockImplementation(async path => path === '/health?full=1'
+    ? { paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } }
+    : path === list ? listing([report]) : path === checks ? { checks: [], diagnostics: [] } : document(report))
+  vi.mocked(getPublic).mockResolvedValue({ ...document(report), shared: true })
+  vi.mocked(post).mockReturnValue(request.promise)
+  select(id)
+  render(html`<${ArtifactsSurface} />`)
+  await screen.findByRole('dialog')
+  const recoveryRow = Array.from(screen.getByRole('dialog').querySelectorAll('p')).find(item => item.textContent?.includes(id) && item.textContent.includes('결과 미확인'))!
+  fireEvent.click(within(recoveryRow).getByRole('button', { name: '같은 요청 확인' }))
+  await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+  await act(async () => { clearStoredToken() })
+  const publicReader = within(await screen.findByRole('dialog'))
+  await act(async () => { request.resolve(shareReply(id)) })
+  await waitFor(() => expect(publicReader.getByRole('region', { name: '외부 공유 요청 결과' }).textContent).toContain('요청 적용'))
+  expect(copyToClipboard).not.toHaveBeenCalled()
 })
 
 it('keeps a lost share result unconfirmed after a workspace change and reread', async () => {
@@ -553,7 +943,7 @@ it('keeps a lost share result unconfirmed after a workspace change and reread', 
       : document(report))
   select(id)
   render(html`<${ArtifactsSurface} />`)
-  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '외부 공유 켜기' }))
+  fireEvent.click(await within(await screen.findByRole('dialog')).findByRole('button', { name: '외부 공유 켜기' }))
   await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
   await act(async () => { workspace.current.value = authority('/workspace-b') })
   await act(async () => { workspace.current.value = authority('/workspace-a') })
@@ -561,7 +951,7 @@ it('keeps a lost share result unconfirmed after a workspace change and reread', 
   await act(async () => { request.reject(new Error('timeout')) })
   const receipt = await waitFor(() => {
     const region = within(screen.getByRole('dialog')).getByRole('region', { name: '외부 공유 요청 결과' })
-    const row = Array.from(region.querySelectorAll('p')).find(item => item.textContent?.includes(id))
+    const row = Array.from(region.querySelectorAll('p')).find(item => item.textContent?.includes(id) && item.textContent?.includes('적용 여부 미확인'))
     expect(row).toBeDefined()
     return row!
   })
@@ -573,6 +963,15 @@ it('keeps a lost share result unconfirmed after a workspace change and reread', 
   expect(toggle.disabled).toBe(true)
   fireEvent.click(toggle)
   expect(post).toHaveBeenCalledTimes(1)
+  const sent = vi.mocked(post).mock.calls[0]![1]
+  vi.mocked(post).mockImplementationOnce(async (_path, body) => {
+    expect(body).toEqual(sent)
+    return shareReply(id)
+  })
+  const recoveryRow = Array.from(screen.getByRole('dialog').querySelectorAll('p')).find(item => item.textContent?.includes(id) && item.textContent.includes('결과 미확인'))!
+  fireEvent.click(within(recoveryRow).getByRole('button', { name: '같은 요청 확인' }))
+  await waitFor(() => expect(post).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(Array.from(screen.getByRole('dialog').querySelectorAll('p')).some(item => item.textContent?.includes(id) && item.textContent.includes('결과 미확인'))).toBe(false))
 })
 
 it.each(['confirmed', 'unconfirmed'] as const)('shows a prior owner share %s result inside the public reader without copying', async result => {
@@ -591,25 +990,25 @@ it.each(['confirmed', 'unconfirmed'] as const)('shows a prior owner share %s res
   vi.mocked(getPublic).mockResolvedValue({ ...document(report, 'public body'), shared: true })
   select(id)
   render(html`<${ArtifactsSurface} />`)
-  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '외부 공유 켜기' }))
+  fireEvent.click(await within(await screen.findByRole('dialog')).findByRole('button', { name: '외부 공유 켜기' }))
   await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
   await act(async () => { worker = true; setStoredToken('worker-credential') })
   const publicReader = within(await screen.findByRole('dialog'))
   expect(publicReader.getByText('public body')).toBeTruthy()
   expect(publicReader.getByText('외부 공유 열람')).toBeTruthy()
   await act(async () => {
-    if (result === 'confirmed') request.resolve({ id, shared: true })
+    if (result === 'confirmed') request.resolve(shareReply(id))
     else request.reject(new Error('lost response'))
   })
   const receipt = await waitFor(() => {
     const region = publicReader.getByRole('region', { name: '외부 공유 요청 결과' })
-    const row = Array.from(region.querySelectorAll('p')).find(item => item.textContent?.includes(id))
+    const row = Array.from(region.querySelectorAll('p')).find(item => item.textContent?.includes(id) && item.textContent?.includes('요청:'))
     expect(row).toBeDefined()
     return row!
   }, { timeout: 500 })
   expect(receipt.textContent).toContain('원래 작업 공간 /workspace-a (/workspace-a/.masc)')
   expect(receipt.textContent).toContain('요청: 외부 공유 켜기')
-  expect(receipt.textContent).toContain(result === 'confirmed' ? '서버 응답: 공유 켜짐' : '적용 여부 미확인: lost response')
+  expect(receipt.textContent).toContain(result === 'confirmed' ? '요청 적용: 당시 공유 켜짐' : '적용 여부 미확인: lost response')
   expect(copyToClipboard).not.toHaveBeenCalled()
   expect(post).toHaveBeenCalledTimes(1)
 })
@@ -625,20 +1024,20 @@ it('retains a confirmed share result for the original selection after navigating
       : document(path.includes(secondId) ? second : report))
   select(id)
   render(html`<${ArtifactsSurface} />`)
-  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '외부 공유 켜기' }))
+  fireEvent.click(await within(await screen.findByRole('dialog')).findByRole('button', { name: '외부 공유 켜기' }))
   await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
   await act(async () => { select(secondId) })
   await screen.findByRole('heading', { name: second.title })
-  const before = reads()
-  await act(async () => { request.resolve({ id, shared: true }) })
+  const before = vi.mocked(get).mock.calls.filter(([path]) => path === list || path === checks).length
+  await act(async () => { request.resolve(shareReply(id)) })
   const receipt = await waitFor(() => {
     const region = within(screen.getByRole('dialog')).getByRole('region', { name: '외부 공유 요청 결과' })
-    const row = Array.from(region.querySelectorAll('p')).find(item => item.textContent?.includes(id))
+    const row = Array.from(region.querySelectorAll('p')).find(item => item.textContent?.includes(id) && item.textContent?.includes('요청:'))
     expect(row).toBeDefined()
     return row!
   })
-  expect(receipt.textContent).toContain('서버 응답: 공유 켜짐')
-  expect(reads()).toBe(before)
+  expect(receipt.textContent).toContain('요청 적용: 당시 공유 켜짐')
+  expect(vi.mocked(get).mock.calls.filter(([path]) => path === list || path === checks)).toHaveLength(before)
   expect(copyToClipboard).not.toHaveBeenCalled()
 })
 
@@ -651,17 +1050,17 @@ it('rereads the same artifact reopened while its earlier share request is pendin
   vi.mocked(get).mockImplementation(async path => path === '/health?full=1'
     ? { paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } }
     : path === list ? listing([report]) : path === checks ? { checks: [], diagnostics: [] }
-      : { ...document(report), shared })
+      : { ...document(report), shared, share_version: shared ? 1 : 0 })
   select(id)
   render(html`<${ArtifactsSurface} />`)
-  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '외부 공유 켜기' }))
+  fireEvent.click(await within(await screen.findByRole('dialog')).findByRole('button', { name: '외부 공유 켜기' }))
   await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
   await act(async () => { select() })
   await act(async () => { select(id) })
   const reader = within(await screen.findByRole('dialog'))
-  expect((reader.getByRole('button', { name: '외부 공유 상태 미확인' }) as HTMLButtonElement).disabled).toBe(true)
+  expect((await reader.findByRole('button', { name: '외부 공유 상태 미확인' }) as HTMLButtonElement).disabled).toBe(true)
   shared = true
-  await act(async () => { request.resolve({ id, shared: true }) })
+  await act(async () => { request.resolve(shareReply(id)) })
   expect(await reader.findByRole('button', { name: '외부 공유 해제' })).toBeTruthy()
   expect(copyToClipboard).not.toHaveBeenCalled()
 })
@@ -694,10 +1093,14 @@ it('starts a new observation for an equal-valued replacement authority', async (
 
 it('rejects workspace A to B to A late catalog success, document error and checks error', async () => {
   const oldList = pending(), oldDocument = pending(), oldChecks = pending()
-  vi.mocked(get).mockImplementation(path => path === list ? oldList.promise : path === checks ? oldChecks.promise : oldDocument.promise)
+  vi.mocked(get).mockImplementation(path => path === '/health?full=1'
+    ? Promise.resolve({ paths: { effective_base_path: '/workspace-a', effective_masc_root: '/workspace-a/.masc' } })
+    : path === list ? oldList.promise : path === checks ? oldChecks.promise : oldDocument.promise)
   select(firstId); render(html`<${ArtifactsSurface} />`)
-  await waitFor(() => expect(reads()).toBe(3))
-  vi.mocked(get).mockImplementation(async path => path === list ? listing([{ ...first, title: 'fresh report' }]) : path === checks
+  await waitFor(() => expect(vi.mocked(get).mock.calls.some(([path]) => path.includes(firstId))).toBe(true))
+  vi.mocked(get).mockImplementation(async path => path === '/health?full=1'
+    ? { paths: { effective_base_path: workspace.current.value?.workspaceRoot ?? '/workspace-a', effective_masc_root: `${workspace.current.value?.workspaceRoot ?? '/workspace-a'}/.masc` } }
+    : path === list ? listing([{ ...first, title: 'fresh report' }]) : path === checks
     ? { checks: [], diagnostics: [] } : document({ ...first, title: 'fresh report' }, 'fresh body'))
   await act(async () => { workspace.current.value = authority('/workspace-b') })
   await act(async () => { workspace.current.value = authority() })
@@ -729,13 +1132,13 @@ it('retains a sent check receipt with the original workspace, document, revision
   await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
   await act(async () => { workspace.current.value = authority('/workspace-b') })
   await screen.findByRole('dialog')
-  const before = reads()
+  const before = vi.mocked(get).mock.calls.filter(([path]) => path === list || path === checks).length
   await act(async () => sent.resolve({ check: checkReceipt }))
   const receipt = (await screen.findByRole('region', { name: '문서 확인 요청 결과' })).textContent
   expect(receipt).toContain('/workspace-a'); expect(receipt).toContain(firstId)
   expect(receipt).toContain('v2'); expect(receipt).toContain(first.body._blob.sha256)
   expect(receipt).toContain('original-human')
-  expect(reads()).toBe(before); expect(post).toHaveBeenCalledTimes(1)
+  expect(vi.mocked(get).mock.calls.filter(([path]) => path === list || path === checks)).toHaveLength(before); expect(post).toHaveBeenCalledTimes(1)
 })
 
 it('retains an unconfirmed sent check outcome after authority loss without claiming a rollback or retrying', async () => {
@@ -790,10 +1193,10 @@ it('preserves a sent reader check for the original selection without refreshing 
   await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
   await act(async () => select(secondId))
   await screen.findByRole('heading', { name: 'HTML report' })
-  const before = reads()
+  const before = vi.mocked(get).mock.calls.filter(([path]) => path === list || path === checks).length
   await act(async () => sent.resolve({ check: checkReceipt }))
   const receipt = await screen.findByRole('region', { name: '문서 확인 요청 결과' })
   expect(receipt.textContent).toContain(firstId)
   expect(receipt.textContent).not.toContain(secondId)
-  expect(reads()).toBe(before); expect(post).toHaveBeenCalledTimes(1)
+  expect(vi.mocked(get).mock.calls.filter(([path]) => path === list || path === checks)).toHaveLength(before); expect(post).toHaveBeenCalledTimes(1)
 })

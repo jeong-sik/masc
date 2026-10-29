@@ -116,9 +116,19 @@ that a Keeper is currently viewing or editing a document.
 - Existing dashboard token authentication and admin permission apply to the
   catalog list, check state and publication routes. Capability-addressed single
   artifact reads (`GET /api/v1/published-artifacts/<id>`) allow unauthenticated
-  read-only sharing only when external sharing is enabled for that artifact via
-  `POST /api/v1/published-artifact-shares` (`{"id": "<id>", "shared": true|false}`),
+  read-only sharing only when external sharing is enabled for that artifact,
   while still validating any presented token. Responses are private and uncached.
+  The server selects the requested revision under the same lock as sharing and
+  publication. A read already admitted while sharing was on can finish after a
+  revocation, but it cannot pick a revision published after that revocation.
+  Enable or revoke sharing with
+  `POST /api/v1/published-artifact-shares`. A change supplies `id`, `shared`,
+  a UUIDv7 `operation_id`, the observed `expected_version`, the latest observed
+  `expected_artifact_revision` and `expected_artifact_sha256`, and both roots in
+  `expected_workspace`. A stale share or publication observation returns a
+  conflict receipt without applying the change. The receipt is the result of
+  that operation; the separately returned `current` snapshot is an observation
+  taken after it and can already have been superseded.
   The Dashboard does not substitute a static report snapshot when the live API
   refuses a read; the static asset route also rejects its report-snapshot
   namespace. Previously downloaded or independently copied content remains
@@ -134,18 +144,49 @@ that a Keeper is currently viewing or editing a document.
   try an anonymous view. A failed refresh retains an existing operator document
   and draft instead of replacing them with the public view. Retained drafts
   from an earlier authority stay accessible before a new reader dialog opens.
-- The Dashboard share action requires a known sharing state and rechecks the
-  selected revision and sharing state with both captured workspace roots before
-  sending a change. A missing state, a failed read, or a changed observation
-  does not become a private state or trigger a write. An interrupted or
-  otherwise unconfirmed dispatched change prevents another change for that ID
-  in the current browser tab; a later GET does not settle the interrupted write.
-  This guard does not survive a page reload or cover other clients. The share
-  API has no compare-and-set precondition, so changes from separate clients may
-  still race between the reread and the write. Dashboard link copying pins the
+- The Dashboard can show a document read-only while workspace identity is
+  pending. Before enabling edits or sharing, it captures both roots, rereads
+  the document against them and requires the server's matched workspace-read
+  receipt. If identity cannot be confirmed, editing and sharing stay disabled.
+  Temporary HTML previews are inert and cannot run scripts; documents whose
+  display is generated entirely by scripts may therefore appear blank until
+  the workspace-bound read succeeds. Public HTML readers remain interactive.
+  The editor and HTML app retain the roots of the admitted document, and their
+  writes carry the pair in the body as well as request headers. Relevant draft,
+  app-data and publication reads require the workspace-read receipt, including
+  the shared-draft event stream.
+  The share action requires a known sharing version and rechecks the selected
+  revision and latest publication against the original roots.
+  Before sending, it retains the exact operation in browser storage; if storage
+  is unavailable, this tab does not send. If storage readback fails after a
+  write attempt, another tab may have seen the request; this tab retains it in
+  memory as unconfirmed, which may be lost on reload. An unconfirmed operation can be checked
+  again with its original identity and preconditions, including after a page
+  reload in the same browser origin. Checking may apply the original request;
+  the recovery row shows its direction and original document. Separate tabs
+  still rely on the server's version checks. Browser storage readback and UI
+  tests do not establish survival of a browser or operating-system crash.
+  A workspace refusal settles that HTTP attempt only; a concurrent attempt in
+  another tab can still leave the operation unconfirmed.
+  A pending first change may also be settled by a subsequent read or before a
+  later publication, even if that publication then conflicts. Dashboard
+  automatic link copying waits for an in-flight document refresh and compares
+  its result to the independent share verification before copying. A failed or
+  indefinitely pending refresh cannot establish a copyable share state. The link pins the
   displayed revision and uses the origin currently open in the browser, which
   may be a local address; it is not evidence that the link is reachable from
   elsewhere.
+  Root pairs identify paths, not a durable store incarnation. Replacing a
+  workspace with another store at the same canonical paths can satisfy these
+  checks; do not replay an uncertain operation across such a replacement.
+  Document-check requests have a separate existing workspace contract and are
+  not protected by the new artifact share or edit body guards.
+- Share snapshots, the migration guard, and per-operation receipts form one
+  storage authority; back up and restore them together. Receipts use disk space
+  as operations accumulate. A missing historical receipt cannot be distinguished
+  from an unused ID. Once a share is migrated, older MASC binaries must not write
+  or serve that workspace: they cannot interpret the new state and may overwrite
+  it. A new server detects a legacy overwrite but cannot fence an old process.
 - `keeper_artifact_publish`: the same store operation using the Keeper's own
   identity. Publication is non-terminal: the Keeper can continue and report its
   durable link. No automatic duplicate Board/chat post is sent by the tool.

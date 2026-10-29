@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
-import { get, post } from './core'
-import { PublishedArtifactSchema, artifactWorkspaceHeaders, type ArtifactWorkspace } from './published-artifacts'
+import { getWithResponse, post } from './core'
+import { PublishedArtifactSchema, artifactWorkspaceBody, artifactWorkspaceHeaders, artifactWorkspaceQuery, requireArtifactWorkspaceRead, type ArtifactWorkspace } from './published-artifacts'
 import type { ArtifactDiscussionRequest } from './artifact-discussion'
 
 const Integer = Schema.Int.pipe(Schema.between(0, Number.MAX_SAFE_INTEGER))
@@ -58,9 +58,11 @@ function decode(input: unknown, artifactId: string, target?: ArtifactDraftTarget
   return view
 }
 export async function fetchArtifactDraft(artifactId: string, workspace: ArtifactWorkspace, signal?: AbortSignal): Promise<ArtifactDraftView> {
-  return decode(await get<unknown>(`${path}/${encodeURIComponent(artifactId)}`, {
+  const response = await getWithResponse<unknown>(`${path}/${encodeURIComponent(artifactId)}?${artifactWorkspaceQuery(workspace)}`, {
     signal, extraHeaders: artifactWorkspaceHeaders(workspace),
-  }), artifactId)
+  })
+  requireArtifactWorkspaceRead(response.headers)
+  return decode(response.data, artifactId)
 }
 export async function sendArtifactDraftCommand(command: ArtifactDraftCommand, workspace: ArtifactWorkspace): Promise<ArtifactDraftView> {
   const target = command.action === 'open' ? undefined : (command.action === 'edit' || command.action === 'resolve') ? command.selection.target : command.target
@@ -68,5 +70,5 @@ export async function sendArtifactDraftCommand(command: ArtifactDraftCommand, wo
     : (command.action === 'edit' || command.action === 'resolve') ? command.selection.target.artifact_id : command.target.artifact_id
   // The transport sends once. A caller retains its local CRDT updates and
   // reconciles uncertain responses; it must not blindly repeat Keeper edits.
-  return decode(await post<unknown>(path, command, artifactWorkspaceHeaders(workspace)), artifactId, target)
+  return decode(await post<unknown>(path, { ...command, expected_workspace: artifactWorkspaceBody(workspace) }, artifactWorkspaceHeaders(workspace)), artifactId, target)
 }

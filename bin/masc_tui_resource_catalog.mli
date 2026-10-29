@@ -10,6 +10,7 @@ type reading =
   { parts : Masc_tui_mcp.resource_content list
   ; revisions : report list
   ; shared : bool option
+  ; share_version : int option
   }
 type scope = All_resources | Published_reports | Markdown_reports | Html_reports
 type layout = Full_width | Side_by_side

@@ -1,7 +1,7 @@
 import { Schema } from 'effect'
 import { authHeaders, fetchControlPlane, apiRequestErrorFromResponse } from './core'
 import { ArtifactDraftTargetSchema, ArtifactDraftPositionSchema, ArtifactDraftViewSchema, type ArtifactDraftTarget } from './artifact-drafts'
-import { artifactWorkspaceHeaders, type ArtifactWorkspace } from './published-artifacts'
+import { artifactWorkspaceBody, artifactWorkspaceHeaders, artifactWorkspaceQuery, requireArtifactWorkspaceRead, type ArtifactWorkspace } from './published-artifacts'
 import { readSse } from '../lib/sse-reader'
 
 export const ArtifactDraftLiveSchema = Schema.Struct({
@@ -20,11 +20,19 @@ export type ArtifactDraftPosition = typeof ArtifactDraftPositionSchema.Type
 export const sameDraftTarget = (a: ArtifactDraftTarget, b: ArtifactDraftTarget) => a.artifact_id === b.artifact_id && a.generation === b.generation
 export async function streamArtifactDraft(target: ArtifactDraftTarget, workspace: ArtifactWorkspace,
   onFrame: (frame: ArtifactDraftLiveFrame) => void, signal: AbortSignal): Promise<void> {
-  const path = `/api/v1/artifact-draft-events/${encodeURIComponent(target.artifact_id)}?generation=${encodeURIComponent(target.generation)}`
+  const query=artifactWorkspaceQuery(workspace);query.set('generation',target.generation)
+  const path = `/api/v1/artifact-draft-events/${encodeURIComponent(target.artifact_id)}?${query}`
   const response = await fetchControlPlane(path, { signal,
     headers: { ...authHeaders(), ...artifactWorkspaceHeaders(workspace), Accept: 'text/event-stream' } })
   if (!response.ok) throw await apiRequestErrorFromResponse('GET', path, response)
-  if (!response.body || !response.headers.get('content-type')?.startsWith('text/event-stream')) throw new Error('공동 편집 연결을 열지 못했습니다.')
+  try {
+    requireArtifactWorkspaceRead(response.headers)
+    if (!response.body || !response.headers.get('content-type')?.startsWith('text/event-stream')) throw new Error('공동 편집 연결을 열지 못했습니다.')
+  } catch (error) {
+    // Admission failed before readSse can own and cancel the stream.
+    void response.body?.cancel().catch(() => {})
+    throw error
+  }
   await readSse(response.body, (event, data) => {
     if (event !== 'draft') return
     const frame = Schema.decodeUnknownSync(ArtifactDraftLiveSchema)(JSON.parse(data))
@@ -39,6 +47,6 @@ export async function sendArtifactPresence(target: ArtifactDraftTarget, sessionI
   const path = '/api/v1/artifact-draft-presence'
   const response = await fetchControlPlane(path, { method: 'POST', keepalive: command.action === 'leave',
     headers: { ...authHeaders(), ...artifactWorkspaceHeaders(workspace), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...command, target, session_id: sessionId }) })
+    body: JSON.stringify({ ...command, target, session_id: sessionId, expected_workspace: artifactWorkspaceBody(workspace) }) })
   if (!response.ok) throw await apiRequestErrorFromResponse('POST', path, response)
 }

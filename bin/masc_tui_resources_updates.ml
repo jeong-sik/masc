@@ -36,6 +36,7 @@ let reconcile reason state =
       state.resource_read_owner <- None;
       state.resource_revision_history <- [];
       state.resource_shared <- None;
+      state.resource_share_version <- None;
       state.resource_content <- None;
       state.resource_content_error <- None;
       state.resource_scroll <- Masc_tui_scroll.Position.first;
@@ -126,6 +127,7 @@ let begin_share_change state ~report ~shared =
       share_report = report; share_target = shared } in
     state.resource_share_pending <- Some request;
     state.resource_shared <- None;
+    state.resource_share_version <- None;
     (match state.resource_pending_key with
      | Some key when Catalog.equal_key key (Catalog.Report_revision report) ->
        retain_unread_revision state key
@@ -166,7 +168,7 @@ let share_changed state request ~result =
        state.resource_pending_key <- None;
        state.resource_read_owner <- None
      | Some _ | None -> ());
-    Option.iter (fun _ -> state.resource_shared <- None) current_key;
+    Option.iter (fun _ -> state.resource_shared <- None; state.resource_share_version <- None) current_key;
     if request.share_workspace = state.workspace_authority && server_authority_ready state
     then current_key else None
   | Some _ | None -> None
@@ -198,11 +200,14 @@ let read_done state ~(request : Catalog.read_request) result =
          | (Some _ | None), Catalog.Report_revision report
            when resource_share_uncertain state report -> None
          | (Some _ | None), (Catalog.Report_revision _ | Catalog.Mcp_uri _) -> reading.shared);
+       state.resource_share_version <- (match state.resource_shared with Some _ -> reading.share_version | None -> None);
        state.resource_image_cursor <- 0;
        state.resource_text_cursor <- 0;
        state.resource_search_position <- Masc_tui_resource_reading.first;
        state.resource_content_error <- None
-     | Error detail -> state.resource_content_error <- Some (key, detail))
+     | Error detail ->
+       state.resource_shared <- None; state.resource_share_version <- None;
+       state.resource_content_error <- Some (key, detail))
   | (Some _ | None), (Some _ | None) -> ()
 
 let open_selected state ~read =

@@ -14,13 +14,12 @@ let refuse request reqd error =
 let presence_error request reqd =
   respond ~status:`Conflict request reqd (`Assoc ["code", `String "artifact_draft_session_closed";
     "error", `String "The editing session is closed or belongs to another actor."])
-
 (* Each connection receives only its authenticated document room, never the
    global agent event stream. The promise is replaced under the room mutex, so
    a commit between observe and await cannot be lost. *)
 let stream ~sw ~clock ~session request reqd =
   let headers = Httpun.Headers.of_list
-    (["content-type", "text/event-stream"; "cache-control", "private, no-store";
+    (Http.Response.scoped_headers () @ ["content-type", "text/event-stream"; "cache-control", "private, no-store";
       "x-accel-buffering", "no"] @ cors_headers (get_origin request)) in
   let writer = Httpun.Reqd.respond_with_streaming reqd (Httpun.Response.create ~headers `OK) in
   let mutex = Eio.Mutex.create () in
@@ -100,12 +99,16 @@ let add_routes router = router
         stream ~sw ~clock ~session request reqd
       with exn -> Live.leave session; raise exn)
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/artifact-draft-presence" (fun state actor request reqd ->
-    let base_path = (Mcp_server.workspace_config state).base_path in
+    let config = Mcp_server.workspace_config state in
+    let base_path = config.base_path in
     Http.Request.read_body_async reqd (fun body ->
       let parsed = match Yojson.Safe.from_string body with
-        | json -> parse_presence json | exception Yojson.Json_error _ -> Error "invalid presence JSON" in
+        | json ->
+          let* json = Server_routes_http_routes_published_artifacts.validate_body_workspace ~config json in
+          parse_presence json |> Result.map_error (fun message -> Server_routes_http_routes_artifact_drafts.error_response (Store.Invalid message))
+        | exception Yojson.Json_error _ -> Error (Server_routes_http_routes_artifact_drafts.error_response (Store.Invalid "invalid presence JSON")) in
       match parsed with
-      | Error message -> refuse request reqd (Store.Invalid message)
+      | Error (json, status) -> respond ~status request reqd json
       | Ok (target, session_id, command) ->
         match Live.find ~base_path ~actor ~target ~session_id with
         | Error _ -> presence_error request reqd

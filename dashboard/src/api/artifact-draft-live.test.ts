@@ -10,11 +10,21 @@ it('decodes a full snapshot followed by a cursor-only null document through the 
   const position = { anchor: [1, 2], head: [3, 4] }
   const presence = { ...first, document: null, peers: [{ ...peer, position }] }
   const body = [first, presence].map(frame => `event: draft\ndata: ${JSON.stringify(frame)}\n\n`).join('')
-  vi.mocked(fetchControlPlane).mockResolvedValue(new Response(body, { headers: { 'content-type': 'text/event-stream' } }))
+  vi.mocked(fetchControlPlane).mockResolvedValue(new Response(body, { headers: { 'content-type': 'text/event-stream', 'x-masc-workspace-read': 'matched-v1' } }))
   const received: ArtifactDraftLiveFrame[] = [], controller = new AbortController()
   await streamArtifactDraft(target, { basePath: '/fixture', mascRoot: '/fixture/.masc' }, frame => {
     received.push(frame); if (received.length === 2) controller.abort()
   }, controller.signal)
   expect(received.map(frame => frame.document)).toEqual([first.document, null])
   expect(received[1]!.peers[0]!.position).toEqual(position)
+})
+it('refuses a stream without a workspace receipt before applying a frame', async () => {
+  const target = { artifact_id: `artifact-${'b'.repeat(32)}`, generation: '019f0000-0000-7000-8000-000000000000' }
+  const cancelled=vi.fn()
+  const body=new ReadableStream({cancel:cancelled})
+  vi.mocked(fetchControlPlane).mockResolvedValue(new Response(body, { headers: { 'content-type': 'text/event-stream' } }))
+  const receive=vi.fn()
+  await expect(streamArtifactDraft(target,{basePath:'/fixture',mascRoot:'/fixture/.masc'},receive,new AbortController().signal)).rejects.toThrow(/작업 공간 확인 응답/)
+  expect(receive).not.toHaveBeenCalled()
+  expect(cancelled).toHaveBeenCalledTimes(1)
 })

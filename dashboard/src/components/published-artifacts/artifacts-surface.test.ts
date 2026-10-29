@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { render, fireEvent, cleanup, waitFor, within, act } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { get, post, currentStoredTokenRevision } from '../../api/core'
+import { get, getWithResponse, post, currentStoredTokenRevision } from '../../api/core'
 import { route, navigate } from '../../router'
 import { ArtifactsSurface } from './artifacts-surface'
 import { copyToClipboard } from '../common/copyable-code'
@@ -22,7 +22,7 @@ vi.mock('../../router', async () => {
   return { route, navigate: vi.fn((tab: string, params: Record<string, string>) => { route.value = { tab, params, postId: null } }) }
 })
 vi.mock('../../api/core', () => ({
-  get: vi.fn(), getPublic: vi.fn(), post: vi.fn(), currentStoredTokenRevision: vi.fn(() => 0), getStoredToken: vi.fn(() => 'test-token'),
+  get: vi.fn(), getPublic: vi.fn(), getWithResponse: vi.fn(), post: vi.fn(), currentStoredTokenRevision: vi.fn(() => 0), getStoredToken: vi.fn(() => 'test-token'),
   subscribeStoredTokenChanges:vi.fn(()=>()=>{}),
   ApiRequestError: class extends Error { status = 404 },
 }))
@@ -61,6 +61,13 @@ beforeEach(() => {
     if (path.includes('?revision=1')) return { ...document, artifact: old, content: '# 이전 원본' }
     if (path.includes(secondId)) return { artifact: second, content: '<button onclick="this.textContent=2">1</button>', revisions: [second] }
     return document
+  })
+  vi.mocked(getWithResponse).mockImplementation(async (path, options) => {
+    const url = new URL(path, window.location.origin)
+    url.searchParams.delete('expected_base_path'); url.searchParams.delete('expected_masc_root')
+    const query = url.searchParams.toString()
+    return { data: await get(`${url.pathname}${query ? `?${query}` : ''}`, options),
+      headers: new Headers({ 'x-masc-workspace-read': 'matched-v1' }) }
   })
 })
 afterEach(cleanup)
@@ -217,8 +224,8 @@ describe('artifact library user flow', () => {
   it('opens HTML in an opaque sandbox with a restrictive resource policy', async () => {
     route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: secondId }, postId: null }
     const view = render(html`<${ArtifactsSurface} />`)
-    const frame = await view.findByTitle(second.title)
-    expect(frame.getAttribute('sandbox')).toBe('allow-scripts')
+    await waitFor(() => expect(view.getByTitle(second.title).getAttribute('sandbox')).toBe('allow-scripts'))
+    const frame = view.getByTitle(second.title)
     expect(frame.getAttribute('srcdoc')).toContain("connect-src 'none'")
     expect(frame.getAttribute('srcdoc')).toContain('<button onclick=')
     expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer')

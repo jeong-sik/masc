@@ -11,10 +11,10 @@ import { draftBase64, draftBytes } from '../../lib/artifact-live-session'
 import type { ArtifactDraftView } from '../../api/artifact-drafts'
 import { sendArtifactDraftCommand } from '../../api/artifact-drafts'
 import { streamArtifactDraft, sendArtifactPresence, type ArtifactDraftLiveFrame } from '../../api/artifact-draft-live'
-import { captureArtifactWorkspace, fetchPublishedArtifact, publishArtifact, readPublishedDraft, type ArtifactDocument } from '../../api/published-artifacts'
+import { captureArtifactWorkspace, fetchWorkspacePublishedArtifact, publishArtifact, readPublishedDraft, type ArtifactDocument } from '../../api/published-artifacts'
 import { artifactDraftRecoveries, discardArtifactDraftRecovery } from '../../lib/artifact-draft-recovery'
 vi.mock('../../api/published-artifacts', async original => ({ ...await original<typeof import('../../api/published-artifacts')>(),
-  captureArtifactWorkspace: vi.fn(), fetchPublishedArtifact: vi.fn(), publishArtifact: vi.fn(), readPublishedDraft: vi.fn() }))
+  captureArtifactWorkspace: vi.fn(), fetchWorkspacePublishedArtifact: vi.fn(), publishArtifact: vi.fn(), readPublishedDraft: vi.fn() }))
 vi.mock('../../api/artifact-drafts', async original => ({ ...await original<typeof import('../../api/artifact-drafts')>(), sendArtifactDraftCommand: vi.fn() }))
 vi.mock('../../api/artifact-draft-live', async original => ({ ...await original<typeof import('../../api/artifact-draft-live')>(),
   streamArtifactDraft: vi.fn(), sendArtifactPresence: vi.fn() }))
@@ -30,7 +30,7 @@ const draftRetention = {
 beforeEach(() => {
   retainedDrafts.clear()
   vi.mocked(captureArtifactWorkspace).mockReset().mockResolvedValue(workspace)
-  vi.mocked(fetchPublishedArtifact).mockReset(); vi.mocked(publishArtifact).mockReset(); vi.mocked(readPublishedDraft).mockReset()
+  vi.mocked(fetchWorkspacePublishedArtifact).mockReset(); vi.mocked(publishArtifact).mockReset(); vi.mocked(readPublishedDraft).mockReset()
   vi.mocked(sendArtifactDraftCommand).mockReset(); vi.mocked(streamArtifactDraft).mockReset()
   vi.mocked(sendArtifactPresence).mockReset().mockResolvedValue()
 })
@@ -61,7 +61,7 @@ function fixture(char: string,source='shared source\r\n한글 😀\r\n') {
   const artifact = { id: target.artifact_id, revision: 1, title: 'original title', summary: 'original summary', format: 'markdown' as const,
     author: 'publisher', created_at: '2026-10-25T13:00:00Z', task_id: null, goal_id: null, body: { _blob: { sha256: 'a'.repeat(64) } }, url: '/dashboard' }
   const doc: ArtifactDocument = { artifact, content: sharedSource(authority), revisions: [artifact] }
-  const mount = (isCurrent = () => true, onPublished = vi.fn(), openingDoc:ArtifactDocument=doc) => render(html`<${ArtifactSharedEditor} draftRetention=${draftRetention} doc=${openingDoc} workspaceRoot="/fixture"
+  const mount = (isCurrent = () => true, onPublished = vi.fn(), openingDoc:ArtifactDocument=doc) => render(html`<${ArtifactSharedEditor} draftRetention=${draftRetention} doc=${openingDoc} workspaceRoot="/fixture" capturedWorkspace=${workspace}
     isCurrent=${isCurrent} onCloseRequest=${() => {}} onMutation=${() => {}} onPublished=${onPublished} onClose=${() => {}} />`)
   const editor = async () => {
     fireEvent.click(await screen.findByRole('button',{name:'원본 편집'}))
@@ -72,16 +72,16 @@ function fixture(char: string,source='shared source\r\n한글 😀\r\n') {
 it('chooses the shared draft base format rather than a newer publication format',async()=>{
   const f=fixture('a'),latest:ArtifactDocument={...f.doc,artifact:{...f.doc.artifact,revision:2,format:'html'}}
   vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
-  vi.mocked(fetchPublishedArtifact).mockResolvedValue(f.doc)
+  vi.mocked(fetchWorkspacePublishedArtifact).mockResolvedValue(f.doc)
   f.mount(()=>true,vi.fn(),latest)
   await screen.findByRole('region',{name:'Markdown 문장 편집'})
   expect(screen.queryByRole('region',{name:'HTML 문장 편집'})).toBeNull()
-  expect(fetchPublishedArtifact).toHaveBeenCalledWith(f.target.artifact_id,'1',undefined,workspace)
+  expect(fetchWorkspacePublishedArtifact).toHaveBeenCalledWith(f.target.artifact_id,'1',workspace)
 })
 it('refuses a publication that does not match the shared draft base before opening either editor',async()=>{
   const f=fixture('b'),latest:ArtifactDocument={...f.doc,artifact:{...f.doc.artifact,revision:2,format:'html'}}
   vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
-  vi.mocked(fetchPublishedArtifact).mockResolvedValue({...f.doc,artifact:{...f.doc.artifact,body:{_blob:{sha256:'b'.repeat(64)}}}})
+  vi.mocked(fetchWorkspacePublishedArtifact).mockResolvedValue({...f.doc,artifact:{...f.doc.artifact,body:{_blob:{sha256:'b'.repeat(64)}}}})
   f.mount(()=>true,vi.fn(),latest)
   await screen.findByText('공유 원고의 게시 기준과 원본 문서가 다릅니다.')
   expect(streamArtifactDraft).not.toHaveBeenCalled()
@@ -127,7 +127,7 @@ it('binds actual editor transactions to exact CRLF source, handles remote edits 
   })
   const artifact = { id: target.artifact_id, revision: 1, title: '공동 원고', summary: '검증', format: 'markdown' as const, author: 'publisher',
     created_at: '2026-10-25T13:00:00Z', task_id: null, goal_id: null, body: { _blob: { sha256: 'a'.repeat(64) } }, url: '/dashboard' }
-  render(html`<${ArtifactSharedEditor} draftRetention=${draftRetention} doc=${{ artifact, content: sharedSource(authority), revisions: [artifact] }} workspaceRoot="/fixture"
+  render(html`<${ArtifactSharedEditor} draftRetention=${draftRetention} doc=${{ artifact, content: sharedSource(authority), revisions: [artifact] }} workspaceRoot="/fixture" capturedWorkspace=${workspace}
     isCurrent=${() => true} onCloseRequest=${() => {}} onMutation=${() => {}} onPublished=${() => {}} onClose=${() => {}} />`)
   fireEvent.click(await screen.findByRole('button',{name:'원본 편집'}))
   const editable = await screen.findByRole('textbox', { name: '공동 편집 원고' })
@@ -149,7 +149,7 @@ it('publishes again only after explicit latest-version comparison, preserving it
   const f = fixture('b'), onPublished = vi.fn()
   let latest = f.doc
   vi.mocked(sendArtifactDraftCommand).mockImplementation(async command => command.action === 'merge' ? f.merge(command.updates) : f.snapshot())
-  vi.mocked(fetchPublishedArtifact).mockImplementation(async () => latest)
+  vi.mocked(fetchWorkspacePublishedArtifact).mockImplementation(async () => latest)
   vi.mocked(publishArtifact).mockImplementation(async request => {
     const artifact = { ...latest.artifact, ...request, revision: latest.artifact.revision + 1,
       task_id: request.task_id ?? null, goal_id: request.goal_id ?? null }
@@ -193,8 +193,8 @@ it('publishes again only after explicit latest-version comparison, preserving it
     id: f.target.artifact_id, expected_revision: 3, title: 'latest title', summary: 'latest summary', format: 'html',
     content: frozen, task_id: 'task-latest', goal_id: 'goal-latest',
   }, workspace])
-  expect(fetchPublishedArtifact).toHaveBeenLastCalledWith(f.target.artifact_id, undefined, undefined, workspace)
-  expect(captureArtifactWorkspace).toHaveBeenCalledTimes(1)
+  expect(fetchWorkspacePublishedArtifact).toHaveBeenLastCalledWith(f.target.artifact_id, undefined, workspace)
+  expect(captureArtifactWorkspace).not.toHaveBeenCalled()
   expect(retainedDrafts.size).toBe(0)
   expect(editor.state.doc.toString()).toBe(`later shared edit ${frozen}`)
 })
@@ -281,7 +281,7 @@ it('retains the publication copy and later edits outside the retired shared edit
   const f = fixture('b')
   let current = true
   vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
-  vi.mocked(fetchPublishedArtifact).mockResolvedValue(f.doc)
+  vi.mocked(fetchWorkspacePublishedArtifact).mockResolvedValue(f.doc)
   const view = f.mount(() => current)
   await f.editor()
   const prepare = screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement
@@ -308,9 +308,9 @@ it('retains the publication copy and later edits outside the retired shared edit
 it.each(['editor', 'reader'] as const)('requires an explicit discard decision when %s closes a locally edited publication copy', async close => {
   const f = fixture('b')
   vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
-  vi.mocked(fetchPublishedArtifact).mockResolvedValue(f.doc)
+  vi.mocked(fetchWorkspacePublishedArtifact).mockResolvedValue(f.doc)
   const onClose = vi.fn()
-  const view = render(html`<${ArtifactReader} doc=${f.doc} fixedRevision=${false} workspaceRoot="/fixture"
+  const view = render(html`<${ArtifactReader} doc=${f.doc} fixedRevision=${false} workspaceRoot="/fixture" shareWorkspace=${workspace}
     draftRetention=${draftRetention} checkState=${{ kind: 'known', check: null }} authRevision=${0}
     isCurrent=${() => true} onMutation=${() => {}} onPublication=${() => {}} onPublished=${() => {}}
     onCheckChanged=${() => {}} onClose=${() => { onClose(); view.unmount() }} />`)

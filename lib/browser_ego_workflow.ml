@@ -7,12 +7,23 @@ let script = {js|async function nativeWorkflow(page, args) {
   let effectStarted = false, completedEffect = false;
   let inputReleased = true;
   const failure = (index, method, error, extra = {}) => {
-    const nativeError = error?.code === 'EGO_PAGE_EVALUATION_TIMED_OUT' ? {
-      code: error.code, timeoutMs: error.timeoutMs,
-      executionStopped: error.executionStopped,
-      mayHaveLateEffects: error.mayHaveLateEffects,
-      pageResponsive: error.pageResponsive
-    } : undefined;
+    const nativeError = (() => {
+      switch (error?.code) {
+        case 'EGO_PAGE_EVALUATION_TIMED_OUT': return {
+          code: error.code, timeoutMs: error.timeoutMs,
+          executionStopped: error.executionStopped,
+          mayHaveLateEffects: error.mayHaveLateEffects,
+          pageResponsive: error.pageResponsive
+        };
+        case 'EGO_NAVIGATION_TIMEOUT': return {
+          code: error.code, timeoutMs: error.timeoutMs,
+          committed: error.committed, waitUntil: error.waitUntil,
+          ...(error.url === undefined ? {} : {url: error.url}),
+          ...(error.readyState === undefined ? {} : {readyState: error.readyState})
+        };
+        default: return undefined;
+      }
+    })();
     return {
       completed, effectStarted, completedEffect, inputReleased,
       failure: {index, method, message: String(error?.message ?? error),
@@ -210,7 +221,16 @@ type evaluation_timeout = {
   may_have_late_effects : bool;
   page_responsive : bool;
 }
+type navigation_wait = Commit | Dom_content_loaded | Load | Network_idle
+type navigation_timeout = {
+  timeout_ms : float;
+  committed : bool;
+  url : string option;
+  ready_state : string option;
+  wait_until : navigation_wait;
+}
 type native_error = Evaluation_timed_out of evaluation_timeout
+  | Navigation_timed_out of navigation_timeout
 module Release = Browser_ego_release
 type outcome =
   | Completed of { reply : Yojson.Safe.t; input : Release.settled }
@@ -229,22 +249,40 @@ let bool key fields = let* value=get key fields in match value with `Bool value 
   | _ -> Error ("workflow receipt has invalid " ^ key)
 let integer key fields = let* value=get key fields in match value with `Int value when value>=0 -> Ok value
   | _ -> Error ("workflow receipt has invalid " ^ key)
+let timeout_ms fields =
+  let* timeout=get "timeoutMs" fields in
+  match timeout with
+  | `Int value when value>=0 -> Ok (float_of_int value)
+  | `Float value when Float.is_finite value && value>=0. -> Ok value
+  | _ -> Error "invalid native timeout"
+let optional_text key fields = match List.assoc_opt key fields with
+  | None -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some _ -> Error ("invalid native " ^ key ^ " observation")
 let native_error fields = match List.assoc_opt "nativeError" fields with
   | None -> Ok None
   | Some value ->
+    let* code=match value with `Assoc fields -> text "code" fields
+      | _ -> Error "native error is not an object" in
+    match code with
+    | "EGO_PAGE_EVALUATION_TIMED_OUT" ->
     let* fields=object_fields ["code";"timeoutMs";"executionStopped";"mayHaveLateEffects";"pageResponsive"] value in
-    let* code=text "code" fields in
-    let* ()=match code with "EGO_PAGE_EVALUATION_TIMED_OUT" -> Ok ()
-      | _ -> Error "unsupported native workflow error code" in
-    let* timeout=get "timeoutMs" fields in
-    let* timeout_ms=match timeout with
-      | `Int value when value>=0 -> Ok (float_of_int value)
-      | `Float value when Float.is_finite value && value>=0. -> Ok value
-      | _ -> Error "invalid native evaluation timeout" in
+    let* timeout_ms=timeout_ms fields in
     let* execution_stopped=bool "executionStopped" fields in
     let* may_have_late_effects=bool "mayHaveLateEffects" fields in
     let* page_responsive=bool "pageResponsive" fields in
     Ok (Some (Evaluation_timed_out {timeout_ms;execution_stopped;may_have_late_effects;page_responsive}))
+    | "EGO_NAVIGATION_TIMEOUT" ->
+    let* fields=object_fields ["code";"timeoutMs";"committed";"url";"readyState";"waitUntil"] value in
+    let* timeout_ms=timeout_ms fields in let* committed=bool "committed" fields in
+    let* url=optional_text "url" fields in let* ready_state=optional_text "readyState" fields in
+    let* requested=text "waitUntil" fields in
+    let* wait_until=match requested with
+      | "commit" -> Ok Commit | "domcontentloaded" -> Ok Dom_content_loaded
+      | "load" -> Ok Load | "networkidle" -> Ok Network_idle
+      | _ -> Error "invalid native navigation lifecycle" in
+    Ok (Some (Navigation_timed_out {timeout_ms;committed;url;ready_state;wait_until}))
+    | _ -> Error "unsupported native workflow error code"
 let saved_fetch_receipt filename value =
   let* fields=object_fields ["ok";"status";"statusText";"url";"headers";"downloadId";"suggestedFilename";"source"] value in
   let* _=bool "ok" fields in let* _=integer "status" fields in

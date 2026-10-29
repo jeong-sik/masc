@@ -9,10 +9,22 @@ type evaluation_timeout = {
   may_have_late_effects : bool;
   page_responsive : bool;
 }
+type navigation_wait = Commit | Dom_content_loaded | Load | Network_idle
+type navigation_timeout = {
+  timeout_ms : float;
+  committed : bool;
+  url : string option;
+  ready_state : string option;
+  wait_until : navigation_wait;
+}
+(** [url] and [ready_state] are absent when the SDK supplied no observation;
+    absence is never replaced by an empty string or inferred page state. *)
 type native_error = Evaluation_timed_out of evaluation_timeout
-(** Native SDK evaluation diagnostics, preserved as observations. Stopped
-    execution may still have late effects; these fields never authorize replay,
-    release held input, or prove that an action did not start. *)
+  | Navigation_timed_out of navigation_timeout
+(** Native SDK diagnostics, preserved as observations. Stopped execution may
+    still have late effects, and committed navigation may not have reached the
+    requested lifecycle. These fields never authorize replay, release held
+    input, or replace workflow progress with an inferred completion. *)
 
 type outcome =
   | Completed of { reply : Yojson.Safe.t; input : Browser_ego_release.settled }
@@ -24,8 +36,10 @@ type outcome =
     saving-Fetch provenance/download ID/filename against the exact request,
     progress/effect flags and final snapshot
     fields against the exact request, including the SDK's optional
-    [failure.nativeError] evaluation-timeout code, nonnegative finite timeout and
-    boolean observations. The public receipt retains the SDK field names.
+    [failure.nativeError] evaluation/navigation timeout code, nonnegative finite
+    timeout, boolean observations and declared navigation lifecycle. Optional
+    navigation URL/readiness observations remain absent when omitted. The public
+    receipt retains the SDK field names.
     A malformed post-execution reply is
     unknown, never a proof that no effect started.
 

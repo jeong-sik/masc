@@ -86,7 +86,7 @@ accept an option `label`; MASC prefixes it with the actor's identity.
 ```
 
 The fixed adapter creates a native `RegExp` and passes it to `page.waitForURL`;
-the [SDK owns URL matching and polling](https://github.com/citrolabs/ego-lite/blob/v2.1.0/package/ego-browser/src/driver/page-waits.ts#L217).
+the [SDK owns URL matching and polling](https://github.com/citrolabs/ego-lite/blob/4cf79356509bccdead17863250b442f60a881c25/package/ego-browser/src/driver/page-waits.ts#L228).
 `source` is a string, including an empty pattern. Optional `flags` is a string;
 omission keeps the JavaScript default. Invalid syntax or flags stop this step
 before entering the wait and preserve any earlier completed effects. MASC does
@@ -263,6 +263,16 @@ Stopped execution can still have late effects; the completed prefix and input-re
 their existing meaning. Native error diagnostics do not authorize replay or
 settle held input. Local codec and SDK-stand-in checks cover these boundaries;
 the actual installed Keeper timeout path remains unverified.
+
+An SDK `EGO_NAVIGATION_TIMEOUT` also retains `code`, `timeoutMs`, `committed`,
+`waitUntil` and its optional `url`/`readyState` under `failure.nativeError`,
+following the [SDK navigation error](https://github.com/citrolabs/ego-lite/blob/4cf79356509bccdead17863250b442f60a881c25/package/ego-browser/src/driver/page-waits.ts#L83).
+Missing observations stay absent. `committed: true` may mean the page moved
+without reaching the requested lifecycle; it does not complete the workflow,
+release input or authorize a repeated navigation. `committed: false` does not
+prove no external effect occurred. Read the same Page before deciding the next
+action. Receipt/SDK-stand-in checks do not establish actual Keeper navigation
+timeout behavior.
 
 For login, 2FA or captcha, hand the same live client to the operator with
 `BrowserAct action=hand_off`. Its receipt names `spaceId` and `spaceName` from

@@ -301,7 +301,7 @@ let evaluation_timeouts () =
       (result ~started:true ~completed_effect:false ~completed:[]
         ~failure:(obj (["index",`Int 0;"method",str method_;"message",str "native timeout"] @ native)))) in
   let detail = function Some (R.Evaluation_timed_out value) -> value
-    | None -> fail "native evaluation diagnostics are absent" in
+    | None | Some (R.Navigation_timed_out _) -> fail "native evaluation diagnostics are absent" in
   List.iter (fun fields ->
     let value=receipt "evaluate" ["nativeError",obj fields] in
     match ok (R.decode expected value) with
@@ -337,6 +337,43 @@ let evaluation_timeouts () =
      replace "executionStopped" (str "true") native;replace "mayHaveLateEffects" `Null native;
      List.remove_assoc "pageResponsive" native;("code",str "EGO_PAGE_EVALUATION_TIMED_OUT")::native;
      ("unexpected",`Bool true)::native]
+let navigation_timeouts () =
+  let expected=request [step "goto" ["url",str "https://example.test/done"]] in
+  let native=["code",str "EGO_NAVIGATION_TIMEOUT";"timeoutMs",`Int 5000;
+    "committed",`Bool true;"waitUntil",str "load";
+    "url",str "https://example.test/redirected";"readyState",str "interactive"] in
+  let replace key value fields=(key,value)::List.remove_assoc key fields in
+  let receipt fields=obj (result ~started:true ~completed_effect:false ~completed:[]
+    ~failure:(obj ["index",`Int 0;"method",str "goto";"message",str "native navigation timeout";"nativeError",obj fields])) in
+  List.iter (fun (wait,kind) ->
+    List.iter (fun fields ->
+      let value=receipt (replace "waitUntil" (str wait) fields) in
+      match ok (R.decode expected value) with
+      | R.Completed _ -> fail "native navigation timeout was marked complete"
+      | R.Stopped {native_error;receipt=original;effect_started;completed_effect;input;_} ->
+        let observed=match native_error with
+          | Some (R.Navigation_timed_out value) -> value
+          | None|Some (R.Evaluation_timed_out _) -> fail "native navigation diagnostics are absent" in
+        check bool "navigation diagnostics retain original receipt" true (original=value);
+        check bool "committed is an observation" (List.assoc "committed" fields=`Bool true) observed.committed;
+        check bool "requested lifecycle is preserved" true (observed.wait_until=kind);
+        check (float 0.) "native timeout retained" 5000. observed.timeout_ms;
+        let optional key=match List.assoc_opt key fields with Some (`String value)->Some value|_->None in
+        check (option string) "native URL observation" (optional "url") observed.url;
+        check (option string) "native document readiness" (optional "readyState") observed.ready_state;
+        check bool "committed false never proves no effect started" true effect_started;
+        check bool "committed true never completes the failed request" false completed_effect;
+        check bool "diagnostics do not manufacture input evidence" true (seen_input input=`No_hold))
+      [native;replace "committed" (`Bool false) (native |> List.remove_assoc "url" |> List.remove_assoc "readyState");
+       native |> replace "url" (str "") |> replace "readyState" (str "")])
+    ["commit",R.Commit;"domcontentloaded",R.Dom_content_loaded;"load",R.Load;"networkidle",R.Network_idle];
+  List.iter (fun fields -> check bool "malformed navigation observations are not defaulted" true
+    (Result.is_error (R.decode expected (receipt fields))))
+    [replace "committed" (str "true") native;replace "waitUntil" (str "ready") native;
+     replace "url" `Null native;replace "readyState" (`Int 1) native;
+     replace "timeoutMs" (`Int (-1)) native;replace "timeoutMs" (`Float nan) native;
+     List.remove_assoc "waitUntil" native;("committed",`Bool false)::native;
+     ("executionStopped",`Bool true)::native]
 let malformed_receipts () =
   let expected=request [click;wait] in
   List.iter (fun value -> check bool "incomplete/mismatched execution is not success" true (Result.is_error (R.decode expected value)))
@@ -546,6 +583,7 @@ let () = if Array.length Sys.argv=3 && Sys.argv.(1)="--proof" then proof Sys.arg
   test_case "fetch save names are safe artifact metadata" `Quick fetch_save_inputs;
   test_case "saved fetch receipts bind exact artifact provenance" `Quick fetch_save_receipts;
   test_case "native evaluation timeout preserves diagnostics and uncertain effects" `Quick evaluation_timeouts;
+  test_case "native navigation timeout preserves commit and lifecycle observations" `Quick navigation_timeouts;
   test_case "drag release is separate from effect completion" `Quick pointer_release;
   test_case "a release claim needs receipt evidence" `Quick release_needs_receipt_evidence;
   test_case "a stopped reply cannot report a release its receipts do not show" `Quick release_claim_on_stopped_replies;

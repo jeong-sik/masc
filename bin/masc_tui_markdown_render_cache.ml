@@ -77,9 +77,10 @@ let create ~capacity =
 (* The identity finds the entry; the rest of the key says whether what was
    found is still what this render would produce. Comparing the source text
    costs nothing when it is the same string the last frame rendered, which is
-   what it is while the transcript sits still. *)
+   what it is while the transcript sits still -- the physical check decides
+   that case before [String.equal] walks any bytes. *)
 let same_rest (left : _ Completed.key) (right : _ Completed.key) =
-  String.equal left.text right.text
+  (left.text == right.text || String.equal left.text right.text)
   && left.width = right.width
   && left.theme_revision = right.theme_revision
   && left.palette_generation = right.palette_generation

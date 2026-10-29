@@ -97,10 +97,18 @@ let kind_code_type = Masc_tui_code_lexer.kind_type
 let kind_code_diff_added = Masc_tui_code_lexer.kind_diff_added
 let kind_code_diff_removed = Masc_tui_code_lexer.kind_diff_removed
 
+(* Answered by comparing bytes where they are, as the URL prefix check in
+   message layout does: cutting the substring to compare it allocated one for
+   every character [find_close] scanned past. *)
 let starts_at text index marker =
   let length = String.length marker in
   index + length <= String.length text
-  && String.equal (String.sub text index length) marker
+  &&
+  let rec same offset =
+    offset >= length
+    || (Char.equal text.[index + offset] marker.[offset] && same (offset + 1))
+  in
+  same 0
 
 (* A marker only opens a span when its partner is on the same line. An
    unmatched [*] is a literal asterisk -- keepers write those -- and treating

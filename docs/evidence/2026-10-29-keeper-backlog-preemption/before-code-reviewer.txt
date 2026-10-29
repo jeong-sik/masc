@@ -1,0 +1,60 @@
+# captured 2026-10-29T05:01:43Z from the server at ~/me/.masc (binary_commit 3e41385b549 until 2026-10-29T03:07Z, 216f7ab8456 after)
+# python3 -I scripts/keeper-queue-probe.py <base>/.masc/keepers --logs-dir <base>/.masc/logs --since 2026-10-22 --until 2026-10-29T02:54:34Z --keeper code-reviewer
+2. Turn endings per Keeper and UTC day (window 2026-10-22T00:00:00Z .. 2026-10-29T02:54:34Z; ckpt_t01 = checkpoint turns with 0 or 1 tool calls)
+keeper                     day         turns   ckpt durable    op_q   done done+tool ckpt_t01 ckpt_share
+code-reviewer              2026-10-22     92      0       0       0     77        64        0       0.0%
+code-reviewer              2026-10-23    645    341       0     341    288       277      313      52.9%
+code-reviewer              2026-10-24    183     22       0      22    159       150       15      12.0%
+code-reviewer              2026-10-25    271     22       0      22    248       237       15       8.1%
+code-reviewer              2026-10-26    309    141      73      68    159       155       44      45.6%
+code-reviewer              2026-10-27    395    303     151     152     86        86      163      76.7%
+code-reviewer              2026-10-28    546    164     160       4    346       176      102      30.0%
+code-reviewer              2026-10-29     76     52      51       1     18         4       49      68.4%
+fleet                      all          2517   1045     435     610   1381      1149      701      41.5%
+
+3. Checkpoint turns by tool calls made (window 2026-10-22T00:00:00Z .. 2026-10-29T02:54:34Z)
+tools      turns    share
+0            352    33.7%
+1            349    33.4%
+2             86     8.2%
+3-5           72     6.9%
+6+           186    17.8%
+all         1045
+
+4. Turn endings by execution path and runtime family (window 2026-10-22T00:00:00Z .. 2026-10-29T02:54:34Z)
+path               family        turns   ckpt durable    op_q   done
+autonomous_cycle   agent_core      443    244      71     173    186
+autonomous_cycle   claude_code     328     71      70       1    235
+autonomous_cycle   codex           759     45      45       0    658
+direct_turn        agent_core      256    203     156      47     53
+direct_turn        claude_code     142     66      66       0     76
+direct_turn        codex           589    416      27     389    173
+
+5. Length of completed turns in seconds, nearest rank (window 2026-10-22T00:00:00Z .. 2026-10-29T02:54:34Z)
+path                 turns      p50      p90      p99       max
+(all paths)           1381       83      303     1114     20963
+autonomous_cycle      1079       72      261      876     20963
+direct_turn            302      129      575     1386      2172
+
+6. Longest run of consecutive turns ended on a durable stimulus (window 2026-10-22T00:00:00Z .. 2026-10-29T02:54:34Z)
+keeper                          turns from_utc             to_utc              
+code-reviewer                      18 2026-10-28T05:23:32Z 2026-10-28T05:28:26Z
+
+7. System log lines per Keeper (window 2026-10-22T00:00:00Z .. 2026-10-29T02:54:34Z)
+keeper                       busy  consumed    again  yield probe and head kind
+code-reviewer                 880      3086     1389  new durable successor head=tool_result_ready=53; any pending stimulus head=schedule_due=3; new durable successor head=ask_answered=2; any pending stimulus head=board_signal=1; new durable successor head=task_outcome=1; any pending stimulus head=tool_result_ready=1
+fleet                         880      3086     1389  new durable successor head=tool_result_ready=53; any pending stimulus head=schedule_due=3; new durable successor head=ask_answered=2; any pending stimulus head=board_signal=1; new durable successor head=task_outcome=1; any pending stimulus head=tool_result_ready=1
+again = consumed a stimulus that an earlier turn of the same Keeper had consumed in the window; by class: board_attention=688, board_signal=340, tool_result_ready=210, schedule_due=144, workspace_message=4, task_outcome=3
+
+7b. Stimuli consumed by code-reviewer, per class (window 2026-10-22T00:00:00Z .. 2026-10-29T02:54:34Z)
+class                             consumed  distinct  max_repeat  gap_p50_s
+tool_result_ready                      905       695          10          0
+schedule_due                           867       723          29        301
+board_attention                        823       174          48        922
+board_signal                           453       131          51       1189
+task_outcome                            19        16           3        273
+workspace_message                       10         6           3      28591
+ask_answered                             8         8           1      36420
+completion_authority_rejected            1         1           1          -
+gap_p50_s = median seconds between the first consumptions of two distinct stimuli of the class
+

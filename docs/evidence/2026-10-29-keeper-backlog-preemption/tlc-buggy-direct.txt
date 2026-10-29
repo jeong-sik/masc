@@ -1,0 +1,136 @@
+# captured 2026-10-29T05:01:04Z at 3e41385b549 (spec is uncommitted at capture)
+# java -cp tla2tools-1.8.0.jar tlc2.TLC -workers 1 -noGenerateSpecTE -config KeeperBacklogPreemption-buggy-direct.cfg KeeperBacklogPreemption.tla
+(Use the -nowarning option to disable this warning.)
+Error: Invariant TurnsFollowOutsideCauses is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ sched_left = 3
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = FALSE
+/\ chat_queued = TRUE
+/\ lane = "none"
+/\ chat_left = 3
+/\ addressed_total = 0
+/\ rows_total = 0
+/\ receipt_row = FALSE
+/\ turns_started = 0
+/\ successor = FALSE
+/\ at_boundary = FALSE
+
+State 2: <StartDirect line 146, col 5 to line 156, col 74 of module KeeperBacklogPreemption>
+/\ sched_left = 3
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = TRUE
+/\ chat_queued = FALSE
+/\ lane = "direct"
+/\ chat_left = 3
+/\ addressed_total = 0
+/\ rows_total = 0
+/\ receipt_row = FALSE
+/\ turns_started = 1
+/\ successor = FALSE
+/\ at_boundary = FALSE
+
+State 3: <DirectCall line 174, col 5 to line 181, col 61 of module KeeperBacklogPreemption>
+/\ sched_left = 3
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = TRUE
+/\ chat_queued = FALSE
+/\ lane = "direct"
+/\ chat_left = 2
+/\ addressed_total = 0
+/\ rows_total = 0
+/\ receipt_row = FALSE
+/\ turns_started = 1
+/\ successor = FALSE
+/\ at_boundary = TRUE
+
+State 4: <DirectYieldToSchedule line 271, col 5 to line 281, col 48 of module KeeperBacklogPreemption>
+/\ sched_left = 3
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = TRUE
+/\ chat_queued = TRUE
+/\ lane = "none"
+/\ chat_left = 2
+/\ addressed_total = 0
+/\ rows_total = 0
+/\ receipt_row = FALSE
+/\ turns_started = 1
+/\ successor = FALSE
+/\ at_boundary = FALSE
+
+State 5: <StartSched line 161, col 5 to line 171, col 33 of module KeeperBacklogPreemption>
+/\ sched_left = 3
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = FALSE
+/\ chat_queued = TRUE
+/\ lane = "sched"
+/\ chat_left = 2
+/\ addressed_total = 0
+/\ rows_total = 0
+/\ receipt_row = FALSE
+/\ turns_started = 2
+/\ successor = FALSE
+/\ at_boundary = FALSE
+
+State 6: <SchedCall line 218, col 5 to line 225, col 61 of module KeeperBacklogPreemption>
+/\ sched_left = 2
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = FALSE
+/\ chat_queued = TRUE
+/\ lane = "sched"
+/\ chat_left = 2
+/\ addressed_total = 0
+/\ rows_total = 0
+/\ receipt_row = FALSE
+/\ turns_started = 2
+/\ successor = FALSE
+/\ at_boundary = TRUE
+
+State 7: <SchedYieldToChat line 240, col 5 to line 247, col 78 of module KeeperBacklogPreemption>
+/\ sched_left = 2
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = FALSE
+/\ chat_queued = TRUE
+/\ lane = "none"
+/\ chat_left = 2
+/\ addressed_total = 0
+/\ rows_total = 0
+/\ receipt_row = FALSE
+/\ turns_started = 2
+/\ successor = FALSE
+/\ at_boundary = FALSE
+
+State 8: <StartDirect line 146, col 5 to line 156, col 74 of module KeeperBacklogPreemption>
+/\ sched_left = 2
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = TRUE
+/\ chat_queued = FALSE
+/\ lane = "direct"
+/\ chat_left = 2
+/\ addressed_total = 0
+/\ rows_total = 0
+/\ receipt_row = FALSE
+/\ turns_started = 3
+/\ successor = FALSE
+/\ at_boundary = FALSE
+
+136 states generated, 86 distinct states found, 29 states left on queue.
+The depth of the complete state graph search is 8.
+Finished in 00s at (2026-10-29 14:01:05)

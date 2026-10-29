@@ -1,0 +1,43 @@
+# captured 2026-10-29T05:02:04Z from the server at ~/me/.masc (binary_commit 3e41385b549 until 2026-10-29T03:07Z, 216f7ab8456 after)
+# python3 -I scripts/keeper-queue-probe.py <base>/.masc/keepers --logs-dir <base>/.masc/logs --since 2026-10-27T12:40:00Z --until 2026-10-28T00:45:00Z --keeper ocaml-agent-ic
+2. Turn endings per Keeper and UTC day (window 2026-10-27T12:40:00Z .. 2026-10-28T00:45:00Z; ckpt_t01 = checkpoint turns with 0 or 1 tool calls)
+keeper                     day         turns   ckpt durable    op_q   done done+tool ckpt_t01 ckpt_share
+ocaml-agent-ic             2026-10-27    114    113     113       0      0         0       21      99.1%
+ocaml-agent-ic             2026-10-28      7      7       7       0      0         0        0     100.0%
+fleet                      all           121    120     120       0      0         0       21      99.2%
+
+3. Checkpoint turns by tool calls made (window 2026-10-27T12:40:00Z .. 2026-10-28T00:45:00Z)
+tools      turns    share
+0              0     0.0%
+1             21    17.5%
+2             37    30.8%
+3-5           54    45.0%
+6+             8     6.7%
+all          120
+
+4. Turn endings by execution path and runtime family (window 2026-10-27T12:40:00Z .. 2026-10-28T00:45:00Z)
+path               family        turns   ckpt durable    op_q   done
+autonomous_cycle   agent_core      121    120     120       0      0
+
+5. Length of completed turns in seconds, nearest rank (window 2026-10-27T12:40:00Z .. 2026-10-28T00:45:00Z)
+path                 turns      p50      p90      p99       max
+
+6. Longest run of consecutive turns ended on a durable stimulus (window 2026-10-27T12:40:00Z .. 2026-10-28T00:45:00Z)
+keeper                          turns from_utc             to_utc              
+ocaml-agent-ic                    120 2026-10-27T12:49:15Z 2026-10-28T00:39:54Z
+
+7. System log lines per Keeper (window 2026-10-27T12:40:00Z .. 2026-10-28T00:45:00Z)
+keeper                       busy  consumed    again  yield probe and head kind
+ocaml-agent-ic                  0       326      106  new durable successor head=completion_authority_rejected=1
+fleet                           0       326      106  new durable successor head=completion_authority_rejected=1
+again = consumed a stimulus that an earlier turn of the same Keeper had consumed in the window; by class: completion_authority_rejected=53, board_attention=45, schedule_due=5, ask_answered=3
+
+7b. Stimuli consumed by ocaml-agent-ic, per class (window 2026-10-27T12:40:00Z .. 2026-10-28T00:45:00Z)
+class                             consumed  distinct  max_repeat  gap_p50_s
+schedule_due                           210       205           2        181
+board_attention                         55        11          27       1564
+completion_authority_rejected           54         1          54          -
+ask_answered                             6         3           2          0
+board_signal                             1         1           1          -
+gap_p50_s = median seconds between the first consumptions of two distinct stimuli of the class
+

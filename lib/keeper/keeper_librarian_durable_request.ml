@@ -323,13 +323,45 @@ let confirm_owner capture =
   let* current=observe_owner ~base_path:capture.owner.workspace.path ~keepers_dir:capture.owner.keepers.path
     ~keeper_id:capture.owner.keeper_id in
   owner_matches_json current (owner_to_json capture.owner)
-let confirm_final ~store capture final =
+let host_proof_target capture =
   let* ()=confirm_owner capture in
   let* exact=request capture in
   let* schema=Option.to_result ~none:"Original history request lacks its schema" exact.Exact.schema in
   let* installation=Owner.installation_of_id capture.destination.installation_id in
-  let* declaration_id=match installation with Owner.Configuration id -> Ok id
+  let+ declaration_id=match installation with Owner.Configuration id -> Ok id
     | Manual _ -> Error "Original history requires a configured host installation" in
+  exact,schema,declaration_id
+let refusal_evidence ~store capture final =
+  match final with
+  | Exact.Call_final (Exact.Input_refused (Input_capacity | Context_overflow | Request_body_refused)) ->
+    let* exact,schema,declaration_id=host_proof_target capture in
+    let* observed=Exact.observe_retained ~store ~declaration_id ~schema exact in
+    (match observed with
+     | Exact.Retained_absent ->
+       (* The worker's frame refusal: no provider or slot ran, so the final
+          alone is the whole evidence. *)
+       Ok (if Exact.refused_before_host final
+           then Keeper_exact_walk_failure.of_input_refusal Keeper_librarian_input_refusal.Request_body_refused
+           else Keeper_exact_walk_failure.empty)
+     | Retained_open -> Ok Keeper_exact_walk_failure.empty
+     | Retained_terminal _ ->
+       let* latest=Exact.read_latest_original_execution ~store ~declaration_id ~schema exact in
+       (match latest with
+        | Exact.Completed_latest {execution={outcome=Exact.Call_ended actual;receipt;_};_}
+          when Yojson.Safe.equal (Exact.final_to_json (Exact.Call_final actual)) (Exact.final_to_json final) ->
+          (* The same bar admission's size check sets: a named input refusal
+             from every visit, with no independent failure mixed in. A
+             timeout or a bad request is not evidence about reading less. *)
+          let evidence=Keeper_exact_walk_receipt.failure_evidence receipt in
+          Ok (if Keeper_exact_walk_failure.refuses_input_capacity evidence
+                 && not evidence.size_independent_execution_failure
+              then evidence else Keeper_exact_walk_failure.empty)
+        | Completed_latest {execution={outcome=Exact.Call_ended _ | Call_refused _;_};_}
+        | No_completed_latest -> Ok Keeper_exact_walk_failure.empty))
+  | Exact.Call_final (Answered _ | Invalid_output _ | Output_limit_reached _ | Input_refused Invalid_request)
+  | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok Keeper_exact_walk_failure.empty
+let confirm_final ~store capture final =
+  let* exact,schema,declaration_id=host_proof_target capture in
   let* observed=Exact.observe_retained ~store ~declaration_id ~schema exact in
   match observed with
   | Exact.Retained_absent ->

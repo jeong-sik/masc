@@ -700,6 +700,16 @@ let may_descend_messages reports =
   | No_descent_evidence | Invalid_output_blocks_descent -> false
 ;;
 
+let not_committed_of_failure ~detail (evidence : Failure_evidence.t) =
+  { detail
+  ; walk_shows_size = Failure_evidence.shows_range_size evidence
+  ; message_descent = message_descent_of_failure evidence
+  ; input_capacity_evidence = input_capacity_of_failure evidence
+  ; provider_input_refusals = evidence.provider_input_refusals
+  ; smaller_range_meets_same_failure = evidence.size_independent_execution_failure
+  }
+;;
+
 let fit_continuity ~capacity ~base_path ~keeper_id ~input_for prepared =
   let open Result.Syntax in
   let* _, cli_slots = resolve_librarian_slots ~base_path ~keeper_id
@@ -2174,13 +2184,7 @@ let run_pass
                | Cli_prompt_unavailable _ | No_transport_declared | Domain_output_invalid _
                | Absorb_judgment_failed _ | Memory_snapshot_write_failed _ -> None in
              on_not_committed ~exhausted_input_refusals
-               { detail
-               ; walk_shows_size = Failure_evidence.shows_range_size evidence
-               ; message_descent = message_descent_of_failure evidence
-               ; input_capacity_evidence = input_capacity_of_failure evidence
-               ; provider_input_refusals = evidence.provider_input_refusals
-               ; smaller_range_meets_same_failure = evidence.size_independent_execution_failure
-               };
+               (not_committed_of_failure ~detail evidence);
              complete
                ?selected_slot:(selected_slot_of_extraction_error error)
                (Exact_lane_run_registry.Failed

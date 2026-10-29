@@ -16,6 +16,10 @@ type t = private
 val empty : t
 val invalid_output : t
 val input_capacity_refusal : t
+val of_input_refusal : Keeper_librarian_input_refusal.t -> t
+(** One named input refusal as a whole-walk observation: it shows the range was
+    too large and keeps the cause. The same value an actual provider refusal
+    with that cause produces in {!of_api_observation}. *)
 val with_invalid_output : t -> t
 val without_measured_cli_capacity : t -> t
 

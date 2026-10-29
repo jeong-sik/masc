@@ -74,5 +74,20 @@ val confirm_final : store:Lane_addon_store.t -> t -> Lane_addon_exact.final ->
     except a final where {!Lane_addon_exact.refused_before_host} holds, for a
     request the host never retained: the worker refuses a request no listing
     reply can carry before the host sees it, and that final holds no answer. *)
+val refusal_evidence : store:Lane_addon_store.t -> t -> Lane_addon_exact.final ->
+  (Keeper_exact_walk_failure.t, string) result
+(** What a refused original shows about reading less. Only an [Input_refused]
+    final naming a request body, input capacity or context refusal can show it;
+    [Invalid_request] and every other final show nothing. With no host record, the worker's frame refusal
+    ([Lane_addon_exact.refused_before_host]) is itself the evidence. With a host
+    terminal, the latest completed execution must end in this same final, and
+    its receipt supplies the walk's evidence, and only when that evidence is a
+    named input refusal with no independent failure mixed in. Anything else, including an open
+    host record, shows nothing. Blocking read; offload it in an Eio caller.
+
+    Nothing reads less because of this evidence yet: the Add-on durable path runs with
+    [No_message_floor]. The layer that gives that path a floor tests, before it does, that a
+    size-refused original descends exactly once and that [Invalid_request] and an open host
+    record never descend. *)
 val validate_proposal : t -> Yojson.Safe.t ->
   (Keeper_librarian_runtime.durable_proposal, string) result

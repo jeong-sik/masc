@@ -60,6 +60,7 @@ let size_independent = execution ~historical_range_size:false ~named_input_capac
 let historical_size = execution ~historical_range_size:true ~named_input_capacity:false
 let input_size = execution ~historical_range_size:true ~named_input_capacity:true
 let provider_input_size refusal = { input_size with provider_input_refusals = [refusal] }
+let of_input_refusal = provider_input_size
 
 type provider_cause = Exact_output.provider_refusal =
   | Request_body_refused | Refusal_body_not_received | Rate_limited | Overloaded

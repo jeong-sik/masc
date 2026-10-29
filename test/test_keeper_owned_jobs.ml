@@ -3917,7 +3917,7 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
     check int (label ^ " emits no outbox notification") 0 !delivered;
     check int (label ^ " delivers no terminal") 0 report.delivered;
     check (list (pair string string)) (label ^ " keeps readable guarded outbox authority") []
-      (List.map (fun (identity,error) -> identity,Outbox.error_to_string error) report.failures);
+      (List.map (fun (subject,error) -> Outbox.failure_subject_to_string subject,Outbox.error_to_string error) report.failures);
     let pending = pending_completions fixture in
     check int (label ^ " adds no queue completion") queued (List.length pending);
     let original_request_notifications = pending |> List.filter
@@ -5984,8 +5984,11 @@ let test_prepared_result_scope_preserves_original_resources ?(parent_alias=false
        let failed = Masc.Keeper_composition_completion_wake.reconcile ~base_path:fixture.base_path
          |> require "original child outbox retained through actual queue fault" in
        check bool "exact original physical result retains its failed delivery obligation" true
-         (List.exists (fun (request_id,_) -> String.equal request_id
-           (child_request |> member "request_id" |> to_string)) failed.failures);
+         (List.exists (function
+            | (Masc.Keeper_composition_completion_outbox.Request_id request_id, _) ->
+                String.equal request_id (child_request |> member "request_id" |> to_string)
+            | (Masc.Keeper_composition_completion_outbox.Record_file _, _) -> false)
+           failed.failures);
        check bool "queue fault publishes no usable parent result" false (Eio.Promise.is_resolved parent);
        write queue_path original_queue;
        ignore (Masc.Keeper_composition_completion_wake.reconcile ~base_path:fixture.base_path

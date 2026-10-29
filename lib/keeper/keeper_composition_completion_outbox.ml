@@ -19,13 +19,23 @@ let error_to_string = function
 
 type obligation = { request_id : string; keeper_name : string }
 type pending = { base_path : string; keeper_name : string; request_id : string }
-type discovery = { entries : pending list; failures : (string * error) list }
+
+type failure_subject =
+  | Request_id of string
+  | Record_file of string
+
+let failure_subject_to_string = function
+  | Request_id request_id -> "request=" ^ request_id
+  | Record_file name -> "record=" ^ name
+;;
+
+type discovery = { entries : pending list; failures : (failure_subject * error) list }
 
 type report =
   { inspected : int
   ; waiting : int
   ; delivered : int
-  ; failures : (string * error) list
+  ; failures : (failure_subject * error) list
   }
 
 type record_outcome = Retired | Waiting | Delivered
@@ -171,7 +181,7 @@ let discover ~base_path =
   let* base_path, names = pending_names ~base_path in
   let entries, failures = List.fold_left (fun (entries, failures) name ->
     match protect_io (fun () -> read ~base_path name) with
-    | Error error -> entries, (name, error) :: failures
+    | Error error -> entries, (Record_file name, error) :: failures
     | Ok None -> entries, failures
     | Ok (Some (obligation : obligation)) ->
         let pending : pending =
@@ -179,12 +189,7 @@ let discover ~base_path =
         pending :: entries, failures) ([], []) names in
   Ok {entries=List.rev entries;failures=List.rev failures}
 
-let recover_record ~base_path ~name ~expected ~deliver =
-  protect_io (fun () ->
-  let* obligation = read ~base_path name in
-  match obligation with
-  | None -> Ok Retired
-  | Some obligation ->
+let recover_obligation ~base_path ~expected ~deliver (obligation : obligation) =
     if (match expected with
       | None -> false
       | Some (original : pending) ->
@@ -226,11 +231,24 @@ let recover_record ~base_path ~name ~expected ~deliver =
         | Persistence_failed _ | Done _ ->
         let* () = deliver ~completion ~composition_tool:tool entry |> Result.map_error (fun detail -> Storage_failed detail) in
         let* () = acknowledge ~base_path ~keeper_name:obligation.keeper_name ~request_id:obligation.request_id in
-        Ok Delivered)
+        Ok Delivered
+
+(* A record that cannot be read or whose filename does not bind its request is
+   labeled by that filename, because its decoded identity is unverified. Once
+   [read] has accepted the record, its request id is the one the filename
+   binds, so every later failure is labeled by that request. *)
+let recover_record ~base_path ~name ~expected ~deliver =
+  match protect_io (fun () -> read ~base_path name) with
+  | Error error -> Error (Record_file name, error)
+  | Ok None -> Ok Retired
+  | Ok (Some obligation) ->
+    protect_io (fun () -> recover_obligation ~base_path ~expected ~deliver obligation)
+    |> Result.map_error (fun error -> Request_id obligation.request_id, error)
 
 let recover (pending : pending) ~deliver =
   recover_record ~base_path:pending.base_path ~name:(filename pending.request_id)
     ~expected:(Some pending) ~deliver
+  |> Result.map_error snd
 
 let flush ~base_path ~deliver =
   protect_io @@ fun () ->
@@ -242,6 +260,6 @@ let flush ~base_path ~deliver =
     | Ok Retired -> report
     | Ok Waiting -> { report with waiting = report.waiting + 1 }
     | Ok Delivered -> { report with delivered = report.delivered + 1 }
-    | Error error -> { report with failures = (name, error) :: report.failures }) empty names in
+    | Error (subject, error) -> { report with failures = (subject, error) :: report.failures }) empty names in
   Ok { result with failures = List.rev result.failures }
 ;;

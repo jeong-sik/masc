@@ -30,20 +30,33 @@ val acknowledge_waiting :
     It emits no composition terminal and grants no job replay permission. *)
 
 
+(** What a failure is about. [Request_id] names a pending record that was read
+    and whose filename binds that request, so the id is verified. [Record_file]
+    names a record that could not be read or whose filename does not bind its
+    request; only the pending filename is known, never an unverified decoded
+    request identity. *)
+type failure_subject =
+  | Request_id of string
+  | Record_file of string
+
+val failure_subject_to_string : failure_subject -> string
+(** [request=<id>] or [record=<filename>], for logs. *)
+
 type report =
   { inspected : int
   ; waiting : int
   ; delivered : int
-  ; failures : (string * error) list
+  ; failures : (failure_subject * error) list
   }
 
 type pending = private { base_path : string; keeper_name : string; request_id : string }
-type discovery = private { entries : pending list; failures : (string * error) list }
+type discovery = private { entries : pending list; failures : (failure_subject * error) list }
 val discover : base_path:string -> (discovery, error) result
 (** Read and validate the original pending identities in directory order.
     Captures the canonical base path and recipient, not terminal or execution
     authority. Missing records carry no work; malformed records remain failures
-    labeled by pending filename, not an unverified decoded request identity. *)
+    labeled [Record_file] by pending filename, not an unverified decoded
+    request identity. *)
 
 type record_outcome = Retired | Waiting | Delivered
 val recover :
@@ -66,7 +79,8 @@ val flush :
 (** Reconcile only this pending partition. Read exact canonical terminal
     proof before delivery; never execute or restart a request worker. Active
     requests keep their obligation. Malformed/unreadable records stay visible
-    in [failures] and remain on disk. Canonically released result waiting
+    in [failures] as [Record_file] and remain on disk; a verified obligation
+    whose delivery fails stays visible as [Request_id] with its request id. Canonically released result waiting
     attempts retire their attempt notification without calling [deliver]. *)
 
 module For_testing : sig

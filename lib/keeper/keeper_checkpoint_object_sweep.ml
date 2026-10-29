@@ -179,7 +179,16 @@ let gate_roots (records : Keeper_retained_checkpoint_sweep.owner_records) =
        String_map.empty
 ;;
 
-let session_roots ~session_root ~session_dir ~session_id =
+(* A session's own roots are files, read one at a time so a session's old
+   checkpoints are not all held at once; the others arrive as bytes. *)
+type root_source =
+  | Root_file of string
+  | Root_bytes of root
+
+(* The files that may hold a session's own root heads. An
+   [accepted-checkpoints] entry that is there but is not a directory stops the
+   pass: what it holds cannot be told. *)
+let session_root_files ~session_dir ~session_id =
   let canonical = Checkpoint.agent_core_checkpoint_path ~session_dir ~session_id in
   let* archives =
     match Checkpoint.list_agent_core_history_files ~session_dir with
@@ -187,33 +196,50 @@ let session_roots ~session_root ~session_dir ~session_id =
     | exception Sys_error detail -> Error (Listing_failed { path = session_dir; detail })
   in
   let retained_dir = Filename.concat session_dir Checkpoint.retained_dirname in
-  let* retained = directory_entries retained_dir in
-  let retained =
-    Option.value ~default:[] retained
-    |> List.filter (String.ends_with ~suffix:".json")
-    |> List.map (Filename.concat retained_dir)
+  let* retained =
+    match kind retained_dir with
+    | Error detail -> Error (Listing_failed { path = retained_dir; detail })
+    | Ok None -> Ok []
+    | Ok (Some (Unix.S_DIR, _)) ->
+      let* entries = directory_entries retained_dir in
+      Ok (Option.value ~default:[] entries)
+    | Ok (Some ((Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK), _)) ->
+      Error (Listing_failed { path = retained_dir; detail = "not a directory" })
   in
-  collect_roots (read_root ~ownership_root:session_root) ((canonical :: archives) @ retained)
+  let retained =
+    retained
+    |> List.filter (String.ends_with ~suffix:".json")
+    |> List.map (fun name -> Root_file (Filename.concat retained_dir name))
+  in
+  Ok ((Root_file canonical :: List.map (fun path -> Root_file path) archives) @ retained)
 ;;
 
 (* What the roots reach in one session, and how many of them are current. *)
-let reached ~session_dir roots =
+let reached ~session_root ~session_dir sources =
   List.fold_left
-    (fun acc root ->
+    (fun acc source ->
        let* current, live = acc in
-       match root_head root.bytes with
-       | Earlier_version -> Ok (current, live)
-       | Unusable detail -> Error (Root_unusable { root = root.where; detail })
-       | Current head ->
-         (match Object_store.walk_segments ~session_dir head with
-          | Object_store.Segment_unreachable { digest; detail } ->
-            Error (Segment_unreachable { root = root.where; segment = (digest :> string); detail })
-          | Object_store.Segments_reached behind ->
-            let add live (digest : Objects.digest) = String_set.add (digest :> string) live in
-            let live = List.fold_left add live (Objects.head_objects head) in
-            Ok (current + 1, List.fold_left add live behind)))
+       let* root =
+         match source with
+         | Root_bytes root -> Ok (Some root)
+         | Root_file path -> read_root ~ownership_root:session_root path
+       in
+       match root with
+       | None -> Ok (current, live)
+       | Some root ->
+         (match root_head root.bytes with
+          | Earlier_version -> Ok (current, live)
+          | Unusable detail -> Error (Root_unusable { root = root.where; detail })
+          | Current head ->
+            (match Object_store.walk_segments ~session_dir head with
+             | Object_store.Segment_unreachable { digest; detail } ->
+               Error (Segment_unreachable { root = root.where; segment = (digest :> string); detail })
+             | Object_store.Segments_reached behind ->
+               let add live (digest : Objects.digest) = String_set.add (digest :> string) live in
+               let live = List.fold_left add live (Objects.head_objects head) in
+               Ok (current + 1, List.fold_left add live behind))))
     (Ok (0, String_set.empty))
-    roots
+    sources
 ;;
 
 type session_plan =
@@ -235,9 +261,12 @@ let plan_sessions ~session_root ~external_roots =
        | Some ((Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK), _) ->
          Ok (roots_seen, plans)
        | Some (Unix.S_DIR, _) ->
-         let* own = session_roots ~session_root ~session_dir ~session_id in
-         let others = Option.value ~default:[] (String_map.find_opt session_id external_roots) in
-         let* current, live = reached ~session_dir (own @ others) in
+         let* own = session_root_files ~session_dir ~session_id in
+         let others =
+           Option.value ~default:[] (String_map.find_opt session_id external_roots)
+           |> List.map (fun root -> Root_bytes root)
+         in
+         let* current, live = reached ~session_root ~session_dir (own @ others) in
          Ok (roots_seen + current, { objects_dir; live } :: plans))
     (Ok (0, []))
     sessions

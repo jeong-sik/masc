@@ -30,7 +30,7 @@ let composition_tool = "keeper_compose_memory-background"
 let with_workspace f =
   let dir =
     Filename.concat
-      (Filename.get_temp_dir_name ())
+      (Unix.realpath (Filename.get_temp_dir_name ()))
       (Printf.sprintf
          "masc_composition_wake_%d_%d"
          (Unix.getpid ())

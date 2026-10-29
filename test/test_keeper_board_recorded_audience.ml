@@ -164,12 +164,15 @@ let test_scan_follows_the_recorded_audience () =
          ~post_kind:Board.Human_post
          ())
   in
+  (* Text names the lane, row has no audience. The scan reads posts oldest
+     first, so it meets this one before the other two. *)
+  let unrecorded = create "@scanreader older row" in
+  Unix.sleepf 0.01;
   (* Text names nobody, record names the lane. *)
   let recorded_target = create "plain note" in
+  Unix.sleepf 0.01;
   (* Text names the lane, record is open to discovery. *)
   let recorded_open = create "@scanreader please look" in
-  (* Text names the lane, row has no audience. *)
-  let unrecorded = create "@scanreader older row" in
   record_audiences
     [ post_id recorded_target, Some (targets_wire [ "scanreader" ])
     ; post_id recorded_open, Some (`Assoc [ "kind", `String "discoverable" ])
@@ -201,7 +204,7 @@ let test_scan_follows_the_recorded_audience () =
   check int "one delivery counts as a mention" 1 mention_count;
   check
     (list string)
-    "only the post whose record names the lane is delivered"
+    "the walk goes on past the unrecorded post and delivers only the post whose record names the lane"
     [ post_id recorded_target ]
     (queued_post_ids config meta.Keeper_meta_contract.name);
   check

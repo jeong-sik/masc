@@ -59,6 +59,13 @@ val load_recovery : base_path:string -> bundle_id:string -> (receipt, error) res
     A symlink spelling of the same canonical workspace is accepted. *)
 
 type input_plan
+(** [<base_path>/.masc/upgrades/journal-inputs]: one directory per adopted
+    input, whose {!input_checkpoint_basename} is a copied checkpoint head
+    naming objects in its trace's session (a root of
+    {!Keeper_checkpoint_object_sweep}). *)
+val input_directories : string -> string
+
+val input_checkpoint_basename : string
 type input_adoption
 type input_publication = Input_adopted of input_adoption | Input_adoption_unconfirmed of input_adoption
 

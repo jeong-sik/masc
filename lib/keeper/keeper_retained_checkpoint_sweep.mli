@@ -39,8 +39,9 @@ type error =
           journal that a read-only open cannot roll back; the next startup
           after that store opens tries again. *)
   | Metadata_unreadable of { path : string; detail : string }
-      (** Whether a keeper's metadata exists could not be told, so whether it
-          is registered is unknown and nothing was removed. *)
+      (** Whether a candidate's metadata entry exists could not be told, so
+          whether a keeper of that name is registered is unknown and nothing
+          was removed. Every entry under [keepers/] is such a candidate. *)
   | Keeper_shares_store_directory of { keeper_name : string }
       (** A keeper is named like a store kept directly under [keepers/]
           ([Common.Keepers_root_scoped]), so its directory cannot be told
@@ -48,6 +49,16 @@ type error =
           keeper, those directories are skipped as stores. *)
 
 val error_to_string : error -> string
+
+(** What the keepers' operation stores hold outstanding. *)
+type owner_records =
+  { input_checkpoints : Keeper_checkpoint_ref.t list
+  ; semantic_executions : Keeper_semantic_execution.t list
+  }
+
+(** Every keeper's operation store under [<runtime_root>/keepers], read as
+    {!run} reads them, with the same failures. *)
+val owner_records : runtime_root:string -> (owner_records, error) result
 
 (** [run ~runtime_root] reads every keeper's operation store under
     [<runtime_root>/keepers], following symlinks as the runtime does, and

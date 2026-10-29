@@ -199,6 +199,11 @@ val checkpoint_references : t -> Keeper_checkpoint_ref.t list
     in the directory named by the reference's trace id. A branch pins both its
     historical root and current input head until semantic settlement. *)
 
+val gate_preparation_heads : t -> (Keeper_checkpoint_ref.t * string) list
+(** The checkpoint heads the record holds in itself: a Gate binding's Agent
+    Core preparation, with the reference it stands for. The objects such a
+    head names are in the reference's trace directory under the session root. *)
+
 val continuation_checkpoints : t -> Keeper_checkpoint_ref.t list
 (** Current native checkpoint and phase-specific continuations, all under
     their trace directories in the session root. The immutable native admission seed is excluded;

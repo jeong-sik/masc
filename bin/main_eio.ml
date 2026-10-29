@@ -774,19 +774,40 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
      (Workspace.backend_config_for canonical_base_path).Backend_types.base_path
    in
    (* Optional cleanup: an exception from it is logged, never a failed boot. *)
-   match Masc.Keeper_retained_checkpoint_sweep.run ~runtime_root with
+   (match Masc.Keeper_retained_checkpoint_sweep.run ~runtime_root with
+    | exception exn ->
+      Log.Server.warn "[Startup] retained checkpoint sweep raised: %s"
+        (Printexc.to_string exn)
+    | Error error ->
+      Log.Server.warn "[Startup] retained checkpoint sweep skipped: %s"
+        (Masc.Keeper_retained_checkpoint_sweep.error_to_string error)
+    | Ok { live_references; removed; removed_bytes; failures } ->
+      Log.Server.info
+        "[Startup] retained checkpoint sweep: removed=%d bytes=%d live_references=%d failures=%d"
+        removed removed_bytes live_references (List.length failures);
+      List.iter
+        (fun failure -> Log.Server.warn "[Startup] retained checkpoint sweep: %s" failure)
+        failures);
+   (* After the retained sweep, so the accepted checkpoints it removed are no
+      longer roots. Optional cleanup, logged as the one above. *)
+   let started = Unix.gettimeofday () in
+   match
+     Masc.Keeper_checkpoint_object_sweep.run ~runtime_root
+       ~journal_inputs_dir:(Keeper_journal_preparation.input_directories canonical_base_path)
+       ~journal_input_head:Keeper_journal_preparation.input_checkpoint_basename
+   with
    | exception exn ->
-     Log.Server.warn "[Startup] retained checkpoint sweep raised: %s"
-       (Printexc.to_string exn)
+     Log.Server.warn "[Startup] checkpoint object sweep raised: %s" (Printexc.to_string exn)
    | Error error ->
-     Log.Server.warn "[Startup] retained checkpoint sweep skipped: %s"
-       (Masc.Keeper_retained_checkpoint_sweep.error_to_string error)
-   | Ok { live_references; removed; removed_bytes; failures } ->
+     Log.Server.warn "[Startup] checkpoint object sweep skipped: %s"
+       (Masc.Keeper_checkpoint_object_sweep.error_to_string error)
+   | Ok { sessions; roots; kept; removed; removed_bytes; failures } ->
      Log.Server.info
-       "[Startup] retained checkpoint sweep: removed=%d bytes=%d live_references=%d failures=%d"
-       removed removed_bytes live_references (List.length failures);
+       "[Startup] checkpoint object sweep: sessions=%d roots=%d kept=%d removed=%d bytes=%d failures=%d elapsed_s=%.3f"
+       sessions roots kept removed removed_bytes (List.length failures)
+       (Unix.gettimeofday () -. started);
      List.iter
-       (fun failure -> Log.Server.warn "[Startup] retained checkpoint sweep: %s" failure)
+       (fun failure -> Log.Server.warn "[Startup] checkpoint object sweep: %s" failure)
        failures);
   (* The process lease is held and no original-request writer has started. *)
   (match Masc.Lane_addon_orphan_body_sweep.run_at_startup ~base_path:canonical_base_path with

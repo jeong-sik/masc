@@ -259,6 +259,7 @@ type input_adoption =
 type input_publication = Input_adopted of input_adoption | Input_adoption_unconfirmed of input_adoption
 
 let input_directories base_path = Filename.concat (Filename.concat (root base_path) "upgrades") "journal-inputs"
+let input_checkpoint_basename = "checkpoint.json"
 let input_directory base_path id = Filename.concat (input_directories base_path) id
 let session_root base_path = Keeper_fs.session_store_path_for_runtime_root (root base_path)
 let session_dir base_path trace_id = Filename.concat (session_root base_path) (Keeper_id.Trace_id.to_string trace_id)
@@ -461,7 +462,7 @@ let adopt_input_using ~before_publication
         let plan = {plan with ip_related=refresh_retained_witness
           ~path:(retained_path base_path reference) ~retained plan.ip_related} in
         let metadata_path = Filename.concat directory "metadata.json" in
-        let checkpoint_path = Filename.concat directory "checkpoint.json" in
+        let checkpoint_path = Filename.concat directory input_checkpoint_basename in
         let* () = write metadata_path (snd plan.ip_metadata).content |> written metadata_path in
         let* () = write checkpoint_path (snd plan.ip_canonical).content |> written checkpoint_path in
         let* metadata = read_private ~base_path metadata_path in
@@ -508,7 +509,7 @@ let load_input_adoption ~base_path ~adoption_id:id = blocking (fun () -> boundar
   if not (valid_id id) then error Invalid_bundle else
   let* base_path = workspace base_path in
   let directory = input_directory base_path id in
-  let paths = List.map (Filename.concat directory) ["manifest.json";"metadata.json";"checkpoint.json";"adopted.sqlite3"] in
+  let paths = List.map (Filename.concat directory) ["manifest.json";"metadata.json";input_checkpoint_basename;"adopted.sqlite3"] in
   let rec capture acc = function
     | [] -> Ok (List.rev acc)
     | path::rest -> let* file = read_private ~base_path path in capture ((path,file)::acc) rest in
@@ -574,7 +575,7 @@ let capture_adoption_files receipt =
   let base_path = receipt.ia_bundle.base_path in
   let directory = input_directory base_path receipt.ia_id in
   let* metadata = read_private ~base_path (Filename.concat directory "metadata.json") in
-  let* checkpoint = read_private ~base_path (Filename.concat directory "checkpoint.json") in
+  let* checkpoint = read_private ~base_path (Filename.concat directory input_checkpoint_basename) in
   let* derivative = read_private ~base_path (Filename.concat directory "adopted.sqlite3") in
   let* manifest = read_private ~base_path (Filename.concat directory "manifest.json") in
   let* json = decode_json manifest.content in
@@ -583,7 +584,7 @@ let capture_adoption_files receipt =
       || digest derivative.content<>receipt.ia_derivative_hash
       || not (Yojson.Safe.equal json (input_adoption_to_json receipt)) then error Invalid_bundle
   else Ok (derivative,List.map (fun (name,file) -> Filename.concat directory name,file)
-    ["metadata.json",metadata;"checkpoint.json",checkpoint;"adopted.sqlite3",derivative;"manifest.json",manifest])
+    ["metadata.json",metadata;input_checkpoint_basename,checkpoint;"adopted.sqlite3",derivative;"manifest.json",manifest])
 let check_installation_plan plan =
   let base_path = plan.ji_adoption.ia_bundle.base_path in
   let* () = check_input_plan plan.ji_input in

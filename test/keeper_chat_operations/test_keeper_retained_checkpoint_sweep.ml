@@ -227,6 +227,19 @@ let test_a_registered_keeper_without_its_directory_removes_nothing () = with_roo
    | Ok _ -> fail "a registered keeper without its directory must stop the sweep");
   check bool "what the moved directory's store named is kept" true (Sys.file_exists kept))
 
+(* A directory named like a metadata file is still read under its own name,
+   beside the keeper whose name the metadata reading gives. *)
+let test_a_directory_named_like_metadata_is_read () = with_root (fun root ->
+  let held = checkpoint "held-by-json-directory" in
+  with_open (keeper_store root "held") (fun _ -> ());
+  with_open (keeper_store root "held.json") (fun store ->
+    ignore (defer_direct_checkpoint store "sweep-held" held));
+  let kept = retained root ~session:["sweep-trace"] held in
+  write kept "{}";
+  let report = sweep root in
+  check int "nothing removed" 0 report.removed;
+  check bool "what the directory's store names is kept" true (Sys.file_exists kept))
+
 (* Metadata that is a link to nothing is still an entry naming the keeper. *)
 let test_a_dangling_metadata_link_still_registers () = with_root (fun root ->
   ignore (keeper_store root "linked" : string);
@@ -379,6 +392,8 @@ let () =
             test_a_registered_keeper_without_its_directory_removes_nothing
         ; test_case "a dangling metadata link still registers" `Quick
             test_a_dangling_metadata_link_still_registers
+        ; test_case "a directory named like metadata is read" `Quick
+            test_a_directory_named_like_metadata_is_read
         ; test_case "lifecycle record directories are not keepers" `Quick
             test_lifecycle_record_directories_are_not_keepers
         ; test_case "missing directories are an empty sweep" `Quick

@@ -93,14 +93,16 @@ let owner_records ~runtime_root =
   then Ok none
   else
     let* entries = sorted_entries keepers_dir |> Result.map_error unreadable in
-    (* Every directory and every keeper metadata names a candidate, so a
-       registered keeper whose whole directory was moved aside is read too. *)
+    (* Every entry is a candidate under its own name, and an entry named as
+       metadata also under the keeper it names, so a registered keeper whose
+       whole directory was moved aside is read too. *)
     let candidates =
       List.fold_left
         (fun names entry ->
-           String_set.add
-             (Option.value ~default:entry (Keeper_runtime_root_entry.metadata_keeper_name entry))
-             names)
+           let names = String_set.add entry names in
+           match Keeper_runtime_root_entry.metadata_keeper_name entry with
+           | Some keeper_name -> String_set.add keeper_name names
+           | None -> names)
         String_set.empty
         entries
     in

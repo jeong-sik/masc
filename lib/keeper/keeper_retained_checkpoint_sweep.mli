@@ -39,8 +39,9 @@ type error =
           journal that a read-only open cannot roll back; the next startup
           after that store opens tries again. *)
   | Metadata_unreadable of { path : string; detail : string }
-      (** Whether a keeper's metadata exists could not be told, so whether it
-          is registered is unknown and nothing was removed. *)
+      (** Whether a candidate's metadata entry exists could not be told, so
+          whether a keeper of that name is registered is unknown and nothing
+          was removed. Every entry under [keepers/] is such a candidate. *)
   | Keeper_shares_store_directory of { keeper_name : string }
       (** A keeper is named like a store kept directly under [keepers/]
           ([Common.Keepers_root_scoped]), so its directory cannot be told

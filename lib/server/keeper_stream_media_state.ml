@@ -1,8 +1,7 @@
 type finalized = {
   index : int;
   media_type : string;
-  source_type : Agent_core.Types.media_source_kind;
-  data : string;
+  source : Agent_core.Types.media_source;
 }
 
 type wire_drop = {
@@ -17,8 +16,7 @@ type completed =
 
 type active_media = {
   media_type : string;
-  source_type : Agent_core.Types.media_source_kind;
-  chunks : string list;
+  chunks : Agent_core.Types.media_chunks;
   encoded_bytes : int;
 }
 
@@ -117,16 +115,18 @@ let stream_start_is_tool ~index ~content_type ~tool_id ~tool_name =
     (Agent_core.Types.ContentBlockStart
        { index; content_type; tool_id; tool_name })
 
-let add_media_chunk (t : t) ~index ~media_type ~source_type ~chunks ~encoded_bytes data =
-  let encoded_bytes = encoded_bytes + String.length data in
+(* [chunks] already holds [chunk]; [chunk] counts toward the wire cap. *)
+let add_media_chunk (t : t) ~index ~media_type ~chunks ~encoded_bytes chunk =
+  let encoded_bytes =
+    encoded_bytes + String.length (Agent_core.Types.media_source_payload chunk)
+  in
   let max_wire_bytes = t.max_wire_bytes in
   if encoded_bytes > max_wire_bytes
   then Wire_rejected (index, { media_type; encoded_bytes; max_wire_bytes })
   else
     Updated
       (replace_block t index
-         (Active_media
-            { media_type; source_type; chunks = data :: chunks; encoded_bytes }))
+         (Active_media { media_type; chunks; encoded_bytes }))
 
 let capture_media (t : t) index media =
   { index; media; max_wire_bytes = t.max_wire_bytes }
@@ -143,12 +143,10 @@ let capture_open_media t =
        | Invalid_block (Tool_block | Oversize) | Closed_block -> None)
 
 let finalize_media { index; media; max_wire_bytes } =
-  let { media_type; source_type; chunks; encoded_bytes } = media in
+  let { media_type; chunks; encoded_bytes } = media in
   if encoded_bytes > max_wire_bytes
   then Error (index, { media_type; encoded_bytes; max_wire_bytes })
-  else
-    let data = String.concat "" (List.rev chunks) in
-    Ok { index; media_type; source_type; data }
+  else Ok { index; media_type; source = Agent_core.Types.media_chunks_source chunks }
 
 let discard_current_scope t =
   (* Completed delivery evidence survives later failure or supersession. *)
@@ -161,28 +159,34 @@ let on_event t (evt : Agent_core.Types.sse_event) =
          && stream_start_is_tool ~index ~content_type ~tool_id ~tool_name ->
       Updated (replace_block t index (Invalid_block Tool_block))
   | Agent_core.Types.ContentBlockDelta
-      { index; delta = Agent_core.Types.MediaDelta { media_type; source_type; data } } ->
+      { index; delta = Agent_core.Types.MediaDelta { media_type; source } } ->
       if t.stream_phase <> Accepting_content
       then Unchanged
       else
         (match List.assoc_opt index t.blocks_by_index with
-         | Some (Active_media media)
-           when String.equal media.media_type media_type
-                && media.source_type = source_type ->
-             add_media_chunk t ~index ~media_type ~source_type ~chunks:media.chunks
-               ~encoded_bytes:media.encoded_bytes data
          | Some (Active_media active) ->
-             Metadata_drift
-               { index;
-                 expected_media_type = active.media_type;
-                 received_media_type = media_type;
-                 expected_source_type = active.source_type;
-                 received_source_type = source_type
-               }
+             let added =
+               if String.equal active.media_type media_type
+               then Agent_core.Types.media_chunks_add active.chunks source
+               else None
+             in
+             (match added with
+              | Some chunks ->
+                  add_media_chunk t ~index ~media_type ~chunks
+                    ~encoded_bytes:active.encoded_bytes source
+              | None ->
+                  Metadata_drift
+                    { index;
+                      expected_media_type = active.media_type;
+                      received_media_type = media_type;
+                      expected_source_type = Agent_core.Types.media_chunks_kind active.chunks;
+                      received_source_type =
+                        Agent_core.Types.media_source_kind_of_source source
+                    })
          | Some (Invalid_block (Tool_block | Oversize) | Closed_block) -> Unchanged
          | None ->
-             add_media_chunk t ~index ~media_type ~source_type ~chunks:[]
-               ~encoded_bytes:0 data)
+             add_media_chunk t ~index ~media_type
+               ~chunks:(Agent_core.Types.media_chunks_start source) ~encoded_bytes:0 source)
   | Agent_core.Types.ContentBlockStop { index } ->
       if t.stream_phase = Terminal Message_stop
       then Unchanged

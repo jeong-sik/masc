@@ -516,7 +516,7 @@ let test_lookup_evidence_survives_slot_failover_but_not_a_new_review () =
       Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
         (fun () -> Ok (List.map (fun slot -> slot, Types_core.Catalog_slot) slots));
       let prompt = "Review the original submission without discarding evidence." in
-      let image data = T.Image { media_type = "image/png"; data; source_type = T.Base64 } in
+      let image data = T.Image { media_type = "image/png"; source = T.Base64 data } in
       let attachment = image "submitted-original-image" in
       let original = [T.Text prompt; attachment] in
       let args = `Assoc ["path", `String "repo/evidence.json"; "include_image", `Bool true] in
@@ -621,7 +621,7 @@ let test_oversized_lookup_handoff_preserves_the_inline_refusal () =
       Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
         (fun () -> Ok ["refused-source", Types_core.Catalog_slot; "next-reviewer", Types_core.Catalog_slot]);
       let prompt = "Review the submitted evidence without bypassing its explicit inline guard." in
-      let image data = T.Image { media_type = "image/png"; data; source_type = T.Base64 } in
+      let image data = T.Image { media_type = "image/png"; source = T.Base64 data } in
       let attachment = image "submitted-original-image" in
       let rejected_media = image "oversized-lookup-image" in
       let body = String.make (Tool_shard_limits.verification_evidence_max_bytes + 1) 'z' in
@@ -724,7 +724,7 @@ let test_failed_lookup_handoff_uses_the_full_bridge_envelope () =
         Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
           (fun () -> Ok ["failed-lookup-source", Types_core.Catalog_slot; "failed-lookup-next", Types_core.Catalog_slot]);
         let prompt = "Review this source while retaining its tool failure accurately." in
-        let attachment = T.Image { media_type = "image/png"; data = "submitted-original-image"; source_type = T.Base64 } in
+        let attachment = T.Image { media_type = "image/png"; source = T.Base64 "submitted-original-image" } in
         let args = `Assoc ["path", `String "repo/failing-evidence.json"] in
         let reads = ref 0 and calls = ref [] in
         let source_lookup : AR.lookup_surface = { lookup with dispatch = (fun ~name ~args:actual ->

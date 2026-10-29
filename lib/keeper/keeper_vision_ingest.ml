@@ -108,7 +108,7 @@ let extraction_query =
 ;;
 
 
-(* An [Image] block's [data] is the base64 wire payload
+(* An [Image] block's [Base64] source payload is the base64 wire payload
    ([Keeper_multimodal_input.normalize_media_payload] guarantees base64); decode
    to the raw bytes the content-addressed store hashes. *)
 let raw_bytes_of_image_data data =
@@ -157,9 +157,9 @@ let eager_read ~base_path ~exclude_runtime_ids ~media_type ~bytes
    double-store, no double-extract). *)
 let evict_block ?base_path ~read ~mode ~keeper_name ~eager_budget (block : Agent_core.Types.content_block) =
   match block with
-  | Agent_core.Types.Image { media_type; data; source_type } ->
-    (match source_type with
-     | Agent_core.Types.Url | Agent_core.Types.File_id ->
+  | Agent_core.Types.Image { media_type; source } ->
+    (match source with
+     | Agent_core.Types.Url _ | Agent_core.Types.File_id _ ->
        (* RFC-0430 / #33682: a reference carrier is not an eviction target.
           Evict exists to trade the heavy inline payload for a local artifact
           handle; a URL or Files-API id costs a few dozen bytes of context,
@@ -169,7 +169,7 @@ let evict_block ?base_path ~read ~mode ~keeper_name ~eager_budget (block : Agent
           placeholder the reader cannot act on. *)
        record_eviction ~keeper_name ~mode ~result:"ok" ~reason:"reference_passthrough";
        block
-     | Agent_core.Types.Base64 ->
+     | Agent_core.Types.Base64 data ->
        match raw_bytes_of_image_data data with
       | Error _ ->
         record_eviction ~keeper_name ~mode ~result:"error" ~reason:"bad_base64";
@@ -306,15 +306,15 @@ let fallback_projector_with_read ?base_path ?(exclude_runtime_ids = []) ~read ~k
     | None ->
       let projected =
         match block with
-        | Agent_core.Types.Image { source_type = Agent_core.Types.Url; data; _ } ->
+        | Agent_core.Types.Image { source = Agent_core.Types.Url data; _ } ->
           Agent_core.Types.Text
             (Printf.sprintf
                "[unread image URL: %s; this runtime cannot view the image]" data)
-        | Agent_core.Types.Image { source_type = Agent_core.Types.File_id; data; _ } ->
+        | Agent_core.Types.Image { source = Agent_core.Types.File_id data; _ } ->
           Agent_core.Types.Text
             (Printf.sprintf
                "[unread image file ID: %s; this runtime cannot view the image]" data)
-        | Llm_provider.Types.Image { data = _; source_type = Llm_provider.Types.Base64;_}
+        | Llm_provider.Types.Image { source = Llm_provider.Types.Base64 _;_}
         | Llm_provider.Types.Text _ | Llm_provider.Types.Thinking _
         | Llm_provider.Types.ReasoningDetails _ | Llm_provider.Types.RedactedThinking _
         | Llm_provider.Types.ToolUse _ | Llm_provider.Types.ToolResult _

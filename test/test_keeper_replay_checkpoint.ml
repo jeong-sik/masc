@@ -736,7 +736,7 @@ let test_media_degraded_projection_persists_canonical_checkpoint () =
   let canonical_history =
     [ message User
         [ Text "canonical history"
-        ; image_block ~media_type:"image/png" ~data:"canonical-image" ()
+        ; image_block ~media_type:"image/png" ~source:(Base64 "canonical-image")
         ]
     ]
   in

@@ -26,7 +26,7 @@ type block_header =
 
 type media =
   { media_type : string
-  ; source_type : Types.media_source_kind
+  ; chunks : Types.media_chunks
   }
 
 type input_piece =
@@ -739,17 +739,26 @@ let transition_open state = function
        terminal_event_failure
          (Printf.sprintf "invalid_redacted_thinking_snapshot:index:%d" index)
          state
-     | ( Some { media = Some media; _ }
-       , Types.MediaDelta { media_type; source_type; _ } )
-       when not
-              (String.equal media.media_type media_type && media.source_type = source_type)
-       ->
-       capture_failure
-         (Types.Stream_parse_failed
-            { reason = Printf.sprintf "media_delta_metadata_conflict:index:%d" index
-            ; raw = ""
-            })
-         state
+     | ( Some { media = Some active; _ }
+       , Types.MediaDelta { media_type; source } ) ->
+       let added =
+         if String.equal active.media_type media_type
+         then Types.media_chunks_add active.chunks source
+         else None
+       in
+       (match added with
+        | Some chunks ->
+          update_block
+            index
+            (fun block -> { block with media = Some { active with chunks } })
+            state
+        | None ->
+          capture_failure
+            (Types.Stream_parse_failed
+               { reason = Printf.sprintf "media_delta_metadata_conflict:index:%d" index
+               ; raw = ""
+               })
+            state)
      | ( Some { header = Announced _; lifecycle = Open; _ }
        , ( Types.TextDelta _
          | Types.TextSnapshot _
@@ -789,10 +798,11 @@ let transition_open state = function
            ; reasoning_details_rev =
                List.rev_append details block.reasoning_details_rev
            }
-         | Types.MediaDelta { media_type; source_type; data } ->
+         | Types.MediaDelta { media_type; source } ->
+           (* The first chunk of a block. A block that already holds media is
+              added to (or rejected) by the arm above. *)
            { block with
-             text_chunks_rev = data :: block.text_chunks_rev
-           ; media = Some { media_type; source_type }
+             media = Some { media_type; chunks = Types.media_chunks_start source }
            }
          | Types.ThinkingSignatureDelta signature ->
            { block with
@@ -932,17 +942,19 @@ let required_nonblank ~reason = function
   | Some _ | None -> stream_parse_failed ~reason ()
 ;;
 
-let media_content ~index ~kind ~make block text =
-  if String.trim text = ""
-  then Ok None
-  else (
-    match block.media with
-    | Some { media_type; source_type } when String.trim media_type <> "" ->
-      Ok (Some (make ~media_type ~data:text ~source_type))
-    | Some _ | None ->
+let media_content ~index ~kind ~make block =
+  match block.media with
+  | None -> Ok None
+  | Some { media_type; chunks } ->
+    let source = Types.media_chunks_source chunks in
+    if String.trim (Types.media_source_payload source) = ""
+    then Ok None
+    else if String.trim media_type <> ""
+    then Ok (Some (make ~media_type ~source))
+    else
       stream_parse_failed
         ~reason:(Printf.sprintf "malformed_media_block:%s:index:%d" kind index)
-        ())
+        ()
 ;;
 
 let tool_input ~index ~trace text =
@@ -1164,26 +1176,20 @@ let content_of_block ~disposition ~stop_reason (index, block) =
     media_content
       ~index
       ~kind:"image"
-      ~make:(fun ~media_type ~data ~source_type ->
-        Types.Image { media_type; data; source_type })
+      ~make:(fun ~media_type ~source -> Types.Image { media_type; source })
       block
-      text
   | Announced { kind = Document_block; _ } ->
     media_content
       ~index
       ~kind:"document"
-      ~make:(fun ~media_type ~data ~source_type ->
-        Types.Document { media_type; data; source_type })
+      ~make:(fun ~media_type ~source -> Types.Document { media_type; source })
       block
-      text
   | Announced { kind = Audio_block; _ } ->
     media_content
       ~index
       ~kind:"audio"
-      ~make:(fun ~media_type ~data ~source_type ->
-        Types.Audio { media_type; data; source_type })
+      ~make:(fun ~media_type ~source -> Types.Audio { media_type; source })
       block
-      text
   | Announced { kind = Unknown_block kind; _ } ->
     (* Unknown wire semantics are not assistant text. Fail closed without
        copying the provider payload into the diagnostic carrier. *)

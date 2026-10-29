@@ -8,7 +8,7 @@ module Media = Masc_tui_chat_media
 module Projection = Server_keeper_chat_agui_projection
 
 let media ?(generation=4) ?(scope=0) ?(index=0) ?(mime="image/png") reference : E.generated_media =
-  {index; media_type=mime; source_type=Agent_core.Types.Base64; media_ref=reference;
+  {index; media_type=mime; source_type=Agent_core.Types.Base64_kind; media_ref=reference;
    response={response_generation=generation; response_scope=scope}}
 
 let wire event =
@@ -108,7 +108,7 @@ let test_generated_midi_live_and_reload_playback () =
     let accum = Keeper_stream_media_accum.create () in
     Keeper_stream_media_accum.on_event accum
       (Agent_core.Types.ContentBlockDelta {index=0; delta=MediaDelta
-        {media_type=mime;source_type=Base64;data=Base64.encode_string raw}});
+        {media_type=mime;source = Base64 (Base64.encode_string raw)}});
     Keeper_stream_media_accum.on_event accum (Agent_core.Types.ContentBlockStop {index=0});
     let blocks = Keeper_stream_media_accum.to_chat_blocks ~base_dir accum in
     let reference = match blocks with

@@ -35,7 +35,7 @@ let test_image_media_persisted_as_block () =
           index = 0;
           delta =
             MediaDelta
-              { media_type = "image/png"; source_type = Base64; data = encoded_media };
+              { media_type = "image/png"; source = Base64 encoded_media };
         };
       ContentBlockStop { index = 0 };
     ];
@@ -62,8 +62,7 @@ let test_audio_media_as_voice_block () =
             MediaDelta
               {
                 media_type = "audio/mpeg";
-                source_type = Base64;
-                data = Base64.encode_string "audio bytes";
+                source = Base64 (Base64.encode_string "audio bytes");
               };
         };
       ContentBlockStop { index = 0 };
@@ -83,8 +82,7 @@ let test_runtime_attempt_discards_unfinished_media () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source_type = Base64
-             ; data = Base64.encode_string "stale"
+             ; source = Base64 (Base64.encode_string "stale")
              }
        });
   A.start_runtime_attempt accum;
@@ -95,8 +93,7 @@ let test_runtime_attempt_discards_unfinished_media () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source_type = Base64
-             ; data = Base64.encode_string fresh
+             ; source = Base64 (Base64.encode_string fresh)
              }
        });
   A.on_event accum (ContentBlockStop { index = 0 });
@@ -122,8 +119,7 @@ let test_timeout_discards_unfinished_media () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source_type = Base64
-             ; data = Base64.encode_string "timed out"
+             ; source = Base64 (Base64.encode_string "timed out")
              }
        });
   A.on_event accum (Timeout "idle timeout after 120.0s");
@@ -147,8 +143,7 @@ let test_open_media_finalized_on_message_stop () =
           delta =
             MediaDelta
               { media_type = "audio/mpeg";
-                source_type = Base64;
-                data = Base64.encode_string "audio"
+                source = Base64 (Base64.encode_string "audio")
               }
         }
     ; ContentBlockDelta
@@ -156,8 +151,7 @@ let test_open_media_finalized_on_message_stop () =
           delta =
             MediaDelta
               { media_type = "image/png";
-                source_type = Base64;
-                data = Base64.encode_string raw_media
+                source = Base64 (Base64.encode_string raw_media)
               }
         }
     ];
@@ -181,8 +175,7 @@ let test_stop_reason_finalizes_media_until_next_exact_scope () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source_type = Base64
-             ; data = Base64.encode_string "first"
+             ; source = Base64 (Base64.encode_string "first")
              }
        });
   A.on_event ~stream_scope:0 accum
@@ -193,8 +186,7 @@ let test_stop_reason_finalizes_media_until_next_exact_scope () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source_type = Base64
-             ; data = Base64.encode_string "late"
+             ; source = Base64 (Base64.encode_string "late")
              }
        });
   A.on_event ~stream_scope:1 accum
@@ -203,8 +195,7 @@ let test_stop_reason_finalizes_media_until_next_exact_scope () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source_type = Base64
-             ; data = Base64.encode_string "second"
+             ; source = Base64 (Base64.encode_string "second")
              }
        });
   A.on_event ~stream_scope:1 accum (ContentBlockStop { index = 0 });
@@ -240,8 +231,7 @@ let test_tool_block_media_not_persisted () =
             MediaDelta
               {
                 media_type = "image/png";
-                source_type = Base64;
-                data = Base64.encode_string "must not persist";
+                source = Base64 (Base64.encode_string "must not persist");
               };
         };
       ContentBlockStop { index = 0 };
@@ -264,8 +254,7 @@ let test_metadata_drift_preserves_first_media_block () =
             MediaDelta
               {
                 media_type = "image/png";
-                source_type = Base64;
-                data = Base64.encode_string raw_media;
+                source = Base64 (Base64.encode_string raw_media);
               };
         };
       ContentBlockDelta
@@ -275,8 +264,7 @@ let test_metadata_drift_preserves_first_media_block () =
             MediaDelta
               {
                 media_type = "audio/mpeg";
-                source_type = Base64;
-                data = Base64.encode_string "drift";
+                source = Base64 (Base64.encode_string "drift");
               };
         };
       ContentBlockStop { index = 0 };
@@ -290,6 +278,73 @@ let test_metadata_drift_preserves_first_media_block () =
         ("/api/v1/media/" ^ expected_token ~media_type:"image/png" raw_media)
         src
   | _ -> fail "expected metadata drift to preserve the first image media block"
+
+(* Base64 [encoded] split into [width]-byte chunks, in order. *)
+let equal_chunks ~width encoded =
+  List.init (String.length encoded / width) (fun i -> String.sub encoded (i * width) width)
+
+let media_chunk_deltas ~index ~media_type chunks =
+  List.map
+    (fun chunk ->
+      Agent_core.Types.ContentBlockDelta
+        { index; delta = Agent_core.Types.MediaDelta { media_type; source = chunk } })
+    chunks
+
+let test_many_media_chunks_join_in_order () =
+  let open Agent_core.Types in
+  let accum = A.create () in
+  let raw_media = String.init 768 (fun i -> Char.chr (i * 7 mod 256)) in
+  let chunks = equal_chunks ~width:4 (Base64.encode_string raw_media) in
+  check int "the payload arrives in many chunks" 256 (List.length chunks);
+  List.iter (A.on_event accum)
+    (media_chunk_deltas ~index:0 ~media_type:"image/png"
+       (List.map (fun chunk -> Base64 chunk) chunks)
+     @ [ ContentBlockStop { index = 0 } ]);
+  let base_dir = Filename.temp_dir "media_accum_test" "" in
+  match A.to_chat_blocks ~base_dir accum with
+  | [ Blocks.Image { src; cap = None } ] ->
+      check string "the persisted media is every chunk in arrival order"
+        ("/api/v1/media/" ^ expected_token ~media_type:"image/png" raw_media)
+        src
+  | _ -> fail "expected one Image block joined from every chunk"
+
+let test_last_media_chunk_over_the_cap_drops_the_block () =
+  with_env "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "4" (fun () ->
+    let open Agent_core.Types in
+    let accum = A.create () in
+    let cap = Masc.Keeper_chat_media_store.max_wire_bytes () in
+    let width = 8 in
+    (* Chunks that fill the cap exactly, then one more that crosses it. *)
+    let at_cap = List.init (cap / width) (fun _ -> String.make width 'A') in
+    let crossing = String.make (cap mod width + 1) 'A' in
+    let observed = (List.length at_cap * width) + String.length crossing in
+    check int "the last chunk is the one that crosses the cap" (cap + 1) observed;
+    List.iter (A.on_event accum)
+      (media_chunk_deltas ~index:0 ~media_type:"image/png"
+         (List.map (fun chunk -> Base64 chunk) (at_cap @ [ crossing ]))
+       @ [ ContentBlockStop { index = 0 } ]);
+    let base_dir = Filename.temp_dir "media_accum_test" "" in
+    match A.to_chat_blocks ~base_dir accum with
+    | [ Blocks.Attach { src = None; size_bytes; _ } ] ->
+        check (option int) "placeholder counts every chunk up to the crossing one"
+          (Some observed) size_bytes
+    | _ -> fail "expected the block that crossed the cap to become one dropped placeholder")
+
+let test_carrier_change_keeps_first_media_block () =
+  let open Agent_core.Types in
+  let accum = A.create () in
+  let raw_media = "first carrier" in
+  List.iter (A.on_event accum)
+    (media_chunk_deltas ~index:0 ~media_type:"image/png"
+       [ Base64 (Base64.encode_string raw_media); Url "https://example.invalid/drift.png" ]
+     @ [ ContentBlockStop { index = 0 } ]);
+  let base_dir = Filename.temp_dir "media_accum_test" "" in
+  match A.to_chat_blocks ~base_dir accum with
+  | [ Blocks.Image { src; cap = None } ] ->
+      check string "a chunk under another carrier is not joined"
+        ("/api/v1/media/" ^ expected_token ~media_type:"image/png" raw_media)
+        src
+  | _ -> fail "expected a carrier change to keep the first image media block"
 
 let test_oversize_media_surfaces_as_dropped_placeholder () =
   let cap_env = "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" in
@@ -307,7 +362,7 @@ let test_oversize_media_surfaces_as_dropped_placeholder () =
             index = 0;
             delta =
               MediaDelta
-                { media_type = "image/png"; source_type = Base64; data = oversized };
+                { media_type = "image/png"; source = Base64 oversized };
         };
         ContentBlockStop { index = 0 };
       ];
@@ -348,8 +403,7 @@ let test_media_persist_failure_surfaces_as_placeholder () =
           delta =
             MediaDelta
               { media_type = "image/png";
-                source_type = Base64;
-                data = invalid_base64
+                source = Base64 invalid_base64
               }
         }
     ; ContentBlockStop { index = 0 }
@@ -380,8 +434,7 @@ let test_dropped_and_persisted_media_keep_stream_order () =
             delta =
               MediaDelta
                 { media_type = "image/png";
-                  source_type = Base64;
-                  data = oversized
+                  source = Base64 oversized
                 }
           }
       ; ContentBlockStop { index = 0 }
@@ -390,8 +443,7 @@ let test_dropped_and_persisted_media_keep_stream_order () =
             delta =
               MediaDelta
                 { media_type = "image/png";
-                  source_type = Base64;
-                  data = Base64.encode_string "x"
+                  source = Base64 (Base64.encode_string "x")
                 }
           }
       ; ContentBlockStop { index = 1 }
@@ -458,7 +510,7 @@ let test_failed_request_reloads_completed_media_across_attempts () =
           (fun data ->
             on_event
               (ContentBlockDelta
-                 { index; delta = MediaDelta { media_type; source_type = Base64; data } }))
+                 { index; delta = MediaDelta { media_type; source = Base64 data } }))
           [ String.sub encoded 0 split
           ; String.sub encoded split (String.length encoded - split)
           ]
@@ -563,6 +615,12 @@ let () =
             test_tool_block_media_not_persisted;
           test_case "metadata drift preserves first media block" `Quick
             test_metadata_drift_preserves_first_media_block;
+          test_case "many media chunks join in order" `Quick
+            test_many_media_chunks_join_in_order;
+          test_case "last media chunk over the cap drops the block" `Quick
+            test_last_media_chunk_over_the_cap_drops_the_block;
+          test_case "carrier change keeps first media block" `Quick
+            test_carrier_change_keeps_first_media_block;
           test_case "oversize media surfaces as dropped placeholder" `Quick
             test_oversize_media_surfaces_as_dropped_placeholder;
           test_case "persist failure surfaces as dropped placeholder" `Quick

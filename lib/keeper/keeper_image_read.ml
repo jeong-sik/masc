@@ -79,7 +79,7 @@ let handle ?turn_sandbox_factory ~config ~(meta : Keeper_meta_contract.keeper_me
           Tool_result.make_ok ~tool_name:"keeper_image_read" ~start_time
             ~data ~content_blocks:
               [ Llm_provider.Types.Text (Yojson.Safe.to_string data)
-              ; Llm_provider.Types.image_block ~media_type ~data:(Base64.encode_exn bytes) () ] ()
+              ; Llm_provider.Types.image_block ~media_type ~source:(Llm_provider.Types.Base64 (Base64.encode_exn bytes)) ] ()
           |> Keeper_tool_execution.of_tool_result
 
 let admission_hook ~accepts_image_input = function

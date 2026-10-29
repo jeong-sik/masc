@@ -39,20 +39,12 @@ let stage name = log "STAGE %s" name
 let marker_audio_data = "h5-audio-bytes-띄어쓰기-007::" ^ String.make 512 'a'
 let marker_document_data = "h5-document-bytes-0007::" ^ String.make 512 'b'
 
-let audio_block ?(source_type = Types.Base64) () =
-  Types.audio_block
-    ~media_type:"audio/wav"
-    ~data:marker_audio_data
-    ~source_type
-    ()
+let audio_block ?(source = Types.Base64 marker_audio_data) () =
+  Types.audio_block ~media_type:"audio/wav" ~source
 ;;
 
-let document_block ?(source_type = Types.Base64) () =
-  Types.document_block
-    ~media_type:"application/pdf"
-    ~data:marker_document_data
-    ~source_type
-    ()
+let document_block ?(source = Types.Base64 marker_document_data) () =
+  Types.document_block ~media_type:"application/pdf" ~source
 ;;
 
 let sha256_of_block block =
@@ -62,26 +54,20 @@ let sha256_of_block block =
   |> Digest.to_hex
 ;;
 
-let describe_source_type = function
-  | Types.Base64 -> "base64"
-  | Types.Url -> "url"
-  | Types.File_id -> "file_id"
-;;
-
 (* block 의 (modality, media_type, source_type, data) 를 관측 문자로. *)
 let describe_block block =
   match block with
-  | Types.Audio { media_type; data; source_type } ->
+  | Types.Audio { media_type; source } ->
     Printf.sprintf "audio media_type=%s source=%s data_len=%d data_sha256_prefix=%s"
       media_type
-      (describe_source_type source_type)
-      (String.length data)
+      (Types.media_source_wire_tag source)
+      (String.length (Types.media_source_payload source))
       (String.sub (sha256_of_block block) 0 16)
-  | Types.Document { media_type; data; source_type } ->
+  | Types.Document { media_type; source } ->
     Printf.sprintf "document media_type=%s source=%s data_len=%d data_sha256_prefix=%s"
       media_type
-      (describe_source_type source_type)
-      (String.length data)
+      (Types.media_source_wire_tag source)
+      (String.length (Types.media_source_payload source))
       (String.sub (sha256_of_block block) 0 16)
   | Types.Image _ -> "image"
   | Types.Text _ -> "text"
@@ -101,8 +87,8 @@ let s1_serialization_roundtrip () =
   let cases =
     [ ("audio_base64", audio_block ())
     ; ("document_base64", document_block ())
-    ; ("audio_url", audio_block ~source_type:Types.Url ())
-    ; ("document_url", document_block ~source_type:Types.Url ())
+    ; ("audio_url", audio_block ~source:(Types.Url marker_audio_data) ())
+    ; ("document_url", document_block ~source:(Types.Url marker_document_data) ())
     ]
   in
   List.iter
@@ -151,31 +137,27 @@ let s1_serialization_roundtrip () =
 let s3_fail_closed_sources () =
   stage "s3: non-base64 sources fail closed instead of reinterpretation";
   let cases =
-    [ ("audio_url", audio_block ~source_type:Types.Url ())
-    ; ("audio_file_id", audio_block ~source_type:Types.File_id ())
-    ; ("document_url", document_block ~source_type:Types.Url ())
-    ; ("document_file_id", document_block ~source_type:Types.File_id ())
+    [ ("audio_url", audio_block ~source:(Types.Url marker_audio_data) ())
+    ; ("audio_file_id", audio_block ~source:(Types.File_id marker_audio_data) ())
+    ; ("document_url", document_block ~source:(Types.Url marker_document_data) ())
+    ; ("document_file_id", document_block ~source:(Types.File_id marker_document_data) ())
     ]
   in
   List.iter
     (fun (name, block) ->
        let backend = "gemini" in
        let block_name = match block with Types.Audio _ -> "audio" | Types.Document _ -> "document" | _ -> "other" in
-       let data =
+       let source =
          match block with
-         | Types.Audio { data; _ }
-         | Types.Document { data; _ } -> data
-         | _ -> ""
+         | Types.Audio { source; _ }
+         | Types.Document { source; _ } -> source
+         | _ -> Types.Base64 ""
        in
        match
          Api_common.base64_media_payload
            ~backend
            ~block:block_name
-           ~data
-           (match block with
-            | Types.Audio { source_type; _ }
-            | Types.Document { source_type; _ } -> source_type
-            | _ -> Types.Base64)
+           source
        with
        | payload ->
          log "S3 %s UNEXPECTED_PASSTHROUGH payload_len=%d (base64 passthrough would lose the origin)"

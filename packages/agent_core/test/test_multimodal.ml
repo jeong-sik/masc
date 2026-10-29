@@ -18,9 +18,7 @@ let test_image_round_trip () =
   let img =
     Types.Image
       { media_type = "image/png"
-      ; data =
-          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-      ; source_type = Types.Base64
+      ; source = Types.Base64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
       }
   in
   let json = Llm_provider.Api_common.content_block_to_json img in
@@ -37,8 +35,7 @@ let test_document_round_trip () =
   let doc =
     Types.Document
       { media_type = "application/pdf"
-      ; data = "JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwo+Pg=="
-      ; source_type = Types.Base64
+      ; source = Types.Base64 "JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwo+Pg=="
       }
   in
   let json = Llm_provider.Api_common.content_block_to_json doc in
@@ -51,8 +48,7 @@ let test_image_url_round_trip () =
   let img =
     Types.Image
       { media_type = "image/png"
-      ; data = "https://example.invalid/image.png"
-      ; source_type = Types.Url
+      ; source = Types.Url "https://example.invalid/image.png"
       }
   in
   let json = Llm_provider.Api_common.content_block_to_json img in
@@ -65,8 +61,7 @@ let test_document_file_id_round_trip () =
   let doc =
     Types.Document
       { media_type = "application/pdf"
-      ; data = "file_abc123"
-      ; source_type = Types.File_id
+      ; source = Types.File_id "file_abc123"
       }
   in
   let json = Llm_provider.Api_common.content_block_to_json doc in
@@ -92,13 +87,14 @@ let test_image_parse_nested_source () =
       ]
   in
   match Llm_provider.Api_common.content_block_of_json json with
-  | Some (Types.Image { media_type; data; source_type }) ->
+  | Some (Types.Image { media_type; source }) ->
+    let data = Types.media_source_payload source in
     Alcotest.(check string) "media_type" "image/jpeg" media_type;
     Alcotest.(check string) "data" "abc123" data;
     Alcotest.(check string)
       "source_type"
       "base64"
-      (Types.media_source_kind_to_string source_type)
+      (Types.media_source_wire_tag source)
   | Some _ -> Alcotest.fail "expected Image variant"
   | None -> Alcotest.fail "content_block_of_json returned None"
 ;;
@@ -120,13 +116,14 @@ let test_document_parse_nested_source () =
       ]
   in
   match Llm_provider.Api_common.content_block_of_json json with
-  | Some (Types.Document { media_type; data; source_type }) ->
+  | Some (Types.Document { media_type; source }) ->
+    let data = Types.media_source_payload source in
     Alcotest.(check string) "media_type" "application/pdf" media_type;
     Alcotest.(check string) "data" "pdf_data_here" data;
     Alcotest.(check string)
       "source_type"
       "base64"
-      (Types.media_source_kind_to_string source_type)
+      (Types.media_source_wire_tag source)
   | Some _ -> Alcotest.fail "expected Document variant"
   | None -> Alcotest.fail "content_block_of_json returned None"
 ;;
@@ -197,9 +194,9 @@ let test_mixed_content_serialization () =
   let blocks =
     [ Types.Text "Here is an image:"
     ; Types.Image
-        { media_type = "image/png"; data = "base64data"; source_type = Types.Base64 }
+        { media_type = "image/png"; source = Types.Base64 "base64data" }
     ; Types.Document
-        { media_type = "application/pdf"; data = "pdfdata"; source_type = Types.Base64 }
+        { media_type = "application/pdf"; source = Types.Base64 "pdfdata" }
     ]
   in
   let json_list = List.map Llm_provider.Api_common.content_block_to_json blocks in
@@ -212,18 +209,18 @@ let test_mixed_content_serialization () =
 ;;
 
 let test_multimodal_constructors () =
-  let image = Types.image_block ~media_type:"image/png" ~data:"img" () in
-  let document = Types.document_block ~media_type:"application/pdf" ~data:"pdf" () in
-  let audio = Types.audio_block ~media_type:"audio/wav" ~data:"wav" () in
+  let image = Types.image_block ~media_type:"image/png" ~source:(Types.Base64 "img") in
+  let document = Types.document_block ~media_type:"application/pdf" ~source:(Types.Base64 "pdf") in
+  let audio = Types.audio_block ~media_type:"audio/wav" ~source:(Types.Base64 "wav") in
   let msg =
     Types.user_msg_blocks [ Types.text_block "Describe"; image; document; audio ]
   in
   Alcotest.(check string) "role" "user" (Types.role_to_string msg.role);
   Alcotest.(check int) "blocks" 4 (List.length msg.content);
   match image, document, audio with
-  | ( Types.Image { source_type = Types.Base64; media_type = "image/png"; _ }
-    , Types.Document { source_type = Types.Base64; media_type = "application/pdf"; _ }
-    , Types.Audio { source_type = Types.Base64; media_type = "audio/wav"; _ } ) -> ()
+  | ( Types.Image { source = Types.Base64 _; media_type = "image/png"; _ }
+    , Types.Document { source = Types.Base64 _; media_type = "application/pdf"; _ }
+    , Types.Audio { source = Types.Base64 _; media_type = "audio/wav"; _ } ) -> ()
   | _ -> Alcotest.fail "unexpected multimodal constructor shape"
 ;;
 
@@ -275,7 +272,7 @@ let test_agent_run_with_handoffs_blocks_rejects_internal_blocks () =
 let test_image_json_structure () =
   let img =
     Types.Image
-      { media_type = "image/webp"; data = "webpdata"; source_type = Types.Base64 }
+      { media_type = "image/webp"; source = Types.Base64 "webpdata" }
   in
   let json = Llm_provider.Api_common.content_block_to_json img in
   let open Yojson.Safe.Util in
@@ -292,7 +289,7 @@ let test_image_json_structure () =
 let test_document_json_structure () =
   let doc =
     Types.Document
-      { media_type = "text/plain"; data = "textdata"; source_type = Types.Base64 }
+      { media_type = "text/plain"; source = Types.Base64 "textdata" }
   in
   let json = Llm_provider.Api_common.content_block_to_json doc in
   let open Yojson.Safe.Util in
@@ -338,7 +335,7 @@ let test_tool_result_content_blocks_serialize () =
           Some
             [ Types.Text "hi"
             ; Types.Image
-                { media_type = "image/png"; data = "d"; source_type = Types.Base64 }
+                { media_type = "image/png"; source = Types.Base64 "d" }
             ]
       }
   in

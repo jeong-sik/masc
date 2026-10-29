@@ -291,18 +291,18 @@ let projector_deadline projector =
 let project projector ~needs_projection blocks =
   let { base_path; keeper_name; read; memo; _ } = projector in
   let replaced : (string * int) list ref = ref [] in
-  let project_one ~kind ~media_type ~data ~source_type block =
+  let project_one ~kind ~media_type ~source block =
     if not (needs_projection kind)
     then block
     else (
       (let name = kind_to_string kind in
        let prev = Option.value ~default:0 (List.assoc_opt name !replaced) in
        replaced := (name, prev + 1) :: List.remove_assoc name !replaced);
-      match (source_type : Agent_core.Types.media_source_kind) with
-      | Agent_core.Types.Url -> Agent_core.Types.text_block (reference_text ~kind ~media_type ~source:"url")
-      | Agent_core.Types.File_id ->
+      match (source : Agent_core.Types.media_source) with
+      | Agent_core.Types.Url _ -> Agent_core.Types.text_block (reference_text ~kind ~media_type ~source:"url")
+      | Agent_core.Types.File_id _ ->
         Agent_core.Types.text_block (reference_text ~kind ~media_type ~source:"file_id")
-      | Agent_core.Types.Base64 ->
+      | Agent_core.Types.Base64 data ->
         (match Base64.decode data with
          | Error _ ->
            ignore block;
@@ -346,10 +346,10 @@ let project projector ~needs_projection blocks =
     List.map
       (fun (block : Agent_core.Types.content_block) ->
         match block with
-        | Agent_core.Types.Audio { media_type; data; source_type } ->
-          project_one ~kind:Audio ~media_type ~data ~source_type block
-        | Agent_core.Types.Document { media_type; data; source_type } ->
-          project_one ~kind:Document ~media_type ~data ~source_type block
+        | Agent_core.Types.Audio { media_type; source } ->
+          project_one ~kind:Audio ~media_type ~source block
+        | Agent_core.Types.Document { media_type; source } ->
+          project_one ~kind:Document ~media_type ~source block
         | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
         | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
         | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _ -> block)

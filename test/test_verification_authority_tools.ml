@@ -1253,7 +1253,8 @@ let test_keeper_endpoint_read_preserves_png_bytes () =
         (Yojson.Safe.Util.member "bytes" data = `Int (String.length bytes));
       Alcotest.(check bool) "remote raw PNG reaches model unchanged" true
         (List.exists (function
-          | Llm_provider.Types.Image { data; _ } -> Base64.decode_exn data = bytes
+          | Llm_provider.Types.Image { source = Llm_provider.Types.Base64 data; _ } ->
+            Base64.decode_exn data = bytes
           | _ -> false) blocks)
     | _ -> Alcotest.fail (Tool_result.message result))
 ;;
@@ -1298,7 +1299,7 @@ let test_goal_and_task_read_deliver_full_png () =
       | Some blocks -> blocks | None -> Alcotest.fail "bridge erased image blocks" in
     Alcotest.(check bool) "bridge preserves complete PNG" true
       (List.exists (function
-         | Agent_core.Types.Image { media_type="image/png"; data; source_type=Base64 } -> data = encoded
+         | Agent_core.Types.Image { media_type="image/png"; source = Base64 data } -> data = encoded
          | _ -> false) actual_blocks);
     let message role content : Agent_core.Types.message =
       { origin = Llm_provider.Types.Conversation;  role; content; name=None; tool_call_id=None; metadata=[] } in
@@ -1376,7 +1377,7 @@ let test_goal_and_task_inspect_real_pdf () =
        let pages = member "pages" data |> to_list in
        Alcotest.(check int) "all page metadata delivered" 3 (List.length pages);
        let images = List.filter_map (function
-         | Llm_provider.Types.Image {media_type="image/png";data;source_type=Base64} ->
+         | Llm_provider.Types.Image {media_type="image/png";source=Base64 data} ->
            Some (Base64.decode_exn data)
          | _ -> None) blocks in
        Alcotest.(check int) "all three parsed pages actually rendered" 3 (List.length images);

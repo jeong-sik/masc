@@ -78,23 +78,23 @@ let error_message_of_body (body : string) : string option =
   | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
 ;;
 
-let unsupported_media_source ~backend ~block source_type =
+let unsupported_media_source ~backend ~block source =
   invalid_arg
     (Printf.sprintf
        "%s does not support %s media source kind %s"
        backend
        block
-       (Types.media_source_kind_to_string source_type))
+       (Types.media_source_wire_tag source))
 ;;
 
-let base64_media_data_url ~backend ~block ~media_type ~data = function
-  | Base64 -> Printf.sprintf "data:%s;base64,%s" media_type data
-  | (Url | File_id) as source_type -> unsupported_media_source ~backend ~block source_type
+let base64_media_data_url ~backend ~block ~media_type = function
+  | Base64 data -> Printf.sprintf "data:%s;base64,%s" media_type data
+  | (Url _ | File_id _) as source -> unsupported_media_source ~backend ~block source
 ;;
 
-let base64_media_payload ~backend ~block ~data = function
-  | Base64 -> data
-  | (Url | File_id) as source_type -> unsupported_media_source ~backend ~block source_type
+let base64_media_payload ~backend ~block = function
+  | Base64 data -> data
+  | (Url _ | File_id _) as source -> unsupported_media_source ~backend ~block source
 ;;
 
 (* ── Document admission (agent-core boundary) ───────────────────────────────────────
@@ -414,34 +414,34 @@ let rec content_block_to_json_with
          ~content
          ~outcome
          content_blocks)
-  | Image { media_type; data; source_type } ->
+  | Image { media_type; source } ->
     `Assoc
       [ "type", `String "image"
       ; ( "source"
         , `Assoc
-            [ "type", `String (media_source_kind_to_string source_type)
+            [ "type", `String (media_source_wire_tag source)
             ; "media_type", `String media_type
-            ; "data", `String data
+            ; "data", `String (media_source_payload source)
             ] )
       ]
-  | Document { media_type; data; source_type } ->
+  | Document { media_type; source } ->
     `Assoc
       [ "type", `String "document"
       ; ( "source"
         , `Assoc
-            [ "type", `String (media_source_kind_to_string source_type)
+            [ "type", `String (media_source_wire_tag source)
             ; "media_type", `String media_type
-            ; "data", `String data
+            ; "data", `String (media_source_payload source)
             ] )
       ]
-  | Audio { media_type; data; source_type } ->
+  | Audio { media_type; source } ->
     `Assoc
       [ "type", `String "audio"
       ; ( "source"
         , `Assoc
-            [ "type", `String (media_source_kind_to_string source_type)
+            [ "type", `String (media_source_wire_tag source)
             ; "media_type", `String media_type
-            ; "data", `String data
+            ; "data", `String (media_source_payload source)
             ] )
       ]
 
@@ -554,14 +554,14 @@ let parse_media_block ~block_type ~make json =
   match source |> member "type" |> to_string_option with
   | None -> Error (Missing_content_block_field { block_type; field = "source.type" })
   | Some raw_source_type ->
-    (match media_source_kind_of_string raw_source_type with
+    (match media_source_of_wire_tag raw_source_type with
      | None ->
        Error (Unsupported_media_source_kind { block_type; source_type = raw_source_type })
-     | Some source_type ->
+     | Some source_of_payload ->
        let open Result.Syntax in
        let* media_type = required_string_field ~block_type ~field:"media_type" source in
        let* data = required_string_field ~block_type ~field:"data" source in
-       Ok (make ~media_type ~data ~source_type))
+       Ok (make ~media_type ~source:(source_of_payload data)))
 ;;
 
 let rec content_block_of_json_result ?(parse_tool_result_json = true) json =
@@ -632,20 +632,17 @@ let rec content_block_of_json_result ?(parse_tool_result_json = true) json =
   | Some "image" ->
     parse_media_block
       ~block_type:"image"
-      ~make:(fun ~media_type ~data ~source_type ->
-        Image { media_type; data; source_type })
+      ~make:(fun ~media_type ~source -> Image { media_type; source })
       json
   | Some "document" ->
     parse_media_block
       ~block_type:"document"
-      ~make:(fun ~media_type ~data ~source_type ->
-        Document { media_type; data; source_type })
+      ~make:(fun ~media_type ~source -> Document { media_type; source })
       json
   | Some "audio" ->
     parse_media_block
       ~block_type:"audio"
-      ~make:(fun ~media_type ~data ~source_type ->
-        Audio { media_type; data; source_type })
+      ~make:(fun ~media_type ~source -> Audio { media_type; source })
       json
   | Some other -> Error (Unsupported_content_block_type other)
   | None -> Error Missing_content_block_type

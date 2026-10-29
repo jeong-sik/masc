@@ -509,7 +509,7 @@ let test_replay_projection_failure_rejects_completed_attempt () =
     [ message
         ~role:User
         [ Text "canonical history"
-        ; image_block ~media_type:"image/png" ~data:"canonical-image" ()
+        ; image_block ~media_type:"image/png" ~source:(Base64 "canonical-image")
         ]
     ]
   in
@@ -1197,8 +1197,7 @@ let test_accept_contract_delegates_to_agent_core_response_shape () =
     [
       Agent_core.Types.Image
         { media_type = "image/png"
-        ; data = "redacted"
-        ; source_type = Agent_core.Types.Base64
+        ; source = Agent_core.Types.Base64 "redacted"
         };
     ]
 
@@ -1981,8 +1980,7 @@ let test_media_with_tool_result_is_deliverable () =
              Agent_core.Types.Image
                {
                  media_type = "image/png";
-                 data = "redacted";
-                 source_type = Agent_core.Types.Base64;
+                 source = Agent_core.Types.Base64 "redacted";
                };
            ]
          ())
@@ -2056,7 +2054,7 @@ let test_sse_event_progress_kind_classifies_known_deltas () =
             index = 0;
             delta =
               MediaDelta
-                { media_type = "image/png"; source_type = Base64; data = "abcd" };
+                { media_type = "image/png"; source = Base64 "abcd" };
           }));
   Alcotest.(check (option string))
     "empty text delta falls back to carrier progress"

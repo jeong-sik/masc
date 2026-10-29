@@ -63,7 +63,7 @@ let pdf_result ~base_path ~name ~path ~bytes ~start_time ~max_image_bytes =
       List.concat_map (fun (page : Verification_pdf_inspection.page) ->
         [Llm_provider.Types.Text (Printf.sprintf "PDF page %d of %d; source sha256=%s"
           page.number page_count inspection.source_sha256);
-         Llm_provider.Types.image_block ~media_type:"image/png" ~data:(Base64.encode_exn page.png) ()]) inspection.pages in
+         Llm_provider.Types.image_block ~media_type:"image/png" ~source:(Llm_provider.Types.Base64 (Base64.encode_exn page.png))]) inspection.pages in
     Tool_result.make_ok ~tool_name:name ~start_time ~data ~content_blocks ()
 
 let presentation_result ~base_path ~name ~path ~bytes ~start_time ~max_image_bytes =
@@ -116,5 +116,5 @@ let presentation_result ~base_path ~name ~path ~bytes ~start_time ~max_image_byt
         [ Llm_provider.Types.Text (Printf.sprintf "PPTX slide %d of %d; original sha256=%s"
             page.number (List.length inspection.slides) inspection.source_sha256);
           Llm_provider.Types.image_block ~media_type:"image/png"
-            ~data:(Base64.encode_exn page.png) () ]) inspection.rendered_pdf.pages in
+            ~source:(Llm_provider.Types.Base64 (Base64.encode_exn page.png)) ]) inspection.rendered_pdf.pages in
     Tool_result.make_ok ~tool_name:name ~start_time ~data ~content_blocks ()

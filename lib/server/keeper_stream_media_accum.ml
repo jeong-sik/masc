@@ -154,10 +154,10 @@ let persisted_block ~media_type media_ref =
 
 let completed_to_chat_block ~base_dir = function
   | State.Wire_dropped dropped -> wire_drop_placeholder_block dropped
-  | State.Persistable { index; media_type; source_type; data } ->
+  | State.Persistable { index; media_type; source } ->
       (match
          Keeper_chat_media_store.persist_media_source_result ~base_dir
-           ~media_type ~source_type ~data
+           ~media_type ~source
        with
        | Ok (_token, media_ref) -> persisted_block ~media_type media_ref
        | Error err ->
@@ -165,11 +165,11 @@ let completed_to_chat_block ~base_dir = function
              "generated media reload persist failed index=%d media_type=%S source_type=%s: %s"
              index
              media_type
-             (Agent_core.Types.media_source_kind_to_string source_type)
+             (Agent_core.Types.media_source_wire_tag source)
              (Keeper_chat_media_store.persist_error_to_string err);
            persist_failure_placeholder
              ~media_type
-             ~encoded_bytes:(String.length data)
+             ~encoded_bytes:(String.length (Agent_core.Types.media_source_payload source))
              err)
 
 let to_chat_blocks ~base_dir t =

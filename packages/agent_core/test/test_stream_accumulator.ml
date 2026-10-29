@@ -810,7 +810,7 @@ let test_tool_use_rejects_non_input_delta_kinds () =
       , ReasoningDetailsDelta { reasoning_content = Some "not args"; details = [] } )
     ; ( "media"
       , MediaDelta
-          { media_type = "image/png"; source_type = Base64; data = "not args" } )
+          { media_type = "image/png"; source = Base64 "not args" } )
     ; "thinking signature", ThinkingSignatureDelta "not args"
     ; "redacted snapshot", RedactedThinkingSnapshot "not args"
     ]
@@ -1056,17 +1056,22 @@ let test_media_metadata_is_frozen_by_first_delta () =
     ; ContentBlockDelta
         { index = 1
         ; delta =
-            MediaDelta { media_type = "image/png"; source_type = Base64; data = "a" }
+            MediaDelta { media_type = "image/png"; source = Base64 "a" }
         }
     ; ContentBlockDelta
         { index = 1
         ; delta =
-            MediaDelta { media_type = "image/png"; source_type = Base64; data = "b" }
+            MediaDelta { media_type = "image/png"; source = Base64 "b" }
+        }
+    ; ContentBlockDelta
+        { index = 1
+        ; delta =
+            MediaDelta { media_type = "image/png"; source = Base64 "c" }
         }
     ];
   let accepted_response = finalize_with_end_turn accepted in
   (match accepted_response.content with
-   | [ Image { media_type = "image/png"; source_type = Base64; data = "ab" } ] -> ()
+   | [ Image { media_type = "image/png"; source = Base64 "abc" } ] -> ()
    | _ -> Alcotest.fail "matching media chunks did not assemble canonically");
   let acc = Streaming.create_stream_acc () in
   Streaming.accumulate_event acc
@@ -1075,7 +1080,7 @@ let test_media_metadata_is_frozen_by_first_delta () =
   Streaming.accumulate_event acc
     (ContentBlockDelta
        { index = 2
-       ; delta = MediaDelta { media_type = "image/png"; source_type = Base64; data = "a" }
+       ; delta = MediaDelta { media_type = "image/png"; source = Base64 "a" }
        });
   (match
      Streaming.resolve_event acc
@@ -1083,13 +1088,98 @@ let test_media_metadata_is_frozen_by_first_delta () =
           { index = 2
           ; delta =
               MediaDelta
-                { media_type = "image/jpeg"; source_type = Base64; data = "b" }
+                { media_type = "image/jpeg"; source = Base64 "b" }
           })
    with
    | Stream_event_rejected
        (Stream_parse_failed
           { reason = "media_delta_metadata_conflict:index:2"; raw = "" }) -> ()
-   | _ -> Alcotest.fail "media metadata drift escaped canonical validation")
+   | _ -> Alcotest.fail "media metadata drift escaped canonical validation");
+  let carrier = Streaming.create_stream_acc () in
+  Streaming.accumulate_event carrier
+    (ContentBlockStart
+       { index = 3; content_type = "image"; tool_id = None; tool_name = None });
+  Streaming.accumulate_event carrier
+    (ContentBlockDelta
+       { index = 3
+       ; delta = MediaDelta { media_type = "image/png"; source = Base64 "a" }
+       });
+  match
+    Streaming.resolve_event carrier
+      (ContentBlockDelta
+         { index = 3
+         ; delta = MediaDelta { media_type = "image/png"; source = Url "b" }
+         })
+  with
+  | Stream_event_rejected
+      (Stream_parse_failed
+         { reason = "media_delta_metadata_conflict:index:3"; raw = "" }) -> ()
+  | _ -> Alcotest.fail "a media carrier change escaped canonical validation"
+;;
+
+let media_source = Alcotest.testable pp_media_source ( = )
+
+let collect_media_chunks first rest =
+  List.fold_left
+    (fun chunks chunk -> Option.bind chunks (fun chunks -> media_chunks_add chunks chunk))
+    (Some (media_chunks_start first))
+    rest
+  |> Option.map media_chunks_source
+;;
+
+let test_media_chunks_join_under_the_first_carrier () =
+  let joins label expected first rest =
+    Alcotest.check (Alcotest.option media_source) label (Some expected)
+      (collect_media_chunks first rest)
+  in
+  joins "one chunk" (Base64 "a") (Base64 "a") [];
+  joins "base64 in order" (Base64 "abc") (Base64 "a") [ Base64 "b"; Base64 "c" ];
+  joins "url in order" (Url "https://x/ab") (Url "https://x/") [ Url "a"; Url "b" ];
+  joins "file id in order" (File_id "file-12") (File_id "file-") [ File_id "1"; File_id "2" ];
+  List.iter
+    (fun (label, first, chunk) ->
+       Alcotest.check (Alcotest.option media_source) label None
+         (collect_media_chunks first [ chunk ]))
+    [ "base64 then url", Base64 "a", Url "b"
+    ; "base64 then file id", Base64 "a", File_id "b"
+    ; "url then base64", Url "a", Base64 "b"
+    ; "url then file id", Url "a", File_id "b"
+    ; "file id then base64", File_id "a", Base64 "b"
+    ; "file id then url", File_id "a", Url "b"
+    ];
+  List.iter
+    (fun (label, first, expected) ->
+       Alcotest.check Alcotest.bool label true
+         (media_chunks_kind (media_chunks_start first) = expected))
+    [ "base64 kind", Base64 "a", Base64_kind
+    ; "url kind", Url "a", Url_kind
+    ; "file id kind", File_id "a", File_id_kind
+    ]
+;;
+
+let test_media_chunks_do_not_retain_empty_deltas () =
+  List.iter
+    (fun (first, empty, other, next, expected) ->
+       let initial = media_chunks_start first in
+       let current = ref initial in
+       for _ = 1 to 10_000 do
+         match media_chunks_add !current empty with
+         | Some chunks -> current := chunks
+         | None -> Alcotest.fail "same carrier was rejected"
+       done;
+       Alcotest.(check bool) "empty deltas retain no accumulated state" true
+         (!current == initial);
+       (match media_chunks_add !current other with
+        | None -> ()
+        | Some _ -> Alcotest.fail "empty delta changed the carrier");
+       match media_chunks_add !current next with
+       | Some chunks -> Alcotest.check media_source "later payload preserved" expected
+                          (media_chunks_source chunks)
+       | None -> Alcotest.fail "same carrier payload was rejected")
+    [ Base64 "", Base64 "", Url "", Base64 "abc", Base64 "abc"
+    ; Url "", Url "", File_id "", Url "https://x", Url "https://x"
+    ; File_id "", File_id "", Base64 "", File_id "file-1", File_id "file-1"
+    ]
 ;;
 
 let test_finalize_tool_use_invalid_json () =
@@ -1549,6 +1639,14 @@ let () =
             "media metadata is frozen"
             `Quick
             test_media_metadata_is_frozen_by_first_delta
+        ; Alcotest.test_case
+            "media chunks join under the first carrier"
+            `Quick
+            test_media_chunks_join_under_the_first_carrier
+        ; Alcotest.test_case
+            "empty media deltas do not accumulate"
+            `Quick
+            test_media_chunks_do_not_retain_empty_deltas
         ; Alcotest.test_case
             "tool_use invalid json"
             `Quick

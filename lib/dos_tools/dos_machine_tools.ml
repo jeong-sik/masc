@@ -431,7 +431,7 @@ let of_lane ?(extra = []) ?png ~base_path ~tool_name ~start_time
         (fun png ->
           [ Llm_provider.Types.Text (Yojson.Safe.to_string data)
           ; Llm_provider.Types.image_block ~media_type:"image/png"
-              ~data:(Base64.encode_exn png) ()
+              ~source:(Llm_provider.Types.Base64 (Base64.encode_exn png))
           ])
         png
     in

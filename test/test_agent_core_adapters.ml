@@ -97,7 +97,7 @@ let test_visible_text_excludes_non_answer_blocks () =
             ; content_blocks = Some [ Agent_core.Types.Text "structured tool payload" ]
             }
         ; Agent_core.Types.Image
-            { media_type = "image/png"; data = "bytes"; source_type = Agent_core.Types.Base64 }
+            { media_type = "image/png"; source = Agent_core.Types.Base64 "bytes" }
         ; Agent_core.Types.Text "tail"
         ]
     ; usage = None

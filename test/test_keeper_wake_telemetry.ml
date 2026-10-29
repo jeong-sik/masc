@@ -151,7 +151,7 @@ let test_compute_sizes_bytes_breakdown () =
 let test_compute_sizes_uses_structured_pending_user_blocks () =
   let user_blocks =
     [ Types.Image
-        { media_type = "image/png"; data = "abc123"; source_type = Types.Base64 }
+        { media_type = "image/png"; source = Types.Base64 "abc123" }
     ; Types.Text "describe"
     ]
   in

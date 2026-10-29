@@ -139,7 +139,7 @@ let test_tool_result_skip_parse_json () =
 
 let test_image_round_trip () =
   let block =
-    Types.Image { media_type = "image/png"; data = "abc"; source_type = Types.Base64 }
+    Types.Image { media_type = "image/png"; source = Types.Base64 "abc" }
   in
   let json = Llm_provider.Api_common.content_block_to_json block in
   match Llm_provider.Api_common.content_block_of_json json with
@@ -150,7 +150,7 @@ let test_image_round_trip () =
 let test_document_round_trip () =
   let block =
     Types.Document
-      { media_type = "application/pdf"; data = "pdf"; source_type = Types.Base64 }
+      { media_type = "application/pdf"; source = Types.Base64 "pdf" }
   in
   let json = Llm_provider.Api_common.content_block_to_json block in
   match Llm_provider.Api_common.content_block_of_json json with
@@ -768,7 +768,7 @@ let test_openai_messages_with_image () =
     ; content =
         [ Types.Text "describe this"
         ; Types.Image
-            { media_type = "image/png"; data = "abc123"; source_type = Types.Base64 }
+            { media_type = "image/png"; source = Types.Base64 "abc123" }
         ]
     ; name = None
     ; tool_call_id = None
@@ -849,7 +849,7 @@ let test_text_blocks_to_string () =
         ; json = None
         ; content_blocks = None
         }
-    ; Types.Image { media_type = "image/png"; data = ""; source_type = Types.Base64 }
+    ; Types.Image { media_type = "image/png"; source = Types.Base64 "" }
     ; Types.Text "world"
     ]
   in

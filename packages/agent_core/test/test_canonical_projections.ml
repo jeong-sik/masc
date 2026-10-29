@@ -7,7 +7,7 @@ open Alcotest
 open Llm_provider
 
 let mk_image () =
-  Types.Image { media_type = "image/png"; data = "AAAA"; source_type = Types.Base64 }
+  Types.Image { media_type = "image/png"; source = Types.Base64 "AAAA" }
 ;;
 
 (* summarize_blocks folds a bare content_block list into the redacted shape. *)

@@ -265,7 +265,7 @@ let test_image_block_media_delta () =
   let response =
     make_response
       [ Types.Image
-          { media_type = "image/png"; data = "base64data"; source_type = Types.Base64 }
+          { media_type = "image/png"; source = Types.Base64 "base64data" }
       ]
   in
   let events = collect_events response in
@@ -275,13 +275,13 @@ let test_image_block_media_delta () =
    | _ -> Alcotest.fail "expected ContentBlockStart");
   (match List.nth events 2 with
    | Types.ContentBlockDelta
-       { delta = Types.MediaDelta { media_type; source_type; data }; _ } ->
+       { delta = Types.MediaDelta { media_type; source }; _ } ->
      Alcotest.(check string) "image media type" "image/png" media_type;
      Alcotest.(check string)
        "image source type"
        "base64"
-       (Types.media_source_kind_to_string source_type);
-     Alcotest.(check string) "image data" "base64data" data
+       (Types.media_source_wire_tag source);
+     Alcotest.(check string) "image data" "base64data" (Types.media_source_payload source)
    | _ -> Alcotest.fail "expected image MediaDelta");
   Alcotest.(check int) "6 events" 6 (List.length events)
 ;;
@@ -290,7 +290,7 @@ let test_document_block_media_delta () =
   let response =
     make_response
       [ Types.Document
-          { media_type = "application/pdf"; data = "pdfdata"; source_type = Types.Base64 }
+          { media_type = "application/pdf"; source = Types.Base64 "pdfdata" }
       ]
   in
   let events = collect_events response in
@@ -300,13 +300,13 @@ let test_document_block_media_delta () =
    | _ -> Alcotest.fail "expected ContentBlockStart");
   (match List.nth events 2 with
    | Types.ContentBlockDelta
-       { delta = Types.MediaDelta { media_type; source_type; data }; _ } ->
+       { delta = Types.MediaDelta { media_type; source }; _ } ->
      Alcotest.(check string) "document media type" "application/pdf" media_type;
      Alcotest.(check string)
        "document source type"
        "base64"
-       (Types.media_source_kind_to_string source_type);
-     Alcotest.(check string) "document data" "pdfdata" data
+       (Types.media_source_wire_tag source);
+     Alcotest.(check string) "document data" "pdfdata" (Types.media_source_payload source)
    | _ -> Alcotest.fail "expected document MediaDelta");
   Alcotest.(check int) "6 events" 6 (List.length events)
 ;;

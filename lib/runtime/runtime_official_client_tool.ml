@@ -125,28 +125,28 @@ let project_content transport ~content ~content_blocks =
   in
   let project = function
     | Agent_core.Types.Text value -> Ok (text value)
-    | Agent_core.Types.Image {media_type; data; source_type} ->
-      (match transport, source_type with
-       | Codex, Base64 ->
+    | Agent_core.Types.Image {media_type; source} ->
+      (match transport, source with
+       | Codex, Base64 data ->
          Result.map
            (fun (media_type, data) -> `Assoc
               ["type", `String "inputImage";
                "imageUrl", `String ("data:" ^ media_type ^ ";base64," ^ data)])
            (checked_base64 ~media_type data)
-       | Codex, Url -> Ok (`Assoc ["type", `String "inputImage"; "imageUrl", `String data])
+       | Codex, Url url -> Ok (`Assoc ["type", `String "inputImage"; "imageUrl", `String url])
        (* MCP's own ImageContent leaves the media-type set open, but the client
           behind this transport does not: Claude Code refuses anything outside
           the shared set before it spawns. Letting a tool result through here
           would reach the provider in a format the initial-image path already
           rejects, and fail the turn after the tool ran. *)
-       | Mcp, Base64 ->
+       | Mcp, Base64 data ->
          Result.map
            (fun (media_type, data) -> `Assoc
               ["type", `String "image"; "mimeType", `String media_type;
                "data", `String data])
            (checked_base64 ~media_type data)
-       | (Codex | Mcp), File_id -> unsupported "file-id image content"
-       | Mcp, Url -> unsupported "URL image content over MCP")
+       | (Codex | Mcp), File_id _ -> unsupported "file-id image content"
+       | Mcp, Url _ -> unsupported "URL image content over MCP")
     | Agent_core.Types.Audio _ -> unsupported "audio content"
     | Agent_core.Types.Document _ -> unsupported "document content"
     | Agent_core.Types.Thinking _

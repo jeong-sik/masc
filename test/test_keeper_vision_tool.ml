@@ -215,10 +215,11 @@ let test_message_of_request () =
        assert (String.equal img.media_type "image/png");
        assert (
          String.equal
-           (Agent_core.Types.media_source_kind_to_string img.source_type)
+           (Agent_core.Types.media_source_wire_tag img.source)
            "base64");
-       assert (String.equal img.data (Base64.encode_string bytes));
-       assert (not (String.equal img.data bytes))
+       let data = Agent_core.Types.media_source_payload img.source in
+       assert (String.equal data (Base64.encode_string bytes));
+       assert (not (String.equal data bytes))
      | _ -> assert false)
 
 (* first_vision_runtime_id returns a typed result either way (no exception). With
@@ -1500,8 +1501,7 @@ let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
       [ Agent_core.Types.Text "before"
       ; Agent_core.Types.Image
           { media_type = "image/png"
-          ; data = Base64.encode_string bytes
-          ; source_type = Agent_core.Types.Base64
+          ; source = Agent_core.Types.Base64 (Base64.encode_string bytes)
           }
       ; Agent_core.Types.Text "after"
       ]
@@ -1543,8 +1543,7 @@ let test_fallback_projection_preserves_artifacts_and_caches_each_mode () =
     let bytes = "\x89PNG\r\n\x1a\noriginal-image" in
     let image =
       Agent_core.Types.Image
-        { media_type = "image/png"; data = Base64.encode_string bytes
-        ; source_type = Agent_core.Types.Base64 }
+        { media_type = "image/png"; source = Agent_core.Types.Base64 (Base64.encode_string bytes) }
     in
     let nested =
       Agent_core.Types.ToolResult
@@ -1601,7 +1600,7 @@ let test_fallback_read_receives_the_walks_excluded_runtimes () =
     let bytes = "\x89PNG\r\n\x1a\nexclusion-fixture" in
     let image =
       Agent_core.Types.image_block ~media_type:"image/png"
-        ~data:(Base64.encode_string bytes) ()
+        ~source:(Agent_core.Types.Base64 (Base64.encode_string bytes))
     in
     let seen = ref [] in
     let read ~exclude_runtime_ids ~media_type:_ ~bytes:_ =
@@ -1626,7 +1625,7 @@ let test_fallback_semantic_read_is_cached_after_completion () =
     let keeper_name = "vision-fallback-read" in
     let bytes = "\x89PNG\r\n\x1a\nsemantic-reading-fixture" in
     let image = Agent_core.Types.image_block ~media_type:"image/png"
-        ~data:(Base64.encode_string bytes) () in
+        ~source:(Agent_core.Types.Base64 (Base64.encode_string bytes)) in
     let calls = ref 0 in
     let read ~exclude_runtime_ids:_ ~media_type ~bytes:received =
       incr calls;
@@ -1659,7 +1658,7 @@ let test_cancelled_fallback_read_can_retry_without_cached_failure () =
   with_temp_base (fun _ ->
     let keeper_name = "vision-fallback-cancellation" in
     let image = Agent_core.Types.image_block ~media_type:"image/png"
-        ~data:(Base64.encode_string "\x89PNG\r\n\x1a\nretry-fixture") () in
+        ~source:(Agent_core.Types.Base64 (Base64.encode_string "\x89PNG\r\n\x1a\nretry-fixture")) in
     let cancelled = Eio.Cancel.Cancelled (Failure "cancel image reading") in
     let calls = ref 0 in
     let read ~exclude_runtime_ids:_ ~media_type:_ ~bytes:_ =
@@ -1864,12 +1863,10 @@ let test_cancelled_candidate_leaves_start_and_cancelled_rows () =
       assert (row_top_string cancelled_row "tool_use_id" = "call-vision-cancel")))
 
 let test_fallback_reference_projection_is_explicitly_unread () =
-  let image source_type data =
-    Agent_core.Types.Image { source_type; data; media_type = "image/png" }
-  in
+  let image source = Agent_core.Types.Image { source; media_type = "image/png" } in
   let original =
-    [ image Agent_core.Types.Url "https://example.invalid/screenshot.png"
-    ; image Agent_core.Types.File_id "file-screen-123" ]
+    [ image (Agent_core.Types.Url "https://example.invalid/screenshot.png")
+    ; image (Agent_core.Types.File_id "file-screen-123") ]
   in
   let project = Vi.fallback_projector ~keeper_name:"vision-reference-projection" () in
   let projected = project ~mode:Vi.Eager original in
@@ -1902,8 +1899,7 @@ let test_delegate_eviction_rejects_invalid_media_type_before_store () =
         ~keeper_name
         [ Agent_core.Types.Image
             { media_type = "text/plain"
-            ; data = Base64.encode_string bytes
-            ; source_type = Agent_core.Types.Base64
+            ; source = Agent_core.Types.Base64 (Base64.encode_string bytes)
             }
         ]
     with
@@ -1927,8 +1923,7 @@ let test_delegate_eviction_rejects_oversize_before_store () =
           ~keeper_name
           [ Agent_core.Types.Image
               { media_type = "image/png"
-              ; data = Base64.encode_string bytes
-              ; source_type = Agent_core.Types.Base64
+              ; source = Agent_core.Types.Base64 (Base64.encode_string bytes)
               }
           ]
       with
@@ -1944,8 +1939,7 @@ let test_delegate_eviction_bad_base64_surfaces_redacted_text_error () =
       ~keeper_name:"vision-ingest-bad-base64"
       [ Agent_core.Types.Image
           { media_type = "image/png"
-          ; data = "not base64"
-          ; source_type = Agent_core.Types.Base64
+          ; source = Agent_core.Types.Base64 "not base64"
           }
       ]
   with
@@ -1962,8 +1956,8 @@ let test_delegate_eviction_bad_base64_surfaces_redacted_text_error () =
    placeholder the reader cannot act on. *)
 let test_delegate_eviction_passes_reference_source_through () =
   List.iter
-    (fun source_type ->
-      let source_name = Agent_core.Types.media_source_kind_to_string source_type in
+    (fun source ->
+      let source_name = Agent_core.Types.media_source_wire_tag source in
       let metric_labels =
         [ "mode", "store_only"; "result", "ok"; "reason", "reference_passthrough" ]
       in
@@ -1975,34 +1969,29 @@ let test_delegate_eviction_passes_reference_source_through () =
           ~mode:Vi.Store_only
           ~delegate:true
           ~keeper_name:("vision-ingest-source-" ^ source_name)
-          [ Agent_core.Types.Image
-              { media_type = "image/png"
-              ; data = "https://example.invalid/image.png"
-              ; source_type
-              }
-          ]
+          [ Agent_core.Types.Image { media_type = "image/png"; source } ]
       with
       | [ Agent_core.Types.Image img ] ->
-        assert (String.equal img.data "https://example.invalid/image.png");
-        assert (String.equal img.media_type "image/png");
         assert (
           String.equal
-            (Agent_core.Types.media_source_kind_to_string img.source_type)
-            source_name);
+            (Agent_core.Types.media_source_payload img.source)
+            "https://example.invalid/image.png");
+        assert (String.equal img.media_type "image/png");
+        assert (String.equal (Agent_core.Types.media_source_wire_tag img.source) source_name);
         assert_metric_increment
           ("vision_ingest reference_passthrough " ^ source_name)
           before
           (metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels)
       | _ -> failwith "a reference-carrying image block must pass through unchanged")
-    [ Agent_core.Types.Url; Agent_core.Types.File_id ]
+    [ Agent_core.Types.Url "https://example.invalid/image.png"
+    ; Agent_core.Types.File_id "https://example.invalid/image.png" ]
 
 let test_non_delegate_eviction_preserves_inline_image () =
   let bytes = "raw-image" in
   let blocks =
     [ Agent_core.Types.Image
         { media_type = "image/png"
-        ; data = Base64.encode_string bytes
-        ; source_type = Agent_core.Types.Base64
+        ; source = Agent_core.Types.Base64 (Base64.encode_string bytes)
         }
     ]
   in
@@ -2014,7 +2003,10 @@ let test_non_delegate_eviction_preserves_inline_image () =
       blocks
   with
   | [ Agent_core.Types.Image img ] ->
-    assert (String.equal img.data (Base64.encode_string bytes))
+    assert (
+      String.equal
+        (Agent_core.Types.media_source_payload img.source)
+        (Base64.encode_string bytes))
   | _ -> failwith "a runtime that takes images itself should keep the inline block"
 
 let test_delegates_media_follows_lane_capability () =
@@ -2078,8 +2070,7 @@ let test_evicted_history_has_no_image_modality () =
         [ Agent_core.Types.Text "look at this"
         ; Agent_core.Types.Image
             { media_type = "image/png"
-            ; data = Base64.encode_string bytes
-            ; source_type = Agent_core.Types.Base64
+            ; source = Agent_core.Types.Base64 (Base64.encode_string bytes)
             }
         ]
     in
@@ -2372,7 +2363,7 @@ let test_browser_screenshot_reaches_vision_reader () =
       let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages ?tools:_ () =
         seen_image := List.exists (fun (message : Agent_core.Types.message) ->
           List.exists (function
-            | Agent_core.Types.Image {media_type="image/png";data;source_type=Base64} -> data=encoded
+            | Agent_core.Types.Image {media_type="image/png";source=Base64 data} -> data=encoded
             | _ -> false) message.content) messages;
         Ok (ok_response "stored browser pixels reached vision") in
       Eio_main.run (fun env ->
@@ -2415,7 +2406,7 @@ let test_browser_screenshot_reaches_vision_reader () =
               ~tool:Masc.Browser_capabilities.Read ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ())
               (`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) with
            | Tool_result.Completed {content_blocks=Some [Agent_core.Types.Text text;
-               Agent_core.Types.Image {media_type="image/png";data=image;source_type=Base64}];data=observed;_} ->
+               Agent_core.Types.Image {media_type="image/png";source=Base64 image}];data=observed;_} ->
                assert (image=encoded);
                assert (Yojson.Safe.from_string text=observed);
                assert (Yojson.Safe.Util.member "data" observed=`Null);
@@ -2461,7 +2452,7 @@ let test_browser_screenshot_reaches_vision_reader () =
             ~args:(`Assoc ["artifact",`String handle]) () in
           assert (native.disposition = Tool_result.Completed ());
           (match native.content_blocks with
-           | Some [Agent_core.Types.Text _; Agent_core.Types.Image {data;_}] ->
+           | Some [Agent_core.Types.Text _; Agent_core.Types.Image {source=Base64 data;_}] ->
                assert (Base64.decode_exn data = image_bytes)
            | _ -> failwith "workspace-bound screenshot did not reach native image reader");
           let module Context = Masc.Keeper_context_core in
@@ -2471,7 +2462,7 @@ let test_browser_screenshot_reaches_vision_reader () =
           let session = Context.create_session ~session_id:checkpoint_trace ~base_dir:checkpoint_base in
           let context = Context.create ~eio:true ~system_prompt:"scoped image checkpoint"
             |> fun ctx -> Context.append ctx (Agent_core.Types.make_message ~role:User
-                 [Agent_core.Types.Image {media_type="image/png";data=encoded;source_type=Base64}]) in
+                 [Agent_core.Types.Image {media_type="image/png";source=Base64 encoded}]) in
           (match Context.save_agent_core_checkpoint ~base_path ~runtime_id:"unconfigured-text-only-fixture"
              ~keeper_name:checkpoint_keeper ~session ~agent_name:checkpoint_keeper ~ctx:context with
            | Ok _ -> ()
@@ -2558,7 +2549,7 @@ let test_native_browser_screenshot_artifact_scope () =
             ~args:(`Assoc ["artifact",`String handle]) () in
           assert (native.disposition = Tool_result.Completed ());
           (match native.content_blocks with
-           | Some [Agent_core.Types.Text _;Agent_core.Types.Image {data;media_type="image/png";_}] ->
+           | Some [Agent_core.Types.Text _;Agent_core.Types.Image {source=Base64 data;media_type="image/png"}] ->
              assert (data=encoded)
            | _ -> failwith "native capture artifact did not reach the image reader"))
           [`Assoc [];`Assoc ["fullPage",`Bool true;"scale",`String "css";"raw",`Bool true]];
@@ -2704,7 +2695,7 @@ let test_generated_sandbox_image_reaches_vision () =
         let native_result = native (`Assoc ["path", `String "generated.png"]) in
         assert (native_result.disposition = Tool_result.Completed ());
         (match native_result.content_blocks with
-         | Some [Agent_core.Types.Text _; Agent_core.Types.Image {data; _}] ->
+         | Some [Agent_core.Types.Text _; Agent_core.Types.Image {source = Base64 data; _}] ->
            assert (Base64.decode_exn data = bytes)
          | _ -> failwith "sandbox image pixels did not reach the native reader");
         assert (!calls = 0);
@@ -2760,7 +2751,7 @@ let test_native_image_read_artifact_and_authority () =
     assert (result.disposition = Tool_result.Completed ());
     (match result.content_blocks with
      | Some [Agent_core.Types.Text _;
-         Agent_core.Types.Image {media_type="image/png"; data; source_type=Base64}] ->
+         Agent_core.Types.Image {media_type="image/png"; source = Base64 data}] ->
        assert (data = encoded)
      | _ -> failwith "native read must deliver the original PNG pixels");
     let output = json_of_output result.raw_output in
@@ -2799,7 +2790,7 @@ let test_native_image_read_artifact_and_authority () =
     let webp_result = invoke meta (`Assoc ["artifact", `String webp_handle]) in
     assert (webp_result.disposition = Tool_result.Completed ());
     (match webp_result.content_blocks with
-     | Some [Agent_core.Types.Text _; Agent_core.Types.Image {media_type="image/webp";data;_}] ->
+     | Some [Agent_core.Types.Text _; Agent_core.Types.Image {media_type="image/webp";source=Base64 data}] ->
        assert (Base64.decode_exn data = webp)
      | _ -> failwith "supported WebP bytes must remain readable");
     write_file (Filename.concat (Vt.vision_store_dir ~keeper_name:meta.name ()) handle) "tampered pixels";
@@ -2876,7 +2867,7 @@ let test_native_image_admission_continues_turn () =
           let saw_pixels = List.exists (function
             | Core.Types.ToolResult {tool_use_id="read-image";content_blocks=Some nested;_} ->
               List.exists (function
-                | Core.Types.Image {media_type="image/png";data;source_type=Base64} -> data=encoded
+                | Core.Types.Image {media_type="image/png";source=Base64 data} -> data=encoded
                 | _ -> false) nested
             | _ -> false) blocks in
           assert (saw_pixels = accepts_image_input)))))) [true; false]

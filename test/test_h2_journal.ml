@@ -179,11 +179,11 @@ let executed submission = match !(submission.execution) with Some result -> resu
 
 let retained_media =
   let open Llm_provider.Types in
-  let image = Image {media_type = "image/png"; source_type = Base64;
-    data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6uoAAAAASUVORK5CYII="} in
+  let image = Image {media_type = "image/png";
+    source = Base64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6uoAAAAASUVORK5CYII="} in
   [image;
-   Document {media_type = "application/pdf"; source_type = Base64; data = Base64.encode_string "%PDF-1.4\n%%EOF\n"};
-   Audio {media_type = "audio/wav"; source_type = Base64; data = Base64.encode_string "RIFF\004\000\000\000WAVE"};
+   Document {media_type = "application/pdf"; source = Base64 (Base64.encode_string "%PDF-1.4\n%%EOF\n")};
+   Audio {media_type = "audio/wav"; source = Base64 (Base64.encode_string "RIFF\004\000\000\000WAVE")};
    ToolResult {tool_use_id = "nested-result"; content = "outer fallback"; outcome = Tool_succeeded;
      json = Some (`Assoc ["sidecar", `List [`Int 7; `Bool true]]);
      content_blocks = Some [image; ToolResult {tool_use_id = "inner-result"; content = "inner fallback";

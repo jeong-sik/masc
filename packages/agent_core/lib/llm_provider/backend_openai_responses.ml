@@ -146,48 +146,45 @@ let input_text_content_part text =
   `Assoc [ "type", `String "input_text"; "text", `String (Utf8_sanitize.sanitize text) ]
 ;;
 
-let input_image_content_part ~media_type ~data ~source_type =
+let input_image_content_part ~media_type ~source =
   (* The responses surface takes image_url OR file_id on input_image,
      mutually exclusive; the docs' file_id names a Files API upload. Same
      three-carrier mapping as the chat serializer. *)
-  match source_type with
-  | Url ->
-    `Assoc [ "type", `String "input_image"; "image_url", `String data ]
-  | File_id ->
-    `Assoc [ "type", `String "input_image"; "file_id", `String data ]
-  | Base64 ->
+  match source with
+  | Url url ->
+    `Assoc [ "type", `String "input_image"; "image_url", `String url ]
+  | File_id file_id ->
+    `Assoc [ "type", `String "input_image"; "file_id", `String file_id ]
+  | Base64 _ ->
     let image_url =
       Api_common.base64_media_data_url
         ~backend:"openai_responses"
         ~block:"image"
         ~media_type
-        ~data
-        source_type
+        source
     in
     `Assoc [ "type", `String "input_image"; "image_url", `String image_url ]
 ;;
 
 let input_content_part_of_block = function
   | Text s -> Some (input_text_content_part s)
-  | Image { media_type; data; source_type } ->
-    Some (input_image_content_part ~media_type ~data ~source_type)
-  | Document { media_type; data; source_type } ->
+  | Image { media_type; source } ->
+    Some (input_image_content_part ~media_type ~source)
+  | Document { media_type; source } ->
     let file_data =
       Api_common.base64_media_data_url
         ~backend:"openai_responses"
         ~block:"document"
         ~media_type
-        ~data
-        source_type
+        source
     in
     Some (`Assoc [ "type", `String "input_file"; "file_data", `String file_data ])
-  | Audio { media_type; data; source_type } ->
+  | Audio { media_type; source } ->
     let data =
       Api_common.base64_media_payload
         ~backend:"openai_responses"
         ~block:"audio"
-        ~data
-        source_type
+        source
     in
     Some
       (`Assoc
@@ -269,8 +266,8 @@ let rec tool_output_has_image = function
 
 let rec tool_output_parts = function
   | Text text -> [ input_text_content_part text ]
-  | Image { media_type; data; source_type } ->
-    [ input_image_content_part ~media_type ~data ~source_type ]
+  | Image { media_type; source } ->
+    [ input_image_content_part ~media_type ~source ]
   | ToolResult { tool_use_id; outcome; content_blocks = Some blocks; _ }
     when List.exists tool_output_has_image blocks ->
     let identity =

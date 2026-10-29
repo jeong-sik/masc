@@ -147,7 +147,7 @@ let test_stored_goal_preparation_and_actual_visual_lookup () = with_workspace (f
     | Tool_result.Completed {content_blocks=Some blocks; _} ->
       Alcotest.(check bool) "real shared-root Read delivers complete canonical image" true
         (List.exists (function
-          | Llm_provider.Types.Image {data; _} -> Base64.decode_exn data = bytes
+          | Llm_provider.Types.Image {source=Llm_provider.Types.Base64 data; _} -> Base64.decode_exn data = bytes
           | _ -> false) blocks)
     | Tool_result.Completed {content_blocks=None; _}
     | Tool_result.Failed _ | Tool_result.Deferred _ -> Alcotest.fail (Tool_result.message result)))

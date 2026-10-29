@@ -19,11 +19,11 @@ let text_and_images_of_blocks ~runtime_label ~field blocks =
   let rec loop texts images = function
     | [] -> Ok (String.concat "\n" (List.rev texts), List.rev images)
     | Agent_core.Types.Text text :: rest -> loop (text :: texts) images rest
-    | Agent_core.Types.Image { media_type; data; source_type } :: rest ->
-      (match source_type with
-       | Agent_core.Types.Base64 ->
+    | Agent_core.Types.Image { media_type; source } :: rest ->
+      (match source with
+       | Agent_core.Types.Base64 data ->
          loop texts ({ media_type; base64_data = data } :: images) rest
-       | Agent_core.Types.Url | Agent_core.Types.File_id ->
+       | Agent_core.Types.Url _ | Agent_core.Types.File_id _ ->
          Error
            (config_error
               ~field

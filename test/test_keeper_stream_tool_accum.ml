@@ -85,7 +85,7 @@ let media_delta ~index data =
     { index
     ; delta =
         Agent_core.Types.MediaDelta
-          { media_type = "image/png"; source_type = Agent_core.Types.Base64; data }
+          { media_type = "image/png"; source = Agent_core.Types.Base64 data }
     }
 
 let test_fragments_concatenate_in_order () =

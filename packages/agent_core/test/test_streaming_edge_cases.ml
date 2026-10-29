@@ -256,9 +256,9 @@ let test_synthetic_events_media_blocks () =
     ; usage = Some (usage ())
     ; telemetry = None
     ; content =
-        [ Image { media_type = "image/png"; data = "aW1n"; source_type = Base64 }
-        ; Document { media_type = "application/pdf"; data = "ZG9j"; source_type = Base64 }
-        ; Audio { media_type = "wav"; data = "YXVkaW8="; source_type = Base64 }
+        [ Image { media_type = "image/png"; source = Base64 "aW1n" }
+        ; Document { media_type = "application/pdf"; source = Base64 "ZG9j" }
+        ; Audio { media_type = "wav"; source = Base64 "YXVkaW8=" }
         ; RedactedThinking "hidden"
         ; ToolResult
             { tool_use_id = "call-1"

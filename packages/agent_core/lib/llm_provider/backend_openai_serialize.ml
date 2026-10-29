@@ -215,33 +215,32 @@ let openai_content_parts_of_blocks blocks =
   |> List.filter_map (function
     | Text s ->
       Some (`Assoc [ "type", `String "text"; "text", `String (Utf8_sanitize.sanitize s) ])
-    | Image { media_type; data; source_type } -> (
-      (* The three carriers the closed media_source_kind names map to the
+    | Image { media_type; source } -> (
+      (* The three carriers the closed media_source names map to the
          three wire forms the chat surface documents: an inline base64 data
          URL, an external https URL passed through as the image_url, and a
          Files API reference as {"type":"file","file_id":…} — file_id and
-         inline data are mutually exclusive on the wire. [data] carries the
-         URL or the file id verbatim for the two reference forms; the
+         inline data are mutually exclusive on the wire. [Url] and [File_id]
+         carry the URL or the file id verbatim for the two reference forms; the
          base64_data_url below still rejects them, which is what kept these
          sources dead until the catalog gained a Files surface (RFC-0430). *)
-      match source_type with
-      | Url ->
-        Some (`Assoc [ "type", `String "image_url"; "image_url", `Assoc [ "url", `String data ] ])
-      | File_id ->
-        Some (`Assoc [ "type", `String "file"; "file", `Assoc [ "file_id", `String data ] ])
-      | Base64 ->
+      match source with
+      | Url url ->
+        Some (`Assoc [ "type", `String "image_url"; "image_url", `Assoc [ "url", `String url ] ])
+      | File_id file_id ->
+        Some (`Assoc [ "type", `String "file"; "file", `Assoc [ "file_id", `String file_id ] ])
+      | Base64 _ ->
         let url =
           Api_common.base64_media_data_url
             ~backend:"openai_chat"
             ~block:"image"
             ~media_type
-            ~data
-            source_type
+            source
         in
         Some
           (`Assoc
               [ "type", `String "image_url"; "image_url", `Assoc [ "url", `String url ] ]))
-    | Document { media_type; data; source_type } ->
+    | Document { media_type; source } ->
       (* agent-core boundary — a document is not an image. This arm used to emit an
          [image_url] part, so a PDF reached the model as a picture and no layer
          reported the substitution. Chat Completions carries a document in its
@@ -256,19 +255,17 @@ let openai_content_parts_of_blocks blocks =
           ~backend:"openai_chat"
           ~block:"document"
           ~media_type
-          ~data
-          source_type
+          source
       in
       Some
         (`Assoc
             [ "type", `String "file"; "file", `Assoc [ "file_data", `String file_data ] ])
-    | Audio { media_type; data; source_type } ->
+    | Audio { media_type; source } ->
       let data =
         Api_common.base64_media_payload
           ~backend:"openai_chat"
           ~block:"audio"
-          ~data
-          source_type
+          source
       in
       Some
         (`Assoc
@@ -718,15 +715,15 @@ let ollama_native_user_message ~modality_priority content : Yojson.Safe.t option
       (fun (texts, images) block ->
          match block with
          | Text s -> Utf8_sanitize.sanitize s :: texts, images
-         | Image { data; source_type = Base64; _ } ->
+         | Image { source = Base64 data; _ } ->
            (* Ollama native /api/chat accepts base64 image payloads in the
               images field. *)
            texts, data :: images
-         | Image { source_type = (Url | File_id) as source_type; _ } ->
+         | Image { source = (Url _ | File_id _) as source; _ } ->
            Api_common.unsupported_media_source
              ~backend:"ollama_native"
              ~block:"image"
-             source_type
+             source
          | Document { media_type; _ } ->
            (* agent-core boundary — documents used to be appended to [images] "so vision
               models can attempt to process them as pages". The server has no
@@ -742,11 +739,11 @@ let ollama_native_user_message ~modality_priority content : Yojson.Safe.t option
                 (Api_common.document_admission_error_to_string
                    (Api_common.Document_wire_has_no_representation
                       { wire_form = Api_common.Document_unrepresentable; media_type })))
-         | Audio { source_type; _ } ->
+         | Audio { source; _ } ->
            Api_common.unsupported_media_source
              ~backend:"ollama_native"
              ~block:"audio"
-             source_type
+             source
          | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
            -> texts, images)
       ([], [])
@@ -775,11 +772,11 @@ let ollama_native_user_message ~modality_priority content : Yojson.Safe.t option
 let rec ollama_tool_images blocks =
   let rec split retained images = function
     | [] -> List.rev retained, List.rev images
-    | Image { data; source_type = Base64; _ } :: rest ->
+    | Image { source = Base64 data; _ } :: rest ->
       split retained (data :: images) rest
-    | Image { source_type = (Url | File_id) as source_type; _ } :: _ ->
+    | Image { source = (Url _ | File_id _) as source; _ } :: _ ->
       Api_common.unsupported_media_source
-        ~backend:"ollama_native" ~block:"image" source_type
+        ~backend:"ollama_native" ~block:"image" source
     | ToolResult ({ content_blocks = Some nested; _ } as result) :: rest ->
       let nested, nested_images = ollama_tool_images nested in
       split

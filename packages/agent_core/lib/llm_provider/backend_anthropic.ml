@@ -418,16 +418,16 @@ let project_history ?(tools_present = false) config messages =
    retains the original typed source instead of adopting a wire format.
    https://platform.claude.com/docs/en/build-with-claude/vision *)
 let rec anthropic_content_block_to_json = function
-  | Image { media_type; data; source_type } ->
+  | Image { media_type; source } ->
     let source =
-      match source_type with
-      | Base64 ->
+      match source with
+      | Base64 data ->
         [ "type", `String "base64"
         ; "media_type", `String media_type
         ; "data", `String data
         ]
-      | Url -> [ "type", `String "url"; "url", `String data ]
-      | File_id -> [ "type", `String "file"; "file_id", `String data ]
+      | Url url -> [ "type", `String "url"; "url", `String url ]
+      | File_id file_id -> [ "type", `String "file"; "file_id", `String file_id ]
     in
     `Assoc [ "type", `String "image"; "source", `Assoc source ]
   | ToolResult { tool_use_id; outcome; content_blocks = Some blocks; _ } ->

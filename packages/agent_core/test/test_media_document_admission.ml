@@ -37,16 +37,16 @@ let contains ~needle haystack =
 ;;
 
 let image_block =
-  Types.Image { media_type = "image/png"; data = "SU1H"; source_type = Types.Base64 }
+  Types.Image { media_type = "image/png"; source = Types.Base64 "SU1H" }
 ;;
 
 let audio_block =
-  Types.Audio { media_type = "wav"; data = "QVVE"; source_type = Types.Base64 }
+  Types.Audio { media_type = "wav"; source = Types.Base64 "QVVE" }
 ;;
 
 let document_block =
   Types.Document
-    { media_type = "application/pdf"; data = "UERG"; source_type = Types.Base64 }
+    { media_type = "application/pdf"; source = Types.Base64 "UERG" }
 ;;
 
 let user_message content =

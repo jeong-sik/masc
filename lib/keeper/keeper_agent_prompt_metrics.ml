@@ -350,9 +350,10 @@ let metric_of_block
               |> String.length
           | Agent_core.Types.RedactedThinking text ->
               String.length (Inference_utils.sanitize_text_utf8 text)
-          | Agent_core.Types.Image { data; _ }
-          | Agent_core.Types.Document { data; _ }
-          | Agent_core.Types.Audio { data; _ } -> String.length data
+          | Agent_core.Types.Image { source; _ }
+          | Agent_core.Types.Document { source; _ }
+          | Agent_core.Types.Audio { source; _ } ->
+              String.length (Agent_core.Types.media_source_payload source)
           | Agent_core.Types.ToolResult _ ->
               invalid_arg
                 "keeper_agent_prompt_metrics: AGENT_CORE canonical tool-result projection unavailable"

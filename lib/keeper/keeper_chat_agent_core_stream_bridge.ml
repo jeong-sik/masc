@@ -20,8 +20,7 @@ type block_state =
   | Invalid_media_block
   | Active_media of
       { media_type : string
-      ; source_type : Agent_core.Types.media_source_kind
-      ; chunks : string list (* reversed: newest chunk first, concatenated at stop *)
+      ; chunks : Agent_core.Types.media_chunks
       ; encoded_bytes : int
       }
       (* RFC-0301: model-generated media accumulates here across [MediaDelta]
@@ -560,11 +559,14 @@ let media_persist_protocol_reason = function
   | Keeper_chat_media_store.Write_failed _ -> "failed to persist generated media"
   | (Keeper_chat_media_store.Unsupported_source_type _ | Keeper_chat_media_store.Invalid_base64 _ | Keeper_chat_media_store.Media_too_large _) as err -> Keeper_chat_media_store.persist_error_to_string err
 
-let add_media_chunk ~max_bytes ~media_type ~source_type ~chunks ~encoded_bytes data =
-  let encoded_bytes = encoded_bytes + String.length data in
+(* [chunks] already holds [chunk]; [chunk] counts toward the wire cap. *)
+let add_media_chunk ~max_bytes ~media_type ~chunks ~encoded_bytes chunk =
+  let encoded_bytes =
+    encoded_bytes + String.length (Agent_core.Types.media_source_payload chunk)
+  in
   if encoded_bytes > max_bytes
   then Error (encoded_bytes, max_bytes)
-  else Ok (Active_media { media_type; source_type; chunks = data :: chunks; encoded_bytes })
+  else Ok (Active_media { media_type; chunks; encoded_bytes })
 
 let media_payload_too_large_event ~index ~size_bytes ~max_bytes =
   protocol_error ~index ~raw_bytes:size_bytes
@@ -572,24 +574,27 @@ let media_payload_too_large_event ~index ~size_bytes ~max_bytes =
     Keeper_chat_events.Media_payload_too_large
 
 let finalize_media_block ~response ~max_wire_bytes ~redact_text ~base_dir ~index ~media_type
-    ~source_type ~chunks ~encoded_bytes =
+    ~chunks ~encoded_bytes =
   if encoded_bytes > max_wire_bytes
   then
     [ media_payload_too_large_event ~index ~size_bytes:encoded_bytes
         ~max_bytes:max_wire_bytes
     ]
   else
-    let data = String.concat "" (List.rev chunks) in
+    let source = Agent_core.Types.media_chunks_source chunks in
   match
     Keeper_chat_media_store.persist_media_source_result ~base_dir ~media_type
-      ~source_type ~data
+      ~source
   with
   | Ok (_token, media_ref) ->
       [ Keeper_chat_events.Agent_core_media_delta
-          { index; media_type; source_type; media_ref; response }
+          { index; media_type
+          ; source_type = Agent_core.Types.media_source_kind_of_source source
+          ; media_ref; response }
       ]
   | Error err ->
-      [ protocol_error ~index ~raw_bytes:(String.length data)
+      [ protocol_error ~index
+          ~raw_bytes:(String.length (Agent_core.Types.media_source_payload source))
           ~reason:(redact_text (media_persist_protocol_reason err))
           (media_persist_error_kind err)
       ]
@@ -635,7 +640,7 @@ let close_open_content_blocks ~stream_scope ~redact_text ~base_dir state =
                    }
                ]
          }
-       | Active_media { media_type; source_type; chunks; encoded_bytes } ->
+       | Active_media { media_type; chunks; encoded_bytes } ->
          { bridge_state =
              replace_block bridge_state index (Occupied_non_tool_block None)
          ; chat_events =
@@ -643,8 +648,8 @@ let close_open_content_blocks ~stream_scope ~redact_text ~base_dir state =
              @ finalize_media_block
                  ~response:{response_generation=bridge_state.content_generation; response_scope=stream_scope}
                  ~max_wire_bytes:bridge_state.max_wire_bytes
-                 ~redact_text ~base_dir ~index ~media_type ~source_type
-                 ~chunks ~encoded_bytes
+                 ~redact_text ~base_dir ~index ~media_type ~chunks
+                 ~encoded_bytes
          }
        | Occupied_non_tool_block _ ->
          let bridge_state = replace_block bridge_state index block in
@@ -1146,7 +1151,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
              ]
          })
   | ContentBlockDelta
-      { index; delta = MediaDelta { media_type; source_type; data } } ->
+      { index; delta = MediaDelta { media_type; source } } ->
       (* RFC-0301: accumulate the media payload across chunks in the block state;
          the persisted URL is emitted once at the block stop (or at message end if
          the stream never closes the block), not a per-chunk count. *)
@@ -1157,28 +1162,33 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
        | Some rejected -> rejected
        | None ->
        match stream_block_for_index bridge_state index with
-       | Some (Active_media m)
-         when String.equal m.media_type media_type && m.source_type = source_type
-         ->
-           (match
-              add_media_chunk ~max_bytes:bridge_state.max_wire_bytes
-                ~media_type ~source_type ~chunks:m.chunks
-                ~encoded_bytes:m.encoded_bytes data
-            with
-            | Ok block ->
-                { bridge_state = replace_block bridge_state index block; chat_events = [] }
-            | Error (size_bytes, max_bytes) ->
-                { bridge_state = invalidate_media_block bridge_state index;
+       | Some (Active_media m) ->
+           let added =
+             if String.equal m.media_type media_type
+             then Agent_core.Types.media_chunks_add m.chunks source
+             else None
+           in
+           (match added with
+            | Some chunks ->
+                (match
+                   add_media_chunk ~max_bytes:bridge_state.max_wire_bytes
+                     ~media_type ~chunks
+                     ~encoded_bytes:m.encoded_bytes source
+                 with
+                 | Ok block ->
+                     { bridge_state = replace_block bridge_state index block; chat_events = [] }
+                 | Error (size_bytes, max_bytes) ->
+                     { bridge_state = invalidate_media_block bridge_state index;
+                       chat_events =
+                         [ media_payload_too_large_event ~index ~size_bytes ~max_bytes ]
+                     })
+            | None ->
+                { bridge_state;
                   chat_events =
-                    [ media_payload_too_large_event ~index ~size_bytes ~max_bytes ]
+                    [ protocol_error ~index
+                        ~reason:"media delta metadata changed for active media block"
+                        Media_delta_invalid_block ]
                 })
-       | Some (Active_media _) ->
-           { bridge_state;
-             chat_events =
-               [ protocol_error ~index
-                   ~reason:"media delta metadata changed for active media block"
-                   Media_delta_invalid_block ]
-           }
        | Some (Active_native_tool _ | Ended_native_tool _ | Occupied_non_tool_block _) ->
          { bridge_state
          ; chat_events =
@@ -1207,8 +1217,8 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       | None ->
           (match
              add_media_chunk ~max_bytes:bridge_state.max_wire_bytes
-                ~media_type ~source_type ~chunks:[]
-                ~encoded_bytes:0 data
+                ~media_type ~chunks:(Agent_core.Types.media_chunks_start source)
+                ~encoded_bytes:0 source
             with
             | Ok block ->
                 { bridge_state = replace_block bridge_state index block; chat_events = [] }
@@ -1522,9 +1532,9 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
           { bridge_state
           ; chat_events = [ block_stop ]
           }
-      | Some (Active_media { media_type; source_type; chunks; encoded_bytes }) ->
-          (* RFC-0301: the media block is complete — concat the accumulated chunks,
-             persist to the media store, and emit the reader-facing URL (not a
+      | Some (Active_media { media_type; chunks; encoded_bytes }) ->
+          (* RFC-0301: the media block is complete — persist the accumulated
+             source to the media store, and emit the reader-facing URL (not a
              byte count). *)
           { bridge_state =
               replace_block bridge_state index (Occupied_non_tool_block None)
@@ -1534,7 +1544,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
                    ~response:{response_generation=bridge_state.content_generation; response_scope=stream_scope}
                    ~max_wire_bytes:bridge_state.max_wire_bytes
                    ~redact_text ~base_dir ~index ~media_type
-                   ~source_type ~chunks ~encoded_bytes
+                   ~chunks ~encoded_bytes
           }
       | None ->
           { bridge_state; chat_events = [ block_stop ] })

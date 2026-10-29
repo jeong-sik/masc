@@ -665,7 +665,7 @@ let test_agent_scope_owns_effect_topology () =
     let scope_locator_json = ref None in
     let invocation_locator_json = ref None in
     let image_blocks = [ Types.image_block ~media_type:"image/png"
-      ~data:"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a14sAAAAASUVORK5CYII=" () ] in
+      ~source:(Types.Base64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a14sAAAAASUVORK5CYII=") ] in
     let calls = ref 0 in
     let settled_before_observer = ref false in
     with_fresh codec dir (fun _sw writer ->

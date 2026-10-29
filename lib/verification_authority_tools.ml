@@ -662,7 +662,7 @@ let media_result t tool ~name ~args ~start_time =
                  ~content_blocks:
                    [ Llm_provider.Types.Text (Yojson.Safe.to_string data)
                    ; Llm_provider.Types.image_block ~media_type
-                       ~data:(Base64.encode_exn bytes) () ] ()) ))
+                       ~source:(Llm_provider.Types.Base64 (Base64.encode_exn bytes)) ] ()) ))
      | _ -> None)
   | (Read_file | Search_files | Web_fetch | Board_source | Fusion_source | Task_source), _ -> None
 ;;

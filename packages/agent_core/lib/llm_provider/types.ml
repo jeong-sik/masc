@@ -112,25 +112,90 @@ let response_format_to_json = function
 
 (** {1 Content Types} *)
 
-(** Closed set of supported media source carriers. *)
+(** A media block's source: the carrier and its payload together. *)
+type media_source =
+  | Base64 of string (** Base64-encoded bytes. *)
+  | Url of string
+  | File_id of string
+[@@deriving show]
+
+(** A carrier without its payload, for records that keep the carrier after the
+    payload has gone elsewhere. *)
 type media_source_kind =
-  | Base64
-  | Url
-  | File_id
+  | Base64_kind
+  | Url_kind
+  | File_id_kind
 [@@deriving show]
 
 let media_source_kind_to_string = function
-  | Base64 -> "base64"
-  | Url -> "url"
-  | File_id -> "file_id"
+  | Base64_kind -> "base64"
+  | Url_kind -> "url"
+  | File_id_kind -> "file_id"
 ;;
 
 let media_source_kind_of_string raw =
   match String.lowercase_ascii (String.trim raw) with
-  | "base64" -> Some Base64
-  | "url" -> Some Url
-  | "file_id" -> Some File_id
+  | "base64" -> Some Base64_kind
+  | "url" -> Some Url_kind
+  | "file_id" -> Some File_id_kind
   | _ -> None
+;;
+
+let media_source_kind_of_source = function
+  | Base64 _ -> Base64_kind
+  | Url _ -> Url_kind
+  | File_id _ -> File_id_kind
+;;
+
+let media_source_wire_tag source =
+  media_source_kind_to_string (media_source_kind_of_source source)
+;;
+
+let media_source_of_wire_tag raw : (string -> media_source) option =
+  match media_source_kind_of_string raw with
+  | Some Base64_kind -> Some (fun payload -> Base64 payload)
+  | Some Url_kind -> Some (fun payload -> Url payload)
+  | Some File_id_kind -> Some (fun payload -> File_id payload)
+  | None -> None
+;;
+
+let media_source_payload = function
+  | Base64 payload | Url payload | File_id payload -> payload
+;;
+
+(* [first] fixes the carrier; [rest_rev] holds the later payloads, newest
+   first, so adding one is a cons and the join happens once. *)
+type media_chunks =
+  { first : media_source
+  ; rest_rev : string list
+  }
+
+let media_chunks_start first = { first; rest_rev = [] }
+
+let media_chunks_add chunks chunk =
+  match chunks.first, chunk with
+  | Base64 _, Base64 payload | Url _, Url payload | File_id _, File_id payload ->
+    (* Empty deltas add no bytes, so a byte cap cannot bound their count.
+       Retain the first carrier without keeping a list node for each one. *)
+    if String.length payload = 0
+    then Some chunks
+    else Some { chunks with rest_rev = payload :: chunks.rest_rev }
+  | Base64 _, (Url _ | File_id _)
+  | Url _, (Base64 _ | File_id _)
+  | File_id _, (Base64 _ | Url _) -> None
+;;
+
+let media_chunks_kind chunks = media_source_kind_of_source chunks.first
+
+let media_chunks_source { first; rest_rev } =
+  match rest_rev with
+  | [] -> first
+  | _ :: _ ->
+    let join head = String.concat "" (head :: List.rev rest_rev) in
+    (match first with
+     | Base64 head -> Base64 (join head)
+     | Url head -> Url (join head)
+     | File_id head -> File_id (join head))
 ;;
 
 type reasoning_detail =
@@ -187,18 +252,15 @@ type content_block =
       }
   | Image of
       { media_type : string
-      ; data : string
-      ; source_type : media_source_kind
+      ; source : media_source
       }
   | Document of
       { media_type : string
-      ; data : string
-      ; source_type : media_source_kind
+      ; source : media_source
       }
   | Audio of
       { media_type : string
-      ; data : string
-      ; source_type : media_source_kind
+      ; source : media_source
       }
 [@@deriving show]
 
@@ -635,9 +697,9 @@ module Message_value = struct
     | ToolUse { id; name; _ } -> mix (mix 5 (string_hint id)) (string_hint name)
     | ToolResult { tool_use_id; content; _ } ->
       mix (mix 6 (string_hint tool_use_id)) (string_hint content)
-    | Image { data; _ } -> mix 7 (string_hint data)
-    | Document { data; _ } -> mix 8 (string_hint data)
-    | Audio { data; _ } -> mix 9 (string_hint data)
+    | Image { source; _ } -> mix 7 (string_hint (media_source_payload source))
+    | Document { source; _ } -> mix 8 (string_hint (media_source_payload source))
+    | Audio { source; _ } -> mix 9 (string_hint (media_source_payload source))
   ;;
 
   let hash (message : t) =
@@ -1242,14 +1304,13 @@ type content_delta =
           [{"limit":10}{"limit":10}]). *)
   | MediaDelta of
       { media_type : string
-      ; source_type : media_source_kind
-      ; data : string
+      ; source : media_source
       }
   (** A chunk of a streamed media (image/document/audio) content block.
-            Carries the block-level [media_type] and [source_type] alongside the
-            [data] payload so the SSE layer needs no new {!ContentBlockStart}
-            fields; the accumulator records the metadata (idempotent across
-            chunks) and concatenates [data]. *)
+            Carries the block-level [media_type] and a [source] whose payload is
+            this chunk, so the SSE layer needs no new {!ContentBlockStart}
+            fields; the accumulator records [media_type] (idempotent across
+            chunks) and collects each chunk with {!media_chunks_add}. *)
 
 (* See types.mli: a 429 or 5xx an OpenAI-compatible provider declared inside a
    response it had already accepted, and only its error object as the body. *)
@@ -1403,20 +1464,14 @@ let make_message ?name ?tool_call_id ?(origin = Conversation) ?(metadata = []) ~
 (** Create a text content block. *)
 let text_block text = Text text
 
-(** Create a base64-backed image content block by default. *)
-let image_block ?(source_type = Base64) ~media_type ~data () =
-  Image { media_type; data; source_type }
-;;
+(** Create an image content block. *)
+let image_block ~media_type ~source = Image { media_type; source }
 
-(** Create a base64-backed document content block by default. *)
-let document_block ?(source_type = Base64) ~media_type ~data () =
-  Document { media_type; data; source_type }
-;;
+(** Create a document content block. *)
+let document_block ~media_type ~source = Document { media_type; source }
 
-(** Create a base64-backed audio content block by default. *)
-let audio_block ?(source_type = Base64) ~media_type ~data () =
-  Audio { media_type; data; source_type }
-;;
+(** Create an audio content block. *)
+let audio_block ~media_type ~source = Audio { media_type; source }
 
 (** Create a text-only message. *)
 let text_message role text = make_message ~role [ Text text ]

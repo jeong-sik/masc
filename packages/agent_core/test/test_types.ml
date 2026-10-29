@@ -306,9 +306,9 @@ let test_show_content_block_variants () =
         ; json = None
         ; content_blocks = None
         }
-    ; Types.Image { media_type = "image/png"; data = "abc"; source_type = Types.Base64 }
+    ; Types.Image { media_type = "image/png"; source = Types.Base64 "abc" }
     ; Types.Document
-        { media_type = "application/pdf"; data = "pdf"; source_type = Types.Base64 }
+        { media_type = "application/pdf"; source = Types.Base64 "pdf" }
     ]
   in
   List.iter
@@ -773,11 +773,11 @@ let test_visible_text_of_content_excludes_non_answer_blocks () =
         ; json = Some (`Assoc [ "ok", `Bool true ])
         ; content_blocks = Some [ Types.Text "structured tool payload" ]
         }
-    ; Types.Image { media_type = "image/png"; data = "bytes"; source_type = Types.Base64 }
+    ; Types.Image { media_type = "image/png"; source = Types.Base64 "bytes" }
     ; Types.Document
-        { media_type = "application/pdf"; data = "doc"; source_type = Types.Base64 }
+        { media_type = "application/pdf"; source = Types.Base64 "doc" }
     ; Types.Audio
-        { media_type = "audio/mpeg"; data = "audio"; source_type = Types.Base64 }
+        { media_type = "audio/mpeg"; source = Types.Base64 "audio" }
     ; Types.Text "tail"
     ]
   in
@@ -992,7 +992,7 @@ let test_validate_tool_result_shape () =
 
 let test_show_audio_block () =
   let block =
-    Types.Audio { media_type = "audio/wav"; data = "data"; source_type = Types.Base64 }
+    Types.Audio { media_type = "audio/wav"; source = Types.Base64 "data" }
   in
   let s = Types.show_content_block block in
   Alcotest.(check bool) "show non-empty" true (String.length s > 0)
@@ -1135,7 +1135,7 @@ let test_response_shape_media_only_is_deliverable () =
       , response
           ~content:
             [ Types.Image
-                { media_type = "image/png"; data = "AAAA"; source_type = Types.Base64 }
+                { media_type = "image/png"; source = Types.Base64 "AAAA" }
             ]
           () )
     ; ( "document"
@@ -1143,8 +1143,7 @@ let test_response_shape_media_only_is_deliverable () =
           ~content:
             [ Types.Document
                 { media_type = "application/pdf"
-                ; data = "AAAA"
-                ; source_type = Types.Base64
+                ; source = Types.Base64 "AAAA"
                 }
             ]
           () )
@@ -1152,7 +1151,7 @@ let test_response_shape_media_only_is_deliverable () =
       , response
           ~content:
             [ Types.Audio
-                { media_type = "audio/wav"; data = "AAAA"; source_type = Types.Base64 }
+                { media_type = "audio/wav"; source = Types.Base64 "AAAA" }
             ]
           () )
     ]

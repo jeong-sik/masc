@@ -50,10 +50,8 @@ let message_of_request (req : Va.request) : Agent_core.Types.message =
     ~role:Agent_core.Types.User
     [ Agent_core.Types.text_block (prompt_of_request req)
     ; Agent_core.Types.image_block
-        ~source_type:Agent_core.Types.Base64
         ~media_type:req.Va.image_media_type
-        ~data:(Base64.encode_string req.Va.image_bytes)
-        ()
+        ~source:(Agent_core.Types.Base64 (Base64.encode_string req.Va.image_bytes))
     ]
 
 type vision_backend =

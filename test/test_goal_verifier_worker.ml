@@ -135,7 +135,7 @@ let test_actual_retained_lookup_and_restored_receipt () = with_workspace (fun co
     (match result with
      | Tool_result.Completed {content_blocks=Some blocks; data; _} ->
        Alcotest.(check bool) "canonical full image reaches reviewer" true
-         (List.exists (function Llm_provider.Types.Image {data; _} -> Base64.decode_exn data = bytes | _ -> false) blocks);
+         (List.exists (function Llm_provider.Types.Image {source=Llm_provider.Types.Base64 data; _} -> Base64.decode_exn data = bytes | _ -> false) blocks);
        Alcotest.(check bool) "shared successful-read projection" true
          (Yojson.Safe.Util.member "evidence_lookup_succeeded" data = `Bool true)
      | Tool_result.Completed {content_blocks=None; _} | Tool_result.Failed _ | Tool_result.Deferred _ ->

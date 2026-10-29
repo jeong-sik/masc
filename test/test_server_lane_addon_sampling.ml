@@ -21,7 +21,7 @@ let test_image_only_completion_is_sampling_content () =
   let response content : L.api_response =
     {id="image-response";model="image-model";stop_reason=L.EndTurn;
      content;usage=None;telemetry=None} in
-  let block = L.Image {media_type="image/png";data=image;source_type=L.Base64} in
+  let block = L.Image {media_type="image/png";source=L.Base64 image} in
   let project = Server_lane_addon_sampling.For_testing.response_content in
   let actual = require (project (response [block])) in
   check bool "single image is preserved as MCP image content" true
@@ -31,8 +31,7 @@ let test_image_only_completion_is_sampling_content () =
     (S.sampling_content_of_yojson (S.sampling_content_to_yojson actual) = Ok actual);
   check bool "multiple image outputs are not silently reduced" true
     (Result.is_error (project (response [block;block])));
-  let url_image = L.Image {media_type="image/png";data="https://example.invalid/image.png";
-    source_type=L.Url} in
+  let url_image = L.Image {media_type="image/png";source=L.Url "https://example.invalid/image.png"} in
   check bool "mixed image sources are not silently reduced" true
     (Result.is_error (project (response [block;url_image])));
   check bool "URL-only image cannot become MCP base64 content" true
@@ -40,12 +39,12 @@ let test_image_only_completion_is_sampling_content () =
   List.iter (fun extra ->
     check bool "unsupported content beside image is rejected" true
       (Result.is_error (project (response [block;extra]))))
-    [L.Audio {media_type="audio/wav";data="YQ==";source_type=L.Base64};
-     L.Document {media_type="application/pdf";data="YQ==";source_type=L.Base64}];
+    [L.Audio {media_type="audio/wav";source=L.Base64 "YQ=="};
+     L.Document {media_type="application/pdf";source=L.Base64 "YQ=="}];
   List.iter (fun data ->
     check bool "invalid or empty base64 is rejected" true
       (Result.is_error (project (response [L.Image {
-        media_type="image/png";data;source_type=L.Base64}])))) ["";"%%%";"a"];
+        media_type="image/png";source=L.Base64 data}])))) ["";"%%%";"a"];
   check bool "reasoning metadata may accompany a valid image" true
     (project (response [L.Thinking {content="reason";signature=None};block]) = Ok actual);
   check bool "empty completion remains an error" true

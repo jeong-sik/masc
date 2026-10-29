@@ -1,10 +1,10 @@
 let schema = "masc.official-client-context-message.v3"
 
-let media_source_to_json ~media_type ~data ~source_type =
+let media_source_to_json ~media_type ~source =
   `Assoc
-    [ "type", `String (Agent_core.Types.media_source_kind_to_string source_type)
+    [ "type", `String (Agent_core.Types.media_source_wire_tag source)
     ; "media_type", `String media_type
-    ; "data", `String data
+    ; "data", `String (Agent_core.Types.media_source_payload source)
     ]
 ;;
 
@@ -69,20 +69,20 @@ let rec content_block_to_json = function
        ]
        @ structured_content
        @ failure)
-  | Image { media_type; data; source_type } ->
+  | Image { media_type; source } ->
     `Assoc
       [ "type", `String "image"
-      ; "source", media_source_to_json ~media_type ~data ~source_type
+      ; "source", media_source_to_json ~media_type ~source
       ]
-  | Document { media_type; data; source_type } ->
+  | Document { media_type; source } ->
     `Assoc
       [ "type", `String "document"
-      ; "source", media_source_to_json ~media_type ~data ~source_type
+      ; "source", media_source_to_json ~media_type ~source
       ]
-  | Audio { media_type; data; source_type } ->
+  | Audio { media_type; source } ->
     `Assoc
       [ "type", `String "audio"
-      ; "source", media_source_to_json ~media_type ~data ~source_type
+      ; "source", media_source_to_json ~media_type ~source
       ]
 ;;
 

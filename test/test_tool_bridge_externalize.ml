@@ -85,7 +85,7 @@ let test_threshold_default_under () =
 let test_keeper_execution_retains_multimodal_producer_output () =
   let blocks = Llm_provider.Types.[
     Text "screen";
-    Image { media_type = "image/png"; data = "c2NyZWVu"; source_type = Base64 }] in
+    Image { media_type = "image/png"; source = Base64 "c2NyZWVu" }] in
   let completed = Tool_result.make_ok ~tool_name:"machine_screen"
     ~start_time:(Tool_timing.start ()) ~data:(`Assoc ["frame", `Int 7])
     ~content_blocks:blocks ~metadata:(`Assoc ["source", `String "worker"]) () in

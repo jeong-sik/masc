@@ -2891,7 +2891,7 @@ let test_missing_selected_account_auth_requires_sign_in () =
 
 let test_invalid_goal_media_never_claims_or_spawns () =
   let image media_type data = Agent_core.Types.Image
-    {media_type; data; source_type=Agent_core.Types.Base64} in
+    {media_type; source = Agent_core.Types.Base64 data} in
   let invalid_blocks =
     [ [Agent_core.Types.Text "Call masc_probe once"; image "image/png" "!not-base64!"];
       [Agent_core.Types.Text "Call masc_probe once"; image "image/svg+xml" "aGVsbG8="];

@@ -33,9 +33,9 @@ let input () : L.input =
       json=Some (`Assoc ["z",`String "structured";"a",`List [`Int 1;`Null]]);
       content_blocks=Some [nested;T.ToolResult {tool_use_id="without-json";content="null";
         outcome=T.Tool_succeeded;json=None;content_blocks=None}]};
-    T.Image {media_type="image/png";data="original-image";source_type=T.Base64};
-    T.Document {media_type="application/pdf";data="original-file";source_type=T.File_id};
-    T.Audio {media_type="audio/wav";data="https://example.test/audio";source_type=T.Url}] in
+    T.Image {media_type="image/png";source=T.Base64 "original-image"};
+    T.Document {media_type="application/pdf";source=T.File_id "original-file"};
+    T.Audio {media_type="audio/wav";source=T.Url "https://example.test/audio"}] in
   let metadata = [T.Input_speaker.key,`Assoc ["actor",`String "first"];
     "other",`Assoc ["z",`Int 1;"a",`Int 2];
     T.Input_speaker.key,`Assoc ["actor",`String "second"]] in

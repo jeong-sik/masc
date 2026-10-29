@@ -88,26 +88,26 @@ let content_block_to_json = function
       ; "is_error", `Bool (tool_result_outcome_is_error outcome)
       ; "json", Option.value ~default:`Null json
       ]
-  | Image { media_type; data; source_type } ->
+  | Image { media_type; source } ->
     `Assoc
       [ "type", `String "image"
       ; "media_type", `String media_type
-      ; "data", `String data
-      ; "source_type", `String (Types.media_source_kind_to_string source_type)
+      ; "data", `String (Types.media_source_payload source)
+      ; "source_type", `String (Types.media_source_wire_tag source)
       ]
-  | Document { media_type; data; source_type } ->
+  | Document { media_type; source } ->
     `Assoc
       [ "type", `String "document"
       ; "media_type", `String media_type
-      ; "data", `String data
-      ; "source_type", `String (Types.media_source_kind_to_string source_type)
+      ; "data", `String (Types.media_source_payload source)
+      ; "source_type", `String (Types.media_source_wire_tag source)
       ]
-  | Audio { media_type; data; source_type } ->
+  | Audio { media_type; source } ->
     `Assoc
       [ "type", `String "audio"
       ; "media_type", `String media_type
-      ; "data", `String data
-      ; "source_type", `String (Types.media_source_kind_to_string source_type)
+      ; "data", `String (Types.media_source_payload source)
+      ; "source_type", `String (Types.media_source_wire_tag source)
       ]
 ;;
 

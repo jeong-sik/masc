@@ -247,16 +247,66 @@ val response_format_to_json : response_format -> Yojson.Safe.t
 
 (** {1 Content Types} *)
 
-(** Closed set of supported media source carriers. Unsupported provider/source
-    combinations must fail closed instead of reinterpreting [data] as base64. *)
-type media_source_kind =
-  | Base64
-  | Url
-  | File_id
+(** A media block's source: the carrier and its payload together, so the
+    meaning of the payload string is fixed by the constructor. Unsupported
+    provider/source combinations must fail closed instead of reinterpreting
+    the payload as base64. *)
+type media_source =
+  | Base64 of string (** Base64-encoded bytes. *)
+  | Url of string
+  | File_id of string
 [@@deriving show]
 
+(** The wire [source.type] value of a source: ["base64"], ["url"] or
+    ["file_id"]. *)
+val media_source_wire_tag : media_source -> string
+
+(** Read a wire [source.type] value (trimmed, any case). [Some make] names the
+    constructor that carries the payload read next to it; [None] for a value
+    outside the three carriers. *)
+val media_source_of_wire_tag : string -> (string -> media_source) option
+
+(** The payload string of a source, whatever its carrier: base64 bytes, a URL,
+    or a file id. For wire codecs that write {!media_source_wire_tag} beside it
+    and for byte accounting. *)
+val media_source_payload : media_source -> string
+
+(** A carrier without its payload: for a record that keeps which carrier a
+    payload arrived in after the payload itself has gone elsewhere (a
+    generated media file), and for a diagnostic that names a carrier without
+    repeating its payload. *)
+type media_source_kind =
+  | Base64_kind
+  | Url_kind
+  | File_id_kind
+[@@deriving show]
+
+val media_source_kind_of_source : media_source -> media_source_kind
+
+(** Same strings as {!media_source_wire_tag}. *)
 val media_source_kind_to_string : media_source_kind -> string
+
+(** Same reading as {!media_source_of_wire_tag}. *)
 val media_source_kind_of_string : string -> media_source_kind option
+
+(** The chunks of one streamed media payload. The first chunk fixes the
+    carrier. Adding a chunk copies nothing; {!media_chunks_source} joins them
+    once. *)
+type media_chunks
+
+val media_chunks_start : media_source -> media_chunks
+
+(** [media_chunks_add chunks chunk] keeps [chunk] after the others when it uses
+    the first chunk's carrier; [None] when it uses another. An empty chunk of
+    the same carrier keeps the existing accumulator. *)
+val media_chunks_add : media_chunks -> media_source -> media_chunks option
+
+(** The carrier the first chunk fixed. *)
+val media_chunks_kind : media_chunks -> media_source_kind
+
+(** The payload of every chunk in arrival order, under the first chunk's
+    carrier. *)
+val media_chunks_source : media_chunks -> media_source
 
 type reasoning_detail =
   { raw : Yojson.Safe.t
@@ -295,18 +345,15 @@ type content_block =
       }
   | Image of
       { media_type : string
-      ; data : string
-      ; source_type : media_source_kind
+      ; source : media_source
       }
   | Document of
       { media_type : string
-      ; data : string
-      ; source_type : media_source_kind
+      ; source : media_source
       }
   | Audio of
       { media_type : string
-      ; data : string
-      ; source_type : media_source_kind
+      ; source : media_source
       }
 [@@deriving show]
 
@@ -836,12 +883,12 @@ type content_delta =
           does not concatenate it into invalid JSON. *)
   | MediaDelta of
       { media_type : string
-      ; source_type : media_source_kind
-      ; data : string
+      ; source : media_source
       }
   (** A chunk of a streamed media (image/document/audio) content block.
-            Carries block-level [media_type] and [source_type] with the [data]
-            payload so no new {!ContentBlockStart} fields are required. *)
+            Carries block-level [media_type] and a [source] whose payload is
+            this chunk, so no new {!ContentBlockStart} fields are required.
+            Consumers collect chunks with {!media_chunks_add}. *)
 
 (** A provider condition an OpenAI-compatible provider declared for an error it
     reported inside a response it had already accepted with [200]: rate limited
@@ -1039,26 +1086,11 @@ val make_message
 
 val text_block : string -> content_block
 
-val image_block
-  :  ?source_type:media_source_kind
-  -> media_type:string
-  -> data:string
-  -> unit
-  -> content_block
+val image_block : media_type:string -> source:media_source -> content_block
 
-val document_block
-  :  ?source_type:media_source_kind
-  -> media_type:string
-  -> data:string
-  -> unit
-  -> content_block
+val document_block : media_type:string -> source:media_source -> content_block
 
-val audio_block
-  :  ?source_type:media_source_kind
-  -> media_type:string
-  -> data:string
-  -> unit
-  -> content_block
+val audio_block : media_type:string -> source:media_source -> content_block
 
 val text_message : role -> string -> message
 val user_msg_blocks : content_block list -> message

@@ -208,15 +208,29 @@ let locate request =
     Ok (located, Install_record.file_path record)
 ;;
 
-(* Whether [path], or a directory above it, is the directory [dir]. They are
-   compared by the files they are, the device and the inode, so that a link, a
-   mount that shows one directory twice (a firmlink, a bind mount), or the case
-   of a name on a volume that ignores case does not hide it. A name that does
-   not exist has no file to compare, and the directories above it are compared
-   instead. *)
+(* Whether [path], or a directory above it, is the directory [dir].
+
+   The links in [path] are followed first, so the walk goes up through the
+   directories the file would really be made in, not through the names that
+   were spelled. A link to a folder inside [dir] leads there, and the names
+   above the link say nothing about it.
+
+   Directories are compared by the files they are, the device and the inode, so
+   that a mount that shows one directory twice (a firmlink, a bind mount), or
+   the case of a name on a volume that ignores case does not hide it. A name
+   that does not exist has no file to compare, and the directories above it are
+   compared instead. When [dir] itself does not exist yet, as the directory of
+   the log does not on a first start, it has no file either, and the place its
+   name leads to is compared by name. *)
 let reaches_directory ~dir path =
+  let place = Fs_compat.realpath_lenient path in
   match Unix.stat dir with
-  | exception Unix.Unix_error _ -> false
+  | exception Unix.Unix_error _ ->
+    let dir_place = Fs_compat.realpath_lenient dir in
+    (* [Filename.concat dir_place ""] is the name with a separator at the end,
+       so that [/a/auth-old] is not taken for a place inside [/a/auth]. *)
+    String.equal place dir_place
+    || String.starts_with ~prefix:(Filename.concat dir_place "") place
   | target ->
     let rec up candidate =
       let is_target =
@@ -229,7 +243,7 @@ let reaches_directory ~dir path =
       let parent = Filename.dirname candidate in
       (not (String.equal parent candidate)) && up parent
     in
-    up path
+    up place
 ;;
 
 (* Whether the two paths are one file that exists. *)

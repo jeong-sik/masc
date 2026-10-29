@@ -76,3 +76,11 @@ LISTENER=$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t | head -1)
 python3 -I "$HERE/probe.py" --routes "$WORK/routes.json" --base-url "$URL" --out "$OUT" ${PROBE_ARGS[@]+"${PROBE_ARGS[@]}"}
 python3 -I "$HERE/probe_extra.py" --base-url "$URL" --out "$OUT"
 cp "$WORK/routes.json" "$OUT/routes.json"
+
+# AUTH_BASELINE_AFTER names a shell command to run while the server is still up, for a probe a
+# layer brings along. It sees AUTH_BASELINE_URL, AUTH_BASELINE_ROUTES, AUTH_BASELINE_TOKENS (the
+# file exists only with AUTH_BASELINE_CREDENTIALS=1) and AUTH_BASELINE_OUT.
+if [ -n "${AUTH_BASELINE_AFTER:-}" ]; then
+  AUTH_BASELINE_URL="$URL" AUTH_BASELINE_ROUTES="$WORK/routes.json" AUTH_BASELINE_TOKENS="$WORK/tokens.json" \
+    AUTH_BASELINE_OUT="$OUT" bash -c "$AUTH_BASELINE_AFTER" || fail "AUTH_BASELINE_AFTER failed"
+fi

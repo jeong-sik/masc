@@ -34,9 +34,21 @@ GET /api/v1/dashboard/bootstrap :: ^\.shell\.projection_diagnostics\.
 # 19 hits and 14 misses, then 11 and 10, in the default mode.
 GET /api/v1/dashboard/cache-stats :: ^\.(hit_ratio|hits_total|misses_total)$
 
-# Reuses of a connection in the pool of the server's own outgoing HTTP client. The
-# server's background work moves it, not the requests made to the server.
-GET /api/v1/dashboard/runtime-observables :: ^\.pool\.reuse_total$
+# The pool of the server's own outgoing HTTP client: reuses, creations and evictions of its
+# connections, and how many are idle or in flight. The server's background work moves them,
+# not the requests made to the server.
+GET /api/v1/dashboard/runtime-observables :: ^\.pool\.
+
+# Samples and bytes the allocation profiler took from the major heap since the process
+# started. They grow with the allocation of the server's own work. Two runs of one build
+# agreed on them once by chance.
+GET /api/v1/diagnostics/memprof :: ^\.major_(bytes|samples)$
+
+# Counters of the process in the health report: the server's log (the sequence number of its
+# newest line, the lines in its recent window, the lines it retains and has written) and the
+# scheduler lag samples. The probe and the periodic tasks add lines and samples, as for
+# /api/v1/dashboard/logs below.
+GET /health :: ^\.(logs|scheduler)\.
 
 # The tail of the server's own log. Its newest 200 lines hold what the probe caused and
 # the periodic tasks (a `gc` line every few minutes), so the sequence numbers and the

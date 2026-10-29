@@ -51,7 +51,8 @@ type time_mark =
 (** {1 What one candidate got} *)
 
 (** Why a candidate has no decision. [Capacity]: a request holding it was
-    refused for size and no smaller request was left to try. [Too_large]: a
+    refused for size and no smaller request was left to try, or the purpose
+    alone was refused for size and the request was never sent. [Too_large]: a
     request holding only this candidate was refused while question (b) was
     accepted. [Rate_limited]: every destination the request went to answered
     HTTP 429; a 429 mixed with another failure is [Provider_failed], the way

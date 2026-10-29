@@ -78,6 +78,49 @@ compared 3260 statuses, 6 problems
 - 표에 없는 경로 404, 표에 없는 메서드 405
 - 표가 `Public_read`나 `Subpath_dispatch`로 적었는데 갈래가 행위자를 요구하면 500(열리지 않아요)
 
+## 자격이 있는 요청
+
+위 측정은 H2로 자격 없는 요청과 잘못된 bearer만 보냈어요. 같은 두 서버를 Worker와 Admin 토큰으로 한 번 더 쟀어요.
+
+- `h2_identities.py`(새)가 경로 388개와, 표 프로브에 없던 `when` 갈래의 대표 경로 9개를 합쳐 397개를 h2c로 보내요. 신원은 none, bad, worker, admin이에요. admin은 GET만 보내요(A1 도구와 같아요). `run.sh`의 새 훅 `AUTH_BASELINE_AFTER`가 서버가 떠 있는 동안 이 스크립트를 돌려요.
+- 같은 실행에서 A1 도구가 자격 있는 요청을 HTTP/1.1로 보내요(`AUTH_BASELINE_CREDENTIALS=1`).
+- `compare.py --noise`에는 변경 전 빌드를 한 번 더 돌린 결과를 줬어요. 같은 빌드끼리도 다른 값이 무엇인지 알아내려는 거예요.
+
+```
+AUTH_BASELINE_CREDENTIALS=1 \
+AUTH_BASELINE_AFTER='python3 -I docs/evidence/2026-10-29-h2-route-gate/h2_identities.py probe --routes "$AUTH_BASELINE_ROUTES" --base-url "$AUTH_BASELINE_URL" --tokens "$AUTH_BASELINE_TOKENS" --out "$AUTH_BASELINE_OUT"' \
+  scripts/auth-route-baseline/run.sh <main_eio.exe> <auth_route_inventory.exe> <port> <work-dir> <out-dir>/default
+python3 docs/evidence/2026-10-29-h2-route-gate/h2_identities.py compare <before-dir> <after-dir>
+python3 scripts/auth-route-baseline/compare.py <before-dir> <after-dir> --noise <second-before-dir> --ignore-file scripts/auth-route-baseline/volatile_fields.txt
+```
+
+H2, 신원 네 가지(`h2-identities-compare.txt`):
+
+```
+compared 2854 statuses, 4 problems
+```
+
+달라진 4개는 모두 앞 표에 있어요.
+
+| 설정 | 요청(HTTP/2) | none | bad | worker | admin |
+|---|---|---:|---:|---:|---:|
+| 기본 | `GET /api/v1/dashboard/namespace-truth` | 200→404 | 200→404 | 200→404 | 200→404 |
+| 엄격 | `GET /api/v1/dashboard/namespace-truth` | 401→404 | 401→404 | 200→404 | 200→404 |
+| 엄격 | `GET /.well-known/agent.json`, `agent-card.json` | 200→401 | 200→401 | 그대로 | 그대로 |
+
+다른 모든 경로에서 Worker와 Admin 토큰의 응답은 그대로예요. 권한 11곳이 표의 권한으로 바뀐 것이 자격 있는 응답에 영향이 없다는 코드 읽기 결과를 응답으로 확인했어요.
+
+표준 비교(`compare-credentials.txt`, 자격 있는 HTTP/1 응답 포함):
+
+```
+compared 6044 statuses, 6 problems
+credentialed bodies: 2571 same, 197 compared by JSON field, 16 not compared, 0 responses skipped
+```
+
+6개는 앞 표의 처음 두 줄이에요. 본문을 비교하지 못한 16개는 `GET /api/v1/prompts`, `/api/v1/providers`, `/graphql`의 응답이에요(상태는 전후 모두 200이에요).
+
+변경 전 빌드 두 번째 실행(노이즈) 없이 돌리면 `etag`(본문이 달라지면 같이 달라져요), `mcp-session-id`(요청마다 무작위), CSP의 nonce(응답마다 새로 만들어요) 같은 헤더 540곳이 걸려요. 노이즈 실행을 주면 이 헤더는 걸리지 않아요. 두 번의 변경 전 실행이 우연히 같은 값이었던 프로세스 카운터 몇 개(`/health`의 `logs`·`scheduler`, `runtime-observables`의 `pool`, `memprof`의 `major_*`)는 `scripts/auth-route-baseline/volatile_fields.txt`에 경로별 규칙과 이유를 더했어요.
+
 ## 확인한 것과 하지 못한 것
 
 확인한 것:
@@ -87,7 +130,7 @@ compared 3260 statuses, 6 problems
 
 하지 못한 것:
 
-- 자격이 있는 H2 요청(Worker, Admin 토큰)을 모든 경로에 보내 보지 않았어요. A1 도구는 자격이 있는 요청을 HTTP/1로만 보내요. 위 시험이 대표 경우만 덮어요.
-- `when` 갈래를 하나씩 모두 대 보지는 않았고, 갈래가 받는 경로의 변형도 보지 않았어요.
+- 자격이 있는 H2 요청은 경로마다 한 번씩 보냈어요. POST·PUT은 본문 `{}`이라서 핸들러 안쪽의 응답(400 같은 것)은 그 입력에서만 확인한 거예요.
+- `when` 갈래는 대표 경로 19개를 신원 4개로 보냈고, 갈래마다 받는 경로의 변형을 모두 보지는 않았어요.
 - 키퍼 하위 경로 5곳은 여전히 갈래가 직접 권한을 적어요. 이걸 표로 올리려면 하위 경로마다 등록을 나눠야 해요(`Subpath_dispatch`를 없애는 일).
 - HTTP/1과 HTTP/2 핸들러가 두 벌이라서 생기는 차이(쿼리 전제조건, 호스트 리다이렉트, #46676)는 그대로예요.

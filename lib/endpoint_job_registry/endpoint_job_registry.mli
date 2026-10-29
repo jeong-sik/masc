@@ -48,6 +48,7 @@ type error =
   | Launch_already_requested
   | Launch_cancelled
   | Launch_intent_spent
+  | Cancel_reconciliation_required
   | Stale_record
   | Cleanup_failed of { primary : error option; cause : File_lock_eio.durable_lock_error }
 
@@ -105,12 +106,31 @@ val launch_record : launch_intent -> record
     or a new permission. Trusted lifetime owners retain it for original-source
     cancellation and result readback before a native supervisor exists.
     Mutations still refresh and validate that exact source. *)
+val with_owner_guard : record -> record
+(** Bind a new in-process owner guard to this exact original. Validated
+    cancellation observations through the returned record are remembered before
+    releasing the job lock and are inherited by its committed launch intent.
+    An uncertain cancellation publication holds launch authority; an explicit
+    cancellation can still revalidate and reconcile the same original.
+    The guard is not durable across process loss or shared with other owners. *)
+val attach_launch_source : launch_intent -> record Atomic.t -> (unit,error) result
+(** Attach an endpoint owner's monotone source to its freshly committed intent,
+    before handing it to a lifetime. Advance an older source to the committed
+    original without overwriting a concurrently observed later state. A source
+    from a different original is rejected. Subsequent source updates must only
+    adopt validated forward progress. The attached source remains authoritative
+    for callback entry and cancelled-intent retirement even if the actor stops.
+    The owner must adopt source progress and invoke the attached lifetime in the
+    same Eio domain; source adoption must not run concurrently on another domain. *)
 
 val refresh : record -> (record, error) result
 (** Read only this opaque record's original registry/job and known launch under
     the same nonwaiting shared read lock as [load].
     Legitimate cancellation progress is visible; a replaced registry, job,
     admission, payload or already-known launch never substitutes another one.
+    An owner-guarded original with an uncertain cancellation publication returns
+    [Cancel_reconciliation_required] while its uncancelled claim remains;
+    an already observed cancellation followed by rollback returns [Stale_record].
     This read grants no launch/signal permission and permits old-boot inspection. *)
 
 val open_storage : sw:Eio.Switch.t -> record -> (storage, error) result

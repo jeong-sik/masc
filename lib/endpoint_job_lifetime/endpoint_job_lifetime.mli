@@ -34,12 +34,21 @@ val start_effect_workspace :
     remain owned until endpoint teardown; digest-bound host consumption/Release
     and cleanup are separate obligations. No files are removed here. *)
 val original : t -> P.original
+val await_startup : t -> (S.launch_outcome,error) result
+(** Observe this lifetime's actual startup completion, including registry lease
+    release and supervisor initialization. A returned owner can still be held
+    or unavailable; this is not payload exec or result readiness. Cancelling
+    the observer leaves startup alive and never retries the original launch. *)
 val await_result : t -> (P.Sha256.t,error) result
 (** Event-driven historical publication digest, never a fresh integrity check.
     A startup that lost the registry to this job's own pending cancellation
     waits for that cancellation to complete, then retires the unused launch
-    permit as an unlaunched result. No relaunch is attempted. Cancelling this
-    observer leaves the job and its publication alive. Endpoint shutdown
+    permit as an unlaunched result. No relaunch is attempted.
+    A startup held by an uncertain cancellation write retains its unused permit
+    and this result future until an explicit cancellation confirms the same
+    original and allows actual retirement and publication; startup itself stays
+    observable through [await_startup]. Cancelling an observer leaves the job
+    and its publication alive. Endpoint shutdown
     resolves unfinished futures with Owner_stopped even if a reserved worker
     never entered. No deadline or status polling is introduced. *)
 val load_result : sw:Eio.Switch.t -> t -> (D.t,error) result

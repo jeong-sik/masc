@@ -874,7 +874,204 @@ let test_unlaunched_publication_preserves_actual_fs_failure () =
     let independent=admitted registry (binding (id "07")) in
     ignore (R.with_launch ~sw (commit independent) (fun _ ~storage:_ -> ()) |> completed))
 
+let test_guarded_launch_pins_cancellation_before_source_adoption () =
+  fixture (fun ~env:_ ~sw ~root ~registry ~open_root:_ ->
+    let b=binding (id "05") in
+    let original=R.with_owner_guard (admitted registry b) in
+    let permit=commit original in
+    let source=Atomic.make original in
+    R.attach_launch_source permit source |> get;
+    check bool "attach advances the captured source to the committed launch" true
+      (R.launch_state (Atomic.get source)=R.Requested (id "06"));
+    let other=Atomic.make original in
+    check bool "a second attach is refused" true
+      (R.attach_launch_source permit other=Error R.Launch_intent_spent);
+    check bool "failed attach does not mutate its source" true (Atomic.get other==original);
+    let claim=claim_path root b in
+    let launch_bytes=In_channel.with_open_bin claim In_channel.input_all in
+    let independent=R.load registry ~binding:b |> get in
+    ignore (R.request_cancel independent ~confirmed_admission_id:(id "04") |> get);
+    let observed=R.refresh (Atomic.get source) |> get in
+    check bool "refresh saw cancellation without adopting the returned record" true
+      (R.cancellation_state observed=R.Cancellation_requested
+       && R.cancellation_state (Atomic.get source)=R.No_cancellation);
+    let saved=claim ^ ".cancelled" in
+    Unix.rename claim saved;
+    Out_channel.with_open_bin claim (fun channel -> output_string channel launch_bytes);
+    Unix.chmod claim 0o400;
+    Fun.protect ~finally:(fun () -> Unix.rename saved claim) (fun () ->
+      check bool "rollback is rejected by the pinned source" true
+        (R.refresh (Atomic.get source)=Error R.Stale_record);
+      let entered=ref false in
+      (match R.with_launch ~sw permit (fun _ ~storage:_ -> entered:=true) with
+       | R.Not_performed R.Stale_record -> ()
+       | R.Not_performed error -> fail (R.error_to_string error)
+       | R.Performed _ -> fail "rollback entered the original callback");
+      check bool "rollback cannot enter the launch callback" false !entered;
+      check bool "rollback cannot prove a no-child retirement" true
+        (R.retire_cancelled_launch ~sw permit=Error R.Stale_record));
+    ignore (R.retire_cancelled_launch ~sw permit |> get);
+    let after_retirement=Atomic.make original in
+    check bool "a retired permit cannot attach a new source" true
+      (R.attach_launch_source permit after_retirement=Error R.Launch_intent_spent);
+    check bool "failed retired attach leaves its source unchanged" true
+      (Atomic.get after_retirement==original);
+    (match R.with_launch ~sw permit (fun _ ~storage:_ -> ()) with
+     | R.Not_performed R.Launch_cancelled -> ()
+     | R.Not_performed error -> fail (R.error_to_string error)
+     | R.Performed _ -> fail "retired cancelled permit re-entered callback"))
+
+let test_guarded_launch_remembers_interrupted_cancel_reply () =
+  fixture (fun ~env:_ ~sw ~root ~registry ~open_root:_ ->
+    let b=binding (id "05") in
+    let original=R.with_owner_guard (admitted registry b) in
+    let permit=commit original in
+    let source=Atomic.make original in
+    R.attach_launch_source permit source |> get;
+    let claim=claim_path root b in
+    let launch_bytes=In_channel.with_open_bin claim In_channel.input_all in
+    (match R.For_testing.request_cancel ~after_publication:(fun () -> raise Interrupted)
+        (Atomic.get source) ~confirmed_admission_id:(id "04") with
+     | exception Interrupted -> ()
+     | Ok _ | Error _ -> fail "cancellation did not reach its lost-reply boundary");
+    let saved=claim ^ ".cancelled" in
+    Unix.rename claim saved;
+    Out_channel.with_open_bin claim (fun channel -> output_string channel launch_bytes);
+    Unix.chmod claim 0o400;
+    Fun.protect ~finally:(fun () -> Unix.rename saved claim) (fun () ->
+      (match R.with_launch ~sw permit (fun _ ~storage:_ -> ()) with
+       | R.Not_performed R.Stale_record -> ()
+       | R.Not_performed error -> fail (R.error_to_string error)
+       | R.Performed _ -> fail "lost cancellation reply allowed rollback launch"));
+    ignore (R.retire_cancelled_launch ~sw permit |> get))
+
+let test_guarded_launch_remembers_uncertain_cancel_publication () =
+  fixture (fun ~env:_ ~sw ~root ~registry ~open_root:_ ->
+    let b=binding (id "05") in
+    let original=R.with_owner_guard (admitted registry b) in
+    let permit=commit original in
+    let source=Atomic.make original in
+    R.attach_launch_source permit source |> get;
+    let claim=claim_path root b in
+    let launch_bytes=In_channel.with_open_bin claim In_channel.input_all in
+    let fault=Recovery_test.parent_sync_dispatch_fault
+      ~exception_:(Unix.Unix_error (Unix.EIO,"fsync","cancel parent")) in
+    (match Recovery_test.with_replace_dispatch_fault fault (fun () ->
+        R.request_cancel (Atomic.get source) ~confirmed_admission_id:(id "04")) with
+     | Error (R.Publication_failed failure) ->
+       check bool "the cancel claim was replaced before durability failed" true
+         (failure.target_effect=Fs_compat.Target_replaced)
+     | Error error -> fail (R.error_to_string error)
+     | Ok _ -> fail "uncertain cancellation was acknowledged");
+    let saved=claim ^ ".cancelled" in
+    Unix.rename claim saved;
+    Out_channel.with_open_bin claim (fun channel -> output_string channel launch_bytes);
+    Unix.chmod claim 0o400;
+    Fun.protect ~finally:(fun () -> Unix.rename saved claim) (fun () ->
+      (match R.with_launch ~sw permit (fun _ ~storage:_ -> ()) with
+       | R.Not_performed R.Stale_record -> ()
+       | R.Not_performed error -> fail (R.error_to_string error)
+       | R.Performed _ -> fail "uncertain replaced cancellation allowed rollback launch");
+      check bool "observed replacement cannot be silently republished after rollback" true
+        (R.request_cancel (Atomic.get source) ~confirmed_admission_id:(id "04")=Error R.Stale_record));
+    let confirmed=R.request_cancel (Atomic.get source) ~confirmed_admission_id:(id "04") |> get in
+    check bool "explicit reconciliation confirms the original cancellation" true
+      (R.cancellation_state confirmed=R.Cancellation_requested);
+    ignore (R.retire_cancelled_launch ~sw permit |> get))
+
+let test_unchanged_cancel_does_not_invent_uncertainty () =
+  fixture (fun ~env:_ ~sw ~root:_ ~registry ~open_root:_ ->
+    let b=binding (id "05") in
+    let original=R.with_owner_guard (admitted registry b) in
+    let permit=commit original in
+    let source=Atomic.make original in
+    R.attach_launch_source permit source |> get;
+    let fault=Recovery_test.replace_dispatch_fault ~stage:Recovery_test.Before_publish_replace
+      ~exception_:(Unix.Unix_error (Unix.EIO,"rename","cancel claim")) in
+    (match Recovery_test.with_replace_dispatch_fault fault (fun () ->
+        R.request_cancel (Atomic.get source) ~confirmed_admission_id:(id "04")) with
+     | Error (R.Publication_failed failure) ->
+       check bool "failed pre-publication leaves the target unchanged" true
+         (failure.target_effect=Fs_compat.Target_unchanged)
+     | Error error -> fail (R.error_to_string error)
+     | Ok _ -> fail "failed cancellation publication was acknowledged");
+    let entered=ref 0 in
+    ignore (R.with_launch ~sw permit (fun _ ~storage:_ -> incr entered) |> completed);
+    check int "unchanged failed cancellation leaves the original launch executable" 1 !entered)
+
+let test_unknown_cancel_effect_holds_original_launch () =
+  fixture (fun ~env:_ ~sw ~root:_ ~registry ~open_root:_ ->
+    let b=binding (id "05") in
+    let original=R.with_owner_guard (admitted registry b) in
+    let permit=commit original in
+    let source=Atomic.make original in
+    R.attach_launch_source permit source |> get;
+    let fault=Recovery_test.remove_staging_payload_before_publish () in
+    (match Recovery_test.with_replace_dispatch_fault fault (fun () ->
+        R.request_cancel (Atomic.get source) ~confirmed_admission_id:(id "04")) with
+     | Error (R.Publication_failed failure) ->
+       check bool "failed rename reports an unknown target effect" true
+         (failure.target_effect=Fs_compat.Target_state_unknown)
+     | Error error -> fail (R.error_to_string error)
+     | Ok _ -> fail "unknown cancellation publication was acknowledged");
+    let entered=ref false in
+    check bool "uncertain cancellation is visible to original observation" true
+      (R.refresh (Atomic.get source)=Error R.Cancel_reconciliation_required);
+    (match R.with_launch ~sw permit (fun _ ~storage:_ -> entered:=true) with
+     | R.Not_performed R.Cancel_reconciliation_required -> ()
+     | R.Not_performed error -> fail (R.error_to_string error)
+     | R.Performed _ -> fail "unknown cancellation effect entered the callback");
+    check bool "unknown cancellation never enters the callback" false !entered)
+
+let test_guarded_intent_pins_direct_cancel_observation during_retirement () =
+  fixture (fun ~env:_ ~sw ~root ~registry ~open_root:_ ->
+    let b=binding (id "05") in
+    let original=R.with_owner_guard (admitted registry b) in
+    let permit=commit original in
+    let source=Atomic.make original in
+    R.attach_launch_source permit source |> get;
+    let claim=claim_path root b in
+    let launch_bytes=In_channel.with_open_bin claim In_channel.input_all in
+    let independent=R.load registry ~binding:b |> get in
+    ignore (R.request_cancel independent ~confirmed_admission_id:(id "04") |> get);
+    if during_retirement then (
+      let reached=ref false in
+      match R.For_testing.retire_cancelled_launch
+          ~before_resync_parent:(fun () -> reached:=true;raise (Unix.Unix_error (Unix.EIO,"fsync","proof parent")))
+          ~after_retirement:(fun () -> ()) ~sw permit with
+      | Error (R.Authority_unavailable _) when !reached -> ()
+      | Ok _ | Error _ -> fail "retirement did not reach the failed resync boundary")
+    else (
+      match R.with_launch ~sw permit (fun _ ~storage:_ -> ()) with
+      | R.Not_performed R.Launch_cancelled -> ()
+      | R.Not_performed error -> fail (R.error_to_string error)
+      | R.Performed _ -> fail "cancelled original entered callback");
+    let saved=claim ^ ".cancelled" in
+    Unix.rename claim saved;
+    Out_channel.with_open_bin claim (fun channel -> output_string channel launch_bytes);
+    Unix.chmod claim 0o400;
+    Fun.protect ~finally:(fun () -> Unix.rename saved claim) (fun () ->
+      match R.with_launch ~sw permit (fun _ ~storage:_ -> ()) with
+      | R.Not_performed R.Stale_record -> ()
+      | R.Not_performed error -> fail (R.error_to_string error)
+      | R.Performed _ -> fail "previously observed cancellation was lost");
+    ignore (R.retire_cancelled_launch ~sw permit |> get))
+
 let ()=run "endpoint job registry" ["original durable admission",[
+  test_case "owner guard pins cancellation before source adoption" `Quick
+    test_guarded_launch_pins_cancellation_before_source_adoption;
+  test_case "owner guard retains an interrupted cancellation reply" `Quick
+    test_guarded_launch_remembers_interrupted_cancel_reply;
+  test_case "owner guard retains an uncertain replaced cancellation" `Quick
+    test_guarded_launch_remembers_uncertain_cancel_publication;
+  test_case "unchanged failed cancellation does not invent a hold" `Quick
+    test_unchanged_cancel_does_not_invent_uncertainty;
+  test_case "unknown cancellation effect holds the original launch" `Quick
+    test_unknown_cancel_effect_holds_original_launch;
+  test_case "launch observation pins cancellation" `Quick
+    (test_guarded_intent_pins_direct_cancel_observation false);
+  test_case "failed retirement pins cancellation" `Quick
+    (test_guarded_intent_pins_direct_cancel_observation true);
   test_case "original admission is idempotent and survives reopen" `Quick test_original_admission_survives_reopen;
   test_case "base Inspect outer v1 is rejected before original decoding" `Quick
     (test_legacy_claim_version_is_rejected_before_decode "base Inspect with bare binding" `Inspect);

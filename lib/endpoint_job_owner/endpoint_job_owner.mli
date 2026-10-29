@@ -35,9 +35,10 @@ val create :
 
     Every original keeps one table entry, one actor and one release hook until
     this Switch ends, including after its result is final; nothing evicts them
-    earlier (issue #46444). If an actor raises outside a request, that
-    original's controls return [Controller_failed] until this Switch ends, and
-    a later lookup returns the same stopped operation (issue #46445). *)
+    earlier (issue #46444). A failed control is reported to its observers.
+    A later explicit control can resume a failed actor on the same operation,
+    retaining its captured source, native lifetime and result. Failed controls
+    are never replayed. Endpoint shutdown cannot be resumed. *)
 val admit : t -> binding:P.binding -> spec:P.spec -> (operation,error) result
 (** Register complete original bytes without launching. Existing live entries
     refresh their captured source; missing authority never falls back to admit.
@@ -45,11 +46,17 @@ val admit : t -> binding:P.binding -> spec:P.spec -> (operation,error) result
 val lookup : t -> P.original -> (operation,error) result
 (** Bind the complete lookup/admission to this controller's original protected
     registry. Cold known launches remain unknown live ownership; this function
-    creates neither a new admission nor a recovered kernel handle. *)
+    creates neither a new admission nor a recovered kernel handle. Existing entries
+    validate their captured physical original; a newly loaded matching binding
+    never replaces it. If that validation finds an uncertain cancellation write,
+    lookup returns the same existing operation for explicit reconciliation;
+    inspection still reports the hold, and lookup grants no new launch authority.
+    Concurrent cold lookup/admission share one reservation. *)
 val original : operation -> P.original
 val inspect_original : operation -> (R.record,error) result
 (** Current source only, without waiting for startup, process exit or output.
-    This is not an execution or complete-result projection. *)
+    This is not an execution or complete-result projection. A concurrent source
+    advance returns [Registry_error R.Stale_record] instead of rolling it back. *)
 val activate : operation -> request
 val cancel : operation -> request
 (** Reserve an endpoint-owned control and return before its I/O. Concurrent
@@ -69,10 +76,28 @@ val await_result : operation -> (P.Sha256.t,error) result
     is invented. Unavailable activation is a visible hold. A later explicit
     activation/cancellation can update the observation without changing the
     original. Cold known launches return Launch_unknown rather than waiting
-    on an invented live future. Cancelling an observer leaves the actor alive. *)
+    on an invented live future. This controller's pending commit/ownership
+    handoff retains its existing future rather than becoming a cold launch.
+    Cancelling an observer leaves the actor alive. *)
 val load_result :
   sw:Eio.Switch.t -> expected_sha256:P.Sha256.t option -> operation -> (D.t,error) result
 (** Load actual original storage and fully verify complete output/receipt.
     A live publication binds its known digest; Some host digest must agree.
     Cold discovery with None uses protected storage only, never live ownership.
     Reader resources belong to this observer. No host ACK or cleanup granted. *)
+
+module For_testing : sig
+  val create :
+    before_request:(unit -> unit) -> after_commit:(unit -> unit) ->
+    sw:Eio.Switch.t -> fs:Eio.Fs.dir_ty Eio.Path.t -> registry:R.t ->
+    cgroup_parent_path:string -> new_id:(unit -> P.Id.t) ->
+    resolve_execution:(P.spec -> (L.execution,string) result) -> t
+  (** Interleave outside request handling or after the original launch commit
+      before native ownership handoff. This grants no execution or authority. *)
+  val inspect_original : after_refresh:(unit -> unit) -> operation -> (R.record,error) result
+  (** Interleave after the actual captured-source refresh and before adopting its
+      result. A concurrently advanced source remains pinned; no retry occurs. *)
+  val await_startup : operation -> ((C.S.launch_outcome,error) result) option
+  (** Observe an owned native lifetime's actual startup future. None means no
+      native lifetime exists; this neither activates nor reconstructs one. *)
+end

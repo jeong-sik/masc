@@ -231,7 +231,7 @@ let test_finalization_reuses_matching_pipeline_checkpoint () =
     ; context = Agent_core.Context.copy persisted.context
     }
   in
-  let selected, source_already_persisted =
+  let selected =
     Finalize.select_finalization_checkpoint
       ~last_persisted_checkpoint:(Some persisted)
       rebuilt
@@ -239,8 +239,8 @@ let test_finalization_reuses_matching_pipeline_checkpoint () =
   Alcotest.(check bool)
     "matching pipeline checkpoint selected"
     true
-    (source_already_persisted && selected == persisted);
-  let patched, replay_suffix_pruned =
+    (selected == persisted);
+  let patched, (_ : Finalize.replay_suffix_prune_reason option) =
     Finalize.checkpoint_for_replay_persistence
       ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
       ~history_messages:history
@@ -253,15 +253,7 @@ let test_finalization_reuses_matching_pipeline_checkpoint () =
   Alcotest.(check bool)
     "canonical no-op preserves the durable message spine"
     true
-    (patched.messages == persisted.messages);
-  Alcotest.(check bool)
-    "final duplicate persistence is unnecessary"
-    true
-    (Finalize.finalization_checkpoint_already_persisted
-       ~source_already_persisted
-       ~source:selected
-       ~patched
-       ~replay_suffix_pruned)
+    (patched.messages == persisted.messages)
 ;;
 
 let test_finalization_does_not_reuse_distinct_message_state () =
@@ -280,7 +272,7 @@ let test_finalization_does_not_reuse_distinct_message_state () =
       ; created_at = persisted.created_at +. 1.0
       }
   in
-  let selected, source_already_persisted =
+  let selected =
     Finalize.select_finalization_checkpoint
       ~last_persisted_checkpoint:(Some persisted)
       rebuilt
@@ -288,7 +280,7 @@ let test_finalization_does_not_reuse_distinct_message_state () =
   Alcotest.(check bool)
     "distinct message spine keeps the rebuilt checkpoint"
     true
-    ((not source_already_persisted) && selected == rebuilt)
+    (selected == rebuilt)
 ;;
 
 let test_finalization_persists_context_only_progress () =
@@ -315,21 +307,18 @@ let test_finalization_persists_context_only_progress () =
       | Stale_noop _ -> Alcotest.fail "current checkpoint must be saved"
     in
     save persisted;
-    let selected, source_already_persisted =
+    let selected =
       Finalize.select_finalization_checkpoint
         ~last_persisted_checkpoint:(Some persisted) updated
     in
-    let patched, replay_suffix_pruned =
+    let patched, (_ : Finalize.replay_suffix_prune_reason option) =
       Finalize.checkpoint_for_replay_persistence
       ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 }) ~history_messages:history
         ~session_id:persisted.session_id ~response_text:"final"
         ~exclude_thought_from_replay:false selected
       |> expect_ok
     in
-    if not
-         (Finalize.finalization_checkpoint_already_persisted
-            ~source_already_persisted ~source:selected ~patched ~replay_suffix_pruned)
-    then save patched;
+    save patched;
     let restored =
       Masc.Keeper_checkpoint_store.load_agent_core ~session_dir
         ~session_id:persisted.session_id
@@ -344,6 +333,49 @@ let test_finalization_persists_context_only_progress () =
          "tool_observation" = None))
 ;;
 
+(* The pipeline saves a turn's messages as open messages; the closing save at
+   finalization writes them as the turn's bundle, also when it selects the
+   value the pipeline already saved. *)
+let test_finalization_closes_the_turn_the_pipeline_saved () =
+  let open Agent_core.Types in
+  let history = [ message User [ Text "question" ] ] in
+  let persisted =
+    checkpoint ~working_context:None (history @ [ message Assistant [ Text "final" ] ])
+  in
+  with_temp_dir (fun session_dir ->
+    let save boundary checkpoint =
+      match
+        Masc.Keeper_checkpoint_store.save_agent_core_classified ~boundary
+          ~history_retained:(history_retained ()) ~session_dir checkpoint
+        |> expect_ok
+      with
+      | Masc.Keeper_checkpoint_store.Saved _ -> ()
+      | Stale_noop _ -> Alcotest.fail "current checkpoint must be saved"
+    in
+    save Agent_core.Checkpoint_objects.Turn_continues persisted;
+    let selected =
+      Finalize.select_finalization_checkpoint ~last_persisted_checkpoint:(Some persisted)
+        { persisted with created_at = persisted.created_at +. 1.0 }
+    in
+    let patched, (_ : Finalize.replay_suffix_prune_reason option) =
+      Finalize.checkpoint_for_replay_persistence
+        ~stop_reason:(Runtime_agent.Completed { provider_turn_ordinal = 17 })
+        ~history_messages:history ~session_id:persisted.session_id ~response_text:"final"
+        ~exclude_thought_from_replay:false selected
+      |> expect_ok
+    in
+    save Agent_core.Checkpoint_objects.Turn_closes patched;
+    let path =
+      Masc.Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir
+        ~session_id:persisted.session_id
+    in
+    match Agent_core.Checkpoint_objects.head_of_string (Fs_compat.load_file path) with
+    | Error error -> Alcotest.fail (Agent_core.Checkpoint_objects.load_error_to_string error)
+    | Ok head ->
+      Alcotest.(check int) "no message is left open" 0 (List.length head.history.open_messages);
+      Alcotest.(check int) "the turn is one closed turn" 1 (List.length head.history.turns))
+;;
+
 let test_finalization_preserves_updated_execution_state () =
   let persisted = checkpoint ~working_context:None [] in
   let updated =
@@ -353,21 +385,11 @@ let test_finalization_preserves_updated_execution_state () =
     ; working_context = Some (`Assoc [ "current", `Bool true ])
     }
   in
-  let selected, reused =
+  let selected =
     Finalize.select_finalization_checkpoint
       ~last_persisted_checkpoint:(Some persisted) updated
   in
-  Alcotest.(check bool) "changed execution state requires save" false reused;
-  Alcotest.(check bool) "new state selected" true (selected == updated);
-  let patched =
-    { persisted with context = Agent_core.Context.copy persisted.context }
-  in
-  Agent_core.Context.set_scoped patched.context Agent_core.Context.Session
-    "tool_observation" (`String "new");
-  Alcotest.(check bool) "post-selection context change requires save" false
-    (Finalize.finalization_checkpoint_already_persisted
-       ~source_already_persisted:true ~source:persisted ~patched
-       ~replay_suffix_pruned:None)
+  Alcotest.(check bool) "new state selected" true (selected == updated)
 ;;
 
 let test_finalization_cannot_hide_unencodable_state () =
@@ -376,12 +398,12 @@ let test_finalization_cannot_hide_unencodable_state () =
     { persisted with context = Agent_core.Context.copy persisted.context }
   in
   Agent_core.Context.set invalid.context "invalid_number" (`Float Float.nan);
-  let selected, reused =
+  let selected =
     Finalize.select_finalization_checkpoint
       ~last_persisted_checkpoint:(Some persisted) invalid
   in
   Alcotest.(check bool) "invalid new state is not replaced by prior success" true
-    ((not reused) && selected == invalid)
+    (selected == invalid)
 ;;
 
 (* A save that recovered the payload stores a different value from the one the
@@ -406,7 +428,7 @@ let test_recovery_copy_is_not_taken_for_the_run_checkpoint () =
   match Agent_core.Checkpoint.drop_unencodable_json poisoned with
   | None -> Alcotest.fail "the duplicate-key input must be droppable"
   | Some recovered ->
-    let selected, reused =
+    let selected =
       Finalize.select_finalization_checkpoint
         ~last_persisted_checkpoint:(Some recovered)
         poisoned
@@ -414,7 +436,7 @@ let test_recovery_copy_is_not_taken_for_the_run_checkpoint () =
     Alcotest.(check bool)
       "the recovery copy is not the run's checkpoint"
       true
-      ((not reused) && selected == poisoned)
+      (selected == poisoned)
 ;;
 
 let test_contract_observation_preserves_current_turn_suffix () =
@@ -1134,6 +1156,9 @@ let () =
         ; Alcotest.test_case
             "context-only progress survives finalization and disk restore"
             `Quick test_finalization_persists_context_only_progress
+        ; Alcotest.test_case
+            "finalization closes the turn the pipeline saved"
+            `Quick test_finalization_closes_the_turn_the_pipeline_saved
         ; Alcotest.test_case
             "finalization preserves changed execution state"
             `Quick test_finalization_preserves_updated_execution_state

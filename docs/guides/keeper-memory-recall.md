@@ -122,6 +122,14 @@ closes.
 
 ## Watch it
 
+- **Standing.** `GET /api/v1/runtime/config/memory-recall` (admin token) says,
+  for every Keeper that has a declaration file, whether the judgment reaches it
+  now (`judged`) or why not (`environment_switch_off`, `memory_recall_disabled`,
+  `keeper_excluded`, `lane_disabled` or `no_armed_destination`), and whether
+  the lane has a key (`lane`: `armed` or the reason). The answer is the one a
+  turn gets: both call `Keeper_memory_recall_standing.of_keeper`. It reads the
+  gate as loaded and the environment as it is, so a runtime.toml edited on disk
+  and not yet loaded does not show.
 - **Journal.** `memory-recall-evaluations.jsonl` in the Keeper's runtime
   directory holds every request, every response and the outcome of each
   judgment. It contains private Keeper memory: treat it like the Keeper's other

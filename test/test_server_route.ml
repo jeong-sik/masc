@@ -94,26 +94,6 @@ let test_access_matches_the_registered_kind () =
     (access_json (Server_route.access (Server_route.Permission Masc_domain.CanAdmin)))
 ;;
 
-let test_older_registrations_are_unclassified () =
-  let unclassified name routes =
-    let route = single_route routes in
-    check
-      string
-      name
-      (access_json Route_access.Unclassified)
-      (access_json route.Router.access)
-  in
-  unclassified "get" (Router.get "/x" plain_handler (Router.create ()));
-  unclassified "post" (Router.post "/x" plain_handler (Router.create ()));
-  unclassified
-    "add"
-    (Router.add ~path:"/x" ~methods:[ `GET ] ~handler:plain_handler (Router.create ()));
-  unclassified "prefix_get" (Router.prefix_get "/x/" plain_handler (Router.create ()));
-  unclassified
-    "ws_get"
-    (Router.ws_get "/x" (fun ~upgrade:_ _request _reqd -> ()) (Router.create ()))
-;;
-
 let test_method_and_kind () =
   let route =
     single_route (Server_route.post Server_route.Always_public "/x" plain_handler (Router.create ()))
@@ -157,7 +137,6 @@ let test_json_shape () =
   let expect name access json =
     check string name json (access_json access)
   in
-  expect "unclassified" Route_access.Unclassified {|{"kind":"unclassified"}|};
   expect
     "permission"
     (Route_access.Permission Masc_domain.CanAdmin)
@@ -308,12 +287,13 @@ let path_of = function
 ;;
 
 (* Every kind with its path, the registration under test, and the same wrapper
-   applied by hand. *)
+   applied by hand. The by-hand side registers through [Always_public], which
+   wraps nothing, so its handler runs as written. *)
 let dispatch_kinds =
   let admin = Masc_domain.CanAdmin in
   [ ( "always_public"
     , (fun r -> Server_route.get Server_route.Always_public "/always_public" (plain "always_public") r)
-    , fun r -> Router.get "/always_public" (plain "always_public") r )
+    , fun r -> Server_route.get Server_route.Always_public "/always_public" (plain "always_public") r )
   ; ( "self_authenticated"
     , (fun r ->
         Server_route.get
@@ -321,16 +301,26 @@ let dispatch_kinds =
           "/self_authenticated"
           (plain "self_authenticated")
           r)
-    , fun r -> Router.get "/self_authenticated" (plain "self_authenticated") r )
+    , fun r ->
+        Server_route.get
+          Server_route.Always_public
+          "/self_authenticated"
+          (plain "self_authenticated")
+          r )
   ; ( "public_read"
     , (fun r -> Server_route.get Server_route.Public_read "/public_read" (on_state "public_read") r)
     , fun r ->
-        Router.get "/public_read" (Server_auth.with_public_read (on_state "public_read")) r )
+        Server_route.get
+          Server_route.Always_public
+          "/public_read"
+          (Server_auth.with_public_read (on_state "public_read"))
+          r )
   ; ( "public_read_on_public_path"
     , (fun r ->
         Server_route.get Server_route.Public_read public_path (on_state "public_read_on_public_path") r)
     , fun r ->
-        Router.get
+        Server_route.get
+          Server_route.Always_public
           public_path
           (Server_auth.with_public_read (on_state "public_read_on_public_path"))
           r )
@@ -343,7 +333,8 @@ let dispatch_kinds =
           r)
     , fun r ->
         (* The shape the dashboard pages had before they carried a kind. *)
-        Router.get
+        Server_route.get
+          Server_route.Always_public
           "/public_read_on_canonical_host"
           (fun request reqd ->
              Server_canonical_host.with_canonical_loopback_host
@@ -358,12 +349,18 @@ let dispatch_kinds =
           r )
   ; ( "read_auth"
     , (fun r -> Server_route.get Server_route.Read_auth "/read_auth" (on_state "read_auth") r)
-    , fun r -> Router.get "/read_auth" (Server_auth.with_read_auth (on_state "read_auth")) r )
+    , fun r ->
+        Server_route.get
+          Server_route.Always_public
+          "/read_auth"
+          (Server_auth.with_read_auth (on_state "read_auth"))
+          r )
   ; ( "permission"
     , (fun r ->
         Server_route.get (Server_route.Permission admin) "/permission" (on_state "permission") r)
     , fun r ->
-        Router.get
+        Server_route.get
+          Server_route.Always_public
           "/permission"
           (Server_auth.with_permission_auth ~permission:admin (on_state "permission"))
           r )
@@ -375,7 +372,8 @@ let dispatch_kinds =
           (on_string "token_permission")
           r)
     , fun r ->
-        Router.get
+        Server_route.get
+          Server_route.Always_public
           "/token_permission"
           (Server_auth.with_token_permission_auth ~permission:admin (on_string "token_permission"))
           r )
@@ -387,7 +385,8 @@ let dispatch_kinds =
           (on_string "private_token_permission")
           r)
     , fun r ->
-        Router.get
+        Server_route.get
+          Server_route.Always_public
           "/private_token_permission"
           (Server_auth.with_private_token_permission_auth
              ~permission:admin
@@ -401,7 +400,8 @@ let dispatch_kinds =
           (on_state "tool")
           r)
     , fun r ->
-        Router.get
+        Server_route.get
+          Server_route.Always_public
           "/tool"
           (Server_auth.with_tool_auth ~tool_name:"masc_status" (on_state "tool"))
           r )
@@ -413,7 +413,8 @@ let dispatch_kinds =
           (on_string "tool_actor")
           r)
     , fun r ->
-        Router.get
+        Server_route.get
+          Server_route.Always_public
           "/tool_actor"
           (Server_auth.with_tool_actor_auth ~tool_name:"masc_status" (on_string "tool_actor"))
           r )
@@ -745,10 +746,6 @@ let () =
             "access is what the registration records"
             `Quick
             test_access_matches_the_registered_kind
-        ; test_case
-            "the older functions record unclassified"
-            `Quick
-            test_older_registrations_are_unclassified
         ; test_case "method and kind follow the function" `Quick test_method_and_kind
         ; test_case
             "ws_get records the upgrade reason"

@@ -399,10 +399,8 @@ module Router : sig
     ; methods : Httpun.Method.t list
     ; handler : route_target
     ; access : Route_access.t
-        (** What the registration says about who may call the route. The
-            registration functions in this module record
-            [Route_access.Unclassified]; the functor {!Make_typed} records the
-            kind it was given. *)
+        (** What the registration says about who may call the route: the kind
+            the functor {!Make_typed} was given. *)
     }
 
   type resolution =
@@ -434,46 +432,11 @@ module Router : sig
       access applies to a request. *)
   val effective_routes : t -> route list
 
-  (** Generic add; prefer the typed wrappers below. *)
-  val add
-    :  path:string
-    -> methods:Httpun.Method.t list
-    -> handler:request_handler
-    -> t
-    -> t
-
-  val get : string -> request_handler -> t -> t
-  val post : string -> request_handler -> t -> t
-
-  (** [any path handler routes] registers handler for GET /
-      POST / PUT / DELETE / OPTIONS. *)
-  val any : string -> request_handler -> t -> t
-
-  (** [ws_get path handler routes] registers a WebSocket-upgrade route
-      on GET [path].  The handler receives the Gluten {!upgrade}
-      capability so it can drive the post-101 connection.  RFC-0281. *)
-  val ws_get : string -> ws_handler -> t -> t
-
-  (** [prefix_get prefix handler routes] matches any GET whose
-      path starts with [prefix]. *)
-  val prefix_get : string -> request_handler -> t -> t
-
-  val prefix_post : string -> request_handler -> t -> t
-
-  (** [prefix_delete prefix handler routes] matches any DELETE whose
-      path starts with [prefix]. *)
-  val prefix_delete : string -> request_handler -> t -> t
-
-  (** [prefix_put prefix handler routes] matches any PUT whose
-      path starts with [prefix]. *)
-  val prefix_put : string -> request_handler -> t -> t
-
   (** {2 Typed registration}
 
-      The only way to give a route an access other than
-      [Route_access.Unclassified] is {!Make_typed}. It applies the wrapper that
-      goes with the kind to the handler and records the kind in the same call,
-      so a route cannot declare [Permission] and run a handler that checks
+      {!Make_typed} is the only way to register a route. It applies the wrapper
+      that goes with the kind to the handler and records the kind in the same
+      call, so a route cannot declare [Permission] and run a handler that checks
       nothing. The function that takes the access and the handler as separate
       arguments is not exported.
 

@@ -1,6 +1,3 @@
-open Server_auth
-module Http = Http_server_eio
-
 let max_queued_events = 64
 let ping_interval_s = Server_mcp_transport_http_headers.sse_ping_interval_s
 
@@ -74,17 +71,16 @@ let serve ~sw ~clock ~subscribe ~ping_interval_s ~stalled_after_s ~max_queued_ev
 
 let add_routes ~sw ~clock router =
   router
-  |> Http.Router.get Fleet_stream.stream_path (fun request reqd ->
-    with_public_read
-      (fun _state _request reqd ->
-         serve
-           ~sw
-           ~clock
-           ~subscribe:(Fleet_stream_hub.subscribe Server_routes_http_runtime.fleet_stream_hub)
-           ~ping_interval_s
-           ~stalled_after_s
-           ~max_queued_events
-           reqd)
-      request
-      reqd)
+  |> Server_route.get
+       Server_route.Public_read
+       Fleet_stream.stream_path
+       (fun _state _request reqd ->
+          serve
+            ~sw
+            ~clock
+            ~subscribe:(Fleet_stream_hub.subscribe Server_routes_http_runtime.fleet_stream_hub)
+            ~ping_interval_s
+            ~stalled_after_s
+            ~max_queued_events
+            reqd)
 ;;

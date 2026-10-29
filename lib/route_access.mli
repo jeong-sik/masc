@@ -2,9 +2,7 @@
 
     [Server_route] derives a value from the typed auth kind of a registration and
     stores it on the route, so the route table can be read without running a
-    handler. [Unclassified] is what the older registration functions of
-    {!Http_server_eio.Router} record. The stack that introduces this module
-    removes both in its last layer (docs/rfc/RFC-typed-route-auth.md). *)
+    handler. *)
 
 (** Why a route authenticates the request itself instead of using one of the
     other kinds. Each reason is a route family whose handler answers a missing
@@ -39,7 +37,6 @@ type self_authenticated_reason =
           sub-routes are not in the route table. *)
 
 type t =
-  | Unclassified
   | Always_public  (** Open on every configuration, strict auth included. *)
   | Public_read
       (** Open on the default configuration; strict auth asks for a read

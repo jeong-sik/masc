@@ -312,7 +312,7 @@ let make_extended_handler ~trust_policy routes =
     let reqd = gluten_reqd.Gluten.Reqd.reqd in
     (* Gluten upgrade capability — only available here at the connection
        boundary.  Threaded to [Http.Router.dispatch] so WebSocket routes
-       ([Http.Router.ws_get]) can drive the post-101 connection.
+       ([Server_route.ws_get]) can drive the post-101 connection.
        RFC-0281. *)
     let upgrade = gluten_reqd.Gluten.Reqd.upgrade in
     let request = Httpun.Reqd.request reqd in

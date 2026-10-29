@@ -5,6 +5,8 @@ import { artifactHref, captureArtifactWorkspace, fetchWorkspacePublishedArtifact
 import { artifactExternalSharing, type ShareObservation } from '../../lib/artifact-external-sharing'
 import { forgetPendingShare, retainPendingShare } from '../../lib/artifact-share-recovery'
 import { ExternalShareOutcomes } from './external-share-outcomes'
+import { PublicationOutcomes } from './publication-outcomes'
+import type { ArtifactPublicationOwner } from '../../lib/artifact-publication-outcomes'
 import { Markdown } from '../common/markdown'
 import { navigate } from '../../router'
 import { copyToClipboard } from '../common/copyable-code'
@@ -55,8 +57,9 @@ function downloadSource(doc: ArtifactDocument): void {
 
 export type ArtifactShareSelection = { doc: ArtifactDocument; fixedRevision: boolean; readError?: string; revalidating?: boolean; shareWorkspace?: ArtifactWorkspace }
 
-export function ArtifactReader({ doc, fixedRevision, readOnly = false, readOnlyInteractive = true, readOnlyLabel = '외부 공유 열람', readError, workspaceRoot, shareWorkspace, currentShareSelection, waitForShareSelection, draftRetention, checkState, authRevision, isCurrent, onMutation, onPublication, onPublished, onCheckChanged, shareObservation, onClose }: {
+export function ArtifactReader({ doc, fixedRevision, readOnly = false, readOnlyInteractive = true, readOnlyLabel = '외부 공유 열람', readError, workspaceRoot, shareWorkspace, currentShareSelection, waitForShareSelection, draftRetention, checkState, authRevision, isCurrent, onMutation, onPublication, onPublished, onCheckChanged, shareObservation, onClose, publicationOwner, onDialogState }: {
   doc: ArtifactDocument; fixedRevision: boolean; checkState: ArtifactCheckState;
+  publicationOwner?: ArtifactPublicationOwner; onDialogState?: (open: boolean) => void;
   readOnly?: boolean;
   readOnlyInteractive?: boolean;
   readOnlyLabel?: string;
@@ -68,7 +71,7 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readOnlyI
   workspaceRoot: string;
   draftRetention: ArtifactDraftRetention;
   authRevision: number; isCurrent: () => boolean; onMutation: (outcome: ArtifactCheckOutcome) => void;
-  onPublication: (outcome: ArtifactPublicationOutcome) => void; onPublished: (publication: ArtifactPublication) => void;
+  onPublication: (outcome: ArtifactPublicationOutcome) => void; onPublished: (publication: ArtifactPublication, workspace: ArtifactWorkspace) => void;
   onCheckChanged: () => void; onClose: () => void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
@@ -94,7 +97,8 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readOnlyI
   useLayoutEffect(() => {
     const element = dialog.current!
     element.showModal()
-    return () => element.close()
+    onDialogState?.(true)
+    return () => { element.close(); onDialogState?.(false) }
   }, [])
   const leaveApp=(action:()=>void)=>{if(!appPending.current||window.confirm('아직 저장하지 못한 앱 입력이 있습니다. 이 화면을 나갈까요?'))action()}
   const changeRevision = (revision: string) => leaveApp(()=>navigate('workspace', {
@@ -259,6 +263,7 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readOnlyI
       <header class="shrink-0 border-b border-[var(--color-border-default)] px-4 py-3 space-y-2">
         ${readError ? html`<p role="alert">문서 재조회 실패: ${readError} 이전에 읽은 문서와 작성 중인 원고를 유지합니다.</p>` : null}
         <${ExternalShareOutcomes} />
+        <${PublicationOutcomes} currentOwner=${publicationOwner} />
         <div class="flex flex-wrap items-center justify-between gap-2">
           ${readOnly
             ? html`<button type="button" onClick=${close}>닫기</button>`
@@ -339,7 +344,7 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readOnlyI
           : editing ? html`<${ArtifactComposer} initial=${editing.snapshot.value}
           base=${editing.document} workspaceRoot=${workspaceRoot} capturedWorkspace=${editing.workspace} isCurrent=${isCurrent} onMutation=${onPublication}
           onDraftChange=${(value: ArtifactDraftSnapshot['value']) => draftRetention.remember({ ...editing.snapshot, value })}
-          onSaved=${(publication: ArtifactPublication) => { draftRetention.forget(editing.snapshot.identity); setEditing(null); onPublished(publication) }}
+          onSaved=${(publication: ArtifactPublication, workspace: ArtifactWorkspace) => { draftRetention.forget(editing.snapshot.identity); setEditing(null); onPublished(publication, workspace) }}
           onCancel=${() => { if (discardDraft()) { draftRetention.forget(editing.snapshot.identity); setEditing(null) } }} />`
           : view === 'source'
           ? html`<pre tabIndex=${0} aria-label="문서 원본" class="m-0 flex-1 whitespace-pre-wrap break-words p-6 text-xs">${content}</pre>`

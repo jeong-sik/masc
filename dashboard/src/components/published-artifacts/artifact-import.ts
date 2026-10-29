@@ -1,13 +1,13 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import type { ArtifactDraft, ArtifactPublication } from '../../api/published-artifacts'
+import type { ArtifactDraft, ArtifactPublication, ArtifactWorkspace } from '../../api/published-artifacts'
 import { ArtifactComposer, type ArtifactPublicationOutcome, type ArtifactDraftRetention, type ArtifactDraftSnapshot } from './artifact-composer'
 
 export function ArtifactImport({ workspaceRoot, draftRetention, isCurrent, onMutation, onSaved, onCancel }: {
   workspaceRoot: string;
   draftRetention: ArtifactDraftRetention;
   isCurrent: () => boolean; onMutation: (outcome: ArtifactPublicationOutcome) => void;
-  onSaved: (publication: ArtifactPublication) => void; onCancel: () => void;
+  onSaved: (publication: ArtifactPublication, workspace: ArtifactWorkspace) => void; onCancel: () => void;
 }) {
   const [draft, setDraft] = useState<ArtifactDraftSnapshot & { key: number } | null>(null)
   const [message, setMessage] = useState('')
@@ -53,7 +53,7 @@ export function ArtifactImport({ workspaceRoot, draftRetention, isCurrent, onMut
     ${message ? html`<p role="status" class="px-6">${message}</p>` : null}
     ${draft ? html`<${ArtifactComposer} key=${draft.key} initial=${draft.value} workspaceRoot=${workspaceRoot} isCurrent=${isCurrent}
       onMutation=${onMutation} onDraftChange=${(value: ArtifactDraft) => draftRetention.remember({ ...draft, value })}
-      onSaved=${(publication: ArtifactPublication) => { draftRetention.forget(draft.identity); onSaved(publication) }}
+      onSaved=${(publication: ArtifactPublication, workspace: ArtifactWorkspace) => { draftRetention.forget(draft.identity); onSaved(publication, workspace) }}
       onCancel=${() => { if (window.confirm('작성 중인 원고를 닫을까요? 저장하지 않은 내용은 사라집니다.')) { draftRetention.forget(draft.identity); onCancel() } }} />` : null}
   </section>`
 }

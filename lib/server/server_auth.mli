@@ -451,6 +451,10 @@ val validate_read_workspace_precondition :
     An absent pair leaves an ordinary read unchanged; partial, repeated or
     foreign values fail before the handler runs. Other methods retain their
     own operation preconditions. *)
+val read_workspace_precondition_error_response :
+  Workspace.expected_workspace_error -> Yojson.Safe.t * Httpun.Status.t
+(** The shared HTTP refusal body and status for an invalid or changed read
+    workspace, used by both HTTP/1 and HTTP/2 transports. *)
 val with_read_workspace_precondition :
   Mcp_server.server_state ->
   (Mcp_server.server_state ->

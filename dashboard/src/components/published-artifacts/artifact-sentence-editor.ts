@@ -26,6 +26,10 @@ export function ArtifactSentenceEditor({ session, state, format, onPending }: {
     return { editor, positions }
   }, [session, content, format])
   const dirty = sentence !== null && sentence.input !== sentence.original
+  const updateSentence = (next: Sentence | null) => {
+    onPending(next !== null && next.input !== next.original)
+    setSentence(next)
+  }
   const copies = (value:Sentence) => [...(value.copy?[value.copy]:[]),...value.recoveredFrom]
   const discard = (records: readonly ArtifactSentenceRecovery[]) => {
     records.forEach(discardArtifactSentence)
@@ -44,7 +48,6 @@ export function ArtifactSentenceEditor({ session, state, format, onPending }: {
     discard([...applied.current.values()]); applied.current.clear()
   }
   useEffect(discardApplied, [state.pending, state.recoveryPersisted])
-  useEffect(() => { onPending(dirty) }, [dirty, onPending])
   useEffect(() => () => { onPending(false); session.select(null) }, [onPending, session])
   useEffect(()=>{
     const refresh=()=>setRecoveries(artifactSentenceRecoveries(session.workspace,session.snapshot.view.draft.target.artifact_id))
@@ -60,7 +63,7 @@ export function ArtifactSentenceEditor({ session, state, format, onPending }: {
       if (!selection) return
       if (sentence) discard(copies(sentence))
       const original=format==='html'?part.text:part.raw
-      setSentence({ id: crypto.randomUUID(), format, copy:null, recoveredFrom: [], expected: part.raw, original, selection, input: original,
+      updateSentence({ id: crypto.randomUUID(), format, copy:null, recoveredFrom: [], expected: part.raw, original, selection, input: original,
         state: draftBase64(sharedState(session.doc)) }); setMessage('')
       session.select(resolveSharedSelection(session.doc, selection), format==='html'?'html_text':'source')
     }
@@ -80,7 +83,7 @@ export function ArtifactSentenceEditor({ session, state, format, onPending }: {
       session.select(resolveSharedSelection(session.doc, selection), format==='html'?'html_text':'source')
       copies(sentence).forEach(record=>applied.current.set(record.revision,record))
       discardApplied()
-      setSentence(null); setMessage('문장을 공유 원고에 반영했습니다.')
+      updateSentence(null); setMessage('문장을 공유 원고에 반영했습니다.')
     } catch (error) { setMessage(error instanceof Error ? error.message : '문장을 반영하지 못했습니다.') }
   }
   const recover = (record: ArtifactSentenceRecovery) => {
@@ -92,7 +95,7 @@ export function ArtifactSentenceEditor({ session, state, format, onPending }: {
       if (sentence) discard(copies(sentence).filter(copy => copy.revision !== record.revision))
       const next:Sentence = { id: crypto.randomUUID(), format:record.format, copy:null, recoveredFrom: [record], expected: record.expected, original: record.original,
         input: record.input, selection: {anchor:[...record.selection.anchor],head:[...record.selection.head]}, state: record.state }
-      setSentence(preserve(next))
+      updateSentence(preserve(next))
       session.recover(state)
       setMessage('선택 시점의 원고와 문장 입력을 복구했습니다. 문장을 확인한 뒤 반영해 주세요.')
     } catch (error) { setMessage(error instanceof Error ? error.message : '복구 원고를 읽지 못했습니다.') }
@@ -121,13 +124,13 @@ export function ArtifactSentenceEditor({ session, state, format, onPending }: {
         <textarea aria-label="선택한 문장" class="mt-2 block min-h-24 w-full border bg-[var(--color-bg-surface)] p-2"
           value=${sentence.input} onInput=${(event: Event) => {
             const next = { ...sentence, input: (event.target as HTMLTextAreaElement).value }
-            setSentence(preserve(next))
+            updateSentence(preserve(next))
           }} />
       </label>
       <div class="flex gap-4">
         <button type="submit" disabled=${!dirty || state.connection !== 'connected'}>문장 반영</button>
         <button type="button" onClick=${() => {
-          if (!dirty || window.confirm('아직 반영하지 않은 문장을 닫을까요?')) { discard(copies(sentence)); setSentence(null); session.select(null) }
+          if (!dirty || window.confirm('아직 반영하지 않은 문장을 닫을까요?')) { discard(copies(sentence)); updateSentence(null); session.select(null) }
         }}>선택 닫기</button>
       </div>
     </form>` : null}

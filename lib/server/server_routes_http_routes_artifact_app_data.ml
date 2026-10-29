@@ -14,10 +14,10 @@ let error_response error =
   | Unavailable _ -> response `Service_unavailable "artifact_app_data_unavailable" []
   | Commit_uncertain attempted -> response `Service_unavailable "artifact_app_data_commit_uncertain"
       ["attempted", Data.to_json attempted; "recovery", `String "Read application inputs before retrying."]
-let respond ?(status = `OK) request reqd json =
+let respond ?cors ?(status = `OK) request reqd json =
+  let cors = match cors with Some headers -> headers | None -> public_read_cors_headers request in
   Http.Response.json_value ~status
-    ~extra_headers:(["cache-control", "private, no-store"] @ cors_headers (get_origin request)) json reqd
-let refuse request reqd error = let json, status = error_response error in respond ~status request reqd json
+    ~extra_headers:(["cache-control", "private, no-store"] @ cors) json reqd
 let decode_request ~config body =
   let open Result.Syntax in
   let* json = match Yojson.Safe.from_string body with
@@ -30,23 +30,28 @@ let decode_request ~config body =
     | Error Workspace.Workspace_precondition_failed ->
       Error (Server_refusal.json ~code:"workspace_precondition_failed" "workspace precondition failed", `Conflict) in
   Data.request_of_json json |> Result.map_error (fun message -> error_response (Store.Invalid message))
-let add_routes router = router
-  |> Server_route.prefix_get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/artifact-app-data/" (fun state actor request reqd ->
-    let base_path = (Mcp_server.workspace_config state).base_path in
+let read ~base_path ~actor ~request =
     match extract_path_param ~prefix:"/api/v1/artifact-app-data/" (Http.Request.path request), query_param request "revision" with
     | Some artifact_id, Some revision ->
       (match int_of_string_opt revision with
        | Some revision ->
          (match Eio_unix.run_in_systhread (fun () -> Store.read ~base_path ~actor { Data.artifact_id; revision }) with
-          | Ok current -> respond request reqd (Data.to_json current) | Error error -> refuse request reqd error)
-       | None -> refuse request reqd (Store.Invalid "revision must be a positive integer"))
-    | _ -> refuse request reqd (Store.Invalid "artifact id and revision required"))
+          | Ok current -> Data.to_json current, `OK | Error error -> error_response error)
+       | None -> error_response (Store.Invalid "revision must be a positive integer"))
+    | _ -> error_response (Store.Invalid "artifact id and revision required")
+let set ~config ~actor ~body =
+  match decode_request ~config body with
+  | Error response -> response
+  | Ok change ->
+    match Eio_unix.run_in_systhread (fun () -> Store.set ~base_path:config.Workspace.base_path ~actor change) with
+    | Ok current -> Data.to_json current, `OK
+    | Error error -> error_response error
+let add_routes router = router
+  |> Server_route.prefix_get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/artifact-app-data/" (fun state actor request reqd ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    let json, status = read ~base_path ~actor ~request in respond ~status request reqd json)
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/artifact-app-data" (fun state actor request reqd ->
     let config = Mcp_server.workspace_config state in
+    let cors = public_read_cors_headers request in
     Http.Request.read_body_async reqd (fun body ->
-      match decode_request ~config body with
-      | Error (json, status) -> respond ~status request reqd json
-      | Ok change ->
-        match Eio_unix.run_in_systhread (fun () -> Store.set ~base_path:config.base_path ~actor change) with
-        | Ok current -> respond request reqd (Data.to_json current)
-        | Error error -> refuse request reqd error))
+      let json, status = set ~config ~actor ~body in respond ~cors ~status request reqd json))

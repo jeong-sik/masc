@@ -1726,6 +1726,19 @@ val rewrite_private_jsonl_durable_locked_at_cursor_result :
   string ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
 
+(** Atomically replace a complete store only if its identity, length and full
+    bytes still match [expected] under the stable sibling lock. A same-cursor
+    content change is refused before staging the replacement. *)
+val rewrite_private_jsonl_durable_locked_at_snapshot_result :
+  string -> expected:private_jsonl_snapshot -> string ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
+(** Production-path seam for descriptor settlement after a snapshot check. *)
+val rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
+  string -> expected:private_jsonl_snapshot -> string ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
 (** Production-path seam proving that a descriptor settlement failure while
     reading the rewrite precondition is not classified as a committed rewrite. *)
 val rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing :

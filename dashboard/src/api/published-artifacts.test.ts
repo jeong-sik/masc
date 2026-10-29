@@ -96,6 +96,14 @@ describe('published artifact native wire contract', () => {
     await expect(fetchWorkspacePublishedArtifact(artifact.id, '2', workspace)).rejects.toThrow(/작업 공간 확인 응답/)
   })
 
+  it('keeps cancellation while refusing an unauthenticated static fallback', async () => {
+    const artifact = nativeInventory.artifacts[0]!, signal = new AbortController().signal
+    const refused = Object.assign(new Error('Unauthorized'), { status: 401 })
+    vi.mocked(get).mockRejectedValueOnce(refused)
+    await expect(fetchPublishedArtifact(artifact.id, '2', signal, undefined, true)).rejects.toBe(refused)
+    expect(get).toHaveBeenCalledExactlyOnceWith(`/api/v1/published-artifacts/${artifact.id}?revision=2`, { signal, consumeWithinTimeout: true })
+  })
+
   it('toggles per-artifact external sharing via /api/v1/published-artifact-shares', async () => {
     const artifact = nativeInventory.artifacts[0]!
     const workspace = { basePath: '/workspace', mascRoot: '/workspace/.masc' }
@@ -135,6 +143,18 @@ describe('published artifact native wire contract', () => {
       requested: true, outcome: 'conflict', snapshot: { version: 0, shared: false } }, current: { version: 0, shared: false } }
     vi.mocked(post).mockRejectedValueOnce(Object.assign(new Error('conflict'), { status: 409, responseData: reply }))
     expect(await setPublishedArtifactShared(operation, workspace)).toEqual(reply)
+  })
+
+  it('rejects a receipt that contradicts the current state at the same version', async () => {
+    const id = nativeInventory.artifacts[0]!.id
+    const workspace = { basePath: '/workspace', mascRoot: '/workspace/.masc' }
+    const operation = { id, shared: true, expectedVersion: 0, operationId: '01890e2a-4c8e-7b21-9f3c-000000000034',
+      expectedArtifactRevision: 2, expectedArtifactSha256: 'a'.repeat(64) }
+    vi.mocked(post).mockResolvedValueOnce({ id, receipt: { operation_id: operation.operationId, expected_version: 0,
+      expected_artifact_revision: 2, expected_artifact_sha256: 'a'.repeat(64), publication_matches: true,
+      requested: true, outcome: 'applied', snapshot: { version: 1, shared: true } }, current: { version: 1, shared: false } })
+    await expect(setPublishedArtifactShared(operation, workspace)).rejects.toThrow()
+    expect(post).toHaveBeenCalledTimes(1)
   })
 
   it('reports a workspace refusal for this attempt without claiming the operation settled', async () => {

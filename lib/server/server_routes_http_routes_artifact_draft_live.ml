@@ -5,22 +5,22 @@ module Draft = Artifact_draft
 module Store = Artifact_draft_store
 module Live = Artifact_draft_live
 open Result.Syntax
-let respond ?(status = `OK) request reqd json =
+let respond ?cors ?(status = `OK) request reqd json =
+  let cors = match cors with Some headers -> headers | None -> public_read_cors_headers request in
   Http.Response.json_value ~status
-    ~extra_headers:(["cache-control", "private, no-store"] @ cors_headers (get_origin request)) json reqd
+    ~extra_headers:(["cache-control", "private, no-store"] @ cors) json reqd
 let refuse request reqd error =
   let json, status = Server_routes_http_routes_artifact_drafts.error_response error in
   respond ~status request reqd json
-let presence_error request reqd =
-  respond ~status:`Conflict request reqd (`Assoc ["code", `String "artifact_draft_session_closed";
-    "error", `String "The editing session is closed or belongs to another actor."])
+
 (* Each connection receives only its authenticated document room, never the
    global agent event stream. The promise is replaced under the room mutex, so
    a commit between observe and await cannot be lost. *)
 let stream ~sw ~clock ~session request reqd =
   let headers = Httpun.Headers.of_list
-    (Http.Response.scoped_headers () @ ["content-type", "text/event-stream"; "cache-control", "private, no-store";
-      "x-accel-buffering", "no"] @ cors_headers (get_origin request)) in
+    (Http.Response.scoped_headers () @
+     ["content-type", "text/event-stream"; "cache-control", "private, no-store";
+      "x-accel-buffering", "no"] @ public_read_cors_headers request) in
   let writer = Httpun.Reqd.respond_with_streaming reqd (Httpun.Response.create ~headers `OK) in
   let mutex = Eio.Mutex.create () in
   let closed = Atomic.make false in
@@ -75,51 +75,66 @@ let parse_presence json =
     | json -> Artifact_document_engine.selection_of_json json |> Result.map (fun position -> Position (Some position)) in
   Ok (target, session_id, command)
 
+let target_of_request request =
+  let* artifact_id = match extract_path_param ~prefix:"/api/v1/artifact-draft-events/" (Http.Request.path request) with
+    | Some id -> Ok id | None -> Error "artifact id required" in
+  let* generation = match query_param request "generation" with Some value -> Ok value | None -> Error "draft generation required" in
+  Draft.target_of_json (`Assoc ["artifact_id", `String artifact_id; "generation", `String generation])
+
+let join ~base_path ~actor ~target =
+  let session = Live.join ~base_path ~actor ~source:Live.Dashboard_connection ~target in
+  (* Register before reading so a newer broadcast cannot be replaced by an
+     older initial read. The successful transport owns [session]. *)
+  try match Store.read ~base_path ~artifact_id:target.Draft.artifact_id () with
+  | Error error -> Live.leave session; Error error
+  | Ok view when view.draft.target <> target ->
+    Live.leave session; Error (Store.Generation_conflict view.draft.target)
+  | Ok view ->
+    Live.publish ~base_path ~draft:view.draft ~content:view.content;
+    Ok session
+  with exn -> Live.leave session; raise exn
+
+let presence ~config ~actor ~body =
+  let base_path = config.Workspace.base_path in
+  let parsed =
+    let* json = match Yojson.Safe.from_string body with
+      | json -> Ok json
+      | exception Yojson.Json_error _ -> Error (Server_routes_http_routes_artifact_drafts.error_response (Store.Invalid "invalid presence JSON")) in
+    let* json = Server_routes_http_routes_published_artifacts.validate_body_workspace ~config json in
+    parse_presence json |> Result.map_error (fun message -> Server_routes_http_routes_artifact_drafts.error_response (Store.Invalid message)) in
+  let closed () =
+    `Assoc ["code", `String "artifact_draft_session_closed";
+      "error", `String "The editing session is closed or belongs to another actor."], `Conflict in
+  match parsed with
+  | Error response -> response
+  | Ok (target, session_id, command) ->
+    match Live.find ~base_path ~actor ~target ~session_id with
+    | Error _ -> closed ()
+    | Ok session ->
+      let validated = match command with
+        | Leave | Position None -> Ok ()
+        | Position (Some position) ->
+          Store.execute ~base_path ~actor (Draft.Resolve { target; position }) |> Result.map (fun _ -> ()) in
+      match validated with
+      | Error error -> Server_routes_http_routes_artifact_drafts.error_response error
+      | Ok () ->
+        let result = match command with Leave -> Live.leave session; Ok () | Position position -> Live.position session position in
+        match result with Error _ -> closed () | Ok () -> `Assoc ["ok", `Bool true], `OK
+
 let add_routes router = router
   |> Server_route.prefix_get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/artifact-draft-events/" (fun state actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
-    let parsed =
-      let* artifact_id = match extract_path_param ~prefix:"/api/v1/artifact-draft-events/" (Http.Request.path request) with
-        | Some id -> Ok id | None -> Error "artifact id required" in
-      let* generation = match query_param request "generation" with Some value -> Ok value | None -> Error "draft generation required" in
-      Draft.target_of_json (`Assoc ["artifact_id", `String artifact_id; "generation", `String generation]) in
-    match parsed, state.Mcp_server.sw, state.Mcp_server.clock with
+    match target_of_request request, state.Mcp_server.sw, state.Mcp_server.clock with
     | Error message, _, _ -> refuse request reqd (Store.Invalid message)
     | Ok _, None, _ | Ok _, _, None -> refuse request reqd (Store.Unavailable "server runtime not initialized")
     | Ok target, Some sw, Some clock ->
-      let session = Live.join ~base_path ~actor ~source:Live.Dashboard_connection ~target in
-      (* Register before reading: a newer commit already broadcast to this room
-         wins over the initial read. Failed admission leaves no presence. *)
-      try match Store.read ~base_path ~artifact_id:target.artifact_id () with
-      | Error error -> Live.leave session; refuse request reqd error
-      | Ok view when view.draft.target <> target ->
-        Live.leave session; refuse request reqd (Store.Generation_conflict view.draft.target)
-      | Ok view ->
-        Live.publish ~base_path ~draft:view.draft ~content:view.content;
-        stream ~sw ~clock ~session request reqd
-      with exn -> Live.leave session; raise exn)
+      (match join ~base_path ~actor ~target with
+       | Error error -> refuse request reqd error
+       | Ok session ->
+         (try stream ~sw ~clock ~session request reqd with exn -> Live.leave session; raise exn)))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/artifact-draft-presence" (fun state actor request reqd ->
     let config = Mcp_server.workspace_config state in
-    let base_path = config.base_path in
+    let cors = public_read_cors_headers request in
     Http.Request.read_body_async reqd (fun body ->
-      let parsed = match Yojson.Safe.from_string body with
-        | json ->
-          let* json = Server_routes_http_routes_published_artifacts.validate_body_workspace ~config json in
-          parse_presence json |> Result.map_error (fun message -> Server_routes_http_routes_artifact_drafts.error_response (Store.Invalid message))
-        | exception Yojson.Json_error _ -> Error (Server_routes_http_routes_artifact_drafts.error_response (Store.Invalid "invalid presence JSON")) in
-      match parsed with
-      | Error (json, status) -> respond ~status request reqd json
-      | Ok (target, session_id, command) ->
-        match Live.find ~base_path ~actor ~target ~session_id with
-        | Error _ -> presence_error request reqd
-        | Ok session ->
-          let validated = match command with
-            | Leave | Position None -> Ok ()
-            | Position (Some position) ->
-              Store.execute ~base_path ~actor (Draft.Resolve { target; position }) |> Result.map (fun _ -> ()) in
-          match validated with
-          | Error error -> refuse request reqd error
-          | Ok () ->
-            let result = match command with Leave -> Live.leave session; Ok () | Position position -> Live.position session position in
-            match result with Error _ -> presence_error request reqd
-            | Ok () -> respond request reqd (`Assoc ["ok", `Bool true])))
+      let json, status = presence ~config ~actor ~body in
+      respond ~cors ~status request reqd json))

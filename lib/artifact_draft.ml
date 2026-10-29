@@ -57,6 +57,11 @@ let advance ?discussion draft ~state ~actor ~at =
   let discussion = Option.value ~default:draft.discussion discussion in
   if not (safe_integer (draft.sequence + 1)) then Error "draft sequence exhausted"
   else validate { draft with state; discussion; sequence = draft.sequence + 1; updated_by = actor; updated_at = at }
+let checkpoint draft ~base_revision ~base_sha256 ~actor ~at =
+  if base_revision <= draft.base_revision then Error "draft publication base must advance"
+  else if not (safe_integer (draft.sequence + 1)) then Error "draft sequence exhausted"
+  else validate { draft with base_revision; base_sha256; sequence = draft.sequence + 1;
+    updated_by = actor; updated_at = at }
 let public_fields draft =
   ["schema", `String "masc.artifact_draft.v2"; "target", target_to_json draft.target;
    "base_revision", `Int draft.base_revision; "base_sha256", `String draft.base_sha256;

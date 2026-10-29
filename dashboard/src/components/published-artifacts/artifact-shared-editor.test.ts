@@ -1,21 +1,24 @@
 import { html } from 'htm/preact'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as Y from 'yjs'
 import { EditorView } from '@codemirror/view'
-import { ArtifactSharedEditor } from './artifact-shared-editor'
+import { ArtifactSharedEditor, type ArtifactSharedCloseRequest } from './artifact-shared-editor'
 import { ArtifactReader } from './artifact-reader'
 import type { ArtifactDraftSnapshot } from './artifact-composer'
+import { ApiRequestError } from '../../api/core'
 import { seedSharedDocument, sharedSource, sharedState, selectSharedSource } from '../../lib/artifact-shared-document'
 import { draftBase64, draftBytes } from '../../lib/artifact-live-session'
 import type { ArtifactDraftView } from '../../api/artifact-drafts'
-import { sendArtifactDraftCommand } from '../../api/artifact-drafts'
+import { checkpointArtifactDraft, sendArtifactDraftCommand } from '../../api/artifact-drafts'
 import { streamArtifactDraft, sendArtifactPresence, type ArtifactDraftLiveFrame } from '../../api/artifact-draft-live'
 import { captureArtifactWorkspace, fetchWorkspacePublishedArtifact, publishArtifact, readPublishedDraft, type ArtifactDocument } from '../../api/published-artifacts'
 import { artifactDraftRecoveries, discardArtifactDraftRecovery } from '../../lib/artifact-draft-recovery'
+import { discussionLocals, discardDiscussionLocal, retainDiscussionLocal } from '../../lib/artifact-discussion-local'
 vi.mock('../../api/published-artifacts', async original => ({ ...await original<typeof import('../../api/published-artifacts')>(),
   captureArtifactWorkspace: vi.fn(), fetchWorkspacePublishedArtifact: vi.fn(), publishArtifact: vi.fn(), readPublishedDraft: vi.fn() }))
-vi.mock('../../api/artifact-drafts', async original => ({ ...await original<typeof import('../../api/artifact-drafts')>(), sendArtifactDraftCommand: vi.fn() }))
+vi.mock('../../api/artifact-drafts', async original => ({ ...await original<typeof import('../../api/artifact-drafts')>(),
+  sendArtifactDraftCommand: vi.fn(), checkpointArtifactDraft: vi.fn() }))
 vi.mock('../../api/artifact-draft-live', async original => ({ ...await original<typeof import('../../api/artifact-draft-live')>(),
   streamArtifactDraft: vi.fn(), sendArtifactPresence: vi.fn() }))
 vi.mock('../../router', () => ({ navigate: vi.fn() }))
@@ -31,13 +34,14 @@ beforeEach(() => {
   retainedDrafts.clear()
   vi.mocked(captureArtifactWorkspace).mockReset().mockResolvedValue(workspace)
   vi.mocked(fetchWorkspacePublishedArtifact).mockReset(); vi.mocked(publishArtifact).mockReset(); vi.mocked(readPublishedDraft).mockReset()
-  vi.mocked(sendArtifactDraftCommand).mockReset(); vi.mocked(streamArtifactDraft).mockReset()
+  vi.mocked(sendArtifactDraftCommand).mockReset(); vi.mocked(checkpointArtifactDraft).mockReset(); vi.mocked(streamArtifactDraft).mockReset()
   vi.mocked(sendArtifactPresence).mockReset().mockResolvedValue()
 })
 afterEach(() => {
   cleanup()
   for (const char of ['a', 'b', 'c']) {
     for (const record of artifactDraftRecoveries(workspace, `artifact-${char.repeat(32)}`)) discardArtifactDraftRecovery(record)
+    for (const record of discussionLocals(workspace, `artifact-${char.repeat(32)}`)) discardDiscussionLocal(record)
   }
   for (const doc of documents.splice(0)) doc.destroy()
   vi.restoreAllMocks()
@@ -61,8 +65,13 @@ function fixture(char: string,source='shared source\r\n한글 😀\r\n') {
   const artifact = { id: target.artifact_id, revision: 1, title: 'original title', summary: 'original summary', format: 'markdown' as const,
     author: 'publisher', created_at: '2026-10-25T13:00:00Z', task_id: null, goal_id: null, body: { _blob: { sha256: 'a'.repeat(64) } }, url: '/dashboard' }
   const doc: ArtifactDocument = { artifact, content: sharedSource(authority), revisions: [artifact] }
-  const mount = (isCurrent = () => true, onPublished = vi.fn(), openingDoc:ArtifactDocument=doc) => render(html`<${ArtifactSharedEditor} draftRetention=${draftRetention} doc=${openingDoc} workspaceRoot="/fixture" capturedWorkspace=${workspace}
-    isCurrent=${isCurrent} onCloseRequest=${() => {}} onMutation=${() => {}} onPublished=${onPublished} onClose=${() => {}} />`)
+  vi.mocked(checkpointArtifactDraft).mockImplementation(async (requestedTarget, expectedSequence, publication) => {
+    const document = snapshot()
+    return { checkpoint: 'checkpointed', document: { ...document, draft: { ...document.draft, target: requestedTarget,
+      base_revision: publication.artifact.revision, base_sha256: publication.artifact.body._blob.sha256, sequence: expectedSequence + 1 } } }
+  })
+  const mount = (isCurrent = () => true, onPublished = vi.fn(), openingDoc:ArtifactDocument=doc, onMutation=vi.fn()) => render(html`<${ArtifactSharedEditor} draftRetention=${draftRetention} doc=${openingDoc} workspaceRoot="/fixture" capturedWorkspace=${workspace}
+    isCurrent=${isCurrent} onCloseRequest=${() => {}} onMutation=${onMutation} onPublished=${onPublished} onClose=${() => {}} />`)
   const editor = async () => {
     fireEvent.click(await screen.findByRole('button',{name:'원본 편집'}))
     return EditorView.findFromDOM(await screen.findByRole('textbox', { name: '공동 편집 원고' }))!
@@ -76,7 +85,7 @@ it('chooses the shared draft base format rather than a newer publication format'
   f.mount(()=>true,vi.fn(),latest)
   await screen.findByRole('region',{name:'Markdown 문장 편집'})
   expect(screen.queryByRole('region',{name:'HTML 문장 편집'})).toBeNull()
-  expect(fetchWorkspacePublishedArtifact).toHaveBeenCalledWith(f.target.artifact_id,'1',workspace)
+  expect(fetchWorkspacePublishedArtifact).toHaveBeenCalledWith(f.target.artifact_id,'1',workspace,expect.any(AbortSignal))
 })
 it('refuses a publication that does not match the shared draft base before opening either editor',async()=>{
   const f=fixture('b'),latest:ArtifactDocument={...f.doc,artifact:{...f.doc.artifact,revision:2,format:'html'}}
@@ -166,6 +175,10 @@ it('publishes again only after explicit latest-version comparison, preserving it
   fireEvent.click(save)
   await waitFor(() => expect(onPublished).toHaveBeenCalledTimes(1))
   expect(vi.mocked(publishArtifact).mock.calls[0]![0].expected_revision).toBe(1)
+  expect(checkpointArtifactDraft).toHaveBeenCalledTimes(1)
+  expect(vi.mocked(checkpointArtifactDraft).mock.calls[0]![0]).toEqual(f.target)
+  expect(vi.mocked(checkpointArtifactDraft).mock.calls[0]![1]).toBe(0)
+  expect(vi.mocked(checkpointArtifactDraft).mock.calls[0]![3]).toEqual(workspace)
 
   // Another publisher changed both content and metadata after our first post.
   latest = { ...latest, artifact: { ...latest.artifact, revision: 3, title: 'latest title', summary: 'latest summary',
@@ -195,8 +208,471 @@ it('publishes again only after explicit latest-version comparison, preserving it
   }, workspace])
   expect(fetchWorkspacePublishedArtifact).toHaveBeenLastCalledWith(f.target.artifact_id, undefined, workspace)
   expect(captureArtifactWorkspace).not.toHaveBeenCalled()
+  expect(checkpointArtifactDraft).toHaveBeenCalledTimes(2)
+  // The later edit must not change the sequence attached to the frozen publication.
+  expect(vi.mocked(checkpointArtifactDraft).mock.calls[1]![1]).toBe(1)
   expect(retainedDrafts.size).toBe(0)
   expect(editor.state.doc.toString()).toBe(`later shared edit ${frozen}`)
+})
+
+it('keeps later unsaved shared edits open after a frozen publication succeeds', async () => {
+  const f = fixture('a'), onPublished = vi.fn()
+  let finishMerge!: () => void
+  vi.mocked(sendArtifactDraftCommand).mockImplementation(command => command.action === 'merge'
+    ? new Promise(resolve => { finishMerge = () => resolve(f.merge(command.updates)) })
+    : Promise.resolve(f.snapshot()))
+  vi.mocked(fetchWorkspacePublishedArtifact).mockResolvedValue(f.doc)
+  const artifact = { ...f.doc.artifact, revision: 2 }
+  vi.mocked(publishArtifact).mockResolvedValue({ schema: 'masc.published_artifact.v1', artifact, revision_url: '/revision' })
+  vi.mocked(readPublishedDraft).mockResolvedValue({ ...f.doc, artifact })
+  f.mount(() => true, onPublished)
+  const editor = await f.editor()
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  const save = await screen.findByRole('button', { name: '새 버전 저장' })
+  editor.dispatch({ changes: { from: 0, insert: 'later local edit ' } })
+  await waitFor(() => expect(vi.mocked(sendArtifactDraftCommand).mock.calls.some(([command]) => command.action === 'merge')).toBe(true))
+  fireEvent.click(save)
+  const viewPublished = await screen.findByRole('button', { name: '게시한 버전 보기' })
+  expect(onPublished).not.toHaveBeenCalled()
+  expect(editor.state.doc.toString()).toContain('later local edit ')
+  const confirm = vi.fn(() => false); vi.stubGlobal('confirm', confirm)
+  fireEvent.click(viewPublished)
+  expect(confirm).toHaveBeenCalledTimes(1)
+  expect(onPublished).not.toHaveBeenCalled()
+  finishMerge()
+  await screen.findByText(/공동 편집을 계속하거나 게시한 버전을 볼 수 있습니다/)
+  fireEvent.click(viewPublished)
+  expect(onPublished).toHaveBeenCalledTimes(1)
+})
+
+it.each(['sentence', 'comment'] as const)('does not navigate when %s input races publication readback', async kind => {
+  const f = fixture('b', '# alpha\n'), onPublished = vi.fn()
+  let finishRead!: (value: ArtifactDocument) => void
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchWorkspacePublishedArtifact).mockResolvedValue(f.doc)
+  const artifact = { ...f.doc.artifact, revision: 2 }
+  vi.mocked(publishArtifact).mockResolvedValue({ schema: 'masc.published_artifact.v1', artifact, revision_url: '/revision' })
+  vi.mocked(readPublishedDraft).mockImplementation(() => new Promise(resolve => { finishRead = resolve }))
+  f.mount(() => true, onPublished)
+  const iframe = await screen.findByTitle('문장을 눌러 편집하는 미리보기') as HTMLIFrameElement
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  const save = await screen.findByRole('button', { name: '새 버전 저장' }) as HTMLButtonElement
+  await waitFor(() => expect(save.disabled).toBe(false))
+  fireEvent.click(save)
+  await waitFor(() => expect(readPublishedDraft).toHaveBeenCalledTimes(1))
+  const token = new DOMParser().parseFromString(iframe.srcdoc, 'text/html').querySelector('script')!.getAttribute('nonce')
+  fireEvent(window, new MessageEvent('message', { source: iframe.contentWindow, data: { type: 'masc.artifact.text.selected.v1', token, id: 0 } }))
+  await screen.findByLabelText('선택한 문장')
+  if (kind === 'comment') fireEvent.click(await screen.findByRole('button', { name: '선택한 원문에 댓글' }))
+  const input = screen.getByLabelText(kind === 'sentence' ? '선택한 문장' : '댓글 내용')
+  await act(async () => {
+    fireEvent.input(input, { target: { value: 'not yet submitted' } })
+    finishRead({ ...f.doc, artifact })
+    await Promise.resolve()
+  })
+  await screen.findByRole('button', { name: '게시한 버전 보기' })
+  expect(onPublished).not.toHaveBeenCalled()
+  expect((input as HTMLTextAreaElement).value).toBe('not yet submitted')
+})
+
+it('keeps an unconfirmed discussion request visible when publication finishes', async () => {
+  const f = fixture('c', '# alpha\n'), onPublished = vi.fn()
+  let finishRead!: (value: ArtifactDocument) => void
+  vi.mocked(sendArtifactDraftCommand).mockImplementation(async command => {
+    if (command.action === 'discuss') throw new ApiRequestError({ method: 'POST', path: '/discussion', status: 503, detail: 'response lost' })
+    return f.snapshot()
+  })
+  vi.mocked(fetchWorkspacePublishedArtifact).mockResolvedValue(f.doc)
+  const artifact = { ...f.doc.artifact, revision: 2 }
+  vi.mocked(publishArtifact).mockResolvedValue({ schema: 'masc.published_artifact.v1', artifact, revision_url: '/revision' })
+  vi.mocked(readPublishedDraft).mockImplementation(() => new Promise(resolve => { finishRead = resolve }))
+  f.mount(() => true, onPublished)
+  const iframe = await screen.findByTitle('문장을 눌러 편집하는 미리보기') as HTMLIFrameElement
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  const save = await screen.findByRole('button', { name: '새 버전 저장' }) as HTMLButtonElement
+  await waitFor(() => expect(save.disabled).toBe(false))
+  fireEvent.click(save)
+  await waitFor(() => expect(readPublishedDraft).toHaveBeenCalledTimes(1))
+  const token = new DOMParser().parseFromString(iframe.srcdoc, 'text/html').querySelector('script')!.getAttribute('nonce')
+  fireEvent(window, new MessageEvent('message', { source: iframe.contentWindow, data: { type: 'masc.artifact.text.selected.v1', token, id: 0 } }))
+  await screen.findByLabelText('선택한 문장')
+  fireEvent.click(await screen.findByRole('button', { name: '선택한 원문에 댓글' }))
+  fireEvent.input(screen.getByLabelText('댓글 내용'), { target: { value: 'recover this comment' } })
+  fireEvent.click(screen.getByRole('button', { name: '댓글 보내기' }))
+  await screen.findByRole('button', { name: '전송 결과 확인' })
+  await act(() => finishRead({ ...f.doc, artifact }))
+  await screen.findByRole('button', { name: '게시한 버전 보기' })
+  expect(onPublished).not.toHaveBeenCalled()
+  expect(discussionLocals(workspace, f.target.artifact_id)).toHaveLength(1)
+  expect(screen.getByRole('button', { name: '전송 결과 확인' })).toBeTruthy()
+})
+
+it('checks saved discussion records again before navigating after publication', async () => {
+  const f = fixture('c'), onPublished = vi.fn()
+  let finishRead!: (value: ArtifactDocument) => void
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchWorkspacePublishedArtifact).mockResolvedValue(f.doc)
+  const artifact = { ...f.doc.artifact, revision: 2 }
+  vi.mocked(publishArtifact).mockResolvedValue({ schema: 'masc.published_artifact.v1', artifact, revision_url: '/revision' })
+  vi.mocked(readPublishedDraft).mockImplementation(() => new Promise(resolve => { finishRead = resolve }))
+  f.mount(() => true, onPublished)
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  const save = await screen.findByRole('button', { name: '새 버전 저장' }) as HTMLButtonElement
+  await waitFor(() => expect(save.disabled).toBe(false))
+  fireEvent.click(save)
+  await waitFor(() => expect(readPublishedDraft).toHaveBeenCalledTimes(1))
+  retainDiscussionLocal(crypto.randomUUID(), workspace, f.target, 'human', { kind: 'input', input: {
+    kind: 'reply', operationId: f.target.generation, threadId: f.target.generation, body: 'recover later' } })
+  await act(() => finishRead({ ...f.doc, artifact }))
+  await screen.findByRole('button', { name: '게시한 버전 보기' })
+  expect(onPublished).not.toHaveBeenCalled()
+})
+
+it('can prepare a new publication after a cached page is restored and the user reconnects', async () => {
+  const f = fixture('a')
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchWorkspacePublishedArtifact).mockResolvedValue(f.doc)
+  f.mount()
+  await f.editor()
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent(window, new Event('pagehide'))
+  fireEvent(window, new Event('pageshow'))
+  const reconnect = screen.queryByRole('button', { name: '다시 연결' })
+  if (reconnect) fireEvent.click(reconnect)
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  await waitFor(() => expect(fetchWorkspacePublishedArtifact).toHaveBeenCalledTimes(1))
+  await screen.findByRole('button', { name: '새 버전 저장' })
+})
+
+it('keeps restored offline edits recoverable until the user reconnects', async () => {
+  const f = fixture('b')
+  vi.mocked(sendArtifactDraftCommand).mockImplementation(async command => command.action === 'merge' ? f.merge(command.updates) : f.snapshot())
+  f.mount()
+  const editor = await f.editor(), original = editor.state.doc.toString()
+  fireEvent(window, new Event('pagehide')); fireEvent(window, new Event('pageshow'))
+  editor.dispatch({ changes: { from: 0, insert: 'offline ' } })
+  expect(editor.state.doc.toString()).toBe(`offline ${original}`)
+  expect(sharedSource(f.authority)).toBe(original)
+  expect(sendArtifactDraftCommand).toHaveBeenCalledTimes(1)
+  expect(artifactDraftRecoveries(workspace, f.target.artifact_id)[0]?.persisted).toBe(true)
+  fireEvent.click(await screen.findByRole('button', { name: '다시 연결' }))
+  await waitFor(() => expect(sharedSource(f.authority)).toBe(`offline ${original}`))
+  await waitFor(() => expect(artifactDraftRecoveries(workspace, f.target.artifact_id)).toHaveLength(0))
+  expect(sendArtifactDraftCommand).toHaveBeenCalledTimes(2)
+})
+
+it('does not replay an interrupted open and only reopens on explicit request', async () => {
+  const f = fixture('b')
+  let finishOpen!: (value: ArtifactDraftView) => void
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+    .mockImplementationOnce(() => new Promise(resolve => { finishOpen = resolve }))
+  f.mount()
+  await waitFor(() => expect(sendArtifactDraftCommand).toHaveBeenCalledTimes(1))
+  fireEvent(window, new Event('pagehide')); fireEvent(window, new Event('pageshow'))
+  finishOpen(f.snapshot())
+  const reopen = await screen.findByRole('button', { name: '공동 편집 다시 열기' })
+  expect(streamArtifactDraft).not.toHaveBeenCalled()
+  expect(sendArtifactDraftCommand).toHaveBeenCalledTimes(1)
+  fireEvent.click(reopen)
+  await waitFor(() => expect(streamArtifactDraft).toHaveBeenCalledTimes(1))
+  expect(sendArtifactDraftCommand).toHaveBeenCalledTimes(2)
+})
+
+it('does not join a draft from a base read started before pagehide', async () => {
+  const f = fixture('a'), newer = { ...f.doc, artifact: { ...f.doc.artifact, revision: 2 } }
+  let finish!: (value: ArtifactDocument) => void
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchWorkspacePublishedArtifact).mockImplementationOnce(() => new Promise(resolve => { finish = resolve })).mockResolvedValue(f.doc)
+  f.mount(() => true, vi.fn(), newer)
+  await waitFor(() => expect(fetchWorkspacePublishedArtifact).toHaveBeenCalledTimes(1))
+  fireEvent(window, new Event('pagehide')); fireEvent(window, new Event('pageshow'))
+  finish(f.doc)
+  const reopen = await screen.findByRole('button', { name: '공동 편집 다시 열기' })
+  expect(streamArtifactDraft).not.toHaveBeenCalled()
+  expect(sendArtifactDraftCommand).toHaveBeenCalledTimes(1)
+  fireEvent.click(reopen)
+  await waitFor(() => expect(streamArtifactDraft).toHaveBeenCalledTimes(1))
+  expect(sendArtifactDraftCommand).toHaveBeenCalledTimes(2)
+})
+
+it.each(['open', 'base'] as const)('manually reopens while the old %s is stuck and isolates its late completion', async phase => {
+  const f = fixture('a'), newer = { ...f.doc, artifact: { ...f.doc.artifact, revision: 2 } }
+  let finishOld!: () => void, finishNew!: () => void
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchWorkspacePublishedArtifact).mockResolvedValue(f.doc)
+  if (phase === 'open') vi.mocked(sendArtifactDraftCommand)
+    .mockImplementationOnce(() => new Promise(resolve => { finishOld = () => resolve(f.snapshot()) }))
+    .mockImplementationOnce(() => new Promise(resolve => { finishNew = () => resolve(f.snapshot()) }))
+  if (phase === 'base') vi.mocked(fetchWorkspacePublishedArtifact)
+    .mockImplementationOnce(() => new Promise(resolve => { finishOld = () => resolve(f.doc) }))
+    .mockImplementationOnce(() => new Promise(resolve => { finishNew = () => resolve(f.doc) }))
+  f.mount(() => true, vi.fn(), phase === 'base' ? newer : f.doc)
+  const calls = () => phase === 'open' ? vi.mocked(sendArtifactDraftCommand).mock.calls : vi.mocked(fetchWorkspacePublishedArtifact).mock.calls
+  const signalAt = (index: number) => phase === 'open' ? vi.mocked(sendArtifactDraftCommand).mock.calls[index]![2]! : vi.mocked(fetchWorkspacePublishedArtifact).mock.calls[index]![3]!
+  await waitFor(() => expect(calls()).toHaveLength(1))
+  const oldSignal = signalAt(0)
+  fireEvent(window, new Event('pagehide')); fireEvent(window, new Event('pageshow'))
+  expect(oldSignal.aborted).toBe(true)
+  const reopen = await screen.findByRole('button', { name: '공동 편집 다시 열기' })
+  fireEvent.click(reopen)
+  await waitFor(() => expect(calls()).toHaveLength(2))
+  expect(signalAt(1).aborted).toBe(false)
+  finishOld()
+  await Promise.resolve(); await Promise.resolve()
+  expect(screen.queryByRole('button', { name: '공동 편집 다시 열기' })).toBeNull()
+  expect(streamArtifactDraft).not.toHaveBeenCalled()
+  finishNew()
+  await waitFor(() => expect(streamArtifactDraft).toHaveBeenCalledTimes(1))
+  expect(calls()).toHaveLength(2)
+})
+
+it('keeps a reopened draft bound to its original workspace and respects a refusal', async () => {
+  const f = fixture('a')
+  let finishOld!: (value: ArtifactDraftView) => void
+  vi.mocked(sendArtifactDraftCommand)
+    .mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+    .mockRejectedValueOnce(new Error('workspace precondition failed'))
+  f.mount()
+  await waitFor(() => expect(sendArtifactDraftCommand).toHaveBeenCalledTimes(1))
+  fireEvent(window, new Event('pagehide')); fireEvent(window, new Event('pageshow'))
+  fireEvent.click(await screen.findByRole('button', { name: '공동 편집 다시 열기' }))
+  await waitFor(() => expect(sendArtifactDraftCommand).toHaveBeenCalledTimes(2))
+  expect(vi.mocked(sendArtifactDraftCommand).mock.calls[1]![1]).toEqual(workspace)
+  expect(captureArtifactWorkspace).not.toHaveBeenCalled()
+  expect(streamArtifactDraft).not.toHaveBeenCalled()
+  finishOld(f.snapshot())
+})
+
+it('never revives a genuinely closed editor on pageshow', async () => {
+  const f = fixture('b')
+  let close: ArtifactSharedCloseRequest | null = null
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchWorkspacePublishedArtifact).mockResolvedValue(f.doc)
+  render(html`<${ArtifactSharedEditor} draftRetention=${draftRetention} doc=${f.doc} workspaceRoot="/fixture" capturedWorkspace=${workspace}
+    isCurrent=${() => true} onCloseRequest=${(request: ArtifactSharedCloseRequest | null) => { close = request }}
+    onMutation=${() => {}} onPublished=${() => {}} onClose=${() => {}} />`)
+  await f.editor()
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  expect(close!().kind).toBe('close')
+  fireEvent(window, new Event('pagehide')); fireEvent(window, new Event('pageshow'))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  expect(fetchWorkspacePublishedArtifact).not.toHaveBeenCalled()
+  expect(publishArtifact).not.toHaveBeenCalled()
+})
+
+it('does not open a composer from a pre-hide latest-version read after restore', async () => {
+  const f = fixture('a')
+  let finish!: (value: ArtifactDocument) => void
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchWorkspacePublishedArtifact).mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  f.mount(); await f.editor()
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  await waitFor(() => expect(fetchWorkspacePublishedArtifact).toHaveBeenCalledTimes(1))
+  fireEvent(window, new Event('pagehide')); fireEvent(window, new Event('pageshow'))
+  finish(f.doc)
+  await Promise.resolve(); await Promise.resolve()
+  expect(screen.queryByRole('button', { name: '새 버전 저장' })).toBeNull()
+  expect(retainedDrafts.size).toBe(0)
+  expect(publishArtifact).not.toHaveBeenCalled()
+})
+
+it('allows a fresh explicit save from a prepared composer after page restore', async () => {
+  const f = fixture('b'), onPublished = vi.fn()
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchWorkspacePublishedArtifact).mockResolvedValue(f.doc)
+  const artifact = { ...f.doc.artifact, revision: 2 }
+  vi.mocked(publishArtifact).mockResolvedValue({ schema: 'masc.published_artifact.v1', artifact, revision_url: '/revision' })
+  vi.mocked(readPublishedDraft).mockResolvedValue({ ...f.doc, artifact })
+  f.mount(() => true, onPublished)
+  await f.editor()
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  const save = await screen.findByRole('button', { name: '새 버전 저장' })
+  await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.input(screen.getByLabelText('문서 요약'), { target: { value: '보존된 사본' } })
+  fireEvent(window, new Event('pagehide')); fireEvent(window, new Event('pageshow'))
+  expect(retainedDrafts.size).toBe(1)
+  fireEvent.click(save)
+  await waitFor(() => expect(onPublished).toHaveBeenCalledTimes(1))
+  expect(publishArtifact).toHaveBeenCalledTimes(1)
+  expect(checkpointArtifactDraft).toHaveBeenCalledTimes(1)
+})
+
+it.each(['hidden', 'restored'] as const)('retains an in-flight publication completed while %s without a readback or second save', async completion => {
+  const f = fixture('c'), onMutation = vi.fn(), onPublished = vi.fn()
+  let finish!: (value: Awaited<ReturnType<typeof publishArtifact>>) => void
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchWorkspacePublishedArtifact).mockResolvedValue(f.doc)
+  vi.mocked(publishArtifact).mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  f.mount(() => true, onPublished, f.doc, onMutation)
+  await f.editor()
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  const save = await screen.findByRole('button', { name: '새 버전 저장' })
+  await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(save)
+  await waitFor(() => expect(publishArtifact).toHaveBeenCalledTimes(1))
+  fireEvent(window, new Event('pagehide'))
+  if (completion === 'restored') fireEvent(window, new Event('pageshow'))
+  expect((save as HTMLButtonElement).disabled).toBe(true)
+  const artifact = { ...f.doc.artifact, revision: 2 }
+  finish({ schema: 'masc.published_artifact.v1', artifact, revision_url: '/revision' })
+  if (completion === 'hidden') {
+    await waitFor(() => expect(onMutation).toHaveBeenCalledWith(expect.objectContaining({ kind: 'published', verified: false })))
+    fireEvent(window, new Event('pageshow'))
+  }
+  await screen.findByText(/페이지가 바뀌기 전에 보낸 게시 응답/)
+  expect(onMutation).toHaveBeenCalledWith(expect.objectContaining({ kind: 'published', verified: false }))
+  expect(readPublishedDraft).not.toHaveBeenCalled()
+  expect(checkpointArtifactDraft).not.toHaveBeenCalled()
+  expect(onPublished).not.toHaveBeenCalled()
+  fireEvent.click(save)
+  expect(publishArtifact).toHaveBeenCalledTimes(1)
+  expect(retainedDrafts.size).toBe(1)
+})
+
+it('reports a pre-hide checkpoint result without applying it to the restored session', async () => {
+  const f = fixture('c'), onMutation = vi.fn()
+  let finish!: (value: Awaited<ReturnType<typeof checkpointArtifactDraft>>) => void
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchWorkspacePublishedArtifact).mockResolvedValue(f.doc)
+  const artifact = { ...f.doc.artifact, revision: 2 }
+  vi.mocked(publishArtifact).mockResolvedValue({ schema: 'masc.published_artifact.v1', artifact, revision_url: '/revision' })
+  vi.mocked(readPublishedDraft).mockResolvedValue({ ...f.doc, artifact })
+  vi.mocked(checkpointArtifactDraft).mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  f.mount(() => true, vi.fn(), f.doc, onMutation); await f.editor()
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  const save = await screen.findByRole('button', { name: '새 버전 저장' })
+  await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(save)
+  await waitFor(() => expect(checkpointArtifactDraft).toHaveBeenCalledTimes(1))
+  fireEvent(window, new Event('pagehide')); fireEvent(window, new Event('pageshow'))
+  const document = f.snapshot()
+  finish({ checkpoint: 'checkpointed', document: { ...document, draft: { ...document.draft,
+    base_revision: 2, base_sha256: artifact.body._blob.sha256, sequence: 1 } } })
+  await waitFor(() => expect(onMutation).toHaveBeenCalledWith(expect.objectContaining({ kind: 'checkpoint', status: 'checkpointed' })))
+  expect(screen.getByText(/게시된 v1에서 시작한 공유 원고/)).toBeTruthy()
+  expect(checkpointArtifactDraft).toHaveBeenCalledTimes(1)
+})
+
+it.each([400, 409, 408, 503].flatMap(status => (['hidden', 'restored'] as const).map(phase => [status, phase] as const)))(
+  'settles a pre-hide publication status %i while %s without replaying', async (status, phase) => {
+  const f = fixture('a'), onMutation = vi.fn()
+  let reject!: (error: Error) => void
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchWorkspacePublishedArtifact).mockResolvedValue(f.doc)
+  vi.mocked(publishArtifact).mockImplementation(() => new Promise((_, fail) => { reject = fail }))
+  f.mount(() => true, vi.fn(), f.doc, onMutation)
+  await f.editor()
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  const save = await screen.findByRole('button', { name: '새 버전 저장' })
+  await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(save)
+  await waitFor(() => expect(publishArtifact).toHaveBeenCalledTimes(1))
+  fireEvent(window, new Event('pagehide'))
+  if (phase === 'restored') fireEvent(window, new Event('pageshow'))
+  reject(new ApiRequestError({ method: 'POST', path: '/api/v1/published-artifacts', status, detail: 'response' }))
+  if (phase === 'hidden') { await Promise.resolve(); await Promise.resolve(); fireEvent(window, new Event('pageshow')) }
+  if (status === 409) await screen.findByText(/다른 사용자가 먼저 저장했습니다/)
+  else if (status === 400) await screen.findByText(/response/)
+  else {
+    await screen.findByText(/자동으로 다시 저장하지 않습니다/)
+    expect(onMutation).toHaveBeenCalledWith(expect.objectContaining({ kind: 'unconfirmed' }))
+  }
+  expect((screen.getByRole('button', { name: '편집 닫기' }) as HTMLButtonElement).disabled).toBe(false)
+  expect(publishArtifact).toHaveBeenCalledTimes(1)
+  expect(checkpointArtifactDraft).not.toHaveBeenCalled()
+  expect(retainedDrafts.size).toBe(1)
+})
+
+it('keeps a verified publication and shared source when its edited composer copy cannot advance the shared base', async () => {
+  const f = fixture('a'), onPublished = vi.fn(), onMutation = vi.fn()
+  let latest = f.doc
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchWorkspacePublishedArtifact).mockImplementation(async () => latest)
+  vi.mocked(publishArtifact).mockImplementation(async request => {
+    const artifact = { ...latest.artifact, ...request, revision: 2, task_id: request.task_id ?? null, goal_id: request.goal_id ?? null }
+    latest = { artifact, content: request.content, revisions: [artifact] }
+    return { schema: 'masc.published_artifact.v1', artifact, revision_url: '/revision' }
+  })
+  vi.mocked(readPublishedDraft).mockImplementation(async () => latest)
+  vi.mocked(checkpointArtifactDraft).mockRejectedValue(new ApiRequestError({ method: 'POST', path: '/checkpoint', status: 409, detail: 'source mismatch' }))
+  f.mount(() => true, onPublished, f.doc, onMutation)
+  const editor = await f.editor(), original = editor.state.doc.toString()
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  fireEvent.input(await screen.findByLabelText('문서 본문'), { target: { value: 'different publication copy' } })
+  const save = screen.getByRole('button', { name: '새 버전 저장' })
+  await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(save)
+  await waitFor(() => expect(onPublished).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(onMutation).toHaveBeenCalledWith(expect.objectContaining({ kind: 'checkpoint', status: 'refused' })))
+  expect(onMutation).toHaveBeenCalledWith(expect.objectContaining({ kind: 'published', verified: true }))
+  expect(checkpointArtifactDraft).toHaveBeenCalledTimes(1)
+  expect(editor.state.doc.toString()).toBe(original)
+  expect(sharedSource(f.authority)).toBe(original)
+})
+
+it.each(['authority', 'pagehide', 'restore'] as const)('does not start a checkpoint after %s during publication readback', async retirement => {
+  const f = fixture('b'), onMutation = vi.fn()
+  let current = true, finishRead!: (value: ArtifactDocument) => void
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchWorkspacePublishedArtifact).mockResolvedValue(f.doc)
+  const artifact = { ...f.doc.artifact, revision: 2 }
+  vi.mocked(publishArtifact).mockResolvedValue({ schema: 'masc.published_artifact.v1', artifact, revision_url: '/revision' })
+  vi.mocked(readPublishedDraft).mockImplementation(() => new Promise(resolve => { finishRead = resolve }))
+  const mounted = f.mount(() => current, vi.fn(), f.doc, onMutation)
+  await f.editor()
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  const save = await screen.findByRole('button', { name: '새 버전 저장' })
+  await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(save)
+  await waitFor(() => expect(readPublishedDraft).toHaveBeenCalledTimes(1))
+  // Retire the authority or window before the component's cleanup runs.
+  if (retirement === 'authority') current = false
+  else {
+    fireEvent(window, new Event('pagehide'))
+    if (retirement === 'restore') fireEvent(window, new Event('pageshow'))
+  }
+  finishRead({ ...f.doc, artifact })
+  await waitFor(() => expect(onMutation).toHaveBeenCalledWith(expect.objectContaining({ kind: 'published', verified: true })))
+  expect(checkpointArtifactDraft).not.toHaveBeenCalled()
+  if (retirement === 'restore') await screen.findByText(/공동 원고 기준은 자동으로 갱신하지 않았습니다/)
+  mounted.unmount()
+})
+
+it.each([408, 503])('retains status %i as an uncertain checkpoint after the old editor is closed, without replaying it', async status => {
+  const f = fixture('c'), onMutation = vi.fn()
+  let current = true, rejectCheckpoint!: (reason: Error) => void
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchWorkspacePublishedArtifact).mockResolvedValue(f.doc)
+  const artifact = { ...f.doc.artifact, revision: 2 }
+  vi.mocked(publishArtifact).mockResolvedValue({ schema: 'masc.published_artifact.v1', artifact, revision_url: '/revision' })
+  vi.mocked(readPublishedDraft).mockResolvedValue({ ...f.doc, artifact })
+  vi.mocked(checkpointArtifactDraft).mockImplementation(() => new Promise((_, reject) => { rejectCheckpoint = reject }))
+  const mounted = f.mount(() => current, vi.fn(), f.doc, onMutation)
+  const editor = await f.editor(), original = editor.state.doc.toString()
+  await waitFor(() => expect((screen.getByRole('button', { name: '새 버전으로 게시' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByRole('button', { name: '새 버전으로 게시' }))
+  const save = await screen.findByRole('button', { name: '새 버전 저장' })
+  await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(save)
+  await waitFor(() => expect(checkpointArtifactDraft).toHaveBeenCalledTimes(1))
+  current = false; mounted.unmount()
+  rejectCheckpoint(new ApiRequestError({ method: 'POST', path: '/checkpoint', status, detail: 'response unavailable' }))
+  await waitFor(() => expect(onMutation).toHaveBeenCalledWith(expect.objectContaining({ kind: 'checkpoint', status: 'unconfirmed' })))
+  expect(onMutation).toHaveBeenCalledWith(expect.objectContaining({ kind: 'published', verified: true }))
+  expect(checkpointArtifactDraft).toHaveBeenCalledTimes(1)
+  expect(sharedSource(f.authority)).toBe(original)
 })
 
 it('offers an in-flight owner’s full local draft after remount without replaying it until explicit resume', async () => {

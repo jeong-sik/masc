@@ -114,7 +114,122 @@ let integration runner =
     let spoofed = match args "read" target with `Assoc fields -> `Assoc (("actor", `String "other") :: fields) | _ -> Alcotest.fail "object" in
     Alcotest.(check bool) "actor is not payload" true ((call scope base_path spoofed).disposition = Tool_result.Failed Tool_result.Policy_rejection);
     Alcotest.(check string) "human text retained" "human" (Store.read ~runner ~base_path ~artifact_id:artifact.id () |> stored).content)));
+  "find another author, edit together and publish the same artifact", `Quick, (fun () -> with_base (fun base_path -> with_scope base_path (fun scope ->
+    let artifact = publish base_path "alpha beta" in
+    let found = call scope base_path (`Assoc ["action", `String "find"; "query", `String "draft fixture"]) |> success in
+    let candidate = member "artifacts" found |> Yojson.Safe.Util.to_list |> List.hd in
+    Alcotest.(check string) "other writer's artifact found" artifact.id (member "id" candidate |> text);
+    let published = call scope base_path (`Assoc ["action", `String "published"; "artifact_id", `String artifact.id]) |> success in
+    Alcotest.(check string) "published source read" "alpha beta" (member "content" published |> text);
+    let target = call scope base_path (open_args artifact.id) |> success |> target_of in
+    let human = Store.execute ~runner ~base_path ~actor:"human" (Draft.Select { target; anchor = 6; head = 10 }) |> stored in
+    let human_selection = match human.selection with Some (selection, _, _) -> selection | None -> Alcotest.fail "human selection absent" in
+    ignore (Store.execute ~runner ~base_path ~actor:"human" (Draft.Edit { selection = human_selection; expected = "beta"; replacement = "human" }) |> stored);
+    let chosen = call scope base_path (select target 0 5) |> success |> member "selection" in
+    let edited = call scope base_path (edit chosen "alpha" "keeper") |> success in
+    let content = member "content" edited |> text in
+    Alcotest.(check string) "both writers retained" "keeper human" content;
+    let request = `Assoc ["id", `String artifact.id; "expected_revision", `Int 1;
+      "title", `String "Keeper draft fixture"; "summary", `String "native";
+      "format", `String "markdown"; "content", `String content] in
+    ignore (Keeper_artifact_publish.handle ~base_path ~author:"keeper-editor" ~args:request |> success);
+    let checkpoint sequence revision = `Assoc ["action", `String "checkpoint"; "target", Draft.target_to_json target;
+      "expected_sequence", sequence; "revision", `Int revision] in
+    let checked = call scope base_path (checkpoint (member "sequence" edited) 2) |> success in
+    Alcotest.(check int) "published draft becomes new base" 2 (member "base_revision" checked |> Yojson.Safe.Util.to_int);
+    let found = call scope base_path (`Assoc ["action", `String "find"; "query", `String "draft fixture"]) |> success in
+    let candidates = member "artifacts" found |> Yojson.Safe.Util.to_list in
+    Alcotest.(check int) "one document" 1 (List.length candidates);
+    Alcotest.(check int) "version advanced" 2 (member "revision" (List.hd candidates) |> Yojson.Safe.Util.to_int);
+    let _, _, original = Published_artifact_store.read ~base_path ~id:artifact.id ~revision:(Some 1)
+      |> Result.map_error Published_artifact_store.error_message |> require in
+    Alcotest.(check string) "original publication remains unchanged" "alpha beta" original;
+    let second_scope = Scope.create ~base_path ~keeper:"second-editor" in
+    Fun.protect ~finally:(fun () -> Scope.close second_scope) (fun () ->
+      let call_second input = Keeper_artifact_draft.handle ~runner ~scope:second_scope ~base_path
+          ~keeper:"second-editor" ~turn_ref ~args:input () in
+      let reopened = call_second (`Assoc ["action", `String "open"; "artifact_id", `String artifact.id; "revision", `Int 2]) |> success in
+      Alcotest.(check int) "other Keeper joins version two" 2 (member "base_revision" reopened |> Yojson.Safe.Util.to_int);
+      let selected = call_second (select target 0 6) |> success |> member "selection" in
+      let next = call_second (edit selected "keeper" "second") |> success in
+      let next_content = member "content" next |> text in
+      let request = `Assoc ["id", `String artifact.id; "expected_revision", `Int 2;
+        "title", `String "Keeper draft fixture"; "summary", `String "native";
+        "format", `String "markdown"; "content", `String next_content] in
+      ignore (Keeper_artifact_publish.handle ~base_path ~author:"second-editor" ~args:request |> success);
+      let tail = String.length next_content in
+      let human = Store.execute ~runner ~base_path ~actor:"human" (Draft.Select { target; anchor = tail; head = tail }) |> stored in
+      let selection = match human.selection with Some (selection, _, _) -> selection | None -> Alcotest.fail "human selection absent" in
+      ignore (Store.execute ~runner ~base_path ~actor:"human" (Draft.Edit { selection; expected = ""; replacement = "!" }) |> stored);
+      let refused = call_second (checkpoint (member "sequence" next) 3) in
+      Alcotest.(check bool) "intervening edit blocks checkpoint" true
+        (refused.disposition = Tool_result.Failed Tool_result.Workflow_rejection);
+      let remaining = call_second (args "read" target) |> success in
+      Alcotest.(check string) "intervening human edit remains" (next_content ^ "!") (member "content" remaining |> text);
+      let request = `Assoc ["id", `String artifact.id; "expected_revision", `Int 3;
+        "title", `String "Keeper draft fixture"; "summary", `String "native";
+        "format", `String "markdown"; "content", member "content" remaining] in
+      ignore (Keeper_artifact_publish.handle ~base_path ~author:"second-editor" ~args:request |> success);
+      let checked = call_second (checkpoint (member "sequence" remaining) 4) |> success in
+      Alcotest.(check int) "new checkpoint advances without losing edit" 4 (member "base_revision" checked |> Yojson.Safe.Util.to_int);
+      let _, _, version_two = Published_artifact_store.read ~base_path ~id:artifact.id ~revision:(Some 2)
+        |> Result.map_error Published_artifact_store.error_message |> require in
+      Alcotest.(check string) "earlier collaborative version remains" "keeper human" version_two))));
   ]
+let discovery_tests = [
+  "workspace candidates and exact published source", `Quick, (fun () -> with_base (fun base_path -> with_scope base_path (fun scope ->
+    let artifact = publish base_path "source by another author" in
+    let call input = Keeper_artifact_draft.handle ~scope ~base_path ~keeper:"keeper-editor" ~turn_ref ~args:input () in
+    let found = call (`Assoc ["action", `String "find"; "query", `String "draft fixture"]) |> success in
+    let items = member "artifacts" found |> Yojson.Safe.Util.to_list in
+    Alcotest.(check int) "one candidate" 1 (List.length items);
+    Alcotest.(check string) "shared author" "publisher" (member "author" (List.hd items) |> text);
+    Alcotest.(check string) "same ID" artifact.id (member "id" (List.hd items) |> text);
+    Alcotest.(check bool) "find omits body" true (member "body" (List.hd items) = `Null);
+    let latest = call (`Assoc ["action", `String "published"; "artifact_id", `String artifact.id]) |> success in
+    Alcotest.(check string) "latest bytes" "source by another author" (member "content" latest |> text);
+    let revision = `Assoc ["id", `String artifact.id; "expected_revision", `Int 1;
+      "title", `String "Keeper draft fixture"; "summary", `String "native";
+      "format", `String "markdown"; "content", `String "revised"] in
+    ignore (Keeper_artifact_publish.handle ~base_path ~author:"keeper-editor" ~args:revision |> success);
+    let found = call (`Assoc ["action", `String "find"; "query", `String "publisher"]) |> success in
+    let candidate = member "artifacts" found |> Yojson.Safe.Util.to_list |> List.hd in
+    Alcotest.(check string) "original author remains searchable" artifact.id (member "id" candidate |> text);
+    Alcotest.(check int) "search returns latest revision" 2 (member "revision" candidate |> Yojson.Safe.Util.to_int);
+    Scope.close scope;
+    Alcotest.(check bool) "closed turn cannot enumerate" true
+      ((call (`Assoc ["action", `String "find"; "query", `String ""]) ).disposition = Tool_result.Failed Tool_result.Runtime_failure))));
+  "pages preserve identity and refuse stale or incomplete inventory", `Quick, (fun () -> with_base (fun base_path -> with_scope base_path (fun scope ->
+    let publish_named index =
+      let request = Published_artifact.request_of_json (`Assoc ["title", `String ("team " ^ string_of_int index ^ String.make 8000 'x');
+        "summary", `String "shared"; "format", `String "markdown"; "content", `String "body"]) |> require in
+      Published_artifact_store.publish ~base_path ~author:"another-keeper" request
+      |> Result.map_error Published_artifact_store.error_message |> require |> fst in
+    let expected = List.init 4 publish_named |> List.map (fun artifact -> artifact.Published_artifact.id) |> List.sort String.compare in
+    let dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) "published_artifacts" in
+    Fs_compat.save_file (Filename.concat dir ("artifact-" ^ String.make 32 'f' ^ ".json")) "invalid json";
+    let call query cursor =
+      let fields = ["action", `String "find"; "query", `String query] in
+      let fields = match cursor with None -> fields | Some cursor -> ("cursor", cursor) :: fields in
+      Keeper_artifact_draft.handle ~scope ~base_path ~keeper:"keeper-editor" ~turn_ref ~args:(`Assoc fields) () in
+    let first = call "team" None |> success in
+    Alcotest.(check int) "unreadable entry is visible" 1 (member "unreadable_count" first |> Yojson.Safe.Util.to_int);
+    let cursor = member "next_cursor" first in
+    Alcotest.(check bool) "wire-bounded page has continuation" true (cursor <> `Null);
+    let rec collect result =
+      let ids = member "artifacts" result |> Yojson.Safe.Util.to_list |> List.map (fun row -> member "id" row |> text) in
+      match member "next_cursor" result with
+      | `Null -> ids
+      | cursor -> ids @ collect (call "team" (Some cursor) |> success) in
+    Alcotest.(check (list string)) "all pages contain each document once" expected (collect first);
+    Alcotest.(check bool) "cursor is bound to query" true
+      ((call "different" (Some cursor)).disposition = Tool_result.Failed Tool_result.Workflow_rejection);
+    ignore (publish base_path "unrelated source");
+    ignore (call "team" (Some cursor) |> success);
+    ignore (publish_named 5);
+    Alcotest.(check bool) "changed catalog invalidates cursor" true
+      ((call "team" (Some cursor)).disposition = Tool_result.Failed Tool_result.Workflow_rejection))));
+]
 let schema_tests = ["canonical tool and sealed owner", `Quick, (fun () ->
   let descriptor = match Keeper_tool_descriptor.find_id "keeper.artifact.draft" with Some descriptor -> descriptor | None -> Alcotest.fail "missing descriptor" in
   Alcotest.(check (list string)) "model schema" [] (Keeper_tool_descriptor.model_schema_errors descriptor);
@@ -131,4 +246,4 @@ let () = Eio_main.run (fun env ->
   let tests, argv = if Array.length Sys.argv = 3 && Sys.argv.(1) = "--transformer"
     then integration (Artifact_document_engine.default_runner ~executable:Sys.argv.(2)), [|Sys.argv.(0)|] else [], Sys.argv in
   Fun.protect ~finally:Process_eio.reset_for_testing (fun () ->
-    Alcotest.run ~argv "Keeper shared artifact draft" ["schema", schema_tests; "runtime", tests]))
+    Alcotest.run ~argv "Keeper shared artifact draft" ["schema", schema_tests; "discovery", discovery_tests; "runtime", tests]))

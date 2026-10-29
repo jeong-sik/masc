@@ -1418,6 +1418,85 @@ let test_private_jsonl_transaction_rejects_same_length_rewrite_aba () =
   check string "rewrite remains authoritative" after (Fs_compat.load_file path)
 ;;
 
+(* Change bytes in place to deterministically model a recycled cursor. This
+   exercises the snapshot comparison without relying on filesystem inode reuse. *)
+let test_private_jsonl_snapshot_rewrite_rejects_same_cursor_changed_bytes () =
+  let before = "{\"row\":1}\n" and after = "{\"row\":2}\n" in
+  with_transaction_jsonl (Some before) @@ fun path ->
+  let expected = transaction_snapshot path ~after:None in
+  let fd = Unix.openfile path [Unix.O_WRONLY] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+    let rec write offset =
+      if offset < String.length after then
+        let count = Unix.write_substring fd after offset (String.length after - offset) in
+        if count = 0 then fail "could not write changed fixture" else write (offset + count) in
+    write 0; Unix.fsync fd);
+  let current = transaction_snapshot path ~after:None in
+  check bool "fixture preserves cursor" true
+    (Fs_compat.Private_jsonl_cursor.equal expected.cursor current.cursor);
+  (match Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result path ~expected "{\"row\":3}\n" with
+   | Error (Fs_compat.Transaction_content_changed _) -> ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "changed bytes were overwritten through a stale snapshot");
+  check string "changed bytes remain authoritative" after (Fs_compat.load_file path);
+  (match Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result path ~expected:current "{\"row\":3}\n" with
+   | Ok _ -> ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error));
+  check string "matching snapshot can commit" "{\"row\":3}\n" (Fs_compat.load_file path)
+;;
+
+let test_private_jsonl_snapshot_rewrite_preserves_settlement_evidence () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let expected = transaction_snapshot path ~after:None in
+  let io, calls = injected_close_io ~fail_calls:[ 1 ] in
+  (match Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
+           ~io path ~expected "{\"row\":2}\n" with
+   | Error (Fs_compat.Transaction_settlement_failed
+       { primary = Fs_compat.Transaction_succeeded (Fs_compat.Cursor_succeeded _)
+       ; cleanup_failures = [ failure ] }) ->
+     check_transaction_close_failure ~label:"snapshot rewrite data cleanup"
+       ~operation:Fs_compat.Close_transaction_data failure
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "committed rewrite omitted the descriptor close failure");
+  check int "data and lock descriptors closed" 2 !calls;
+  check string "rewrite remained committed" "{\"row\":2}\n" (Fs_compat.load_file path)
+;;
+
+let test_private_jsonl_snapshot_rewrite_preserves_mismatch_cleanup () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let expected = transaction_snapshot path ~after:None in
+  let output = open_out_bin path in
+  output_string output "{\"row\":2}\n";
+  close_out output;
+  let io, calls = injected_close_io ~fail_calls:[ 1 ] in
+  (match Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
+           ~io path ~expected "{\"row\":3}\n" with
+   | Error (Fs_compat.Transaction_settlement_failed
+       { primary = Fs_compat.Transaction_failed (Fs_compat.Transaction_content_changed _)
+       ; cleanup_failures = [ failure ] }) ->
+     check_transaction_close_failure ~label:"snapshot mismatch data cleanup"
+       ~operation:Fs_compat.Close_transaction_data failure
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "mismatched snapshot committed");
+  check int "data and lock descriptors closed" 2 !calls;
+  check string "mismatch left newer bytes intact" "{\"row\":2}\n" (Fs_compat.load_file path)
+;;
+
+let test_private_jsonl_snapshot_rewrite_create_is_conditional () =
+  with_transaction_jsonl None @@ fun path ->
+  let missing = transaction_snapshot path ~after:None in
+  (match Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result
+           path ~expected:missing "{\"row\":1}\n" with
+   | Ok _ -> ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error));
+  (match Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result
+           path ~expected:missing "{\"row\":2}\n" with
+   | Error (Fs_compat.Cursor_mismatch _) -> ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "missing snapshot replaced an existing store");
+  check string "created bytes retained" "{\"row\":1}\n" (Fs_compat.load_file path)
+;;
+
 let test_private_jsonl_transaction_lock_is_private () =
   with_transaction_jsonl None @@ fun path ->
   ignore (transaction_snapshot path ~after:None);
@@ -1731,6 +1810,22 @@ let () =
             "private JSONL transaction rejects same-length rewrite ABA"
             `Quick
             test_private_jsonl_transaction_rejects_same_length_rewrite_aba
+        ; test_case
+            "private JSONL snapshot rewrite rejects changed bytes at the same cursor"
+            `Quick
+            test_private_jsonl_snapshot_rewrite_rejects_same_cursor_changed_bytes
+        ; test_case
+            "private JSONL snapshot rewrite preserves committed settlement evidence"
+            `Quick
+            test_private_jsonl_snapshot_rewrite_preserves_settlement_evidence
+        ; test_case
+            "private JSONL snapshot mismatch preserves cleanup failure"
+            `Quick
+            test_private_jsonl_snapshot_rewrite_preserves_mismatch_cleanup
+        ; test_case
+            "private JSONL snapshot creation is conditional"
+            `Quick
+            test_private_jsonl_snapshot_rewrite_create_is_conditional
         ; test_case
             "private JSONL stable lock is private"
             `Quick

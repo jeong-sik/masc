@@ -2,13 +2,15 @@ import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { ApiRequestError } from '../../api/core'
 import {
-  publishArtifact, readPublishedDraft, fetchWorkspacePublishedArtifact, artifactHref, captureArtifactWorkspace,
+  publishArtifact, readPublishedDraft, fetchWorkspacePublishedArtifact, captureArtifactWorkspace,
   type ArtifactDocument, type ArtifactDraft, type ArtifactPublication, type ArtifactPublicationRequest, type ArtifactWorkspace,
 } from '../../api/published-artifacts'
 
-export type ArtifactPublicationOutcome = { title: string; base?: { id: string; revision: number } } & (
+export type ArtifactPublicationOutcome = { identity: object; title: string; workspace: ArtifactWorkspace; base?: { id: string; revision: number } } & (
   | { kind: 'published'; publication: ArtifactPublication; verified: boolean }
   | { kind: 'unconfirmed'; detail: string }
+  | { kind: 'checkpoint'; publication: ArtifactPublication;
+      status: 'pending' | 'checkpointed' | 'already_current' | 'refused' | 'unconfirmed'; detail?: string }
 )
 export type ArtifactDraftSnapshot = {
   readonly identity: object;
@@ -22,7 +24,7 @@ export type ArtifactDraftRetention = {
 type SaveState = { kind: 'ready'; message?: string } | { kind: 'saving' }
   | { kind: 'conflict'; message: string; latest?: ArtifactDocument }
   | { kind: 'unconfirmed'; message: string; publication?: ArtifactPublication }
-  | { kind: 'saved'; publication: ArtifactPublication }
+  | { kind: 'saved'; publication: ArtifactPublication; message?: string }
 type WorkspaceState = { kind: 'loading' } | { kind: 'ready'; value: ArtifactWorkspace } | { kind: 'error'; message: string }
 
 export function downloadArtifactDraft(draft: ArtifactDraft) {
@@ -35,12 +37,13 @@ export function downloadArtifactDraft(draft: ArtifactDraft) {
   URL.revokeObjectURL(url)
 }
 
-export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDraftChange, onMutation, onSaved, onCancel, capturedWorkspace }: {
+export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDraftChange, onMutation, onSaved, onCancel, capturedWorkspace, captureAttempt }: {
   initial: ArtifactDraft; base?: ArtifactDocument; capturedWorkspace?: ArtifactWorkspace; isCurrent: () => boolean;
+  captureAttempt?: () => () => boolean;
   workspaceRoot: string;
   onDraftChange: (draft: ArtifactDraft) => void;
   onMutation: (outcome: ArtifactPublicationOutcome) => void;
-  onSaved: (publication: ArtifactPublication) => void; onCancel: () => void;
+  onSaved: (publication: ArtifactPublication, workspace: ArtifactWorkspace) => void; onCancel: () => void;
 }) {
   const [draft, setDraft] = useState(initial)
   const latestDraft = useRef(initial)
@@ -72,6 +75,8 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDr
   const ready = state.kind === 'ready' || state.kind === 'conflict'
   const save = async () => {
     if (sending.current || state.kind !== 'ready' || workspace.kind !== 'ready' || !current()) return
+    const attemptCurrent = captureAttempt?.() ?? (() => true)
+    if (!attemptCurrent()) return
     sending.current = true
     const sent = { ...draft }
     const request: ArtifactPublicationRequest = base
@@ -79,13 +84,14 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDr
       : sent
     setState({ kind: 'saving' })
     const expectedWorkspace = workspace.value
+    const outcomeIdentity = {}
     let publication: ArtifactPublication
     try {
       publication = await publishArtifact(request, expectedWorkspace)
     } catch (error) {
       const message = error instanceof Error ? error.message : '저장 응답을 받지 못했습니다.'
-      // A proxy timeout can follow a committed write. Keep it unconfirmed.
-      // Other parsed 4xx responses are definite refusals.
+      // A proxy timeout can arrive after the server has committed. Preserve
+      // the uncertain publication without offering another save in this editor.
       const refusalStatus = error instanceof ApiRequestError ? error.status : undefined
       const definiteRefusal = refusalStatus !== undefined && refusalStatus >= 400 && refusalStatus < 500 && refusalStatus !== 408
       if (definiteRefusal && error instanceof ApiRequestError && error.errorCode === 'workspace_precondition_failed') {
@@ -93,9 +99,9 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDr
         if (current()) setState({ kind: 'ready', message: '서버의 작업 공간이 바뀌어 저장 요청이 거절되었습니다. 작성한 원고는 그대로 남아 있습니다.' })
         return
       }
-      if (!definiteRefusal) onMutation({ kind: 'unconfirmed', title: sent.title, base: baseRef, detail: message })
-      if (!current()) return
       sending.current = false
+      if (!definiteRefusal) onMutation({ kind: 'unconfirmed', identity: outcomeIdentity, title: sent.title, workspace: expectedWorkspace, base: baseRef, detail: message })
+      if (!current()) return
       if (refusalStatus === 409) setState({ kind: 'conflict', message: '다른 사용자가 먼저 저장했습니다. 작성한 원고는 그대로 남아 있습니다.' })
       else if (definiteRefusal) setState({ kind: 'ready', message })
       else setState({ kind: 'unconfirmed', message })
@@ -103,14 +109,20 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDr
     }
     // Keep the committed identity even if the selected document/workspace was
     // withdrawn while the request was in flight. Do not read with new credentials.
-    onMutation({ kind: 'published', title: sent.title, base: baseRef, publication, verified: false })
-    if (!current()) return
+    onMutation({ kind: 'published', identity: outcomeIdentity, title: sent.title, workspace: expectedWorkspace, base: baseRef, publication, verified: false })
+    if (!current() || !attemptCurrent()) {
+      sending.current = false
+      if (current()) setState({ kind: 'unconfirmed', publication,
+        message: '페이지가 바뀌기 전에 보낸 게시 응답입니다. 저장된 버전을 직접 확인해 주세요.' })
+      return
+    }
     try {
       await readPublishedDraft(publication, sent, expectedWorkspace)
-      onMutation({ kind: 'published', title: sent.title, base: baseRef, publication, verified: true })
+      onMutation({ kind: 'published', identity: outcomeIdentity, title: sent.title, workspace: expectedWorkspace, base: baseRef, publication, verified: true })
       if (!current()) return
-      setState({ kind: 'saved', publication })
-      onSaved(publication)
+      if (attemptCurrent()) { setState({ kind: 'saved', publication }); onSaved(publication, expectedWorkspace) }
+      else setState({ kind: 'saved', publication,
+        message: '게시된 내용은 확인했습니다. 페이지가 바뀌어 공동 원고 기준은 자동으로 갱신하지 않았습니다.' })
     } catch (error) {
       if (!current()) return
       setState({ kind: 'unconfirmed', publication, message: error instanceof Error ? error.message : '저장한 버전을 다시 읽지 못했습니다.' })
@@ -120,13 +132,15 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDr
   }
   const readLatest = async () => {
     if (!base || !current()) return
+    const attemptCurrent = captureAttempt?.() ?? (() => true)
+    if (!attemptCurrent()) return
     setLatestError('')
     try {
       if (workspace.kind !== 'ready') return
       const latest = await fetchWorkspacePublishedArtifact(base.artifact.id, undefined, workspace.value)
-      if (current()) setState({ kind: 'conflict', message: '최신 버전과 작성 중인 원고를 비교해 주세요. 원고는 자동으로 바뀌지 않습니다.', latest })
+      if (current() && attemptCurrent()) setState({ kind: 'conflict', message: '최신 버전과 작성 중인 원고를 비교해 주세요. 원고는 자동으로 바뀌지 않습니다.', latest })
     } catch (error) {
-      if (current()) setLatestError(error instanceof Error ? error.message : '최신 버전을 읽지 못했습니다.')
+      if (current() && attemptCurrent()) setLatestError(error instanceof Error ? error.message : '최신 버전을 읽지 못했습니다.')
     }
   }
   const field = (key: 'title' | 'summary' | 'content', value: string) => updateDraft({ [key]: value })
@@ -157,8 +171,9 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDr
         <p>원고를 다운로드한 뒤 편집을 닫고 최신 버전에서 다시 시작해 주세요.</p></div>` : null}
     </div>` : state.kind === 'unconfirmed' ? html`<div role="alert"><p>${state.message}</p>
       <p>자동으로 다시 저장하지 않습니다. 원고를 다운로드하고 저장된 버전을 확인해 주세요.</p>
-      ${state.publication ? html`<a href=${artifactHref(state.publication.artifact.id, state.publication.artifact.revision)}>응답받은 버전 확인</a>` : null}
-    </div>` : state.kind === 'saved' ? html`<p role="status">v${state.publication.artifact.revision} 저장 후 내용을 다시 읽어 확인했습니다.</p>` : null}
+      ${state.publication ? html`<p>응답받은 문서 ${state.publication.artifact.id} · v${state.publication.artifact.revision}
+        ${workspace.kind === 'ready' ? ` · 원래 작업 공간 ${workspace.value.basePath} (${workspace.value.mascRoot})` : ''}</p>` : null}
+    </div>` : state.kind === 'saved' ? html`<p role="status">${state.message ?? `v${state.publication.artifact.revision} 저장 후 내용을 다시 읽어 확인했습니다.`}</p>` : null}
     ${latestError ? html`<p role="alert">${latestError}</p>` : null}
     ${workspace.kind === 'loading' ? html`<p role="status">작업 공간을 확인하고 있습니다.</p>` : null}
     ${workspace.kind === 'error' ? html`<div role="alert"><p>${workspace.message}</p>

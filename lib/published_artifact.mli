@@ -2,14 +2,17 @@
     [Published_artifact_store]. Revision bodies remain content-addressed. *)
 type format = Markdown | Html
 type update = Create | Revise of { id : string; expected_revision : int }
+(** In a publication request, an omitted link is [Unspecified], JSON null is
+    [Clear], and a valid string is [Set]. Stored revisions use [string option]. *)
+type link_update = Unspecified | Clear | Set of string
 type request = private
   { update : update
   ; title : string
   ; summary : string
   ; format : format
   ; content : string
-  ; task_id : string option
-  ; goal_id : string option
+  ; task_id : link_update
+  ; goal_id : link_update
   }
 type revision =
   { revision : int

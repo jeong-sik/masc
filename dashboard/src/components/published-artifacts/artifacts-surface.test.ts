@@ -1,3 +1,4 @@
+import { artifactPublicationOutcomes } from '../../lib/artifact-publication-outcomes'
 import { html } from 'htm/preact'
 import { render, fireEvent, cleanup, waitFor, within, act } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -46,6 +47,7 @@ const old = { ...first, revision: 1, title: '조사 초안' }
 const document = { artifact: first, content: '# 보고서\r\n한글과 😀', revisions: [first, old] }
 
 beforeEach(() => {
+  artifactPublicationOutcomes.clear()
   workspaceOwner.reset()
   vi.clearAllMocks()
   vi.mocked(post).mockReset()

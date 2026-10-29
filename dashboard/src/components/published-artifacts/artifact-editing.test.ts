@@ -1,3 +1,4 @@
+import { artifactPublicationOutcomes } from '../../lib/artifact-publication-outcomes'
 import { html } from 'htm/preact'
 import type { Signal } from '@preact/signals'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
@@ -46,6 +47,7 @@ async function edit(waitForWorkspace = true) {
 }
 
 beforeEach(() => {
+  artifactPublicationOutcomes.clear()
   vi.mocked(get).mockReset(); vi.mocked(getPublic).mockReset(); vi.mocked(post).mockReset()
   setStoredToken('credential-a')
   workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace-a', connectionGeneration: 1 }
@@ -158,7 +160,9 @@ it('retains the committed identity when readback fails, without claiming the dra
     ? Promise.resolve({ ...original, artifact: { ...artifact, revision: 3 }, content: 'wrong body' }) : fallback(path, options))
   fireEvent.click(reader.getByRole('button', { name: '새 버전 저장' }))
   await reader.findByText(/저장된 문서가 보낸 내용과 다릅니다/)
-  expect(reader.getByRole('link', { name: '응답받은 버전 확인' }).getAttribute('href')).toContain('revision=3')
+  expect(reader.getByText(/응답받은 문서/).textContent).toContain(`${id} · v3`)
+  expect(reader.getByText(/응답받은 문서/).textContent).toContain('/workspace-a (/runtime-a)')
+  expect(reader.queryByRole('link', { name: '응답받은 버전 확인' })).toBeNull()
   expect(screen.queryByText('저장 내용 확인됨', { exact: false })).toBeNull()
   expect(post).toHaveBeenCalledTimes(1)
 })

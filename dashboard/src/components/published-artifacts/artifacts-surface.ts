@@ -3,9 +3,11 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import { route, navigate } from '../../router'
 import { ApiRequestError, currentStoredTokenRevision, getStoredToken } from '../../api/core'
 import { storedTokenRevision } from '../../api/token-revision'
-import { ArtifactWorkspaceReadUnattested, captureArtifactWorkspace, fetchPublishedArtifacts, fetchPublishedArtifact, fetchWorkspacePublishedArtifact, fetchPublicArtifact, artifactHref, latestArtifactRevision, type ArtifactList, type ArtifactDocument, type ArtifactPublication, type ArtifactWorkspace } from '../../api/published-artifacts'
+import { ArtifactWorkspaceReadUnattested, captureArtifactWorkspace, fetchPublishedArtifacts, fetchPublishedArtifact, fetchWorkspacePublishedArtifact, fetchPublicArtifact, latestArtifactRevision, type ArtifactList, type ArtifactDocument, type ArtifactPublication, type ArtifactWorkspace } from '../../api/published-artifacts'
 import { artifactExternalSharing, type ShareObservation } from '../../lib/artifact-external-sharing'
 import { ExternalShareOutcomes } from './external-share-outcomes'
+import { PublicationOutcomes } from './publication-outcomes'
+import { artifactPublicationOutcomes, type ArtifactPublicationOwner } from '../../lib/artifact-publication-outcomes'
 import { fetchArtifactChecks, resolveArtifactCheck, type ArtifactCheckList, type ArtifactCheckState } from '../../api/published-artifact-checks'
 import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import { ArtifactReader, type ArtifactShareSelection } from './artifact-reader'
@@ -17,6 +19,7 @@ import { downloadArtifactDraft, type ArtifactDraftRetention, type ArtifactDraftS
 
 type Remote<T> = { key: object; kind: 'loaded'; data: T; receivedAt: number }
   | { key: object; kind: 'error'; message: string; data?: T; revalidating?: boolean }
+type PublicationTarget = { publication: ArtifactPublication; workspace: ArtifactWorkspace; owner: ArtifactPublicationOwner }
 const errorMessage = (error: unknown) => error instanceof ApiRequestError && error.status === 404
   ? '문서 또는 선택한 버전을 찾지 못했습니다.'
   : error instanceof Error ? error.message : '문서를 불러오지 못했습니다.'
@@ -44,6 +47,11 @@ export function ArtifactsSurface() {
   const authRevision = storedTokenRevision.value
   const authority = executionWorkspaceAuthority.value
   const { artifact: selectedId, revision } = route.value.params
+  const publicationTarget = useRef<PublicationTarget | null>(null)
+  useLayoutEffect(() => route.subscribe(() => {
+    const target = publicationTarget.current
+    if (target && !selectedArtifact(target.publication.artifact.id, String(target.publication.artifact.revision))) publicationTarget.current = null
+  }), [])
   const mounts = useRef(0)
   const [ownerEpoch, setOwnerEpoch] = useState(0)
   // The ordinal is only a component key. Authority is the existing SSOT object.
@@ -61,7 +69,7 @@ export function ArtifactsSurface() {
     return () => { unsubscribeWorkspace(); unsubscribeCredential() }
   }, [owner])
   const [receipts, setReceipts] = useState<readonly { owner: typeof owner; outcome: ArtifactCheckOutcome }[]>([])
-  const [publications, setPublications] = useState<readonly { owner: typeof owner; outcome: ArtifactPublicationOutcome }[]>([])
+  const [readerOpen, setReaderOpen] = useState(false)
   const [drafts, setDrafts] = useState<readonly { owner: typeof owner; snapshot: ArtifactDraftSnapshot }[]>([])
   // Callbacks close over the original owner, never the replacement authority.
   const draftRetention: ArtifactDraftRetention = {
@@ -78,6 +86,9 @@ export function ArtifactsSurface() {
     && executionWorkspaceAuthority.peek() === owner.authority
   const current = () => owner.authority !== null && ownsSession()
   const publicSelection = selectedId && (authority === null || getStoredToken() === null)
+  const pinnedPublication = publicationTarget.current && selectedId === publicationTarget.current.publication.artifact.id
+    && revision === String(publicationTarget.current.publication.artifact.revision)
+  const blockedPublication = pinnedPublication && (publicationTarget.current?.owner !== owner || !!publicSelection)
   return html`<div>
     <${ExternalShareOutcomes} />
     ${retiredDrafts.length ? html`<section aria-label="이전 접근 상태의 원고" class="space-y-3 p-4">
@@ -94,16 +105,7 @@ export function ArtifactsSurface() {
         }}>원고 폐기</button>
       </article>`)}
     </section>` : null}
-    ${publications.length ? html`<section aria-label="문서 저장 요청 결과">
-      ${publications.map(({ owner: original, outcome }, index) => html`<p key=${index}>
-        ${outcome.title} · 원래 작업 공간 ${original.authority?.workspaceRoot}
-        ${outcome.kind === 'published' ? html` · <a href=${artifactHref(outcome.publication.artifact.id, outcome.publication.artifact.revision)}>
-          ${outcome.publication.artifact.id} · v${outcome.publication.artifact.revision}</a>
-          · ${outcome.verified ? '저장 내용 확인됨' : '저장 응답 받음 · 내용 확인 필요'}`
-          : ` · 적용 여부 미확인: ${outcome.detail}`}
-        ${original !== owner ? ' · 이전 접근 상태의 요청 결과' : ''}
-      </p>`)}
-    </section>` : null}
+    ${readerOpen ? null : html`<${PublicationOutcomes} currentOwner=${owner} />`}
     ${receipts.length ? html`<section aria-label="문서 확인 요청 결과">
       ${receipts.map(({ owner: original, outcome }, index) => html`<p key=${index}>
         ${outcome.artifact.title} · ${outcome.artifact.id} · v${outcome.artifact.revision}
@@ -116,21 +118,21 @@ export function ArtifactsSurface() {
         ${original !== owner ? ' · 이전 접근 상태의 요청 결과' : ''}
       </p>`)}
     </section>` : null}
-    ${authority === null || publicSelection
+    ${blockedPublication
+      ? retiredDrafts.length ? html`<p role="status">이전 원고를 처리한 뒤 문서를 읽습니다.</p>`
+        : html`<div role="alert"><p>게시 당시 작업 공간의 접근 상태를 확인한 뒤 문서를 다시 열어 주세요.
+            현재 접근 상태에서는 같은 주소로 다른 문서가 열릴 수 있습니다.</p>
+            <button type="button" onClick=${() => { publicationTarget.current = null; setOwnerEpoch(epoch => epoch + 1) }}>현재 접근 상태에서 문서 다시 열기</button></div>`
+      : authority === null || publicSelection
       ? (retiredDrafts.length === 0 && selectedId
           ? html`<${SharedArtifactObservation} key=${`${owner.mount}:${selectedId}:${revision ?? ''}`}
-              authRevision=${authRevision} selectedId=${selectedId} revision=${revision} isCurrent=${ownsSession} />`
+              authRevision=${authRevision} selectedId=${selectedId} revision=${revision} isCurrent=${ownsSession}
+              publicationOwner=${owner} onDialogState=${setReaderOpen} />`
           : html`<p role="status">${retiredDrafts.length ? '이전 원고를 처리한 뒤 문서를 읽습니다.' : '현재 작업 공간을 확인한 뒤 아티팩트를 읽습니다.'}</p>`)
       : html`<${ArtifactsObservation} key=${owner.mount} authRevision=${authRevision} isCurrent=${current}
           workspaceRoot=${authority.workspaceRoot} draftRetention=${draftRetention} allowReader=${retiredDrafts.length === 0}
-          onPublication=${(outcome: ArtifactPublicationOutcome) => setPublications(previous => {
-            const index = outcome.kind === 'published' ? previous.findIndex(entry => entry.owner === owner
-              && entry.outcome.kind === 'published'
-              && entry.outcome.publication.artifact.id === outcome.publication.artifact.id
-              && entry.outcome.publication.artifact.revision === outcome.publication.artifact.revision) : -1
-            return index < 0 ? [...previous, { owner, outcome }]
-              : previous.map((entry, position) => position === index ? { owner, outcome } : entry)
-          })}
+          publicationOwner=${owner} publicationTarget=${publicationTarget} onDialogState=${setReaderOpen}
+          onPublication=${(outcome: ArtifactPublicationOutcome) => artifactPublicationOutcomes.record(owner, outcome)}
           onMutation=${(outcome: ArtifactCheckOutcome) => setReceipts(previous => [...previous, { owner, outcome }])} />`}
   </div>`
 }
@@ -147,19 +149,21 @@ const selectedArtifact = (id: string, revision: string | undefined) => {
     && selected.params.artifact === id && selected.params.revision === revision
 }
 
-function SharedArtifactReader({ doc, revision, authRevision, isCurrent }: {
+function SharedArtifactReader({ doc, revision, authRevision, isCurrent, publicationOwner, onDialogState }: {
   doc: ArtifactDocument; revision: string | undefined; authRevision: number; isCurrent: () => boolean
+  publicationOwner: ArtifactPublicationOwner; onDialogState: (open: boolean) => void
 }) {
   return html`<${ArtifactReader} doc=${doc} fixedRevision=${revision !== undefined} readOnly=${true}
     draftRetention=${noopDraftRetention} workspaceRoot=""
     checkState=${{ kind: 'unknown', message: '외부 공유 열람' }} authRevision=${authRevision}
     isCurrent=${isCurrent} onMutation=${() => {}} onCheckChanged=${() => {}}
-    onPublication=${() => {}} onPublished=${() => {}}
+    onPublication=${() => {}} onPublished=${() => {}} publicationOwner=${publicationOwner} onDialogState=${onDialogState}
     onClose=${() => navigate('workspace', { section: 'artifacts' })} />`
 }
 
-function SharedArtifactObservation({ authRevision, selectedId, revision, isCurrent }: {
+function SharedArtifactObservation({ authRevision, selectedId, revision, isCurrent, publicationOwner, onDialogState }: {
   authRevision: number; selectedId: string; revision: string | undefined; isCurrent: () => boolean
+  publicationOwner: ArtifactPublicationOwner; onDialogState: (open: boolean) => void
 }) {
   const [document, setDocument] = useState<Remote<ArtifactDocument> | null>(null)
   const [visitEpoch, setVisitEpoch] = useState(0)
@@ -193,12 +197,15 @@ function SharedArtifactObservation({ authRevision, selectedId, revision, isCurre
   const doc = document?.key === documentKey ? document : null
   if (doc === null) return html`<p role="status">문서를 불러오고 있습니다.</p>`
   if (!doc.data) return html`<p role="alert">${doc.kind === 'error' ? doc.message : '문서를 읽지 못했습니다.'}</p>`
-  return html`<${SharedArtifactReader} doc=${doc.data} revision=${revision} authRevision=${authRevision} isCurrent=${current} />`
+  return html`<${SharedArtifactReader} doc=${doc.data} revision=${revision} authRevision=${authRevision} isCurrent=${current}
+    publicationOwner=${publicationOwner} onDialogState=${onDialogState} />`
 }
 
-function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, allowReader, isCurrent, onMutation, onPublication }: {
+function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, allowReader, isCurrent, onMutation, onPublication, publicationOwner, publicationTarget, onDialogState }: {
   authRevision: number; isCurrent: () => boolean; onMutation: (outcome: ArtifactCheckOutcome) => void
   onPublication: (outcome: ArtifactPublicationOutcome) => void
+  publicationOwner: ArtifactPublicationOwner; onDialogState: (open: boolean) => void
+  publicationTarget: { current: PublicationTarget | null }
   workspaceRoot: string
   draftRetention: ArtifactDraftRetention
   allowReader: boolean
@@ -275,6 +282,37 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
     const publish = (next: DocumentRemote) => {
       if (!controller.signal.aborted && currentDocument()) { documentRef.current = next; setDocument(next); notifyShareWaiters() }
     }
+    const cleanup = () => { controller.abort(); notifyShareWaiters(true); unsubscribeRoute(); unsubscribeWorkspace(); unsubscribeCredential() }
+    const target = publicationTarget.current
+    if (target && (target.publication.artifact.id !== selectedId || String(target.publication.artifact.revision) !== revision)) {
+      publicationTarget.current = null
+    } else if (target) {
+      // A publication result belongs to its original workspace. Do not show an
+      // unbound or public response while opening that result: the server may
+      // have switched to another runtime with the same document id and revision.
+      const retained = () => {
+        const previous = documentRef.current
+        const data = previous?.key === documentKey && previous.kind !== 'public-loading'
+          && previous.data?.kind === 'operator' ? previous.data : undefined
+        return data?.workspace?.basePath === target.workspace.basePath && data.workspace.mascRoot === target.workspace.mascRoot
+          && data.document.artifact.id === target.publication.artifact.id && data.document.artifact.revision === target.publication.artifact.revision
+          && data.document.artifact.body._blob.sha256 === target.publication.artifact.body._blob.sha256 ? data : undefined
+      }
+      const failed = (message: string) => publish({ key: documentKey, kind: 'error', message, data: retained() })
+      const previous = retained()
+      if (previous) publish({ key: documentKey, kind: 'error', message: '작업 공간을 다시 확인하고 있습니다.', data: previous, revalidating: true })
+      const shareObservation = artifactExternalSharing.observe(selectedId, target.workspace)
+      void fetchWorkspacePublishedArtifact(selectedId, revision, target.workspace, controller.signal).then(document => {
+        if (document.artifact.id !== target.publication.artifact.id
+          || document.artifact.revision !== target.publication.artifact.revision
+          || document.artifact.body._blob.sha256 !== target.publication.artifact.body._blob.sha256) {
+          failed('게시한 문서의 내용이 달라 원래 버전을 열지 못했습니다.')
+          return
+        }
+        publish({ key: documentKey, kind: 'loaded', data: { kind: 'operator', document, workspace: target.workspace, shareObservation }, receivedAt: Date.now() })
+      }, error => failed(`게시 당시 작업 공간에서 문서를 열지 못했습니다: ${errorMessage(error)}`))
+      return cleanup
+    }
     let boundApplied = false
     let publicRequested = false
     const readFailed = (error: unknown) => {
@@ -349,7 +387,7 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
         } else if (!boundApplied) readFailed(error)
       }
     }, error => { if (priorBound) readFailed(error) })
-    return () => { controller.abort(); notifyShareWaiters(true); unsubscribeRoute(); unsubscribeWorkspace(); unsubscribeCredential() }
+    return cleanup
   }, [authRevision, selectedId, revision, documentKey, visit, refresh, allowReader])
 
   const list = catalog?.key === catalogKey ? catalog : null
@@ -393,8 +431,9 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
     setChecks(null)
     setRefresh(n => n + 1)
   }
-  const published = (publication: ArtifactPublication) => {
+  const published = (publication: ArtifactPublication, workspace: ArtifactWorkspace) => {
     if (!current()) return
+    publicationTarget.current = { publication, workspace, owner: publicationOwner }
     setImporting(false)
     setRefresh(n => n + 1)
     navigate('workspace', { section: 'artifacts', artifact: publication.artifact.id, revision: String(publication.artifact.revision) })
@@ -493,7 +532,7 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
           : !doc.data ? html`<p role="alert">${doc.kind === 'error' ? doc.message : '문서를 읽지 못했습니다.'}</p>`
           : doc.data.kind === 'public' ? html`<${SharedArtifactReader} key=${`public-${documentKey.visit}`}
               doc=${doc.data.document} revision=${revision} authRevision=${authRevision}
-              isCurrent=${currentDocument} />`
+              isCurrent=${currentDocument} publicationOwner=${publicationOwner} onDialogState=${onDialogState} />`
           : html`<${ArtifactReader} key=${documentKey.visit} doc=${doc.data.document} fixedRevision=${revision !== undefined}
               draftRetention=${draftRetention} workspaceRoot=${workspaceRoot}
               readOnly=${!doc.data.workspace} readOnlyLabel="작업 공간 미확인 · 읽기 전용"
@@ -504,7 +543,7 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
               shareObservation=${doc.data.shareObservation}
               readError=${doc.kind === 'error' ? doc.message : undefined}
               checkState=${checkState(doc.data.document.artifact)} authRevision=${authRevision} isCurrent=${currentDocument} onMutation=${onMutation} onCheckChanged=${checkChanged}
-              onPublication=${onPublication} onPublished=${published}
+              onPublication=${onPublication} onPublished=${published} publicationOwner=${publicationOwner} onDialogState=${onDialogState}
               onClose=${() => navigate('workspace', { section: 'artifacts' })} />`}
       </div>
     </section>

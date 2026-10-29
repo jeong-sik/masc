@@ -54,6 +54,74 @@ describe('live shared drafts', () => {
     expect(a.content).toBe(`보관 ${initial}`); expect(sharedSource(authority)).toBe(a.content)
     expect(sendArtifactDraftCommand).toHaveBeenCalledTimes(2)
   })
+  it.each(['success', 'failure'] as const)('reconciles an old merge with a new attempt and ignores its late %s', async outcome => {
+    let finishOld!: (view: ArtifactDraftView) => void, rejectOld!: (error: Error) => void
+    let finishNew!: (view: ArtifactDraftView) => void
+    let oldCommand!: Parameters<typeof sendArtifactDraftCommand>[0]
+    let newCommand!: Parameters<typeof sendArtifactDraftCommand>[0]
+    vi.mocked(sendArtifactDraftCommand).mockImplementationOnce(command => {
+      oldCommand = command
+      return new Promise((resolve, reject) => { finishOld = resolve; rejectOld = reject })
+    }).mockImplementationOnce(command => {
+      newCommand = command
+      return new Promise(resolve => { finishNew = resolve })
+    }).mockImplementation(commit)
+    const a = open()
+    await vi.waitFor(() => expect(sendArtifactPresence).toHaveBeenCalled())
+    await Promise.resolve()
+    a.doc.getText('content').insert(0, '보존 ')
+    expect(a.snapshot.saving).toBe(true)
+    const oldSignal = vi.mocked(sendArtifactDraftCommand).mock.calls[0]![2]!
+    a.suspend()
+    expect(oldSignal.aborted).toBe(true)
+    expect(a.snapshot.pending).toBe(true)
+    expect(a.snapshot.saving).toBe(false)
+    expect(sendArtifactDraftCommand).toHaveBeenCalledTimes(1)
+    void a.connect()
+    await vi.waitFor(() => expect(sendArtifactDraftCommand).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(sendArtifactDraftCommand).mock.calls[1]![2]!.aborted).toBe(false)
+    expect(streamArtifactDraft).toHaveBeenCalledTimes(2)
+    if (outcome === 'success') finishOld(await commit(oldCommand))
+    else rejectOld(new Error('old response unavailable'))
+    await Promise.resolve(); await Promise.resolve()
+    expect(a.snapshot.saving).toBe(true)
+    expect(a.snapshot.pending).toBe(true)
+    a.doc.getText('content').insert(0, '새 글 ')
+    expect(sendArtifactDraftCommand).toHaveBeenCalledTimes(2)
+    finishNew(await commit(newCommand))
+    await vi.waitFor(() => expect(a.snapshot.pending).toBe(false))
+    expect(sendArtifactDraftCommand).toHaveBeenCalledTimes(3)
+    expect(a.content).toBe(`새 글 보존 ${initial}`)
+    expect(sharedSource(authority)).toBe(a.content)
+  })
+  it('reconnects while a pre-hide position hangs and isolates its late completion from the new position', async () => {
+    const a = open()
+    await vi.waitFor(() => expect(sendArtifactPresence).toHaveBeenCalledTimes(1))
+    await Promise.resolve(); await Promise.resolve(); vi.mocked(sendArtifactPresence).mockClear()
+    let finishOld!: () => void, finishNew!: () => void
+    vi.mocked(sendArtifactPresence)
+      .mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+      .mockImplementationOnce(() => new Promise(resolve => { finishNew = resolve }))
+      .mockResolvedValue()
+    a.select({ anchor: 0, head: 1 })
+    expect(sendArtifactPresence).toHaveBeenCalledTimes(1)
+    const oldSignal = vi.mocked(sendArtifactPresence).mock.calls[0]![4]!
+    a.suspend()
+    expect(oldSignal.aborted).toBe(true)
+    void a.connect()
+    await vi.waitFor(() => expect(sendArtifactPresence).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(sendArtifactPresence).mock.calls[1]![4]!.aborted).toBe(false)
+    expect(a.snapshot.connection).toBe('connected')
+    expect(vi.mocked(sendArtifactPresence).mock.calls[1]![1]).toBe('session-1')
+    finishOld(); await Promise.resolve(); await Promise.resolve()
+    a.select({ anchor: 1, head: 2 })
+    expect(sendArtifactPresence).toHaveBeenCalledTimes(2)
+    finishNew()
+    await vi.waitFor(() => expect(sendArtifactPresence).toHaveBeenCalledTimes(3))
+    expect(vi.mocked(sendArtifactPresence).mock.calls[2]![1]).toBe('session-1')
+    expect(vi.mocked(sendArtifactPresence).mock.calls[2]![3]).toEqual({ action: 'position',
+      position: selectSharedSource(a.doc, { anchor: 1, head: 2 }) })
+  })
   it('waits for durable insert before sending its relative cursor and leaves on dispose', async () => {
     let release!: () => void
     vi.mocked(sendArtifactDraftCommand).mockImplementation(async command => { await new Promise<void>(resolve => { release = resolve }); return commit(command) })

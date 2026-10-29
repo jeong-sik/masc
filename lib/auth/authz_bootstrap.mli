@@ -37,12 +37,17 @@
       directory of the log, which a link can put outside the base path. The log,
       its lock file and the rest of what this module writes are in those
       directories, and a store inside the base path is in every backup of it.
-      Paths are compared by the files they are, the device and the inode, so a
-      link, a mount that shows one directory twice, and the case of a name that
-      exists do not hide a collision. A name that does not exist has no file to
-      compare. The install record may not be written yet, and then its path is
-      compared as spelled, after the links in the part that exists are resolved:
-      a spelling that differs in the case of a name that is not there yet gets
+      The links in the path of the store are followed first, so a link to a
+      folder inside the base path does not hide it. Directories are compared by
+      the files they are, the device and the inode, so a mount that shows one
+      directory twice, and the case of a name that exists do not hide a
+      collision. A name that does not exist has no file to compare, and the
+      directories above it are compared instead. The directory of the log is not
+      made until the log is opened, and until then it is compared by the place
+      its name leads to, after the links in the part that exists are resolved.
+      The install record may not be written yet, and then its path is compared
+      as spelled, after the links in the part that exists are resolved: a
+      spelling that differs in the case of a name that is not there yet gets
       past. The config directory is not checked to be outside the base path.
     - A config directory is known, so the install record can be written.
     - The install record is not unreadable or corrupt. It names a store, or none.

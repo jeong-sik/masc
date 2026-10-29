@@ -542,6 +542,17 @@ let refusals =
             B.external_store = Filename.concat (Filename.concat elsewhere "auth") "authz.jsonl"
           })
     }
+  ; { label = "the directory of the log, which a link puts outside the base path, before it is made"
+    ; expected = "External_store_path_invalid Inside_base_path"
+    ; prepare =
+        (fun dirs ->
+          let elsewhere = Filename.concat dirs.root "elsewhere" in
+          Fs_compat.mkdir_p elsewhere;
+          Unix.symlink elsewhere (Filename.concat dirs.base ".masc");
+          { (request dirs) with
+            B.external_store = Filename.concat (Filename.concat elsewhere "auth") "authz.jsonl"
+          })
+    }
   ; { label = "a store inside the base path"
     ; expected = "External_store_path_invalid Inside_base_path"
     ; prepare =
@@ -556,6 +567,16 @@ let refusals =
         (fun dirs ->
           let through_link = Filename.concat dirs.root "base-link" in
           Unix.symlink dirs.base through_link;
+          { (request dirs) with B.external_store = Filename.concat through_link "external.jsonl" })
+    }
+  ; { label = "a store inside the base path, through a link to a folder of it"
+    ; expected = "External_store_path_invalid Inside_base_path"
+    ; prepare =
+        (fun dirs ->
+          let folder = Filename.concat dirs.base "folder" in
+          Fs_compat.mkdir_p folder;
+          let through_link = Filename.concat dirs.root "folder-link" in
+          Unix.symlink folder through_link;
           { (request dirs) with B.external_store = Filename.concat through_link "external.jsonl" })
     }
   ; { label = "the base path itself as the store"

@@ -928,6 +928,8 @@
   masc.masc_core
   masc.masc_log
   eio
+  eio.unix
+  masc.masc_process
   mtime.clock.os
   masc.config_dir_resolver
   masc.fs_compat

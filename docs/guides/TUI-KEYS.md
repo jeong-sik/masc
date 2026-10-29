@@ -73,7 +73,8 @@ The command palette is `:`.
 |---|---|
 | `j/k` | move the roster cursor |
 | `v` | cycle compact / detailed / grouped |
-| `o` | cycle priority / recent / name |
+| `o` | cycle priority / recent / oldest / activity / name |
+| `J` | open the selected Keeper's schedules |
 | `Right / Enter` | keeper detail |
 | `c` | chat with the keeper |
 | `l` | logs |

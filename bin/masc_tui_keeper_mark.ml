@@ -27,8 +27,9 @@ let activity_glyph : Masc_tui_keeper_list_model.activity -> string = function
   | Async_working _ -> "&"
   | Deferred -> "\xe2\x97\x8c" (* ◌ *)
   | Tool_waiting -> "\xe2\x96\xa0" (* ■ *)
-  | Model_waiting | External_waiting -> "\xe2\x97\x8c" (* ◌ *)
-  | Delegating -> "\xe2\x86\x92" (* → *)
+  | Model_waiting -> "\xe2\x97\x94" (* ◔ *)
+  | External_waiting -> "\xe2\x97\x8c" (* ◌ *)
+  | Delegate_result -> "\xe2\x86\xa9" (* ↩ *)
   | Idle -> "\xe2\x97\x8b" (* ○ *)
   | Paused -> "\xe2\x85\xa1" (* Ⅱ *)
   | Offline -> "\xc3\x97" (* × *)
@@ -40,9 +41,9 @@ let badge_glyph : Masc_tui_keeper_list_model.badge -> string = function
   | Badge_async _ -> "&"
   | Badge_async_queued _ -> ">"
   | Badge_async_cancelling _ -> "\xc3\x97" (* × *)
-  | Badge_delegate -> "\xe2\x86\x92" (* → *)
+  | Badge_delegate -> "\xe2\x86\xa9" (* ↩ *)
   | Badge_verification -> "\xe2\x97\x87" (* ◇ *)
-  | Badge_schedule -> "\xe2\x96\xb8" (* ▸ *)
+  | Badge_schedule -> "\xe2\x97\xb7" (* ◷ *)
 
 type open_turn = Worked | Worked_while_failing | Left_open
 

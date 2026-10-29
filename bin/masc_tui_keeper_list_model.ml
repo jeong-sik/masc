@@ -1,6 +1,6 @@
 type layout = Compact | Detailed | Grouped
-type sort = Priority | Recent | Name
-type attention = Needs_you | Active | Waiting | Inactive | Unobserved
+type sort = Priority | Recent | Oldest | Activity | Name
+type attention = Attention | Active | Waiting | Inactive | Unobserved
 
 type keeper_waiting_state = Masc.Tui_decode.keeper_waiting_state =
   | Keeper_waiting_idle
@@ -52,7 +52,7 @@ type activity =
   | Deferred
   | Tool_waiting
   | Model_waiting
-  | Delegating
+  | Delegate_result
   | Verifying
   | External_waiting
   | Idle
@@ -95,7 +95,9 @@ let next_layout = function
 
 let next_sort = function
   | Priority -> Recent
-  | Recent -> Name
+  | Recent -> Oldest
+  | Oldest -> Activity
+  | Activity -> Name
   | Name -> Priority
 
 let layout_label = function
@@ -106,7 +108,23 @@ let layout_label = function
 let sort_label = function
   | Priority -> "priority"
   | Recent -> "recent"
+  | Oldest -> "oldest"
+  | Activity -> "activity"
   | Name -> "name"
+
+let layout_of_string = function
+  | "compact" -> Some Compact
+  | "detailed" -> Some Detailed
+  | "grouped" -> Some Grouped
+  | _ -> None
+
+let sort_of_string = function
+  | "priority" -> Some Priority
+  | "recent" -> Some Recent
+  | "oldest" -> Some Oldest
+  | "activity" -> Some Activity
+  | "name" -> Some Name
+  | _ -> None
 
 let waiting_items row =
   match row.waiting with
@@ -192,7 +210,7 @@ let primary_activity_of_row row =
       if running > 0 then Async_working running
       else if waiting_state row = Some Keeper_waiting_deferred then Deferred
       else if waiting_state row = Some Keeper_waiting_busy then Running
-      else if waiting_has_producer Wake_keeper_delegate items then Delegating
+      else if waiting_has_producer Wake_keeper_delegate items then Delegate_result
       else if waiting_has_producer Wake_completion_authority items || row.awaiting_verification then
         Verifying
       else if queued > 0 || cancelling > 0 then External_waiting
@@ -221,14 +239,14 @@ let badges_of_row row =
 
 let group_of_row row =
   match primary_activity_of_row row with
-  | Held_call | Question | Confirmation | Failure -> Needs_you
+  | Held_call | Question | Confirmation | Failure -> Attention
   | Preparing | Streaming | Running | Async_working _ | Deferred -> Active
-  | Tool_waiting | Model_waiting | Delegating | Verifying | External_waiting -> Waiting
+  | Tool_waiting | Model_waiting | Delegate_result | Verifying | External_waiting -> Waiting
   | Idle | Paused | Offline -> Inactive
   | Unknown -> Unobserved
 
 let attention_rank = function
-  | Needs_you -> 0
+  | Attention -> 0
   | Active -> 1
   | Waiting -> 2
   | Inactive -> 3
@@ -246,26 +264,53 @@ let compare_recent left right =
   | None, Some _ -> 1
   | None, None -> compare_name left right
 
-let order_rows ~sort rows =
+let compare_oldest left right =
+  match left.last_activity_at, right.last_activity_at with
+  | Some left_at, Some right_at ->
+      let order = Float.compare left_at right_at in
+      if order = 0 then compare_name left right else order
+  | Some _, None -> -1
+  | None, Some _ -> 1
+  | None, None -> compare_name left right
+
+let activity_rank = function
+  | Held_call -> 0 | Question -> 1 | Confirmation -> 2 | Failure -> 3
+  | Preparing -> 4 | Streaming -> 5 | Running -> 6 | Async_working _ -> 7
+  | Deferred -> 8 | Tool_waiting -> 9 | Model_waiting -> 10 | Delegate_result -> 11
+  | Verifying -> 12 | External_waiting -> 13 | Idle -> 14 | Paused -> 15
+  | Offline -> 16 | Unknown -> 17
+
+let order_rows ~layout ~sort rows =
   List.stable_sort
     (fun left right ->
-      match sort with
-      | Name -> compare_name left right
-      | Recent -> compare_recent left right
-      | Priority ->
-          let order = compare (attention_rank (group_of_row left)) (attention_rank (group_of_row right)) in
-          if order = 0 then compare_recent left right else order)
+      let group_order =
+        match layout with
+        | Grouped -> Int.compare (attention_rank (group_of_row left)) (attention_rank (group_of_row right))
+        | Compact | Detailed -> 0
+      in
+      if group_order <> 0 then group_order
+      else match sort with
+        | Name -> compare_name left right
+        | Recent -> compare_recent left right
+        | Oldest -> compare_oldest left right
+        | Activity ->
+            let order = Int.compare (activity_rank (primary_activity_of_row left))
+                (activity_rank (primary_activity_of_row right)) in
+            if order = 0 then compare_recent left right else order
+        | Priority ->
+            let order = Int.compare (attention_rank (group_of_row left)) (attention_rank (group_of_row right)) in
+            if order = 0 then compare_recent left right else order)
     rows
 
 let group_counts rows =
   List.fold_left
-    (fun (needs_you, active, waiting, inactive, unobserved) row ->
+    (fun (attention, active, waiting, inactive, unobserved) row ->
       match group_of_row row with
-      | Needs_you -> needs_you + 1, active, waiting, inactive, unobserved
-      | Active -> needs_you, active + 1, waiting, inactive, unobserved
-      | Waiting -> needs_you, active, waiting + 1, inactive, unobserved
-      | Inactive -> needs_you, active, waiting, inactive + 1, unobserved
-      | Unobserved -> needs_you, active, waiting, inactive, unobserved + 1)
+      | Attention -> attention + 1, active, waiting, inactive, unobserved
+      | Active -> attention, active + 1, waiting, inactive, unobserved
+      | Waiting -> attention, active, waiting + 1, inactive, unobserved
+      | Inactive -> attention, active, waiting, inactive + 1, unobserved
+      | Unobserved -> attention, active, waiting, inactive, unobserved + 1)
     (0, 0, 0, 0, 0) rows
 
 type waiting_summary = {
@@ -286,7 +331,7 @@ let waiting_summary rows =
       | Tool_waiting -> { summary with tool = summary.tool + 1; background }
       | Model_waiting -> { summary with model = summary.model + 1; background }
       | External_waiting -> { summary with external_wait = summary.external_wait + 1; background }
-      | Delegating -> { summary with delegate = summary.delegate + 1; background }
+      | Delegate_result -> { summary with delegate = summary.delegate + 1; background }
       | Verifying -> { summary with verification = summary.verification + 1; background }
       | Held_call | Question | Confirmation | Failure | Preparing | Streaming | Running
       | Async_working _ | Deferred | Idle | Paused | Offline | Unknown -> summary)

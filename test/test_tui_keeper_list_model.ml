@@ -131,7 +131,9 @@ let test_cycles () =
   Alcotest.(check bool) "detailed to grouped" true (Model.next_layout Model.Detailed = Model.Grouped);
   Alcotest.(check bool) "grouped to compact" true (Model.next_layout Model.Grouped = Model.Compact);
   Alcotest.(check bool) "priority to recent" true (Model.next_sort Model.Priority = Model.Recent);
-  Alcotest.(check bool) "recent to name" true (Model.next_sort Model.Recent = Model.Name);
+  Alcotest.(check bool) "recent to oldest" true (Model.next_sort Model.Recent = Model.Oldest);
+  Alcotest.(check bool) "oldest to activity" true (Model.next_sort Model.Oldest = Model.Activity);
+  Alcotest.(check bool) "activity to name" true (Model.next_sort Model.Activity = Model.Name);
   Alcotest.(check bool) "name to priority" true (Model.next_sort Model.Name = Model.Priority)
 
 let test_priority_orders_attention_activity_waiting_then_inactive () =
@@ -153,7 +155,7 @@ let test_priority_orders_attention_activity_waiting_then_inactive () =
   in
   Alcotest.(check (list string)) "attention, activity, waiting, inactive"
     [ "failure"; "held"; "question"; "async"; "stream"; "delegate"; "model"; "verify"; "idle"; "paused"; "unknown" ]
-    (names (Model.order_rows ~sort:Model.Priority rows))
+    (names (Model.order_rows ~layout:Model.Compact ~sort:Model.Priority rows))
 
 let test_recent_and_name_have_deterministic_ties () =
   let rows =
@@ -164,12 +166,12 @@ let test_recent_and_name_have_deterministic_ties () =
     ]
   in
   Alcotest.(check (list string)) "recent descending, name tie, unknown last"
-    [ "alpha"; "beta"; "old"; "unknown" ] (names (Model.order_rows ~sort:Model.Recent rows));
+    [ "alpha"; "beta"; "old"; "unknown" ] (names (Model.order_rows ~layout:Model.Compact ~sort:Model.Recent rows));
   Alcotest.(check (list string)) "name ignores activity"
-    [ "alpha"; "beta"; "old"; "unknown" ] (names (Model.order_rows ~sort:Model.Name rows));
+    [ "alpha"; "beta"; "old"; "unknown" ] (names (Model.order_rows ~layout:Model.Compact ~sort:Model.Name rows));
   let duplicates = [ row ~last_activity_at:(Some 10.) "same-a"; row ~last_activity_at:(Some 10.) "same-b" ] in
   Alcotest.(check (list string)) "identical sort keys remain stable"
-    [ "same-a"; "same-b" ] (names (Model.order_rows ~sort:Model.Recent duplicates))
+    [ "same-a"; "same-b" ] (names (Model.order_rows ~layout:Model.Compact ~sort:Model.Recent duplicates))
 
 let test_streaming_keeps_async_and_schedule_badges () =
   let value =
@@ -203,9 +205,9 @@ let test_delegate_and_verification_remain_distinct_badges () =
       ~waiting:(waiting ~items:[waiting_item ~producer:Model.Wake_keeper_delegate ()] "row")
       "row"
   in
-  Alcotest.(check bool) "delegation is primary without an active turn" true
-    (Model.primary_activity_of_row value = Model.Delegating);
-  Alcotest.(check bool) "delegation waits" true (Model.group_of_row value = Model.Waiting);
+  Alcotest.(check bool) "a queued delegate result is primary without an active turn" true
+    (Model.primary_activity_of_row value = Model.Delegate_result);
+  Alcotest.(check bool) "the result awaits the Keeper" true (Model.group_of_row value = Model.Waiting);
   let badges = Model.badges_of_row value in
   Alcotest.(check bool) "delegation badge" true (List.mem Model.Badge_delegate badges);
   Alcotest.(check bool) "verification badge" true (List.mem Model.Badge_verification badges)
@@ -244,7 +246,7 @@ let test_confirmation_and_inventory_errors_need_attention () =
       "read-error"
   in
   Alcotest.(check bool) "operator confirmation needs a person" true
-    (Model.primary_activity_of_row confirmation = Model.Confirmation && Model.group_of_row confirmation = Model.Needs_you);
+    (Model.primary_activity_of_row confirmation = Model.Confirmation && Model.group_of_row confirmation = Model.Attention);
   Alcotest.(check bool) "an inventory read failure does not become a Keeper failure" true
     (Model.primary_activity_of_row read_error = Model.External_waiting
      && Model.group_of_row read_error = Model.Waiting);

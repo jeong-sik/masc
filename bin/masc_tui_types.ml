@@ -8522,6 +8522,7 @@ type state = {
   mutable home_decision_inflight : home_request option;
   mutable home_last_chat : home_chat_receipt;
   home_chat_writer : Masc_tui_chat_visit.t;
+  keeper_preference_writer : Masc_tui_config.keeper_preference_writer;
   credential_preparation : Masc_tui_credential_preparation.t;
   mutable home_chat_visit : Masc_tui_chat_visit.request option;
   mutable metrics_scroll: int;
@@ -9233,6 +9234,12 @@ type state = {
   mutable keeper_cursor: int;
   mutable keeper_list_layout: Masc_tui_keeper_list_model.layout;
   mutable keeper_list_sort: Masc_tui_keeper_list_model.sort;
+  mutable keeper_list_preference_notice: string option;
+  mutable keeper_list_preference_startup_error: string option;
+  mutable keeper_list_order_save_error: string option;
+  mutable keeper_list_view_save_error: string option;
+  mutable keeper_list_order_save_request: int option;
+  mutable keeper_list_view_save_request: int option;
   (* Roster row to return to when the Keeper message view closes. Kept by name
      so an empty roster read, which clamps [keeper_cursor], does not lose it. *)
   mutable keeper_message_return: string option;
@@ -11087,7 +11094,8 @@ let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
       ; last_activity_at = keeper_activity_at ~turn ~waiting:activity_waiting keeper
       })
     state.keepers
-  |> Masc_tui_keeper_list_model.order_rows ~sort:state.keeper_list_sort
+  |> Masc_tui_keeper_list_model.order_rows ~layout:state.keeper_list_layout
+       ~sort:state.keeper_list_sort
 
 let ordered_keepers state =
   List.map (fun row -> row.Masc_tui_keeper_list_model.keeper) (keeper_list_rows state)
@@ -11119,6 +11127,80 @@ let keeper_list_select_name state keeper_name =
 
 let selected_keeper (state : state) =
   List.nth_opt (keepers_for_selection state) state.keeper_cursor
+
+let keeper_preference_unresolved_warnings (state : state) =
+  List.filter_map Fun.id
+    [ state.keeper_list_order_save_error; state.keeper_list_view_save_error
+    ; state.keeper_list_preference_startup_error ]
+
+let refresh_keeper_preference_notice (state : state) =
+  let warnings = keeper_preference_unresolved_warnings state in
+  let prefix =
+    match state.keeper_list_order_save_error, state.keeper_list_view_save_error with
+    | Some _, Some _ -> "order and view save issues: "
+    | Some _, None | None, Some _ | None, None -> ""
+  in
+  state.keeper_list_preference_notice <-
+    match warnings with [] -> None | _ -> Some (prefix ^ String.concat "; " warnings)
+
+let note_keeper_preference_startup_error (state : state) message =
+  state.keeper_list_preference_startup_error <- Some
+    (match state.keeper_list_preference_startup_error with
+     | None -> "At startup: " ^ message
+     | Some previous -> previous ^ "; " ^ message);
+  refresh_keeper_preference_notice state
+
+(* A newer choice of the same kind may be queued when an earlier receipt
+   arrives. Retain a failure until the latest request of that kind succeeds. *)
+let note_keeper_preference_submission (state : state) ~request_id = function
+  | Masc_tui_config.Keeper_order _ ->
+      state.keeper_list_order_save_request <- Some request_id
+  | Masc_tui_config.Keeper_view _ ->
+      state.keeper_list_view_save_request <- Some request_id
+
+let apply_keeper_preference_completion (state : state)
+    (completion : Masc_tui_config.keeper_preference_completion) =
+  let current =
+    match completion.preference with
+    | Keeper_order _ -> state.keeper_list_order_save_request
+    | Keeper_view _ -> state.keeper_list_view_save_request
+  in
+  if current <> Some completion.request_id then None else
+  let error =
+    let choice = match completion.preference with
+      | Keeper_order value -> "order " ^ value
+      | Keeper_view value -> "view " ^ value in
+    match completion.outcome with
+    | Preference_saved -> None
+    | Preference_unconfirmed reason -> Some ("Keeper " ^ choice ^ " save unconfirmed: " ^ reason)
+    | Preference_not_started reason -> Some ("Keeper " ^ choice ^ " save not started: " ^ reason)
+  in
+  (match completion.preference with
+   | Keeper_order _ ->
+       state.keeper_list_order_save_error <- error
+   | Keeper_view _ ->
+       state.keeper_list_view_save_error <- error);
+  refresh_keeper_preference_notice state;
+  error
+
+type activity_keeper_selection =
+  | Activity_keeper_missing
+  | Activity_keeper_selected
+  | Activity_keeper_already_selected
+
+(* Recent's rows name a Keeper, while the cursor belongs to the active
+   surface's roster. In the full Keeper list that roster is sorted and may be
+   grouped; elsewhere it is the original roster. Resolve and compare against
+   the same roster [selected_keeper] reads. *)
+let select_activity_keeper state keeper_name =
+  match List.find_index
+      (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+      (keepers_for_selection state) with
+  | None -> Activity_keeper_missing
+  | Some index when index = state.keeper_cursor -> Activity_keeper_already_selected
+  | Some index ->
+      state.keeper_cursor <- index;
+      Activity_keeper_selected
 
 let transition_keeper_view state view =
   let selected = Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state) in
@@ -16122,6 +16204,7 @@ let create_state
   home_decision_inflight = None;
   home_last_chat = No_chat_receipt;
   home_chat_writer = Masc_tui_chat_visit.create ();
+  keeper_preference_writer = Masc_tui_config.create_keeper_preference_writer ();
   credential_preparation = Masc_tui_credential_preparation.create ();
   home_chat_visit = None;
   metrics_scroll = 0;
@@ -16471,6 +16554,12 @@ let create_state
   keeper_cursor = 0;
   keeper_list_layout = Masc_tui_keeper_list_model.Compact;
   keeper_list_sort = Masc_tui_keeper_list_model.Priority;
+  keeper_list_preference_notice = None;
+  keeper_list_preference_startup_error = None;
+  keeper_list_order_save_error = None;
+  keeper_list_view_save_error = None;
+  keeper_list_order_save_request = None;
+  keeper_list_view_save_request = None;
   keeper_message_return = None;
   keeper_list_scroll = 0;
   runtime_pick_keeper = None;

@@ -523,7 +523,8 @@ let for_surface = function
   | Keepers Keeper_list ->
       (b Navigate "j/k" "move" ~help:"move the roster cursor")
       :: (b Navigate "v" "view" ~help:"cycle compact / detailed / grouped")
-      :: (b Navigate "o" "order" ~help:"cycle priority / recent / name")
+      :: (b Navigate "o" "order" ~help:"cycle priority / recent / oldest / activity / name")
+      :: (b Act "J" "jobs" ~help:"open the selected Keeper's schedules")
       :: (b Act "Right / Enter" "detail" ~help:"keeper detail")
       :: keeper_actions
       @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"

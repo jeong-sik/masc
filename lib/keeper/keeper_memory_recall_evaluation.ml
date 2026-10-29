@@ -10,6 +10,7 @@ let http_status_too_many_requests = 429
 
 type t =
   { judgment_id : string
+  ; keeper_id : string
   ; path : string
   ; turn_ref : Ids.Turn_ref.t
   ; destinations : Typesafeai_config.destinations
@@ -20,6 +21,7 @@ let create ~config ~keeper_id ~turn_ref ~destinations =
   let directory = Filename.concat (Workspace.keepers_runtime_dir config) keeper_id in
   let path = Filename.concat directory journal_file_name in
   { judgment_id = Random_id.prefixed ~prefix:"memory-recall-" ~bytes:16
+  ; keeper_id
   ; path
   ; turn_ref
   ; destinations
@@ -51,16 +53,63 @@ let attempt_failure_of_client_failure failure : Flow.attempt_failure =
     else if every http_status_ok then Flow.Invalid_response
     else Flow.Failed
 
+(* ---- metrics ---- *)
+
+(* Histogram schema, not a limit on a request: the client's own timeout decides
+   when a request ends. A request takes 0.2 to 1 second in the measures of the
+   RFC (section 4.8) and at most the timeout of each destination in turn. *)
+let request_seconds_upper_bounds = [ 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0; 20.0; 40.0 ]
+
+let () =
+  Otel_metric_store.register_histogram_buckets
+    Keeper_metrics.(to_string MemoryRecallRequestSeconds)
+    request_seconds_upper_bounds
+
+(* How one request ended, as the [result] label says it. *)
+type request_result =
+  | Answered
+  | Attempt_failed of Flow.attempt_failure
+  | Cancelled_request
+
+let request_result_token = function
+  | Answered -> "answered"
+  | Attempt_failed failure -> Flow.attempt_failure_token failure
+  | Cancelled_request -> "cancelled"
+
+let record_request t ~kind result =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string MemoryRecallRequests)
+    ~labels:
+      [ "keeper", t.keeper_id
+      ; "kind", Codec.request_kind_token kind
+      ; "result", request_result_token result
+      ]
+    ()
+
+let record_request_seconds t ~kind seconds =
+  Otel_metric_store.observe_histogram
+    Keeper_metrics.(to_string MemoryRecallRequestSeconds)
+    ~labels:[ "keeper", t.keeper_id; "kind", Codec.request_kind_token kind ]
+    seconds
+
+let record_input_bytes t bytes =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string MemoryRecallInputBytes)
+    ~labels:[ "keeper", t.keeper_id ]
+    ~delta:(Float.of_int bytes)
+    ()
+
 (* ---- the journal ---- *)
 
 let append_unprotected t row =
   let payload = Yojson.Safe.to_string row ^ "\n" in
+  let written = String.length payload in
   match Fs_compat.append_private_jsonl_durable_locked_result t.path payload with
-  | Fs_compat.Private_file_succeeded () -> Ok ()
+  | Fs_compat.Private_file_succeeded () -> Ok written
   | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = (); cleanup_failure } ->
     Log.Keeper.warn "memory recall record committed; descriptor cleanup failed: %s"
       (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
-    Ok ()
+    Ok written
   | Fs_compat.Private_file_failed error ->
     Error (Fs_compat.private_jsonl_append_error_to_string error)
   | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
@@ -121,7 +170,8 @@ let response_json (evaluated : Client.evaluated) =
 
 let evaluate_with ~call t (request : Codec.request) : (Types.eval_response, Flow.attempt_failure) result =
   let request_id = Random_id.prefixed ~prefix:"memory-recall-request-" ~bytes:16 in
-  let row fields = request_row t ~request_id ~kind:request.kind fields in
+  let kind = request.kind in
+  let row fields = request_row t ~request_id ~kind fields in
   let first, rest = t.destinations in
   let started =
     row
@@ -142,19 +192,24 @@ let evaluate_with ~call t (request : Codec.request) : (Types.eval_response, Flow
   match append t started with
   | Error detail ->
     Log.Keeper.warn "memory recall input record unavailable request=%s: %s" request_id detail;
+    record_request t ~kind (Attempt_failed Flow.Not_recorded);
     Error Flow.Not_recorded
-  | Ok () ->
+  | Ok started_bytes ->
+    record_input_bytes t started_bytes;
+    let began = Time_compat.now () in
     let result =
       try call ~destinations:t.destinations ~state:request.state ~questions:request.questions () with
       | Eio.Cancel.Cancelled _ as exn ->
         let backtrace = Printexc.get_raw_backtrace () in
         Eio.Cancel.protect (fun () ->
           match append t (row [ "status", `String "cancelled" ]) with
-          | Ok () -> ()
+          | Ok _ -> ()
           | Error _ ->
             Log.Keeper.warn "memory recall cancellation record unavailable request=%s" request_id);
+        record_request t ~kind Cancelled_request;
         Printexc.raise_with_backtrace exn backtrace
     in
+    record_request_seconds t ~kind (Time_compat.now () -. began);
     let completion =
       match result with
       | Error failure ->
@@ -162,14 +217,21 @@ let evaluate_with ~call t (request : Codec.request) : (Types.eval_response, Flow
       | Ok evaluated ->
         row [ "status", `String "response_received"; "response", response_json evaluated ]
     in
-    (match append t completion with
-     | Error detail ->
-       Log.Keeper.warn "memory recall response record unavailable request=%s: %s" request_id detail;
-       Error Flow.Not_recorded
-     | Ok () ->
-       result
-       |> Result.map (fun (evaluated : Client.evaluated) -> evaluated.response)
-       |> Result.map_error attempt_failure_of_client_failure)
+    let used =
+      match append t completion with
+      | Error detail ->
+        Log.Keeper.warn "memory recall response record unavailable request=%s: %s" request_id detail;
+        Error Flow.Not_recorded
+      | Ok _ ->
+        result
+        |> Result.map (fun (evaluated : Client.evaluated) -> evaluated.response)
+        |> Result.map_error attempt_failure_of_client_failure
+    in
+    record_request t ~kind
+      (match used with
+       | Ok _ -> Answered
+       | Error failure -> Attempt_failed failure);
+    used
 
 let evaluate ?clock t request =
   evaluate_with
@@ -230,7 +292,7 @@ let retain_outcome t (judged : Flow.judged) =
        @ [ "status", `String "judgment_completed"; "outcome", outcome_json judged ])
   in
   match append t row with
-  | Ok () -> judged
+  | Ok _ -> judged
   | Error detail ->
     Log.Keeper.warn "memory recall outcome record unavailable judgment=%s: %s" t.judgment_id detail;
     Flow.not_recorded judged

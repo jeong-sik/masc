@@ -11,6 +11,13 @@ type attempt_failure =
   | Failed
   | Not_recorded
 
+let attempt_failure_token = function
+  | Capacity_refused -> "capacity_refused"
+  | Rate_limited -> "rate_limited"
+  | Invalid_response -> "invalid_response"
+  | Failed -> "failed"
+  | Not_recorded -> "not_recorded"
+
 type evaluate = Codec.request -> (Types.eval_response, attempt_failure) result
 
 type judged =

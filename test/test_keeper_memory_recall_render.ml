@@ -231,6 +231,10 @@ let test_the_search_pointer_ends_every_state_but_selected_when_the_tool_exists (
     (fun (label, judgment, hint) ->
       Alcotest.(check bool) (label ^ " points to the search") true
         (String.ends_with ~suffix:hint (status judgment));
+      (* The short pointer is the last sentence of the long one, so what ends
+         the text does not tell them apart. *)
+      Alcotest.(check bool) (label ^ " has the long pointer only where it should") (String.equal hint search_hint)
+        (contains (status judgment) search_hint);
       Alcotest.(check bool) (label ^ " names no tool when there is none") false
         (contains (status ~memory_search_available:false judgment) "keeper_memory_search"))
     cases;

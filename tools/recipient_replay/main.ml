@@ -12,8 +12,18 @@
    read persisted Keeper metadata. Both are the Keeper's declaration, but they
    are two readers, and these numbers are about the settings.
 
+   A system post is not replayed. Platform code writes it, and the write path
+   reads no address out of its text (lib/board/board_audience.ml,
+   [audience_for_post]). Posts written before that rule still carry recorded
+   targets, and this RFC changes nothing for them, so they are counted apart.
+
+   The verdict compares Keepers, not list entries. A recorded list that names
+   one Keeper twice, by name and by alias, is [Unchanged].
+
    Board posts are internal and the output carries their titles. It is for the
-   operator's terminal and is not meant to be committed.
+   operator's terminal and is not meant to be committed. The exit code is 1
+   when a line of the posts file could not be read, 2 for a bad argument or an
+   unreadable Keeper setting.
 
    Usage:
      recipient_replay --keepers <dir of keeper .toml files> --posts <board_posts.jsonl> *)
@@ -27,19 +37,32 @@ type keeper =
 type failure = Ambiguous_alias of string * string list
 
 let fold = String.lowercase_ascii
+let name_path = [ "keeper"; "name" ]
 let mention_targets_path = [ "keeper"; "mention_targets" ]
 
+(* The Keeper loader names a Keeper by [keeper.name] when it is set and not
+   empty, and by the file stem otherwise
+   (lib/keeper/keeper_types_profile_toml_io.ml). *)
+let keeper_name toml ~stem =
+  if not (Otoml.path_exists toml name_path)
+  then Ok stem
+  else
+    Otoml.find_result toml Otoml.get_string name_path
+    |> Result.map (fun name -> if String.equal name "" then stem else name)
+
+let keeper_aliases toml =
+  if not (Otoml.path_exists toml mention_targets_path)
+  then Ok []
+  else Otoml.find_result toml (Otoml.get_array Otoml.get_string) mention_targets_path
+
 let read_keeper path =
-  let name = Filename.remove_extension (Filename.basename path) in
+  let stem = Filename.remove_extension (Filename.basename path) in
   match Otoml.Parser.from_file_result path with
   | Error detail -> Error (Printf.sprintf "%s: %s" path detail)
   | Ok toml ->
-    if not (Otoml.path_exists toml mention_targets_path)
-    then Ok { name; aliases = [] }
-    else
-      Otoml.find_result toml (Otoml.get_array Otoml.get_string) mention_targets_path
-      |> Result.map (fun aliases -> { name; aliases })
-      |> Result.map_error (fun detail -> Printf.sprintf "%s: %s" path detail)
+    Result.bind (keeper_name toml ~stem) (fun name ->
+      Result.map (fun aliases -> { name; aliases }) (keeper_aliases toml))
+    |> Result.map_error (fun detail -> Printf.sprintf "%s: %s" path detail)
 
 let read_keepers dir =
   Sys.readdir dir
@@ -72,36 +95,58 @@ let declared keepers candidate =
      | _ :: _ :: _ as claimants ->
        Error (Ambiguous_alias (wanted, List.map (fun keeper -> keeper.name) claimants)))
 
+type post_kind =
+  | Human_post
+  | Automation_post
+  | System_post
+
+(* The spelling lib/board/board_core_classify.ml stores. *)
+let post_kind_of_string = function
+  | "direct" -> Some Human_post
+  | "automation" -> Some Automation_post
+  | "system" -> Some System_post
+  | _ -> None
+
 type post =
   { id : string;
     author : string;
+    kind : post_kind;
     title : string;
     body : string;
     recorded : string list }
 
 (* The record shape is the one lib/board_types writes. A line the replay cannot
-   read is counted and reported, not skipped quietly. *)
+   read is counted, and the run exits with 1: invalid JSON, a missing field, a
+   post kind it does not know, or an audience whose targets are not a list of
+   strings. Nothing is skipped quietly. *)
 let post_of_line line =
   match Yojson.Safe.from_string line with
   | exception Yojson.Json_error _ -> None
   | json ->
-    let open Yojson.Safe.Util in
-    let text key = Option.value ~default:"" (to_string_option (member key json)) in
-    let recorded =
-      match member "audience" json with
-      | `Assoc _ as audience ->
-        (match to_string_option (member "kind" audience) with
-         | Some "targets" ->
-           List.filter_map to_string_option (to_list (member "targets" audience))
-         | Some _ | None -> [])
-      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
-    in
-    Some
-      { id = text "id";
-        author = text "author";
-        title = text "title";
-        body = text "body";
-        recorded }
+    (try
+       let open Yojson.Safe.Util in
+       let text key = to_string (member key json) in
+       let recorded =
+         match member "audience" json with
+         | `Null -> []
+         | `Assoc _ as audience ->
+           (match to_string (member "kind" audience) with
+            | "targets" -> List.map to_string (to_list (member "targets" audience))
+            | _ -> [])
+         | (`Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as other ->
+           raise (Type_error ("audience is not an object", other))
+       in
+       Option.map
+         (fun kind ->
+            { id = text "id";
+              author = text "author";
+              kind;
+              title = text "title";
+              body = text "body";
+              recorded })
+         (post_kind_of_string (text "post_kind"))
+     with
+     | Yojson.Safe.Util.Type_error _ -> None)
 
 (* What the board write path reads: the title and the body, one per line. *)
 let address_text post =
@@ -189,11 +234,10 @@ let print_ambiguous_aliases keepers =
   List.iter
     (fun keeper ->
        List.iter
-         (fun alias ->
-            let key = fold alias in
+         (fun key ->
             let seen = Option.value ~default:[] (Hashtbl.find_opt claimants key) in
             Hashtbl.replace claimants key (keeper.name :: seen))
-         (List.sort_uniq String.compare keeper.aliases))
+         (List.sort_uniq String.compare (List.map fold keeper.aliases)))
     keepers;
   Hashtbl.iter
     (fun alias names ->
@@ -216,7 +260,15 @@ let run ~keepers_dir ~posts_file =
     Printf.printf "# keepers=%d posts=%d unreadable_lines=%d\n" (List.length keepers)
       (List.length posts) unreadable;
     print_ambiguous_aliases keepers;
-    let addressed = List.filter (fun post -> post.recorded <> []) posts in
+    let with_targets = List.filter (fun post -> post.recorded <> []) posts in
+    let system, addressed =
+      List.partition
+        (fun post ->
+           match post.kind with
+           | System_post -> true
+           | Human_post | Automation_post -> false)
+        with_targets
+    in
     let replayed = List.map (replay keepers) addressed in
     List.iter (fun entry -> if entry.verdict <> Unchanged then print_replayed entry) replayed;
     let count verdict =
@@ -231,7 +283,9 @@ let run ~keepers_dir ~posts_file =
               | Unchanged | Leaves_targets | Narrows | Differs -> false)
            replayed)
     in
-    Printf.printf "# posts with recorded targets=%d\n" (List.length addressed);
+    Printf.printf "# posts with recorded targets=%d\n" (List.length with_targets);
+    Printf.printf "# system posts, not replayed=%d\n" (List.length system);
+    Printf.printf "# replayed=%d\n" (List.length addressed);
     List.iter
       (fun verdict -> Printf.printf "# %s=%d\n" (verdict_label verdict) (count verdict))
       [ Unchanged; Leaves_targets; Narrows; Differs ];
@@ -249,7 +303,7 @@ let run ~keepers_dir ~posts_file =
     |> List.of_seq
     |> List.sort (fun (_, left) (_, right) -> Int.compare right left)
     |> List.iter (fun (name, posts) -> Printf.printf "# lost name %s in %d posts\n" name posts);
-    0
+    if unreadable > 0 then 1 else 0
 
 let () =
   let keepers_dir = ref "" in

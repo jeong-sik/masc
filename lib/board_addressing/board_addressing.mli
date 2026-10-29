@@ -75,7 +75,7 @@ val routing_target : string -> string option
 
 val is_routable_target : string -> bool
 (** Whether a direct target, as {!parse} returns it, has the shape of a name:
-    not empty, and only letters, digits, ['_'] and ['-'].  A path separator or
+    not empty, and only ASCII letters, digits, ['_'] and ['-'].  A path separator or
     a dot never passes, because the sinks build file names from the name.
     {!routing_target} skips what fails this, and
     [Recipient_resolution.Candidate.of_string] keeps the same rule. *)

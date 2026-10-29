@@ -8,12 +8,10 @@
 ## Related Documents
 
 - PR #841 (merged 2026-04-12) — event bus에 `session_id`/`worker_run_id` correlation 추가
-- Issue #484 (open, Epic) — Delta-Context Architecture, checkpoint delta protocol
 - `lib/otel_tracer.ml` — 현재 OTel tracer (W3C trace/span ID, OTLP JSON export)
 - `lib/eval.ml` — `run_metrics`, `metric_value` 타입
 - `lib/harness.ml` — swiss_verdict, verdict, layer 타입
 - `lib/eval_baseline.ml` — regression detection (`Unchanged | Improved | Regressed | Added | Removed`)
-- `lib/checkpoint.ml` — delta metric names (`checkpoint_delta_*`)
 - `lib/llm_provider/metrics.ml` — provider-level event hooks
 - `lib/raw_trace.ml` — JSONL trace format (v1, 6 record types)
 - `docs/sdk-independence-principle.md` — downstream coordinator 어휘 역주입 금지
@@ -22,9 +20,9 @@
 
 ### 1. OTel Metric 이름 비표준
 
-현재 OAS는 OTel semantic attribute(`gen_ai.agent.name`, `gen_ai.turn`)와 자체 metric name(`checkpoint_delta_apply_total`)을 혼용한다. 문제:
+현재 OAS는 OTel semantic attribute(`gen_ai.agent.name`, `gen_ai.turn`)와 자체 metric name을 혼용한다. 문제:
 
-- **Namespace 충돌 위험**: `checkpoint_delta_*`는 agent_core 고유이나 `gen_ai.*`는 OpenTelemetry GenAI SIG 공식 convention. agent_core 자체 metric이 `gen_ai` 아래로 분류될 근거가 없음.
+- **Namespace 충돌 위험**: `gen_ai.*`는 OpenTelemetry GenAI SIG 공식 convention. agent_core 자체 metric이 `gen_ai` 아래로 분류될 근거가 없음.
 - **Consumer 파편화**: 외부 dashboard, Grafana, CI 각각이 metric name을 하드코딩. OAS가 이름을 바꾸면 downstream 전부 깨짐.
 - **검색 불가**: `agent_core`라는 prefix가 없어 OTel collector에서 agent_core 메트릭만 필터링하기 어려움.
 
@@ -58,7 +56,7 @@ agent_core.<subsystem>.<metric_name>[.<unit>]
 | Rule | Example | Rationale |
 |------|---------|-----------|
 | Subsystem prefix | `agent_core.agent.turns_total` | OTel collector에서 `agent_core.*` 필터 가능 |
-| Snake_case | `agent_core.checkpoint.delta_apply_total` | OTel metric naming convention 준수 |
+| Snake_case | `agent_core.tool.calls_total` | OTel metric naming convention 준수 |
 | Unit suffix (선택) | `agent_core.llm.request_duration_seconds` | OTel unit convention |
 | Counter suffix `_total` | `agent_core.tool.calls_total` | Prometheus convention 호환 |
 
@@ -66,9 +64,6 @@ agent_core.<subsystem>.<metric_name>[.<unit>]
 
 | 현재 이름 | 새 이름 | 타입 |
 |-----------|---------|------|
-| `checkpoint_delta_apply_total` | `agent_core.checkpoint.delta_apply_total` | counter |
-| `checkpoint_delta_apply_failures_total` | `agent_core.checkpoint.delta_apply_failures_total` | counter |
-| `checkpoint_delta_size_bytes` | `agent_core.checkpoint.delta_size_bytes` | histogram |
 | (신규) | `agent_core.agent.turns_total` | counter |
 | (신규) | `agent_core.agent.run_duration_seconds` | histogram |
 | (신규) | `agent_core.tool.calls_total` | counter |
@@ -172,7 +167,6 @@ val emit_run_metrics : Otel_tracer.t -> run_metrics -> unit
 
 ### Phase 1: Metric Naming Migration (1 PR)
 - `otel_tracer.ml`: `agent_core.*` namespace prefix 적용
-- `checkpoint.ml`: 4개 delta metric 이름 변경
 - `llm_provider/metrics.ml`: event hook metric을 `agent_core.llm.*`로 emit
 - 하위호환: 1 release cycle 동안 구이름/새이름 동시 emit, deprecated 경고
 
@@ -217,7 +211,6 @@ val emit_run_metrics : Otel_tracer.t -> run_metrics -> unit
 ## Scope Exclusion
 
 - `Agent.replay_from()` API (Issue #484 Epic 범위)
-- Checkpoint delta protocol 변경 (Issue #484 Epic 범위)
 - Raw trace format 변경 (v1 유지)
 - Downstream consumer code changes (those live in their own repositories, not in agent_core)
 - Cost tracking OTel emit 세부 구현 (~~Phase 3에서 다루되 cost_tracker.ml 내부 로직 변경은 없음~~ — `cost_tracker.ml`은 2026-07-21 test-only surface cut에서 삭제됨)

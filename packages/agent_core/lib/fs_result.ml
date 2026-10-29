@@ -1,8 +1,7 @@
 (** Result-based filesystem operations.
 
     Normalizes [Eio.Io], [Unix.Unix_error], [Sys_error], and [Failure]
-    into [Error.Io (FileOpFailed ...)].
-    Pattern extracted from checkpoint_store.ml / a2a_task_store.ml. *)
+    into [Error.Io (FileOpFailed ...)]. *)
 
 open Result_syntax
 
@@ -104,8 +103,7 @@ let write_file path content =
     (* Unique tmp per writer: [Filename.temp_file] uses PID + counter,
        so concurrent [write_file] calls on the same target never share
        a tmp path. This closes the [rename] race where writer A's
-       rename consumes the tmp before writer B's rename runs
-       (agent_core checkpoint_store.ml / a2a_task_store.ml / memory_file_backend.ml). *)
+       rename consumes the tmp before writer B's rename runs. *)
     let tmp_path = Filename.temp_file ~temp_dir:dir (base ^ ".") ".tmp" in
     let clean_tmp () =
       try Sys.remove tmp_path with

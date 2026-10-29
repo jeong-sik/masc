@@ -97,7 +97,7 @@
   test_canonical_tool
   test_capabilities_wiring
   test_checkpoint
-  test_checkpoint_store
+  test_checkpoint_objects
   test_clone
   test_complete_ext
   test_consumer
@@ -235,7 +235,7 @@
   test_canonical_tool
   test_capabilities_wiring
   test_checkpoint
-  test_checkpoint_store
+  test_checkpoint_objects
   test_clone
   test_complete_ext
   test_consumer
@@ -412,13 +412,11 @@
 
 (tests
  (names
-  test_checkpoint_delta
   test_context_properties
   test_property
   test_property_advanced
   test_tool_set)
  (modules
-  test_checkpoint_delta
   test_context_properties
   test_property
   test_property_advanced

@@ -15403,6 +15403,7 @@ let retain_preflight_inputs (state : state) entries =
     | Turn_preflight item ->
       let request = item.Masc_tui_keeper_chat_queue.request in
       if item.intent = Masc_tui_keeper_chat_queue.Next
+         && item.source = Masc_tui_keeper_chat_queue.Request_message
          && state.msg_target_keeper_name = Some request.keeper_name
          && Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
               ~keeper_name:request.keeper_name = []

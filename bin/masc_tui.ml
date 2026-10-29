@@ -1195,7 +1195,7 @@ let recall_newer (state : state) =
 
 let queued_edit_is_unchanged state item =
   match Chat_queue.find state.msg_queued ~request_id:item.Chat_queue.request.request_id with
-  | Some current -> current.request = item.request
+  | Some current -> current.request = item.request && current.source = item.source
   | None -> false
 
 let composer_empty_for_queue_edit state =
@@ -9478,8 +9478,9 @@ let queue_keeper_message state request =
               waiting_request.Keeper_chat.references @ request.Keeper_chat.references
           }
         in
+        let source = Chat_queue.source_for_join item ~message:request.message in
         (match
-           Chat_queue.replace_request state.msg_queued
+           Chat_queue.replace_request ~source state.msg_queued
              ~request_id:merged.Keeper_chat.request_id merged
          with
          | Error _ -> None
@@ -9527,7 +9528,9 @@ let stage_accepted_spill state ~keeper_name ~source_text ~prefix ~prepared
       let staged = place_spilled_paste state ~keeper_name ~staging_dir spill source_text in
       let message = match prefix with None -> staged | Some prior -> prior ^ "\n" ^ staged in
       let request = {accepted.request with Keeper_chat.message} in
-      (match Chat_queue.replace_recalled_request state.msg_queued ~original:accepted request with
+      let source = Chat_queue.source_for_staging accepted ~message in
+      (match Chat_queue.replace_recalled_request ~source
+               state.msg_queued ~original:accepted request with
        | Error detail ->
            state.msg_spill <- Some spill;
            Error detail
@@ -9718,6 +9721,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
         when String.equal editing.Chat_queue.request.Keeper_chat.keeper_name
                target ->
           let original = editing.Chat_queue.request in
+          let source = Chat_queue.source_for_edit editing ~message:text in
           let request =
             let attachments, references = pending_attachments state in
             { original with
@@ -9727,7 +9731,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
             }
           in
           (match
-             Chat_queue.replace_recalled_request state.msg_queued
+             Chat_queue.replace_recalled_request ~source state.msg_queued
                ~original:editing request
            with
            | Error detail -> report_action state "error" detail
@@ -12920,7 +12924,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
               else notice ~kind:Notice_failure "Local queue changed; inspect /queue again"
             | Edit (id, message) ->
               let request = {item.request with Keeper_chat.message = message} in
-              (match Chat_queue.replace_request state.msg_queued ~request_id:id request with
+              let source = Chat_queue.source_for_edit item ~message in
+              (match Chat_queue.replace_request ~source state.msg_queued ~request_id:id request with
                | Error detail -> notice ~kind:Notice_failure detail
                | Ok queue -> state.msg_queued <- queue; update_queued_history_text state request;
                    notice ~kind:Notice_reply ("Updated unsent message " ^ id))

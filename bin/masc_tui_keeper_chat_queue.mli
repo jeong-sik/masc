@@ -41,8 +41,17 @@ type intent =
   | Steer_after_interrupt
   | Steer_without_priority
 
+type source =
+  | Request_message
+  | Staged_fragments of string list
+      (** Accepted input fragments in reverse order, joined by newlines.
+          Materialized only when the original text is needed. *)
+
 type item =
   { request : Chat.request
+  ; source : source
+      (** The accepted input before staging replaced part of it with a file
+          reference. An explicit edit of that reference is new input. *)
   ; submitted_at : float
   ; submission_seq : int
       (** Monotone local submission order. Dispatch priority can move a steer
@@ -154,16 +163,30 @@ val move_to_front : t -> keeper_name:string -> request_id:string -> (t, string) 
 (** Move an ordinary unsent item ahead of the same Keeper's ordinary input.
     Steers remain ahead, and the ordinary dispatch admission rules still apply. *)
 
+val source_text : item -> string
+(** Materialize the accepted input. Joining staged input stores fragments
+    without repeatedly copying earlier paste bytes. *)
+
+val source_for_edit : item -> message:string -> source
+(** Preserve the original source if the wire message is unchanged. *)
+
+val source_for_join : item -> message:string -> source
+(** Append accepted input to a prior item's source in constant time. *)
+
+val source_for_staging : item -> message:string -> source
+(** Preserve the accepted source when the wire message becomes a file reference. *)
+
 val replace_request :
-  t -> request_id:string -> Chat.request -> (t, string) result
+  ?source:source -> t -> request_id:string -> Chat.request -> (t, string) result
 (** Edit a pending request in place while preserving intent, causal parent,
     submission sequence, submitted_at, and dispatch position. The replacement
-    must retain the same request_id. *)
+    must retain the same request_id. Unless supplied, the source is the
+    replacement request's message. *)
 
 val replace_recalled_request :
-  t -> original:item -> Chat.request -> (t, string) result
+  ?source:source -> t -> original:item -> Chat.request -> (t, string) result
 (** Replace only the payload the editor recalled. Changes to queue priority
-    are preserved; a changed or absent request is not overwritten. *)
+    are preserved; a changed or absent request or source is not overwritten. *)
 
 val join_target : t -> keeper_name:string -> item option
 (** The most recently submitted waiting next-turn line a newly typed line for

@@ -32,6 +32,12 @@ let keeper_store root keeper_name =
   let path = Store.path_for_keeper ~keepers_runtime_dir ~keeper_name in
   mkdir_p (Filename.dirname path);
   path
+(* The metadata file the runtime writes for a registered keeper. *)
+let register root keeper_name =
+  write
+    (Filename.concat (Filename.concat root Common.keepers_runtime_dirname)
+       (Keeper_runtime_root_entry.keeper_basename ~keeper_name Keeper_runtime_root_entry.Metadata))
+    "{}"
 let with_open path f =
   let store = Store.open_or_create ~path |> store_ok in
   Fun.protect ~finally:(fun () -> Store.close store |> store_ok) (fun () -> f store)
@@ -187,6 +193,7 @@ let test_missing_store_removes_nothing () = with_root (fun root ->
   with_open (keeper_store root "present") (fun store ->
     ignore (defer_direct_checkpoint store "sweep-held" held));
   let moved_aside = keeper_store root "moved-aside" in
+  register root "moved-aside";
   let kept_held = retained root ~session:["sweep-trace"] held in
   let kept_moved = retained root ~session:["sweep-trace"] named_by_moved in
   List.iter (fun path -> write path "{}") [kept_held; kept_moved];
@@ -198,6 +205,19 @@ let test_missing_store_removes_nothing () = with_root (fun root ->
    | Ok _ -> fail "a missing store must stop the sweep");
   check bool "what the missing store named is kept" true (Sys.file_exists kept_moved);
   check bool "what a present store names is kept" true (Sys.file_exists kept_held))
+
+(* 2026-10-26 to 10-29: keepers/mother held only an answer queued for a name no
+   keeper is registered under. Read as a keeper whose store is missing, it
+   stopped every startup sweep. *)
+let test_an_unregistered_directory_names_nothing () = with_root (fun root ->
+  write
+    (List.fold_left Filename.concat root
+       [Common.keepers_runtime_dirname; "unregistered"; "event-queue-v19.json"])
+    "{}";
+  let orphan = retained root ~session:["sweep-trace"] (checkpoint "orphan") in
+  write orphan "{}";
+  let report = sweep root in
+  check int "orphan removed beside the unregistered directory" 1 report.removed)
 
 (* 2026-10-22: keepers/.configuration-removals and keepers/.shutdown-operations
    have no operation store. Read as keepers, they stopped every startup sweep
@@ -315,6 +335,8 @@ let () =
             test_workspace_store_directories_are_not_keepers
         ; test_case "an unreadable store removes nothing" `Quick test_unreadable_store_removes_nothing
         ; test_case "a missing store removes nothing" `Quick test_missing_store_removes_nothing
+        ; test_case "an unregistered directory names nothing" `Quick
+            test_an_unregistered_directory_names_nothing
         ; test_case "lifecycle record directories are not keepers" `Quick
             test_lifecycle_record_directories_are_not_keepers
         ; test_case "missing directories are an empty sweep" `Quick

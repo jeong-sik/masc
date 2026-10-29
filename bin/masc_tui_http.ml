@@ -1623,6 +1623,44 @@ let observe_runtime_events ~clock ~(host : string) ~(port : int)
       Error (Http_refused { status; detail = body })
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
 
+(* The server writes a keepalive comment every [sse_ping_interval_s] when the
+   fleet has nothing to say. The idle watcher compares the last chunk only at
+   the end of each window of [fleet_stream_missed_keepalives] intervals, so a
+   connection that goes quiet is ended between one and two windows later:
+   90 to 180 s. *)
+let fleet_stream_missed_keepalives = 3.0
+
+let fleet_stream_idle_timeout_sec =
+  fleet_stream_missed_keepalives
+  *. Server_mcp_transport_http_headers.sse_ping_interval_s
+
+(** The fleet stream (RFC-0477): [GET Fleet_stream.stream_path] answers with
+    Server-Sent Events, a [Snapshot] first and one event per revision after it.
+    [on_chunk] reads the bytes as they arrive, and an exception it raises ends
+    the connection. A refusal comes back as [Http_refused] with [on_chunk]
+    never called.
+
+    The server answers 409 unless it is [expected_workspace], so a stream
+    reopened after another workspace took the port cannot show that server's
+    fleet. The fleet read this replaced was bound to the confirmed workspace
+    the same way. *)
+let observe_fleet_stream ~clock ~(expected_workspace : Masc.Tui_decode.server_identity)
+    ~(host : string) ~(port : int) ~(on_chunk : string -> unit)
+    : (unit, observer_error) result =
+  let url =
+    url_of ~host ~port
+      ~path:(Masc.Fleet_stream.stream_path ^ "?" ^ expected_workspace_query expected_workspace)
+  in
+  let headers = ("Accept", "text/event-stream") :: auth_headers () in
+  match
+    Masc_http_client.get_stream ~clock
+      ~idle_timeout_sec:fleet_stream_idle_timeout_sec ~url ~headers ~on_chunk ()
+  with
+  | Error detail -> Error (Transport_failed (report_err "fleet stream failed" detail))
+  | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
+      Error (Http_refused { status; detail = body })
+  | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
+
 (** One MCP [tools/call] under an existing session.
 
     The task tools ([masc_add_task], [masc_transition]) have no REST route;
@@ -3298,21 +3336,6 @@ let fetch_dashboard_planning ~(host : string) ~(port : int) : (Yojson.Safe.t, st
     all three, so this does not pay for [full=1]. *)
 let fetch_server_identity ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/health"
-
-(** Fetch the operator fleet reading from /health?full=1.
-
-    The operator snapshot does not carry it: [keeper_fleet_safety] is assembled
-    in lib/server from a scan the operator projection has no path to, and the
-    dependency runs server -> operator, not back. So this reads the health
-    surface, which serves the section from its cached snapshot: while the
-    refreshes fail, a stale snapshot serves the last reading it measured, and
-    the [full_health_snapshot] beside it says when that was (#38499).
-
-    [full=1] is the only shape that carries the section. It is a wider payload
-    than the fleet reading alone, which is why the caller polls it on the fleet
-    view rather than on every tick. *)
-let fetch_fleet_safety ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/health?full=1"
 
 (** GET /api/v1/keepers/:name/config — name, instructions, effective_config,
     sources. Read here for the detail pane's Instructions tab. *)

@@ -543,17 +543,21 @@ let render_section_resources ~cols (state : state) =
      it. It read "not observed", which is what the section says before the
      first read, so a fleet the TUI could not read looked like one it had not
      asked for yet (#38499). *)
-  let safety_lines = match state.fleet_safety, state.fleet_safety_error with
-    | _, Some error -> [ "    Execution readiness: " ^ Terminal_text.single_line error ]
-    | None, None -> [ "    Execution readiness not observed" ]
-    | Some (Decode.Fleet_not_measured { status }), None ->
-      [ "    Execution readiness " ^ Masc_tui_fleet_line.not_measured_text ~status ]
-    | Some (Decode.Fleet_measured { fleet = safety; freshness }), None ->
+  let safety_lines = match fleet_stream_view state with
+    | Masc_tui_fleet_stream.Cannot_read failure ->
+      [ "    Execution readiness: " ^ Masc_tui_fleet_line.failure_text failure ]
+    | Masc_tui_fleet_stream.Awaiting_first_reading -> [ "    Execution readiness not observed" ]
+    | Masc_tui_fleet_stream.Unreachable { since } ->
+      [ "    Execution readiness: " ^ Masc_tui_fleet_line.unreachable_text ~now ~since ]
+    | Masc_tui_fleet_stream.Unavailable { degradation; disconnected_since } ->
+      [ "    Execution readiness: "
+        ^ Masc_tui_fleet_line.unavailable_text ~now ~degradation ~disconnected_since ]
+    | Masc_tui_fleet_stream.Reading { reading = { fleet = safety; _ }; trouble } ->
       Printf.sprintf "    Executable %d / target %d · shortfall %d · failing %d · paused %d"
         safety.fs_executable_count safety.fs_target_reaction_capacity
         safety.fs_reaction_capacity_shortfall safety.fs_failing_count safety.fs_paused_count
-      :: (Masc_tui_fleet_line.freshness_text ~now freshness
-          |> Option.map (fun text -> "    " ^ text)
+      :: (trouble
+          |> Option.map (fun trouble -> "    " ^ Masc_tui_fleet_line.trouble_text ~now trouble)
           |> Option.to_list)
   in
   List.map clip
@@ -561,7 +565,7 @@ let render_section_resources ~cols (state : state) =
      @ [ ""; title "Work per assignee · lead time is created to completed" ] @ assignee_lines
      @ [ ""; title daily_title ] @ daily_lines
      @ [ ""; title "Current owner turns" ] @ turn_lines
-     @ [ ""; title "Execution readiness (health snapshot)" ] @ safety_lines)
+     @ [ ""; title "Execution readiness (fleet stream)" ] @ safety_lines)
 
 let render_section_tools ~cols (state : state) : string list =
   (* Section 3: Memory & Gate Safety *)

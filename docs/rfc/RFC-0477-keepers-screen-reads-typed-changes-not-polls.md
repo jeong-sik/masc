@@ -208,10 +208,12 @@ SSE 어댑터는 이벤트를 받아 공용 코덱으로 인코딩해서 쓴다.
 ### 3.5 TUI
 
 - 연결은 job 하나가 소유한다(`launch_fleet_stream`, `bin/masc_tui.ml`). 관찰자 피드와 같은 방식으로 `fork_workspace_job ~observation:true` 로 띄우고 메일박스로 보고한다. 서버가 한 번 답하고 workspace 를 확인한 뒤(`Workspace_identity_match`) 시작하고, 끝나면 이름 붙은 상수 `fleet_stream_reconnect_s`(2초, 기본 새로고침과 같다) 뒤에 다시 연결한다. workspace 가 걸어 내리기 전에는 끝나지 않는다. 요청에 `expected_base_path`·`expected_masc_root` 를 붙여서, 같은 포트에 다른 workspace 가 답하면 서버가 409 로 거절한다. 옛 `/health?full=1` 읽기가 `Health_identity` 로 하던 일을 이어받는 것이고, 관찰자 피드와 달리 workspace 가 맞지 않는 동안에는 시작하지 않는다.
-- 받은 바이트를 화면용 상태로 바꾸는 일은 순수 모듈 `Masc_tui_fleet_stream`(`bin/`)이 한다. 값(`view`)은 닫힌 타입이다: `Awaiting_first_reading`, 첫 읽기 없는 실패와 연결 종료 시각을 담는 `Unavailable`, `Reading { reading; trouble }`(`trouble` 은 없음, `Scans_failing`, `Disconnected { since }`), `Cannot_read`(`Refused`, `Schema_mismatch`, `Frame_rejected`). 시도 횟수 같은 숫자로 동작을 바꾸지 않는다.
+- 받은 바이트를 화면용 상태로 바꾸는 일은 순수 모듈 `Masc_tui_fleet_stream`(`bin/`)이 한다. 값(`view`)은 닫힌 타입이다: `Awaiting_first_reading`, 상태를 받기 전에 연결이 끊긴 시각을 담는 `Unreachable`, 첫 읽기 없는 실패와 연결 종료 시각을 담는 `Unavailable`, `Reading { reading; trouble }`(`trouble` 은 없음, `Scans_failing`, `Disconnected { since }`), `Cannot_read`(`Refused`, `Schema_mismatch`, `Frame_rejected`). 시도 횟수 같은 숫자로 동작을 바꾸지 않는다. 화면이 그리는 `view` 는 job 이 따르는 동안에만 있다(`Fleet_stream_following of view`). job 이 내려가면 값도 같이 없어지므로 다른 workspace 의 값이 화면에 남지 않는다.
 - `Snapshot` 과 `Unavailable_snapshot` 은 번호와 상관없이 받는다(서버를 다시 켜면 번호가 1부터다). 그 밖의 이벤트는 바로 앞 번호 다음이어야 받고, 아니면 연결을 닫고 다시 연다. 읽을 수 없는 프레임과 다른 `schema` 도 같다. 거절하고 나면 첫 상태가 올 때까지 아무것도 따르지 않는다.
 - 키퍼 화면, Metrics 의 fleet 읽기(`needs_fleet_safety`, `load_fleet_safety`, `fetch_fleet_safety`, `Dataset_fleet_safety`)와 `Tui_decode` 의 fleet 타입·디코더를 지웠다. 이 화면들은 더 이상 `/health?full=1` 을 읽지 않는다. 그래서 헤더 배지의 `· reading …` 에서도 fleet 읽기가 사라진다.
-- `fleet reading: stale …` 줄은 서버 스캔이 실패하는 중이거나 연결이 끊긴 동안만 그린다. 값이 있는 동안 줄이 없다. 끊긴 동안은 마지막 값을 끊긴 뒤 지난 시간과 함께 그린다. 값을 못 읽는 이유(HTTP 거절, 다른 `schema`)는 `fleet:` 줄에 한 줄로 쓴다.
+- `fleet reading: stale …` 줄은 서버 스캔이 실패하는 중이거나 연결이 끊긴 동안만 그린다. 값이 있는 동안 줄이 없다. 서버는 답하는데 스트림만 끊긴 동안은 마지막 값을 끊긴 뒤 지난 시간과 함께 그린다. 값을 못 읽는 이유(HTTP 거절, 다른 `schema`)는 `fleet:` 줄에 한 줄로 쓴다. 상태를 한 번도 받기 전에 연결이 끊기면 `fleet:` 줄에 `not observed · stream lost <지난 시간> ago` 를 쓰고, 이유는 TUI 로그(`tui_fleet_stream_lost`)에 남긴다.
+- 서버를 읽는 새로고침이 실패하면 workspace 확인이 풀려서 job 이 내려가고 fleet 줄도 사라진다. 연결이 끊겼다는 것은 헤더 배지가 말한다. 서버가 돌아와 workspace 가 다시 확인되면 새 job 이 연결해서 `Snapshot` 으로 다시 그린다. workspace 가 바뀌어 job 이 내려갈 때도 같다.
+- 조용해진 연결은 `get_stream` 의 idle 감시가 끝낸다. 감시는 구간(keepalive 간격의 세 배, 90초)이 끝날 때만 마지막 청크를 비교하므로, 연결이 조용해지고 90초에서 180초 사이에 끊긴 것으로 처리된다.
 - 연결되지 않는 동안 HTTP 로 읽는 길을 두지 않는다(hard cut).
 - 표시 문구와 줄 배치를 확인하는 테스트는 만들지 않는다(constitution). TUI 시험은 상태 전이(번호 건너뜀 → 재연결, 다른 `schema` → `Cannot_read`)만 본다.
 - `Masc_tui_workspace_read` 의 `Health_identity` 증명은 이 읽기가 쓰는 유일한 곳이 사라져서 운영 코드에서는 쓰이지 않는다(시험 하나만 쓴다). 이 RFC 는 건드리지 않았고, 지우는 일은 따로 한다.

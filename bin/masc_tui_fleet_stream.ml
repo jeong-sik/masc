@@ -18,6 +18,7 @@ type failure =
 
 type view =
   | Awaiting_first_reading
+  | Unreachable of { since : float }
   | Reading of { reading : reading; trouble : trouble option }
   | Unavailable of { degradation : F.degradation; disconnected_since : float option }
   | Cannot_read of failure
@@ -27,8 +28,9 @@ type step =
   | Reconnect
 
 (* [following] is the revision of the last event of this connection, [None]
-   until its [Snapshot]. [down_since] is [None] exactly while a connection that
-   delivered a [Snapshot] is open. *)
+   until its [Snapshot]. [down_since] is the time of the first loss since the
+   last state arrived (a [Snapshot] or an [Unavailable_snapshot]), and [None]
+   before any loss and once a state arrived after it. *)
 type t =
   { mutable decoder : Sse_wire.decoder
   ; mutable reading : reading option
@@ -149,7 +151,10 @@ let feed t chunk =
 let view t =
   match t.failure, t.reading, t.unavailable with
   | Some failure, (Some _ | None), (Some _ | None) -> Cannot_read failure
-  | None, None, None -> Awaiting_first_reading
+  | None, None, None ->
+    (match t.down_since with
+     | None -> Awaiting_first_reading
+     | Some since -> Unreachable { since })
   | None, None, Some degradation ->
     Unavailable { degradation; disconnected_since = t.down_since }
   | None, Some reading, (Some _ | None) ->

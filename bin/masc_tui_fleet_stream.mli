@@ -34,6 +34,12 @@ type failure =
 
 type view =
   | Awaiting_first_reading
+      (** Nothing was told yet and no connection has been lost. *)
+  | Unreachable of { since : float }
+      (** Nothing was ever told, and the connection is down since [since]:
+          the stream could not be reached, which is not the wait for the first
+          scan. It lasts until a connection delivers a [Snapshot] or an
+          [Unavailable_snapshot]. *)
   | Reading of { reading : reading; trouble : trouble option }
   | Unavailable of
       { degradation : Masc.Fleet_stream.degradation
@@ -43,7 +49,8 @@ type view =
           A later connection loss is retained separately from the scan failure. *)
   | Cannot_read of failure
       (** No usable reading: the server refused, or speaks a form this build
-          does not. It lasts until a connection delivers a [Snapshot]. *)
+          does not. It lasts until a connection delivers a [Snapshot] or an
+          [Unavailable_snapshot]. *)
 
 type t
 
@@ -64,8 +71,8 @@ val refused : t -> status:int -> detail:string -> unit
 (** The server answered with an HTTP refusal instead of the stream. *)
 
 val lost : t -> now:float -> unit
-(** The connection ended, whatever the reason. The first loss after a
-    snapshot fixes [since]; the losses after it, while no new snapshot
-    arrived, keep it. *)
+(** The connection ended, whatever the reason. The first loss after a state
+    (or since the start) fixes [since]; the losses after it, while no new
+    state arrived, keep it. *)
 
 val view : t -> view

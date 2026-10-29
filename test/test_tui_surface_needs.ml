@@ -40,8 +40,7 @@ let test_every_keeper_sub_mode_still_asks_for_the_roster () =
   List.iter
     (fun (label, mode) ->
        let n = needs (Types.Keepers mode) in
-       check bool (label ^ " asks for the roster") true n.Types.needs_keeper_roster;
-       check bool (label ^ " asks for fleet safety") true n.Types.needs_fleet_safety)
+       check bool (label ^ " asks for the roster") true n.Types.needs_keeper_roster)
     [ "the list", Types.Keeper_list
     ; "detail", Types.Keeper_detail
     ; "logs", Types.Keeper_logs
@@ -115,7 +114,6 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
     let dataset_count =
       [ delta.Types.needs_transport
       ; delta.needs_keeper_roster
-      ; delta.needs_fleet_safety
       ; delta.needs_board
       ; delta.needs_planning
       ; delta.needs_system_logs
@@ -136,8 +134,8 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
     List.fold_left add_delta (needs Types.Overview, 0) destinations
   in
   (* Home no longer fetches Goal measurement. Entering Work now adds that
-     request beside planning: Work 2 + Keepers 4 + Usage 5 + Board 1. Keepers
-     reads its roster, fleet safety, held calls and open questions. Config
+     request beside planning: Work 2 + Keepers 3 + Usage 5 + Board 1. Keepers
+     reads its roster, held calls and open questions. Config
      adds one: the Models pane names the account behind a provider id, so
      entering Config reads account emails. *)
   let work_delta =
@@ -146,7 +144,7 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
   in
   check bool "entering Work adds the Goal measurement absent from Home" true
     work_delta.Types.needs_overview_goals;
-  check int "only newly visible scoped requests are planned" 13 dataset_count
+  check int "only newly visible scoped requests are planned" 12 dataset_count
 ;;
 
 let test_keepers_list_reads_operator_attention () =
@@ -171,7 +169,7 @@ let test_keeper_detail_drops_only_list_attention_reads () =
   check bool "returning adds held calls" true added.Types.needs_operator_approvals;
   check bool "returning adds questions" true added.Types.needs_asks;
   check int "returning adds only attention reads" 2
-    ([ added.Types.needs_transport; added.needs_keeper_roster; added.needs_fleet_safety
+    ([ added.Types.needs_transport; added.needs_keeper_roster
      ; added.needs_board; added.needs_planning; added.needs_system_logs; added.needs_keeper_chat
      ; added.needs_operator_approvals; added.needs_asks; added.needs_runtime_quota
      ; added.needs_keeper_usage; added.needs_provider_history; added.needs_overview_goals

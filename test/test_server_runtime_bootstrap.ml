@@ -3099,15 +3099,11 @@ let test_health_json_distinguishes_failing_executable_keepers () =
           Alcotest.(check bool) "health still asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool))))
 
-(* The scan's own section as the health route serves it right after a
-   refresh: the TUI takes how current a reading is from the snapshot beside
-   the section, and these tests are about the counts the scan wrote. *)
-let tui_reading_of_scan section =
-  Tui_decode.decode_fleet_safety
-    (`Assoc
-       [ "keeper_fleet_safety", section
-       ; "full_health_snapshot", `Assoc [ "status", `String "ready" ]
-       ])
+(* The scan's own section as the health route serves it, read by the function
+   the fleet stream uses. These tests are about the counts the scan wrote. *)
+let stream_reading_of_scan section =
+  Fleet_stream_health_section.fleet_of_health_fields
+    [ "keeper_fleet_safety", section ]
 
 let test_fleet_official_client_recovery ~paused ~autoboot () =
   with_temp_dir "fleet-official-recovery" (fun dir ->
@@ -3191,16 +3187,14 @@ let test_fleet_official_client_recovery ~paused ~autoboot () =
         (json |> member "operator_action_required" |> to_bool);
       Alcotest.(check string) "configuration keeps its existing blocker priority"
         "turn_configuration_error" (json |> member "blocker" |> to_string);
-      match tui_reading_of_scan json with
-      | Error error -> Alcotest.fail error
-      | Ok (Tui_decode.Fleet_not_measured _) ->
-        Alcotest.fail "the scan's own section decoded as not measured"
-      | Ok (Tui_decode.Fleet_measured { fleet; freshness = _ }) ->
-        Alcotest.(check int) "TUI retains the recovering count" 1 fleet.fs_recovering_count;
-        Alcotest.(check int) "TUI retains session recovery count" (List.length required_names)
+      match stream_reading_of_scan json with
+      | Error error -> Alcotest.fail (Fleet_stream_health_section.error_to_string error)
+      | Ok fleet ->
+        Alcotest.(check int) "the stream retains the recovering count" 1 fleet.fs_recovering_count;
+        Alcotest.(check int) "the stream retains session recovery count" (List.length required_names)
           fleet.fs_official_client_recovery_required_count;
-        Alcotest.(check (list string)) "TUI retains session recovery names" required_names
-          fleet.fs_official_client_recovery_required_names))
+        Alcotest.(check (list string)) "the stream retains session recovery names" required_names
+          (Fleet_stream.Names.to_list fleet.fs_official_client_recovery_required_names)))
 
 let test_fleet_official_client_recovery_clears_after_success reason () =
   with_temp_dir "fleet-official-recovery-success" (fun dir ->
@@ -3295,15 +3289,13 @@ let test_fleet_official_client_recovery_clears_after_success reason () =
         (after |> member "operator_action_required" |> to_bool);
       Alcotest.(check bool) "successful keeper leaves no fleet blocker" true
         ((after |> member "blocker") = `Null);
-      match tui_reading_of_scan after with
-      | Error error -> Alcotest.fail error
-      | Ok (Tui_decode.Fleet_not_measured _) ->
-        Alcotest.fail "the scan's own section decoded as not measured"
-      | Ok (Tui_decode.Fleet_measured { fleet; freshness = _ }) ->
-        Alcotest.(check int) "TUI clears session recovery count" 0
+      match stream_reading_of_scan after with
+      | Error error -> Alcotest.fail (Fleet_stream_health_section.error_to_string error)
+      | Ok fleet ->
+        Alcotest.(check int) "the stream clears session recovery count" 0
           fleet.fs_official_client_recovery_required_count;
-        Alcotest.(check (list string)) "TUI clears session recovery names" []
-          fleet.fs_official_client_recovery_required_names))
+        Alcotest.(check (list string)) "the stream clears session recovery names" []
+          (Fleet_stream.Names.to_list fleet.fs_official_client_recovery_required_names)))
 
 let test_manual_keeper_failure_health ~paused ~phase ~reason
     ~expected_config_count ~expected_blocker () =
@@ -4324,36 +4316,30 @@ let test_full_health_cold_refresh_timeout_is_timeout_not_error () =
     (after |> member "keeper_memory_execution" |> member "status" |> to_string);
   Alcotest.(check bool) "failed cold memory observation names the timeout" true
     (after |> member "keeper_memory_execution" |> member "component_timed_out" |> to_bool);
-  (* The TUI reads this same body. A cold refresh that timed out is a failure
-     with the server's reason in it, not a fleet of zeros and not a snapshot
-     that is merely being rebuilt. *)
-  match Tui_decode.decode_fleet_safety after with
-  | Ok _ -> Alcotest.fail "a timed-out cold refresh decoded as a fleet reading"
-  | Error err ->
-    Alcotest.(check bool) "the TUI names the timeout" true
-      (String_util.contains_substring err "refresh timed out")
+  (* The fleet stream reads this same body. A cold refresh that timed out has
+     no reading to tell and is not a fleet of zeros. It is a scan that ran out
+     of time, and the stream reports it as one. *)
+  match Fleet_stream_health_section.fleet_of_health_fields (to_assoc after) with
+  | Ok _ -> Alcotest.fail "a timed-out cold refresh read as a fleet reading"
+  | Error (Fleet_stream_health_section.Scan_failed Fleet_stream.Scan_timed_out) -> ()
+  | Error (Fleet_stream_health_section.Scan_failed Fleet_stream.Scan_failed) ->
+    Alcotest.fail "a timed-out cold refresh read as a failed scan"
+  | Error (Fleet_stream_health_section.Not_measured { status }) ->
+    Alcotest.fail ("a timed-out cold refresh read as not measured: " ^ status)
+  | Error (Fleet_stream_health_section.Unreadable detail) -> Alcotest.fail detail
 
-(* The TUI reads the fleet out of this same body. After a refresh that timed
-   out, the section is still the last good scan, and only the snapshot beside
-   it says so: the reading must decode as stale, measured when the last good
-   refresh ran, with the server's reason -- not as the present (#38499). *)
-let test_the_tui_reads_a_last_good_snapshot_as_stale () =
+(* After a refresh that timed out, the fleet section is still the last good
+   scan, and only the snapshot beside it says so: it is stale, it still names
+   when the last good refresh ran, and it gives the timeout as the reason
+   (#38499). The section itself still reads as a fleet. *)
+let test_a_last_good_snapshot_says_it_is_stale () =
   Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
   let request = Httpun.Request.create `GET "/health?full=1" in
   Server_routes_http_runtime.For_testing.refresh_full_health_snapshot_now request;
   let before = Server_routes_http_runtime.make_health_response_json request in
-  (match Tui_decode.decode_fleet_safety before with
-   | Ok (Tui_decode.Fleet_measured { freshness = Tui_decode.Fleet_current; _ }) -> ()
-   | Ok (Tui_decode.Fleet_measured
-           { freshness =
-               Tui_decode.(Fleet_last_good _ | Unrecognised_snapshot_status _)
-           ; _
-           }) ->
-     Alcotest.fail "a just-refreshed snapshot's reading decoded as not current"
-   | Ok (Tui_decode.Fleet_not_measured _) ->
-     Alcotest.fail "a refreshed snapshot decoded as not measured"
-   | Error err -> Alcotest.fail err);
   let open Yojson.Safe.Util in
+  Alcotest.(check string) "a just-refreshed snapshot is ready" "ready"
+    (before |> member "full_health_snapshot" |> member "status" |> to_string);
   let measured_at =
     before |> member "full_health_snapshot" |> member "computed_at_unix"
     |> to_number
@@ -4366,40 +4352,32 @@ let test_the_tui_reads_a_last_good_snapshot_as_stale () =
        ; elapsed_s = 17.0
        });
   let after = Server_routes_http_runtime.make_health_response_json request in
-  match Tui_decode.decode_fleet_safety after with
-  | Ok
-      (Tui_decode.Fleet_measured
-         { freshness = Tui_decode.Fleet_last_good { measured_at_unix; stale_reason }
-         ; _
-         }) ->
-    Alcotest.(check (float 0.)) "measured when the last good refresh ran"
-      measured_at measured_at_unix;
-    Alcotest.(check string) "the server's reason" "last_good_refresh_timeout"
-      stale_reason
-  | Ok
-      (Tui_decode.Fleet_measured
-         { freshness = Tui_decode.(Fleet_current | Unrecognised_snapshot_status _)
-         ; _
-         }) ->
-    Alcotest.fail "the last good reading decoded as the present"
-  | Ok (Tui_decode.Fleet_not_measured _) ->
-    Alcotest.fail "the last good reading decoded as not measured"
-  | Error err -> Alcotest.fail err
+  Alcotest.(check string) "the snapshot is stale" "stale"
+    (after |> member "full_health_snapshot" |> member "status" |> to_string);
+  Alcotest.(check (float 0.)) "measured when the last good refresh ran"
+    measured_at
+    (after |> member "full_health_snapshot" |> member "computed_at_unix" |> to_number);
+  Alcotest.(check string) "the server's reason" "last_good_refresh_timeout"
+    (after |> member "full_health_snapshot" |> member "stale_reason" |> to_string);
+  match Fleet_stream_health_section.fleet_of_health_fields (to_assoc after) with
+  | Ok _ -> ()
+  | Error err -> Alcotest.fail (Fleet_stream_health_section.error_to_string err)
 
 (* With no snapshot yet the health body carries the fleet section as the
-   "warming" placeholder. The TUI reads that exact body as not measured, so a
-   renamed placeholder key fails here rather than turning every rebuild into
-   a decode error on the operator's screen. *)
-let test_the_tui_reads_a_rebuilding_snapshot_as_not_measured () =
+   "warming" placeholder. The fleet stream reads that exact body as no
+   reading, so a renamed placeholder key fails here rather than turning every
+   rebuild into an unreadable section. *)
+let test_a_rebuilding_snapshot_has_no_fleet_reading () =
   Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
   let request = Httpun.Request.create `GET "/health?full=1" in
   let body = Server_routes_http_runtime.make_health_response_json request in
-  match Tui_decode.decode_fleet_safety body with
-  | Ok (Tui_decode.Fleet_not_measured { status }) ->
+  match Fleet_stream_health_section.fleet_of_health_fields (Yojson.Safe.Util.to_assoc body) with
+  | Error (Fleet_stream_health_section.Not_measured { status }) ->
     Alcotest.(check string) "the placeholder's word" "warming" status
-  | Ok (Tui_decode.Fleet_measured _) ->
-    Alcotest.fail "a snapshot being rebuilt decoded as a fleet reading"
-  | Error err -> Alcotest.fail err
+  | Ok _ -> Alcotest.fail "a snapshot being rebuilt read as a fleet reading"
+  | Error (Fleet_stream_health_section.Scan_failed _) ->
+    Alcotest.fail "a snapshot being rebuilt read as a failed scan"
+  | Error (Fleet_stream_health_section.Unreadable detail) -> Alcotest.fail detail
 
 let test_health_response_survives_deleted_cwd () =
   with_temp_dir "health-deleted-cwd" (fun dir ->
@@ -7009,10 +6987,10 @@ let () =
           Alcotest.test_case
             "full health cold refresh timeout is timeout" `Quick
             test_full_health_cold_refresh_timeout_is_timeout_not_error;
-          Alcotest.test_case "the TUI reads a rebuilding snapshot as not measured" `Quick
-            test_the_tui_reads_a_rebuilding_snapshot_as_not_measured;
-          Alcotest.test_case "the TUI reads a last good snapshot as stale" `Quick
-            test_the_tui_reads_a_last_good_snapshot_as_stale;
+          Alcotest.test_case "a rebuilding snapshot has no fleet reading" `Quick
+            test_a_rebuilding_snapshot_has_no_fleet_reading;
+          Alcotest.test_case "a last good snapshot says it is stale" `Quick
+            test_a_last_good_snapshot_says_it_is_stale;
           Alcotest.test_case "health response survives deleted cwd" `Quick
             test_health_response_survives_deleted_cwd;
           Alcotest.test_case "readiness false before init" `Quick

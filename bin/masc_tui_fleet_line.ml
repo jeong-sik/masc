@@ -1,5 +1,6 @@
-module Tui_decode = Masc.Tui_decode
+module F = Masc.Fleet_stream
 module Keeper_fleet_blocker = Masc.Keeper_fleet_blocker
+module Keeper_fleet_grade = Masc.Keeper_fleet_grade
 module Terminal_text = Masc_tui_ansi.Terminal_text
 
 let blocker_phrase = function
@@ -11,27 +12,18 @@ let blocker_phrase = function
   | Active_task_owner_without_executable_fiber -> "task owner without fiber"
   | Durable_paused_autoboot_enabled -> "autoboot keepers paused"
 
-let status_text = function
-  | Tui_decode.Fleet_grade grade -> Masc.Keeper_fleet_grade.wire_name grade
-  | Unrecognised_fleet_status word -> Terminal_text.single_line word
+let status_text = Keeper_fleet_grade.wire_name
 
 let status_is_ok = function
-  | Tui_decode.Fleet_grade Masc.Keeper_fleet_grade.Fleet_ok -> true
-  | Fleet_grade Masc.Keeper_fleet_grade.(Fleet_degraded | Fleet_blocked)
-  | Unrecognised_fleet_status _ ->
-      false
+  | Keeper_fleet_grade.Fleet_ok -> true
+  | Keeper_fleet_grade.(Fleet_degraded | Fleet_blocked) -> false
 
-let blocker_text (fleet : Tui_decode.fleet_safety) =
-  Option.map
-    (function
-      | Tui_decode.Blocker blocker -> blocker_phrase blocker
-      | Unrecognised_blocker name -> "blocker: " ^ Terminal_text.single_line name)
-    fleet.fs_blocker
+let blocker_text (fleet : F.fleet) = Option.map blocker_phrase fleet.fs_blocker
 
 (* The phase snapshot partitions failing Keepers into retrying, configuration
    errors and official-client session recovery, so the classes drawn sum to
    the failing count. The latter two need more than the same turn again. *)
-let failing_text (fleet : Tui_decode.fleet_safety) =
+let failing_text (fleet : F.fleet) =
   if fleet.fs_failing_count = 0 then None
   else
     let classes =
@@ -54,36 +46,58 @@ let failing_text (fleet : Tui_decode.fleet_safety) =
                    (fun (label, count) -> Printf.sprintf "%s %d" label count)
                    classes)))
 
-let not_measured_text ~status =
-  Printf.sprintf "not measured yet (%s)" (Terminal_text.single_line status)
+let failure_text = function
+  | Masc_tui_fleet_stream.Refused { status; detail } ->
+      Printf.sprintf "fleet stream refused with %d: %s" status
+        (Terminal_text.single_line detail)
+  | Schema_mismatch { expected; received } ->
+      Printf.sprintf "fleet stream is schema %d, this build reads %d" received expected
+  | Frame_rejected detail ->
+      "fleet stream sent a frame this build cannot read: "
+      ^ Terminal_text.single_line detail
 
-(* Known refresh-failure and age reasons are said in words (#39194).
-   Other reasons, including invalidation, are drawn as the server wrote them,
-   the way an unknown blocker or snapshot status is. *)
-let stale_reason_text reason =
-  match reason with
-  | "last_good_refresh_timeout" -> "refresh timed out"
-  | "last_good_refresh_error" -> "refresh failed"
-  | "ttl_expired" -> "reading aged out"
-  | other -> Terminal_text.single_line other
+let outage_reason_text = function
+  | F.Scan_timed_out -> "refresh timed out"
+  | F.Scan_failed -> "refresh failed"
 
-(* A stale health snapshot serves the last fleet it measured, so the counts
-   beside this are a past reading (#38499). The age is taken from [now] at
-   draw time, so it keeps growing between polls instead of freezing at the
-   age the poll saw. A server clock ahead of this one has no age to give, and
-   the tag still says the reading is stale. *)
-let freshness_text ~now = function
-  | Tui_decode.Fleet_current -> None
-  | Fleet_last_good { measured_at_unix; stale_reason } ->
-      let reason = stale_reason_text stale_reason in
-      Some
-        (match
-           Masc_tui_message_layout.age_text ~now ~since:measured_at_unix
-         with
-         | Some age -> Printf.sprintf "stale \xc2\xb7 measured %s ago (%s)" age reason
-         | None -> Printf.sprintf "stale (%s)" reason)
-  | Unrecognised_snapshot_status word ->
-      Some ("health snapshot " ^ Terminal_text.single_line word)
+let unavailable_text ~now ~(degradation : F.degradation) ~disconnected_since =
+  let reason = outage_reason_text degradation.reason in
+  let scan =
+    match Masc_tui_message_layout.age_text ~now ~since:degradation.since with
+    | Some age -> Printf.sprintf "not observed · %s for %s" reason age
+    | None -> "not observed · " ^ reason
+  in
+  match disconnected_since with
+  | None -> scan
+  | Some since ->
+    let loss = match Masc_tui_message_layout.age_text ~now ~since with
+      | Some age -> "stream lost " ^ age ^ " ago"
+      | None -> "stream lost"
+    in
+    scan ^ " · " ^ loss
+
+(* No reading was ever told and the stream is down, so nothing was observed
+   and the screen says the stream is the reason, not a scan. *)
+let unreachable_text ~now ~since =
+  match Masc_tui_message_layout.age_text ~now ~since with
+  | Some age -> "not observed \xc2\xb7 stream lost " ^ age ^ " ago"
+  | None -> "not observed \xc2\xb7 stream lost"
+
+(* While the scans fail or the stream is down, the counts beside this are the
+   last reading (#38499). The age is taken from [now] at draw time, so it keeps
+   growing between events instead of freezing at the age the event had. A
+   clock ahead of this one has no age to give, and the tag still says the
+   reading is stale. *)
+let trouble_text ~now = function
+  | Masc_tui_fleet_stream.Scans_failing { F.since; reason } ->
+      let reason = outage_reason_text reason in
+      (match Masc_tui_message_layout.age_text ~now ~since with
+       | Some age -> Printf.sprintf "stale \xc2\xb7 scans failing for %s (%s)" age reason
+       | None -> Printf.sprintf "stale (%s)" reason)
+  | Disconnected { since } ->
+      (match Masc_tui_message_layout.age_text ~now ~since with
+       | Some age -> Printf.sprintf "stale \xc2\xb7 stream lost %s ago" age
+       | None -> "stale (stream lost)")
 
 (* The task owners the fleet has no fiber for, and how much of that reading is
    missing. A Keeper whose profile does not load is a scan error: its tasks are
@@ -93,7 +107,7 @@ let freshness_text ~now = function
 
    [None] where there is neither: a zero over a complete reading is a row spent
    saying nothing happened. *)
-let owner_scan_text (fleet : Tui_decode.fleet_safety) =
+let owner_scan_text (fleet : F.fleet) =
   let owners = fleet.fs_active_task_owner_without_fiber_count in
   let unread = fleet.fs_active_task_owner_scan_error_count in
   if owners = 0 && unread = 0 then None

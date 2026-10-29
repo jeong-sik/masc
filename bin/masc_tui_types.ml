@@ -274,12 +274,12 @@ end = struct
 end
 
 module Surface_read_source = struct
-  type t = Transport | Board | Planning | System_logs | Fleet_safety
+  type t = Transport | Board | Planning | System_logs
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
 
   let name = function
     | Transport -> "transport" | Board -> "Board" | Planning -> "Work"
-    | System_logs -> "logs" | Fleet_safety -> "fleet health"
+    | System_logs -> "logs"
     | Runtime_quota -> "provider windows" | Keeper_usage -> "Keeper usage"
     | Provider_history -> "provider history" | Overview_goals -> "Goals"
     | Account_emails -> "accounts"
@@ -3535,6 +3535,15 @@ type observer_status =
       events : int;  (** frames the stream delivered before it closed *)
     }
 
+(** Whether a job follows the fleet stream ([GET /api/v1/stream/fleet]), and
+    what it last posted for the screen. The job owns the connection and
+    reconnects it, so it follows from the launch until the workspace withdraws
+    it. The view exists only while a job follows: a job that is gone leaves
+    nothing to draw. *)
+type fleet_stream_reader =
+  | Fleet_stream_idle  (** no job: one starts on the next refresh that reaches the server *)
+  | Fleet_stream_following of Masc_tui_fleet_stream.view
+
 type observer_replay_status =
   | Observer_replay_unobserved
   | Observer_replay_scoped of Sse_wire.observer_handshake
@@ -3695,18 +3704,10 @@ type planning_backlog = Tui_decode.planning_backlog
   pb_cancelled: int;
 }
 
-type fleet_blocker = Tui_decode.fleet_blocker =
-  | Blocker of Masc.Keeper_fleet_blocker.t
-  | Unrecognised_blocker of string
-
-type fleet_status = Tui_decode.fleet_status =
-  | Fleet_grade of Masc.Keeper_fleet_grade.t
-  | Unrecognised_fleet_status of string
-
-type fleet_safety = Tui_decode.fleet_safety
+type fleet_safety = Masc.Fleet_stream.fleet
   = {
-  fs_status: fleet_status;
-  fs_blocker: fleet_blocker option;
+  fs_status: Masc.Keeper_fleet_grade.t;
+  fs_blocker: Masc.Keeper_fleet_blocker.t option;
   fs_operator_action_required: bool;
   fs_bootable_count: int;
   fs_running_count: int;
@@ -3718,11 +3719,11 @@ type fleet_safety = Tui_decode.fleet_safety
   fs_paused_count: int;
   fs_target_reaction_capacity: int;
   fs_reaction_capacity_shortfall: int;
-  fs_bootable_names: string list;
-  fs_running_names: string list;
-  fs_executable_names: string list;
-  fs_turn_configuration_error_names: string list;
-  fs_official_client_recovery_required_names: string list;
+  fs_bootable_names: Masc.Fleet_stream.Names.t;
+  fs_running_names: Masc.Fleet_stream.Names.t;
+  fs_executable_names: Masc.Fleet_stream.Names.t;
+  fs_turn_configuration_error_names: Masc.Fleet_stream.Names.t;
+  fs_official_client_recovery_required_names: Masc.Fleet_stream.Names.t;
   fs_active_task_owner_without_fiber_count: int;
   fs_completion_authority_pending_count: int;
   fs_active_task_owner_scan_error_count: int;
@@ -4216,7 +4217,6 @@ let surface_ring : (surface * string) list =
 type surface_needs = {
   needs_transport : bool;
   needs_keeper_roster : bool;
-  needs_fleet_safety : bool;
   needs_board : bool;
   needs_planning : bool;
   needs_system_logs : bool;
@@ -4233,7 +4233,6 @@ type surface_needs = {
 let nothing =
   { needs_transport = false;
     needs_keeper_roster = false;
-    needs_fleet_safety = false;
     needs_board = false;
     needs_planning = false;
     needs_system_logs = false;
@@ -4286,7 +4285,6 @@ and surface_needs_of_surface : surface -> surface_needs = function
   | Keepers Keeper_list ->
       { nothing with
         needs_keeper_roster = true
-      ; needs_fleet_safety = true
       ; needs_operator_approvals = true
       ; needs_asks = true
       }
@@ -4294,11 +4292,10 @@ and surface_needs_of_surface : surface -> surface_needs = function
      keeper it is choosing for can leave the roster while it is open. Its
      catalogue has its own loader, fetched when the picker opens. *)
   | Keepers (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_runtime_pick) ->
-      { nothing with needs_keeper_roster = true; needs_fleet_safety = true }
+      { nothing with needs_keeper_roster = true }
   | Keepers Keeper_message ->
       { nothing with
         needs_keeper_roster = true
-      ; needs_fleet_safety = true
       ; needs_keeper_chat = true
       }
   | Board -> { nothing with needs_board = true }
@@ -4317,7 +4314,6 @@ and surface_needs_of_surface : surface -> surface_needs = function
   | Metrics ->
       { nothing with
         needs_keeper_roster = true
-        ; needs_fleet_safety = true
         ; needs_transport = true
         ; needs_runtime_quota = true
         ; needs_keeper_usage = true
@@ -4336,8 +4332,6 @@ let surface_needs_delta ~previous ~next =
   { needs_transport = next.needs_transport && not previous.needs_transport
   ; needs_keeper_roster =
       next.needs_keeper_roster && not previous.needs_keeper_roster
-  ; needs_fleet_safety =
-      next.needs_fleet_safety && not previous.needs_fleet_safety
   ; needs_board = next.needs_board && not previous.needs_board
   ; needs_planning = next.needs_planning && not previous.needs_planning
   ; needs_system_logs =
@@ -4367,10 +4361,10 @@ let surface_needs_any needs = needs <> nothing
    Questions, approvals and roster already have independent source owners. *)
 module Surface_read_order : sig
   type kind = Full | Navigation | Independent
-  type source = Surface_read_source.t = Transport | Board | Planning | System_logs | Fleet_safety
+  type source = Surface_read_source.t = Transport | Board | Planning | System_logs
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
   type dataset = Transport_data | Board_posts | Board_hearths | Planning_data
-    | System_logs_data | Fleet_safety_data | Runtime_quota_data | Keeper_usage_data
+    | System_logs_data | Runtime_quota_data | Keeper_usage_data
     | Provider_history_data | Overview_goals_data | Account_emails_data
   type t
   type request
@@ -4400,10 +4394,10 @@ module Surface_read_order : sig
   val latest_navigation : t -> request -> bool
 end = struct
   type kind = Full | Navigation | Independent
-  type source = Surface_read_source.t = Transport | Board | Planning | System_logs | Fleet_safety
+  type source = Surface_read_source.t = Transport | Board | Planning | System_logs
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
   type dataset = Transport_data | Board_posts | Board_hearths | Planning_data
-    | System_logs_data | Fleet_safety_data | Runtime_quota_data | Keeper_usage_data
+    | System_logs_data | Runtime_quota_data | Keeper_usage_data
     | Provider_history_data | Overview_goals_data | Account_emails_data
   type request = { id: int; kind: kind; started_ns: int64; datasets: dataset list; owner: unit ref }
   type t = {
@@ -4416,25 +4410,25 @@ end = struct
   let sources needs =
     [Transport, needs.needs_transport; Board, needs.needs_board;
      Planning, needs.needs_planning; System_logs, needs.needs_system_logs;
-     Fleet_safety, needs.needs_fleet_safety; Runtime_quota, needs.needs_runtime_quota;
+     Runtime_quota, needs.needs_runtime_quota;
      Keeper_usage, needs.needs_keeper_usage; Provider_history, needs.needs_provider_history;
      Overview_goals, needs.needs_overview_goals; Account_emails, needs.needs_account_emails]
     |> List.filter_map (fun (source, wanted) -> if wanted then Some source else None)
   let source_datasets = function
     | Transport -> [Transport_data] | Board -> [Board_posts;Board_hearths]
     | Planning -> [Planning_data] | System_logs -> [System_logs_data]
-    | Fleet_safety -> [Fleet_safety_data] | Runtime_quota -> [Runtime_quota_data]
+    | Runtime_quota -> [Runtime_quota_data]
     | Keeper_usage -> [Keeper_usage_data] | Provider_history -> [Provider_history_data]
     | Overview_goals -> [Overview_goals_data] | Account_emails -> [Account_emails_data]
   let dataset_source = function
     | Transport_data -> Transport | Board_posts | Board_hearths -> Board
     | Planning_data -> Planning | System_logs_data -> System_logs
-    | Fleet_safety_data -> Fleet_safety | Runtime_quota_data -> Runtime_quota
+    | Runtime_quota_data -> Runtime_quota
     | Keeper_usage_data -> Keeper_usage | Provider_history_data -> Provider_history
     | Overview_goals_data -> Overview_goals | Account_emails_data -> Account_emails
   let dataset_name = function
     | Board_posts -> "Board posts" | Board_hearths -> "Board hearths"
-    | (Transport_data | Planning_data | System_logs_data | Fleet_safety_data
+    | (Transport_data | Planning_data | System_logs_data
       | Runtime_quota_data | Keeper_usage_data | Provider_history_data
       | Overview_goals_data | Account_emails_data) as dataset ->
         Surface_read_source.name (dataset_source dataset)
@@ -9209,10 +9203,9 @@ type state = {
   mutable last_action: (string * float) option;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
-     fleet's own reading of what is missing, or the server's word that its
-     health snapshot is being rebuilt. *)
-  mutable fleet_safety: Tui_decode.fleet_safety_reading option;
-  mutable fleet_safety_error: string option;
+     fleet's own reading of what is missing, as the fleet stream (RFC-0477)
+     last told it. *)
+  mutable fleet_stream_reader: fleet_stream_reader;
   mutable connection_status: connection_status;
   mutable http_refresh_started_ns: int64 option;
   mutable http_refresh_progress: (workspace_authority * Http_refresh_progress.t) option;
@@ -12644,6 +12637,13 @@ let suspend_verification_evidence_read state =
     state.verification_evidence;
   state.verification_evidence_request <- None
 
+(* What the Keepers screen draws of the fleet: what the job that follows the
+   stream last posted, and nothing once no job follows. *)
+let fleet_stream_view state =
+  match state.fleet_stream_reader with
+  | Fleet_stream_following view -> view
+  | Fleet_stream_idle -> Masc_tui_fleet_stream.Awaiting_first_reading
+
 let suspend_workspace_readings state =
   state.resource_diagrams <- None;
   (match state.keeper_peer_reading with
@@ -12692,6 +12692,7 @@ let suspend_workspace_readings state =
   state.workspace_observation_cancellations <- [];
   List.iter (fun (_, cancel) -> cancel ()) cancellations;
   state.observer <- Observer_off;
+  state.fleet_stream_reader <- Fleet_stream_idle;
   state.detail_read_authority <- ref ();
   state.detail_reads <- [];
   suspend_keeper_deletions_read state;
@@ -16585,8 +16586,7 @@ let create_state
   voice_floor = None;
   quit_armed = false;
   last_action = None;
-  fleet_safety = None;
-  fleet_safety_error = None;
+  fleet_stream_reader = Fleet_stream_idle;
   connection_status = Disconnected;
   http_refresh_started_ns = None;
   http_refresh_progress = None;

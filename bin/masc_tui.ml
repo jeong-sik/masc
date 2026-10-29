@@ -13099,20 +13099,6 @@ let launch_system_logs_load state ~mailbox =
     (fun () -> load_system_logs ~host ~port ?level ~limit:system_log_page ())
   end
 
-let apply_fleet_safety_load state = function
-  | Ok reading ->
-      state.fleet_safety <- Some reading;
-      state.fleet_safety_error <- None
-  | Error err ->
-      (* The last good reading is dropped: a stale fleet line is worse than an
-         absent one, because it reports keepers as running after the reading
-         that said so stopped arriving. *)
-      state.fleet_safety <- None;
-      remember_surface_error state ~surface:"fleet safety"
-        ~current_error:state.fleet_safety_error
-        ~set_error:(fun value -> state.fleet_safety_error <- value)
-        err
-
 (* A failed read replaces the last good one: a window drawn after the reading
    that said so stopped arriving would name a report nobody heard again. *)
 let apply_runtime_quota_load state (runtimes, providers) =
@@ -13419,22 +13405,18 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
 let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~ask_request ~roster_request ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_query
     ~system_log_level ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) : unit http_scoped_surface_readings =
-  let publish_bound ~source ~dataset load =
+  let publish_bound ~dataset load =
     match server_identity, on_dataset, Fs_compat.execution_context () with
     | Ok expected, Some publish, Fs_compat.Eio_fiber ->
-      let proof = match source with
-        | Surface_read_order.Fleet_safety -> Masc_tui_workspace_read.Health_identity
-        | Transport | Board | Planning | System_logs | Runtime_quota
-        | Keeper_usage | Provider_history | Overview_goals | Account_emails ->
-          Masc_tui_workspace_read.Request_precondition in
-      Masc_tui_workspace_read.with_binding ~host ~port ~expected ~proof (fun () ->
+      Masc_tui_workspace_read.with_binding ~host ~port ~expected
+        ~proof:Masc_tui_workspace_read.Request_precondition (fun () ->
         let result = load () in
         publish expected (dataset result);
         result)
     | Error _, _, _ | Ok _, None, _ | Ok _, Some _, Fs_compat.Non_eio -> load ()
   in
   let when_needed ~source ~dataset ~outcome wanted load =
-    if wanted then Some (publish_bound ~source ~dataset (fun () ->
+    if wanted then Some (publish_bound ~dataset (fun () ->
       observe_http_reader ~on_progress
         (Http_refresh_progress.Surface_data source) ~outcome load))
     else None in
@@ -13460,12 +13442,12 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
           (Http_refresh_progress.Surface_data Surface_read_order.Board)
           ~outcome:Http_refresh_progress.of_board
           (fun () -> Masc_tui_loader.read_pair
-            (fun () -> publish_bound ~source:Surface_read_order.Board
+            (fun () -> publish_bound
               ~dataset:(fun result -> Dataset_board_posts {bpr_query=board_query;bpr_result=result}) (fun () ->
                 observe_http_component ~on_progress Http_refresh_progress.Board_posts
                   (fun () -> load_board_list ~host ~port ~sort_by:(board_sort_label board_query.bq_sort)
                     ~hearth:board_query.bq_hearth)))
-            (fun () -> publish_bound ~source:Surface_read_order.Board
+            (fun () -> publish_bound
               ~dataset:(fun result -> Dataset_board_hearths result) (fun () ->
                 observe_http_component ~on_progress Http_refresh_progress.Board_hearths
                   (fun () -> load_board_hearths ~host ~port)))) in
@@ -13482,11 +13464,6 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
       needs.needs_system_logs (fun () ->
         load_system_logs ~host ~port ?level:system_log_level
           ~limit:system_log_page ())
-  in
-  let read_fleet_safety () =
-    when_needed ~source:Surface_read_order.Fleet_safety ~outcome:Http_refresh_progress.of_result
-      ~dataset:(fun result -> Dataset_fleet_safety result)
-      needs.needs_fleet_safety (fun () -> load_fleet_safety ~host ~port)
   in
   let read_keeper_surfaces () =
     load_http_keeper_surfaces ~on_progress:None ~on_asks:None ~on_roster:None
@@ -13550,7 +13527,7 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
      result. The enclosing request verifies identity after all its readers
      join; this collector grants no publication authority and adds no probe.
      With no Eio switch, [read_pair] runs the same readers synchronously. *)
-  let ((http_transport, http_fleet_safety),
+  let (http_transport,
        ((http_approvals, (http_board, http_board_hearths)),
         (http_planning, http_system_logs))),
       (((http_asks, http_keeper_roster), http_overview_goals),
@@ -13559,7 +13536,7 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
     Masc_tui_loader.read_pair
       (fun () ->
         Masc_tui_loader.read_pair
-          (fun () -> Masc_tui_loader.read_pair read_transport read_fleet_safety)
+          read_transport
           (fun () ->
             Masc_tui_loader.read_pair
               (fun () ->
@@ -13583,7 +13560,6 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
   ; http_board_hearths
   ; http_planning
   ; http_system_logs
-  ; http_fleet_safety
   ; http_keeper_roster
   ; http_runtime_quota
   ; http_keeper_usage
@@ -13724,7 +13700,6 @@ let apply_http_scoped_data state ~datasets results =
   let roster_refreshed = Option.fold ~none:false
     ~some:(apply_keeper_roster_observation state) results.http_keeper_roster in
   apply Surface_read_order.System_logs_data ~received:Result.is_ok (apply_system_logs_load state) results.http_system_logs;
-  apply Surface_read_order.Fleet_safety_data ~received:Result.is_ok (apply_fleet_safety_load state) results.http_fleet_safety;
   apply Surface_read_order.Runtime_quota_data
     ~received:(fun (runtimes, quota) -> Result.is_ok runtimes && Result.is_ok quota) (apply_runtime_quota_load state) results.http_runtime_quota;
   apply Surface_read_order.Keeper_usage_data ~received:Result.is_ok (apply_keeper_usage_load state) results.http_keeper_usage;
@@ -13742,7 +13717,6 @@ let apply_http_dataset state = function
   | Dataset_board_hearths hearths -> Masc_tui_types.apply_board_census_load state hearths; None
   | Dataset_planning result -> apply_planning_load state result; None
   | Dataset_system_logs result -> apply_system_logs_load state result; None
-  | Dataset_fleet_safety result -> apply_fleet_safety_load state result; None
   | Dataset_runtime_quota (runtimes, quota) -> apply_runtime_quota_load state (runtimes, quota); None
   | Dataset_keeper_usage result -> apply_keeper_usage_load state result; None
   | Dataset_provider_history (days, result) -> apply_provider_history_load state (days, result); None
@@ -14108,6 +14082,10 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.runtime_param_edit <- None;
   state.runtime_params_notice <- None;
   state.observer <- Observer_off;
+  (* The withdrawal cancelled the fleet job with every other job. What it drew
+     belongs to the workspace left, and the next refresh that confirms one
+     starts another. *)
+  state.fleet_stream_reader <- Fleet_stream_idle;
   state.mcp_session <- None;
   state.resources_list <- None;
   state.resources_error <- None;
@@ -15515,6 +15493,90 @@ let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
     ( Observer_closed_before_answer _ | Observer_closed_after_live _
     | Observer_opening | Observer_live _ )
   | (Disconnected | Connecting | Booting), _ ->
+      ()
+
+(* The fleet stream reconnects at the default refresh cadence, so a server that
+   is down costs one failed connection per refresh, as the poll it replaces
+   did. *)
+let fleet_stream_reconnect_s = 2.0
+
+(* Follow the fleet stream (RFC-0477) on a daemon fiber. The job owns the
+   connection and the reader: when a connection ends it opens the next one
+   after [fleet_stream_reconnect_s], and it posts the reader's view to the
+   mailbox whenever that changes. The render fiber owns all state. The job
+   ends only when the workspace withdraws it, and the withdrawal resets
+   [state.fleet_stream_reader], so the next refresh starts another. *)
+let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
+  let enqueue_async = workspace_enqueue state in
+  let exception Close_connection in
+  state.fleet_stream_reader <-
+    Fleet_stream_following Masc_tui_fleet_stream.Awaiting_first_reading;
+  let run () =
+    match Eio_context.get_clock_opt () with
+    | None -> enqueue_async mailbox (Fleet_stream_reader_ended "Eio clock is unavailable")
+    | Some clock ->
+        let reader = Masc_tui_fleet_stream.create () in
+        let posted = ref Masc_tui_fleet_stream.Awaiting_first_reading in
+        let post () =
+          let view = Masc_tui_fleet_stream.view reader in
+          if view <> !posted then begin
+            posted := view;
+            enqueue_async mailbox (Fleet_stream_view view)
+          end
+        in
+        let read_one_connection () =
+          Masc_tui_fleet_stream.started reader;
+          let outcome =
+            try
+              Masc_tui_http.observe_fleet_stream ~clock ~expected_workspace ~host ~port
+                ~on_chunk:(fun chunk ->
+                  let step = Masc_tui_fleet_stream.feed reader chunk in
+                  post ();
+                  match step with
+                  | Masc_tui_fleet_stream.Keep_reading -> ()
+                  | Masc_tui_fleet_stream.Reconnect -> raise Close_connection)
+            with Close_connection -> Ok ()
+          in
+          (match outcome with
+           | Error (Masc_tui_http.Http_refused { status; detail }) ->
+               Masc_tui_fleet_stream.refused reader ~status ~detail
+           | Error (Masc_tui_http.Transport_failed detail) ->
+               Log.Transport.warn "tui_fleet_stream_lost detail=%s" detail
+           | Ok () -> Log.Transport.debug "tui_fleet_stream_ended");
+          Masc_tui_fleet_stream.lost reader ~now:(Eio.Time.now clock);
+          post ()
+        in
+        while true do
+          read_one_connection ();
+          Eio.Time.sleep clock fleet_stream_reconnect_s
+        done
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      fork_workspace_job ~observation:true state ~sw (fun () ->
+        try run () with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> enqueue_async mailbox (Fleet_stream_reader_ended (Printexc.to_string exn)))
+  | None -> enqueue_async mailbox (Fleet_stream_reader_ended "Eio switch is unavailable")
+
+(* The stream is opened only after a refresh confirmed the workspace, and it
+   asks the server for that workspace, which the fleet read it replaced did
+   too. The observer feed also runs while the workspace mismatches; a fleet
+   drawn then would be another workspace's. Once open, the job reconnects by
+   itself, so this starts one only when none is following. *)
+let open_fleet_stream_if_due state ~host ~port ~mailbox =
+  match state.workspace_identity, state.server_identity with
+  | Workspace_identity_match, Some expected_workspace when server_authority_ready state ->
+      (match state.connection_status, state.fleet_stream_reader with
+       | (Connected | Degraded), Fleet_stream_idle ->
+           launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox
+       | (Connected | Degraded), Fleet_stream_following _
+       | (Disconnected | Connecting | Booting), _ ->
+           ())
+  | ( Workspace_identity_unread
+    | Workspace_identity_match
+    | Workspace_identity_match_unconfirmed _
+    | Workspace_identity_mismatch _ ), _ ->
       ()
 
 (* Resolve the saved opening only after an owned roster observation. An
@@ -18483,7 +18545,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
         | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
         | Github_login_finished (_, _) | Github_token_saved (_, _) | Observer_opened _
-        | Observer_received (_, _) | Observer_closed _ | Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ -> ())
+        | Observer_received (_, _) | Observer_closed _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ -> ())
   | Chat_command_read_completed (ticket, message) ->
       if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
         state.chat_command_reads <- List.filter (fun (pending, _, _) -> pending != ticket) state.chat_command_reads;
@@ -19116,6 +19178,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
       if identity_recovered then enqueue_async mailbox Approvals_listing_superseded;
       open_observer_if_due state ~retry_closed:false
         ~host:(server_peer_host) ~port:state.port ~mailbox;
+      open_fleet_stream_if_due state
+        ~host:(server_peer_host) ~port:state.port ~mailbox;
       end;
       start_scoped_refresh_followup state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight
@@ -19415,6 +19479,17 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
          | Observer_closed_after_live _ ->
            Observer_closed_before_answer { reason; at });
       add_event state "observer" ("runtime event feed closed: " ^ reason)
+  | Fleet_stream_view view ->
+      (* A view from a job that is no longer followed has no screen to go to. *)
+      (match state.fleet_stream_reader with
+       | Fleet_stream_following _ -> state.fleet_stream_reader <- Fleet_stream_following view
+       | Fleet_stream_idle -> ())
+  | Fleet_stream_reader_ended detail ->
+      (* The job reconnects by itself and ends only when withdrawn, so an end
+         it reports is a failure of the job: say so, draw nothing more from
+         it, and let the next refresh start another. *)
+      Log.Transport.warn "tui_fleet_stream_reader_ended detail=%s" detail;
+      state.fleet_stream_reader <- Fleet_stream_idle
   | Http_refresh_failed (err, approval_ticket, refresh_ticket) ->
       http_refresh_inflight := false;
       finish_observed_http_refresh state ~ticket:refresh_ticket;
@@ -19758,7 +19833,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            state.goal_confirmation <- Goal_confirmation.Inspecting read
        | Runtime_form_save_changed _, _ | Keeper_settings_save_changed _, _ -> ()
        | (Goal_confirmation_submitted _, Goal_confirmation.Inspecting _)
-       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_calibrated _ | Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | Keeper_logs_loaded _ | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Listen_prepared _ | Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( (Board_vote_done _ | Artifact_check_changed _) | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( (Verification_evidence_loaded (_, _) | Verification_evidence_exported _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( (Resources_listed _ | Artifact_checks_loaded _) | ( Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_exported _ | Resource_share_changed _ | Resource_read (_, _) | Resource_diagram_ready _ | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | ( Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
+       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_calibrated _ | Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | Keeper_logs_loaded _ | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Listen_prepared _ | Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( (Board_vote_done _ | Artifact_check_changed _) | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( (Verification_evidence_loaded (_, _) | Verification_evidence_exported _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( (Resources_listed _ | Artifact_checks_loaded _) | ( Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_exported _ | Resource_share_changed _ | Resource_read (_, _) | Resource_diagram_ready _ | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | ( Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
       match result with
       | Ok message ->
           state.goal_action_pending <- None;
@@ -34872,6 +34947,7 @@ and is loaded on demand through keeper_skill.
         (* The retry a closed feed waits for. *)
         open_observer_if_due state ~retry_closed:true ~host ~port
           ~mailbox:async_messages;
+        open_fleet_stream_if_due state ~host ~port ~mailbox:async_messages;
         start_http_refresh state ~host ~port ~intent:Cadence
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight

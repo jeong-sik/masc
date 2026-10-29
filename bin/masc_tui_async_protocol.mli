@@ -65,7 +65,6 @@ type http_dataset =
   | Dataset_board_hearths of ((string * int) list, string) result
   | Dataset_planning of (planning_snapshot, string) result
   | Dataset_system_logs of (system_log_snapshot, string) result
-  | Dataset_fleet_safety of (Masc.Tui_decode.fleet_safety_reading, string) result
   | Dataset_runtime_quota of
       (Masc.Tui_decode.runtime_option list, string) result
       * (Masc.Tui_decode_usage.provider_usage_windows, string) result
@@ -107,7 +106,6 @@ type 'identity http_scoped_surface_readings = {
   http_board_hearths: ((string * int) list, string) result option;
   http_planning: (planning_snapshot, string) result option;
   http_system_logs: (system_log_snapshot, string) result option;
-  http_fleet_safety: (Masc.Tui_decode.fleet_safety_reading, string) result option;
   (* [None] on surfaces that do not read the roster or its Candle summary;
      leaving it out keeps the observation until a relevant refresh. *)
   http_keeper_roster: keeper_roster_observation option;
@@ -749,6 +747,8 @@ type async_msg =
     }
   | Observer_received of string option * Masc_tui_observer.delivery list
   | Observer_closed of (unit, Masc_tui_http.observer_error) result
+  | Fleet_stream_view of Masc_tui_fleet_stream.view
+  | Fleet_stream_reader_ended of string
   | Original_task_read_done of Masc_tui_types.task_inspection_request
       * (Masc_tui_original_task_read.task_snapshot, Masc_tui_original_task_read.error) result
   | Original_task_history_done of Masc_tui_types.task_inspection_request

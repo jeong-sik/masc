@@ -192,7 +192,8 @@ let position reader =
         | None -> Fine
         | Some (Client.Scans_failing _) -> Scans_failing
         | Some (Client.Disconnected _) -> Disconnected )
-  | Client.Awaiting_first_reading | Client.Unavailable _ | Client.Cannot_read _ -> None
+  | Client.Awaiting_first_reading | Client.Unreachable _ | Client.Unavailable _
+  | Client.Cannot_read _ -> None
 ;;
 
 let position_t =
@@ -261,7 +262,8 @@ let test_first_scan_failure_survives_reconnect_and_recovers_over_http () =
         match Client.view reader with
         | Client.Unavailable { degradation; disconnected_since = Some _ } -> degradation = outage
         | Client.Unavailable { disconnected_since = None; _ }
-        | Client.Awaiting_first_reading | Client.Reading _ | Client.Cannot_read _ -> false);
+        | Client.Awaiting_first_reading | Client.Unreachable _ | Client.Reading _
+        | Client.Cannot_read _ -> false);
       let second = start_server ~sw env ~port:first.port hub in
       wait_until env "same failure on the new connection" (fun () ->
         Client.view reader = Client.Unavailable { degradation = outage; disconnected_since = None });

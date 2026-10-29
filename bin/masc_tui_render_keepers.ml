@@ -352,12 +352,15 @@ let keeper_secondary_row_content ~inner (row : Keeper_list_model.row) =
    running (2026-09-16). Executable is the set with a live fiber (Running or
    Failing), which is the fact the label names. *)
 let keeper_fleet_gap_lines (fleet : fleet_safety) =
+  let names = Masc.Fleet_stream.Names.to_list in
   let subtract from_names remove_names =
     List.filter (fun name -> not (List.mem name remove_names)) from_names
   in
-  let not_running = subtract fleet.fs_bootable_names fleet.fs_executable_names in
+  let not_running =
+    subtract (names fleet.fs_bootable_names) (names fleet.fs_executable_names)
+  in
   let running_without_turn =
-    subtract fleet.fs_running_names fleet.fs_executable_names
+    subtract (names fleet.fs_running_names) (names fleet.fs_executable_names)
   in
   List.filter_map
     (fun (names, label, color) ->
@@ -371,10 +374,10 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
          failing counter only counts them. Unscoped on purpose -- the
          configuration_blocked_* wire fields are autoboot-scoped and skip a
          blocked keeper booted on request. *)
-      ( fleet.fs_turn_configuration_error_names
+      ( names fleet.fs_turn_configuration_error_names
       , "config-blocked"
       , (Theme.bad ()) )
-    ; ( fleet.fs_official_client_recovery_required_names
+    ; ( names fleet.fs_official_client_recovery_required_names
       , "session recovery required"
       , (Theme.bad ()) )
     ]
@@ -588,17 +591,23 @@ let render_keeper_list (state : state) =
       (Theme.warn () ^ "  preferences: " ^ Terminal_text.single_line message ^ Ansi.reset))
     state.keeper_list_preference_notice;
 
-  (match (state.fleet_safety, state.fleet_safety_error) with
-   | _, Some err ->
+  (match fleet_stream_view state with
+   | Masc_tui_fleet_stream.Awaiting_first_reading -> ()
+   | Masc_tui_fleet_stream.Unreachable { since } ->
        box_line buf cols
-         ((Theme.bad ()) ^ "  fleet: " ^ Terminal_text.single_line err ^ Ansi.reset)
-   | None, None -> ()
-   | Some (Fleet_not_measured { status }), None ->
-       box_line buf cols
-         ((Theme.warn ()) ^ "  fleet "
-          ^ Masc_tui_fleet_line.not_measured_text ~status
+         ((Theme.warn ()) ^ "  fleet: "
+          ^ Masc_tui_fleet_line.unreachable_text ~now:now_unix ~since
           ^ Ansi.reset)
-   | Some (Fleet_measured { fleet; freshness }), None ->
+   | Masc_tui_fleet_stream.Cannot_read failure ->
+       box_line buf cols
+         ((Theme.bad ()) ^ "  fleet: " ^ Masc_tui_fleet_line.failure_text failure
+          ^ Ansi.reset)
+   | Masc_tui_fleet_stream.Unavailable { degradation; disconnected_since } ->
+       box_line buf cols
+         ((Theme.warn ()) ^ "  fleet: "
+          ^ Masc_tui_fleet_line.unavailable_text ~now:now_unix ~degradation ~disconnected_since
+          ^ Ansi.reset)
+   | Masc_tui_fleet_stream.Reading { reading = { fleet; _ }; trouble } ->
        let tone =
          if fleet.fs_operator_action_required then (Theme.bad ())
          else if Masc_tui_fleet_line.status_is_ok fleet.fs_status then (Theme.ok ())
@@ -622,10 +631,11 @@ let render_keeper_list (state : state) =
           frame cuts a row from the right, and the counts are what a narrow
           screen keeps. *)
        Option.iter
-         (fun text ->
+         (fun trouble ->
             box_line buf cols
-              ((Theme.warn ()) ^ "  fleet reading: " ^ text ^ Ansi.reset))
-         (Masc_tui_fleet_line.freshness_text ~now:now_unix freshness);
+              ((Theme.warn ()) ^ "  fleet reading: "
+               ^ Masc_tui_fleet_line.trouble_text ~now:now_unix trouble ^ Ansi.reset))
+         trouble;
        let failing_entry =
          Option.to_list (Masc_tui_fleet_line.failing_text fleet)
        in

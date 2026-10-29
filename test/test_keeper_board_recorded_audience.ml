@@ -346,7 +346,7 @@ let test_scan_follows_the_recorded_comment_audience () =
   let post =
     get
       (Board_dispatch.create_post
-         ~author:"external-author"
+         ~author:"scanreader"
          ~content:"thread root"
          ~title:"thread"
          ~body:"thread root"
@@ -368,11 +368,20 @@ let test_scan_follows_the_recorded_comment_audience () =
   let recorded_elsewhere = comment "@scanreader please look" in
   (* Text names the lane, row has no audience. *)
   let unrecorded = comment "@scanreader older row" in
+  (* Text names nobody, row has no audience.  The lane wrote the post, so a
+     scan that guessed "the thread" for a missing record would deliver it
+     without reading any text. *)
+  let unrecorded_plain = comment "older row without an address" in
+  (* Text names nobody, record is the thread: the lane wrote the post, so it
+     belongs to this thread and the comment reaches it. *)
+  let recorded_thread = comment "plain follow-up two" in
   record_audiences
     ~path:(Board.comments_path ())
     [ comment_id recorded_target, Some (targets_wire [ "scanreader" ])
     ; comment_id recorded_elsewhere, Some (targets_wire [ "someone-else" ])
+    ; comment_id recorded_thread, Some (`Assoc [ "kind", `String "thread_participants" ])
     ; comment_id unrecorded, None
+    ; comment_id unrecorded_plain, None
     ];
   let audience_of comment =
     match Board_dispatch.read_comments ~post_id:(post_id post) with
@@ -389,9 +398,17 @@ let test_scan_follows_the_recorded_comment_audience () =
     "the edited rows reload with the audiences they were given"
     true
     (match
-       audience_of recorded_target, audience_of recorded_elsewhere, audience_of unrecorded
+       ( audience_of recorded_target
+       , audience_of recorded_elsewhere
+       , audience_of recorded_thread
+       , audience_of unrecorded
+       , audience_of unrecorded_plain )
      with
-     | Ok (KBA.Targets [ _ ]), Ok (KBA.Targets [ _ ]), Error KBA.Audience_not_recorded -> true
+     | ( Ok (KBA.Targets [ _ ])
+       , Ok (KBA.Targets [ _ ])
+       , Ok KBA.Thread_participants
+       , Error KBA.Audience_not_recorded
+       , Error KBA.Audience_not_recorded ) -> true
      | _ -> false);
   Keeper_registry.set_board_cursor
     ~base_path:config.Workspace.base_path
@@ -406,15 +423,21 @@ let test_scan_follows_the_recorded_comment_audience () =
   in
   check int "the thread is replayed once" 1 post_count;
   check int "one delivery counts as a mention" 1 mention_count;
+  (* The two comments the record reaches to the lane are delivered: the one
+     that names it, and the one on a thread it wrote.  The comment recorded for
+     someone else and the comment without a record are not, although the text of
+     both names the lane. *)
   check
     (list string)
-    "only the comment whose record names the lane is delivered"
-    [ comment_id recorded_target ]
-    (queued_comment_ids config meta.Keeper_meta_contract.name);
+    "only the comments whose record reaches the lane are delivered"
+    (List.sort String.compare [ comment_id recorded_target; comment_id recorded_thread ])
+    (List.sort
+       String.compare
+       (queued_comment_ids config meta.Keeper_meta_contract.name));
   check
     (float 0.)
-    "the comment without a recorded audience is counted as a failure"
-    1.0
+    "each comment without a recorded audience is counted as a failure"
+    2.0
     (board_event_failures () -. failures_before)
 ;;
 

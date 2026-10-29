@@ -146,6 +146,11 @@ let ask_time ~evaluate piece =
 let ask_times ~evaluate segments =
   List.concat (Eio.Fiber.List.map (ask_time ~evaluate) (carried_pieces segments))
 
+let reduced ~results ~turn ~marks =
+  match J.reduce ~candidates:results ~turn with
+  | Some status -> { status; results; turn; marks }
+  | None -> impossible "no result for a non-empty candidate list"
+
 (* Question (b) runs in a fiber of the switch and the requests of (a) in its
    body. An exception on either side cancels the other, and a request of (a)
    that waits for (b) does not wait forever when (b) raises. *)
@@ -163,9 +168,17 @@ let judge ~evaluate ~purpose ~initial ~turn_request =
   let results = List.concat_map segment_results segments in
   let turn = turn_answer_of (Eio.Promise.await turn_done) in
   let marks = ask_times ~evaluate segments in
-  match J.reduce ~candidates:results ~turn with
-  | Some status -> { status; results; turn; marks }
-  | None -> impossible "no result for a non-empty candidate list"
+  reduced ~results ~turn ~marks
+
+let not_recorded (judged : judged) =
+  let results =
+    List.map
+      (function
+        | J.Decided { id; decision = _ } | J.Undecided { id; reason = _ } ->
+          J.Undecided { id; reason = J.Not_recorded })
+      judged.results
+  in
+  reduced ~results ~turn:J.Turn_question_failed ~marks:[]
 
 let first_duplicate candidates =
   let rec go seen = function

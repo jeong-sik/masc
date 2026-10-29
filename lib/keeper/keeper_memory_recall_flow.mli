@@ -47,6 +47,12 @@ type judged =
             entry per carried candidate, and none for the others. *)
   }
 
+val not_recorded : judged -> judged
+(** The judgment to use when the record of its outcome could not be saved.
+    Nothing of the original is kept: every candidate is undecided with
+    [Not_recorded], question (b) counts as failed and there are no marks, so
+    the status is [unavailable] with that reason. *)
+
 val run :
   evaluate:evaluate ->
   purpose:Yojson.Safe.t ->

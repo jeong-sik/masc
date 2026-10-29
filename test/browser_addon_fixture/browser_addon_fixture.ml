@@ -15,6 +15,7 @@ let rec remove path=match (Unix.lstat path).Unix.st_kind with
 let server={|import argparse,json,os,socket,sys,threading,time
 p=argparse.ArgumentParser()
 p.add_argument("root");p.add_argument("--socket");p.add_argument("--incarnation");p.add_argument("--max-message-bytes")
+p.add_argument("--backend",required=True)
 a=p.parse_args()
 s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.bind(a.socket);s.listen()
 def control(conn):
@@ -138,6 +139,13 @@ let with_env ~env ~config run =
 let dispatch ~config operation fields=R.dispatch ~caller:"browser-fixture"
   ~access:Lane_addon_sources.Operator_configuration ~config ~operation (`Assoc fields)
   |> Result.map_error R.error_to_string |> require
+let phase ~config id =
+  let instances=dispatch ~config R.Inspect ["instance_id",`String id]
+    |> Yojson.Safe.Util.member "instances" |> Yojson.Safe.Util.to_list in
+  match instances with
+  | [instance] -> Yojson.Safe.Util.member "phase" instance
+      |> Lane_addon_types.phase_of_json |> require
+  | []|_::_::_ -> failwith "scripted browser worker inspection lost its exact instance"
 let wait ~env predicate = let rec loop ()=if predicate () then () else
   (Eio.Time.sleep (Eio.Stdenv.clock env) 0.001;loop ()) in loop ()
 (* One scripted worker under [root]/[name], attached with its own package.
@@ -175,8 +183,6 @@ max_reply_bytes = 2097152
   let id=dispatch ~config R.Attach ["manifest_path",`String manifest;"run_id",`String ("fixture-" ^ name);
     "binding",`Assoc ["sources",`List []]] |> Yojson.Safe.Util.member "instance_id"
     |> Yojson.Safe.Util.to_string in
-  let inspect ()=dispatch ~config R.Inspect ["instance_id",`String id]
-    |> Yojson.Safe.Util.member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
   let respond_file name=
     let path=Filename.concat requests name in
     let request=Yojson.Safe.from_file path in Unix.unlink path;
@@ -210,11 +216,15 @@ max_reply_bytes = 2097152
     done);
   let stop ()=if not !settled then Eio.Cancel.protect (fun () ->
     ignore (dispatch ~config R.Detach ["instance_id",`String id]);
-    wait ~env (fun () -> Yojson.Safe.Util.(inspect () |> member "phase" |> member "kind")=`String "detached");
+    wait ~env (fun () -> phase ~config id=Lane_addon_types.Detached);
     running:=false;settled:=true) in
   id,stop
-let serving ~config id=List.exists (fun (service:R.browser_service) -> service.instance_id=id)
-  (R.browser_services ~config ~access:Lane_addon_sources.Operator_configuration)
+let serving ~config id = match phase ~config id with
+  | Lane_addon_types.Failed detail -> failwith ("scripted browser worker failed before readiness: " ^ detail)
+  | Detaching | Detached -> failwith "scripted browser worker stopped before readiness"
+  | Attached | Observing ->
+    List.exists (fun (service:R.browser_service) -> service.instance_id=id)
+      (R.browser_services ~config ~access:Lane_addon_sources.Operator_configuration)
 type worker = { serves : B.Backend.t; clients : B.client_info list; exports : bool }
 type attached = { serves : B.Backend.t; instance_id : string; polled : unit -> string list }
 (* Starts one scripted worker per entry, each of its own one-source package,

@@ -481,8 +481,15 @@ let browser_rows_read_the_addon_observation () =
 let browser_lanes_read_their_own_sources () =
   let work registered = `Assoc ["activity",`String "enabled";"registered",`Bool registered;
     "session",`String "closed";"locate",`Bool false] in
-  let client id transport = `Assoc ["clientId",`String id;"browser",`String "firefox";"version",`String "158.0.1";
-    "engineVersion",`String "158.0.1";"transport",`String transport;"interactions",`List []] in
+  let client id transport =
+    let client_id=match Browser_lane.client_id_of_string id with
+      | Ok id -> id | Error detail -> fail detail in
+    let browser,space=match transport with
+      | Browser_lane.Ego_task_space -> Browser_lane.Ego_lite,Some {Browser_lane.id=51;name="Inventory fixture"}
+      | Web_extension | Webdriver_bidi -> Browser_lane.Firefox,None in
+    let client : Browser_lane.client_info =
+      {client_id;browser;version="158.0.1";engine_version="158.0.1";transport;space} in
+    Browser_addon_observation.publish_client client ~space_observation:None in
   (* A worker answers its snapshot whatever its package serves; the host
      reads only the sources the package names. *)
   let published clients = match Browser_addon_observation.of_snapshot ~observed_at:1.
@@ -499,12 +506,12 @@ let browser_lanes_read_their_own_sources () =
   (* An automation worker that reports a client: it serves no live source,
      so the live row does not count it. *)
   let automation = serving Browser_lane.Backend.Automation
-      (published [client "01a16363-ef6a-7000-aee1-37e1be230204" "webdriver_bidi"])
+      (published [client "01a16363-ef6a-7000-aee1-37e1be230204" Browser_lane.Webdriver_bidi])
   and ego = serving Browser_lane.Backend.Ego
-      (published [client "01a16363-ef67-7000-ad62-05bcd0320d99" "ego_task_space"])
+      (published [client "01a16363-ef67-7000-ad62-05bcd0320d99" Browser_lane.Ego_task_space])
   and extension = serving Browser_lane.Backend.External_host
-      (published [client "01a16363-ef68-7000-aee1-37e1be230202" "web_extension";
-                  client "01a16363-ef69-7000-aee1-37e1be230203" "web_extension"]) in
+      (published [client "01a16363-ef68-7000-aee1-37e1be230202" Browser_lane.Web_extension;
+                  client "01a16363-ef69-7000-aee1-37e1be230203" Browser_lane.Web_extension]) in
   let workers = [automation; ego; extension] in
   check bool "the live row counts the clients of every live installation" true
     (state workers Browser_lane.Lane_name.Live = Inventory.Browser_clients (Inventory.Browser_observed 3));

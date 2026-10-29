@@ -258,8 +258,8 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
    2. L1-4b(#46802), v18: 머리 객체와 turn segment(D8). head 크기가 머리 필드의 크기와 턴 수에 따라 늘지 않는다.
    3. 개수·미리보기, Librarian `chain(k)`.
 5. **L1-5: 객체 정리와 기준점(§3.6).**
-   1. L1-5a: 기동 때 객체 정리. Keeper 가 시작하기 전에 돌아서, 잠금 밖에서 객체를 읽는 `decode_changed_bytes` 와 겹치지 않는다.
-   2. L1-5b: purge 가 옛 묶음을 가리키는 보관 head 도 지운다. 그 전에는 purge 한 내용의 객체가 보관 head 가 바뀔 때까지 남는다.
+   1. L1-5a(#46827, #46838): 기동 때 객체 정리. Keeper 가 시작하기 전에 돌아서, 잠금 밖에서 객체를 읽는 `decode_changed_bytes` 와 겹치지 않는다.
+   2. L1-5b: purge 가 옛 묶음을 가리키는 보관 head 도 지운다. 보관 head 는 저장마다 새 head 를 복사한 것이고, 읽는 곳은 대시보드의 checkpoint 목록뿐이다. 그래서 purge 로 checkpoint 가 바뀌면 그 세션의 보관 head 를 모두 지운다. 다음 저장이 다시 보관한다. 백업은 canonical 과 그 객체만 들어서, 되돌려도 보관 head 는 돌아오지 않는다.
 6. **L2.** 보관 snapshot 을 head 사본으로 바꾸고, 정리를 head 를 따라가게 한다.
 
 ## 6. 하지 않는 것

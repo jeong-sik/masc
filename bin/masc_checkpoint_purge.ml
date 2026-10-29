@@ -8,7 +8,8 @@
     up byte-exact and saves the purged checkpoint through
     [Keeper_checkpoint_store.save_agent_core_classified] (locked, structure-validated,
     watermark-checked; [turn_count] is unchanged so the save lands as an
-    equal-watermark re-save).
+    equal-watermark re-save), then deletes the session's history archive
+    entries, which are heads of the checkpoint before the purge.
 
     Run [--apply] only while the keeper is stopped ([masc_keeper_down]): a
     live keeper holds the conversation in memory and its next save overwrites
@@ -35,7 +36,8 @@ Options:
                            the trace, and its Librarian files are read and moved
   --trace ID               optional: refuse unless the keeper's meta names this trace
   --base DIR               workspace root (default: MASC_BASE_PATH or cwd)
-  --apply                  back up, then write the purged checkpoint
+  --apply                  back up, write the purged checkpoint, then delete
+                           the history archive entries of the checkpoint before it
   --keep-recent N          protected tail length in messages (default 20)
   --no-strip-thinking      keep unsigned Thinking/ReasoningDetails blocks
   --no-clear-tool-results  keep ToolResult payloads
@@ -384,6 +386,15 @@ let () =
               error
                 "the purged checkpoint was stored as a recovery copy; the Librarian \
                  position was not moved (backup retained)";
+            (* The archive entries are heads of the checkpoint before the purge;
+               while one is there, the object sweep keeps what the purge
+               removed (RFC-0476 §3.3). *)
+            (match Store.delete_all_agent_core_history_files ~session_dir with
+             | Error detail ->
+               Printf.printf "warning: the history archive was not removed: %s\n" detail
+             | Ok { removed; left } ->
+               Printf.printf "applied: removed %d history archive entries\n" removed;
+               List.iter (Printf.printf "warning: history archive entry kept: %s\n") left);
             (* The position follows the checkpoint. A failure here leaves the
                old position against the new numbering; the next Librarian
                round stops on the mismatch until the keeper's Librarian files

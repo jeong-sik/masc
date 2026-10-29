@@ -39,6 +39,16 @@ let with_cwd path f =
   Sys.chdir path;
   Fun.protect ~finally:(fun () -> Sys.chdir prior) f
 
+(* A child started without stdin content holds this process's own stdin, and
+   the fake docker scripts below drain it with [cat]. With stdin open (a
+   terminal, or a pipe that a background task keeps open) that waits for an end
+   of input that never comes, and every call through such a script times out.
+   No case here takes input from outside, so stdin reads as empty. *)
+let read_stdin_as_empty () =
+  let null = Unix.openfile Filename.null [ Unix.O_RDONLY ] 0 in
+  Unix.dup2 null Unix.stdin;
+  Unix.close null
+
 let with_config_dir config_dir f =
   let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Fun.protect
@@ -2931,6 +2941,7 @@ let test_container_removal_reclaims_anonymous_volumes () =
 ;;
 
 let () =
+  read_stdin_as_empty ();
   Alcotest.run "Keeper_sandbox_docker_route"
     [
       ( "docker_route_fires",

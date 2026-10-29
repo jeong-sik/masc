@@ -25547,9 +25547,26 @@ let main
     | None, _ | _, None -> report_action state "error" "config identity not loaded yet; r to reload"
     | Some _, Some reading ->
       let session = runtime_config_working_session reading in
+      let module Form = Masc_tui_memory_recall_form in
+      (* A paused Keeper, or one the roster reading says is not running, is
+         marked in the list. A roster that could not be read says nothing:
+         [Unknown] is not drawn. *)
+      let roster_entry (keeper : keeper) =
+        { Form.name = keeper.k_name
+        ; presence =
+            (if keeper.k_paused then Form.Stopped
+             else
+               match
+                 Masc_tui_keeper_control.liveness_of_roster state.keeper_roster keeper.k_name
+               with
+               | Masc_tui_keeper_control.Present _ -> Form.Running
+               | Masc_tui_keeper_control.Absent -> Form.Stopped
+               | Masc_tui_keeper_control.Unobserved | Masc_tui_keeper_control.Invalid _ ->
+                   Form.Unknown) }
+      in
       (match
-         Masc_tui_memory_recall_form.open_on ~source_revision:session.base.source_revision
-           ~keepers:(List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers)
+         Form.open_on ~source_revision:session.base.source_revision
+           ~keepers:(List.map roster_entry state.keepers)
            session.text
        with
        | Ok form -> state.memory_recall_form <- Some form

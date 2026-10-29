@@ -3214,6 +3214,17 @@ let parse_typesafeai_excluded_keepers ~(path : string) (tbl : Otoml.t) =
     (parse_typesafeai_keeper_names ~path ~key:"excluded_keepers" tbl)
 ;;
 
+(* What the three memory recall keys declare, before the switch decides
+   anything: the switch, and the scope the scope keys name whether the switch
+   is on or off. A file that switched recall off by hand keeps its list here,
+   which {!Runtime_schema.memory_recall} cannot say (off has no scope). *)
+type memory_recall_declaration =
+  { switch : bool
+  ; scope : Runtime_schema.memory_recall_scope option
+  }
+
+let memory_recall_scope_key path = path ^ ".memory_recall_scope"
+
 (* [memory_recall] is the switch and [memory_recall_scope] says which keepers:
    "all", or "listed" with the names in [memory_recall_keepers]. Switching it
    on without a scope is refused, so is a "listed" scope with no names, and so
@@ -3221,10 +3232,10 @@ let parse_typesafeai_excluded_keepers ~(path : string) (tbl : Otoml.t) =
    writing it empty reaches every keeper, and a list is never ignored while it
    looks like a limit. The scope keys are read whatever the switch says: a
    misspelt scope is refused while the switch is off. *)
-let parse_typesafeai_memory_recall ~(path : string) (tbl : Otoml.t)
-  : (Runtime_schema.memory_recall, parse_error list) result
+let parse_typesafeai_memory_recall_declaration ~(path : string) (tbl : Otoml.t)
+  : (memory_recall_declaration, parse_error list) result
   =
-  let scope_key = path ^ ".memory_recall_scope" in
+  let scope_key = memory_recall_scope_key path in
   let keepers_key = path ^ ".memory_recall_keepers" in
   let keepers_only_listed =
     error
@@ -3263,12 +3274,22 @@ let parse_typesafeai_memory_recall ~(path : string) (tbl : Otoml.t)
   | Error switch_errors, Error scope_errors -> Error (switch_errors @ scope_errors)
   | Error switch_errors, Ok _ -> Error switch_errors
   | Ok _, Error scope_errors -> Error scope_errors
-  | Ok false, Ok (Some _ | None) -> Ok Runtime_schema.Memory_recall_off
-  | Ok true, Ok (Some scope) -> Ok (Runtime_schema.Memory_recall_on scope)
-  | Ok true, Ok None ->
+  | Ok switch, Ok scope -> Ok { switch; scope }
+;;
+
+(* The switch and the scope are one value for everyone who asks whether a
+   keeper is covered: no scope is read from a switch that is off. *)
+let parse_typesafeai_memory_recall ~(path : string) (tbl : Otoml.t)
+  : (Runtime_schema.memory_recall, parse_error list) result
+  =
+  match parse_typesafeai_memory_recall_declaration ~path tbl with
+  | Error errors -> Error errors
+  | Ok { switch = false; scope = _ } -> Ok Runtime_schema.Memory_recall_off
+  | Ok { switch = true; scope = Some scope } -> Ok (Runtime_schema.Memory_recall_on scope)
+  | Ok { switch = true; scope = None } ->
     Error
       (error
-         scope_key
+         (memory_recall_scope_key path)
          "memory_recall = true needs memory_recall_scope: \"all\" or \"listed\" with \
           memory_recall_keepers")
 ;;
@@ -3614,6 +3635,24 @@ let parse_string (content : string) : (Runtime_schema.config, parse_error list) 
   match Otoml.Parser.from_string_result content with
   | Ok toml -> parse_toml toml
   | Error msg -> Error [ { path = "<parse>"; message = msg } ]
+;;
+
+let memory_recall_declaration_of_string (content : string)
+  : (memory_recall_declaration, parse_error list) result
+  =
+  match Otoml.Parser.from_string_result content with
+  | Error msg -> Error [ { path = "<parse>"; message = msg } ]
+  | Ok toml ->
+    let path = Ns.(key Typesafeai) in
+    (match Otoml.find_opt toml Fun.id [ path ] with
+     | None -> Ok { switch = false; scope = None }
+     | Some ((Otoml.TomlTable _ | Otoml.TomlInlineTable _) as tbl) ->
+       parse_typesafeai_memory_recall_declaration ~path tbl
+     | Some
+         ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+         | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+         | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+         | Otoml.TomlTableArray _ ) -> Error (error path "[typesafeai] must be a TOML table"))
 ;;
 
 (* The legacy keys this text still carries, dotted paths like

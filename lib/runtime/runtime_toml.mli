@@ -72,6 +72,24 @@ val parse_string : string -> (Runtime_schema.config, parse_error list) result
     Returns [Ok config] on success, [Error errors] with all
     parse errors found. *)
 
+type memory_recall_declaration =
+  { switch : bool  (** [\[typesafeai\] memory_recall]; [false] when the key is absent. *)
+  ; scope : Runtime_schema.memory_recall_scope option
+        (** What [memory_recall_scope] and [memory_recall_keepers] name, whether the
+            switch is on or off. [None] when neither key is there. *)
+  }
+
+val memory_recall_declaration_of_string
+  :  string
+  -> (memory_recall_declaration, parse_error list) result
+(** What the three memory recall keys of [\[typesafeai\]] declare, read the
+    way {!parse_string} reads them and refused the same ways. The switch and
+    the scope stay apart: {!Runtime_schema.memory_recall} has no scope for a
+    switch that is off, so a list a file keeps while recall is switched off
+    by hand is visible here and nowhere else. It reads only these three
+    keys; a file that {!parse_string} refuses for another reason can still
+    answer. *)
+
 val parse_file : string -> (Runtime_schema.config, parse_error list) result
 (** Parse a TOML file into a Runtime config. *)
 

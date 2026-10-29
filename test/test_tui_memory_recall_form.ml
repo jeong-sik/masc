@@ -6,7 +6,11 @@
 module F = Masc_tui_memory_recall_form
 
 let probe = "[models.probe]\napi-name = \"probe\"\n"
-let roster = [ "a"; "b"; "c" ]
+let entries names =
+  List.map (fun name -> { F.name; presence = F.Unknown }) names
+;;
+
+let roster = entries [ "a"; "b"; "c" ]
 
 let recall =
   Alcotest.testable Runtime_schema.pp_memory_recall Runtime_schema.equal_memory_recall
@@ -198,6 +202,124 @@ let test_the_same_keepers_in_another_order_write_nothing () =
   Alcotest.(check string) "a dropped and picked again" text (text_of form)
 ;;
 
+(* A file that switched recall off by hand keeps its list. The form starts
+   with that list picked, and switching recall back on over it writes the
+   switch alone -- the scope line and the list keep their text. *)
+let test_a_list_kept_while_off_is_restored_by_switching_on () =
+  let text =
+    with_table
+      "memory_recall = false # paused\nmemory_recall_scope = \"listed\" # why\n\
+       memory_recall_keepers = [\"a\", \"b\"] # who\n"
+  in
+  let form = edited (opened text) [ "right" ] in
+  Alcotest.(check string)
+    "only the switch is rewritten"
+    (with_table
+       "memory_recall = true # paused\nmemory_recall_scope = \"listed\" # why\n\
+        memory_recall_keepers = [\"a\", \"b\"] # who\n")
+    (text_of form);
+  Alcotest.(check recall)
+    "read back as the kept list"
+    (listed [ "a"; "b" ])
+    (recall_of (text_of form));
+  let widened = edited form [ "down"; "down"; "down"; " " ] in
+  Alcotest.(check recall)
+    "a pick after the restore joins the list"
+    (listed [ "a"; "b"; "c" ])
+    (recall_of (text_of widened))
+;;
+
+let detail =
+  let show (d : F.detail) =
+    let mode = function F.Off -> "off" | F.Listed -> "listed" | F.All -> "all" in
+    Printf.sprintf
+      "%s -> %s +[%s] -[%s] kept=%d removed=%d"
+      (mode d.before)
+      (mode d.after)
+      (String.concat "," d.added)
+      (String.concat "," d.dropped)
+      d.list_kept
+      d.list_removed
+  in
+  Alcotest.testable (fun formatter d -> Format.pp_print_string formatter (show d)) ( = )
+;;
+
+let expect_changed form =
+  match F.change form with
+  | F.Changed d -> d
+  | F.Unchanged -> Alcotest.fail "expected a change, got none"
+  | F.Nobody_picked -> Alcotest.fail "expected a change, got nobody picked"
+;;
+
+let listed_ab =
+  with_table
+    "memory_recall = true\nmemory_recall_scope = \"listed\"\n\
+     memory_recall_keepers = [\"a\", \"b\"]\n"
+;;
+
+(* What saving would do, named before it is done: the summary row reads this. *)
+let test_change_names_what_saving_would_do () =
+  let check label expected form = Alcotest.(check detail) label expected (expect_changed form) in
+  check
+    "a first pick"
+    { F.before = F.Off; after = F.Listed; added = [ "a" ]; dropped = []; list_kept = 0; list_removed = 0 }
+    (edited (opened probe) [ "right"; "down"; " " ]);
+  check
+    "one dropped, one picked"
+    { F.before = F.Listed; after = F.Listed; added = [ "c" ]; dropped = [ "a" ]; list_kept = 0; list_removed = 0 }
+    (edited (opened listed_ab) [ "down"; " "; "down"; "down"; " " ]);
+  check
+    "switched off keeps the list"
+    { F.before = F.Listed; after = F.Off; added = []; dropped = []; list_kept = 2; list_removed = 0 }
+    (edited (opened listed_ab) [ "left" ]);
+  check
+    "every keeper removes the list"
+    { F.before = F.Listed; after = F.All; added = []; dropped = []; list_kept = 0; list_removed = 2 }
+    (edited (opened listed_ab) [ "right" ]);
+  check
+    "back on over a kept list adds nothing"
+    { F.before = F.Off; after = F.Listed; added = []; dropped = []; list_kept = 0; list_removed = 0 }
+    (edited
+       (opened
+          (with_table
+             "memory_recall = false\nmemory_recall_scope = \"listed\"\n\
+              memory_recall_keepers = [\"a\", \"b\"]\n"))
+       [ "right" ]);
+  (match F.change (opened probe) with
+   | F.Unchanged -> ()
+   | F.Changed _ | F.Nobody_picked -> Alcotest.fail "a file that says off, left off, is no change");
+  (match F.change (edited (opened probe) [ "right" ]) with
+   | F.Nobody_picked -> ()
+   | F.Changed _ | F.Unchanged -> Alcotest.fail "listed with nobody picked has no change to name")
+;;
+
+(* The summary and the write are one decision: the choice is unchanged exactly
+   when saving gives the opening text back. *)
+let test_change_and_text_on_agree_about_nothing_to_write () =
+  let cases =
+    [ "off left off", probe, []
+    ; "listed left alone", listed_ab, []
+    ; "dropped and picked again", listed_ab, [ "down"; " "; " " ]
+    ; "a pick", listed_ab, [ "down"; "down"; "down"; " " ]
+    ; "to every keeper", listed_ab, [ "right" ]
+    ; "off", listed_ab, [ "left" ]
+    ]
+  in
+  List.iter
+    (fun (label, text, keys) ->
+       let form = edited (opened text) keys in
+       let unchanged_by_change =
+         match F.change form with
+         | F.Unchanged -> true
+         | F.Changed _ | F.Nobody_picked -> false
+       in
+       Alcotest.(check bool)
+         label
+         unchanged_by_change
+         (String.equal text (text_of form)))
+    cases
+;;
+
 (* The picks are the form's, not the range's: a visit to the other ranges and
    back shows the same list. *)
 let test_picks_survive_a_visit_to_the_other_ranges () =
@@ -248,7 +370,7 @@ let test_a_name_the_roster_lacks_stays_until_it_is_dropped () =
       "memory_recall = true\nmemory_recall_scope = \"listed\"\n\
        memory_recall_keepers = [\"gone\", \"a\"]\n"
   in
-  let form = opened ~keepers:[ "a"; "b" ] text in
+  let form = opened ~keepers:(entries [ "a"; "b" ]) text in
   Alcotest.(check string) "opening and saving changes nothing" text (text_of form);
   let dropped = edited form [ "down"; "down"; "down"; " " ] in
   Alcotest.(check recall) "gone is dropped" (listed [ "a" ]) (recall_of (text_of dropped))
@@ -299,7 +421,7 @@ let test_a_table_the_line_editor_cannot_change_is_refused_not_written () =
 (* A keeper name comes from the file and from the server; an escape sequence in
    it must not reach the terminal. *)
 let test_a_keeper_name_cannot_colour_the_pane () =
-  let form = edited (opened ~keepers:[ "x\027[31my" ] probe) [ "right" ] in
+  let form = edited (opened ~keepers:(entries [ "x\027[31my" ]) probe) [ "right" ] in
   List.iter
     (fun row ->
        Alcotest.(check bool) "no escape byte in a row" false (String.contains row '\027'))
@@ -310,7 +432,7 @@ let test_rows_are_drawn_at_any_size () =
   let long = List.init 40 (fun index -> Printf.sprintf "keeper-%02d" index) in
   List.iter
     (fun keys ->
-       let form = edited (opened ~keepers:long probe) keys in
+       let form = edited (opened ~keepers:(entries long) probe) keys in
        List.iter
          (fun height ->
             List.iter
@@ -336,6 +458,12 @@ let () =
             test_a_key_that_already_holds_the_value_keeps_its_comment
         ; Alcotest.test_case "the same keepers in another order write nothing" `Quick
             test_the_same_keepers_in_another_order_write_nothing
+        ; Alcotest.test_case "a list kept while off is restored by switching on" `Quick
+            test_a_list_kept_while_off_is_restored_by_switching_on
+        ; Alcotest.test_case "change names what saving would do" `Quick
+            test_change_names_what_saving_would_do
+        ; Alcotest.test_case "change and text_on agree about nothing to write" `Quick
+            test_change_and_text_on_agree_about_nothing_to_write
         ; Alcotest.test_case "picks survive a visit to the other ranges" `Quick
             test_picks_survive_a_visit_to_the_other_ranges
         ; Alcotest.test_case "a pick made later goes after the file's own" `Quick

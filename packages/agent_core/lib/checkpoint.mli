@@ -14,7 +14,7 @@ val checkpoint_version : int
 
 (** {1 Checkpoint type} *)
 
-type t =
+type t = Checkpoint_types.t =
   { version : int
   ; session_id : string
   ; agent_name : string

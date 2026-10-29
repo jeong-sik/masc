@@ -97,6 +97,7 @@
   test_canonical_tool
   test_capabilities_wiring
   test_checkpoint
+  test_checkpoint_objects
   test_checkpoint_store
   test_clone
   test_complete_ext
@@ -235,6 +236,7 @@
   test_canonical_tool
   test_capabilities_wiring
   test_checkpoint
+  test_checkpoint_objects
   test_checkpoint_store
   test_clone
   test_complete_ext

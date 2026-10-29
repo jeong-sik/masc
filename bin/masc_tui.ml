@@ -12064,6 +12064,22 @@ let close_image state =
       Masc_tui_msx.invalidate ();
       write_to_terminal Masc_tui_graphics.delete_all
 
+(* Whether an arriving screenshot would draw exactly what the viewport
+   already shows. The bytes decide the picture; the title, address, tab,
+   source and client decide the chrome around it; the geometry decides where
+   clicks land -- all three must match. [elapsed_ms] is deliberately excluded:
+   it names how long this capture took, and a static page keeps showing the
+   first capture's number rather than re-transmitting identical pixels to
+   refresh it. *)
+let same_browser_viewport_shot
+    (previous : Browser_lane_view.screenshot) (shot : Browser_lane_view.screenshot) =
+  previous.source = shot.source
+  && Option.equal String.equal previous.client_id shot.client_id
+  && previous.tab_id = shot.tab_id
+  && String.equal previous.title shot.title
+  && String.equal previous.url shot.url
+  && previous.viewport = shot.viewport
+
 let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
   let failed = ref false in
   let refuse detail =
@@ -22329,20 +22345,27 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            if request.live_view == !msx_poll_view && request.live_port = state.port
               && state.msx_open && not state.msx_menu_open
               && state.machine_source = Masc.Machine_lane.Msx then begin
-             (match Masc_tui_machine_live.advance state.msx_live (Result.map fst result) with
-              | None -> ()
-              | Some live ->
-                  let live, frame = msx_frame_of_live ~previous_live:state.msx_live
-                    ~previous_frame:state.msx_frame live in
-                  state.msx_live <- live;
-                  state.msx_frame <- frame;
-                  msx_surface_frame := frame);
+             (* [advance] answers [None] when the read changes nothing on
+                screen, and MSX carries no activity feed beside the picture,
+                so an unchanged read repaints nothing -- the DOS branch below
+                already reads it that way. Poll bookkeeping still runs:
+                liveness is not paint. *)
+             let picture_changed =
+               match Masc_tui_machine_live.advance state.msx_live (Result.map fst result) with
+               | None -> false
+               | Some live ->
+                   let live, frame = msx_frame_of_live ~previous_live:state.msx_live
+                     ~previous_frame:state.msx_frame live in
+                   state.msx_live <- live;
+                   state.msx_frame <- frame;
+                   msx_surface_frame := frame;
+                   true in
              (match !msx_pending_poll with
               | Poll_ready Outcome_unknown when Result.is_ok result && Option.is_some state.msx_frame -> msx_pending_poll := Poll_ready Advancing
               | Poll_ready (Advancing | Observing _ | Outcome_unknown)
               | Poll_pending _ | Poll_observing _ -> ());
              state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-             render_spectator state
+             if picture_changed then render_spectator state
            end
        | Some _ | None -> ())
   | Dos_live_loaded (request, result) ->
@@ -23250,13 +23273,26 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
               && Option.is_some (browser_lane_on_screen state) then
              match screenshot, result with
              | Some shot, Ok (_, bytes) ->
-                 let refuse detail =
-                   state.browser_lane <- Some { settled with load = Failed detail }
-                 in
-                 (match !terminal_draws_images with
-                  | Some false -> refuse terminal_draws_no_images
-                  | Some true | None ->
-                      draw_browser_viewport state shot bytes)
+                 (* A cadence tick on a static page replays the same pixels.
+                    Bytes plus chrome metadata decide sameness, so a mere
+                    re-read redraws nothing; [state.browser_viewport] keeps
+                    describing exactly what is on screen. *)
+                 let unchanged =
+                   match state.browser_viewport with
+                   | Some (previous, previous_bytes) ->
+                       String.equal previous_bytes bytes
+                       && same_browser_viewport_shot previous shot
+                   | None -> false in
+                 if unchanged then ()
+                 else begin
+                   let refuse detail =
+                     state.browser_lane <- Some { settled with load = Failed detail }
+                   in
+                   (match !terminal_draws_images with
+                    | Some false -> refuse terminal_draws_no_images
+                    | Some true | None ->
+                        draw_browser_viewport state shot bytes)
+                 end
              | None, (Ok _ | Error _) | Some _, Error _ ->
                  if Option.is_some state.browser_viewport then close_image state)
   | Browser_lane_action_done (generation, result) ->

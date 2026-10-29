@@ -28,10 +28,22 @@ The Keeper name must match the file name, and a Keeper named in
 ``--runtime-toml``'s ``[typesafeai] excluded_keepers`` is refused. The API key
 is read from the ``TYPESAFEAI_API_KEY`` environment variable and never printed.
 
+``--synthetic COUNT`` replaces the Keeper's facts with COUNT generated
+candidates whose claims are filler text of ``--claim-bytes`` bytes. Nothing
+from a Keeper is sent, so only ``--send`` is needed. ``--key-shape`` picks the
+question id: ``digest12``, the first 12 hex digits of the claim digest that
+layer 0 used, or ``memory-id``, the 71-character ``sha256:`` id that
+``keeper_memory_recall_jev_codec`` sends. It tries a request shape without real
+memory, such as the long keys with a colon and the more than 56 questions the
+codec builds. A synthetic run reads no file: ``--turn-input-file`` is refused
+with it, because a turn input is not filler and no allowance covers it.
+
 Usage:
     python3 -I scripts/keeper-recall-jev-probe.py <keeper>.memory-current.json
     python3 -I scripts/keeper-recall-jev-probe.py <keeper>.memory-current.json \\
         --send --allow-send-for <keeper> --runtime-toml <base-path>/.masc/config/runtime.toml --repeat 3
+    python3 -I scripts/keeper-recall-jev-probe.py --synthetic 120 --claim-bytes 60 \\
+        --key-shape memory-id --shape two --piece-kb 1000 --send
 """
 
 from __future__ import annotations
@@ -102,6 +114,12 @@ DEFAULT_TURN_INPUT = (
     "comments, then record a verdict line."
 )
 SYNTHETIC_NOTE = "synthetic probe input; not a real turn"
+KEY_SHAPES = ("digest12", "memory-id")
+SYNTHETIC_FILLER = "This sentence stands in for a stored lesson and holds no real data. "
+# "Synthetic memory 00000. " is the part of a claim that tells two candidates apart.
+SYNTHETIC_HEAD_BYTES = len("Synthetic memory 00000. ")
+SYNTHETIC_MAX_COUNT = 99_999
+SYNTHETIC_CLAIM_BYTES = 200
 
 
 class Refusal(Exception):
@@ -144,6 +162,26 @@ def load_candidates(path: str) -> list[dict[str, object]]:
                 "first_seen": day(as_float(fact.get("first_seen"))),
                 "last_seen": day(as_float(fact.get("last_seen"))),
                 "origin": as_str(as_dict(fact.get("origin")).get("kind")),
+            }
+        )
+    return candidates
+
+
+def synthetic_candidates(count: int, claim_bytes: int, key_shape: str) -> list[dict[str, object]]:
+    """Candidates made of filler text. Each claim is ``claim_bytes`` ASCII bytes and differs from the others."""
+    candidates: list[dict[str, object]] = []
+    for index in range(count):
+        head = f"Synthetic memory {index:05d}. "
+        claim = (head + SYNTHETIC_FILLER * (claim_bytes // len(SYNTHETIC_FILLER) + 1))[:claim_bytes]
+        digest = hashlib.sha256(claim.encode("utf-8")).hexdigest()
+        candidates.append(
+            {
+                "question_id": digest[:12] if key_shape == "digest12" else f"sha256:{digest}",
+                "category": "lesson",
+                "claim": claim,
+                "first_seen": "2026-01-01",
+                "last_seen": "2026-01-01",
+                "origin": "authored",
             }
         )
     return candidates
@@ -408,7 +446,10 @@ def repeat_report(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("memory_current", help="a <keeper>.memory-current.json file")
+    parser.add_argument("memory_current", nargs="?", help="a <keeper>.memory-current.json file; not used with --synthetic")
+    parser.add_argument("--synthetic", type=int, default=0, help="use this many generated candidates of filler text; nothing from a Keeper is sent")
+    parser.add_argument("--claim-bytes", type=int, default=SYNTHETIC_CLAIM_BYTES, help="with --synthetic, bytes per claim")
+    parser.add_argument("--key-shape", choices=KEY_SHAPES, default=None, help="with --synthetic, the question id: digest12 (layer 0) or memory-id (the codec's sha256: id)")
     parser.add_argument("--send", action="store_true", help="send the requests to Jev; without it only sizes are printed")
     parser.add_argument("--allow-send-for", default="", help="the Keeper whose memory may be sent; must match the file name")
     parser.add_argument("--runtime-toml", default="", help="runtime.toml whose [typesafeai] excluded_keepers is checked")
@@ -422,7 +463,22 @@ def main() -> int:
     parser.add_argument("--turn-input-file", help="a file with the turn input text; default is a synthetic one")
     args = parser.parse_args()
 
-    candidates = load_candidates(args.memory_current)
+    if args.synthetic:
+        if args.memory_current:
+            parser.error("--synthetic takes no memory file")
+        if not 0 < args.synthetic <= SYNTHETIC_MAX_COUNT:
+            parser.error(f"--synthetic must be between 1 and {SYNTHETIC_MAX_COUNT}")
+        if args.claim_bytes < SYNTHETIC_HEAD_BYTES:
+            parser.error(f"--claim-bytes must be at least {SYNTHETIC_HEAD_BYTES}, or the claims would not differ")
+        if args.turn_input_file:
+            parser.error("--synthetic takes no --turn-input-file: a synthetic run sends no file content")
+        candidates = synthetic_candidates(args.synthetic, args.claim_bytes, args.key_shape or "digest12")
+    else:
+        if not args.memory_current:
+            parser.error("a memory file or --synthetic is required")
+        if args.key_shape is not None:
+            parser.error("--key-shape applies to --synthetic only")
+        candidates = load_candidates(args.memory_current)
     if args.max_candidates > 0:
         candidates = candidates[: args.max_candidates]
     turn_input = DEFAULT_TURN_INPUT
@@ -435,12 +491,15 @@ def main() -> int:
     print(f"pieces of at most {args.piece_kb} KB of candidates: {len(pieces)} ({[len(piece) for piece in pieces]} candidates)")
     print(f"question shape {args.shape}: {' / '.join(shape.labels)}")
     if not args.send:
-        print("not sent (add --send and --allow-send-for)")
+        print("not sent (add --send)" if args.synthetic else "not sent (add --send and --allow-send-for)")
         return 0
-    reason = refuse_unless_allowed(args.memory_current, args.allow_send_for, args.runtime_toml)
-    if reason:
-        print(f"refused: {reason}", file=sys.stderr)
-        return 2
+    if args.synthetic:
+        print("synthetic filler only: nothing from a Keeper is sent")
+    else:
+        reason = refuse_unless_allowed(args.memory_current, args.allow_send_for, args.runtime_toml)
+        if reason:
+            print(f"refused: {reason}", file=sys.stderr)
+            return 2
 
     runs: list[dict[str, dict[str, object]]] = []
     for index in range(max(args.repeat, 1)):

@@ -1,6 +1,8 @@
 """Pure logic of the Jev recall probe; no request is sent and no key is read."""
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import sys
@@ -194,6 +196,104 @@ class SendGuardTests(unittest.TestCase):
             self.assertIsNone(probe.refuse_unless_allowed(path, 'alpha', ''))
             other = str(Path(directory) / 'beta.memory-current.json')
             self.assertIsNone(probe.refuse_unless_allowed(other, 'beta', str(toml)))
+
+
+class SyntheticTests(unittest.TestCase):
+    def test_claims_have_the_asked_size_and_differ(self):
+        items = probe.synthetic_candidates(120, 60, 'memory-id')
+        self.assertEqual(len(items), 120)
+        self.assertEqual({len(item['claim'].encode('utf-8')) for item in items}, {60})
+        self.assertEqual(len({item['claim'] for item in items}), 120)
+        self.assertEqual(len({item['question_id'] for item in items}), 120)
+
+    def test_key_shapes_are_the_layer_0_digest_and_the_codec_memory_id(self):
+        short = probe.synthetic_candidates(3, 60, 'digest12')
+        long = probe.synthetic_candidates(3, 60, 'memory-id')
+        for a, b in zip(short, long):
+            digest = hashlib.sha256(a['claim'].encode('utf-8')).hexdigest()
+            self.assertEqual(a['question_id'], digest[:12])
+            self.assertEqual(b['question_id'], 'sha256:' + digest)
+            self.assertEqual(len(b['question_id']), 71)
+
+    def test_the_claims_are_a_numbered_head_and_filler_cut_to_size(self):
+        filler = 'This sentence stands in for a stored lesson and holds no real data. '
+        for index, item in enumerate(probe.synthetic_candidates(5, 200, 'digest12')):
+            self.assertEqual(item['claim'], (f'Synthetic memory {index:05d}. ' + filler * 4)[:200])
+
+    def run_main(self, *arguments: str) -> tuple[int, str, list[dict[str, object]]]:
+        sent: list[dict[str, object]] = []
+
+        def post(request: dict[str, object], _timeout: float) -> tuple[int, dict[str, object], float]:
+            sent.append(request)
+            answers: dict[str, object] = {
+                question_id: {'choice': 'not_needed', 'confidence': 0.5, 'probabilities': {'possibly_needed': 0.2, 'not_needed': 0.8}}
+                for question_id in probe.as_dict(request['questions'])}
+            return 200, {'model': 'jev-test', 'usage': {'input_tokens': 1}, 'answers': answers}, 0.01
+
+        out = io.StringIO()
+        with patch.object(probe, 'post', post), patch.object(sys, 'argv', ['probe', *arguments]), contextlib.redirect_stdout(out):
+            code = probe.main()
+        return code, out.getvalue(), sent
+
+    def test_a_synthetic_run_needs_no_keeper_allowance_and_sends_only_filler(self):
+        with patch.object(probe, 'refuse_unless_allowed', side_effect=AssertionError('a Keeper allowance was asked for')):
+            code, out, sent = self.run_main('--synthetic', '120', '--claim-bytes', '60', '--key-shape', 'memory-id', '--shape', 'two', '--piece-kb', '1000', '--send')
+        self.assertEqual(code, 0)
+        self.assertIn('nothing from a Keeper is sent', out)
+        self.assertEqual(len(sent), 1)
+        keys = list(probe.as_dict(sent[0]['questions']))
+        self.assertEqual((len(keys), {len(key) for key in keys}), (120, {71}))
+        candidates = probe.as_list(probe.as_dict(sent[0]['state'])['candidates'])
+        self.assertTrue(all(probe.as_str(probe.as_dict(candidate)['claim']).startswith('Synthetic memory ') for candidate in candidates))
+
+    def test_without_send_nothing_is_posted(self):
+        code, out, sent = self.run_main('--synthetic', '5')
+        self.assertEqual((code, sent), (0, []))
+        self.assertIn('not sent (add --send)', out)
+
+    def test_a_real_file_still_needs_the_allowance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'alpha.memory-current.json'
+            path.write_text(json.dumps({'facts': [{'claim': 'a', 'category': 'lesson', 'first_seen': 0, 'last_seen': 0, 'origin': {'kind': 'authored'}}]}), encoding='utf-8')
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                code, _out, sent = self.run_main(str(path), '--send')
+        self.assertEqual((code, sent), (2, []))
+        self.assertIn('--allow-send-for', err.getvalue())
+
+    def test_the_flags_that_do_not_fit_together_are_usage_errors(self):
+        cases = (
+            ('--synthetic', '5', 'some.memory-current.json'),
+            ('--synthetic', '0'),
+            ('--synthetic', '5', '--claim-bytes', '10'),
+            # The path does not exist: the usage error has to come before the file is read.
+            ('--synthetic', '5', '--turn-input-file', '/nonexistent/turn-input.txt'),
+            ('--key-shape', 'memory-id', 'some.memory-current.json'),
+            (),
+        )
+        for arguments in cases:
+            with self.subTest(arguments=arguments):
+                with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
+                    self.run_main(*arguments)
+                self.assertEqual(caught.exception.code, 2)
+
+    def test_a_synthetic_run_refuses_a_turn_input_file_before_it_reads_or_sends_anything(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'turn-input.txt'
+            path.write_text('a turn input that belongs to a Keeper', encoding='utf-8')
+            sent: list[dict[str, object]] = []
+
+            def post(request: dict[str, object], _timeout: float) -> tuple[int, dict[str, object], float]:
+                sent.append(request)
+                return 200, {'model': 'jev-test', 'usage': {'input_tokens': 1}, 'answers': {}}, 0.01
+
+            err = io.StringIO()
+            arguments = ['probe', '--synthetic', '5', '--turn-input-file', str(path), '--send']
+            with patch.object(probe, 'post', post), patch.object(sys, 'argv', arguments), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as caught:
+                probe.main()
+        self.assertEqual(caught.exception.code, 2)
+        self.assertEqual(sent, [])
+        self.assertIn('--turn-input-file', err.getvalue())
 
 
 class RepeatReportTests(unittest.TestCase):

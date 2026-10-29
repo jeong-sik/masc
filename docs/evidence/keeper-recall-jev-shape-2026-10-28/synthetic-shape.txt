@@ -1,0 +1,20 @@
+candidates 120; in one request: body 79.2 KB (state 24.8 KB, questions 54.4 KB)
+pieces of at most 1000 KB of candidates: 1 ([120] candidates)
+question shape two: possibly_needed / not_needed
+synthetic filler only: nothing from a Keeper is sent
+run 1: judged 120 of 120 in 0.55 s wall time
+  120 candidates, body 79.2 KB (state 24.8 KB, questions 54.4 KB): HTTP 200, 0.52 s, input tokens 27243, answered by jev-1.14.0
+candidates 120; in one request: body 100.5 KB (state 31.9 KB, questions 68.5 KB)
+pieces of at most 1000 KB of candidates: 1 ([120] candidates)
+question shape two: possibly_needed / not_needed
+synthetic filler only: nothing from a Keeper is sent
+run 1: judged 120 of 120 in 0.54 s wall time
+  120 candidates, body 100.5 KB (state 31.9 KB, questions 68.5 KB): HTTP 200, 0.53 s, input tokens 39334, answered by jev-1.14.0
+candidates 300; in one request: body 250.8 KB (state 79.4 KB, questions 171.3 KB)
+pieces of at most 1000 KB of candidates: 1 ([300] candidates)
+question shape two: possibly_needed / not_needed
+synthetic filler only: nothing from a Keeper is sent
+run 1: judged 300 of 300 in 1.55 s wall time
+  300 candidates, body 250.8 KB (state 79.4 KB, questions 171.3 KB): HTTP 400, 0.30 s, input tokens -, answered by -, detail {"error_type": "max_tokens_exceeded"}
+  150 candidates, body 125.5 KB (state 39.8 KB, questions 85.7 KB): HTTP 200, 0.67 s, input tokens 49032, answered by jev-1.14.0
+  150 candidates, body 125.5 KB (state 39.8 KB, questions 85.7 KB): HTTP 200, 0.57 s, input tokens 49032, answered by jev-1.14.0

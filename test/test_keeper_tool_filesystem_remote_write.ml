@@ -595,10 +595,10 @@ let run_payload ?env ~stdin argv =
 
 (* The payloads are written for the endpoint's GNU userland: [mv -T], [stat -c]
    and [cp --remove-destination]. The BSD tools macOS ships take none of them,
-   so on such a host the payload stops before it reaches any link and the two
-   cases below prove nothing; they skip there. The forms are tried on scratch
-   files and not through the payload, so a payload that breaks on a GNU host
-   still fails the cases. *)
+   so there the payload's write step fails whatever the links are, and the two
+   cases below fail for that and not for the links; they skip there. The forms
+   are tried on scratch files and not through the payload, so a payload that
+   breaks on a GNU host still fails the cases. *)
 let host_takes_the_payload_forms () =
   let dir = temp_dir () in
   match

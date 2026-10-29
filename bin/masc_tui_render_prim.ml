@@ -116,6 +116,9 @@ let clamped_scroll_now (state : state) = function
   | Message_scroll _ -> Message_scroll {scroll=state.msg_scroll; pin=state.msg_scroll_pin}
   | Schedule_detail_scroll _ -> Schedule_detail_scroll state.schedule_scroll
   | Keeper_detail _ -> Keeper_detail state.detail_scroll
+  | Keeper_terminal_scroll _ ->
+      Keeper_terminal_scroll
+        (Masc_tui_execute_terminal.back (Masc_tui_types.keeper_terminal_hold state))
   | Keeper_calls _ -> Keeper_calls state.keeper_calls_scroll
   | Keeper_logs_scroll { cols; _ } ->
       Keeper_logs_scroll { scroll = state.log_scroll; cols }
@@ -215,8 +218,9 @@ let reader_after_wheel (reader : clamped_scroll)
      own, which the notch cannot yet tell apart from the post's. *)
   | Board_read _ -> None
   (* Some Keeper detail tabs and the calls view move a row cursor on [j]; the
-     notch keeps reaching them as that key. *)
-  | Keeper_detail _ | Keeper_calls _ -> None
+     notch keeps reaching them as that key. The Terminal tab counts its scroll
+     back from the newest output, and [j] and [k] already move that. *)
+  | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _ -> None
   (* Logs use their own bounded Metrics_tail movement through the key path. *)
   | Keeper_logs_scroll _ -> None
   (* List scrolls: the notch moves the list's cursor as the arrow does. *)

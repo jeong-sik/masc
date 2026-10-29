@@ -57,13 +57,13 @@ let of_result text =
   in
   Some { ok; status; execution_time_ms; timeout_limit_sec; output }
 
+let process_status_text = function
+  | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
+
 let status_text t =
-  let ended =
-    match t.status with
-    | Unix.WEXITED code -> Printf.sprintf "exit %d" code
-    | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
-    | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
-  in
+  let ended = process_status_text t.status in
   let ran = Printf.sprintf "%s \xc2\xb7 %d ms" ended t.execution_time_ms in
   match t.timeout_limit_sec with
   | None -> ran

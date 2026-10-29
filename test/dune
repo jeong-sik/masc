@@ -4879,6 +4879,8 @@
 (include stanzas/test_prompt_templates_render.inc)
 (include stanzas/test_tui_send_disposition.inc)
 (include stanzas/test_tui_scroll.inc)
+(include stanzas/test_tui_execute_terminal.inc)
+(include stanzas/test_tui_keeper_terminal_state.inc)
 (include stanzas/test_tui_hit.inc)
 (include stanzas/test_tui_pane_selection.inc)
 (include stanzas/test_tui_wheel_reader.inc)

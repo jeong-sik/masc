@@ -455,7 +455,7 @@ let test_keeper_operations_are_not_top_level_tabs () =
           | Detail_channels | Detail_automation | Detail_runs ->
               Some (keeper_detail_tab_label tab)
           | Detail_info | Detail_items | Detail_sandbox | Detail_instructions | Detail_secrets
-          | Detail_github | Detail_identity -> None)
+          | Detail_github | Detail_identity | Detail_terminal -> None)
        keeper_detail_tabs)
 
 let test_lanes_is_a_main_destination () =

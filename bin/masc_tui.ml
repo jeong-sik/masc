@@ -5244,7 +5244,7 @@ let visible_item_revision state =
           (identity.Tui_decode.sid_base_path, identity.sid_masc_root,
            identity.sid_state_ready)) state.server_identity)
   | (Keepers (Keeper_detail), Detail_items, None)
-  | (Keepers (Keeper_detail), (Detail_info | (Detail_sandbox | (Detail_instructions | (Detail_secrets | (Detail_github | (Detail_identity | (Detail_channels | (Detail_automation | Detail_runs)))))))), _)
+  | (Keepers (Keeper_detail), (Detail_info | (Detail_sandbox | (Detail_instructions | (Detail_secrets | (Detail_github | (Detail_identity | (Detail_channels | (Detail_automation | (Detail_runs | Detail_terminal))))))))), _)
   | (Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick)))), _, _)
   | ((Overview | (Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | System_logs))))))))))))))))))))), _, _) -> None
 
@@ -7461,6 +7461,13 @@ let reading_pane (state : state) ~cols : (int -> Masc_tui_types.clamped_scroll) 
        | None when state.acting_filter = Masc_tui_acting.Turns ->
            pane (fun v -> Acting v)
        | None -> None)
+  (* The Terminal reads like scrollback: Home is the oldest output it kept and
+     End the newest, where it follows again. It counts rows back from the
+     newest, so Home's 0 names the far end and End's far end names 0. *)
+  | Keepers Keeper_detail
+    when (not state.context_inspector_open) && state.detail_tab = Detail_terminal ->
+      pane (fun edge ->
+        Keeper_terminal_scroll (if edge = 0 then Masc_tui_types.clamped_scroll_end else 0))
   (* Except with the context inspector open, where the body is that tab's
      item list and [row_list] owns the cursor -- and except on the Runs tab,
      where the drawing follows [keeper_run_cursor] and [row_list] has it. *)
@@ -15342,6 +15349,18 @@ let apply_http_refresh_outcome state ~mailbox = function
 (* Preserve the existing physical metrics window, shared by every entry path. *)
 let keeper_log_window = 200
 
+(* The Terminal tab reads further back than the Logs view does. Following a
+   build means seeing where it began, and a build prints more than 200 rows. *)
+let keeper_terminal_window = 500
+
+let keeper_terminal_on_screen state =
+  state.view = Keepers Keeper_detail && state.detail_tab = Detail_terminal
+
+(* The Execute output both views read is one reading with one key, and the
+   key holds its row limit: the view on screen says which limit it asks for. *)
+let keeper_execute_window state =
+  if keeper_terminal_on_screen state then keeper_terminal_window else keeper_log_window
+
 let log_keeper_log_read ~phase request ~outcome =
   let key = Masc_tui_fetched.request_key request.klr_request in
   Log.Transport.info "tui_keeper_logs=%s" (Yojson.Safe.to_string (`Assoc [
@@ -15395,7 +15414,7 @@ let launch_keeper_log_read state ~mailbox ~intent keeper =
       true
 
 let launch_keeper_execute_read state ~mailbox ~intent keeper =
-  match begin_keeper_execute_read state ~intent ~limit:keeper_log_window keeper with
+  match begin_keeper_execute_read state ~intent ~limit:(keeper_execute_window state) keeper with
   | None -> false
   | Some request ->
     let key = Masc_tui_fetched.request_key request.ker_request in
@@ -15442,6 +15461,9 @@ let launch_current_keeper_logs state ~mailbox ~intent =
   metrics || execute
 
 let reconcile_keeper_logs state ~mailbox =
+  (* Leaving the Terminal tab, or moving to another Keeper, ends what it held
+     still. Coming back opens on the newest output again. *)
+  Masc_tui_types.reconcile_keeper_terminal state;
   let metrics = match keeper_log_target state, state.workspace_identity with
   | Some keeper, Workspace_identity_match ->
       let key = keeper_log_key state ~limit:keeper_log_window keeper in
@@ -15456,7 +15478,7 @@ let reconcile_keeper_logs state ~mailbox =
       held in
   let execute = match keeper_execute_target state, state.workspace_identity with
     | Some keeper, Workspace_identity_match ->
-      let key = keeper_log_key state ~limit:keeper_log_window keeper in
+      let key = keeper_log_key state ~limit:(keeper_execute_window state) keeper in
       (match state.keeper_execute_read with
        | Some request when request.ker_reading == state.workspace_read_authority
            && keeper_log_equal_key key (Masc_tui_fetched.request_key request.ker_request) -> false
@@ -15536,6 +15558,8 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
       state.keeper_schedules_error <- None;
       launch_keeper_schedules_load state ~mailbox ~keeper_name:keeper.k_name
   | Detail_runs -> launch_fusion_runs_load state ~mailbox
+  | Detail_terminal ->
+      ignore (launch_keeper_execute_read state ~mailbox ~intent:Snapshot_read.Refresh keeper)
 ;;
 
 (* Authority loss revokes every detail ticket. Resume the pane's current
@@ -15556,7 +15580,7 @@ let refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_aut
         launch_detail_tab_reading state ~mailbox keeper
     | Connectors, _, _ -> launch_connectors_load state ~mailbox
     | Fusion, _, _ -> launch_fusion_runs_load state ~mailbox
-    | (Keepers (Keeper_detail), (Detail_info | (Detail_sandbox | (Detail_instructions | (Detail_secrets | (Detail_github | (Detail_identity | (Detail_channels | (Detail_automation | Detail_runs)))))))), None)
+    | (Keepers (Keeper_detail), (Detail_info | (Detail_sandbox | (Detail_instructions | (Detail_secrets | (Detail_github | (Detail_identity | (Detail_channels | (Detail_automation | (Detail_runs | Detail_terminal))))))))), None)
     | (Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick)))), _, _)
     | ((Overview | (Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Repositories | (Code | (Changes | (Runtime | (Config | (Resources | (Tools | System_logs))))))))))))))))))), _, _) -> ()
   end
@@ -20306,7 +20330,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                   state.keeper_sandbox_view <- None; state.keeper_sandbox_view_error <- None;
                   launch_keeper_sandbox_view state ~mailbox key.ksk_keeper
               | Detail_info | Detail_items | Detail_secrets | Detail_github | Detail_identity
-              | Detail_channels | Detail_automation | Detail_runs -> ()
+              | Detail_channels | Detail_automation | Detail_runs | Detail_terminal -> ()
       end
   | Runtime_form_save_changed (request, status, observed_ns) ->
       let attached = runtime_form_is_attached state request in
@@ -24834,8 +24858,8 @@ let main
       | Some (Preset_detail_scroll (_, Some confirmation)) ->
         preset_confirmation_needs_present state confirmation
       | None | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _
-        | Schedule_detail_scroll _ | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _
-        | Acting _ | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
+        | Schedule_detail_scroll _ | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _
+        | Keeper_logs_scroll _ | Acting _ | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
         | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
         | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
         | System_log_detail_scroll _ | Planning_confirmation_scroll _ | Planning_detail_scroll _
@@ -24898,7 +24922,8 @@ let main
              if not was_ready && Masc_tui_render_config.preset_confirmation_ready state then
                Render_schedule.request render_schedule Render_schedule.Input
          | Some (Task_detail _) | None | Some (Board_read _) | Some (Message_scroll _)
-         | Some (Schedule_detail_scroll _) | Some (Keeper_detail _) | Some (Keeper_calls _)
+         | Some (Schedule_detail_scroll _) | Some (Keeper_detail _) | Some (Keeper_terminal_scroll _)
+         | Some (Keeper_calls _)
          | Some (Keeper_logs_scroll _) | Some (Acting _) | Some (Acting_selection (_, _))
          | Some (Acting_detail_scroll _) | Some (Memory_fact_detail_scroll _)
          | Some (Client_detail_scroll _) | Some (Verification_detail_scroll _)
@@ -24964,6 +24989,14 @@ let main
   let msx_spectator_poll_interval_ns =
     Int64.of_float (msx_spectator_poll_seconds *. nanoseconds_per_second)
   in
+  (* The Terminal tab follows output as it is written, so it re-reads on a
+     clock of its own rather than the refresh tick's. Each read is a snapshot
+     of rows the server already holds, and only the open tab asks. *)
+  let keeper_terminal_poll_seconds = 1.0 in
+  let keeper_terminal_poll_interval_ns =
+    Int64.of_float (keeper_terminal_poll_seconds *. nanoseconds_per_second)
+  in
+  let keeper_terminal_last_poll_ns = ref (Mtime_clock.elapsed_ns ()) in
   let last_check_ns = ref (Mtime_clock.elapsed_ns ()) in
   let roster_marquee_target = ref None in
   let roster_marquee_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
@@ -26793,6 +26826,11 @@ and is loaded on demand through keeper_skill.
           Float.min input_timeout msx_spectator_poll_seconds
         else input_timeout
       in
+      let input_timeout =
+        if keeper_terminal_on_screen state then
+          Float.min input_timeout keeper_terminal_poll_seconds
+        else input_timeout
+      in
       (* The load menu owns the terminal while it is up: skip the frame poll so
          it does not repaint the picker with a game screen. The spectator poll
          resumes the moment a game is chosen and the menu closes. *)
@@ -26825,6 +26863,22 @@ and is loaded on demand through keeper_skill.
                | Observe_machine -> launch_msx_live_read state ~mailbox:async_messages
                | Control_machine -> launch_msx_poll state ~mailbox:async_messages)
           | Masc.Machine_lane.Dos -> launch_dos_live_poll state ~mailbox:async_messages
+        end
+      end;
+      if keeper_terminal_on_screen state then begin
+        let now_ns = Mtime_clock.elapsed_ns () in
+        if
+          Int64.compare (Int64.sub now_ns !keeper_terminal_last_poll_ns)
+            keeper_terminal_poll_interval_ns
+          >= 0
+        then begin
+          keeper_terminal_last_poll_ns := now_ns;
+          Option.iter
+            (fun keeper ->
+              ignore
+                (launch_keeper_execute_read state ~mailbox:async_messages
+                   ~intent:Snapshot_read.Poll keeper))
+            (keeper_execute_target state)
         end
       end;
       let guarding_before_read =
@@ -27708,8 +27762,8 @@ and is loaded on demand through keeper_skill.
       let preset_confirmation_wheel = match wheel_reader with
         | Some (Preset_detail_scroll _) -> true
         | None | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _
-          | Schedule_detail_scroll _ | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _
-          | Acting _ | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
+          | Schedule_detail_scroll _ | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _
+          | Keeper_logs_scroll _ | Acting _ | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
           | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
           | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
           | System_log_detail_scroll _ | Planning_confirmation_scroll _ | Planning_detail_scroll _
@@ -33754,6 +33808,8 @@ and is loaded on demand through keeper_skill.
                 move_item_browser state ~delta:(direction * page)
             | Keepers Keeper_detail when state.detail_tab = Detail_runs ->
                 move_list_by_rows state ~delta:(direction * page)
+            | Keepers Keeper_detail when state.detail_tab = Detail_terminal ->
+                Masc_tui_types.move_keeper_terminal state ~by:(-direction * page)
             | Keepers Keeper_detail when state.detail_tab = Detail_channels ->
                 state.detail_scroll <-
                   (if direction > 0 then
@@ -34544,6 +34600,8 @@ and is loaded on demand through keeper_skill.
                   state.connectors_binding_cursor <- 0;
                   state.detail_scroll <- 0
                 end
+                else if state.detail_tab = Detail_terminal then
+                  Masc_tui_types.move_keeper_terminal state ~by:(-1)
                 else state.detail_scroll <- Masc_tui_types.scroll_down_from state.detail_scroll ~by:1
             | Keepers Keeper_logs ->
                 state.log_scroll <-
@@ -34884,6 +34942,8 @@ and is loaded on demand through keeper_skill.
                   state.connectors_binding_cursor <- 0;
                   state.detail_scroll <- 0
                 end
+                else if state.detail_tab = Detail_terminal then
+                  Masc_tui_types.move_keeper_terminal state ~by:1
                 else if state.detail_scroll > 0 then
                   state.detail_scroll <- state.detail_scroll - 1
             | Keepers Keeper_logs ->
@@ -36601,7 +36661,7 @@ and is loaded on demand through keeper_skill.
                     launch_keeper_lanes_load state ~mailbox:async_messages
                 | Detail_items | Detail_sandbox | Detail_instructions
                 | Detail_github | Detail_identity | Detail_channels
-                | Detail_automation | Detail_runs -> ())
+                | Detail_automation | Detail_runs | Detail_terminal -> ())
          | Keepers Keeper_calls ->
              (match selected_keeper state with
               | Some keeper ->

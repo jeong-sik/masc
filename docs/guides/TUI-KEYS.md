@@ -352,7 +352,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | Keys | What it does |
 |---|---|
 | `h/l` | move between roster and detail |
-| `[ / ]` | detail tabs: Info / Items / Sandbox / Settings / Secrets / GitHub / Identity / Channels / Automation / Runs |
+| `[ / ]` | detail tabs: Info / Items / Sandbox / Settings / Secrets / GitHub / Identity / Channels / Automation / Runs / Terminal |
 | `o` | open container logs in Sandbox; Keeper activity elsewhere |
 | `U` | pick a runtime candidate order (on the Channels tab U is unbind all) |
 | `Left / Esc` | back |
@@ -398,6 +398,9 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `PgUp/PgDn` | on the Channels tab: detail page |
 | `b / e / u u` | on the Channels tab: bind a channel, reassign the selected row, or remove it twice-confirmed |
 | `U U` | on the Channels tab: remove every channel binding of this Keeper on every transport, twice-confirmed; a channel rebound to another Keeper meanwhile is left as is |
+| `j/k` | on the Terminal tab: scroll |
+| `PgUp/PgDn` | on the Terminal tab: page |
+| `Home/End` | on the Terminal tab: Home goes to the oldest output kept; End goes back to the bottom and follows new output again |
 
 ## Chat
 

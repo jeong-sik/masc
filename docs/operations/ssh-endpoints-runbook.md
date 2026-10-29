@@ -405,13 +405,24 @@ Four things this costs, none of them obvious from the CLI's help:
 
 ## Watching Keeper commands and output
 
-In the MASC TUI, select a Keeper and press `l` for its logs. The Execute
-section shows the most recently observed, redacted command summaries and stdout/stderr;
-it refreshes with the TUI's normal cadence. Each row carries the stream and
-Task identifiers. A failed read is shown as unavailable, and a missing earlier
-sequence means the in-memory server history has already been truncated.
-The command summary omits shell operators and environment assignments; it is
-an audit aid, not an exact command to copy and rerun.
+In the MASC TUI, open a Keeper (`Right` from the Keepers list) and press `[`
+once from Info to reach the Terminal tab. It follows the Keeper's redacted
+command lines and stdout/stderr as they arrive, reading once a second, and
+`k`, `PgUp` or `Home` holds the screen still while you read back (`End` follows
+again). The tab works the same for Docker, microVM and `remote_ssh` Keepers,
+because all of them stream through the same server-side ring. It reads that
+ring over HTTP, so it is not a PTY: nothing typed in the TUI reaches the
+command. A pipeline with a file redirect, or another shape the dispatcher
+chains without streaming, shows its output when the command ends rather
+than line by line.
+
+`l` opens the logs view instead. Its Execute section
+shows the most recently observed command summaries and stdout/stderr, newest
+first, at the TUI's normal cadence. Each row carries the stream and Task
+identifiers. In either view a failed read is shown as unavailable, and a
+missing earlier sequence means the in-memory server history has already been
+truncated. The command summary omits shell operators and environment
+assignments; it is an audit aid, not an exact command to copy and rerun.
 
 For a terminal tail of several Keepers, from a MASC checkout use:
 

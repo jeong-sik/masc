@@ -1,10 +1,11 @@
 # Ego SDK coverage and remaining work
 
 This inventory compares all **74 entries** printed by the installed
-`ego-browser nodejs -e 'help()'` on 2026-10-26 with the MASC Ego adapter and
+`ego-browser nodejs -e 'help()'` on 2026-10-28 with the MASC Ego adapter and
 native workflow. Entries include properties and returned handles, not just
 independent operations. Source integration, SDK execution, installed MASC and
 actual Keeper/UI behavior are separate evidence layers.
+The retained [installed help inventory](../evidence/2026-10-28-ego-sdk-help/README.md) records the complete command output and its digest.
 
 The installed `ego-browser skill` guide is v2.1.0; the live browser reports Ego
 0.6.1.11. The
@@ -26,6 +27,17 @@ and the actual
 contract to a Keeper. “Partial” includes missing SDK options and lifecycle choices.
 Neither means fully supported.
 
+This source inventory was refreshed against the pending native stack through
+`bd800dc94952b00a33efaf1751d24313ffbc2a9a`, including the strict RegExp URL
+matcher, evaluation/navigation diagnostics, pending native-download cancellation
+and both Dashboard browser observation repairs. Source coverage does not mean
+these changes are merged, installed or exercised by a real Keeper.
+
+The official [Space guide](https://lite.ego.app/document/en/docs/space) describes
+Spaces as BrowserContexts in the same Ego browser process, rather than headless
+Chrome. This architecture description does not establish that a particular
+local Space is visible or that its login is complete.
+
 ## Spaces and handles
 
 | SDK entry | Current MASC integration | Remaining boundary |
@@ -46,7 +58,7 @@ Neither means fully supported.
 | `TaskSpace.adopt` | Explicit `page.act` adopt_tab, observed tabId and clientId; native UnmanagedPage handle and optional pageLabel/as. Native Page effects support adopted Pages while preserving origin | Real SDK/installed-route proof and per-goal scope |
 | `TaskSpace.release` | Explicit `page.act` release_tab unmanages an unknown-origin Page without closing it | Real SDK/installed-route proof and per-goal scope |
 | `TaskSpace.waitForControl` | `page.act` wait_for_control forwards native interval/timeout and uses the SDK clock within an agent-owned Space | Real SDK/installed-route proof; no handoff completion or takeover implied |
-| `TaskSpace.handOff` | `page.act` hand_off returns same-Space ID/name; Keeper guidance composes `masc_ask` and explicit-confirmation resume. Input-reset assertions are separate and never authorize takeover | Real Keeper login handoff, per-goal scope and UI control-state projection |
+| `TaskSpace.handOff` | `page.act` hand_off returns same-Space ID/name; Keeper guidance composes `masc_ask` and explicit-confirmation resume. Input-reset assertions are separate and never authorize takeover | Real Keeper login handoff and current UI control-state behavior; published ownership remains a dated observation |
 | `TaskSpace.finish` | Explicit finish_space with keepPages (default empty), validated native receipt, terminal Page guard and process-local no replay; retirement preserves Space/files | Automatic Goal completion, durable cross-worker reconciliation and retained-file reclamation |
 | `TaskSpace.cdp` | Fixed native activate_tab uses Target activation and same-target window lookup; restores only a minimized window. No caller-supplied protocol, target or window IDs | Real SDK/installed route and visible UI proof; general Target/Browser protocol boundary and lifecycle reconciliation |
 | `Page.label` | Inventory and document-read DTO retain the permanent label; TUI shows it for the selected tab | Installed/UI proof and lifecycle-aware resume |
@@ -58,19 +70,19 @@ Neither means fully supported.
 
 | SDK entry | Current MASC integration | Remaining boundary |
 | --- | --- | --- |
-| `Page.goto` | `page.goto`, native workflow goto with referer/timeout/waitUntil | Installed MASC/Keeper route unverified |
-| `Page.reload` | `page.act` reload, native workflow reload with timeout/waitUntil | Installed MASC/Keeper route unverified |
+| `Page.goto` | `page.goto`, native workflow goto with referer/timeout/waitUntil; workflow navigation timeouts retain committed, lifecycle and optional URL/readiness diagnostics | Actual timeout path and installed MASC/Keeper route unverified |
+| `Page.reload` | `page.act` reload, native workflow reload with timeout/waitUntil; workflow preserves native navigation timeout diagnostics | Actual timeout path and installed MASC/Keeper route unverified |
 | `Page.snapshot` | BrowserRead and final workflow snapshot; step snapshot preserves native scope/root and action-mark/stable-locator options | New step options require real SDK and installed-route proof |
 | `Page.screenshot` | `BrowserRead` screenshot / `page.capture` forwards native fullPage, clip (including clip scale), scale="css" and raw; broker owns the output path and Vision size limit. Explicit options produce a page image artifact without pointer-frame geometry | Real SDK options execution and installed MASC/Keeper route unverified |
 | `Page.url` | Native workflow url returns the SDK value as a step receipt | Installed MASC/Keeper route unverified |
-| `Page.waitForURL` | Native workflow waitForURL | String/glob supported; RegExp and function matchers not exposed |
+| `Page.waitForURL` | Native workflow string/glob or `urlRegex {source, flags?}`; native RegExp construction and SDK matching/polling, without a second host matcher | Function matcher not exposed; actual SDK and installed MASC/Keeper route unverified |
 | `Page.waitForEvent` | Internal download watch | General event waits and typed handle lifecycle |
 | `Page.waitForTimeout` | Native workflow explicit finite nonnegative milliseconds | Real SDK/installed-route proof; elapsed time is not state verification |
 | `Page.title` | Native workflow title returns the SDK value as a step receipt | Installed MASC/Keeper route unverified |
 | `Page.info` | Native workflow info returns native state; dialog stops following steps | Installed MASC/Keeper route unverified |
 | `Page.acceptDialog` | `page.act` accept_dialog | Native boolean receipt and per-goal ownership evidence |
 | `Page.dismissDialog` | `page.act` dismiss_dialog | Native boolean receipt and per-goal ownership evidence |
-| `Page.evaluate` | Native workflow evaluate, browser expression/call with JSON | Safety-timeout metadata beyond message not retained; installed MASC/Keeper route unverified |
+| `Page.evaluate` | Native workflow browser expression/call with JSON; structured timeout code, timeoutMs, executionStopped, mayHaveLateEffects and pageResponsive retained as diagnostics | Actual installed timeout path unverified; diagnostics never authorize replay or settle held input |
 | `Page.waitForFunction` | Native workflow waitForFunction with JSON and timeout/polling | Predicates count as possible effects; installed MASC/Keeper route unverified |
 | `Page.fetch` | Native workflow fetch with browser options; `saveAs` accepts an artifact filename, maps it to a fresh private path, and returns a download ID for the existing download broker | Actual SDK binary execution, installed MASC/Keeper route and registry recovery across SDK-process replacement remain unverified |
 | `Page.cdp` | Fixed internal history commands only | General Page protocol calls with explicit effect and lifecycle handling |
@@ -95,8 +107,8 @@ Neither means fully supported.
 | --- | --- | --- |
 | `Page.mouse.click` | Trusted coordinates; workflow forwards button/clickCount/delay/label | New workflow requires real SDK and installed-route proof |
 | `Page.mouse.move` | Hover/path internals; workflow forwards steps/label | New workflow requires real SDK and installed-route proof |
-| `Page.mouse.down` | Balanced drag implementation only | Held-button state, cancellation and release settlement across workflow steps |
-| `Page.mouse.up` | Balanced drag implementation and cleanup | Explicit release receipt and uncertain-pointer recovery |
+| `Page.mouse.down` | Internal coordinate-path drag presses natively; an entered raw sequence retains unknown release and blocks input pending private operator confirmation | General held-button workflows and native release settlement remain unsupported |
+| `Page.mouse.up` | Internal coordinate-path drag attempts native release in finally; its void result never proves release. Selector drag delegates release to native dragAndDrop | Explicit raw release acknowledgement and automatic uncertain-pointer recovery remain unsupported |
 | `Page.mouse.wheel` | Scroll at observed point; workflow forwards deltas/label | New workflow requires real SDK and installed-route proof; move over observed container first |
 | `Page.keyboard.down` | None | Held-key state and cancellation/release settlement |
 | `Page.keyboard.up` | None | Explicit release and uncertain-key recovery |
@@ -112,10 +124,25 @@ Neither means fully supported.
 | `Download.saveAs` | Internal UUID path then download broker | Explicit brokered save operation; no arbitrary host path |
 | `Download.path` | None | Round-local path lifetime with broker output |
 | `Download.failure` | Internal completion/interrupt observation | Explicit handle operation |
-| `Download.cancel` | None | Download cancellation and resulting receipt |
+| `Download.cancel` | `download.cancel` workflow calls a pending native handle belonging to the exact Page once; strict downloadId/source/cancelReturned receipt, with no inferred transfer termination | Actual SDK/Keeper execution and complete handle lifecycle unverified; completed, Fetch and foreign-Page handles are refused |
 | `Download.delete` | Internal temporary-file cleanup after save | Explicit deletion of only that handle's temporary files |
 
 ## Current evidence and next work
+
+The current Dashboard source renders personal-browser caller/Space observations
+and separate server-owned Automation/Stagehand session observations. It decodes
+an Ego user-owned-name refusal without discarding healthy clients. Owned-session
+registration does not imply an open browser, and those session observations do
+not identify a current caller. Component tests and frontend build manifests are
+not installed or rendered UI proof.
+
+Recent local checks exercise the actual workflow/Release codecs and production
+JavaScript with SDK stand-ins. Cancellation component checks also use the actual
+OCaml-emitted download watcher and pinned upstream Download classes with fake
+CDP/filesystem services. These confirm component contracts, not a real native
+transport, current Keeper execution or login. Native evaluation/navigation
+error flags remain diagnostic data and do not replace validated effect progress.
+
 
 A native workflow Fetch can request binary output with
 `{"method":"fetch","url":"/api/report.pdf","options":{"saveAs":"report.pdf"}}`.

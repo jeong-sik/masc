@@ -254,7 +254,7 @@ An SDK `EGO_PAGE_EVALUATION_TIMED_OUT` error retains its structured diagnostics
 under the workflow receipt's `failure.nativeError`: `code`, `timeoutMs`,
 `executionStopped`, `mayHaveLateEffects` and `pageResponsive`. The timeout is
 finite and nonnegative; the three observations are booleans. These fields come
-from the [SDK error](https://github.com/citrolabs/ego-lite/blob/v2.1.0/package/ego-browser/src/page-model.ts#L416),
+from the [SDK error](https://github.com/citrolabs/ego-lite/blob/4cf79356509bccdead17863250b442f60a881c25/package/ego-browser/src/page-model.ts#L416),
 without interpreting its message. A first-step evaluation failure also returns
 this receipt while its effect outcome remains unknown. An initial URL or other
 read failure retains the same diagnostics with `effectPhase: not_started` when
@@ -295,8 +295,17 @@ clock; a lost result is never replayed or treated as input-reset confirmation.
 A question or an invisible-window
 report is not completion. See the [Keeper procedure](../../skills/browser-lanes/references/connection.md#로그인인증-인계).
 These tools are composed by the Keeper; handoff does not automatically create
-an Ask, show a window, or verify credentials. The identity receipt and guidance
+an Ask or verify credentials. Its identity receipt does not verify that a
+window is visible. The identity receipt and guidance
 are source changes; a real Keeper login handoff remains unverified.
+
+The public [TaskSpace.handOff implementation](https://github.com/citrolabs/ego-lite/blob/4cf79356509bccdead17863250b442f60a881c25/package/ego-browser/src/page-model.ts#L1014)
+awaits the native handoff and stops background Page discovery. The
+[native API contract](https://github.com/citrolabs/ego-lite/blob/4cf79356509bccdead17863250b442f60a881c25/docs/native-bindings-api.md#L610)
+describes control transfer and status, without a rendered-window acknowledgement.
+The native implementation's UI behavior is not established by those public
+sources, so neither visible presentation nor absence of native window handling
+may be inferred from the JavaScript wrapper alone.
 
 Before handing off an agent-controlled Space, `BrowserInteract activate_tab`
 can explicitly activate its observed managed Page, with exact `clientId`,

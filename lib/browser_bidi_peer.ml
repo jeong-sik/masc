@@ -742,7 +742,7 @@ let dispatch_with_window ?actor ?request_id t ~verb args =
       | Browser_lane.Activate_tab -> activate t context id args in
       let* receipt = Result.map_error (function
         | Partial_failure partial -> Partial_failure {partial with receipt=normalize_receipt partial.receipt}
-        | (Before_effect _ | Outcome_unknown _) as failure -> failure) outcome in
+        | (Before_effect _ | Outcome_unknown _ | Observed_failure _) as failure -> failure) outcome in
       let receipt = normalize_receipt receipt in
       Result.map_error (fun detail -> Outcome_unknown detail) (with_tab id receipt))
 

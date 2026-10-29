@@ -451,8 +451,8 @@ let test_request_deadline_controls_the_bidi_exchange () =
       (match metadata peer with Ok _ -> () | Error detail -> fail detail);
       let expired = Monotonic_deadline.after ~seconds:0. in
       (match Peer.dispatch ~deadline:expired peer ~verb:Peer.Tabs_list (obj []) with
-       | Error (Peer.Before_effect _) -> ()
-       | Ok _ | Error (Peer.Partial_failure _ | Peer.Outcome_unknown _) ->
+       | Error (Peer.Before_effect _ | Peer.Observed_failure {disposition=Peer.Not_started;_}) -> ()
+       | Ok _ | Error (Peer.Partial_failure _ | Peer.Outcome_unknown _ | Peer.Observed_failure {disposition=Peer.Uncertain;_}) ->
            fail "expired work was not refused before writing");
       let deadline = Monotonic_deadline.after ~seconds:3. in
       (match Peer.dispatch ~deadline peer ~verb:Peer.Tabs_list (obj []) with
@@ -554,8 +554,8 @@ let test_interrupted_release_uses_original_transport_window () =
         (match metadata peer with Ok _ -> () | Error detail -> fail detail);
         let deadline=Monotonic_deadline.after ~seconds:30. in
         (match Peer.dispatch ~deadline ~interruptions:[interrupted] peer ~verb:Peer.Page_interact keyboard_args with
-         | Error (Peer.Outcome_unknown _) -> ()
-         | Ok _ | Error (Peer.Before_effect _ | Peer.Partial_failure _) -> fail "unanswered input cleanup must remain unknown");
+         | Error (Peer.Outcome_unknown _ | Peer.Observed_failure {disposition=Peer.Uncertain;_}) -> ()
+         | Ok _ | Error (Peer.Before_effect _ | Peer.Partial_failure _ | Peer.Observed_failure {disposition=Peer.Not_started;_}) -> fail "unanswered input cleanup must remain unknown");
         check bool "unanswered release fences the peer" true (Eio.Promise.peek ended<>None);
         ended_session peer) in
     check (result unit string) "bounded cleanup leaves session end available" (Ok ()) outcome;
@@ -578,8 +578,8 @@ let test_interruption_bounds_an_already_sent_read () =
       (match metadata peer with Ok _ -> () | Error detail -> fail detail);
       let deadline=Monotonic_deadline.after ~seconds:30. in
       (match Peer.dispatch ~deadline ~interruptions:[interrupted] peer ~verb:Peer.Tabs_list (obj []) with
-       | Error (Peer.Before_effect _) -> ()
-       | Ok _ | Error (Peer.Partial_failure _ | Peer.Outcome_unknown _) -> fail "an unanswered read should fail");
+       | Error (Peer.Before_effect _ | Peer.Observed_failure {disposition=Peer.Not_started;_}) -> ()
+       | Ok _ | Error (Peer.Partial_failure _ | Peer.Outcome_unknown _ | Peer.Observed_failure {disposition=Peer.Uncertain;_}) -> fail "an unanswered read should fail");
       check bool "an unanswered read fences the original peer" true (Eio.Promise.peek ended<>None);
       ended_session peer) in
   check (result unit string) "session ends" (Ok ()) outcome;
@@ -652,8 +652,8 @@ let test_timed_out_input_still_releases_on_the_original_socket () =
       let args=obj ["tabId",`Int 1;"expectedUrl",`String "https://example.org";"action",`String "type_text";
         "documentId",`String "d1";"text",`String "x"] in
       (match Peer.dispatch ~request_id:"fixture-unanswered" ~deadline peer ~verb:Peer.Page_interact args with
-       | Error (Peer.Outcome_unknown _) -> ()
-       | Ok _ | Error (Peer.Before_effect _ | Peer.Partial_failure _) ->
+       | Error (Peer.Outcome_unknown _ | Peer.Observed_failure {disposition=Peer.Uncertain;_}) -> ()
+       | Ok _ | Error (Peer.Before_effect _ | Peer.Partial_failure _ | Peer.Observed_failure {disposition=Peer.Not_started;_}) ->
            fail "unanswered input must remain unknown");
       check bool "ordinary commands remain fenced" true (Eio.Promise.peek ended <> None);
       ended_session peer) in
@@ -686,8 +686,8 @@ let test_expiry_during_encoding_does_not_send_input () =
       let args=obj ["tabId",`Int 1;"expectedUrl",`String "https://example.org";"action",`String "type_text";
         "documentId",`String "d1";"text",`String "x"] in
       (match Peer.dispatch ~deadline peer ~verb:Peer.Page_interact args with
-       | Error (Peer.Before_effect _) -> ()
-       | Ok _ | Error (Peer.Outcome_unknown _ | Peer.Partial_failure _) ->
+       | Error (Peer.Before_effect _ | Peer.Observed_failure {disposition=Peer.Not_started;_}) -> ()
+       | Ok _ | Error (Peer.Outcome_unknown _ | Peer.Partial_failure _ | Peer.Observed_failure {disposition=Peer.Uncertain;_}) ->
            fail "input that expired before send must be before-effect");
       check bool "unsent input did not end the peer" true (Eio.Promise.peek ended = None);
       (match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
@@ -721,7 +721,7 @@ let test_expiry_after_create_preserves_the_connection () =
        | Error (Peer.Partial_failure {tab_id;receipt;_}) ->
          check int "created tab remains known" 1 tab_id;
          check bool "navigation was never sent" false Yojson.Safe.Util.(receipt |> member "navigationSent" |> to_bool)
-       | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _) ->
+       | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _ | Peer.Observed_failure _) ->
            fail "a created tab with unsent navigation must remain a known partial effect");
       check bool "unsent navigation did not end the peer" true (Eio.Promise.peek ended = None);
       (match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
@@ -774,7 +774,7 @@ let test_completed_input_respects_the_observation_deadline () =
          check string "the post-effect observation was not sent" "not_sent"
            Yojson.Safe.Util.(receipt |> member "postEffectObservation" |> to_string)
        | Ok _,false -> ()
-       | (Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _)),true
+       | (Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _ | Peer.Observed_failure _)),true
        | Error _,false -> fail "confirmed input did not retain the correct observation boundary");
       check bool "the original peer is still connected" true (Eio.Promise.peek ended = None);
       (match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
@@ -808,7 +808,7 @@ let test_feedback_without_a_deadline_still_shows_working () = Eio_main.run (fun 
   let args=obj ["tabId",`Int 1;"expectedUrl",`String "https://example.org";"action",`String "type_text";
     "documentId",`String "d1";"text",`String "x"] in
   (match Peer.dispatch ~request_id:"fixture-unbounded" peer ~verb:Peer.Page_interact args with
-   | Error (Peer.Before_effect _) -> () | Ok _ | Error _ -> fail "the guard should refuse this input");
+   | Error (Peer.Before_effect _ | Peer.Observed_failure {disposition=Peer.Not_started;_}) -> () | Ok _ | Error _ -> fail "the guard should refuse this input");
   check int "begin, refused guard, and finish" 3 !scripts)
 (* The session a connection created is ended over that connection, also after
    this side stopped trusting it for page commands: a page whose command got
@@ -1352,7 +1352,7 @@ let test_release_outlives_the_request_deadline () = Eio_main.run (fun _ ->
    | Error (Peer.Partial_failure {receipt;_}) ->
      check string "the post-effect observation was not sent" "not_sent"
        Yojson.Safe.Util.(receipt |> member "postEffectObservation" |> to_string)
-   | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _) ->
+   | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _ | Peer.Observed_failure _) ->
      fail "confirmed input with no observation must be a known partial result");
   check int "input was sent once" 1 !performed;
   check int "release still used its cleanup window" 1 !released)
@@ -1386,7 +1386,7 @@ let test_partial_semantic_input_names_the_requested_frame () = Eio_main.run (fun
    | Error (Peer.Partial_failure {receipt;_}) ->
      check string "receipt retains caller's semantic action" "click" Yojson.Safe.Util.(receipt |> member "action" |> to_string);
      check bool "receipt retains caller's frame" true (Yojson.Safe.Util.member "framePath" receipt=`List [`String "iframe"])
-   | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _) -> fail "confirmed input did not preserve its partial receipt");
+   | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _ | Peer.Observed_failure _) -> fail "confirmed input did not preserve its partial receipt");
   check int "semantic input was sent once" 1 !inputs;
   check int "only resolution and guard scripts ran" 2 !scripts)
 
@@ -1408,8 +1408,8 @@ let test_expired_unsent_input_does_not_release () = Eio_main.run (fun _ ->
   let args=obj ["tabId",`Int 1;"expectedUrl",`String "https://example.org";"action",`String "type_text";
     "documentId",`String "d1";"text",`String "x"] in
   (match Peer.dispatch ~deadline peer ~verb:Peer.Page_interact args with
-   | Error (Peer.Before_effect _) -> ()
-   | Ok _ | Error (Peer.Outcome_unknown _ | Peer.Partial_failure _) ->
+   | Error (Peer.Before_effect _ | Peer.Observed_failure {disposition=Peer.Not_started;_}) -> ()
+   | Ok _ | Error (Peer.Outcome_unknown _ | Peer.Partial_failure _ | Peer.Observed_failure {disposition=Peer.Uncertain;_}) ->
        fail "unsent input must be refused before effect");
   check int "the expired input reached its send boundary" 1 !attempted;
   check int "expired input was not sent" 0 !performed;
@@ -1438,8 +1438,8 @@ let test_expired_unsent_page_effect_is_before_effect () = Eio_main.run (fun _ ->
       else ["action",`String "set_viewport";"width",`Int 800;"height",`Int 600] in
     let args=obj (["tabId",`Int 1;"expectedUrl",`String "https://example.org"] @ action) in
     (match Peer.dispatch ~deadline peer ~verb:Peer.Page_interact args with
-     | Error (Peer.Before_effect _) -> ()
-     | Ok _ | Error (Peer.Outcome_unknown _ | Peer.Partial_failure _) ->
+     | Error (Peer.Before_effect _ | Peer.Observed_failure {disposition=Peer.Not_started;_}) -> ()
+     | Ok _ | Error (Peer.Outcome_unknown _ | Peer.Partial_failure _ | Peer.Observed_failure {disposition=Peer.Uncertain;_}) ->
        failf "%s: an unsent effect must be refused before effect" mode);
     check int (mode ^ " reached its send boundary") 1 !attempts;
     check int (mode ^ " sent no effect") 0 !effects) ["fill";"viewport"])

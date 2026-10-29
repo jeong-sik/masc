@@ -1184,7 +1184,7 @@ let rec message_matches_share_input ~resource_read ~recovery_loaded = function
   | Github_token_saved _ | Observer_opened _ | Observer_received _ | Observer_closed _
   | Fleet_stream_view _ | Fleet_stream_reader_ended _ | Original_task_read_done _
   | Original_task_history_done _ | Original_task_evidence_done _ | Task_dispatch_completed _
-  | Task_creation_read_done _
+  | Task_creation_read_done _ | Keeper_queue_action_received _
   | Keeper_execute_loaded _ -> false
 let workspace_message_admitted state ~authority ~reading message =
   workspace_reply_admitted state ~authority ~reading

@@ -18673,7 +18673,8 @@ let resource_scroll_position = function
   | Changes_diff_scroll _ | Repository_changes_diff_scroll _ | Metrics_scroll _
   | Approval_detail_scroll _ | Patch_modal_scroll _ | Link_modal_scroll _ | Play_invite_scroll _
   | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _ | Context_inspector_scroll _
-  | Context_inspector_response_scroll _ -> None
+  | Context_inspector_response_scroll _ | Planning_list_page_rows _ | Queue_panel_presented _
+  | Help_presented -> None
 
 let clamped_scroll_end = max_int
 

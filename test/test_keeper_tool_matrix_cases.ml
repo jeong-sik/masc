@@ -193,6 +193,16 @@ let make_fixture
   Masc.Keeper_registry.For_testing.clear ();
   ignore (Masc.Keeper_registry.For_testing.register ~base_path meta.name meta);
   ignore (Masc.Keeper_registry.For_testing.register ~base_path "tool-matrix" meta);
+  (* The matrix runs the full AGENT_CORE handler path, so it must also hand
+     the bundle what a real turn hands it: a turn-context cell. Without one
+     the call arrives with [turn_ref = None] and shared-draft editing --
+     the only matrix tool that requires its owning Keeper turn -- fails the
+     case as an unclassified [Runtime_failure] instead of exercising the
+     handler. The cell mirrors [test_keeper_artifact_draft_bundle]: any
+     [keeper_turn_id] works, what matters is that one exists. *)
+  let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+  Masc.Keeper_tool_call_log.set_turn_context ~cell:turn_ctx_cell
+    ~agent_name:meta.name ~turn:0 ~keeper_turn_id:1 ();
   let bundle =
     KTO.For_testing.make_tool_bundle
       ~config
@@ -200,6 +210,7 @@ let make_fixture
       ~publication_recovery
       ~ctx_snapshot
       ~clock
+      ~turn_ctx_cell
       ()
   in
   (match init_mode with

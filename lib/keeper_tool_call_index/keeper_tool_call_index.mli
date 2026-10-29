@@ -8,8 +8,12 @@
     prefix content in the blocking worker without locking out appenders.
     This costs O(existing prefix bytes) on a changed ledger, including ordinary
     appends. The prefix is hashed at most once per advance, and again only when
-    the file's inode/size/mtime/ctime changed during the scan. That post-scan
-    check and the unchanged-observation fast path both assume the filesystem
+    the file's inode/size/mtime/ctime changed during the scan. The observation
+    a read verified is also written beside its continuity record, without
+    fsync, so a later process skips the proof for a file that still reads
+    exactly so against exactly that continuity; a missing or stale one means
+    the prefix is read again. That post-scan check and the
+    unchanged-observation fast path both assume the filesystem
     reports external modification in inode/size/mtime/ctime; neither is byte
     proof against metadata-preserving raw edits. Storage ownership optimization
     is separate.

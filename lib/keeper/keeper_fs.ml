@@ -1,70 +1,58 @@
 (** Keeper_fs — Centralized keeper filesystem operations.
 
     Provides atomic file writes (write-to-temp + rename) and
-    fiber-safe directory creation with caching. Consolidates the
-    four scattered ensure_dir implementations into one.
-
-    Mutable caches use either an Eio mutex or an immutable Atomic snapshot.
+    fiber-safe directory creation. Consolidates the four scattered
+    ensure_dir implementations into one.
 
     @since 2.162.0 — #3721 keeper stabilization *)
 
 (* ================================================================ *)
-(* Directory Cache (Eio.Mutex-protected)                            *)
+(* Directory Creation (no lock)                                     *)
 (* ================================================================ *)
 
-let dir_mu = Eio.Mutex.create ()
-let ensured_dirs : (string, unit) Hashtbl.t = Hashtbl.create 16
+(* RFC-0474 L4g. [ensure_dir] held one process-wide Eio mutex while it
+   checked that a cached directory still existed. The check is a stat that
+   eio_posix runs on a system thread, so the holder suspended inside the
+   lock and every other caller, on every domain, queued behind the slowest
+   stat. [keeper_meta_path] ensures [.masc/keepers] on every Keeper meta
+   read; on 2026-10-28 fibers waited 2,972 s on that mutex in 180 s, up to
+   45 s for one wait, and [gate/keepers] spent 95% of its wall time waiting.
+
+   It now takes no lock and keeps no cache. A cached path was stat'ed on
+   every call anyway, so a directory removed outside would be made again;
+   one stat per call is what an existing directory costs now. [mkdir_p]
+   accepts a directory that already exists, so two callers racing on one
+   path only stat twice. *)
+let note_ensure_dir_failure ~site path =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string FsFailures)
+    ~labels:[("path", path); ("site", Keeper_fs_failure_site.to_label site)]
+    ()
 
 let ensure_dir (path : string) : string =
-  (* Capture exceptions inside the mutex body so the lock exits normally,
-     then re-raise after release. Escaping an exception from
-     Eio.Mutex.use_rw poisons the mutex and breaks all subsequent
-     ensure_dir calls in the same process (Issue #8475: fleet-test
-     isolation runtime failures). *)
-  let deferred_exn = ref None in
-  Eio_guard.with_mutex dir_mu (fun () ->
-    if not (Hashtbl.mem ensured_dirs path) || not (Fs_compat.file_exists path) then begin
-      match
-        try
-          Fs_compat.mkdir_p path;
-          Hashtbl.replace ensured_dirs path ();
-          Ok ()
-        with
-        | Eio.Cancel.Cancelled _ as exn ->
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string FsFailures)
-              ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Ensure_dir_cancelled))]
-              ();
-            Log.Keeper.warn "filesystem_runtime: ensure_dir cancelled path=%s" path;
-            Error (exn, Printexc.get_raw_backtrace ())
-        | exn ->
-            Keeper_fd_pressure.note_exception
-              ~site:"filesystem_runtime.ensure_dir"
-              exn;
-            Keeper_disk_pressure.note_exception
-              ~site:"filesystem_runtime.ensure_dir"
-              exn;
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string FsFailures)
-              ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Ensure_dir_failed))]
-              ();
-            Log.Keeper.warn "filesystem_runtime: ensure_dir failed path=%s: %s"
-              path (Printexc.to_string exn);
-            Error (exn, Printexc.get_raw_backtrace ())
-      with
-      | Ok () -> ()
-      | Error err -> deferred_exn := Some err
-    end);
-  match !deferred_exn with
-  | Some (exn, bt) -> Printexc.raise_with_backtrace exn bt
-  | None -> path
+  if Fs_compat.file_exists path
+  then path
+  else
+    match Fs_compat.mkdir_p path with
+    | () -> path
+    | exception (Eio.Cancel.Cancelled _ as exn) ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      note_ensure_dir_failure ~site:Keeper_fs_failure_site.Ensure_dir_cancelled path;
+      Log.Keeper.warn "filesystem_runtime: ensure_dir cancelled path=%s" path;
+      Printexc.raise_with_backtrace exn backtrace
+    | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      Keeper_fd_pressure.note_exception ~site:"filesystem_runtime.ensure_dir" exn;
+      Keeper_disk_pressure.note_exception ~site:"filesystem_runtime.ensure_dir" exn;
+      note_ensure_dir_failure ~site:Keeper_fs_failure_site.Ensure_dir_failed path;
+      Log.Keeper.warn "filesystem_runtime: ensure_dir failed path=%s: %s"
+        path (Printexc.to_string exn);
+      Printexc.raise_with_backtrace exn backtrace
 
 let invalidate_dir (path : string) : unit =
-  Eio_guard.with_mutex dir_mu (fun () -> Hashtbl.remove ensured_dirs path);
   Keeper_fs_durable_directory.invalidate path
 
 let clear_dir_cache () : unit =
-  Eio_guard.with_mutex dir_mu (fun () -> Hashtbl.clear ensured_dirs);
   Keeper_fs_durable_directory.clear ()
 
 (* ================================================================ *)

@@ -1,21 +1,23 @@
 (** Keeper_fs — Centralized keeper filesystem operations.
 
     Provides atomic file writes (write-to-temp + rename) and
-    fiber-safe directory creation with caching.
+    fiber-safe directory creation.
 
     @since 2.162.0 — #3721 keeper stabilization *)
 
 (** {1 Directory Management} *)
 
-(** Ensure [path] exists, creating it recursively if needed.
-    Fiber-safe: protected by Eio.Mutex. Returns [path] for chaining. *)
+(** Ensure [path] exists, creating it recursively if needed. Every call
+    checks the filesystem, so a directory removed outside is made again.
+    Takes no lock and keeps no cache: concurrent callers may each stat or
+    create the same path. Returns [path] for chaining. *)
 val ensure_dir : string -> string
 
-(** Remove [path] from the directory cache.
-    Call after external deletion or move. *)
+(** Forget that [path]'s directory chain was made durable, so the next
+    durable write prepares it again. Call after external deletion or move. *)
 val invalidate_dir : string -> unit
 
-(** Clear the entire directory cache. Useful in tests. *)
+(** Forget every directory chain made durable. *)
 val clear_dir_cache : unit -> unit
 
 (** {1 Atomic File Writes} *)

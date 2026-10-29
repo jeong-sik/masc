@@ -355,6 +355,33 @@ L4e 뒤로도 trust snapshot 은 Keeper 하나에 0.2~1.6초였다. snapshot 이
   부하 평균 26 에서 다시 재면(2026-10-28 18:05Z) 처음 만들기는 3.1초였고, 한 줄 붙은 뒤 읽기는 7~15 ms 였다. 하루 파일 23개(125 MB) 전부의 MD5 는 0.23초라, digest 는 처음 만들기의 7% 쯤이다.
 - - 운영: 배포 뒤 `by_name` 에서 `compact_keeper_runtime_trust_json`·`compute_execution_trust_json`·`cached_goals_tree_payload` 의 실행 합과 `Keeper_approval__Audit.read_recent` 의 실행 시간을 본다.
 
+#### L4g — 디렉터리 확인은 lock 을 쥔 채 멈추지 않는다
+
+L4d 배포 뒤 읽기 lane 실행 시간의 50%가 `gate/keepers` 였다(2시간 반, job 3,546개, 평균 339 ms, 최대 44.7초). 같은 계산을 서버 밖에서 재면 한 번에 18~55 ms 다. 차이를 보려고 `rtev_fibers` 가 pool job 의 traced section 마다 실행 시간과 멈춘 이유별 시간, 그리고 Eio lock 의 대기·보유를 재게 했다(2026-10-28 14:07~14:34Z, load 40~77).
+
+- `gate/keepers` 는 180초 동안 job 59개, wall 합 65.5초 가운데 실행이 3.05초(5%)였다. 대부분 한 Eio mutex 를 기다렸다.
+- 그 mutex(object id 28) 하나를 180초 동안 기다린 시간 합이 1,020~2,972초였다. 기다린 쪽은 pool job 전부와 HTTP 응답 쓰기(`writev`), 연결 받기(`accept`)까지였다.
+- 길게 쥔 쪽은 모두 쥐고 있는 동안 `fstat` 하나를 기다렸다(0.35~5.2초). 놓은 바로 뒤의 다음 작업은 `fstat` 이나 Keeper meta 파일(`<keeper>.json`) 읽기였다.
+- 이 mutex 를 `Keeper_fs.dir_mu` 로 본다. Eio mutex 에는 이름이 없어 trace 만으로는 확정할 수 없다. 근거는 두 가지다. 쥔 채 `fstat` 에서 멈추고 놓은 뒤 Keeper meta 를 읽는 모양이 아래 코드와 같다. 그리고 기다린 job 이 모두 Keeper meta 를 읽는다. 배포 뒤 같은 trace 에서 이 대기가 사라지는지로 확인한다. `ensure_dir` 는 캐시에 있는 디렉터리도 `Fs_compat.file_exists`(eio_posix 의 `in_worker_thread "fstat"`)로 다시 확인했다. 그동안 프로세스 전체가 쓰는 mutex 를 쥐고 있었다. `keeper_meta_path` 는 Keeper meta 를 읽을 때마다 `.masc/keepers` 를 이렇게 보장한다.
+- 이 확인은 원래 `Sys.file_exists` 였다. #6289 가 Eio 안의 막는 IO 를 없애려고 `Fs_compat.file_exists` 로 바꾸면서, 짧은 syscall 이 lock 을 쥔 채 멈추는 system thread 대기가 됐다.
+
+설계:
+
+1. 디렉터리 캐시를 없앤다. 캐시에 있는 경로도 매번 파일시스템에서 확인했으므로 캐시가 아끼는 것이 없었다. 확인과 `mkdir_p` 는 lock 없이 한다. 있는 디렉터리 하나에 드는 것은 `stat` 한 번으로 전과 같다.
+2. 동작은 그대로다. 밖에서 지운 디렉터리는 다시 만든다. `mkdir_p` 는 이미 있는 디렉터리를 받아들이므로 같은 경로를 두 호출이 동시에 만들어도 된다. `invalidate_dir`·`clear_dir_cache` 는 이제 durable 디렉터리 기록(`Keeper_fs_durable_directory`)만 지운다.
+3. `dir_mu` 를 예로 든 주석 넷에서 그 이름을 지운다. 지금 동작을 설명하는 두 곳(`dashboard_cache.ml`, `server_routes_http_routes_provider_runs.ml`)은 지금 있는 mutex(`Keeper_types_support.keeper_execution_receipt_store` 가 쥐는 것)를 예로 든다. 6월 사고를 적은 두 곳(`eio_guard.ml`, `test_executor_pool_eio_mutex.ml`)은 그 mutex 가 이제 없으므로 일반어로 적는다. 다른 mutex 이름을 넣으면 사고 기록이 틀려진다.
+
+검증:
+
+- 단위(`test_keeper_fs`): 바깥에서 지운 디렉터리를 다시 만든다. domain 넷이 같은 새 경로 여덟 개를 동시에 50번씩 보장해도 모든 호출이 경로를 돌려주고 디렉터리가 있다. mutant 둘(만들지 않기, 확인 없이 돌려주기)은 모두 실패한다. 캐시를 비우면 다시 확인하는지 보던 시험 둘(`invalidate`, `clear cache`)은 캐시가 없어져 지웠다. 같은 동작은 "밖에서 지운 디렉터리" 시험이 본다.
+- bench: 실제 `.masc/keepers` 에 domain 8개 × fiber 4개가 16,000번 `ensure_dir` 를 불렀다. main 의 lock 경로를 그대로 옮긴 것과 번갈아 3번씩 돌렸다(2026-10-28 16:11Z, load 65~68).
+
+  | | 전체 | p50 | p99 |
+  |---|---|---|---|
+  | main | 0.97~1.60초 | 1.4~2.1 ms | 6.3~17.6 ms |
+  | L4g | 0.17~0.28초 | 0.19~0.35 ms | 0.9~2.4 ms |
+- 운영: 배포 뒤 `rtev_fibers` 로 같은 창을 다시 떠서 가장 많이 기다린 lock 과 `gate/keepers` 의 실행 비율을 본다. `by_name` 에서 `respond_keeper_tool_json` 의 실행 평균과 읽기 lane 의 대기를 본다.
+
 ## 5. 순서
 
 1. L1 — 코드가 작고, A/B 로 효과를 이미 봤다.
@@ -367,6 +394,7 @@ L4e 뒤로도 trust snapshot 은 Keeper 하나에 0.2~1.6초였다. snapshot 이
 8. L4d — TUI 로그에서 시간 초과가 난 경로를 세고, 원인으로 확인된 goals tree 의 요청 경로 계산부터 없앤다.
 9. L4e — goals tree 계산 자체를 줄인다. 시간의 97%가 쓰지 않는 Keeper 의 trust snapshot 이었다.
 10. L4f — trust snapshot 시간의 98%였던 승인 기록 읽기를 한 번 읽는 index 로 바꾼다.
+11. L4g — Keeper meta 를 읽을 때마다 프로세스 전체를 줄 세우던 디렉터리 확인 lock 을 없앤다.
 
 ## 6. 하지 않는 것
 

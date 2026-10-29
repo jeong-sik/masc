@@ -38,44 +38,58 @@ let require_ok label = function
 (* ensure_dir tests                                                 *)
 (* ================================================================ *)
 
-let test_ensure_dir_creates_and_caches () =
+let test_ensure_dir_creates_a_directory () =
   let base = temp_dir () in
   let dir = Filename.concat base "sub/nested" in
   let result = KF.ensure_dir dir in
   check string "returns path" dir result;
   check bool "directory exists" true (Sys.file_exists dir);
   check bool "is directory" true (Sys.is_directory dir);
-  (* Second call should hit cache and succeed *)
-  let result2 = KF.ensure_dir dir in
-  check string "cached return" dir result2;
+  check string "an existing directory returns its path" dir (KF.ensure_dir dir);
   cleanup_dir base
 
-let test_ensure_dir_invalidate () =
+(* A directory removed outside is made again: every call checks the
+   filesystem. *)
+let test_ensure_dir_recreates_a_directory_removed_outside () =
   let base = temp_dir () in
-  let dir = Filename.concat base "volatile" in
+  let dir = Filename.concat base "removed-outside" in
   ignore (KF.ensure_dir dir);
-  check bool "exists after ensure" true (Sys.file_exists dir);
-  (* Remove directory externally *)
   Unix.rmdir dir;
-  check bool "gone after rmdir" false (Sys.file_exists dir);
-  (* Invalidate cache and re-ensure *)
-  KF.invalidate_dir dir;
-  ignore (KF.ensure_dir dir);
-  check bool "recreated after invalidate" true (Sys.file_exists dir);
+  check string "returns path" dir (KF.ensure_dir dir);
+  check bool "recreated without invalidation" true (Sys.file_exists dir);
   cleanup_dir base
 
-let test_clear_dir_cache () =
+(* Four domains ensure the same new directories at once. Nothing serialises
+   them, so each may stat or create a path another is creating; every call
+   must still return its path with the directory there. *)
+let test_ensure_dir_from_many_domains () =
   let base = temp_dir () in
-  let dir = Filename.concat base "cleartest" in
-  ignore (KF.ensure_dir dir);
-  KF.clear_dir_cache ();
-  (* After clearing cache, ensure_dir should re-check filesystem *)
-  Unix.rmdir dir;
-  ignore (KF.ensure_dir dir);
-  check bool "recreated after cache clear" true (Sys.file_exists dir);
+  let paths = List.init 8 (fun i -> Filename.concat base (Printf.sprintf "shared/%d/leaf" i)) in
+  (* Alcotest's checks print through Format, which one domain at a time may
+     use; the domains only count, and the checks run after they join. *)
+  let calls = Atomic.make 0 in
+  let wrong = Atomic.make 0 in
+  Eio_main.run (fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let domain_mgr = Eio.Stdenv.domain_mgr env in
+    Eio.Fiber.all
+      (List.init 4 (fun _ () ->
+         Eio.Domain_manager.run domain_mgr (fun () ->
+           for _ = 1 to 50 do
+             List.iter
+               (fun path ->
+                  Atomic.incr calls;
+                  if not (String.equal (KF.ensure_dir path) path) then Atomic.incr wrong)
+               paths
+           done))));
+  check int "every call ran" (4 * 50 * List.length paths) (Atomic.get calls);
+  check int "every call returned its path" 0 (Atomic.get wrong);
+  List.iter
+    (fun path -> check bool ("exists " ^ path) true (Sys.is_directory path))
+    paths;
   cleanup_dir base
 
-let test_ensure_dir_failure_does_not_poison_mutex () =
+let test_ensure_dir_failure_does_not_stop_later_calls () =
   let base = temp_dir () in
   let blocker = Filename.concat base "blocker" in
   let oc = open_out blocker in
@@ -651,11 +665,12 @@ let () =
     [
       ( "ensure_dir",
         [
-          test_case "creates and caches" `Quick test_ensure_dir_creates_and_caches;
-          test_case "invalidate" `Quick test_ensure_dir_invalidate;
-          test_case "clear cache" `Quick test_clear_dir_cache;
-          test_case "failure does not poison mutex" `Quick
-            test_ensure_dir_failure_does_not_poison_mutex;
+          test_case "creates a directory" `Quick test_ensure_dir_creates_a_directory;
+          test_case "recreates a directory removed outside" `Quick
+            test_ensure_dir_recreates_a_directory_removed_outside;
+          test_case "many domains at once" `Quick test_ensure_dir_from_many_domains;
+          test_case "a failure does not stop later calls" `Quick
+            test_ensure_dir_failure_does_not_stop_later_calls;
         ] );
       ( "save_atomic",
         [

@@ -95,11 +95,12 @@ let cached_dashboard_json_result ~now:clock ~sync_first ~sw ~cache ~key ~placeho
   let run_compute_and_store entry =
     let result =
       (* Offload via the Executor_pool, NOT [Eio_guard.run_in_systhread].
-         The keeper-* computes transitively reach [Keeper_fs.ensure_dir],
-         which takes the shared [dir_mu] through [Eio.Mutex.use_rw ~protect].
+         The keeper-* computes transitively take process-shared Eio mutexes,
+         such as the one [Keeper_types_support.keeper_execution_receipt_store]
+         takes through [Eio.Mutex.use_rw ~protect].
          On a bare systhread there is no Eio effect handler, so [Cancel.protect]
          performs [Get_context] with no handler -> [Effect.Unhandled], which
-         [use_rw] turns into a poison of [dir_mu] -> every file write in the
+         [use_rw] turns into a poison of that mutex -> every later caller in the
          process then fails with [Eio.Mutex.Poisoned] (keeper persistence dies).
          Executor_pool workers run [f] inside [Eio.Switch.run] (a real fiber
          with a [Get_context] handler), so [use_rw] resolves normally; when no

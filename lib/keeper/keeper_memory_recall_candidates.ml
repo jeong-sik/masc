@@ -2,10 +2,15 @@ type t = { id : string; line : Yojson.Safe.t; line_bytes : int }
 
 let utc_day seconds =
   match Ptime.of_float_s seconds with
-  | None -> `Null
+  | None -> None
   | Some time ->
     let year, month, day = Ptime.to_date time in
-    `String (Printf.sprintf "%04d-%02d-%02d" year month day)
+    Some (Printf.sprintf "%04d-%02d-%02d" year month day)
+
+let day_json seconds =
+  match utc_day seconds with
+  | Some day -> `String day
+  | None -> `Null
 
 let of_fact (fact : Keeper_memory_os_types.fact) =
   let id = Keeper_memory_os_types.memory_id fact in
@@ -13,8 +18,8 @@ let of_fact (fact : Keeper_memory_os_types.fact) =
     ["question_id", `String id;
      "category", `String (Keeper_memory_os_types.category_to_string fact.category);
      "claim", `String fact.claim;
-     "first_seen", utc_day fact.first_seen;
-     "last_seen", utc_day fact.last_seen;
+     "first_seen", day_json fact.first_seen;
+     "last_seen", day_json fact.last_seen;
      "origin", `String (Keeper_memory_os_types.origin_kind_to_string fact.origin.kind)] in
   { id; line; line_bytes = String.length (Yojson.Safe.to_string line) }
 

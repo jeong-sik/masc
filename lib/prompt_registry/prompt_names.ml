@@ -175,6 +175,28 @@ let keeper_world_frame_held_rows_sections = "keeper.world.frame.held_rows_sectio
    recent-conversation rows in the turn context. *)
 let keeper_world_transcript_header = "keeper.world.transcript.header"
 let keeper_world_transcript_intro = "keeper.world.transcript.intro"
+(* The two blocks of the recall judgment (RFC-keeper-recall-reaches-the-turn
+   section 4.4): the status line a judged turn always carries, and the body of
+   the memories the judgment carried. *)
+let keeper_recall_status_selected = "keeper.recall.status.selected"
+let keeper_recall_status_selected_ids = "keeper.recall.status.selected_ids"
+let keeper_recall_status_none_found_needed = "keeper.recall.status.none_found_needed"
+let keeper_recall_status_none_found_unsure = "keeper.recall.status.none_found_unsure"
+let keeper_recall_status_none_needed = "keeper.recall.status.none_needed"
+let keeper_recall_status_unavailable = "keeper.recall.status.unavailable"
+let keeper_recall_status_unavailable_turn_question =
+  "keeper.recall.status.unavailable_turn_question"
+let keeper_recall_status_partial = "keeper.recall.status.partial"
+let keeper_recall_status_search_hint = "keeper.recall.status.search_hint"
+let keeper_recall_status_search_hint_unavailable =
+  "keeper.recall.status.search_hint_unavailable"
+let keeper_recall_body_heading = "keeper.recall.body.heading"
+let keeper_recall_body_item = "keeper.recall.body.item"
+let keeper_recall_body_source_board = "keeper.recall.body.source_board"
+let keeper_recall_body_time_bound = "keeper.recall.body.time_bound"
+let keeper_recall_body_time_unjudged = "keeper.recall.body.time_unjudged"
+let keeper_recall_body_omitted = "keeper.recall.body.omitted"
+
 let keeper_world_active_goals_unavailable = "keeper.world.active_goals.unavailable"
 let keeper_world_active_goals_heading = "keeper.world.active_goals.heading"
 let keeper_world_active_goals_criterion = "keeper.world.active_goals.criterion"

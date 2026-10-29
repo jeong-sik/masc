@@ -26,13 +26,18 @@ val retain_projection : t -> reason:string -> payload:Yojson.Safe.t -> (unit,str
 (** Save a proposed provider-bound projection. This is not a delivery receipt;
     actual request captures establish transmission. *)
 
-val evaluate : ?clock:[> float Eio.Time.clock_ty] Eio.Resource.t -> t ->
+val evaluate : clock:[> float Eio.Time.clock_ty] Eio.Resource.t option -> t ->
   state:Yojson.Safe.t -> questions:(string * Typesafeai_types.question) list ->
   (Typesafeai_types.eval_response, Keeper_workspace_memory_selection.evaluation_error) result
 (** Save the input before HTTP dispatch and the typed response before returning
     it. Persistence failure prevents selection from consuming an unretained
     judgment. Cancellation records a terminal attempt when possible and propagates.
-    Records contain private source data and sanitized destination identities. *)
+    Records contain private source data and sanitized destination identities.
+
+    [clock] has no default, so a caller has to decide. The client puts a time
+    limit on a request only with a clock; with [None] the request is sent
+    without any limit and a destination that accepts the connection and never
+    answers is waited on for good. *)
 
 module For_testing : sig
   val evaluate_with :

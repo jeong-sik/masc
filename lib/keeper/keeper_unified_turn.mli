@@ -119,13 +119,6 @@ type turn_success =
     and a non-executable phase remain distinct so a durable source cannot be
     acknowledged as completed work. *)
 
-val autonomous_yield_request
-  :  base_path:string
-  -> keeper_name:string
-  -> (Keeper_agent_run.yield_request option, string) result
-(** Read Owner chat readiness and ready durable stimuli at a safe boundary.
-    Waiting inputs remain durable without forcing an unproductive checkpoint. *)
-
 val hitl_replay_preemption_request
   :  resolution_deliverable:(Keeper_event_queue.hitl_resolution -> bool)
   -> now:float
@@ -137,48 +130,22 @@ val hitl_replay_preemption_request
     still unspent, so a resolution already threaded into the current turn
     (grant consumed at tool-bundle build) never preempts its own run. *)
 
-val hitl_replay_yield_request
-  :  base_path:string
-  -> keeper_name:string
-  -> (Keeper_agent_run.yield_request option, string) result
-(** [hitl_replay_preemption_request] over the keeper's durable queue snapshot
-    with the runtime deliverability predicate (approval left the pending map,
-    grant durably unspent). *)
-
-val connector_attention_preemption_request
-  :  now:float
-  -> Keeper_event_queue.t
-  -> Keeper_agent_run.yield_request option
-(** Pure post-tool boundary decision (#20849): yield the in-flight [Woken]
-    source when a pending [Connector_attention] stimulus — an ambient
-    connector conversation message — is waiting. The owner-operation probe
-    above already covers a person's direct address; this covers the ambient
-    class, which had no mid-turn preemption before. Any pending
-    [Connector_attention] in the supplied queue preempts. The production
-    source-turn caller first excludes its exact admitted selections; selection
-    itself leaves them pending until their consumer settles. *)
-
-val connector_attention_waiting
-  :  base_path:string
-  -> keeper_name:string
-  -> (Keeper_agent_run.yield_request option, string) result
-(** [connector_attention_preemption_request] over the keeper's durable queue
-    snapshot. *)
-
-
 module For_testing : sig
   val autonomous_yield_probe
-    :  wake:Keeper_registry.wake_reason
-    -> sources:Keeper_heartbeat_source_batch.t
+    :  turn_input:Keeper_heartbeat_source_batch.turn_input
     -> base_path:string
     -> keeper_name:string
     -> (unit -> (Keeper_agent_run.yield_request option, string) result)
        * (unit -> int)
-  (** The production source-turn callback plus its actual attention batch-read
-      count. A source preempts only when the queue admitted it after intake
-      read it, which no edit of an entry intake already saw (reprioritize,
-      defer, retention) can change. The counter observes reads; it cannot
-      change cache decisions. *)
+  (** The production source-turn callback for [turn_input], plus its actual
+      attention batch-read count. It yields to a claimable chat, to an approved
+      Gate resolution whose grant is unspent, and to a message to the Keeper,
+      a result it asked for, or input that voids its work, when the queue
+      admitted that row after the intake of [turn_input] read it. Ambient
+      signals, timers and the turn's own tool receipts never preempt. No edit
+      of an entry intake already saw (reprioritize, defer, retention) makes it
+      a later arrival. The counter observes reads; it cannot change cache
+      decisions. *)
 end
 
 val continuation_channel_of_wake :

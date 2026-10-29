@@ -6109,32 +6109,26 @@ let test_scheduled_source_handoff case () =
   submit first;
   Eio.Promise.await started;
   submit next;
-  let observed = observed_token owner in
-  let accepted = match case with
-    | Natural_completion_handoff ->
-      Option.is_some (owner_ok (Owner.observe_scheduled_turn owner [selection]))
-    | Checkpoint_handoff | Withdrawn_handoff | Reinserted_handoff
-    | Unavailable_handoff | Scoped_release_handoff | Failed_chat_handoff
-    | Unconfirmed_checkpoint_handoff | Failed_listener_handoff | Missing_listener_handoff
-    | Paused_handoff | Ended_consumer_handoff | Replaced_consumer_handoff ->
-      owner_ok (Owner.request_scheduled_turn owner ~observed [selection]) in
+  let accepted = Option.is_some (owner_ok (Owner.observe_scheduled_turn owner [selection])) in
   check bool "handoff requires a live release consumer"
     (case <> Missing_listener_handoff) accepted;
   let captured = owner_ok (Owner.scheduled_turn_handoff owner) in
   (match case, captured with
    | Scoped_release_handoff, Some old ->
-     check bool "additional exact source is reserved" true
-       (owner_ok (Owner.request_scheduled_turn owner ~observed [other]));
+     (* The release below removes only [selection]. The cohort check after the
+        source slot starts therefore proves that [other] was reserved here. *)
+     ignore (Owner.observe_scheduled_turn owner [other] |> owner_ok);
      Owner.release_scheduled_turn owner ~handoff:old |> owner_ok
    | Ended_consumer_handoff, _ ->
-     ignore (Owner.request_scheduled_turn owner ~observed [other] |> owner_ok);
+     ignore (Owner.observe_scheduled_turn owner [other] |> owner_ok);
      Owner.end_scheduled_turn_consumer owner ~consumer |> owner_ok;
-     check bool "ending the consumer rejects late reservation" false
-       (Owner.request_scheduled_turn owner ~observed [selection] |> owner_ok)
+     check bool "ending the consumer rejects late reservation" true
+       (Option.is_none (Owner.observe_scheduled_turn owner [selection] |> owner_ok))
    | Replaced_consumer_handoff, Some old ->
      ignore (Owner.begin_scheduled_turn_consumer owner |> owner_ok);
-     check bool "replacement owns new reservations" true
-       (Owner.request_scheduled_turn owner ~observed [selection; other] |> owner_ok);
+     (* The cohort size of 2 checked after the source slot starts proves that
+        the replacement reserved both. *)
+     ignore (Owner.observe_scheduled_turn owner [selection; other] |> owner_ok);
      Owner.end_scheduled_turn_consumer owner ~consumer |> owner_ok;
      Owner.release_scheduled_turn owner ~handoff:old |> owner_ok
    | Paused_handoff, _ ->
@@ -6173,9 +6167,7 @@ let test_scheduled_source_handoff case () =
     check (list string) "one source slot then fresh chat and original continuation"
       (if case = Natural_completion_handoff then ["chat"; "source"; "fresh"]
        else ["chat"; "source"; "fresh"; "resumed"]) !order;
-    check int "reservation itself delivers the release wake" 1 !wakes;
-    check bool "old child cannot reserve a later slot" false
-      (owner_ok (Owner.request_scheduled_turn owner ~observed [selection])))
+    check int "reservation itself delivers the release wake" 1 !wakes)
   else (
     let observation = match case with
       | Unavailable_handoff -> Error "durable queue read unavailable"
@@ -6188,6 +6180,40 @@ let test_scheduled_source_handoff case () =
     check bool "stale, paused or failed handoff releases its scoped reservation" true
       (Option.is_none (owner_ok (Owner.scheduled_turn_handoff owner)));
     check bool "no failed handoff dispatches source work" false (List.mem "source" !order));
+  ignore (Owner.begin_stopping owner |> owner_ok)
+;;
+
+(* A scheduled cohort is reserved only behind a busy Direct child, whose
+   natural terminal would otherwise hand the next slot to queued chat. An idle
+   Owner and an autonomous child reserve nothing: that child already owns its
+   input. A consumer is registered and the Owner can release a slot, so any
+   reservation here would be accepted. *)
+let test_scheduled_cohort_is_reserved_only_behind_a_direct_child () =
+  Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
+  let path = Filename.temp_file "keeper-owner-scheduled-observe-" ".sqlite3" in
+  Unix.unlink path;
+  Eio.Switch.on_release sw (fun () -> if Sys.file_exists path then Unix.unlink path);
+  let owner = Owner.start ~sw
+    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+    ~operation_store_path:path
+    ~session_root:(Filename.concat (Filename.dirname path) "traces")
+    ~now:(fun () -> 42.)
+    ~operation_runner:None
+    ~on_turn_slot_released:(Some (fun () -> ()))
+    ~keeper_name:"scheduled-observe"
+    ~initial_meta:(Some (make_meta "scheduled-observe")) |> owner_ok in
+  ignore (Owner.begin_scheduled_turn_consumer owner |> owner_ok);
+  let cohort = [ scheduled_selection "occurrence-observed" ] in
+  let reserves () =
+    Option.is_some (owner_ok (Owner.observe_scheduled_turn owner cohort)) in
+  check bool "an idle Owner reserves nothing" false (reserves ());
+  (match Owner.run_autonomous_if_idle owner reserves with
+   | Ok (`Ran reserved) -> check bool "an autonomous child reserves nothing" false reserved
+   | Ok (`Busy _) -> fail "the idle Owner did not admit the autonomous child"
+   | Ok `Interrupted -> fail "nothing interrupted the autonomous child"
+   | Error error -> fail (Owner.error_to_string error));
+  check bool "no reservation outlives the child" true
+    (Option.is_none (owner_ok (Owner.scheduled_turn_handoff owner)));
   ignore (Owner.begin_stopping owner |> owner_ok)
 ;;
 
@@ -6282,7 +6308,9 @@ let () =
       ; test_case "missing release listener cannot reserve a slot" `Quick
           (test_scheduled_source_handoff Missing_listener_handoff)
       ; test_case "pause wins over scheduled reservation" `Quick
-          (test_scheduled_source_handoff Paused_handoff) ] )
+          (test_scheduled_source_handoff Paused_handoff)
+      ; test_case "only a busy direct child holds a scheduled reservation" `Quick
+          test_scheduled_cohort_is_reserved_only_behind_a_direct_child ] )
     ; ( "input ownership", [test_case "writer binds child, lane and exact predecessor" `Quick
           test_input_writer_is_bound_to_child_and_predecessor] )
     ; ( "retry_deadline_rearm",

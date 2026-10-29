@@ -42,10 +42,11 @@ type durable_stimulus_summary = {
   head_age_sec : float;
   kinds : Keeper_event_queue.stimulus_payload list;
 }
-(** What the durable queue held at the instant the turn yielded. The yield
-    condition is [pending <> empty], so a yield record without this says only
-    that a yield happened, not what it yielded to — which cannot distinguish
-    healthy cooperation from a keeper that never finishes a turn. *)
+(** What the turn yielded to. It yields when a row of a kind that may preempt
+    reached the queue after its intake, or when an approved Gate resolution is
+    deliverable; [head] is that row. A yield record without this says only that
+    a yield happened, not what it yielded to — which cannot distinguish healthy
+    cooperation from a keeper that never finishes a turn. *)
 
 type yield_reason =
   | Operation_queued

@@ -163,9 +163,8 @@ val stimulus_ready_for_intake
   :  base_path:string
   -> Keeper_event_queue.stimulus
   -> bool
-(** Shared readiness predicate for batch intake and cooperative preemption.
-    An approval still pending, or whose pending state cannot be read, does
-    not authorize yielding to a successor that intake cannot dispatch. *)
+(** Readiness predicate for batch intake. An approval still pending, or whose
+    pending state cannot be read, is not ready: intake cannot dispatch it. *)
 
 (** [ready_hitl_resolution_peek ~base_path ~keeper_name] returns the first
     queued [Hitl_resolved] whose approval has left the pending map, without

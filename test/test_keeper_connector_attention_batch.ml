@@ -243,6 +243,42 @@ let scheduled_wake_stimulus ~occurrence ~arrived_at : Q.stimulus =
   }
 ;;
 
+(* What someone else sent this Keeper, as the queue holds it. Intake consumes
+   it without reading another store. *)
+let workspace_message_stimulus ~id ~arrived_at : Q.stimulus =
+  let message : Q.workspace_message =
+    { wmsg_request_id = id; wmsg_from = "peer-keeper" }
+  in
+  { Q.post_id = Q.workspace_message_post_id message
+  ; urgency = Q.Immediate
+  ; arrived_at
+  ; payload = Q.Workspace_message message
+  }
+;;
+
+(* The answer to a request this Keeper made itself. *)
+let delegate_completed_stimulus ~id ~arrived_at : Q.stimulus =
+  { Q.post_id = id
+  ; urgency = Q.Immediate
+  ; arrived_at
+  ; payload =
+      Q.Delegate_completed
+        { dc_operation_id = id
+        ; dc_keeper = "original-delegate"
+        ; dc_terminal = Q.Delegate_replied "delegate result"
+        }
+  }
+;;
+
+(* The receipt is a SHA256 pointer into the Keeper's tool outbox. *)
+let tool_result_stimulus ~receipt ~arrived_at : Q.stimulus =
+  { Q.post_id = "keeper-tool-result:" ^ receipt
+  ; urgency = Q.Immediate
+  ; arrived_at
+  ; payload = Q.Tool_result_ready receipt
+  }
+;;
+
 let approve_grant_exn ~base_path ~keeper_name ~request =
   let approval_id =
     match
@@ -317,6 +353,24 @@ let with_ctx keeper_name f =
   f ~base_path ~keeper_name ~meta ~ctx
 ;;
 
+(* A free-slot listener, so an Owner is able to reserve the next slot. *)
+let slot_released ~keeper_name:_ = ()
+
+(* The Owner a source turn asks about chat readiness. *)
+let start_owner ~(ctx : _ Keeper_types_profile.context) ~base_path ~meta
+      ~operation_runner ~on_turn_slot_released =
+  (match
+     Keeper_owner_registry.install_from_store
+       ~sw:ctx.sw ~operation_runner ~on_turn_slot_released ctx.config
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
+  match Keeper_owner_registry.create_meta ~base_path meta with
+  | Ok (Some _) -> ()
+  | Ok None -> fail "owner fixture metadata disappeared"
+  | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
+;;
+
 let test_scheduled_work_is_not_batched_with_other_requests () =
   with_ctx "all-ready-batch" (fun ~base_path ~keeper_name ~meta ~ctx ->
     let board =
@@ -361,13 +415,12 @@ let test_scheduled_work_is_not_batched_with_other_requests () =
        |> Result.value ~default:(-1)))
 ;;
 
-(* Exercise the actual durable queue, intake, handoff candidate read and
-   checkpoint/terminal settlement boundaries. No provider or model is simulated:
-   these decisions are assertions about source ownership, not tool effects. *)
+(* Exercise the actual durable queue, intake and checkpoint/terminal
+   settlement boundaries. No provider or model is simulated: these decisions
+   are assertions about source ownership, not tool effects. *)
 let test_scheduled_checkpoint_successor_and_resume () =
   with_ctx "schedule-continuation" (fun ~base_path ~keeper_name ~meta ~ctx ->
     let module Batch = Keeper_heartbeat_source_batch in
-    let module Handoff = Keeper_scheduled_turn_handoff in
     let require = function Ok value -> value | Error detail -> fail detail in
     let first = scheduled_wake_stimulus ~occurrence:1 ~arrived_at:1. in
     let second = scheduled_wake_stimulus ~occurrence:2 ~arrived_at:2. in
@@ -380,8 +433,6 @@ let test_scheduled_checkpoint_successor_and_resume () =
     let intake priority_sources =
       Keeper_heartbeat_stimulus_intake.heartbeat_event_intake_with_priority
         ~priority_sources ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
-    let successors batch = Handoff.successors ~intake:batch ~base_path ~keeper_name
-      |> require in
     let complete selection =
       match Keeper_registry_event_queue.terminalize_pending_turn_completed_result
         ~base_path keeper_name ~applied_at:100. ~selection |> require with
@@ -404,23 +455,23 @@ let test_scheduled_checkpoint_successor_and_resume () =
     enqueue_exn ~base_path keeper_name first;
     let first_batch = (intake []).source_batch in
     enqueue_exn ~base_path keeper_name second;
-    let handoff = successors first_batch in
-    check (list string) "a newly arrived schedule receives the next slot"
-      [second.post_id] (ids handoff);
+    (* The Owner reserves the next slot for the occurrence that came due while
+       the first one ran, and intake admits that exact occurrence ahead of
+       queue order. *)
+    let handoff = Keeper_scheduled_turn_handoff.pending ~base_path ~keeper_name
+      |> require
+      |> List.filter (fun (s : Keeper_event_queue_state.pending_selection) ->
+           s.source.post_id = second.post_id) in
     checkpoint first_batch;
     check (list string) "cold durable reload retains both exact requests behind the successor"
       [second.post_id; first.post_id] (ids (cold_pending ()));
     let second_batch = (intake handoff).source_batch in
     check (list string) "successor owns only its occurrence"
       [second.post_id] (ids (Batch.selections second_batch));
-    check (list string) "suspended predecessor cannot preempt its successor"
-      [] (ids (successors second_batch));
     let validated, withdrawn = Batch.validate ~diagnostic:None
       ~standing:(fun selection -> Keeper_registry_event_queue.admitted_selection_standing_result
         ~base_path keeper_name ~selection) second_batch |> require in
     check int "dispatch did not withdraw successor" 0 (List.length withdrawn);
-    check (list string) "dispatch validation retains the intake cohort"
-      [] (ids (successors validated));
     List.iter (fun selection -> ignore (complete selection)) (Batch.selections validated);
     check (list string) "successor terminal leaves original work pending"
       [first.post_id] (ids (cold_pending ()));
@@ -434,8 +485,6 @@ let test_scheduled_checkpoint_successor_and_resume () =
        check string "resumed request retains its original body"
          "scheduled batch work" wake.message
      | _ -> fail "resumed work has no exact scheduled prompt observation");
-    check (list string) "completed successor is never reexecuted" []
-      (ids (successors resumed.source_batch));
     checkpoint resumed.source_batch;
     check (list string) "another checkpoint cannot complete the original"
       [first.post_id] (ids (cold_pending ()));
@@ -476,10 +525,11 @@ let test_scheduled_continuation_withdrawal_and_reinsertion () =
     (* Even byte-identical reinsertion has a new durable incarnation. It must
        not inherit the old turn's exclusion or completion authority. *)
     enqueue_exn ~base_path keeper_name original;
-    let successors = Keeper_scheduled_turn_handoff.successors ~intake:captured
-      ~base_path ~keeper_name |> require in
-    check int "reinserted occurrence is new work for the active turn" 1
-      (List.length successors);
+    let reinserted = Keeper_scheduled_turn_handoff.pending ~base_path ~keeper_name
+      |> require in
+    check int "reinserted occurrence is pending once" 1 (List.length reinserted);
+    check bool "reinserted occurrence is new work for the active turn" true
+      (List.for_all (Batch.arrived_since_intake captured) reinserted);
     (match validate captured with
      | Error detail ->
        check string "replacement strictly rejects old incarnation authority"
@@ -489,7 +539,7 @@ let test_scheduled_continuation_withdrawal_and_reinsertion () =
     let current = Keeper_registry_event_queue.pending_selections_result
       ~base_path keeper_name |> require in
     check bool "stale validation leaves the exact replacement pending" true
-      (current = successors);
+      (current = reinserted);
     let replacement = (intake ()).source_batch in
     check bool "next intake owns the current replacement incarnation" true
       (Batch.selections replacement = current);
@@ -948,16 +998,14 @@ let test_failed_connector_batch_skips_shared_store_without_starving_other_work (
        |> Result.map Q.length |> Result.value ~default:(-1)))
 ;;
 
-let test_proactive_yields_only_to_ready_intake () =
-  with_ctx "proactive-ready-intake" (fun ~base_path ~keeper_name ~meta ~ctx ->
-    (match Keeper_owner_registry.install_from_store
-        ~sw:ctx.sw ~operation_runner:None ~on_turn_slot_released:None ctx.config with
-     | Ok _ -> ()
-     | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
-    (match Keeper_owner_registry.create_meta ~base_path meta with
-     | Ok (Some _) -> ()
-     | Ok None -> fail "readiness fixture metadata disappeared"
-     | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+(* A proactive turn has no source of its own. What it finds in the queue, a
+   pending approval and a ready source included, waits for the next intake,
+   with or without a readable chat store. Only a row that arrives after that
+   intake and may preempt stops it. *)
+let test_backlog_never_interrupts_proactive_progress () =
+  with_ctx "proactive-backlog" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    start_owner ~ctx ~base_path ~meta ~operation_runner:None
+      ~on_turn_slot_released:None;
     (match Keeper_approval_queue.install_persistence ~base_path with
      | Ok _ -> ()
      | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
@@ -975,28 +1023,27 @@ let test_proactive_yields_only_to_ready_intake () =
           ; channel = Keeper_continuation_channel.unrouted "readiness fixture" } }
     in
     enqueue_exn ~base_path keeper_name waiting;
-    let yield_request () =
-      match Keeper_unified_turn.autonomous_yield_request ~base_path ~keeper_name with
+    let yield_request turn_input =
+      let probe, _ = Keeper_unified_turn.For_testing.autonomous_yield_probe
+        ~turn_input ~base_path ~keeper_name in
+      match probe () with
       | Ok request -> request
       | Error detail -> fail detail
     in
+    let proactive = Keeper_heartbeat_source_batch.for_turn ~reactive:false
+      Keeper_heartbeat_source_batch.empty in
     check bool "pending approval does not interrupt proactive progress" true
-      (Option.is_none (yield_request ()));
+      (Option.is_none (yield_request proactive));
     let ready : Q.stimulus =
       { post_id = "ready-bootstrap"; urgency = Q.Normal; arrived_at = 2.0
       ; payload = Q.Bootstrap }
     in
     enqueue_exn ~base_path keeper_name ready;
-    (match yield_request () with
-     | Some {Keeper_agent_run.reason = Durable_stimulus_waiting summary} ->
-       check int "only ready successor is reported" 1 summary.pending_count;
-       check (option string) "ready source owns the yield" (Some ready.post_id)
-         (Option.map (fun (source : Q.stimulus) -> source.post_id) summary.head)
-     | Some {Keeper_agent_run.reason = Operation_queued} | None ->
-       fail "ready event did not request the next intake");
+    check bool "a ready source does not interrupt proactive progress either" true
+      (Option.is_none (yield_request proactive));
     let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
         ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
-    check (list string) "intake agrees with proactive readiness" [ready.post_id]
+    check (list string) "the next intake admits it" [ready.post_id]
       (List.map (fun (source : Q.stimulus) -> source.post_id)
          (Keeper_heartbeat_source_batch.stimuli intake.source_batch));
     check int "observation and selection preserve both durable sources" 2
@@ -1017,11 +1064,20 @@ let test_proactive_yields_only_to_ready_intake () =
      | Ok () -> fail "broken chat store appeared readable");
     check bool "chat outage is explicitly projected" true
       (Keeper_owner.operation_projection owner).store_unavailable;
-    (match yield_request () with
+    let after_intake = Keeper_heartbeat_source_batch.for_turn ~reactive:false
+      intake.source_batch in
+    check bool "chat outage does not make backlog interrupt the turn" true
+      (Option.is_none (yield_request after_intake));
+    let message = workspace_message_stimulus ~id:"peer-after-intake" ~arrived_at:3.0 in
+    enqueue_exn ~base_path keeper_name message;
+    (match yield_request after_intake with
      | Some {Keeper_agent_run.reason = Durable_stimulus_waiting summary} ->
-       check int "chat outage still allows independent event progress" 1 summary.pending_count
+       check int "chat outage still allows a new message to be reported alone" 1
+         summary.pending_count;
+       check (option string) "the new message owns the yield" (Some message.post_id)
+         (Option.map (fun (source : Q.stimulus) -> source.post_id) summary.head)
      | Some {Keeper_agent_run.reason = Operation_queued} | None ->
-       fail "chat outage prevented independent ready event progress"))
+       fail "a message arriving after intake did not request the next intake"))
 ;;
 
 let test_one_intake_admits_only_one_hitl_resolution () =
@@ -1470,7 +1526,7 @@ let test_checkpoint_rotates_whole_connector_conversation_after_boundary () =
       [a1.post_id;a2.post_id] (ids (Batch.selections original));
     let input = Batch.for_turn ~reactive:true original in
     let probe = fst (Keeper_unified_turn.For_testing.autonomous_yield_probe
-      ~wake:(Batch.wake input) ~sources:(Batch.sources input) ~base_path ~keeper_name) in
+      ~turn_input:input ~base_path ~keeper_name) in
     check bool "the unadmitted A suffix is not a new arrival" true
       (Option.is_none (probe () |> require));
     let scope = Keeper_chat_operation.Operation_id.of_string "original-A-consumer"
@@ -2069,9 +2125,11 @@ let test_official_turn_keeps_tool_result_until_completion () =
           Keeper_agent_run.For_testing.native_tool_boundary
             ~repetition_execution:None
             ~terminal_effect_state:Keeper_tools_agent_core.Terminal_effect_open
-            ~yield_requested:(Some (fun () ->
-              Keeper_unified_turn.autonomous_yield_request
-                ~base_path ~keeper_name))
+            ~yield_requested:(Some (fst (
+              Keeper_unified_turn.For_testing.autonomous_yield_probe
+                ~turn_input:(Keeper_heartbeat_source_batch.for_turn ~reactive:false
+                               Keeper_heartbeat_source_batch.empty)
+                ~base_path ~keeper_name)))
         with
         | Ok (Runtime_agent.Yield Runtime_agent.Operation_queued) -> ()
         | Ok (Runtime_agent.Yield _ | Runtime_agent.Continue) | Error _ ->
@@ -2143,7 +2201,7 @@ let test_running_source_observes_new_completion_after_intake () =
              backlog);
         let input = Batch.for_turn ~reactive:true intake.source_batch in
         let make_probe () = fst (Keeper_unified_turn.For_testing.autonomous_yield_probe
-          ~wake:(Batch.wake input) ~sources:(Batch.sources input) ~base_path ~keeper_name) in
+          ~turn_input:input ~base_path ~keeper_name) in
         let probe = make_probe () in
         check bool "neither own selections nor bounded existing backlog cause checkpoint exchange" true
           (Option.is_none (probe () |> require));
@@ -2222,7 +2280,7 @@ let test_running_source_does_not_preempt_after_queue_edit ~case ~edit () =
     check int "one running source admitted" 1 (Batch.count intake.source_batch);
     let input = Batch.for_turn ~reactive:true intake.source_batch in
     let probe = fst (Keeper_unified_turn.For_testing.autonomous_yield_probe
-      ~wake:(Batch.wake input) ~sources:(Batch.sources input) ~base_path ~keeper_name) in
+      ~turn_input:input ~base_path ~keeper_name) in
     check bool (case ^ " intake does not preempt itself") true
       (Option.is_none (probe () |> require));
     let selection = match Batch.selections intake.source_batch with
@@ -2265,6 +2323,402 @@ let test_running_source_does_not_preempt_after_defer () =
     ()
 ;;
 
+(* The payload kinds that stop a running turn when they reach the queue after
+   its intake read it. *)
+let stops_a_running_turn : Q.stimulus_payload -> bool = function
+  | Q.Connector_attention _ | Q.Workspace_message _ | Q.Ask_answered _
+  | Q.Completion_authority_rejected _ | Q.Task_cancelled _ | Q.Fusion_completed _
+  | Q.Delegate_completed _ | Q.Composition_completed _ | Q.Owned_job_completed _
+  | Q.Addon_operation_changed _ | Q.Task_outcome _ -> true
+  | Q.Bootstrap | Q.Board_signal _ | Q.Board_attention _ | Q.Schedule_due _
+  | Q.Hitl_resolved _ | Q.Tool_result_ready _ -> false
+;;
+
+(* One queue row of every payload kind, in the same order for every [case].
+   [case] keeps ids and pointers apart between rows. The Hitl_resolved row is
+   a rejection, which carries no grant to starve, so it never stops a turn. *)
+let one_row_of_every_kind ~base_path ~keeper_name ~case ~arrived_at : Q.stimulus list =
+  let tag = string_of_int case in
+  let channel = Keeper_continuation_channel.unrouted "preempt-table" in
+  let row post_id payload : Q.stimulus =
+    { Q.post_id; urgency = Q.Low; arrived_at; payload } in
+  let trace_id = Random_id.uuid_v7 () in
+  let job_source : Keeper_owned_job_identity.source =
+    { task_id = Some "table-task"
+    ; turn_ref = Some (Ids.Turn_ref.make ~trace_id ~absolute_turn:7)
+    ; tool_use_id = Some "table-call"; trace_id = Some trace_id; keeper_turn_id = Some 7 } in
+  let authority = Masc_domain.System_llm_agent { agent_run_id = "judge-" ^ tag } in
+  (* A SHA256-shaped pointer, as a tool receipt and an add-on origin carry. *)
+  let receipt =
+    Digest.to_hex (Digest.string (tag ^ "-a")) ^ Digest.to_hex (Digest.string (tag ^ "-b")) in
+  let hitl : Q.hitl_resolution =
+    { approval_id = "approval-" ^ tag; decision = Q.Hitl_rejected "fixture"; channel } in
+  let ask : Q.ask_answered = { ask_id = "ask-" ^ tag; channel } in
+  let rejection : Q.completion_authority_rejection =
+    { car_task_id = "task-" ^ tag; car_verification_id = "verification-" ^ tag
+    ; car_reason = "fixture"; car_authority = authority } in
+  let cancellation : Q.task_cancellation =
+    { tc_task_id = "cancelled-" ^ tag; tc_cancelled_by = "peer-keeper"; tc_reason = None } in
+  let fusion : Q.fusion_completion =
+    { run_id = "fusion-" ^ tag; terminal = Q.Fusion_cancelled; board_post_id = ""; channel } in
+  let composition : Q.composition_completion =
+    { cc_request_id = "composition-" ^ tag; cc_tool = "fixture-tool"
+    ; cc_terminal = Q.Composition_succeeded } in
+  let job : Q.owned_job_completion =
+    { oj_job_id = Keeper_owned_job_identity.Job_id.fresh ()
+    ; oj_source = job_source; oj_channel = channel } in
+  let addon : Q.addon_operation_change =
+    { ao_origin_id = receipt; ao_publication_id = Random_id.uuid_v7 ()
+    ; ao_source = job_source; ao_channel = channel } in
+  let outcome : Q.task_outcome =
+    { to_task_id = "approved-" ^ tag; to_verification_id = "verification-" ^ tag
+    ; to_producer = "fixture-keeper"; to_authority = authority } in
+  [ board_distractor_stimulus ~post_id:("board-signal-" ^ tag) ~arrived_at
+  ; board_attention_stimulus ~label:("board-attention-" ^ tag) ~arrived_at
+  ; row ("bootstrap-" ^ tag) Q.Bootstrap
+  ; tool_result_stimulus ~receipt ~arrived_at
+  ; row (Q.fusion_completion_post_id fusion) (Q.Fusion_completed fusion)
+  ; scheduled_wake_stimulus ~occurrence:case ~arrived_at
+  ; connector_attention_stimulus ~base_path ~keeper_name ~channel_id:"preempt-table"
+      ~message_id:tag ~arrived_at ~content:"table fixture"
+  ; row (Q.hitl_resolution_post_id hitl) (Q.Hitl_resolved hitl)
+  ; row (Q.ask_answered_post_id ask) (Q.Ask_answered ask)
+  ; row (Q.completion_authority_rejection_post_id rejection)
+      (Q.Completion_authority_rejected rejection)
+  ; row (Q.task_cancellation_post_id cancellation) (Q.Task_cancelled cancellation)
+  ; workspace_message_stimulus ~id:tag ~arrived_at
+  ; delegate_completed_stimulus ~id:("delegate-" ^ tag) ~arrived_at
+  ; row (Q.composition_completion_post_id composition) (Q.Composition_completed composition)
+  ; row (Q.owned_job_completion_post_id job) (Q.Owned_job_completed job)
+  ; row (Q.addon_operation_change_post_id addon) (Q.Addon_operation_changed addon)
+  ; row (Q.task_outcome_post_id outcome) (Q.Task_outcome outcome)
+  ]
+;;
+
+(* A running turn stops for a message to the Keeper, a result it asked for or
+   input that voids its work, and only when that row reached the queue after
+   its intake read it. Every kind is tried both ways, for a turn whose intake
+   admitted nothing and for one whose intake admitted the row it saw. *)
+let test_only_new_input_of_the_right_kind_preempts () =
+  with_ctx "preempt-table" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    start_owner ~ctx ~base_path ~meta ~operation_runner:None
+      ~on_turn_slot_released:None;
+    let require = function Ok value -> value | Error detail -> fail detail in
+    let module Batch = Keeper_heartbeat_source_batch in
+    let pending () = Keeper_event_queue_persistence.pending_selections_result
+      ~base_path ~keeper_name |> require in
+    let clear () = List.iter (fun selection ->
+      Keeper_registry_event_queue.ack_pending_result ~base_path keeper_name ~selection
+      |> require) (pending ()) in
+    let run_shape ~admit_source ~case =
+      let seen_rows = one_row_of_every_kind ~base_path ~keeper_name ~case ~arrived_at:1. in
+      let arrived_rows =
+        one_row_of_every_kind ~base_path ~keeper_name ~case:(case + 1) ~arrived_at:2. in
+      List.iter2 (fun (seen : Q.stimulus) (arrived : Q.stimulus) ->
+        let kind = Q.payload_kind_label arrived.payload in
+        if stops_a_running_turn arrived.payload then
+          check bool (kind ^ " stops a turn only if intake can admit it") true
+            (Keeper_heartbeat_stimulus_intake.stimulus_ready_for_intake ~base_path arrived);
+        clear ();
+        enqueue_exn ~base_path keeper_name seen;
+        let frontier, read = Keeper_event_queue_persistence.pending_frontier_result
+          ~base_path ~keeper_name |> require in
+        let batch = Batch.of_intake ~frontier ~admitted:(if admit_source then read else []) in
+        check bool (kind ^ ": the row intake read is no later arrival") true
+          (List.for_all (fun row -> not (Batch.arrived_since_intake batch row)) read);
+        let probe = fst (Keeper_unified_turn.For_testing.autonomous_yield_probe
+          ~turn_input:(Batch.for_turn ~reactive:admit_source batch) ~base_path ~keeper_name) in
+        check bool (kind ^ " seen by intake never preempts") true
+          (Option.is_none (probe () |> require));
+        enqueue_exn ~base_path keeper_name arrived;
+        match probe () |> require with
+        | Some {Keeper_agent_run.reason = Durable_stimulus_waiting summary} ->
+          check bool (kind ^ " arriving after intake preempts") true
+            (stops_a_running_turn arrived.payload);
+          check (option string) (kind ^ " names the row that arrived") (Some arrived.post_id)
+            (Option.map (fun (source : Q.stimulus) -> source.post_id) summary.head)
+        | Some {reason = Operation_queued} -> fail (kind ^ " was mislabeled as chat")
+        | None ->
+          check bool (kind ^ " arriving after intake does not preempt") false
+            (stops_a_running_turn arrived.payload))
+        seen_rows arrived_rows
+    in
+    run_shape ~admit_source:false ~case:0;
+    run_shape ~admit_source:true ~case:2)
+;;
+
+(* A queue the probe cannot read fails the probe, and the turn with it, instead
+   of running on past rows it could not see. A proactive turn and a turn that
+   was admitted a source read the same queue. *)
+let test_unreadable_queue_fails_the_probe () =
+  with_ctx "queue-read-failure" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    start_owner ~ctx ~base_path ~meta ~operation_runner:None
+      ~on_turn_slot_released:None;
+    let module Batch = Keeper_heartbeat_source_batch in
+    enqueue_exn ~base_path keeper_name
+      (workspace_message_stimulus ~id:"admitted" ~arrived_at:1.);
+    let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    check int "intake admitted a source" 1 (Batch.count intake.source_batch);
+    let turns =
+      [ "a proactive turn", Batch.for_turn ~reactive:false Batch.empty
+      ; "a source turn", Batch.for_turn ~reactive:true intake.source_batch ] in
+    let reads_the_queue turn_input =
+      let probe, _ = Keeper_unified_turn.For_testing.autonomous_yield_probe
+        ~turn_input ~base_path ~keeper_name in
+      Result.is_ok (probe ()) in
+    List.iter (fun (label, turn_input) ->
+      check bool (label ^ " reads a healthy queue") true (reads_the_queue turn_input))
+      turns;
+    Fs_compat.save_file
+      (Filename.concat
+         (Filename.concat (Workspace.keepers_runtime_dir ctx.config) keeper_name)
+         Keeper_event_queue_persistence.snapshot_filename)
+      "{";
+    List.iter (fun (label, turn_input) ->
+      check bool (label ^ " fails when the queue cannot be read") false
+        (reads_the_queue turn_input))
+      turns)
+;;
+
+(* The chat check's error reaches the caller: a turn that cannot tell whether a
+   person is waiting does not go on as if nobody were. *)
+let test_failed_chat_check_fails_the_probe () =
+  with_ctx "chat-check-failure" (fun ~base_path ~keeper_name:_ ~meta:_ ~ctx:_ ->
+    let probe, _ = Keeper_unified_turn.For_testing.autonomous_yield_probe
+      ~turn_input:(Keeper_heartbeat_source_batch.for_turn ~reactive:false
+                     Keeper_heartbeat_source_batch.empty)
+      ~base_path ~keeper_name:"never-registered" in
+    check bool "a Keeper the registry does not know fails the probe" true
+      (Result.is_error (probe ())))
+;;
+
+(* The receipt a tool call leaves for its own result does not end the turn at
+   the boundary after that call, on either runtime. A message that arrived
+   after intake does. *)
+let test_tool_receipt_does_not_end_a_turn_at_a_tool_boundary () =
+  with_ctx "receipt-at-boundary" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    start_owner ~ctx ~base_path ~meta ~operation_runner:None
+      ~on_turn_slot_released:None;
+    let require = function Ok value -> value | Error detail -> fail detail in
+    let module Batch = Keeper_heartbeat_source_batch in
+    let frontier, _ = Keeper_event_queue_persistence.pending_frontier_result
+      ~base_path ~keeper_name |> require in
+    let probe = fst (Keeper_unified_turn.For_testing.autonomous_yield_probe
+      ~turn_input:(Batch.for_turn ~reactive:false (Batch.of_intake ~frontier ~admitted:[]))
+      ~base_path ~keeper_name) in
+    let agent_core () = Keeper_agent_run.For_testing.native_tool_boundary
+      ~repetition_execution:None
+      ~terminal_effect_state:Keeper_tools_agent_core.Terminal_effect_open
+      ~yield_requested:(Some probe) in
+    let official_client () = Keeper_agent_run.For_testing.official_client_tool_boundary
+      ~repetition_execution:None ~yield_requested:(Some probe) ~tool_name:"keeper_tool" in
+    enqueue_exn ~base_path keeper_name
+      (tool_result_stimulus ~receipt:(String.make 64 'a') ~arrived_at:1.);
+    (match agent_core () with
+     | Ok Runtime_agent.Continue -> ()
+     | Ok (Runtime_agent.Yield _) | Error _ ->
+       fail "a tool receipt ended an AGENT_CORE turn at its tool boundary");
+    (match official_client () with
+     | Ok None -> ()
+     | Ok (Some _) | Error _ ->
+       fail "a tool receipt ended an official-client turn at its tool boundary");
+    enqueue_exn ~base_path keeper_name (workspace_message_stimulus ~id:"peer" ~arrived_at:2.);
+    (match agent_core () with
+     | Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting) -> ()
+     | Ok (Runtime_agent.Yield _ | Runtime_agent.Continue) | Error _ ->
+       fail "a message from a peer did not end an AGENT_CORE turn");
+    match official_client () with
+    | Ok (Some _) -> ()
+    | Ok None | Error _ -> fail "a message from a peer did not end an official-client turn")
+;;
+
+(* An approved Gate resolution whose grant is unspent stops a turn even when
+   its intake already read the resolution: the grant is spent by the turn
+   itself, so the intake frontier says nothing about it. *)
+let test_unspent_grant_stops_a_turn_whose_intake_read_it () =
+  with_ctx "grant-read-at-intake" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    start_owner ~ctx ~base_path ~meta ~operation_runner:None
+      ~on_turn_slot_released:None;
+    (match Keeper_approval_queue.install_persistence ~base_path with
+     | Ok _ -> ()
+     | Error error -> fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
+    ignore (approve_grant_exn ~base_path ~keeper_name ~request:"read-at-intake");
+    let module Batch = Keeper_heartbeat_source_batch in
+    let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    let pending = Keeper_event_queue_persistence.pending_selections_result
+      ~base_path ~keeper_name |> function Ok rows -> rows | Error detail -> fail detail in
+    check int "intake admitted the resolution" 1 (Batch.count intake.source_batch);
+    check bool "the resolution is no later arrival" true
+      (List.for_all (fun row -> not (Batch.arrived_since_intake intake.source_batch row))
+         pending);
+    let probe = fst (Keeper_unified_turn.For_testing.autonomous_yield_probe
+      ~turn_input:(Batch.for_turn ~reactive:true intake.source_batch)
+      ~base_path ~keeper_name) in
+    match probe () with
+    | Ok (Some {Keeper_agent_run.reason = Durable_stimulus_waiting summary}) ->
+      check (list string) "the resolution owns the yield"
+        (List.map (fun (source : Q.stimulus) -> source.post_id) (Batch.stimuli intake.source_batch))
+        (Option.to_list
+           (Option.map (fun (source : Q.stimulus) -> source.post_id) summary.head))
+    | Ok (Some {reason = Operation_queued}) -> fail "the Gate yield was mislabeled as chat"
+    | Ok None -> fail "an unspent grant read at intake did not stop the turn"
+    | Error detail -> fail detail)
+;;
+
+(* A schedule that comes due while an autonomous turn runs waits for the next
+   intake and does not stop the turn. A heartbeat consumer is registered and
+   the Owner can release a slot, so a reservation request from the boundary
+   would be accepted. *)
+let test_due_schedule_does_not_preempt_an_autonomous_turn () =
+  with_ctx "schedule-after-intake" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    start_owner ~ctx ~base_path ~meta ~operation_runner:None
+      ~on_turn_slot_released:(Some slot_released);
+    let require = function Ok value -> value | Error detail -> fail detail in
+    (match Owner_registry.begin_scheduled_turn_consumer ~base_path ~keeper_name with
+     | Ok _ -> ()
+     | Error error -> fail (Owner_registry.command_error_to_string error));
+    let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    match
+      Owner_registry.run_autonomous_if_idle ~base_path ~keeper_name (fun () ->
+        let probe = fst (Keeper_unified_turn.For_testing.autonomous_yield_probe
+          ~turn_input:(Keeper_heartbeat_source_batch.for_turn ~reactive:false
+                         intake.source_batch)
+          ~base_path ~keeper_name) in
+        enqueue_exn ~base_path keeper_name
+          (scheduled_wake_stimulus ~occurrence:1 ~arrived_at:1.);
+        check bool "a schedule that came due after intake does not stop the turn" true
+          (Option.is_none (probe () |> require)))
+    with
+    | Ok (`Ran ()) -> ()
+    | Ok (`Busy _) -> fail "the idle owner did not admit the autonomous turn"
+    | Ok `Interrupted -> fail "nothing interrupted the autonomous lane"
+    | Error error -> fail (Owner_registry.command_error_to_string error))
+;;
+
+(* A direct chat turn does not yield to a schedule that is due. A chat
+   admitted after it that waits for the slot still makes it yield. *)
+let test_direct_turn_does_not_yield_to_a_due_schedule () =
+  Eio_main.run
+  @@ fun env ->
+  Masc_test_deps.ensure_rng_initialized ();
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run
+  @@ fun sw ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Unix.putenv "MASC_BASE_PATH" base_path;
+  let keeper_name = "direct-schedule-yield" in
+  let meta = test_meta keeper_name in
+  Keeper_registry.For_testing.clear ();
+  Fun.protect ~finally:(fun () -> Keeper_registry.For_testing.clear ()) @@ fun () ->
+  ignore (Keeper_registry.For_testing.register ~base_path keeper_name meta);
+  let operation_id name =
+    match Owner.Chat_operation.Operation_id.of_string name with
+    | Ok operation_id -> operation_id
+    | Error detail -> fail detail
+  in
+  let first_id = operation_id "kmsg-direct-schedule-first" in
+  let second_id = operation_id "kmsg-direct-schedule-second" in
+  let request_from_first () =
+    Keeper_chat_yield_request.request
+      ~turn:(Keeper_chat_yield_request.Direct first_id) ~base_path ~keeper_name
+  in
+  let alone, resolve_alone = Eio.Promise.create () in
+  let second_queued, resolve_second_queued = Eio.Promise.create () in
+  let later, resolve_later = Eio.Promise.create () in
+  (* The chat child runs on another Eio domain, so it reports what the yield
+     request answered and the test body judges it. *)
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    match claim () with
+    | Ok (Some (operation : Owner.Chat_operation.t)) ->
+      if Owner.Chat_operation.Operation_id.equal operation.operation_id first_id
+      then begin
+        Eio.Promise.resolve resolve_alone (request_from_first ());
+        Eio.Promise.await second_queued;
+        Eio.Promise.resolve resolve_later (request_from_first ())
+      end;
+      Owner.Operation_succeeded
+        { outcome_ref =
+            "turn:" ^ Owner.Chat_operation.Operation_id.to_string operation.operation_id }
+    | Ok None -> fail "the chat runner found an empty queue"
+    | Error Owner.Owner_closed ->
+      Owner.Operation_failed
+        { kind = Owner.Chat_operation.Turn_cancelled
+        ; detail = "keeper owner closed before the queued chat claimed"
+        ; outcome_ref = None
+        }
+    | Error error -> fail (Owner.error_to_string error)
+  in
+  let noop_execution_settled ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution:_ = () in
+  (match
+     Owner_registry.install_from_store
+       ~sw
+       ~operation_runner:
+         (Some
+            Owner.
+              { ready = (fun ~keeper_name:_ -> true)
+              ; execute
+              ; on_execution_settled = noop_execution_settled
+              })
+       ~on_turn_slot_released:(Some slot_released)
+       (Workspace.default_config base_path)
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Owner_registry.install_error_to_string error));
+  (match Owner_registry.create_meta ~base_path meta with
+   | Ok _ -> ()
+   | Error error -> fail (Owner_registry.command_error_to_string error));
+  let owner =
+    match Owner_registry.get ~base_path ~keeper_name with
+    | Ok owner -> owner
+    | Error error -> fail (Owner_registry.lookup_error_to_string error)
+  in
+  (match Owner_registry.begin_scheduled_turn_consumer ~base_path ~keeper_name with
+   | Ok _ -> ()
+   | Error error -> fail (Owner_registry.command_error_to_string error));
+  enqueue_exn ~base_path keeper_name (scheduled_wake_stimulus ~occurrence:1 ~arrived_at:1.);
+  let submit operation_id =
+    match
+      Owner.submit_operation owner ~operation_id
+        ~source:(`Assoc [ "kind", `String "dashboard" ])
+        ~input:(`Assoc [ "message", `String "answer this" ])
+    with
+    | Ok _ -> ()
+    | Error error -> fail (Owner.error_to_string error)
+  in
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+    submit first_id;
+    (match Eio.Promise.await alone with
+     | Ok None -> ()
+     | Ok (Some _) -> fail "the direct turn yielded to a schedule that is due"
+     | Error detail -> fail detail);
+    submit second_id;
+    Eio.Promise.resolve resolve_second_queued ();
+    (match Eio.Promise.await later with
+     | Ok (Some {Keeper_agent_run.reason = Operation_queued}) -> ()
+     | Ok (Some _) | Ok None -> fail "the direct turn ignored a chat admitted after it"
+     | Error detail -> fail detail);
+    List.iter (fun operation_id ->
+      let rec await_settlement () =
+        match Owner.exact_operation owner operation_id with
+        | Error error -> fail (Owner.error_to_string error)
+        | Ok None -> fail "a submitted chat disappeared"
+        | Ok (Some operation) ->
+          (match operation.state with
+           | Owner.Chat_operation.Succeeded _ -> ()
+           | Owner.Chat_operation.Queued | Owner.Chat_operation.Running _ ->
+             Eio.Fiber.yield ();
+             await_settlement ()
+           | Owner.Chat_operation.Failed _ | Owner.Chat_operation.Cancelled _ ->
+             fail "a submitted chat did not settle successfully")
+      in
+      await_settlement ())
+      [ first_id; second_id ])
+;;
+
 let () =
   run
     "keeper_connector_attention_batch"
@@ -2273,8 +2727,22 @@ let () =
             test_scheduled_checkpoint_successor_and_resume
         ; test_case "scheduled continuation cancellation and reinsertion remain exact" `Quick
             test_scheduled_continuation_withdrawal_and_reinsertion
-        ; test_case "proactive yields only to a ready intake" `Quick
-            test_proactive_yields_only_to_ready_intake
+        ; test_case "backlog never interrupts proactive progress" `Quick
+            test_backlog_never_interrupts_proactive_progress
+        ; test_case "only new input of the right kind preempts a running turn" `Quick
+            test_only_new_input_of_the_right_kind_preempts
+        ; test_case "a tool receipt does not end a turn at its tool boundary" `Quick
+            test_tool_receipt_does_not_end_a_turn_at_a_tool_boundary
+        ; test_case "an unspent grant read at intake still stops the turn" `Quick
+            test_unspent_grant_stops_a_turn_whose_intake_read_it
+        ; test_case "an unreadable queue fails the probe" `Quick
+            test_unreadable_queue_fails_the_probe
+        ; test_case "a failed chat check fails the probe" `Quick
+            test_failed_chat_check_fails_the_probe
+        ; test_case "a due schedule does not preempt an autonomous turn" `Quick
+            test_due_schedule_does_not_preempt_an_autonomous_turn
+        ; test_case "a direct turn does not yield to a due schedule" `Quick
+            test_direct_turn_does_not_yield_to_a_due_schedule
         ; test_case "new completions preempt after exact bounded intake frontier" `Quick
             test_running_source_observes_new_completion_after_intake
         ; test_case "reprioritized running source does not preempt itself" `Quick

@@ -2,7 +2,7 @@
    was woken by a different stimulus, and must be able to preempt an in-flight
    source run while its one-shot grant is unspent. Covers the turn-start
    projection ([ready_hitl_resolution_peek]) and the post-tool boundary
-   preemption ([hitl_replay_preemption_request] / [hitl_replay_yield_request]). *)
+   preemption ([hitl_replay_preemption_request] and the source-turn probe). *)
 open Alcotest
 open Masc
 module Q = Keeper_event_queue
@@ -160,94 +160,6 @@ let hitl_stimulus ~arrived_at ~approval_id =
     ~payload:(Q.Hitl_resolved resolution)
 ;;
 
-(* #20849 / #25898: the ambient connector conversation yield. *)
-let connector_stimulus ~arrived_at ~event_id =
-  stimulus
-    ~post_id:("connector-" ^ event_id)
-    ~urgency:Q.Low
-    ~arrived_at
-    ~payload:(Q.Connector_attention { event_id; channel = unrouted })
-;;
-
-let test_connector_attention_preempts_source () =
-  let source = Q.Bootstrap in
-  let connector = connector_stimulus ~arrived_at:990. ~event_id:"evt-ambient" in
-  let request =
-    Keeper_unified_turn.connector_attention_preemption_request
-      ~now:1000.
-      (queue_of
-         [ stimulus ~post_id:"source" ~urgency:Q.Normal ~arrived_at:900. ~payload:source
-         ; connector
-         ])
-  in
-  match request with
-  | Some
-      { Keeper_agent_run.reason = Keeper_agent_run.Durable_stimulus_waiting summary } ->
-    check int "both durable stimuli remain visible" 2 summary.pending_count;
-    (match summary.head with
-     | Some selected ->
-       check string
-         "yield names the ambient connector message as the next source"
-         "connector-evt-ambient"
-         selected.post_id
-     | None -> fail "connector preemption lost its selected source");
-    check (float 0.001) "selected-source age is exact" 10. summary.head_age_sec
-  | Some { reason = Keeper_agent_run.Operation_queued } ->
-    fail "connector preemption was mislabeled as chat"
-  | None ->
-    fail "pending connector attention did not preempt the in-flight source"
-;;
-
-let test_no_connector_attention_no_yield () =
-  check bool
-    "only non-connector payloads pending: no yield"
-    true
-    (Option.is_none
-       (Keeper_unified_turn.connector_attention_preemption_request
-          ~now:1000.
-          (queue_of
-             [ stimulus
-                 ~post_id:"hitl-only"
-                 ~urgency:Q.Immediate
-                 ~arrived_at:990.
-                 ~payload:
-                   (Q.Hitl_resolved
-                      { approval_id = "appr-other"
-                      ; decision = Q.Hitl_approved
-                      ; channel = unrouted
-                      })
-             ; stimulus ~post_id:"board" ~urgency:Q.Low ~arrived_at:995. ~payload:Q.Bootstrap
-             ; (* #35033 added [Task_outcome] — the variant that broke the
-                  build in CI. The negative case must pin that the newest
-                  non-connector payload also never preempts, so the next
-                  payload variant lands with its branch in the same change. *)
-               stimulus
-                 ~post_id:"task-outcome"
-                 ~urgency:Q.Normal
-                 ~arrived_at:997.
-                 ~payload:
-                   (Q.Task_outcome
-                      { to_task_id = "task-999"
-                      ; to_verification_id = "verif-1"
-                      ; to_producer = "fixture-keeper"
-                      ; to_authority =
-                          Masc_domain.System_llm_agent { agent_run_id = "judge-1" }
-                      })
-             ])))
-;;
-
-let test_connector_attention_alone_preempts () =
-  (* Even with nothing else pending — the minimal ambient-only wait — the
-     source must yield. *)
-  check bool
-    "connector attention alone preempts"
-    true
-    (Option.is_some
-       (Keeper_unified_turn.connector_attention_preemption_request
-          ~now:1000.
-          (queue_of [ connector_stimulus ~arrived_at:998. ~event_id:"evt-only" ])))
-;;
-
 let test_deliverable_resolution_preempts_source () =
   let source =
     stimulus ~post_id:"source" ~urgency:Q.Normal ~arrived_at:900. ~payload:Q.Bootstrap
@@ -306,22 +218,32 @@ let test_queue_without_resolution_never_preempts () =
           (queue_of [ source ])))
 ;;
 
-(* --- durable deliverability -------------------------------------------- *)
-
-let test_yield_request_tracks_grant_consumption () =
+(* The production source-turn probe. An approved resolution whose grant is
+   unspent stops a running turn even when nothing else is waiting; once the
+   grant is spent it does not. *)
+let test_source_turn_probe_yields_to_unspent_grant () =
   with_workspace
   @@ fun config ->
   let base_path = config.Workspace_utils.base_path in
-  let keeper_name = "hitl-preempt-keeper" in
-  create_keeper_exn ~config keeper_name;
-  let input = `Assoc [ "target", `String "hitl-preempt" ] in
+  let keeper_name = "hitl-probe-keeper" in
+  register_keeper_exn ~config keeper_name;
+  let input = `Assoc [ "target", `String "hitl-probe" ] in
   let approval_id = approved_grant_fixture ~base_path ~keeper_name ~input in
-  (match Keeper_unified_turn.hitl_replay_yield_request ~base_path ~keeper_name with
+  let probe, _reads =
+    Keeper_unified_turn.For_testing.autonomous_yield_probe
+      ~turn_input:
+        (Keeper_heartbeat_source_batch.for_turn
+           ~reactive:false
+           Keeper_heartbeat_source_batch.empty)
+      ~base_path
+      ~keeper_name
+  in
+  (match probe () with
    | Ok (Some { Keeper_agent_run.reason = Keeper_agent_run.Durable_stimulus_waiting _ })
      -> ()
    | Ok (Some { reason = Keeper_agent_run.Operation_queued }) ->
      fail "unspent grant was mislabeled as chat"
-   | Ok None -> fail "unspent approved resolution did not request a yield"
+   | Ok None -> fail "unspent approved resolution did not stop the running turn"
    | Error message -> fail message);
   (match
      Keeper_approval_queue.consume_approved_resolution
@@ -337,9 +259,9 @@ let test_yield_request_tracks_grant_consumption () =
    | Ok Masc.Keeper_approval_queue_result.Consumption_not_matching ->
      fail "exact grant did not match its own request"
    | Error error -> fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
-  match Keeper_unified_turn.hitl_replay_yield_request ~base_path ~keeper_name with
+  match probe () with
   | Ok None -> ()
-  | Ok (Some _) -> fail "spent grant preempted the source again"
+  | Ok (Some _) -> fail "spent grant stopped the running turn again"
   | Error message -> fail message
 ;;
 
@@ -537,6 +459,42 @@ let test_reconcile_retires_resolution_without_record () =
   check int "the wake left the queue" 0 (queue_length ~base_path ~keeper_name)
 ;;
 
+(* The store's typed answer that nothing stands behind an approved wake is a
+   fact reading again does not change, and intake retires such a wake. The
+   probe treats it as not deliverable: no yield, no error, no warning at each
+   tool boundary. *)
+let test_source_turn_probe_ignores_resolution_without_record () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  let keeper_name = "hitl-probe-absent-keeper" in
+  register_keeper_exn ~config keeper_name;
+  let _approval_id = enqueue_resolution_without_record ~config ~keeper_name in
+  let probe, _reads =
+    Keeper_unified_turn.For_testing.autonomous_yield_probe
+      ~turn_input:
+        (Keeper_heartbeat_source_batch.for_turn
+           ~reactive:false
+           Keeper_heartbeat_source_batch.empty)
+      ~base_path
+      ~keeper_name
+  in
+  let cursor =
+    match Log.Ring.recent ~limit:1 () with
+    | entry :: _ -> entry.Log.Ring.seq
+    | [] -> -1
+  in
+  (match probe () with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "a wake without a record stopped the running turn"
+   | Error message -> fail message);
+  let warnings =
+    Log.Ring.recent ~since_seq:cursor ~module_filter:"Keeper" ()
+    |> List.filter (fun (entry : Log.Ring.entry) -> entry.level = Log.Warn)
+  in
+  check int "a wake without a record logs no warning" 0 (List.length warnings)
+;;
+
 (* --- settled continuation ------------------------------------------------ *)
 
 (* #32956: the turn that received the replay failed after the provider
@@ -716,21 +674,9 @@ let () =
             `Quick
             test_queue_without_resolution_never_preempts
         ; test_case
-            "pending connector attention preempts the in-flight source"
+            "source-turn probe yields to an unspent grant"
             `Quick
-            test_connector_attention_preempts_source
-        ; test_case
-            "no connector attention pending: no yield"
-            `Quick
-            test_no_connector_attention_no_yield
-        ; test_case
-            "connector attention alone preempts"
-            `Quick
-            test_connector_attention_alone_preempts
-        ; test_case
-            "yield request tracks durable grant consumption"
-            `Quick
-            test_yield_request_tracks_grant_consumption
+            test_source_turn_probe_yields_to_unspent_grant
         ] )
     ; ( "turn-start projection"
       , [ test_case
@@ -759,6 +705,10 @@ let () =
             "a resolution without a record is retired without a turn"
             `Quick
             test_reconcile_retires_resolution_without_record
+        ; test_case
+            "the source-turn probe stays quiet about a resolution without a record"
+            `Quick
+            test_source_turn_probe_ignores_resolution_without_record
         ] )
     ; ( "settled continuation"
       , [ test_case

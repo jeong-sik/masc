@@ -24,11 +24,15 @@ membership, input, execution identity, and output route.
 ## Proactive and event intake
 
 Proactive cycles already pass through `heartbeat_event_intake`, admitting the
-ready durable snapshot in one batch. The shared `stimulus_ready_for_intake`
-predicate also filters a proactive turn's successor-yield probe. In particular,
-a HITL resolution still in the approval pending map cannot force a checkpoint
-that intake has no way to advance. A later ready event can still request a turn;
-yield diagnostics name only the ready successors.
+ready durable snapshot in one batch. A HITL resolution still in the approval
+pending map is not ready, so intake does not admit it. The turn that runs
+carries the queue frontier of its intake. At a tool boundary it yields to a
+claimable chat operation, to an approved Gate resolution whose grant is still
+unspent, and to a row of a kind that may preempt that reached the queue after
+that frontier: a message to the Keeper, a result of work it asked for, or input
+that voids its work. Rows intake already read, ambient signals, timers and the
+turn's own tool receipts wait for the next intake. Yield diagnostics name the
+rows that caused the yield.
 
 Batch intake keeps the existing conversation routing boundary and one exact
 HITL replay grant per turn. Reading or selecting events does not ACK them.
@@ -45,9 +49,12 @@ MASC additionally preserves each command's execution and reply obligation.
 `test_keeper_owner` covers retained approval waits, autonomous progress during
 backoff, readiness refresh, original operation identity, and retry wake timing.
 `test_keeper_connector_attention_batch` exercises the actual proactive boundary
-against a pending approval and a later ready event, checks agreement with batch
-intake, and verifies both durable sources survive observation and selection.
-Its existing scenarios cover all-ready batching and routing/ACK boundaries.
+against a pending approval and a ready source, checks that batch intake admits
+that source, verifies both durable sources survive observation and selection,
+and checks that a message arriving after intake stops the turn while the chat
+store is unavailable. It also tries every payload kind before and after the
+intake frontier. Its existing scenarios cover all-ready batching and
+routing/ACK boundaries.
 
 These source and test changes do not demonstrate a deployed binary, live Keeper
 latency, or TUI status rendering. Those require separate runtime evidence.

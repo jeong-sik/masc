@@ -195,9 +195,10 @@ type request_wire_evidence =
   ; wire_tools : Agent_core.Tool.t list
   }
 
-(* What the queue held when the turn decided to yield. The decision itself is
-   [pending <> empty], so without this the record says a yield happened and
-   nothing about what it yielded to. *)
+(* What the turn yielded to. It yields when a row of a kind that may preempt
+   reached the queue after its intake, or when an approved Gate resolution is
+   deliverable. Without this the record says a yield happened and nothing
+   about what it yielded to; [head] is that row. *)
 type durable_stimulus_summary =
   { pending_count : int
   ; head : Keeper_event_queue.stimulus option

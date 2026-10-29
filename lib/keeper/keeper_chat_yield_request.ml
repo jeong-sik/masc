@@ -1,6 +1,6 @@
 type turn = Autonomous | Direct of Keeper_chat_operation.Operation_id.t
 
-let chat_request ~turn ~base_path ~keeper_name =
+let request ~turn ~base_path ~keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" keeper_name)
   | Some _ ->
@@ -24,22 +24,3 @@ let chat_request ~turn ~base_path ~keeper_name =
          | Error _ as error -> error
          | Ok true -> Ok (Some Keeper_agent_run.{ reason = Operation_queued })
          | Ok false -> Ok None)
-
-let request ~turn ~base_path ~keeper_name =
-  match turn with
-  | Autonomous -> chat_request ~turn ~base_path ~keeper_name
-  | Direct _ ->
-    (match Keeper_scheduled_turn_handoff.request
-            ~intake:Keeper_heartbeat_source_batch.empty ~base_path ~keeper_name with
-     | Error (Keeper_scheduled_turn_handoff.Owner_unavailable error) ->
-       Error (Keeper_owner_registry.command_error_to_string error)
-     | Error (Queue_unavailable detail) ->
-       Log.Keeper.warn ~keeper_name
-         "scheduled handoff unavailable; retaining current chat progress: %s" detail;
-       chat_request ~turn ~base_path ~keeper_name
-     | Ok [] -> chat_request ~turn ~base_path ~keeper_name
-     | Ok sources ->
-       let queue = List.fold_left (fun queue (source : Keeper_event_queue_state.pending_selection) ->
-         Keeper_event_queue.enqueue queue source.source) Keeper_event_queue.empty sources in
-       Ok (Some Keeper_agent_run.{ reason = Durable_stimulus_waiting
-         (durable_stimulus_summary ~now:(Time_compat.now ()) queue) }))

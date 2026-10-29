@@ -715,9 +715,15 @@ let test_task_review_does_not_require_inventory () =
   with_surface ~sandbox_profile:"docker" (fun config surface ->
     (* Missing roots and more checkouts than the inventory cap both used to
        stop before the submitted evidence reached a judge. *)
-    let root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config
-      (match Keeper_meta_store.read_effective_meta config producer with
-       | Ok (Some meta) -> meta | _ -> Alcotest.fail "fixture meta missing") in
+    (* The review captures its root without trailing slashes
+       ([Verification_authority_tools.create]); a docker-profile host root is
+       spelt with one, so compare the same normalised spelling. *)
+    let root =
+      Env_config_core.strip_trailing_slashes
+        (Masc.Keeper_sandbox.host_root_abs_of_meta ~config
+           (match Keeper_meta_store.read_effective_meta config producer with
+            | Ok (Some meta) -> meta | _ -> Alcotest.fail "fixture meta missing"))
+    in
     check config root;
     let playground = producer_playground config producer in
     for index = 0 to Masc.Keeper_playground_checkouts.max_reported_checkouts do

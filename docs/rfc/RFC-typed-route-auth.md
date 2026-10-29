@@ -152,13 +152,14 @@ val Server_route.get : 'h auth -> string -> 'h -> Router.t -> Router.t
 
 H2 게이트웨이는 갈래마다 인증 래퍼를 고르지 않아요. 요청이 오면 HTTP/1 라우터에게 같은 요청의 종류를 물어요. `Router.resolve`가 돌려주는 `route.access`예요. 게이트웨이는 그 종류에 맞는 H2 게이트를 걸고 갈래의 핸들러를 불러요.
 
-그래서 같은 경로가 HTTP/1과 HTTP/2에서 다른 종류를 가질 수 없어요. 종류를 적는 곳이 HTTP/1 등록 하나뿐이에요. 둘이 어긋났는지 보는 시험은 필요 없고, 경로를 HTTP/1에 새로 등록하면 같은 경로의 H2 갈래가 그 종류를 받아요.
+그래서 표에 종류가 있는 경로는 HTTP/1과 HTTP/2에서 다른 종류를 가질 수 없어요. 종류를 적는 곳이 HTTP/1 등록 하나뿐이에요. 둘이 어긋났는지 보는 시험은 필요 없고, 경로를 HTTP/1에 새로 등록하면 같은 경로의 H2 갈래가 그 종류를 받아요. 표에 종류가 없는 하위 경로(`Subpath_dispatch`)는 이 보장 밖이에요. 아래에서 따로 다뤄요.
 
 - 라우터는 `Server_runtime_bootstrap`이 H2 핸들러를 만드는 자리에서 넘겨요. 지금은 그 자리에 라우터가 있는데도 넘기지 않아요.
 - H2 갈래는 자기가 받는 핸들러 모양만 말해요. 서버 상태만 받는지, 인증된 행위자도 받는지예요. 게이트는 종류를 HTTP/1의 `Server_auth`와 같은 판정 함수로 풀어서 걸어요. 종류가 갈래의 모양과 맞지 않거나 H2가 아직 구현하지 않은 종류면 요청을 거절해요. 열지 않아요.
-- 종류가 `Always_public`이나 `Self_authenticated`인 경로는 게이트가 인증을 걸지 않아요. 핸들러가 직접 인증하는 `/mcp`, OAuth, `/ws`가 이쪽이에요.
-- HTTP/1 라우터에 없는 경로는 H2 갈래를 `h2_only` 목록에 이름과 사유로 적어야 열려요. 목록에도 라우터에도 없는 경로는 404예요. 목록을 고치면 리뷰에서 보여요.
-- 이 층은 HTTP/2 응답이 HTTP/1에 맞춰 바뀌는 첫 층이에요. 지금 둘이 다른 곳은 [#46675](https://github.com/jeong-sik/masc/issues/46675)(엄격 설정에서 `/.well-known/agent.json`과 `agent-card.json`을 HTTP/2만 자격 없이 200으로 줘요)와 [#46676](https://github.com/jeong-sik/masc/issues/46676)(쿼리 전제조건과 호스트 리다이렉트를 H2가 안 지켜요, `github-identity`가 admin에게 500이에요, HTTP/1에서 없앤 `namespace-truth`가 H2에만 남아 있어요)예요. 변환 전후로 A1 기준선의 HTTP/2 전체를 돌려 바뀐 응답 목록을 PR 근거로 남기고, 목록의 모든 줄이 HTTP/1과 같아지는 쪽인지 읽어요.
+- 종류가 `Always_public`인 경로와, `Self_authenticated`의 이유가 `Mcp_transport`, `Oauth_protocol`, `Websocket_upgrade`인 경로는 게이트가 인증을 걸지 않아요. 핸들러가 직접 인증하는 `/mcp`, OAuth, `/ws`가 이쪽이에요. 나머지 이유(`Browser_lane`, `Loopback_dev_token`, `Subpath_dispatch`)는 H2에 갈래가 없거나 표가 종류를 갖고 있지 않아서 요청을 거절해요. 종류나 이유가 하나 늘면 이 판정이 컴파일되지 않아요.
+- `Subpath_dispatch`는 열지 않아요. HTTP/1은 `/api/v1/keepers/` prefix 핸들러 안에서 하위 경로에 따라 공개 읽기나 `CanAdmin` 같은 권한을 고르고, 표에는 `Self_authenticated`만 남아요. 종류만 읽는 게이트는 하위 경로의 권한을 알 수 없어서, 열면 하위 경로가 자격 없이 열릴 수 있어요. 그래서 이 prefix 아래 H2 갈래 5곳(`hitl`, `child-content`, `native-tasks`, `github-identity`, `github-login`)은 갈래가 권한을 직접 적고 옛 래퍼를 그대로 불러요. 이 5곳의 권한은 HTTP/1 핸들러 안과 H2 갈래에 따로 적혀 있어서 어긋날 수 있고, 이 층은 그걸 닫지 않아요. 닫으려면 하위 경로마다 종류가 표에 있어야 해요. 지금 라우터는 정확한 경로와 prefix만 알아서 `/api/v1/keepers/<이름>/child-content/receivers`처럼 가운데에 변수가 낀 경로를 등록할 수 없어요. 그런 경로를 받는 라우터가 먼저 필요하고, 그건 이 RFC 다음 층이에요.
+- HTTP/1 라우터에 없는 경로는 404, 라우터에 없는 메서드는 405예요. H2에만 있던 경로는 `namespace-truth` 별명 하나였고 A4c에서 지워요. H2에만 있는 경로를 새로 열려면 이 규칙을 먼저 바꾸는 RFC가 필요해요.
+- 이 층은 HTTP/2 응답이 HTTP/1에 맞춰 바뀌는 첫 층이에요. 이 층이 닫는 것은 [#46675](https://github.com/jeong-sik/masc/issues/46675)(엄격 설정에서 `/.well-known/agent.json`과 `agent-card.json`을 HTTP/2만 자격 없이 200으로 줘요)와 H2에만 남은 `namespace-truth`예요. [#46676](https://github.com/jeong-sik/masc/issues/46676)의 나머지(쿼리 전제조건과 호스트 리다이렉트를 H2가 안 지켜요, `github-identity`가 admin에게 500이에요)는 핸들러가 두 벌이라서 생기는 차이라 남아요. 변환 전후로 A1 기준선의 HTTP/2 전체를 돌려 바뀐 응답 목록을 PR 근거로 남기고, 목록의 모든 줄이 HTTP/1과 같아지는 쪽인지 읽어요.
 
 핸들러까지 하나로 합치는 단일 디스패처는 이 RFC 범위가 아니에요. 핸들러가 HTTP/1과 HTTP/2에 두 벌인 동안은 응답이 어긋날 수 있어요(#46676의 쿼리 전제조건과 호스트 리다이렉트). 이 층은 인증 종류가 한 곳에서 나오게 할 뿐이에요.
 

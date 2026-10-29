@@ -61,7 +61,12 @@ val load_failure_to_string : load_failure -> string
 (** Renders as before: "read <path>: <detail>", "parse …", "validate …". *)
 
 val load_and_apply : base_path:string -> (int, load_failure) result
-(** Validates the registry's effective readers before applying overrides, even
+(** Declares the registry's file-owned names first
+    ({!Config_boot_overrides.declare_file_owned}), so the validation below and
+    every later read of them leave the process environment out. A load that
+    fails withdraws the declaration.
+
+    Validates the registry's effective readers before applying overrides, even
     with no TOML file. Strict malformed environment input is a [Validate]
     failure at startup rather than a later Keeper-cycle exception. *)
 

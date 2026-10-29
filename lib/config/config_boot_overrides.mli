@@ -25,8 +25,9 @@ val clear : string -> unit
 val declare_file_owned : string list -> unit
 (** Declare the names whose only input is the runtime file; replaces any earlier
     declaration. The loader calls it at boot with the registry's file-owned
-    names, before it reads or applies anything. A name read before the
-    declaration is read with the process env first. *)
+    names, before it reads or applies anything, and with [[]] when the file
+    does not load. A name read before the declaration is read with the process
+    env first. *)
 
 val is_file_owned : string -> bool
 (** Whether [name] was declared file-owned. *)

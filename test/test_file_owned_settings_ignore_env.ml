@@ -111,6 +111,47 @@ let test_the_loader_declares_the_file_owned_names () =
   Config_boot_overrides.reset_for_tests ()
 ;;
 
+(* A runtime.toml whose [turn] value is outside the declared range, so the
+   load fails in validation. *)
+let with_unloadable_runtime_toml f =
+  let base_path = Filename.temp_dir "masc-file-owned" "" in
+  let masc_dir = Filename.concat base_path ".masc" in
+  let config_dir = Filename.concat masc_dir "config" in
+  let path = Filename.concat config_dir Config_dir_resolver.runtime_toml_filename in
+  Unix.mkdir masc_dir 0o755;
+  Unix.mkdir config_dir 0o755;
+  let channel = open_out_bin path in
+  output_string channel "[turn]\nstream_idle_timeout_sec = 0\n";
+  close_out channel;
+  with_env "MASC_CONFIG_DIR" None (fun () ->
+    Fun.protect
+      ~finally:(fun () ->
+        List.iter
+          (fun remove -> try remove () with Sys_error _ | Unix.Unix_error _ -> ())
+          [ (fun () -> Sys.remove path)
+          ; (fun () -> Unix.rmdir config_dir)
+          ; (fun () -> Unix.rmdir masc_dir)
+          ; (fun () -> Unix.rmdir base_path)
+          ])
+      (fun () -> f base_path))
+;;
+
+let test_a_load_that_fails_declares_nothing () =
+  Config_boot_overrides.reset_for_tests ();
+  with_unloadable_runtime_toml (fun base_path ->
+    (match Keeper_runtime_config.load_and_apply ~base_path with
+     | Ok _ -> fail "a runtime.toml with an out-of-range value was applied"
+     | Error failure ->
+       check bool "the load fails in validation" true
+         (failure.Keeper_runtime_config.kind = Keeper_runtime_config.Validate));
+    List.iter
+      (fun (row : R.setting) ->
+         check bool (row.env_name ^ " is not declared after a failed load") false
+           (Config_boot_overrides.is_file_owned row.env_name))
+      file_owned_rows);
+  Config_boot_overrides.reset_for_tests ()
+;;
+
 let test_a_declared_name_answers_from_the_file_only () =
   match file_owned_rows with
   | [] -> fail "the registry has no file-owned row"
@@ -148,6 +189,8 @@ let () =
             test_the_environment_does_not_reach_a_file_owned_reader
         ; test_case "the loader declares the file-owned names" `Quick
             test_the_loader_declares_the_file_owned_names
+        ; test_case "a load that fails declares nothing" `Quick
+            test_a_load_that_fails_declares_nothing
         ; test_case "a declared name answers from the file only" `Quick
             test_a_declared_name_answers_from_the_file_only
         ; test_case "a name that is not declared still reads the environment" `Quick

@@ -641,6 +641,15 @@ let load_and_apply ~base_path : (int, load_failure) result =
       Ok ()
     with Env_config_core.Config_error message -> Result.Error {kind=Validate; message}
   in
-  match validation with
-  | Result.Error error -> Result.Error error
-  | Ok () -> load_and_apply_document ~base_path
+  let result =
+    match validation with
+    | Result.Error error -> Result.Error error
+    | Ok () -> load_and_apply_document ~base_path
+  in
+  (* A file that did not load fed nothing, so these names are not the file's
+     alone: a process that goes on after the failure reads them as it did
+     before. *)
+  (match result with
+   | Result.Error _ -> Config_boot_overrides.declare_file_owned []
+   | Ok _ -> ());
+  result

@@ -64,7 +64,9 @@ let stub_main () =
   (* [--probe] takes no frame: the shim answers its identity on stdout and
      exits. The two probe modes differ only in what the shim says it can
      build, which is the one fact the observe stage reads (RFC-0422). *)
-  if List.exists (String.equal "--probe") args
+  if List.exists
+       (fun arg -> String.equal arg "--probe" || String.equal arg "masc-exec-shim --probe")
+       args
   then (
     let capabilities =
       if String.equal mode "probe-observe" then [ Exec_ssh_protocol.observe_capability ] else []

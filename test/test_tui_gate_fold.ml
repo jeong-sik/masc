@@ -127,6 +127,36 @@ let test_wait_after_success_is_not_settled () =
 let test_rows_that_are_not_gate_rows_are_untouched () =
   check (list string) "nothing else folds" [ "가"; "나" ] (fold [ said "가"; said "나" ])
 
+let test_narrow_chat_notice_has_no_old_row_action () =
+  let module Render = Masc_tui_render_chat in
+  let module Actions = Masc_tui_chat_row_actions in
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let previous_reserved = !(Masc_tui_render_prim.acting_pane_reserved_cols) in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect
+    ~finally:(fun () -> set_size previous_size;
+      Masc_tui_render_prim.acting_pane_reserved_cols := previous_reserved)
+    (fun () ->
+      Masc_tui_render_prim.acting_pane_reserved_cols := 0;
+      let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+      state.view <- Types.Keepers Types.Keeper_message;
+      state.msg_target_keeper_name <- Some "k";
+      state.msg_tool_visibility <- Types.Tools_compact;
+      state.msg_history <- [step ~summary:(Some (String.make 300 'x')) Approval_requested];
+      let scope = state.workspace_authority, state.workspace_read_authority in
+      let has_action candidate =
+        List.exists (fun row -> Actions.contains ~same_scope:Types.same_acting_pane_scope
+          ~scope ~keeper:(Some "k") ~row candidate) (List.init 30 (fun i -> i + 1))
+      in
+      set_size (30, 100);
+      ignore (Render.render_keeper_message state);
+      check bool "the folded Gate row has an action" true (has_action (Render.chat_row_actions ()));
+      set_size (30, 20);
+      ignore (Render.render_keeper_message state);
+      check bool "the narrow notice has no retained row action" false (has_action (Render.chat_row_actions ())))
+
 (* #32956: the turn that received the replay failed after the model answered.
    The run is not folded: the failed step stays its own row so it is seen. *)
 let test_a_failed_continuation_keeps_the_run_open () =
@@ -154,6 +184,8 @@ let () =
         ; test_case "wait after success is unresolved" `Quick test_wait_after_success_is_not_settled
         ; test_case "rows that are not gate rows are untouched" `Quick
             test_rows_that_are_not_gate_rows_are_untouched
+        ; test_case "narrow chat notice has no old row action" `Quick
+            test_narrow_chat_notice_has_no_old_row_action
         ; test_case "a failed continuation keeps the run open" `Quick
             test_a_failed_continuation_keeps_the_run_open
         ] )

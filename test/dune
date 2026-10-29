@@ -3951,7 +3951,13 @@
  (name test_tui_gate_fold)
  (modules test_tui_gate_fold)
  (libraries masc_tui_image_preview alcotest masc masc.keeper_contract masc_tui_types
-   masc_tui_gate_text masc_tui_message_layout))
+   masc_tui_gate_text masc_tui_message_layout masc_tui_chat_row_actions
+   masc_tui_render_chat masc_tui_render_prim masc_tui_ansi masc_tui_render_schedule))
+
+(test
+ (name test_tui_chat_row_actions)
+ (modules test_tui_chat_row_actions)
+ (libraries alcotest masc_tui_chat_row_actions))
 
 (test
  (name test_tui_server_identity_refresh)

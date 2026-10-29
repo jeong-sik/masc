@@ -3,7 +3,10 @@
 module Frame_presenter = Masc_tui_frame_presenter
 module Message_layout = Masc_tui_message_layout
 
-val chat_row_action_at : row:int -> Message_layout.row_action
+val reset_chat_row_actions : unit -> unit
+val chat_row_actions :
+  unit -> (Masc_tui_types.workspace_authority * unit ref) Masc_tui_chat_row_actions.t
+(** Candidate rows for the current draw. Publish only after presentation. *)
 
 val keeper_health_word :
   Masc_tui_types.Tui_decode.keeper_health option -> string

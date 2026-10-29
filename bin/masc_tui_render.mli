@@ -172,10 +172,11 @@ val render :
   Masc_tui_approvals_model.approval_row option *
   Masc_tui_press.press_target Masc_tui_hit.zones *
   Masc_tui_pane_selection.layout *
-  Masc_tui_types.acting_pane_source Masc_tui_acting_pane.frame
+  Masc_tui_types.acting_pane_source Masc_tui_acting_pane.frame *
+  (Masc_tui_types.workspace_authority * unit ref) Masc_tui_chat_row_actions.t
 (** The frame without press marks, where each marked text landed in it, and
     where each of its panes sits. Commit the zones, panes, and Activity
-    input authority only once the terminal accepts the frame. [home] is a fresh, UI-domain-owned lazy
+    input authority and chat row actions only once the terminal accepts the frame. [home] is a fresh, UI-domain-owned lazy
     reading for this synchronous Build only. Frame preparation and drawing
     may force it; neither awaits, shares it with another domain, nor mutates
     its source inputs between those forces. Other surfaces leave it unforced. *)

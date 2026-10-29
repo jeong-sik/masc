@@ -5,7 +5,7 @@ status: Draft
 created: 2026-10-29
 updated: 2026-10-29
 author: claude
-related: ["0335", "keeper-guests-stay-inside-a-host-memory-budget"]
+related: ["0335", "settings-typed-delivery", "keeper-guests-stay-inside-a-host-memory-budget"]
 ---
 
 # RFC: 파일에 키가 있는 설정은 서버를 띄운 셸의 환경변수를 읽지 않는다
@@ -64,6 +64,12 @@ RFC-0335(2026-07-09, Draft)는 설정의 원천을 파일 하나로 모으자고
 
 이 RFC 의 2~3층이 0335 의 W2·W3 에 해당한다.
 
+### 1.5 settings-typed-delivery 와의 관계
+
+RFC settings-typed-delivery(2026-09-02, Draft)는 비목표에 "env 를 입력에서 빼는 것"과 "우선순위 변경(env > TOML > 기본값 그대로)"을 적었다. 운영자가 `export MASC_…` 로 값을 주는 방식을 지키려는 뜻이었다.
+
+이 RFC 는 그 두 항목을 `runtime.toml` 에 키가 있는 설정에 한해 바꾼다(결정 D1). 이유는 §1.2 의 사고다. `export` 로 값을 주는 길을 남기면 옛 탭에 남은 `export` 도 같이 남는다. 그 RFC 의 나머지(설정을 typed 레코드로 읽게 하기)와는 부딪치지 않는다. 그 RFC 의 맨 위에는 이 RFC 를 가리키는 줄을 덧붙인다.
+
 ## 2. 현황 수치
 
 | 항목 | 값 |
@@ -71,7 +77,7 @@ RFC-0335(2026-07-09, Draft)는 설정의 원천을 파일 하나로 모으자고
 | 레지스트리 행 | 64. 파일에 키가 있는 설정 38(`Toml_and_env` 36, `Toml_only` 2), 환경 전용(`Env_only`) 26 |
 | `raw_value_opt` 가 나오는 줄 | 82 (`lib`, `bin`) |
 | 아직 `Toml_and_env` 인 36개 이름을 쓰는 시험 | 파일 37개, 256곳 |
-| 위 이름을 환경변수로 쓰는 스크립트·compose | 이름 4개: `MASC_KEEPER_AUTONOMOUS_ENABLED` 39줄, `MASC_OTEL_ENABLED` 10줄, `MASC_SEARXNG_URL` 4줄, `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` 2줄 |
+| 위 이름을 환경변수로 쓰는 스크립트·compose | 이름 4개, 파일 33개. `MASC_KEEPER_AUTONOMOUS_ENABLED` 27개 파일, `MASC_OTEL_ENABLED` 8개, `MASC_SEARXNG_URL` 2개, `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` 2개(한 파일이 여러 이름을 쓰면 겹친다). harness, 스모크, 릴리스 증거 스크립트와 `docker-compose.yml` |
 | 환경을 직접 읽는 줄(`Sys.getenv`, `Unix.getenv`, `Unix.environment`) | `lib` 140, `bin` 41. `bin` 에는 클라이언트(CLI, TUI)가 섞여 있다 |
 | `lib`, `bin` 에서 파일 키 이름을 문자열 그대로 getenv 하는 곳 | 0 |
 
@@ -111,11 +117,13 @@ RFC-0335(2026-07-09, Draft)는 설정의 원천을 파일 하나로 모으자고
 
 ### 3.4 시험
 
-시험은 환경변수 대신 `Config_boot_overrides.set` 으로 값을 넣는다(#46805 의 시험 helper `with_boot_override`). 37개 파일을 코드모드로 바꾼다. 파일 소유 이름을 `putenv` 하는 시험이 남아 있으면 시험이 실패하게 한다. 일부만 바꾸고 끝나는 일을 막는다.
+선언은 `load_and_apply` 가 하므로, 로더를 부르지 않는 시험은 지금과 같이 환경변수가 먼저인 규칙으로 돈다. 로더를 거치는 시험(`test_runtime_toml_overrides`, `test_server_runtime_bootstrap`, `test_keeper_runtime_config_leaf` 등)은 환경변수 대신 `Config_boot_overrides.set` 으로 값을 넣게 바꾼다(#46805 의 시험 helper `with_boot_override`). 로더를 부르지 않으면서 파일 소유 이름을 `putenv` 하는 시험은 (a) 방식의 구멍과 같은 모양이라, 3층의 목록에 넣어 함께 정리한다. 이 이름을 쓰는 시험 파일은 37개(256곳)지만 대부분은 이름을 기대값으로 적거나 로더 없이 읽기만 한다.
 
 ### 3.5 스크립트와 compose
 
-스크립트가 서버를 띄울 때는 임시 base path 에 `runtime.toml` 을 쓴다. compose 는 설정 디렉터리를 마운트한다. 파일 위치를 정하는 `MASC_BASE_PATH`, `MASC_CONFIG_DIR` 는 파일을 읽기 전에 필요해서 파일 안에 둘 수 없다. 환경 전용으로 남는다. `MASC_BASE_PATH` 는 0335 의 결정 6항과 같다.
+스크립트가 서버를 띄울 때는 임시 base path 에 `runtime.toml` 을 쓴다. compose 는 설정 디렉터리를 마운트한다.
+
+33개 파일 대부분은 서버를 임시 base path 에 띄우면서 `MASC_KEEPER_AUTONOMOUS_ENABLED=false` 로 Keeper 자동 시작을 끄는 harness 다. 릴리스 스모크(`release-binary-smoke.sh`, `install-smoke.sh`, `release-evidence.sh`)도 들어 있다. 로컬에서 돌려 보지 않고 한 번에 바꾸기에는 범위가 커서, 이 네 이름은 2b층으로 따로 뺀다(§6). 파일 위치를 정하는 `MASC_BASE_PATH`, `MASC_CONFIG_DIR` 는 파일을 읽기 전에 필요해서 파일 안에 둘 수 없다. 환경 전용으로 남는다. `MASC_BASE_PATH` 는 0335 의 결정 6항과 같다.
 
 ### 3.6 레지스트리 밖의 환경 읽기(3층)
 
@@ -173,7 +181,8 @@ RFC-0335(2026-07-09, Draft)는 설정의 원천을 파일 하나로 모으자고
 | 층 | 내용 | 확인 |
 |---|---|---|
 | 1 | 이 RFC | 문서 검사 |
-| 2 | 읽는 함수 한 군데에서 강제한다. 파일 키 36행을 `Toml_only` 로 바꾸고 `Toml_and_env` 를 지운다. 시험 37개 파일, 스크립트, compose 를 옮긴다. #46805 의 특수 처리를 일반 규칙으로 대체한다 | §7 의 엉뚱한 환경값 시험, `Test` 워크플로 |
+| 2a | 읽는 함수 한 군데에서 강제한다. `Config_boot_overrides` 에 파일 소유 이름을 선언하고 `raw_value_opt` 가 따른다. 스크립트가 쓰지 않는 32행을 `Toml_only` 로 바꾸고 로더를 거치는 시험을 옮긴다. #46805 의 특수 처리를 일반 규칙으로 대체하고 `docs/ENV-CONTRACT.md` 와 헤더 주석을 고친다 | §7 의 엉뚱한 환경값 시험, `Test` 워크플로 |
+| 2b | 스크립트가 쓰는 네 이름(4행)을 `Toml_only` 로 바꾸고, 스크립트 33개와 compose 를 `runtime.toml` 쓰기로 옮긴 뒤 `Toml_and_env` 를 지운다 | 옮긴 스크립트 중 돌려 볼 수 있는 것은 돌린다. 릴리스 스모크는 따로 표시한다 |
 | 3 | 레지스트리 밖의 서버 쪽 환경 읽기를 등록하거나 지우고, 새로 늘면 실패하는 검사를 넣는다 | 검사의 시험, 분류 목록 |
 | 4 | `masc restart` 가 넘기는 환경을 레지스트리에서 만든다 | 환경 만들기 순수 함수 시험, 재시작 뒤 서버 환경 이름 확인 |
 
@@ -182,6 +191,7 @@ RFC-0335(2026-07-09, Draft)는 설정의 원천을 파일 하나로 모으자고
 - 엉뚱한 환경값 시험: 레지스트리의 파일 소유 행마다 환경변수에 기본값과 다른 값을 둔 채 `effective` 를 읽고, 값이 파일 값이나 기본값 그대로인지 본다. 기본값과 다른 값은 행의 `value_kind` 와 `default` 로 만든다. 목록이 레지스트리에서 나오므로 행을 더하면 시험도 따라온다.
 - 옛 탭 시험: `MASC_KEEPER_MICROVM_MEMORY=8g` 를 둔 채 부팅 읽기 경로를 돌려 게스트 크기가 파일 값인지 본다. #46805 의 시험에 일부 있다.
 - 4층: 환경 만들기 함수에 파일 소유 이름이 든 환경을 주면 결과에 그 이름이 없는지 본다.
+- 문서: `docs/ENV-CONTRACT.md` 의 우선순위 설명을 2a층에서 고친다.
 - 운영 확인: 재시작 뒤 `ps eww -p <pid>` 로 서버 환경의 변수 이름을 본다. 값은 읽지 않는다. 값에 토큰이 있다. 서버 로그의 `runtime.toml: applied N override(s)` 수도 본다.
 
 ## 8. 결정
@@ -193,6 +203,7 @@ RFC-0335(2026-07-09, Draft)는 설정의 원천을 파일 하나로 모으자고
 | D3 | #46805 는 임시 처방이다. 병합됐으니(2026-10-29 22:56) 본문에 `WORKAROUND` 표시와 이 RFC 를 적고, 2층이 병합될 때 특수 처리를 일반 규칙으로 바꾼다 | 정함. 병합이 라벨보다 먼저였다 |
 | D4 | 파일 소유 이름을 아래층에 알리는 방법. (a) 부팅 때 선언(기본안), (b) 표를 아래층에 둔다(§3.3) | 열림 |
 | D5 | 0335 의 W1(자격 증명 파일)을 이 RFC 뒤에 이어서 할지 | 열림. 이 RFC 에는 영향이 없다 |
+| D6 | 2b층에서 스크립트 33개를 옮기는 방식. 스크립트마다 `runtime.toml` 을 쓰는 공용 함수(셸 하나, 파이썬 하나)를 두거나, 서버를 띄우는 harness 공용 코드(`scripts/harness/lib/server_bootstrap.sh`)에 한 번만 넣는다 | 열림. 2b층을 시작할 때 정한다 |
 
 ## 9. 되돌리기
 

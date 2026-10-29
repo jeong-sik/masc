@@ -6,12 +6,8 @@ module Store = Lane_addon_store
 module Runtime = Lane_addon_runtime
 module History = Keeper_librarian_durable_request
 open Result.Syntax
-type namespace = Admission of string | History of string | Other
-let namespace id = match Capture.scope_of_request_id id with
-  | Ok scope -> Admission scope
-  | Error _ -> match History.scope_of_request_id id with
-    | Ok scope -> History scope
-    | Error _ -> Other
+module Namespace = Keeper_librarian_request_namespace
+module Step = Keeper_librarian_floor_step_request
 type discovery = {keepers:string list;refusals:string list;original_keepers:string list}
 let discover_parts ~store ~parts_by_owner owner =
   match List.assoc_opt owner !parts_by_owner with
@@ -29,6 +25,12 @@ let history_keeper ~base_path ~keepers_dir original =
   let* owner=History.observe_record_owner ~base_path ~keepers_dir original in
   let* capture=History.restore ~owner original in
   Ok (History.keeper_id owner,(History.destination capture).installation_id)
+(* The step's header names its destination, so the wake needs neither the step's
+   input nor its prompt. *)
+let floor_step_keeper ~base_path ~keepers_dir original =
+  let* owner=Step.observe_record_owner ~base_path ~keepers_dir original in
+  let* header=Step.header ~owner original in
+  Ok (History.keeper_id owner,header.destination.installation_id)
 type rescan_state = Idle | Running | Rerun_needed
 let rec claim_rescan state =
   match Atomic.get state with
@@ -66,14 +68,16 @@ let discover ~fold_originals ~config ~store =
       let original_keepers,original_refusals=
         let folded = Store.with_tool_request_settlement_barrier store (fun () ->
           fold_originals ~store ~init:([],[]) ~f:(fun (keepers,refusals) (original:Owner.retained) ->
-          let keeper=match namespace original.request_id with
-            | Admission scope when scope=original.scope ->
+          let keeper=match Namespace.of_request_id original.request_id with
+            | Namespace.Admission scope when scope=original.scope ->
               admission_keeper ~store ~parts_by_owner ~base_path ~keepers_dir original |> Result.map Option.some
             | History scope when scope=original.scope ->
               history_keeper ~base_path ~keepers_dir original |> Result.map Option.some
+            | Floor_step scope when scope=original.scope ->
+              floor_step_keeper ~base_path ~keepers_dir original |> Result.map Option.some
             (* Gate/partition journals have their own domains. Only the exact
                execution scope derived by its typed ID decoder is this owner. *)
-            | Admission _ | History _ | Other -> Ok None in
+            | Admission _ | History _ | Floor_step _ | Other -> Ok None in
           match keeper with
           | Ok None -> keepers,refusals
           | Ok (Some (keeper,_installation)) -> keeper::keepers,refusals
@@ -85,15 +89,16 @@ let discover ~fold_originals ~config ~store =
       Ok {keepers=List.sort_uniq String.compare (persisted @ queued @ original_keepers);
           refusals=metadata_refusals @ queue_refusals @ original_refusals;original_keepers}
     | Exact_result_delivered {installation_id;instance_id=_;request_id} ->
-      let* scope=match namespace request_id with
-        | Admission scope | History scope -> Ok scope
+      let* scope=match Namespace.of_request_id request_id with
+        | Namespace.Admission scope | History scope | Floor_step scope -> Ok scope
         | Other -> Error "Librarian result hint has no original execution namespace" in
       let* original=Owner.load ~store ~scope ~request_id |> Result.map_error Owner.error_to_string in
       let* original=Option.to_result ~none:"Librarian result hint has no original owner" original in
       let parts_by_owner=ref [] in
-      let* keeper,original_installation=match namespace request_id with
-        | Admission _ -> admission_keeper ~store ~parts_by_owner ~base_path ~keepers_dir original
+      let* keeper,original_installation=match Namespace.of_request_id request_id with
+        | Namespace.Admission _ -> admission_keeper ~store ~parts_by_owner ~base_path ~keepers_dir original
         | History _ -> history_keeper ~base_path ~keepers_dir original
+        | Floor_step _ -> floor_step_keeper ~base_path ~keepers_dir original
         | Other -> Error "Librarian result hint has no original execution namespace" in
       if installation_id=original_installation
       then Ok {keepers=[keeper];refusals=[];original_keepers=[keeper]}

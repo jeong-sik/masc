@@ -487,6 +487,7 @@ exit 0
        ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
        ; capabilities = [ Exec_ssh_protocol.observe_capability ]
        ; release = None
+       ; boot_id = None
        })
     (Exec_ssh_protocol.render_trailer
        { v = Exec_ssh_protocol.newest
@@ -1466,6 +1467,7 @@ let test_failed_endpoint_preflight_keeps_original_error_and_tree_refusal () =
       ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
       ; capabilities = []
       ; release = None
+      ; boot_id = None
       }
   in
   let script =

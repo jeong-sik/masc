@@ -10,9 +10,14 @@ let private_copy (checkpoint:Agent_core.Checkpoint.t) =
   {checkpoint with context=Agent_core.Context.copy checkpoint.context}
 let source_checkpoint (t:t) = Ok (private_copy t.source)
 let cut_checkpoint (t:t) = Ok (private_copy t.cut)
+(* Messages compare as the checkpoint codec writes them, as [prepare] and
+   [validate_candidate] compare checkpoints: the cut is a value in hand and
+   the seed a decode, and the codec keeps only what it writes. *)
+let same_message x y =
+  Yojson.Safe.equal (Agent_core.Checkpoint.message_to_json x) (Agent_core.Checkpoint.message_to_json y)
 let rec prefix expected actual = match expected,actual with
   | [],_ -> true
-  | x::xs,y::ys -> x=y && prefix xs ys
+  | x::xs,y::ys -> same_message x y && prefix xs ys
   | _::_,[] -> false
 let contains_tool_result (message:Agent_core.Types.message) = List.exists (function
   | Agent_core.Types.ToolResult _ -> true

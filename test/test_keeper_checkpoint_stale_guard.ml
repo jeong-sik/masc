@@ -1305,7 +1305,10 @@ let allocated_minor_words f =
   Gc.minor_words () -. before
 ;;
 
-let test_a_summarised_source_is_admitted_without_a_parse () =
+(* The source check parses the head under the lock every time (#43575), but
+   never the messages: a CAS against an 8,000-message source allocates less
+   than a parse of that history would. *)
+let test_a_source_check_reads_the_head_not_the_messages () =
   let session_id = "sess-cas-hash-only" in
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
@@ -2854,6 +2857,229 @@ let test_history_window_follows_the_runtime_setting () =
   check int "clearing the override puts the default window back"
     default_window (retained_files ())
 
+(* ── RFC-0476 head and objects: what a save and a backup can rely on ── *)
+
+let head_at path =
+  match Agent_core.Checkpoint_objects.head_of_string (Fs_compat.load_file path) with
+  | Ok head -> head
+  | Error error -> fail (Agent_core.Checkpoint_objects.load_error_to_string error)
+
+(* The same bytes under the canonical's name as a new file: no summary this
+   process kept describes it, so the next access parses the head only. *)
+let replace_with_a_copy path =
+  let copy = path ^ ".copy" in
+  Out_channel.with_open_bin copy (fun channel ->
+    Out_channel.output_string channel (Fs_compat.load_file path));
+  Unix.rename copy path
+
+let one_more_message (checkpoint : Agent_core.Checkpoint.t) text =
+  { checkpoint with
+    turn_count = checkpoint.turn_count + 1
+  ; messages = checkpoint.messages @ [ Agent_core.Types.user_msg text ]
+  }
+
+let same_history label (expected : Agent_core.Checkpoint.t) (actual : Agent_core.Checkpoint.t) =
+  check bool label true
+    (List.equal Agent_core.Types.Message_value.equal expected.messages actual.messages)
+
+(* A head this process only parsed names objects nobody here has looked for.
+   A bundle lost under it is written again by the next save, from the
+   messages in hand, so the head that save writes reads back. *)
+let test_a_save_writes_back_an_object_a_parsed_head_lost () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let session_id = "sess-lost-object" in
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let first = make_checkpoint ~session_id ~turn_count:1 ~marker:"first" in
+  save_ok ~session_dir first "first save";
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id in
+  let bundle = (List.hd (head_at path).history.turns).bundle in
+  let bundle_path = Keeper_checkpoint_object_store.path ~session_dir bundle in
+  replace_with_a_copy path;
+  Unix.unlink bundle_path;
+  let second = one_more_message first "after the loss" in
+  save_ok ~session_dir second "save after the bundle was lost";
+  check bool "the lost bundle is written again" true (Sys.file_exists bundle_path);
+  check bool "the first turn is kept as it was" true
+    (String.equal (bundle :> string)
+       ((List.hd (head_at path).history.turns).bundle :> string));
+  same_history "the saved head reads back" second (decode_head_files ~session_dir path)
+
+(* A file rewritten in place with its size and mtime kept passes the
+   summary's identity rule (#43575); the source check reads the head under
+   the lock, so it is not the expected source. *)
+let test_an_in_place_rewrite_is_not_the_source () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let session_id = "sess-in-place" in
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  save_ok ~session_dir (make_checkpoint ~session_id ~turn_count:8 ~marker:"source") "seed save";
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id in
+  (* Whole seconds, so the restore below sets the same mtime exactly; the load
+     then keeps a summary under that identity. *)
+  let mtime = Float.round (Unix.stat path).st_mtime in
+  Unix.utimes path mtime mtime;
+  let source_ref =
+    match Keeper_checkpoint_store.load_agent_core_with_ref ~session_dir ~session_id with
+    | Ok (_, reference) -> reference
+    | Error _ -> fail "source load failed"
+  in
+  let before = Unix.stat path in
+  let bytes = Fs_compat.load_file path in
+  let rewritten =
+    Str.global_replace (Str.regexp_string "\"turn_count\":8") "\"turn_count\":7" bytes
+  in
+  check bool "the rewrite changes the head" false (String.equal bytes rewritten);
+  let channel = open_out_gen [ Open_wronly; Open_trunc; Open_binary ] 0o644 path in
+  output_string channel rewritten;
+  close_out channel;
+  Unix.utimes path mtime mtime;
+  let after = Unix.stat path in
+  check bool "the file keeps its inode, size and mtime" true
+    (after.st_ino = before.st_ino && after.st_size = before.st_size
+     && Float.equal after.st_mtime before.st_mtime);
+  match
+    Keeper_checkpoint_store.save_agent_core_if_source
+      ~boundary:Agent_core.Checkpoint_objects.Turn_continues ~session_dir
+      ~expected_source_ref:source_ref
+      (make_checkpoint ~session_id ~turn_count:9 ~marker:"candidate")
+  with
+  | Keeper_checkpoint_store.Not_installed { cause = Keeper_checkpoint_store.Source_changed _; _ } -> ()
+  | Keeper_checkpoint_store.Not_installed _ -> fail "refused for another reason"
+  | Keeper_checkpoint_store.Installed _ -> fail "a rewritten head passed for its source"
+
+let copy_tree ~from ~into =
+  let rec copy from into =
+    if Sys.is_directory from
+    then (
+      if not (Sys.file_exists into) then Unix.mkdir into 0o755;
+      Array.iter
+        (fun name -> copy (Filename.concat from name) (Filename.concat into name))
+        (Sys.readdir from))
+    else
+      Out_channel.with_open_bin into (fun channel ->
+        Out_channel.output_string channel (Fs_compat.load_file from))
+  in
+  copy from into
+
+(* A backup is the head and every object it names, at the session's paths:
+   copying it over the session dir after another save puts the checkpoint
+   back. It copies only the source the caller read, and a retry of the same
+   source succeeds. *)
+let test_a_backup_restores_the_checkpoint_by_a_copy () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let session_id = "sess-backup" in
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let root = Filename.dirname session_dir in
+  let closed = make_checkpoint ~session_id ~turn_count:1 ~marker:"closed" in
+  save_ok ~session_dir closed "closed turn";
+  let source = one_more_message closed "open message" in
+  (match
+     Keeper_checkpoint_store.save_agent_core_classified
+       ~boundary:Agent_core.Checkpoint_objects.Turn_continues
+       ~history_retained:0 ~session_dir source
+   with
+   | Ok _ -> ()
+   | Error detail -> fail ("open save failed: " ^ detail));
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id in
+  let head_bytes = Fs_compat.load_file path in
+  let content = content_digest_of_head head_bytes in
+  let backup_dir = Filename.concat root "backup" in
+  let back_up ~content backup_dir =
+    Keeper_checkpoint_store.back_up_canonical
+      ~session_dir ~session_id ~ownership_root:root ~backup_dir ~content
+  in
+  (match back_up ~content:(String.make 64 '0') backup_dir with
+   | Error (Keeper_checkpoint_store.Backup_content_changed _) -> ()
+   | Error _ | Ok _ -> fail "a backup of another source must be refused");
+  check bool "a refused backup writes nothing" false (Sys.file_exists backup_dir);
+  (match back_up ~content backup_dir with
+   | Ok backup ->
+     check string "the backup head is the canonical's bytes" head_bytes
+       (Fs_compat.load_file backup.backup_head)
+   | Error error -> fail (Keeper_checkpoint_store.backup_error_to_string error));
+  (match back_up ~content backup_dir with
+   | Ok _ -> ()
+   | Error error -> fail ("a retried backup: " ^ Keeper_checkpoint_store.backup_error_to_string error));
+  save_ok ~session_dir
+    (make_checkpoint ~session_id ~turn_count:3 ~marker:"after the backup")
+    "a later save";
+  copy_tree ~from:backup_dir ~into:session_dir;
+  same_history "the copied backup reads back as the source" source
+    (stored_value ~session_dir ~session_id);
+  let open_message = List.hd (head_at path).history.open_messages in
+  Unix.unlink (Keeper_checkpoint_object_store.path ~session_dir open_message);
+  match back_up ~content (Filename.concat root "second-backup") with
+  | Error (Keeper_checkpoint_store.Backup_object_unreadable _) -> ()
+  | Error _ | Ok _ -> fail "a backup missing an object must be refused"
+
+(* The objects first, then the head: an object write that fails leaves the
+   head that was there. *)
+let test_a_failed_object_write_keeps_the_previous_head () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let session_id = "sess-object-write-fails" in
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let first = make_checkpoint ~session_id ~turn_count:1 ~marker:"first" in
+  save_ok ~session_dir first "first save";
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id in
+  let head_before = Fs_compat.load_file path in
+  let objects = Filename.concat session_dir Keeper_checkpoint_object_store.dirname in
+  Unix.rename objects (objects ^ ".moved");
+  Out_channel.with_open_bin objects (fun channel -> Out_channel.output_string channel "not a directory");
+  (match
+     Keeper_checkpoint_store.save_agent_core_classified
+       ~boundary:Agent_core.Checkpoint_objects.Turn_closes
+       ~history_retained:0 ~session_dir (one_more_message first "cannot be stored")
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "a save whose objects cannot be written must fail");
+  check string "the previous head stays" head_before (Fs_compat.load_file path)
+
+(* Head bytes another store keeps load back as the snapshot they were made
+   from, with their objects read from the session. *)
+let test_a_persisted_snapshot_loads_back () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let session_id = "sess-persisted" in
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let trace_id =
+    match Keeper_id.Trace_id.of_string session_id with
+    | Ok trace_id -> trace_id
+    | Error reason -> fail reason
+  in
+  let first = make_checkpoint ~session_id ~turn_count:1 ~marker:"first" in
+  save_ok ~session_dir first "first save";
+  let value = one_more_message first "held by a Gate" in
+  let snapshot =
+    match Keeper_checkpoint_store.exact_snapshot_of_value ~expected_session_id:trace_id value with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "snapshot of the value"
+  in
+  let head_bytes =
+    match Keeper_checkpoint_store.persist_exact_snapshot ~session_dir snapshot with
+    | Ok head_bytes -> head_bytes
+    | Error error -> fail (Keeper_checkpoint_store.persist_error_to_string error)
+  in
+  match
+    Keeper_checkpoint_store.exact_snapshot_of_head_bytes ~session_dir
+      ~expected_session_id:trace_id head_bytes
+  with
+  | Error _ -> fail "persisted head bytes do not load"
+  | Ok loaded ->
+    check bool "the loaded snapshot names the same reference" true
+      (Keeper_checkpoint_ref.equal
+         (Keeper_checkpoint_store.exact_snapshot_reference snapshot)
+         (Keeper_checkpoint_store.exact_snapshot_reference loaded));
+    same_history "and holds the same history" value
+      (Keeper_checkpoint_store.exact_snapshot_checkpoint loaded)
+
 let () =
   run "Keeper_checkpoint_store checkpoint watermark (RFC-0225 §3.2)"
     [
@@ -2927,8 +3153,8 @@ let () =
             test_canonical_checkpoint_is_written_compact;
           test_case "exact source CAS permits one equal-turn writer" `Quick
             test_exact_source_cas_allows_one_equal_turn_writer;
-          test_case "a summarised source is admitted without a parse" `Quick
-            test_a_summarised_source_is_admitted_without_a_parse;
+          test_case "a source check reads the head, not the messages" `Quick
+            test_a_source_check_reads_the_head_not_the_messages;
           test_case "exact source CAS updates the canonical watermark" `Quick
             test_exact_source_cas_updates_canonical_watermark;
           test_case "release failure preserves Not_installed cause" `Quick
@@ -2995,6 +3221,16 @@ let () =
             test_unregistering_a_keeper_whose_session_store_moved_drops_its_written_value;
           test_case "a plain save keeps no written value" `Quick
             test_a_plain_save_keeps_no_written_value;
+          test_case "a save writes back an object a parsed head lost" `Quick
+            test_a_save_writes_back_an_object_a_parsed_head_lost;
+          test_case "an in-place rewrite is not the source" `Quick
+            test_an_in_place_rewrite_is_not_the_source;
+          test_case "a backup restores the checkpoint by a copy" `Quick
+            test_a_backup_restores_the_checkpoint_by_a_copy;
+          test_case "a failed object write keeps the previous head" `Quick
+            test_a_failed_object_write_keeps_the_previous_head;
+          test_case "a persisted snapshot loads back" `Quick
+            test_a_persisted_snapshot_loads_back;
           test_case "one keeper name in two workspaces keeps both values" `Quick
             test_one_keeper_name_in_two_workspaces_keeps_both_values;
         ] );

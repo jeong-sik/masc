@@ -421,13 +421,22 @@ type canonical_identity =
   ; mtime : float
   }
 
+(* Whether this process has seen every object a head names: it wrote them,
+   or a load read them back against their digests. A head that was only
+   parsed names objects nobody here has looked for, so a save checks that
+   they are there before it names them again (RFC-0476 §3.3). Objects are
+   never removed while a head names them, so a head seen once stays seen. *)
+type head_objects =
+  | Objects_seen
+  | Objects_unchecked
+
 type canonical_summary =
   { identity : canonical_identity
   ; summary_session_id : string
   ; summary_turn_count : int
   ; summary_message_count : int
   ; summary_history : Objects.history
-  ; summary_content : Objects.digest
+  ; summary_objects : head_objects
   }
 
 let canonical_summaries : (string, canonical_summary) Hashtbl.t = Hashtbl.create 16
@@ -524,13 +533,13 @@ let cached_summary ~canonical_path =
            Some summary
          | Some _ | None -> None))
 
-let summary_of_head ~identity (head : Objects.head) =
+let summary_of_head ~identity ~objects (head : Objects.head) =
   { identity
   ; summary_session_id = head.checkpoint.session_id
   ; summary_turn_count = head.checkpoint.turn_count
   ; summary_message_count = Objects.message_count head.history
   ; summary_history = head.history
-  ; summary_content = Objects.head_content_digest head
+  ; summary_objects = objects
   }
 
 let publish_summary ~canonical_path summary =
@@ -543,10 +552,10 @@ let publish_summary ~canonical_path summary =
 (* After a parse: the summary describes the bytes parsed only if the file
    identity is the same before and after the read. Otherwise a rename landed
    during the read and nothing is published; the next access reads again. *)
-let publish_summary_after_parse ~canonical_path ~identity_before head =
+let publish_summary_after_parse ~canonical_path ~identity_before ~objects head =
   match identity_before, canonical_identity_opt canonical_path with
   | Some before, Some after when canonical_identity_equal before after ->
-    publish_summary ~canonical_path (summary_of_head ~identity:before head)
+    publish_summary ~canonical_path (summary_of_head ~identity:before ~objects head)
   | Some _, (Some _ | None) | None, (Some _ | None) -> ()
 
 (* After a durable atomic write under the session lock: the file at the path
@@ -554,7 +563,7 @@ let publish_summary_after_parse ~canonical_path ~identity_before head =
 let publish_summary_after_write ~canonical_path head =
   match canonical_identity_opt canonical_path with
   | Some identity ->
-    publish_summary ~canonical_path (summary_of_head ~identity head);
+    publish_summary ~canonical_path (summary_of_head ~identity ~objects:Objects_seen head);
     Some identity
   | None -> None
 
@@ -741,7 +750,7 @@ let load_agent_core_as ~read_use ~(session_dir : string) ~(session_id : string) 
         (match decode_head_off_scheduler ~session_dir ~memo bytes with
          | Error e -> Error (classify_objects_error e)
          | Ok (head, ckpt) ->
-           publish_summary_after_parse ~canonical_path:path ~identity_before head;
+           publish_summary_after_parse ~canonical_path:path ~identity_before ~objects:Objects_seen head;
            (match read_use with
             | Read_only -> Ok ckpt
             | Read_for_save keeper_name ->
@@ -1081,39 +1090,59 @@ let load_canonical_bytes_strict path =
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn -> Error (Io_error (Printexc.to_string exn))
 
-(* What a save or a source check needs from the canonical: the head alone,
-   no message object. From the summary while it describes the file, otherwise
-   from a parse of the head, which publishes the summary. A head is trusted to
-   name objects that are durable: every writer writes the objects first. *)
+(* What a save needs from the canonical: the head alone, no message object.
+   From the summary while it describes the file, otherwise from a parse of
+   the head, which publishes the summary. *)
 type known_canonical =
   { known_session_id : string
   ; known_turn_count : int
   ; known_history : Objects.history
-  ; known_content : Objects.digest
+  ; known_objects : head_objects
   }
 
 let known_of_summary summary =
   { known_session_id = summary.summary_session_id
   ; known_turn_count = summary.summary_turn_count
   ; known_history = summary.summary_history
-  ; known_content = summary.summary_content
+  ; known_objects = summary.summary_objects
   }
+
+(* The head on disk now, parsed, with the identity of the file read. *)
+let parsed_canonical ~canonical_path
+  : ((canonical_identity * Objects.head) option, checkpoint_load_error) result =
+  match load_canonical_bytes_strict canonical_path with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some (identity, content)) ->
+    (match head_of_bytes_off_scheduler content with
+     | Error error -> Error (classify_objects_error error)
+     | Ok head -> Ok (Some (identity, head)))
 
 let known_canonical ~canonical_path
   : (known_canonical option, checkpoint_load_error) result =
   match cached_summary ~canonical_path with
   | Some summary -> Ok (Some (known_of_summary summary))
   | None ->
-    (match load_canonical_bytes_strict canonical_path with
+    (match parsed_canonical ~canonical_path with
      | Error _ as error -> error
      | Ok None -> Ok None
-     | Ok (Some (identity, content)) ->
-       (match head_of_bytes_off_scheduler content with
-        | Error error -> Error (classify_objects_error error)
-        | Ok head ->
-          let summary = summary_of_head ~identity head in
-          publish_summary_after_parse ~canonical_path ~identity_before:(Some identity) head;
-          Ok (Some (known_of_summary summary))))
+     | Ok (Some (identity, head)) ->
+       let summary = summary_of_head ~identity ~objects:Objects_unchecked head in
+       publish_summary_after_parse
+         ~canonical_path ~identity_before:(Some identity) ~objects:Objects_unchecked head;
+       Ok (Some (known_of_summary summary)))
+
+(* The objects the canonical names that the session does not hold. A head
+   this process has seen whole names none; one only parsed is checked file
+   by file, so the save that follows writes the missing ones again instead
+   of naming them once more. *)
+let absent_objects ~session_dir (known : known_canonical) =
+  match known.known_objects with
+  | Objects_seen -> []
+  | Objects_unchecked ->
+    List.filter
+      (fun digest -> not (Keeper_checkpoint_object_store.present ~session_dir digest))
+      (Objects.history_objects known.known_history)
 
 (* ── Judging and removing an undecodable canonical ([masc_keeper_clear]) ─
    A canonical no turn can decode fails every turn (#37089), and nothing the
@@ -1512,6 +1541,7 @@ let load_ref_locked ~session_dir ~expected_session_id =
        publish_summary_after_parse
          ~canonical_path
          ~identity_before:(Some identity_before)
+         ~objects:Objects_seen
          head;
        exact_snapshot_of_checkpoint
          ~expected_session_id ~content:(Objects.head_content_digest head) checkpoint)
@@ -1525,9 +1555,10 @@ type canonical_source =
 
 (* RFC-0225 §3.2 admission: the reference is the content digest, which the
    head gives without a message object read (RFC-0476 §3.2), and its session
-   and turn are the head's. The canonical summary holds all three for the head
-   on disk, so a file the summary describes is admitted without a read. A head
-   that does not parse refuses the write. *)
+   and turn are the head's. The head is read and parsed under the lock every
+   time, so a file rewritten in place under the summary's identity (#43575)
+   cannot pass for the expected source. A head that does not parse refuses
+   the write. *)
 let canonical_source_locked
       ~session_dir
       ~(expected_source_ref : Keeper_checkpoint_ref.t)
@@ -1538,11 +1569,11 @@ let canonical_source_locked
       ~session_dir
       ~session_id:(Keeper_id.Trace_id.to_string expected_session_id)
   in
-  match known_canonical ~canonical_path with
+  match parsed_canonical ~canonical_path with
   | Error error -> Error (Ref_read_failed error)
   | Ok None -> Ok Source_absent
-  | Ok (Some known) ->
-    (match Keeper_id.Trace_id.of_string known.known_session_id with
+  | Ok (Some ((_ : canonical_identity), head)) ->
+    (match Keeper_id.Trace_id.of_string head.checkpoint.session_id with
      | Error reason -> Error (Ref_identity_invalid (Session_id_invalid reason))
      | Ok trace_id when not (Keeper_id.Trace_id.equal trace_id expected_session_id) ->
        Error (Ref_session_mismatch { expected = expected_session_id; actual = trace_id })
@@ -1550,8 +1581,8 @@ let canonical_source_locked
        (match
           Keeper_checkpoint_ref.of_persisted
             ~trace_id
-            ~turn_count:known.known_turn_count
-            ~sha256:(known.known_content :> string)
+            ~turn_count:head.checkpoint.turn_count
+            ~sha256:(Objects.head_content_digest head :> string)
         with
         | Error error -> Error (Ref_identity_invalid (Ref_create_failed error))
         | Ok reference ->
@@ -1639,7 +1670,9 @@ let read_since_locked ~session_dir ~(known : exact_source) =
    The identity is the one the head was read under, so the answer does not
    depend on what the file holds when this runs, after the lock was released.
    The objects a head names do not change, so reading them now gives what
-   they held then. *)
+   they held then. That holds only while nothing removes them between the
+   head's read under the lock and this decode after it; the object sweep
+   (RFC-0476 §3.6) has to keep that true. *)
 let decode_changed_bytes changed =
   let decoded =
     match
@@ -1661,6 +1694,7 @@ let decode_changed_bytes changed =
     publish_summary_after_parse
       ~canonical_path:changed.changed_path
       ~identity_before:(Some changed.changed_identity_before)
+      ~objects:Objects_seen
       changed.changed_head;
     (match Keeper_id.Trace_id.of_string checkpoint.session_id with
      | Error reason -> Error (Ref_identity_invalid (Session_id_invalid reason))
@@ -1725,13 +1759,14 @@ let with_checkpoint_cas_lock ~session_dir f =
     |> installation_of_lock_observation
 
 (* A plan's layout follows the canonical as it is when the plan is made
-   (RFC-0476 §3.3). Every head that was the canonical names durable objects,
-   so the plan stays valid when the canonical moves before a lock is taken;
-   the source check under the lock decides whether it is installed. A
-   canonical that cannot be read gives no layout to follow, and the source
-   check then refuses the install. *)
+   (RFC-0476 §3.3), and writes again what that head names but the session
+   does not hold. Objects are not removed while a head names them, so the
+   plan stays valid when the canonical moves before a lock is taken; the
+   source check under the lock decides whether it is installed. A canonical
+   that cannot be read gives no layout to follow, and the source check then
+   refuses the install. *)
 let plan_for_session ~session_dir ~boundary (checkpoint : Agent_core.Checkpoint.t) =
-  let previous =
+  let known =
     if not (leaf_is_real_segment checkpoint.session_id)
     then None
     else (
@@ -1740,11 +1775,13 @@ let plan_for_session ~session_dir ~boundary (checkpoint : Agent_core.Checkpoint.
           ~canonical_path:
             (agent_core_checkpoint_path ~session_dir ~session_id:checkpoint.session_id)
       with
-      | Ok (Some known) -> Some known.known_history
-      | Ok None | Error (_ : checkpoint_load_error) -> None)
+      | Ok known -> known
+      | Error (_ : checkpoint_load_error) -> None)
   in
+  let previous = Option.map (fun known -> known.known_history) known in
+  let absent = Option.fold ~none:[] ~some:(absent_objects ~session_dir) known in
   offload_checkpoint_cpu (fun () ->
-    Objects.plan_save (Objects.create_memo ()) ?previous boundary checkpoint)
+    Objects.plan_save (Objects.create_memo ()) ?previous ~absent boundary checkpoint)
 
 let install_plan_if_source
     ~require_absent
@@ -2226,6 +2263,101 @@ let persist_exact_snapshot ~session_dir snapshot =
   | Ok result -> result
   | Error detail -> Error (Persist_session_unavailable detail)
 
+(* A copy of the canonical head and every object it names, laid out as the
+   session holds them, so copying the backup over the session directory puts
+   the checkpoint back (docs/CHECKPOINT-PURGE-RUNBOOK.md). *)
+type canonical_backup =
+  { backup_head : string
+  ; backup_bytes : int
+  }
+
+type backup_error =
+  | Backup_canonical_unreadable of checkpoint_load_error
+  | Backup_canonical_absent
+  | Backup_content_changed of
+      { expected : string
+      ; actual : string
+      }
+  | Backup_object_unreadable of
+      { digest : string
+      ; detail : string
+      }
+  | Backup_file_conflict of string
+  | Backup_write_failed of
+      { path : string
+      ; error : Keeper_fs.durable_write_error
+      }
+  | Backup_read_back_mismatch of string
+
+let backup_error_to_string = function
+  | Backup_canonical_unreadable error -> checkpoint_load_error_to_string error
+  | Backup_canonical_absent -> "no canonical checkpoint to back up"
+  | Backup_content_changed { expected; actual } ->
+    Printf.sprintf "the canonical checkpoint is %s, not the source %s" actual expected
+  | Backup_object_unreadable { digest; detail } ->
+    Printf.sprintf "checkpoint object %s cannot be backed up: %s" digest detail
+  | Backup_file_conflict path -> path ^ " already holds other bytes"
+  | Backup_write_failed { path; error } ->
+    Printf.sprintf "%s: %s" path (Keeper_fs.durable_write_error_to_string error)
+  | Backup_read_back_mismatch path -> path ^ " does not read back as written"
+
+let back_up_canonical ~session_dir ~session_id ~ownership_root ~backup_dir ~content =
+  (* A file already in the backup is kept when it holds these bytes, so a
+     retried backup of one checkpoint succeeds. *)
+  let copy ~path bytes =
+    match Fs_compat.load_file_opt path with
+    | Some existing when String.equal existing bytes -> Ok ()
+    | Some _ -> Error (Backup_file_conflict path)
+    | None ->
+      (match Keeper_fs.save_bytes_durable_atomic ~ownership_root path bytes with
+       | Error error -> Error (Backup_write_failed { path; error })
+       | Ok () ->
+         (match Fs_compat.load_file_opt path with
+          | Some written when String.equal written bytes -> Ok ()
+          | Some _ | None -> Error (Backup_read_back_mismatch path)))
+  in
+  let rec copy_objects total = function
+    | [] -> Ok total
+    | (digest : Objects.digest) :: rest ->
+      let unreadable detail =
+        Error (Backup_object_unreadable { digest = (digest :> string); detail })
+      in
+      (match Keeper_checkpoint_object_store.read ~session_dir digest with
+       | Error detail -> unreadable detail
+       | Ok None -> unreadable "missing"
+       | Ok (Some bytes)
+         when not (String.equal (Objects.digest_of_bytes bytes :> string) (digest :> string)) ->
+         unreadable "its bytes have another digest"
+       | Ok (Some bytes) ->
+         (match
+            copy ~path:(Keeper_checkpoint_object_store.path ~session_dir:backup_dir digest) bytes
+          with
+          | Error _ as error -> error
+          | Ok () -> copy_objects (total + String.length bytes) rest))
+  in
+  if not (leaf_is_real_segment session_id)
+  then Error (Backup_canonical_unreadable (Store_error "session_id is not a real path segment"))
+  else (
+    match load_canonical_bytes_strict (agent_core_checkpoint_path ~session_dir ~session_id) with
+    | Error error -> Error (Backup_canonical_unreadable error)
+    | Ok None -> Error Backup_canonical_absent
+    | Ok (Some ((_ : canonical_identity), head_bytes)) ->
+      (match head_of_bytes_off_scheduler head_bytes with
+       | Error error -> Error (Backup_canonical_unreadable (classify_objects_error error))
+       | Ok head ->
+         let actual = (Objects.head_content_digest head :> string) in
+         if not (String.equal actual content)
+         then Error (Backup_content_changed { expected = content; actual })
+         else (
+           (* The objects first, then the head that names them. *)
+           match copy_objects 0 (Objects.history_objects head.history) with
+           | Error _ as error -> error
+           | Ok object_bytes ->
+             let backup_head = agent_core_checkpoint_path ~session_dir:backup_dir ~session_id in
+             (match copy ~path:backup_head head_bytes with
+              | Error _ as error -> error
+              | Ok () -> Ok { backup_head; backup_bytes = object_bytes + String.length head_bytes }))))
+
 type release_failure =
   | Lock_held_elsewhere
   | Release_failed of string
@@ -2286,7 +2418,7 @@ let save_outcome_after_write
     ~history_retained ~payload_writer ~(plan : Objects.plan) ckpt
   =
   let identity = canonical_identity_of_stats written_file in
-  publish_summary ~canonical_path (summary_of_head ~identity plan.head);
+  publish_summary ~canonical_path (summary_of_head ~identity ~objects:Objects_seen plan.head);
   (match save_lineage with
    | Save_for_keeper keeper_name ->
      keep_lineage ~canonical_path ~identity ~memo ~keeper_name (Some plan.decoded)
@@ -2370,6 +2502,7 @@ let save_agent_core_classified_typed
       | Ok existing ->
         let known = Option.map (fun known -> known.known_turn_count) existing in
         let previous = Option.map (fun known -> known.known_history) existing in
+        let absent = Option.fold ~none:[] ~some:(absent_objects ~session_dir) existing in
         let ownership_root = Filename.dirname session_dir in
         let memo =
           match save_lineage with
@@ -2377,7 +2510,7 @@ let save_agent_core_classified_typed
           | Save_without_lineage -> Objects.create_memo ()
         in
         let plan payload =
-          offload_checkpoint_cpu (fun () -> Objects.plan_save memo ?previous boundary payload)
+          offload_checkpoint_cpu (fun () -> Objects.plan_save memo ?previous ~absent boundary payload)
         in
         (* The objects first, then the head that names them (RFC-0476 §3.3). *)
         let install payload (plan : Objects.plan) =

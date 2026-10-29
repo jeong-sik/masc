@@ -45,9 +45,12 @@ equal-watermark re-save through the locked validated store.
    Keeper is active.
 3. Stop the Keeper completely, preview again, then select **백업 후 청소**.
    Apply is unavailable while the Keeper is registered. The server takes the
-   same lifecycle key used by boot, writes and reads back a byte-exact backup,
-   then installs only against the exact checkpoint source reference it read.
-4. Keep the displayed backup path until the Keeper completes a healthy turn.
+   same lifecycle key used by boot, writes and reads back a byte-exact backup
+   (see [Backup and rollback](#backup-and-rollback)), then installs only
+   against the exact checkpoint source reference it read. The backup is
+   `<masc-dir>/backups-checkpoint-purge-<trace>-<source sha256>/`.
+4. Keep the displayed backup directory until the Keeper completes a healthy
+   turn.
 
 ### CLI
 
@@ -64,17 +67,41 @@ equal-watermark re-save through the locked validated store.
    ```sh
    masc-checkpoint-purge --keeper <keeper-name> --base <base-path>
    ```
-3. **Apply.** The tool writes a byte-exact backup before saving:
+3. **Apply.** The tool writes a byte-exact backup before saving
+   (see [Backup and rollback](#backup-and-rollback)):
 
    ```sh
    masc-checkpoint-purge --keeper <keeper-name> --base <base-path> --apply
-   # backup: {runtime-root}/backups-checkpoint-purge-<trace>-<ts>Z/<trace>.json
+   # backup: {runtime-root}/backups-checkpoint-purge-<trace>-<ts>Z
    ```
 4. **Verify fixpoint.** Re-run the dry-run; expect `+0.0%` and zero rule
    counts.
 5. **Keep the backup** until the keeper has completed at least one healthy
-   turn after restart. Rollback is a plain file copy over the canonical
-   checkpoint (server stopped).
+   turn after restart.
+
+### Backup and rollback
+
+The canonical checkpoint is a small head, `<session>/<trace>.json`, and the
+messages are objects it names under `<session>/objects/<aa>/<sha256>`
+(RFC-0476). The backup copies the head and every object it names, byte for
+byte, at the same relative paths:
+
+```text
+backups-checkpoint-purge-<trace>-<…>/
+  <trace>.json
+  objects/<aa>/<sha256>
+```
+
+Rollback, with the server stopped, copies the backup's contents over the
+session directory:
+
+```sh
+cp -R <backup-dir>/. <session-dir>/
+```
+
+The objects are named by their digest, so copying one that is already there
+writes the same bytes. Copying `<trace>.json` alone is not a rollback: a
+head reads only with its objects.
 
 ## What the tool refuses (and what to do)
 

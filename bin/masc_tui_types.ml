@@ -10788,10 +10788,10 @@ let queue_panel_priority state ~items panel =
       (match List.find_opt (fun (item : Masc_tui_keeper_chat_queue.item) ->
           String.equal item.request.request_id id)
           (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name:panel.qp_keeper) with
-       | Some {intent=Next; _} ->
+       | Some item when Masc_tui_keeper_chat_queue.local_order_editable item ->
            if queue_local_reordering_held state ~keeper_name:panel.qp_keeper then Queue_no_priority
            else Queue_local_order
-       | Some {intent=Steer_after_interrupt; _} | None -> Queue_no_priority)
+       | Some _ | None -> Queue_no_priority)
   | Some (Server_message _) -> Queue_server_order
   | Some (Event _) -> Queue_event_urgency
   | Some (Running_message _ | Schedule _) | None -> Queue_no_priority
@@ -14360,6 +14360,32 @@ let inflight_for_keeper state keeper_name =
     state.msg_inflight
 ;;
 
+(* The first POST and its acceptance are separate boundaries. Until an
+   acceptance or a completed continuation checkpoint is observed, another
+   input to this Keeper must not pass it. *)
+let keeper_admission_pending state keeper_name =
+  List.exists (fun (entry : inflight) ->
+    String.equal entry.sent_request.keeper_name keeper_name
+    && Option.is_none (Masc_tui_keeper_chat_transcript.admission entry.log.tl_transcript)
+    && not (Masc_tui_keeper_chat_log.run_started entry.log.tl_log
+            && Masc_tui_keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript))
+    state.msg_inflight
+;;
+
+(* A held input needs an explicit edit or resume. A newer Enter cannot join
+   it and thereby turn its hold into an admission. *)
+let joinable_keeper_input state keeper_name =
+  match Masc_tui_keeper_chat_queue.join_target state.msg_queued ~keeper_name with
+  | Some item when List.exists (fun (keeper, id, intervention) ->
+      String.equal keeper item.request.keeper_name
+      && String.equal id item.request.request_id
+      && match intervention with
+         | Retained_before_dispatch | Retained_after_stop -> true
+         | Awaiting_control _ -> false) state.keeper_interactive_waiting -> None
+  | Some _ as item -> item
+  | None -> None
+;;
+
 (* A live subscription can outlast one checkpoint segment. Such a watcher
    keeps its identity and log while fresh input may enter the server queue. *)
 let blocking_inflight_for_keeper state keeper_name =
@@ -15304,6 +15330,33 @@ let retain_preflight_inputs (state : state) entries =
       end) entries
 ;;
 
+(* A finished worker whose preflight never received the start acknowledgement
+   made no POST. Preserve the promoted item before retiring its owner. A
+   priority request stays queued with its id and intent until explicit resume. *)
+let recover_failed_keeper_preflight state request =
+  let same = Masc_tui_keeper_chat_projection.same_request_identity in
+  match inflight_entry_by_request_id state request.Masc_tui_keeper_chat_projection.request_id with
+  | Some entry when same entry.sent_request request ->
+      (match entry.phase with
+       | Turn_preflight _ ->
+           let other_preflight = List.exists (fun (other : inflight) ->
+             other != entry
+             && String.equal other.sent_request.keeper_name request.keeper_name
+             && match other.phase with
+                | Turn_preflight _ -> true
+                | Turn_streaming | Turn_reconciling -> false) state.msg_inflight in
+           if other_preflight then false else begin
+             let was_visible = Option.exists (fun live -> live == entry.log) state.msg_live in
+             retain_preflight_inputs state [entry];
+             withdraw_undispatched_request state request;
+             if was_visible then
+               state.msg_live <- Option.bind state.msg_target_keeper_name (live_for_keeper state);
+             true
+           end
+       | Turn_streaming | Turn_reconciling -> false)
+  | Some _ | None -> false
+;;
+
 (* Suspension changes workspace ownership, not a prior server stop receipt.
    Keep real stop reasons; other unsent input needs only explicit local resume. *)
 let suspend_keeper_input state =
@@ -15343,6 +15396,20 @@ let withdraw_keeper_chat_requests (state : state) =
 let keeper_chat_control_generation state keeper_name =
   Option.value ~default:0 (List.assoc_opt keeper_name state.keeper_chat_control_generations)
 
+(* A first POST is authorized only by the still-current preflight owner. A
+   stop or resume begun after promotion revokes that owner's start, even if
+   the workspace probe answered later. *)
+let keeper_preflight_dispatch_allowed state request =
+  match inflight_entry_by_request_id state request.Masc_tui_keeper_chat_projection.request_id with
+  | Some entry ->
+      Masc_tui_keeper_chat_projection.same_request_identity entry.sent_request request
+      && (match entry.phase with Turn_preflight _ -> true | Turn_streaming | Turn_reconciling -> false)
+      && state.workspace_identity = Workspace_identity_match
+      && server_authority_ready state
+      && entry.control_generation = keeper_chat_control_generation state request.keeper_name
+      && not (List.mem_assoc request.keeper_name state.keeper_chat_control_pending)
+  | None -> false
+
 (* These messages never paused the server. Explicit local resume authorizes
    their first POST; an actual stop still needs the server's resume receipt. *)
 let can_resume_preflight_keeper_input state keeper_name =
@@ -15363,8 +15430,9 @@ let retained_input_markers queue previous =
     | Some (_, _, (Retained_before_dispatch | Retained_after_stop as held)) -> Some (name, id, held)
     | Some (_, _, Awaiting_control _) | None ->
       match item.intent with
-      | Next -> None
-      | Steer_after_interrupt -> Some (name, id, Retained_before_dispatch))
+      | Next | Next_without_auto_priority -> None
+      | Run_next _ | Steer_after_interrupt | Steer_without_priority ->
+          Some (name, id, Retained_before_dispatch))
 
 let advance_keeper_chat_control state keeper_name =
   let generation = keeper_chat_control_generation state keeper_name + 1 in
@@ -15375,6 +15443,17 @@ let advance_keeper_chat_control state keeper_name =
 (* A server control that stops or resumes the owner supersedes the priority
    requests still waiting locally for that Keeper. *)
 let clear_keeper_priority_requests state keeper_name =
+  state.msg_queued <- Masc_tui_keeper_chat_queue.clear_run_next_for_keeper
+    state.msg_queued ~keeper_name;
+  List.iter (fun (entry : inflight) ->
+    if String.equal entry.sent_request.keeper_name keeper_name then
+      match entry.phase with
+      | Turn_preflight ({intent=Run_next _; _} as item) ->
+          entry.phase <- Turn_preflight {item with intent=Next_without_auto_priority}
+      | Turn_preflight ({intent=Steer_after_interrupt; _} as item) ->
+          entry.phase <- Turn_preflight {item with intent=Steer_without_priority}
+      | Turn_preflight {intent=(Next | Next_without_auto_priority | Steer_without_priority); _}
+      | Turn_streaming | Turn_reconciling -> ()) state.msg_inflight;
   state.keeper_run_next_pending <- List.filter
     (fun (request : Masc_tui_keeper_chat_projection.request) ->
        not (String.equal request.keeper_name keeper_name))
@@ -15420,6 +15499,19 @@ let begin_keeper_chat_control ?(preserve_input_holds = false)
             Awaiting_control {held with generation}
         | Awaiting_control _ | Retained_after_stop | Retained_before_dispatch -> intervention in
     name, id, intervention) state.keeper_interactive_waiting;
+  if not preserve_input_holds then begin
+    (* Unmarked queue entries were also present when this control began.
+       Retain them too; a later drain must not treat them as new input. *)
+    let newly_held =
+      Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name
+      |> List.filter_map (fun (item : Masc_tui_keeper_chat_queue.item) ->
+        let id = item.request.request_id in
+        if List.exists (fun (name, held_id, _) ->
+            String.equal name keeper_name && String.equal held_id id)
+             state.keeper_interactive_waiting
+        then None else Some (keeper_name, id, Retained_after_stop)) in
+    state.keeper_interactive_waiting <- newly_held @ state.keeper_interactive_waiting
+  end;
   generation
 
 let keeper_run_next_receipt_provisional state request =
@@ -15487,11 +15579,22 @@ let finish_keeper_chat_control state keeper_name ~generation =
     true
   end
 
-let release_retained_keeper_input state keeper_name =
+(* A resume only releases the inputs held when that control began. An input
+   recovered from a failed preflight afterwards needs its own authorization. *)
+let retained_keeper_input_ids state keeper_name =
+  List.filter_map (fun (name, id, intervention) ->
+    if String.equal name keeper_name then
+      match intervention with
+      | Retained_after_stop | Retained_before_dispatch -> Some id
+      | Awaiting_control _ -> None
+    else None) state.keeper_interactive_waiting
+
+let release_retained_keeper_input state keeper_name ~request_ids =
   let generation = keeper_chat_control_generation state keeper_name in
   state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
     let intervention = match intervention with
-      | Retained_after_stop | Retained_before_dispatch when name = keeper_name ->
+      | Retained_after_stop | Retained_before_dispatch
+        when name = keeper_name && List.mem id request_ids ->
           Awaiting_control {generation; target=None}
       | Retained_after_stop | Retained_before_dispatch | Awaiting_control _ -> intervention in
     name, id, intervention)
@@ -15507,19 +15610,27 @@ let keeper_chat_control_result_current state keeper_name ~generation =
       && not (List.mem_assoc keeper_name state.keeper_chat_control_pending))
 
 let send_disposition state ~keeper_name : send_disposition =
-  Masc_tui_send_disposition.of_state
+  match state.msg_recall_replaces with
+  | Some item when String.equal item.request.keeper_name keeper_name ->
+      Masc_tui_send_disposition.Updates item.request
+  | Some _ | None ->
+  if List.exists (fun (name, id, intervention) ->
+       String.equal name keeper_name
+       && intervention = Retained_before_dispatch
+       && Masc_tui_keeper_chat_queue.holds state.msg_queued ~request_id:id)
+       state.keeper_interactive_waiting
+  then Masc_tui_send_disposition.Queues_until_resume
+  else Masc_tui_send_disposition.of_state
     ~inflight:
       (Option.map
          (fun entry -> entry.sent_request)
          (blocking_inflight_for_keeper state keeper_name))
     ~waiting:
-      (* The most recently submitted waiting [Next], never a steer, is the
-         line a new one for this keeper would join. Present it as "the keeper is spoken for" so Enter queues onto
-         it instead of dispatching past a line the operator has not finished. *)
+      (* The footer must describe the same line Enter would actually join. *)
       (Option.map
          (fun (item : Masc_tui_keeper_chat_queue.item) ->
            item.Masc_tui_keeper_chat_queue.request)
-         (Masc_tui_keeper_chat_queue.join_target state.msg_queued ~keeper_name))
+         (joinable_keeper_input state keeper_name))
 
 let acting_flat_entries state =
   List.filter
@@ -16378,9 +16489,14 @@ let recalling_for_keeper (state : state) keeper_name =
   | None -> false
 
 (* A fresh Enter may bypass input held by an explicit stop. A refused
-   preflight keeps its place until local resume; unmarked input remains owned
-   by the generic drainer and its composer/recall checks. *)
+   preflight keeps its place until local resume. An earlier unmarked item is
+   eligible only under the generic drainer's composer and in-flight checks. *)
 let next_authorized_keeper_input state keeper_name =
+  let stopped_input = List.exists (fun (name, _, intervention) ->
+    String.equal name keeper_name && match intervention with
+      | Retained_after_stop -> true
+      | Retained_before_dispatch | Awaiting_control _ -> false)
+    state.keeper_interactive_waiting in
   let rec ready = function
     | [] -> None
     | (item : Masc_tui_keeper_chat_queue.item) :: rest ->
@@ -16390,7 +16506,12 @@ let next_authorized_keeper_input state keeper_name =
         when held.generation = keeper_chat_control_generation state keeper_name ->
           Some (item, held.target)
       | Some (_, _, Retained_before_dispatch) -> None
-      | Some (_, _, (Awaiting_control _ | Retained_after_stop)) | None -> ready rest
+      | Some (_, _, (Awaiting_control _ | Retained_after_stop)) -> ready rest
+      | None when stopped_input -> ready rest
+      | None when not (composing_for_keeper state keeper_name)
+                  && Option.is_none (blocking_inflight_for_keeper state keeper_name) ->
+          Some (item, None)
+      | None -> None
   in
   if recalling_for_keeper state keeper_name then None
   else ready (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name)
@@ -22263,6 +22384,12 @@ let keeper_observed_interrupt_rows (state : state) =
    the row that names the observed turn. On the 2026-09-22 screen the band
    was five rows, all in the status colour, for two facts: a turn is
    running, and this pane's line waits behind it. *)
+let keeper_input_retained state keeper_name =
+  List.exists (fun (name, _, intervention) ->
+    String.equal name keeper_name && match intervention with
+    | Retained_before_dispatch | Retained_after_stop -> true
+    | Awaiting_control _ -> false) state.keeper_interactive_waiting
+
 let keeper_message_diagnostic_activity_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
@@ -22308,10 +22435,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
         | Keeper_queued -> awaiting, queued + 1, rechecking
         | Rechecking_delivery -> awaiting, queued, rechecking + 1)
         (0, 0, 0) waiting_items in
-    let retained = List.exists (fun (name, _, intervention) ->
-      name = keeper_name && match intervention with
-      | Retained_after_stop | Retained_before_dispatch -> true | Awaiting_control _ -> false)
-      state.keeper_interactive_waiting in
+    let retained = keeper_input_retained state keeper_name in
     let plain text = { Masc_tui_answering.lead = text; rest = ""; keys = "" } in
     let queue_rows =
       match waiting_items with
@@ -22330,8 +22454,9 @@ let keeper_message_diagnostic_activity_rows (state : state) =
               |> String.trim
               |> fun text -> Masc_tui_message_layout.fit_width text 34 |> String.trim in
             let intent_str = match first.intent with
-              | Steer_after_interrupt -> " [steer]"
-              | Next -> "" in
+              | Steer_after_interrupt | Steer_without_priority -> " [steer]"
+              | Run_next _ -> " [run-next]"
+              | Next | Next_without_auto_priority -> "" in
             [ { Masc_tui_answering.lead = "Local NEXT" ^ intent_str
               ; rest = Printf.sprintf ": \"%s\"" preview
               ; keys = "" } ] in
@@ -22348,11 +22473,12 @@ let keeper_message_diagnostic_activity_rows (state : state) =
         @ local_rows
     in
     activity @ (if retained then
-      [plain (if List.exists (fun (name, _, intervention) ->
-         name = keeper_name && intervention = Retained_after_stop)
-         state.keeper_interactive_waiting
-       then "Input retained after Esc; /queue resume sends it"
-       else "Input retained before sending; /queue resume sends it")]
+      [{ Masc_tui_answering.lead = "Held"
+       ; rest = (if List.exists (fun (name, _, intervention) ->
+           name = keeper_name && intervention = Retained_after_stop)
+           state.keeper_interactive_waiting
+         then " · after stop" else " · before sending")
+       ; keys = " · /queue resume" }]
       else []) @ queue_rows
 ;;
 
@@ -22475,18 +22601,25 @@ let keeper_message_activity_rows (state : state) =
         else if received then add "일부 메시지 다음 순서로 전달 대기"
         else if count Keeper_queued > 0 then add "처리 대기"
       end;
-      if List.exists (fun (name, _, intervention) ->
+      let retained_after_stop = List.exists (fun (name, _, intervention) ->
           String.equal name keeper_name && intervention = Retained_after_stop)
-          state.keeper_interactive_waiting then attention "중단 뒤 보관 중 · /queue resume"
-      else if List.exists (fun (name, _, intervention) ->
+          state.keeper_interactive_waiting in
+      let retained_before_dispatch = List.exists (fun (name, _, intervention) ->
           String.equal name keeper_name && intervention = Retained_before_dispatch)
-          state.keeper_interactive_waiting then attention "전송 전 보관 중 · /queue resume";
+          state.keeper_interactive_waiting in
       let keys =
         match keeper_observed_stop_hint state with None -> "" | Some _ -> " · Esc:중단" in
-      match List.rev !urgent @ List.rev !clauses with
-      | [] -> []
-      | parts -> [{ Masc_tui_answering.lead = String.concat " · " parts;
-          rest = ""; keys }]
+      let held_rows =
+        if retained_after_stop || retained_before_dispatch then
+          [{ Masc_tui_answering.lead = "Held"
+           ; rest = (if retained_after_stop then " · after stop" else " · before sending")
+           ; keys = " · /queue resume" }]
+        else [] in
+      let activity_rows = match List.rev !urgent @ List.rev !clauses with
+        | [] -> []
+        | parts -> [{ Masc_tui_answering.lead = String.concat " · " parts;
+            rest = ""; keys }] in
+      held_rows @ activity_rows
 ;;
 
 let keeper_message_activity_needs_attention (state : state) =
@@ -22494,6 +22627,7 @@ let keeper_message_activity_needs_attention (state : state) =
   | None -> false
   | Some name ->
       Option.is_some state.keeper_turns_error
+      || keeper_input_retained state name
       || List.exists (fun (row : Tui_decode.keeper_turn_row) ->
           String.equal row.ktr_keeper_name name && match row.ktr_state with
           | Keeper_turn_unavailable _ -> true

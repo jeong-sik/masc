@@ -235,7 +235,7 @@ type async_msg =
       { action : string; detail : string; workspace : workspace_input_identity option }
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
-  | Keeper_queue_resume_confirmed of string * int * resume_confirmation
+  | Keeper_queue_resume_confirmed of string * int * resume_confirmation * string list
   | Keeper_queue_action_received of string * string list
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list * (Masc_tui_queue_inspection.observation, string) result, string) result
   | Lane_addons_loaded of int * Masc_tui_lane_addons.read_target * (lane_addons_reply, lane_addons_failure) result
@@ -896,8 +896,8 @@ let rec workspace_message_is_read = function
   | Play_room_received (request, _) -> Masc_tui_play_room.is_read request
   (* A roster observation cannot release retained input after its read epoch
      retires. A completed resume POST still owns its mutation receipt. *)
-  | Keeper_queue_resume_confirmed (_, _, Owner_already_active) -> true
-  | Keeper_queue_resume_confirmed (_, _, Owner_resumed) -> false
+  | Keeper_queue_resume_confirmed (_, _, Owner_already_active, _) -> true
+  | Keeper_queue_resume_confirmed (_, _, Owner_resumed, _) -> false
   | Lane_declaration_loaded (_, request, _, _, _) ->
     (match request with Masc_tui_lane_declaration.Read _ -> true | Save _ -> false)
   | Account_login_json (_, _, action, _) -> account_login_action_is_read action
@@ -1214,7 +1214,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Chat_command_read_completed (_, _) | Workspace_identity_unconfirmed _
     | Schedule_form_authority_refused _ | Lane_package_catalog_loaded (_, _, _)
     | Lane_package_preview_loaded (_, _, _)
-    | Keeper_queue_resume_confirmed (_, _, _) | Keeper_queue_action_received _ | Keeper_queue_loaded (_, _, _, _)
+    | Keeper_queue_resume_confirmed (_, _, _, _) | Keeper_queue_action_received _ | Keeper_queue_loaded (_, _, _, _)
     | Lane_addons_loaded (_, _, _) | Lane_application_loaded (_, _)
     | Lane_subscriptions_loaded (_, Error _)
     | Lane_declaration_loaded (_, _, _, _, _)
@@ -1354,7 +1354,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Chat_command_read_completed (_, _) | Workspace_identity_unconfirmed _
   | Schedule_form_authority_refused _ | Lane_package_catalog_loaded (_, _, _)
   | Lane_package_preview_loaded (_, _, _)
-  | Keeper_queue_resume_confirmed (_, _, _) | Keeper_queue_action_received _
+  | Keeper_queue_resume_confirmed (_, _, _, _) | Keeper_queue_action_received _
   | Keeper_queue_loaded (_, _, _, Error _)
   | Lane_addons_loaded (_, _, (Error _ | Ok { lar_snapshot = None; _ }))
   | Lane_application_loaded (_, _)

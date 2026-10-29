@@ -5,9 +5,13 @@
     gone. Holding it is what an operator means by pressing Enter twice, and
     what every other agent console does.
 
-    Ordinary [Next] input keeps submission order. An explicit
-    [Steer_after_interrupt] is a different intent and precedes ordinary input
-    for the same Keeper after the interrupted turn settles.
+    Ordinary [Next] input keeps submission order. [Next_without_auto_priority]
+    records a server control superseding an earlier priority request.
+    [Run_next] retains a manual
+    or automatic priority request until admission. An explicit
+    [Steer_after_interrupt] records a steer and its requested priority. It
+    does not prove the target was interrupted. [Steer_without_priority] keeps
+    the steer after control supersedes priority and restores local order.
 
     {2 Why whole requests}
 
@@ -32,7 +36,10 @@ type t
 
 type intent =
   | Next
+  | Next_without_auto_priority
+  | Run_next of { automatic : bool }
   | Steer_after_interrupt
+  | Steer_without_priority
 
 type item =
   { request : Chat.request
@@ -64,8 +71,23 @@ val cap : int
 val restore_unsent : t -> item -> t
 (** Return an already admitted item whose first POST never began. It precedes
     input staged while its workspace probe was pending, retaining its payload,
-    submission ordinal, intent and causal parent. The admission cap cannot discard existing input.
+    submission ordinal, intent and causal parent. An item whose priority was
+    superseded returns to its Keeper's submission order. The admission cap
+    cannot discard existing input.
     A request already held by the queue is left unchanged. *)
+
+val mark_run_next : t -> request_id:string -> (t, string) result
+(** Record explicit priority on an unsent item without moving its queue slot.
+    A steer keeps its causal parent, even if its prior priority was cancelled. *)
+
+val clear_run_next_for_keeper : t -> keeper_name:string -> t
+(** Retire unsent run-next or steer priority after a superseding Keeper
+    control, prevent automatic promotion, and restore that Keeper's local
+    submission order without moving other Keepers' slots. *)
+
+val prepare_for_admission : automatic:bool -> item -> item
+(** Apply automatic priority only to an ordinary unsent item. An item whose
+    prior priority was superseded by a control stays ordinary. *)
 
 val push : t -> submitted_at:float -> Chat.request -> (t * int, string) result
 (** Append one request. [Ok (queue, waiting)] carries how many are now waiting,
@@ -119,6 +141,10 @@ val holds : t -> request_id:string -> bool
 val find : t -> request_id:string -> item option
 (** Exact pending item, for intent-aware recall/edit behavior. *)
 
+val local_order_editable : item -> bool
+(** Whether the operator may move this item within its Keeper's line. Only a
+    steer waiting for its interrupt holds a fixed place. *)
+
 val move_to_end : t -> keeper_name:string -> request_id:string -> (t, string) result
 (** Move an ordinary unsent item behind the same Keeper's waiting items,
     retaining other Keepers' slots and the item's submission identity. A steer
@@ -139,7 +165,6 @@ val join_target : t -> keeper_name:string -> item option
     this Keeper would join, or [None] when there is nothing to join. Reordering
     dispatch must not change which original submission receives a joined line.
 
-    The last one in dispatch order, so a third line joins the result of the
-    first two rather than reaching past them. A steer is never returned: it
-    was created to replace one exact operation, and folding another line into
-    it would move that causal parent. *)
+    Only the last item in dispatch order can be joined. If that item is a
+    steer or run-next, do not reach past it to an older ordinary input. The
+    caller also decides whether a locally retained item may be edited. *)

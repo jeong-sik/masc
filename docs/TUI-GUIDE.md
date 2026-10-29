@@ -2825,11 +2825,19 @@ in the footer. The later external editor and save are separate operations.
 
 On the Keepers surface, `v` cycles compact, detailed and grouped views; `o`
 cycles priority, recent activity, oldest activity, activity kind and name.
+Compact and grouped views give the row to the current work and waiting detail.
+Detailed view shows the lifecycle/runtime column when the terminal is wide
+enough; the selected Keeper's Info tab also retains runtime details.
 Grouped view keeps the selected order within each status group. Both choices
 are stored in `tui-keepers.toml` in the resolved config directory and restored
 on the next start; a failed or unconfirmed save is reported. `J` opens the
 selected Keeper's Automation tab and its own schedule list. A schedule mark in
 the roster is an observed waiting-inventory item, not a complete schedule count.
+When the Activity pane is visible and tall enough, it shows the selected
+Keeper's observed task and waiting items above its Recent/Changes content.
+A failed or unread waiting inventory is labelled separately; the schedule
+example is one last-observed item rather than a promise that it is the next due.
+An inventory with a source read error is marked partial.
 `K` opens a read-only relationship view for the selected Keeper: each arrow
 comes from the recorded Keeper sender of a request queued for that recipient.
 The view reads the first server page; more queued requests may exist. It does

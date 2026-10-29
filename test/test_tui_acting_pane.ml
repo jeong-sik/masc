@@ -111,6 +111,7 @@ let fixture : Pane.input =
         ; keeper "polisher"
         ]
   ; selected = Some "tester"
+  ; keeper_context = None
   ; approvals = [ { Pane.approval_keeper = "polisher"; approval_tool = "tool_execute" } ]
   ; chunks = chunks [ "quiet-one"; "tester"; "probe"; "polisher" ] fixture_entries
   ; changes = Pane.Changes_absent
@@ -879,6 +880,76 @@ let test_an_age_the_clocks_cannot_give_draws_the_no_value_mark () =
   check bool "a stamp at the clock has an age" true
     (not (String.equal (Pane.age_text ~now now) no_value))
 
+let test_keeper_waiting_context_preserves_evidence () =
+  let module Model = Masc_tui_keeper_list_model in
+  let context waiting = Pane.{keeper_name = "alpha"; task = Task_not_observed;
+    waiting; waiting_stale = false} in
+  let item source producer what : Masc.Tui_decode.waiting_item =
+    {kwi_source = source; kwi_waiting_on = "item"; kwi_what = what;
+     kwi_wake_producer = producer; kwi_since = None; kwi_due_at = None;
+     kwi_next_action = "resume"} in
+  let row name items : Masc.Tui_decode.keeper_waiting_row =
+    {kwr_keeper_name = name; kwr_state = Keeper_waiting_blocked;
+     kwr_waiting_count = List.length items; kwr_since = None; kwr_due_at = None;
+     kwr_waiting_on = items} in
+  check bool "an unread inventory is not an empty inventory" true
+    (Pane.summarize_keeper_waiting (context Model.Waiting_unobserved) = Pane.Waiting_not_observed);
+  let failed_before_first_row = { (context Model.Waiting_unobserved) with waiting_stale = true } in
+  check bool "a failed read before the first row is unavailable" true
+    (Pane.summarize_keeper_waiting failed_before_first_row = Pane.Waiting_read_unavailable);
+  check bool "an unavailable inventory is not an empty inventory" true
+    (Pane.summarize_keeper_waiting (context Model.Waiting_unavailable) = Pane.Waiting_read_unavailable);
+  let other = row "beta" [] in
+  check bool "another Keeper's inventory is refused" true
+    (Pane.summarize_keeper_waiting (context (Model.Waiting_observed other)) = Pane.Waiting_read_unavailable);
+  let schedule = item Waiting_source_schedule_waiting Wake_schedule_store "scheduled work" in
+  let misleading = item Waiting_source_event_queue_pending Wake_keeper_owner_actor "delegate result" in
+  let observed = Pane.summarize_keeper_waiting (context (Model.Waiting_observed (row "alpha" [schedule; misleading]))) in
+  check bool "only typed sources establish schedules and delegate results" true
+    (match observed with
+     | Pane.Waiting_items {schedules; delegate_result_waiting = false; read_error = false} ->
+         schedules = [schedule]
+     | Waiting_items _ | Waiting_not_observed | Waiting_read_unavailable -> false);
+  let result = item Waiting_source_event_queue_pending Wake_keeper_delegate "result" in
+  check bool "the recorded delegate producer is observed" true
+    (match Pane.summarize_keeper_waiting (context (Model.Waiting_observed (row "alpha" [result]))) with
+     | Pane.Waiting_items {delegate_result_waiting = true; _} -> true
+     | Waiting_items _ | Waiting_not_observed | Waiting_read_unavailable -> false);
+  let error = item Waiting_source_read_error Wake_read_model_reader "unavailable" in
+  check bool "a source read error stays visible in the observation" true
+    (match Pane.summarize_keeper_waiting (context (Model.Waiting_observed (row "alpha" [error]))) with
+     | Pane.Waiting_items {schedules = []; delegate_result_waiting = false; read_error = true} -> true
+     | Waiting_items _ | Waiting_not_observed | Waiting_read_unavailable -> false)
+
+let test_context_change_keeps_focus_in_pane () =
+  check (option int) "unchanged context retains focus" (Some 4)
+    (Pane.reconcile_context_cursor ~previous_rows:6 ~current_rows:6 (Some 4));
+  check (option int) "context inserted moves focus to the pane header" (Some 0)
+    (Pane.reconcile_context_cursor ~previous_rows:0 ~current_rows:6 (Some 4));
+  check (option int) "context removed moves focus to the pane header" (Some 0)
+    (Pane.reconcile_context_cursor ~previous_rows:6 ~current_rows:0 (Some 4));
+  check (option int) "no focus remains absent" None
+    (Pane.reconcile_context_cursor ~previous_rows:0 ~current_rows:6 None)
+
+let test_task_source_preserves_failed_refresh () =
+  let classify ~workspace_ready ~source ~metadata_failed ~task_id =
+    Pane.summarize_keeper_task ~workspace_ready ~source ~metadata_failed ~task_id in
+  check bool "unread metadata is unavailable" true
+    (classify ~workspace_ready:true ~source:Task_source_unread ~metadata_failed:false
+       ~task_id:(Some "old") = Task_unavailable);
+  check bool "foreign workspace metadata is unavailable" true
+    (classify ~workspace_ready:false ~source:Task_source_read ~metadata_failed:false
+       ~task_id:(Some "old") = Task_unavailable);
+  check bool "failed local read retains only last observed task" true
+    (classify ~workspace_ready:true ~source:Task_source_failed ~metadata_failed:false
+       ~task_id:(Some "old") = Task_observed { id = "old"; refresh_failed = true });
+  check bool "partial metadata failure marks the retained task" true
+    (classify ~workspace_ready:true ~source:Task_source_read ~metadata_failed:true
+       ~task_id:(Some "old") = Task_observed { id = "old"; refresh_failed = true });
+  check bool "failed read without a task is not a known empty read" true
+    (classify ~workspace_ready:true ~source:Task_source_failed ~metadata_failed:false
+       ~task_id:None = Task_refresh_failed)
+
 let () =
   run "tui acting pane"
     [ ( "viewport allocation"
@@ -956,6 +1027,12 @@ let () =
             test_beside_the_roster_only_the_selected_keepers_record_draws
         ; test_case "keepers waiting on approval still draw" `Quick
             test_beside_the_roster_keepers_waiting_on_approval_still_draw
+        ; test_case "waiting context uses the selected Keeper's typed evidence" `Quick
+            test_keeper_waiting_context_preserves_evidence
+        ; test_case "a context change keeps keyboard focus in the pane" `Quick
+            test_context_change_keeps_focus_in_pane
+        ; test_case "task source keeps failed and unread states distinct" `Quick
+            test_task_source_preserves_failed_refresh
         ;] )
     ; ( "ages"
       , [ test_case "an age the clocks cannot give draws the no-value mark" `Quick

@@ -9,6 +9,7 @@ See the [storage guide](../guides/WORKSPACE-STORAGE.md) for output locations.
 
 | Date | Record |
 | --- | --- |
+| 2026-10-28 | [Keeper workbench: baseline and design options](2026-10-28-keeper-workbench.md) |
 | 2026-10-28 | [Keeper 기억 recall: 2026-10 추가 조사 (r2)](2026-10-28-keeper-recall-prior-art-r2.md) |
 | 2026-10-28 | [Keeper 기억 recall: 기성 제품과 논문 대조, 우리 구현의 빠진 곳 (r1)](2026-10-28-keeper-recall-prior-art-r1.md) |
 | 2026-10-26 | [Librarian 완료 기록 검증 비용 — 실측, 외부 설계 대조, 선택지 (r1)](2026-10-26-librarian-history-validation-cost-r1.md) |

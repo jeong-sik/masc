@@ -4634,6 +4634,7 @@
   masc
   agent_core ; the tool schedule contract the ledger rows carry
   masc_tui_acting_pane
+  masc_tui_keeper_list_model
   masc_tui_acting
   masc_tui_observer
   masc_tui_message_layout

@@ -670,38 +670,31 @@ let keeper_staging_dir ~base_path ~keeper_name =
       | false -> None
       | exception Sys_error _ -> None)
 
-(* Written beside the final name and renamed over it: a turn starting while
-   this write is mid-flight enumerates the staging directory, and a file it
-   can see must be whole. The temporary name is outside the
-   [Keeper_paste_naming] shape, so enumeration never picks it up. *)
+(* Publish a completed temporary file without replacing an earlier paste.
+   Keeper paste delivery enumerates only [Keeper_paste_naming] names, so it
+   cannot pick up the temporary file while it is being written. *)
 let write_file path contents =
   let drop_tmp tmp_path = try Sys.remove tmp_path with Sys_error _ -> () in
   match
     Filename.temp_file ~temp_dir:(Filename.dirname path) "spill-write-" ".tmp"
   with
   | exception Sys_error detail -> Error detail
-  | tmp_path -> (
-      match
-        match open_out_bin tmp_path with
-        | exception Sys_error detail -> Error detail
-        | channel -> (
-            match
-              Fun.protect
-                ~finally:(fun () -> close_out_noerr channel)
-                (fun () -> output_string channel contents)
-            with
-            | () -> Ok ()
-            | exception Sys_error detail -> Error detail)
-      with
-      | Error detail ->
-          drop_tmp tmp_path;
-          Error detail
-      | Ok () -> (
-          match Unix.rename tmp_path path with
-          | () -> Ok ()
-          | exception Unix.Unix_error (error, _, _) ->
-              drop_tmp tmp_path;
-              Error (Unix.error_message error)))
+  | tmp_path ->
+      Fun.protect ~finally:(fun () -> drop_tmp tmp_path) (fun () ->
+        let written = match open_out_bin tmp_path with
+          | exception Sys_error detail -> Error detail
+          | channel ->
+              (match Fun.protect ~finally:(fun () -> close_out_noerr channel)
+                  (fun () -> output_string channel contents; close_out channel) with
+               | () -> Ok ()
+               | exception Sys_error detail -> Error detail) in
+        match written with
+        | Error _ as error -> error
+        | Ok () ->
+            (match Unix.link tmp_path path with
+             | () -> Ok ()
+             | exception Unix.Unix_error (error, _, _) ->
+                 Error (Unix.error_message error)))
 
 (* Stage a spilled paste as a file the keeper will be able to read, and put
    a line naming that file where the placeholder stands.
@@ -18796,16 +18789,16 @@ let handle_composer_key state ~base_path ~mailbox key =
    Typed keys reach the draft only through [is_printable_utf8_scalar], so a
    control byte cannot get in one keystroke at a time; a paste is the one way
    a terminal escape could arrive, and it arrives as spaces instead. *)
-(* Names for a spilled paste's file. Read from the clock and from the request
-   ids this process already mints, so two pastes in the same second cannot
-   claim one name. *)
+(* A paste filename pairs the wall-clock minute with a random suffix. The
+   publication step refuses to replace an existing name if that suffix collides. *)
 let spill_stamp () =
   let time = Unix.localtime (Unix.gettimeofday ()) in
   Printf.sprintf "%04d%02d%02d-%02d%02d" (time.Unix.tm_year + 1900)
     (time.Unix.tm_mon + 1) time.Unix.tm_mday time.Unix.tm_hour time.Unix.tm_min
 
 let spill_nonce () =
-  String.sub (Random_id.uuid_v7 ()) 0 8
+  (* Keep the existing short filename; [write_file] refuses any collision. *)
+  Random_id.hex ~bytes:4
 
 (* A file dropped on the composer arrives as a paste. An image is meant to be
    looked at, so it is staged rather than spelled out; every other file keeps

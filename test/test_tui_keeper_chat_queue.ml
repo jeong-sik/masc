@@ -519,7 +519,7 @@ let test_superseded_steer_returns_to_submission_order () =
    one turn receives, not what a turn in flight sees. *)
 (* One item per intent, built the way the product builds them, so a sixth
    intent cannot be added without deciding here whether it may be moved. *)
-let test_only_a_waiting_steer_is_fixed_in_place () =
+let test_a_waiting_steer_and_a_run_next_item_are_fixed_in_place () =
   let ok_or_fail = function Ok queue -> queue | Error detail -> fail detail in
   let id queue text =
     (List.find (fun (item : Queue.item) -> String.equal item.request.Chat.message text)
@@ -625,8 +625,8 @@ let () =
             test_a_steer_is_not_replaced_by_run_next_or_coalesced_past
         ; test_case "superseded steer returns to submission order" `Quick
             test_superseded_steer_returns_to_submission_order
-        ; test_case "only a waiting steer is fixed in place" `Quick
-            test_only_a_waiting_steer_is_fixed_in_place
+        ; test_case "a waiting steer and a run-next item are fixed in place" `Quick
+            test_a_waiting_steer_and_a_run_next_item_are_fixed_in_place
         ; test_case "a line does not join ahead of run-next" `Quick
             test_a_line_does_not_join_ahead_of_run_next
         ] )

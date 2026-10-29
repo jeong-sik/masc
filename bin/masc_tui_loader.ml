@@ -17,6 +17,32 @@ let read_map read items =
   | Some _ -> Eio.Fiber.List.map read items
   | None -> List.map read items
 
+(* Typed results keyed by the physical identity of the JSON they were decoded
+   from. A 304 answers with the very object the last pass decoded, so the
+   typed decode runs only when a fresh body arrived. Decoders here are pure,
+   so an identical input answers identically -- success or failure. Input and
+   result share one slot, so concurrent readers always see a consistent pair. *)
+type 'a json_memo = { mutable memo_slot : (Yojson.Safe.t * 'a) option }
+
+let json_memo () = { memo_slot = None }
+
+let decode_memoized memo decode json =
+  match memo.memo_slot with
+  | Some (previous, result) when previous == json -> result
+  | _ ->
+      let result = decode json in
+      memo.memo_slot <- Some (json, result);
+      result
+
+(* A dashboard GET decode: skipped when the kept answer did not move, run on
+   the CPU pool otherwise. For single-JSON decodes only -- decodes that read
+   anything else (a second body, a reference, caller strings) take
+   [Masc_tui_response_decode.run] directly. *)
+let decode_offloaded memo ~name decode json =
+  decode_memoized memo
+    (fun json -> Masc_tui_response_decode.run ~name (fun () -> decode json))
+    json
+
 module Keeper_declared_roster = Masc.Keeper_declared_roster
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_status_runtime = Masc.Keeper_status_runtime
@@ -832,14 +858,16 @@ let decode_board_hearths json =
         (Printf.sprintf "board hearths must be a list: %s"
            (Yojson.Safe.to_string value))
 
+let memo_board_hearths = json_memo ()
+
 (** Load the hearth census from /api/v1/board/hearths. *)
 let load_board_hearths ~(host : string) ~(port : int) :
     ((string * int) list, string) result =
   match fetch_board_hearths ~host ~port with
   | Error err -> Error ("board hearths load failed: " ^ err)
   | Ok json ->
-      Masc_tui_response_decode.run ~name:"board.hearths.decode_wait" (fun () ->
-        decode_board_hearths json)
+      decode_offloaded memo_board_hearths ~name:"board.hearths.decode_wait"
+        decode_board_hearths json
 
 let decode_board_posts json_list =
   Masc.Tui_decode_fields.decode_list "posts" decode_board_post json_list
@@ -865,26 +893,41 @@ let decode_board_comment json =
 let decode_board_comments json_list =
   Masc.Tui_decode_fields.decode_list "comments" decode_board_comment json_list
 
+let memo_schedules = json_memo ()
+
 (** Load the schedule list from /api/v1/dashboard/scheduled-automation. *)
 let load_schedules ~(host : string) ~(port : int) :
     (schedule_snapshot, string) result =
   match fetch_schedules ~host ~port with
   | Error err -> Error ("schedule load failed: " ^ err)
-  | Ok json -> Masc_tui_schedule_decode.snapshot_of_json json
+  | Ok json ->
+      decode_offloaded memo_schedules ~name:"schedules.decode_wait"
+        Masc_tui_schedule_decode.snapshot_of_json json
+
+let memo_schedule_wake_history = json_memo ()
 
 (** Load one schedule's wake history from the exact lookup. *)
 let load_schedule_wake_history ~(host : string) ~(port : int)
     ~(schedule_id : string) : (schedule_wake_history, string) result =
   match fetch_schedule_detail ~host ~port ~schedule_id with
   | Error err -> Error ("schedule detail load failed: " ^ err)
-  | Ok json -> Masc_tui_schedule_decode.wake_history_of_json json
+  | Ok json ->
+      decode_offloaded memo_schedule_wake_history
+        ~name:"schedule.wake_history.decode_wait"
+        Masc_tui_schedule_decode.wake_history_of_json json
+let memo_schedules_for_target = json_memo ()
+
 (** Load one target's schedules. Same envelope as the fleet page, so the same
     decoder reads it and the pane keeps its truncation reading. *)
 let load_schedules_for_target ~(host : string) ~(port : int)
     ~(payload_target : string) : (schedule_snapshot, string) result =
   Result.bind
     (fetch_schedules_for_target ~host ~port ~payload_target)
-    Masc_tui_schedule_decode.snapshot_of_json
+    (decode_offloaded memo_schedules_for_target
+       ~name:"schedules.target.decode_wait"
+       Masc_tui_schedule_decode.snapshot_of_json)
+
+let memo_board_list = json_memo ()
 
 (** Load board post list from /api/v1/board *)
 let load_board_list ~(host : string) ~(port : int)
@@ -893,9 +936,11 @@ let load_board_list ~(host : string) ~(port : int)
   match fetch_board ~host ~port ~sort_by ~hearth with
   | Error err -> Error ("board load failed: " ^ err)
   | Ok json ->
-      Masc_tui_response_decode.run ~name:"board.list.decode_wait" (fun () ->
-        let* posts = Masc.Tui_decode_fields.required_list_field json "posts" in
-        decode_board_posts posts)
+      decode_offloaded memo_board_list ~name:"board.list.decode_wait"
+        (fun json ->
+          let* posts = Masc.Tui_decode_fields.required_list_field json "posts" in
+          decode_board_posts posts)
+        json
 
 (** The ordinary Board read uses the newest twenty. The reader can request
     the complete history explicitly; that read walks bounded REST pages. *)
@@ -914,20 +959,21 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
     in
     Masc_tui_frame_timing.time_stage ~name:"board.model_decode"
       (fun () ->
-        let* comments_json = Masc.Tui_decode_fields.required_list_field json
-          (if full_history then "comments" else "comment_context") in
-        let* comments = decode_board_comments comments_json in
-        let* revision = Masc.Tui_decode_fields.required_string_field json "comment_revision" in
-        let* () = if String.length revision=64 && String.for_all
-            (function '0'..'9' | 'a'..'f' -> true | _ -> false) revision
-          then Ok () else Error "board detail comment revision is malformed" in
-        let* page = Masc.Tui_decode_fields.required_object_field json "comment_page" in
-        let* actual_offset = Masc.Tui_decode_fields.required_int_field page "offset" in
-        let* total = Masc.Tui_decode_fields.required_int_field page "total" in
-        match offset with
-        | Some expected when actual_offset <> expected ->
-            Error "board detail returned a different comment offset"
-        | None | Some _ -> Ok (json, comments, actual_offset, total, revision))
+        Masc_tui_response_decode.run ~name:"board.page.decode_wait" (fun () ->
+          let* comments_json = Masc.Tui_decode_fields.required_list_field json
+            (if full_history then "comments" else "comment_context") in
+          let* comments = decode_board_comments comments_json in
+          let* revision = Masc.Tui_decode_fields.required_string_field json "comment_revision" in
+          let* () = if String.length revision=64 && String.for_all
+              (function '0'..'9' | 'a'..'f' -> true | _ -> false) revision
+            then Ok () else Error "board detail comment revision is malformed" in
+          let* page = Masc.Tui_decode_fields.required_object_field json "comment_page" in
+          let* actual_offset = Masc.Tui_decode_fields.required_int_field page "offset" in
+          let* total = Masc.Tui_decode_fields.required_int_field page "total" in
+          match offset with
+          | Some expected when actual_offset <> expected ->
+              Error "board detail returned a different comment offset"
+          | None | Some _ -> Ok (json, comments, actual_offset, total, revision)))
   in
   let* (first_json, first_comments, first_offset, total, revision) =
     read_page (if full_history then Some 0 else None)
@@ -939,7 +985,9 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
   in
   let* post =
     Masc_tui_frame_timing.time_stage ~name:"board.model_decode"
-      (fun () -> decode_board_post ~require_body:true post_json)
+      (fun () ->
+        Masc_tui_response_decode.run ~name:"board.post.decode_wait" (fun () ->
+          decode_board_post ~require_body:true post_json))
   in
   let rec read_remaining offset total reversed =
     if offset >= total then Ok (post, List.rev reversed, None)
@@ -972,22 +1020,29 @@ let load_board_post ?(full_history = false) ~(host : string) ~(port : int)
         | comment :: _ -> Some comment.bc_id in
     Ok (post, first_comments, landing)
 
+let memo_approvals = json_memo ()
+
 (** Load the actor-scoped pending confirmation envelope from the operator
     surface. Missing or malformed envelopes remain explicit errors. *)
 let load_approvals ~(host : string) ~(port : int) :
     (approval_snapshot, string) result =
   match fetch_operator_snapshot ~host ~port with
   | Error err -> Error ("approvals load failed: " ^ err)
-  | Ok json -> Masc_tui_operator_projection.decode_snapshot json
+  | Ok json ->
+      decode_offloaded memo_approvals ~name:"approvals.decode_wait"
+        Masc_tui_operator_projection.decode_snapshot json
 
 let load_workspace_approvals ~(expected_workspace : Tui_decode.server_identity)
     ~(host : string) ~(port : int) : (approval_snapshot, string) result =
   let ( let* ) = Result.bind in
   let* json = fetch_operator_snapshot ~host ~port in
-  Masc_tui_operator_projection.decode_workspace_snapshot
-    ~expected_base_path:(Canonical_path.to_string expected_workspace.sid_base_path)
-    ~expected_masc_root:(Canonical_path.to_string expected_workspace.sid_masc_root)
-    json
+  Masc_tui_response_decode.run ~name:"approvals.workspace.decode_wait" (fun () ->
+    Masc_tui_operator_projection.decode_workspace_snapshot
+      ~expected_base_path:(Canonical_path.to_string expected_workspace.sid_base_path)
+      ~expected_masc_root:(Canonical_path.to_string expected_workspace.sid_masc_root)
+      json)
+
+let memo_runtime_catalog = json_memo ()
 
 (** Load the runtime catalogue, lanes, and keeper assignments for the picker. *)
 let load_runtime_resolved ~(host : string) ~(port : int) :
@@ -1000,11 +1055,15 @@ let load_runtime_resolved ~(host : string) ~(port : int) :
   match fetch_runtime_resolved ~host ~port with
   | Error err -> Error ("runtime catalogue load failed: " ^ err)
   | Ok json ->
-      Masc_tui_response_decode.run ~name:"runtime.catalog.decode_wait" (fun () ->
-        Tui_decode.decode_runtime_resolved_full json
-        |> Result.map (fun catalog ->
-          let snapshot = catalog.Tui_decode.rrc_snapshot in
-          snapshot.rrs_runtimes, snapshot.rrs_lanes, catalog.rrc_assignments, snapshot.rrs_default_route))
+      decode_offloaded memo_runtime_catalog ~name:"runtime.catalog.decode_wait"
+        (fun json ->
+          Tui_decode.decode_runtime_resolved_full json
+          |> Result.map (fun catalog ->
+            let snapshot = catalog.Tui_decode.rrc_snapshot in
+            snapshot.rrs_runtimes, snapshot.rrs_lanes, catalog.rrc_assignments, snapshot.rrs_default_route))
+        json
+
+let memo_runtime_quota = json_memo ()
 
 (** One read of [/api/v1/runtime/resolved] for the Overview: runtime rows and
     provider usage share interpretation while keeping independent errors.
@@ -1017,25 +1076,32 @@ let load_overview_runtime_resolved ~(host : string) ~(port : int) :
       let reason = "runtime catalogue load failed: " ^ err in
       (Error reason, Error reason)
   | Ok json ->
-      Masc_tui_response_decode.run ~name:"runtime.quota.decode_wait" (fun () ->
-        let observation = Tui_decode.decode_runtime_resolved_observation json in
-        ( Result.map
-            (fun catalog -> catalog.Tui_decode.rrc_snapshot.rrs_runtimes)
-            observation.rro_catalog
-        , observation.rro_usage ))
+      decode_offloaded memo_runtime_quota ~name:"runtime.quota.decode_wait"
+        (fun json ->
+          let observation = Tui_decode.decode_runtime_resolved_observation json in
+          ( Result.map
+              (fun catalog -> catalog.Tui_decode.rrc_snapshot.rrs_runtimes)
+              observation.rro_catalog
+          , observation.rro_usage ))
+        json
+
+let memo_keeper_usage = json_memo ()
 
 let load_keeper_usage ~(host : string) ~(port : int) =
   match fetch_keeper_usage ~host ~port with
   | Error reason -> Error ("keeper usage load failed: " ^ reason)
   | Ok json ->
-      Masc_tui_response_decode.run ~name:"keeper.usage.decode_wait" (fun () ->
-        Masc.Tui_decode_usage.decode_keeper_usage_window json)
+      decode_offloaded memo_keeper_usage ~name:"keeper.usage.decode_wait"
+        Masc.Tui_decode_usage.decode_keeper_usage_window json
+
+let memo_provider_history = json_memo ()
 
 let load_provider_usage_history ~(host : string) ~(port : int) ~(days : int) =
   match fetch_provider_usage_history ~host ~port ~days with
   | Error reason -> Error ("provider usage history load failed: " ^ reason)
   | Ok json ->
-      Masc_tui_response_decode.run ~name:"provider.history.decode_wait" (fun () ->
+      decode_offloaded memo_provider_history ~name:"provider.history.decode_wait"
+        (fun json ->
         let cache_error =
           match Json_util.assoc_member_opt "cache" json with
           | Some cache ->
@@ -1055,6 +1121,7 @@ let load_provider_usage_history ~(host : string) ~(port : int) ~(days : int) =
               | Some (`String reason) -> Error reason
               | _ -> Error "history unavailable without a reason")
          | Some _ | None -> Masc.Tui_decode_usage.decode_provider_usage_history json))
+        json
 
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;
@@ -1082,39 +1149,49 @@ let load_runtime_surface ~(host : string) ~(port : int) ~(force : bool) :
   match results with
   | [ _; Error detail; _ ] -> Error ("runtime resolved load failed: " ^ detail)
   | [ probe_result; Ok resolved_json; evidence_result ] ->
-      (match Tui_decode.decode_runtime_resolved_snapshot resolved_json with
-       | Error detail -> Error ("runtime resolved decode failed: " ^ detail)
-       | Ok rsl_resolved ->
-           let rsl_probe =
-             match probe_result with
-             | Error detail -> Error ("runtime probe load failed: " ^ detail)
-             | Ok probe_json ->
-                 (match Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot probe_json with
-                  | Ok probe -> Ok probe
-                  | Error detail ->
-                      Error ("runtime probe decode failed: " ^ detail))
-           in
-           let rsl_evidence = match evidence_result with
-             | Ok json -> Masc_tui_runtime_evidence.decode json
-             | Error _ -> Error "runtime history unavailable; check server support and operator access" in
-           Ok { rsl_resolved; rsl_probe; rsl_evidence })
+      Masc_tui_response_decode.run ~name:"runtime.surface.decode_wait" (fun () ->
+        match Tui_decode.decode_runtime_resolved_snapshot resolved_json with
+        | Error detail -> Error ("runtime resolved decode failed: " ^ detail)
+        | Ok rsl_resolved ->
+            let rsl_probe =
+              match probe_result with
+              | Error detail -> Error ("runtime probe load failed: " ^ detail)
+              | Ok probe_json ->
+                  (match Masc.Tui_decode_runtime_probe.decode_runtime_probe_snapshot probe_json with
+                   | Ok probe -> Ok probe
+                   | Error detail ->
+                       Error ("runtime probe decode failed: " ^ detail))
+            in
+            let rsl_evidence = match evidence_result with
+              | Ok json -> Masc_tui_runtime_evidence.decode json
+              | Error _ -> Error "runtime history unavailable; check server support and operator access" in
+            Ok { rsl_resolved; rsl_probe; rsl_evidence })
   | [] | [ _ ] | [ _; _ ] | _ :: _ :: _ :: _ :: _ ->
       Error "runtime surface loader lost a projection read"
+
+let memo_keeper_tool_approvals = json_memo ()
 
 (** Load the tool calls keepers are holding, for the Approvals surface. *)
 let load_keeper_tool_approvals ~(host : string) ~(port : int) :
     (Tui_decode.keeper_tool_approval list, string) result =
   match fetch_keeper_tool_approvals ~host ~port with
   | Error err -> Error ("tool approvals load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_keeper_tool_approvals json
+  | Ok json ->
+      decode_offloaded memo_keeper_tool_approvals
+        ~name:"keeper.tool_approvals.decode_wait"
+        Tui_decode.decode_keeper_tool_approvals json
+
+let memo_keeper_turns = json_memo ()
 
 (** Load which keepers are mid-turn right now (the "answering now" badge). *)
 let load_keeper_turns ~(host : string) ~(port : int) ~preparation_details_for :
     (Tui_decode.keeper_turns_projection, string) result =
   let ( let* ) = Result.bind in
   let* json = fetch_keeper_turns ~host ~port ~preparation_details_for in
-  Masc_tui_response_decode.run ~name:"keeper.turns.decode_wait" (fun () ->
-    Tui_decode.decode_keeper_turns_projection json)
+  decode_offloaded memo_keeper_turns ~name:"keeper.turns.decode_wait"
+    Tui_decode.decode_keeper_turns_projection json
+
+let memo_dashboard_gate = json_memo ()
 
 (** Load the durable Gate: pending approvals and both lane modes. *)
 let load_dashboard_gate ~(host : string) ~(port : int) :
@@ -1125,28 +1202,46 @@ let load_dashboard_gate ~(host : string) ~(port : int) :
      the 47 reads in this file share that asymmetry -- #35573. *)
   Result.map_error
     (fun detail -> "gate load failed: " ^ detail)
-    (Result.bind (fetch_dashboard_gate ~host ~port) Tui_decode.decode_gate_snapshot)
+    (Result.bind (fetch_dashboard_gate ~host ~port)
+       (decode_offloaded memo_dashboard_gate ~name:"gate.decode_wait"
+          Tui_decode.decode_gate_snapshot))
+
+let memo_keeper_gate_settings = json_memo ()
 
 (** Load the durable per-keeper Gate settings. *)
 let load_keeper_gate_settings ~(host : string) ~(port : int) :
     ((string * Tui_decode.gate_mode) list * Tui_decode.keeper_exact_lane_first list, string) result =
   match fetch_keeper_gate_settings ~host ~port with
   | Error err -> Error ("keeper Gate settings load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_keeper_gate_settings json
+  | Ok json ->
+      decode_offloaded memo_keeper_gate_settings
+        ~name:"keeper.gate_settings.decode_wait"
+        Tui_decode.decode_keeper_gate_settings json
+
+let memo_runtime_params = json_memo ()
 
 (** Load the Runtime_params registry rows. *)
 let load_runtime_params ~(host : string) ~(port : int) :
     (Tui_decode.runtime_param_row list, string) result =
   match fetch_runtime_params ~host ~port with
   | Error err -> Error ("runtime params load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_runtime_params json
+  | Ok json ->
+      decode_offloaded memo_runtime_params ~name:"runtime.params.decode_wait"
+        Tui_decode.decode_runtime_params json
+
+let memo_keeper_tool_approval_modes = json_memo ()
 
 (** Load the keepers whose approval gate is moved off [auto]. *)
 let load_keeper_tool_approval_modes ~(host : string) ~(port : int) :
     ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result =
   match fetch_keeper_tool_approval_modes ~host ~port with
   | Error err -> Error ("tool approval modes load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_tool_approval_mode_overrides json
+  | Ok json ->
+      decode_offloaded memo_keeper_tool_approval_modes
+        ~name:"keeper.tool_approval_modes.decode_wait"
+        Tui_decode.decode_tool_approval_mode_overrides json
+
+let memo_transport = json_memo ()
 
 (** Load the delivery-path summary from /api/v1/dashboard/transport-health. *)
 let load_transport_health ~(host : string) ~(port : int) :
@@ -1154,8 +1249,8 @@ let load_transport_health ~(host : string) ~(port : int) :
   match fetch_transport_health ~host ~port with
   | Error err -> Error ("transport health load failed: " ^ err)
   | Ok json ->
-      Masc_tui_response_decode.run ~name:"transport.decode_wait" (fun () ->
-        Tui_decode.decode_transport_health json)
+      decode_offloaded memo_transport ~name:"transport.decode_wait"
+        Tui_decode.decode_transport_health json
 
 (* The briefing gives each Keeper the control plane's own liveness word, and
    [Keeper_status_runtime] owns both ends of that vocabulary -- the producer
@@ -1191,6 +1286,8 @@ let keeper_liveness_of_briefs briefs =
       | _ -> { counts with klc_unreadable = counts.klc_unreadable + 1 })
     empty briefs
 
+let memo_account_emails = json_memo ()
+
 (* Plan usage on Usage names each account's email. The route needs Admin,
    and a read that fails is said beside the section rather than drawn as
    accounts without an email. The section names the failure, so the reason is
@@ -1200,8 +1297,10 @@ let load_account_emails ~(host : string) ~(port : int) :
   match Masc_tui_http.fetch_account_emails ~host ~port with
   | Error err -> Error err
   | Ok json ->
-      Masc_tui_response_decode.run ~name:"account.emails.decode_wait" (fun () ->
-        Masc_tui_account_login.emails_of_document json)
+      decode_offloaded memo_account_emails ~name:"account.emails.decode_wait"
+        Masc_tui_account_login.emails_of_document json
+
+let memo_overview_goals = json_memo ()
 
 (* The Overview's GOALS section. A phase this build does not know refuses the
    whole reading: a goal dropped from the list, or drawn under a phase it is
@@ -1211,9 +1310,13 @@ let load_overview_goals ~(host : string) ~(port : int) :
   match Masc_tui_http.fetch_dashboard_goals ~host ~port with
   | Error err -> Error ("goals load failed: " ^ err)
   | Ok json ->
-      Masc_tui_response_decode.run ~name:"overview.goals.decode_wait" (fun () ->
-        Result.map_error Tui_decode.overview_goals_error_to_string
-          (Tui_decode.decode_overview_goals json))
+      decode_offloaded memo_overview_goals ~name:"overview.goals.decode_wait"
+        (fun json ->
+          Result.map_error Tui_decode.overview_goals_error_to_string
+            (Tui_decode.decode_overview_goals json))
+        json
+
+let memo_overview = json_memo ()
 
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :
@@ -1221,7 +1324,7 @@ let load_overview ~(host : string) ~(port : int) :
   match fetch_dashboard_briefing ~host ~port with
   | Error err -> Error ("overview load failed: " ^ err)
   | Ok json ->
-      Masc_tui_response_decode.run ~name:"overview.decode_wait" (fun () ->
+      decode_offloaded memo_overview ~name:"overview.decode_wait" (fun json ->
         let* summary = Masc.Tui_decode_fields.required_object_field json "summary" in
         let* incidents =
           let* items = Masc.Tui_decode_fields.optional_list_field json "incidents" in
@@ -1287,6 +1390,9 @@ let load_overview ~(host : string) ~(port : int) :
               |> List.rev);
             ov_generated_at;
           })
+        json
+
+let memo_system_logs = json_memo ()
 
 (** Load the system log page from /api/v1/dashboard/logs. [level] is the
     minimum-level floor in the route's lowercase spelling. *)
@@ -1295,8 +1401,10 @@ let load_system_logs ~(host : string) ~(port : int) ?level ~(limit : int) () :
   match fetch_dashboard_logs ~host ~port ?level ~limit () with
   | Error err -> Error ("system logs load failed: " ^ err)
   | Ok json ->
-      Masc_tui_response_decode.run ~name:"system.logs.decode_wait" (fun () ->
-        Tui_decode.decode_system_log_snapshot json)
+      decode_offloaded memo_system_logs ~name:"system.logs.decode_wait"
+        Tui_decode.decode_system_log_snapshot json
+
+let memo_tools_inventory = json_memo ()
 
 (** Load the registered tool inventory and, when selected, one Keeper's exact
     effective turn surface from /api/v1/dashboard/tools. *)
@@ -1305,15 +1413,20 @@ let load_tools ~(host : string) ~(port : int) ?keeper () :
   match fetch_dashboard_tools ~host ~port ?keeper () with
   | Error err -> Error ("tool inventory load failed: " ^ err)
   | Ok json ->
-      Masc_tui_response_decode.run ~name:"tools.inventory.decode_wait" (fun () ->
-        Masc.Tui_decode_tools.decode_tool_snapshot json)
+      decode_offloaded memo_tools_inventory ~name:"tools.inventory.decode_wait"
+        Masc.Tui_decode_tools.decode_tool_snapshot json
+
+let memo_skills_catalog = json_memo ()
 
 (** Load the workspace skills catalog for the Tools screen tracking views. *)
 let load_skills_catalog ~(host : string) ~(port : int) :
     (Masc.Tui_decode_tools.skills_catalog, string) result =
   Result.bind (fetch_skills_catalog ~host ~port) (fun json ->
-    Masc_tui_response_decode.run ~name:"skills.catalog.decode_wait" (fun () ->
-      Masc.Tui_decode_tools.decode_skills_catalog json))
+    decode_offloaded memo_skills_catalog ~name:"skills.catalog.decode_wait"
+      Masc.Tui_decode_tools.decode_skills_catalog json)
+
+let memo_connectors_snapshot = json_memo ()
+let memo_connectors_names = json_memo ()
 
 (** Load connector status from /api/v1/gate/connectors *)
 let load_connectors ~(host : string) ~(port : int) ~on_status :
@@ -1321,8 +1434,8 @@ let load_connectors ~(host : string) ~(port : int) ~on_status :
   match fetch_connectors ~host ~port with
   | Error err -> Error err
   | Ok json ->
-      (match Masc_tui_response_decode.run ~name:"connectors.snapshot.decode_wait" (fun () ->
-         Masc.Tui_decode_connectors.decode_connector_snapshot json) with
+      (match decode_offloaded memo_connectors_snapshot ~name:"connectors.snapshot.decode_wait"
+         Masc.Tui_decode_connectors.decode_connector_snapshot json with
        | Error _ as error -> error
        | Ok snapshot ->
            (* Publish useful status/bindings before optional names, on the
@@ -1342,8 +1455,8 @@ let load_connectors ~(host : string) ~(port : int) ~on_status :
                | Error detail ->
                  List.rev pages, Some (label ^ ": " ^ detail)
                | Ok json ->
-                 (match Masc_tui_response_decode.run ~name:"connectors.names.decode_wait" (fun () ->
-                    Masc.Tui_decode_connectors.decode_connector_name_page json) with
+                 (match decode_offloaded memo_connectors_names ~name:"connectors.names.decode_wait"
+                    Masc.Tui_decode_connectors.decode_connector_name_page json with
                   | Error detail ->
                     List.rev pages, Some (label ^ ": " ^ detail)
                   | Ok page ->
@@ -1410,6 +1523,8 @@ let load_connectors ~(host : string) ~(port : int) ~on_status :
            in
            Ok { snapshot with cs_connectors = connectors })
 
+let memo_keeper_lanes = json_memo ()
+
 (** Load the light Lanes projection from /api/v1/keepers/composite, together
     with the secret projection the same body carries.
 
@@ -1424,12 +1539,17 @@ let load_keeper_lanes ~(host : string) ~(port : int) :
   match fetch_keeper_lanes ~host ~port with
   | Error err -> Error ("keeper lanes load failed: " ^ err)
   | Ok json ->
-    (match Tui_decode.decode_keeper_lanes_snapshot json with
-     | Error err -> Error err
-     | Ok lanes ->
-       (match Tui_decode.decode_keeper_secret_projections json with
-        | Error err -> Error err
-        | Ok projections -> Ok (lanes, projections)))
+      decode_offloaded memo_keeper_lanes ~name:"keeper.lanes.decode_wait"
+        (fun json ->
+          match Tui_decode.decode_keeper_lanes_snapshot json with
+          | Error err -> Error err
+          | Ok lanes -> (
+              match Tui_decode.decode_keeper_secret_projections json with
+              | Error err -> Error err
+              | Ok projections -> Ok (lanes, projections)))
+        json
+
+let memo_lane_inventory = json_memo ()
 
 (** Load the common Lane inventory independently from Keeper lane rows so a
     failure on either observation does not erase the last good other one. *)
@@ -1437,21 +1557,33 @@ let load_lane_inventory ~(host : string) ~(port : int) :
     (Masc.Tui_decode_lane_inventory.snapshot, string) result =
   match fetch_lane_inventory ~host ~port with
   | Error err -> Error err
-  | Ok json -> Masc.Tui_decode_lane_inventory.decode json
+  | Ok json ->
+      decode_offloaded memo_lane_inventory ~name:"lane.inventory.decode_wait"
+        Masc.Tui_decode_lane_inventory.decode json
+
+let memo_clients = json_memo ()
 
 (** Load the clients roster from /api/v1/dashboard/clients *)
 let load_clients ~(host : string) ~(port : int) :
     (Tui_decode.clients_snapshot, string) result =
   match fetch_clients ~host ~port with
   | Error err -> Error ("clients load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_clients_snapshot json
+  | Ok json ->
+      decode_offloaded memo_clients ~name:"clients.decode_wait"
+        Tui_decode.decode_clients_snapshot json
+
+let memo_repositories = json_memo ()
 
 (** Load the repository list from /api/v1/repositories *)
 let load_repositories ~(host : string) ~(port : int) :
     (Tui_decode.repository_snapshot, string) result =
   match fetch_repositories ~host ~port with
   | Error err -> Error ("repository load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_repository_snapshot json
+  | Ok json ->
+      decode_offloaded memo_repositories ~name:"repository.decode_wait"
+        Tui_decode.decode_repository_snapshot json
+
+let memo_repository_changes = json_memo ()
 
 (** Load one repository's current Git working-tree changes. *)
 let load_repository_changes ~(host : string) ~(port : int)
@@ -1459,27 +1591,42 @@ let load_repository_changes ~(host : string) ~(port : int)
     (Tui_decode.repository_change_snapshot, string) result =
   match fetch_repository_changes ~host ~port ~repository_id with
   | Error err -> Error ("repository changes load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_repository_change_snapshot json
+  | Ok json ->
+      decode_offloaded memo_repository_changes
+        ~name:"repository.changes.decode_wait"
+        Tui_decode.decode_repository_change_snapshot json
+
+let memo_memory_health = json_memo ()
 
 let load_memory_health ~(host : string) ~(port : int) :
     (Masc.Tui_decode_memory_health.memory_health_snapshot, string) result =
   match fetch_keeper_memory_health ~host ~port with
   | Error err -> Error ("memory health load failed: " ^ err)
-  | Ok json -> Masc.Tui_decode_memory_health.decode_memory_health_snapshot json
+  | Ok json ->
+      decode_offloaded memo_memory_health ~name:"memory.health.decode_wait"
+        Masc.Tui_decode_memory_health.decode_memory_health_snapshot json
+
+let memo_memory_facts = json_memo ()
 
 (** Load one keeper's remembered facts, both stores. *)
 let load_memory_facts ~(host : string) ~(port : int) ~(keeper_name : string) :
     (Masc.Tui_decode_memory_facts.memory_fact_snapshot, string) result =
   match fetch_keeper_memory_facts ~host ~port ~keeper_name with
   | Error err -> Error ("memory facts load failed: " ^ err)
-  | Ok json -> Masc.Tui_decode_memory_facts.decode_memory_fact_snapshot json
+  | Ok json ->
+      decode_offloaded memo_memory_facts ~name:"memory.facts.decode_wait"
+        Masc.Tui_decode_memory_facts.decode_memory_fact_snapshot json
+
+let memo_project_changes = json_memo ()
 
 (** Load the current project's Git working-tree changes. *)
 let load_project_changes ~(host : string) ~(port : int) :
     (Tui_decode.repository_change_snapshot, string) result =
   match fetch_project_changes ~host ~port with
   | Error err -> Error ("project changes load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_repository_change_snapshot json
+  | Ok json ->
+      decode_offloaded memo_project_changes ~name:"project.changes.decode_wait"
+        Tui_decode.decode_repository_change_snapshot json
 
 (** Load a keeper's file changes from /api/v1/keepers/:name/file-changes. *)
 let load_keeper_file_changes ~(host : string) ~(port : int)
@@ -1497,38 +1644,57 @@ let load_git_diff ?repo ~(host : string) ~(port : int)
   | Error err -> Error ("git diff load failed: " ^ err)
   | Ok diff -> Ok diff
 
+let memo_harness = json_memo ()
+
 (** Load the harness snapshot from /api/v1/dashboard/harness-health *)
 let load_harness ~(host : string) ~(port : int) :
     (Tui_decode.harness_snapshot, string) result =
   match fetch_harness_health ~host ~port with
   | Error err -> Error ("harness load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_harness_snapshot json
+  | Ok json ->
+      decode_offloaded memo_harness ~name:"harness.decode_wait"
+        Tui_decode.decode_harness_snapshot json
+
+let memo_fusion_runs = json_memo ()
 
 (** Load the retained Fusion registry list. *)
 let load_fusion_runs ~(host : string) ~(port : int) :
     (Masc.Tui_decode_fusion.fusion_snapshot, string) result =
   match fetch_fusion_runs ~host ~port with
   | Error err -> Error ("fusion runs load failed: " ^ err)
-  | Ok json -> Masc.Tui_decode_fusion.decode_fusion_snapshot json
+  | Ok json ->
+      decode_offloaded memo_fusion_runs ~name:"fusion.runs.decode_wait"
+        Masc.Tui_decode_fusion.decode_fusion_snapshot json
 
 (** Load one exact Fusion run/evidence projection. *)
 let load_fusion_historical_detail ~(host : string) ~(port : int) ~reference =
   match fetch_board_post ~host ~port ~post_id:reference.Masc.Tui_decode_fusion.fhe_post_id () with
   | Error err -> Error ("Fusion Board original load failed: " ^ err)
-  | Ok json -> Masc.Tui_decode_fusion.decode_fusion_historical_detail ~reference json
+  | Ok json ->
+      Masc_tui_response_decode.run ~name:"fusion.historical_detail.decode_wait" (fun () ->
+        Masc.Tui_decode_fusion.decode_fusion_historical_detail ~reference json)
+
+let memo_fusion_detail = json_memo ()
 
 let load_fusion_detail ~(host : string) ~(port : int) ~(run_id : string) :
     (Masc.Tui_decode_fusion.fusion_detail, string) result =
   match fetch_fusion_detail ~host ~port ~run_id with
   | Error err -> Error ("fusion detail load failed: " ^ err)
-  | Ok json -> Masc.Tui_decode_fusion.decode_fusion_detail json
+  | Ok json ->
+      decode_offloaded memo_fusion_detail ~name:"fusion.detail.decode_wait"
+        Masc.Tui_decode_fusion.decode_fusion_detail json
+
+let memo_fusion_launch_options = json_memo ()
 
 (** Read what the launch form offers. *)
 let load_fusion_launch_options ~(host : string) ~(port : int) :
     (Masc.Tui_decode_fusion.fusion_launch_options, string) result =
   match fetch_fusion_config ~host ~port with
   | Error err -> Error ("fusion presets load failed: " ^ err)
-  | Ok json -> Masc.Tui_decode_fusion.decode_fusion_launch_options json
+  | Ok json ->
+      decode_offloaded memo_fusion_launch_options
+        ~name:"fusion.launch_options.decode_wait"
+        Masc.Tui_decode_fusion.decode_fusion_launch_options json
 
 (** Start a Fusion run and read back its run id. A refusal is the server's
     sentence; an unanswered request says so, because the run may have
@@ -1539,10 +1705,14 @@ let launch_fusion_run ~(host : string) ~(port : int)
     post_fusion_launch ~host ~port ~keeper:request.Masc_tui_fusion_launch.keeper
       ~body:(Masc_tui_fusion_launch.request_body request)
   with
-  | Post_answered json -> Masc.Tui_decode_fusion.decode_fusion_launch_receipt json
+  | Post_answered json ->
+      Masc_tui_response_decode.run ~name:"fusion.launch_receipt.decode_wait" (fun () ->
+        Masc.Tui_decode_fusion.decode_fusion_launch_receipt json)
   | Post_refused detail -> Error detail
   | Post_unanswered detail ->
       Error ("fusion launch unanswered: " ^ detail ^ "; the run may have started, r refreshes the list")
+
+let memo_verification = json_memo ()
 
 (** Load one page of one view from /api/v1/verification/requests *)
 let load_verification ~(host : string) ~(port : int) ~(limit : int)
@@ -1550,7 +1720,11 @@ let load_verification ~(host : string) ~(port : int) ~(limit : int)
     (Tui_decode.verification_snapshot, string) result =
   match fetch_verification_requests ~host ~port ~limit ~view ~offset with
   | Error err -> Error ("verification load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_verification_snapshot json
+  | Ok json ->
+      decode_offloaded memo_verification ~name:"verification.decode_wait"
+        Tui_decode.decode_verification_snapshot json
+
+let memo_planning = json_memo ()
 
 (** Load planning snapshot from /api/v1/dashboard/planning *)
 let load_planning ~(host : string) ~(port : int) :
@@ -1558,8 +1732,10 @@ let load_planning ~(host : string) ~(port : int) :
   match fetch_dashboard_planning ~host ~port with
   | Error err -> Error ("planning load failed: " ^ err)
   | Ok json ->
-      Masc_tui_response_decode.run ~name:"planning.decode_wait" (fun () ->
-        Tui_decode.decode_planning_snapshot json)
+      decode_offloaded memo_planning ~name:"planning.decode_wait"
+        Tui_decode.decode_planning_snapshot json
+
+let memo_server_identity = json_memo ()
 
 (* Which server this is. [/health] is the compact probe, and the caller asks on
    every refresh because another process may bind the same endpoint without a
@@ -1569,22 +1745,32 @@ let load_server_identity ~(host : string) ~(port : int) :
   match fetch_server_identity ~host ~port with
   | Error err -> Error ("server identity load failed: " ^ err)
   | Ok json ->
-      Masc_tui_response_decode.run ~name:"server.identity.decode_wait" (fun () ->
-        Tui_decode.decode_server_identity json)
+      decode_offloaded memo_server_identity ~name:"server.identity.decode_wait"
+        Tui_decode.decode_server_identity json
+
+let memo_prompts = json_memo ()
 
 (** Load the prompt registry from /api/v1/prompts. *)
 let load_prompts ~(host : string) ~(port : int) :
     (Tui_decode.prompts_snapshot, string) result =
   match fetch_prompts ~host ~port with
   | Error err -> Error ("prompts load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_prompts json
+  | Ok json ->
+      decode_offloaded memo_prompts ~name:"prompts.decode_wait"
+        Tui_decode.decode_prompts json
+
+let memo_presets = json_memo ()
 
 (** The prompt presets from /api/v1/presets. *)
 let load_presets ~(host : string) ~(port : int) :
     (Tui_decode.presets_snapshot, string) result =
   match Masc_tui_http.fetch_presets ~host ~port with
   | Error err -> Error ("presets load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_presets json
+  | Ok json ->
+      decode_offloaded memo_presets ~name:"presets.decode_wait"
+        Tui_decode.decode_presets json
+
+let memo_preset_detail = json_memo ()
 
 (** GET /api/v1/presets/show — what the named preset holds. *)
 let load_preset_detail ~(host : string) ~(port : int) ~(name : string)
@@ -1592,7 +1778,9 @@ let load_preset_detail ~(host : string) ~(port : int) ~(name : string)
   =
   match Masc_tui_http.fetch_preset_detail ~host ~port ~name with
   | Error err -> Error ("preset detail load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_preset_detail json
+  | Ok json ->
+      decode_offloaded memo_preset_detail ~name:"preset.detail.decode_wait"
+        Tui_decode.decode_preset_detail json
 ;;
 
 (** POST /api/v1/presets — the manifest the server wrote. *)
@@ -1605,10 +1793,11 @@ let save_preset ~(host : string) ~(port : int) ~(name : string) ~(description : 
   | Ok (Post_refused detail) -> Error (Preset_save_refused detail)
   | Ok (Post_unanswered detail) -> Error (Preset_save_unconfirmed detail)
   | Ok (Post_answered json) ->
-    (match Tui_decode.decode_preset_saved json with
-     | Ok manifest when String.equal manifest.Tui_decode.pm_name (String.trim name) -> Ok manifest
-     | Ok _ -> Error (Preset_save_unconfirmed "Preset save receipt names a different preset")
-     | Error detail -> Error (Preset_save_unconfirmed detail))
+      Masc_tui_response_decode.run ~name:"preset.save.decode_wait" (fun () ->
+        match Tui_decode.decode_preset_saved json with
+        | Ok manifest when String.equal manifest.Tui_decode.pm_name (String.trim name) -> Ok manifest
+        | Ok _ -> Error (Preset_save_unconfirmed "Preset save receipt names a different preset")
+        | Error detail -> Error (Preset_save_unconfirmed detail))
 
 (** POST /api/v1/presets/restore — the per-surface report. A transport
     failure leaves the outcome unknown: the server writes an autosave and
@@ -1625,16 +1814,19 @@ let restore_preset ~(host : string) ~(port : int) ~(name : string)
   match Masc_tui_http.post_preset_restore ~host ~port ~name with
   | Error (`Unknown_outcome message) -> unconfirmed message
   | Ok json ->
-    (match Tui_decode.decode_preset_restore json with
-     | Ok report -> Ok report
-     | Error detail -> unconfirmed detail)
+      Masc_tui_response_decode.run ~name:"preset.restore.decode_wait" (fun () ->
+        match Tui_decode.decode_preset_restore json with
+        | Ok report -> Ok report
+        | Error detail -> unconfirmed detail)
 
 (** POST /api/v1/presets/delete — the name the server removed. An unanswered
     request may still have removed it, so the operator is told to read the
     list before trying again. *)
 let delete_preset ~(host : string) ~(port : int) ~(name : string) : (string, string) result =
   match Masc_tui_http.post_preset_delete ~host ~port ~name with
-  | Post_answered json -> Tui_decode.decode_preset_deleted json
+  | Post_answered json ->
+      Masc_tui_response_decode.run ~name:"preset.delete.decode_wait" (fun () ->
+        Tui_decode.decode_preset_deleted json)
   | Post_refused detail -> Error ("preset delete refused: " ^ detail)
   | Post_unanswered detail ->
     Error
@@ -1653,16 +1845,17 @@ let load_keeper_roster ~(host : string) ~(port : int) ~expected_workspace :
       Error (Masc_tui_keeper_control.Roster_unreachable transport)
   | Ok (status, body) when not (Tui_decode.is_success_http_status status) ->
       Error (Masc_tui_keeper_control.roster_failure_of_status ~status ~body)
-  | Ok (_, body) -> (
-      match Yojson.Safe.from_string body with
-      | exception Yojson.Json_error detail ->
-          Error (Masc_tui_keeper_control.Roster_malformed detail)
-      | json -> (
-          match Tui_decode.decode_keeper_runtime_list json with
-          | Error detail ->
-              Error (Masc_tui_keeper_control.Roster_malformed detail)
-          | Ok (rows, errors, truncated, total, candle) ->
-              Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total, candle)))
+  | Ok (_, body) ->
+      Masc_tui_response_decode.run ~name:"keeper.roster.decode_wait" (fun () ->
+        match Yojson.Safe.from_string body with
+        | exception Yojson.Json_error detail ->
+            Error (Masc_tui_keeper_control.Roster_malformed detail)
+        | json -> (
+            match Tui_decode.decode_keeper_runtime_list json with
+            | Error detail ->
+                Error (Masc_tui_keeper_control.Roster_malformed detail)
+            | Ok (rows, errors, truncated, total, candle) ->
+                Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total, candle)))
 
 let load_keeper_config_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =
@@ -1701,14 +1894,18 @@ let load_keeper_sandbox_logs ~(host : string) ~(port : int)
     Masc_tui_keeper_sandbox.decode_logs
       ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text json
 
+let memo_settings_editor = json_memo ()
+
 let load_keeper_config_editor ~(host : string) ~(port : int)
     ~(keeper_name : string) : (Yojson.Safe.t * string, string) result =
   match
     Masc_tui_http.fetch_keeper_config_snapshot ~host ~port ~keeper_name
   with
   | Error err -> Error ("keeper config load failed: " ^ err)
-  | Ok json -> Masc_tui_response_decode.run ~name:"keeper.settings_editor.decode_wait" (fun () ->
-      Ok (json, Masc_tui_keeper_config.editor_stem json))
+  | Ok json ->
+      decode_offloaded memo_settings_editor ~name:"keeper.settings_editor.decode_wait"
+        (fun json -> Ok (json, Masc_tui_keeper_config.editor_stem json))
+        json
 
 let load_keeper_github_identity_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =
@@ -1721,12 +1918,17 @@ let load_keeper_github_identity_view ~(host : string) ~(port : int)
       (Masc_tui_github_identity.view_lines
          ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text json)
 
+let memo_keeper_board_quarantines = json_memo ()
+
 let load_keeper_board_quarantines ~(host : string) ~(port : int)
     ~(keeper_name : string) :
     (Masc_tui_board_quarantine.t, string) result =
   match Masc_tui_http.fetch_keeper_board_quarantines ~host ~port ~keeper_name with
   | Error err -> Error ("board quarantines: " ^ err)
-  | Ok json -> Masc_tui_board_quarantine.decode json
+  | Ok json ->
+      decode_offloaded memo_keeper_board_quarantines
+        ~name:"board.quarantine.decode_wait"
+        Masc_tui_board_quarantine.decode json
 
 (* What a Keeper can be attached to, and what each of those currently offers
    it. One fetch rather than two: a list of providers and a list of
@@ -1811,13 +2013,18 @@ let load_runtime_config_view ~(host : string) ~(port : int) :
       | Ok reading -> Ok reading
 
 
+let memo_config_snapshot = json_memo ()
+
 (* Only the Config observation needs these full source/model projections.
    Specialized activity readers keep their existing document-only read. *)
 let load_runtime_config_snapshot ~(host : string) ~(port : int) :
     (Masc_tui_runtime_config_snapshot.t, string) result =
   match Masc_tui_http.fetch_runtime_config_raw ~host ~port with
   | Error detail -> Error ("fetch: " ^ detail)
-  | Ok json -> Masc_tui_response_decode.run ~name:"runtime.config_snapshot.decode_wait" (fun () ->
-      Masc_tui_runtime_config_view.decode json
-      |> Result.map_error (fun detail -> "decode: " ^ detail)
-      |> Result.map Masc_tui_runtime_config_snapshot.of_reading)
+  | Ok json ->
+      decode_offloaded memo_config_snapshot ~name:"runtime.config_snapshot.decode_wait"
+        (fun json ->
+          Masc_tui_runtime_config_view.decode json
+          |> Result.map_error (fun detail -> "decode: " ^ detail)
+          |> Result.map Masc_tui_runtime_config_snapshot.of_reading)
+        json

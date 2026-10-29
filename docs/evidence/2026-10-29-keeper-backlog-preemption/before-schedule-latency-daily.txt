@@ -1,0 +1,13 @@
+# captured 2026-10-29T07:06:33Z from the server at ~/me/.masc (binary_commit 575e4665d63 since 2026-10-29T06:06:01Z; the log is cumulative, earlier deliveries came from earlier binaries)
+# python3 -I scripts/keeper-queue-probe.py <base>/.masc/keepers --logs-dir <base>/.masc/logs --schedule-latency day --since 2026-10-24 --until 2026-10-29T02:54:34Z
+8. Due schedule latency per UTC day of due_at (due window 2026-10-24T00:00:00Z .. 2026-10-29T02:54:34Z)
+seconds from due_at to the first 'scheduled wake delivered' line of the same occurrence
+bucket            n    p50_s    p90_s    p99_s    max_s   deliv/occ  again%
+2026-10-24      538       70     5174    22380   164896        1.22   10.2%
+2026-10-25      699       24      970    29480    45025        1.09    5.0%
+2026-10-26     1920       15      225     2830    19770        1.14    5.2%
+2026-10-27     1400       36      550     5040    25309        1.07    4.7%
+2026-10-28     1134       18      465     5680    59969        1.52   19.6%
+2026-10-29       90       14      538     1504     1504        1.74   21.1%
+all            5781       19      528    11384   164896        1.21    8.6%
+

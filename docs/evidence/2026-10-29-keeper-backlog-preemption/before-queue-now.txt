@@ -1,0 +1,31 @@
+# captured 2026-10-29T05:02:21Z from the server at ~/me/.masc (binary_commit 216f7ab8456; the queue is a snapshot of the read time)
+# python3 -I scripts/keeper-queue-probe.py <base>/.masc/keepers --since 2026-10-29 (table 1 only)
+1. Queue now (snapshot read at 2026-10-29T05:02:23Z UTC)
+keeper                           rows by kind                                       oldest_h oldest_kind                max_ret
+code-reviewer                       1 schedule_due=1                                    0.01 schedule_due                     0
+code-reviewer-brother               3 board_signal=2,schedule_due=1                     0.15 schedule_due                     1
+context-reviewer                    7 tool_result_ready=5,ask_answered=1,schedule_due=1      0.11 ask_answered                     1
+geek-scout                          3 schedule_due=3                                   14.12 schedule_due                     0
+glossary-maniac                     2 schedule_due=2                                   37.23 schedule_due                     0
+goo-yang-bong                       1 ask_answered=1                                    0.11 ask_answered                     0
+hole-finder                         6 ask_answered=5,schedule_due=1                   743.80 ask_answered                     0
+indie-geek-blue                     4 ask_answered=3,schedule_due=1                   735.31 ask_answered                     0
+jazz-developer                      2 ask_answered=2                                  787.24 ask_answered                     0
+judas-priest                        1 schedule_due=1                                    0.17 schedule_due                     0
+kidsnote-incoming-dd-manager        1 schedule_due=1                                    5.04 schedule_due                     0
+kidsnote-job-manager                7 board_signal=4,schedule_due=3                    21.14 board_signal                     0
+kidsnote-qa-hub-manager             1 ask_answered=1                                    0.11 ask_answered                     0
+masc-pro-builder                    1 board_signal=1                                    0.04 board_signal                     0
+masc-productor-owner                1 schedule_due=1                                    0.82 schedule_due                     0
+msx-retro-mania                     4 schedule_due=2,board_signal=1,ask_answered=1    742.39 ask_answered                     0
+music-sensei                        2 board_signal=1,ask_answered=1                     0.50 board_signal                     0
+ocaml-agent-ic                      9 ask_answered=5,schedule_due=3,completion_authority_rejected=1    755.01 ask_answered                    31
+ocaml-refactor-woman                1 schedule_due=1                                    0.22 schedule_due                     0
+rondo                               2 ask_answered=2                                  817.54 ask_answered                     0
+rust-hwp-guy                        3 ask_answered=3                                 1028.83 ask_answered                     0
+simplifyer                          4 ask_answered=4                                  747.26 ask_answered                     0
+tui-developer                       3 ask_answered=2,task_outcome=1                   747.26 ask_answered                     0
+wkbl-front                          5 ask_answered=2,board_signal=1,schedule_due=1,board_attention=1    740.21 ask_answered                     0
+won-chik                            3 ask_answered=2,schedule_due=1                   747.43 ask_answered                     0
+fleet                              77
+

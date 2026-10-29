@@ -174,6 +174,20 @@ let dispatch_failure_boundary () =
      | exception Eio.Cancel.Cancelled _ -> true
      | _ -> false)
 
+(* The service adds the answering client and its transport to [data] and writes
+   fields in its own order. A result belongs to the request that asked for it by
+   what the lane answered, so compare without the decoration and with sorted keys. *)
+let rec normalized = function
+  | `Assoc fields ->
+    let fields = List.map (function
+      | "data", `Assoc data ->
+        "data", `Assoc (List.filter (fun (key, _) -> key <> "clientId" && key <> "transport") data)
+      | field -> field) fields in
+    `Assoc (List.sort (fun (a, _) (b, _) -> String.compare a b)
+      (List.map (fun (key, value) -> key, normalized value) fields))
+  | `List items -> `List (List.map normalized items)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as scalar -> scalar
+
 let exercise_departure ~connect owner =
   (match Owner.poll_live owner ~client ~window_sec:0.001 with
    | Ok None -> () | Ok (Some _) -> fail "unexpected initial work" | Error detail -> fail detail);
@@ -211,7 +225,7 @@ let exercise_departure ~connect owner =
   let response=Eio.Buf_read.line (Eio.Buf_read.of_flow second ~max_size:4096) in
   check bool "B receives its own result" true
     (match ok (W.reply_of_json (Yojson.Safe.from_string response)) with
-     | W.Issue_result (Ok (B.Answered actual)) -> actual=payload
+     | W.Issue_result (Ok (B.Answered actual)) -> normalized actual=normalized payload
      | W.Issue_result (Ok (B.Lane_absent|B.Timed_out|B.Refused _|B.Rejected_before_effect _))
      | W.Issue_result (Error _) | W.Snapshot_result _ | W.Poll_result _ | W.Receipt
      | W.Service_refusal _ | W.Model_reply _ | W.Extension_reply _ | W.Download_reply _ -> false);
@@ -262,7 +276,7 @@ let exercise_departure ~connect owner =
   let reply=Eio.Buf_read.line (Eio.Buf_read.of_flow after_drain ~max_size:4096) in
   check bool "new idle work succeeds after queue drain" true
     (match ok (W.reply_of_json (Yojson.Safe.from_string reply)) with
-     | W.Issue_result (Ok (B.Answered actual)) -> actual=payload
+     | W.Issue_result (Ok (B.Answered actual)) -> normalized actual=normalized payload
      | W.Issue_result (Ok (B.Lane_absent | B.Timed_out | B.Refused _ | B.Rejected_before_effect _))
      | W.Issue_result (Error _) | W.Snapshot_result _ | W.Poll_result _ | W.Receipt
      | W.Service_refusal _ | W.Model_reply _ | W.Extension_reply _ | W.Download_reply _ -> false)
@@ -321,7 +335,7 @@ let exercise_extension_departure ~sw ~connect owner =
   let raw=Eio.Promise.await_exn response in
   check bool "extension B receives only its own result" true
     (match ok (W.reply_of_json (Yojson.Safe.from_string raw)) with
-     | W.Issue_result (Ok (B.Answered actual)) -> actual=payload "B"
+     | W.Issue_result (Ok (B.Answered actual)) -> normalized actual=normalized (payload "B")
      | W.Issue_result (Ok (B.Lane_absent | B.Timed_out | B.Refused _ | B.Rejected_before_effect _))
      | W.Issue_result (Error _) | W.Snapshot_result _ | W.Poll_result _ | W.Receipt
      | W.Service_refusal _ | W.Model_reply _ | W.Extension_reply _ | W.Download_reply _ -> false)

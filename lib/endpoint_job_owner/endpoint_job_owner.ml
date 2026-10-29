@@ -540,8 +540,10 @@ let lookup controller original =
     | `Existing operation ->
         let* operation=validate_lookup original operation in
         (match refresh operation with
-         | Ok _ | Error (Registry_error R.Cancel_reconciliation_required) -> Ok operation
-         | Error error -> Error error)
+         | Ok _ -> Ok operation
+         | Error error ->
+           (* An uncertain original cancellation still leaves the retained operation answerable. *)
+           if error=Registry_error R.Cancel_reconciliation_required then Ok operation else Error error)
     | `Conflict -> Error Binding_mismatch
     | `Join pending -> Eio.Promise.await pending.value
     | `Run pending -> run_admission controller key pending (fun () ->

@@ -31,6 +31,22 @@ let classify_startup_error : S.error -> original_error = function
   | Launch_error _ | Output_error _ | Pipe_unavailable | Pipe_cleanup_failed _
   | Registry_cleanup_failed _ | Interrupted | Supervisor_failed | Publication_failed _
   | Recovery_failed _ | Receipt_storage_unavailable | Result_encoding_failed _ -> Unavailable
+(* A failed cleanup carries the error that ended the operation as its primary. *)
+let rec cancel_needs_reconciliation : R.error -> bool = function
+  | R.Cancel_reconciliation_required -> true
+  | Cleanup_failed {primary=Some primary;cause=_} -> cancel_needs_reconciliation primary
+  | Cleanup_failed {primary=None;cause=_} -> false
+  | Protection_refused _ | Authority_unavailable _ | Publication_failed _
+  | Recovery_unavailable _ | Lock_failed _ | Commit_unconfirmed _ | Busy
+  | Binding_mismatch | Invalid_request _ | Execution_identity_changed
+  | Endpoint_replaced | Missing_original | Admission_incomplete | Corrupt_original _
+  | Launch_already_requested | Launch_cancelled | Launch_intent_spent | Stale_record
+  | Unsupported_version _ -> false
+let startup_needs_reconciliation : S.error -> bool = function
+  | S.Registry_error error -> cancel_needs_reconciliation error
+  | Launch_error _ | Output_error _ | Pipe_unavailable | Pipe_cleanup_failed _
+  | Registry_cleanup_failed _ | Interrupted | Supervisor_failed | Publication_failed _
+  | Recovery_failed _ | Receipt_storage_unavailable | Result_encoding_failed _ -> false
 type 'a completion = {
   value : 'a Eio.Promise.t;
   resolver : 'a Eio.Promise.u;
@@ -93,10 +109,8 @@ let start_effect_workspace ~sw ~fs ~cgroup_parent_path ~execution intent =
       Eio.Switch.run (fun job_sw ->
         let outcome=S.launch_effect_workspace ~sw:job_sw ~fs ~cgroup_parent_path ~execution intent in
         let held=match outcome with
-          | S.Not_performed {error=S.Registry_error R.Cancel_reconciliation_required;pipe_cleanup_errors=_} -> true
-          | S.Not_performed {error=S.Registry_error (R.Cleanup_failed
-              {primary=Some R.Cancel_reconciliation_required;cause=_});pipe_cleanup_errors=_} -> true
-          | S.Not_performed _ | S.Performed _ -> false in
+          | S.Not_performed {error;pipe_cleanup_errors=_} -> startup_needs_reconciliation error
+          | S.Performed _ -> false in
         if held then Atomic.set t.reconcile_cancel true;
         finish t.startup (Ok outcome);
         if not held then finish t.result (terminal_result t ~sw:job_sw intent outcome);

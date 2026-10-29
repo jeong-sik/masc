@@ -233,10 +233,10 @@ let evaluate_with ~call t (request : Codec.request) : (Types.eval_response, Flow
        | Error failure -> Attempt_failed failure);
     used
 
-let evaluate ?clock t request =
+let evaluate ~clock t request =
   evaluate_with
     ~call:(fun ~destinations ~state ~questions () ->
-      Client.evaluate ?clock ~destinations ~state ~questions ())
+      Client.evaluate ~clock ~destinations ~state ~questions ())
     t request
 
 (* ---- the outcome ---- *)

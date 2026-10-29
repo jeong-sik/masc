@@ -62,10 +62,14 @@ val attempt_failure_of_client_failure :
     client uses for capacity, applied to the other two. *)
 
 val evaluate :
-  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   t ->
   Keeper_memory_recall_flow.evaluate
-(** Called from several fibers at the same time, one call for each request.
+(** [clock] is required because the client arms a request's time limit only
+    with a clock; without one a destination that accepts the connection and
+    never answers would be waited on for good.
+
+    Called from several fibers at the same time, one call for each request.
     Each call writes its own rows in this order: [started] with the exact
     state and questions, then [response_received] or [provider_failed], or
     [cancelled] when the call is cancelled. Every row carries the [judgment_id],

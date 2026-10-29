@@ -81,9 +81,9 @@ let judge_with ~evaluate ~memo ~config ~keeper_id ~turn_ref ~purpose candidates 
           if is_kept_for_its_turn judged then keep memo ~turn_ref judged;
           Ok (Judged judged)))
 
-let judge ?clock ~memo ~config ~keeper_id ~turn_ref ~purpose candidates =
+let judge ~clock ~memo ~config ~keeper_id ~turn_ref ~purpose candidates =
   judge_with
-    ~evaluate:(fun record -> Evaluation.evaluate ?clock record)
+    ~evaluate:(fun record -> Evaluation.evaluate ~clock record)
     ~memo
     ~config
     ~keeper_id

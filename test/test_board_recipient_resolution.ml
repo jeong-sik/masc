@@ -208,7 +208,11 @@ let test_a_lookup_failure_refuses_the_write_and_stores_nothing =
       "no comment was stored"
       0
       (List.length (get (Board_dispatch.get_comments ~post_id:(post_id post))));
-    check bool "the comment reached no disk" false (persisted_text_contains "zzmarker-comment"))
+    check bool "the comment reached no disk" false (persisted_text_contains "zzmarker-comment");
+    (* The control: a stored post does show up in those files, so the checks
+       above are able to see a write. *)
+    ignore (get (write "a stored post zzmarker-control"));
+    check bool "a stored post reaches the disk" true (persisted_text_contains "zzmarker-control"))
 ;;
 
 (* Platform code decides whom a system post reaches. Its text is evidence, so a
@@ -494,7 +498,10 @@ let test_a_comment_during_the_lookup_does_not_make_the_edit_ask_again =
       if String.equal (spelled candidate) "alice"
       then (
         incr alice_asked;
-        if !alice_asked = 1 then !during_the_lookup ());
+        if !alice_asked = 1
+        then (
+          require_no_lock_is_held ();
+          !during_the_lookup ()));
       declared_from table candidate)
   in
   started ~lookup (fun () ->

@@ -53,10 +53,17 @@ let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~unread_me
   let* found = Step_owner.discover ~store ~owner |> Result.map_error owner_error in
   let mine = List.filter (fun (_, (header : Step.header)) -> header.range = range) found in
   let* retained = index mine in
-  (* The gate scope is read once for the pass. The judgments of the steps that
-     earlier passes finished are answered from it, so the pass reads the scope
-     once, not once per step. *)
-  let* inventory = io (fun () -> Gate.Inventory.read ~store ~owner) in
+  (* The gate scope is read once for the pass, when the first answered step
+     needs judging. The judgments of the steps that earlier passes finished are
+     answered from that read, so the pass reads the scope once, not once per
+     step, and a pass with no answered step does not read it. *)
+  let gate_scope_read = ref None in
+  let inventory () = match !gate_scope_read with
+    | Some inventory -> Ok inventory
+    | None ->
+      let* inventory = io (fun () -> Gate.Inventory.read ~store ~owner) in
+      gate_scope_read := Some inventory;
+      Ok inventory in
   (* A chain that has a step starts again from what its first step retained:
      the transaction, the facts the floor started from, and the state and unread
      messages it carried in. The caller's [fresh] names a chain's start only
@@ -131,6 +138,7 @@ let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~unread_me
             go machine ~previous:(Some (link_of record))
           | [], _ | _ :: _ :: _, _ | [_], None -> Ok (Stopped {position = question.position; report}))
        | Step_owner.Answered (answer, record) ->
+         let* inventory = inventory () in
          let* judged = Judgment.judge ~store ~step ~record ~answer ~fresh_authority:(fresh_authority step)
            ~inventory in
          (match judged with

@@ -20,7 +20,7 @@ type build_context = {
   pending_approvals : Yojson.Safe.t list;
   keeper_metas : Keeper_meta_contract.keeper_meta list;
   latest_receipts : (string * Yojson.Safe.t) list;
-  latest_runtime_trusts : (string * Yojson.Safe.t) list;
+  runtime_trust_of : string -> Yojson.Safe.t option;
   goal_task_index : (string, string list) Hashtbl.t;
 }
 
@@ -67,7 +67,7 @@ let build_tree context goals goal =
   let direct_runtime_trusts =
     direct_linked_keeper_names
     |> List.filter_map (fun keeper_name ->
-           List.assoc_opt keeper_name context.latest_runtime_trusts
+           context.runtime_trust_of keeper_name
            |> Option.map (fun trust -> (keeper_name, trust)))
   in
   let task_activity_values =

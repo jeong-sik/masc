@@ -28,7 +28,10 @@ let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_meta_contract.kee
 
 
 
-let build_forest ~(config : Workspace.config) ~goals ~tasks
+let build_forest_with_trust_reader
+    ~(read_trust :
+       config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> Yojson.Safe.t)
+    ~(config : Workspace.config) ~goals ~tasks
     ~(pending_approvals : Yojson.Safe.t list) =
   match Workspace_goal_index.read_goal_task_links_authoritative_r config with
   | Error detail -> Error detail
@@ -50,6 +53,29 @@ let build_forest ~(config : Workspace.config) ~goals ~tasks
     |> Keeper_execution_receipt.latest_json_by_keeper config
   in
   let goal_task_index = Workspace_goal_index.build_task_goal_index ~goal_task_links () in
+  (* A goal reads the runtime trust of the Keepers its tasks are assigned to,
+     and nothing else. Computing every Keeper's snapshot up front cost the
+     whole tree: on 2026-10-28 the 40 snapshots took 7.3 s of a 7.5 s tree,
+     and the 19 Keepers any goal names took 2.0 s of them. Each snapshot is
+     computed the first time a goal asks for it and kept for this build. *)
+  let runtime_trust_of =
+    let computed = Hashtbl.create 16 in
+    fun keeper_name ->
+      match Hashtbl.find_opt computed keeper_name with
+      | Some trust -> Some trust
+      | None ->
+        match
+          List.find_opt
+            (fun (meta : Keeper_meta_contract.keeper_meta) ->
+               String.equal meta.name keeper_name)
+            keeper_metas
+        with
+        | None -> None
+        | Some meta ->
+          let trust = read_trust ~config ~meta in
+          Hashtbl.replace computed keeper_name trust;
+          Some trust
+  in
   let context =
     {
       now_ts = Time_compat.now ();
@@ -57,15 +83,14 @@ let build_forest ~(config : Workspace.config) ~goals ~tasks
       pending_approvals;
       keeper_metas;
       latest_receipts;
-      latest_runtime_trusts =
-        keeper_metas
-        |> List.map (fun (meta : Keeper_meta_contract.keeper_meta) ->
-               ( meta.name,
-                 keeper_runtime_trust_snapshot_json ~config ~meta ));
+      runtime_trust_of;
       goal_task_index;
     }
   in
   Ok (goals |> List.map (build_tree context goals))
+
+let build_forest =
+  build_forest_with_trust_reader ~read_trust:keeper_runtime_trust_snapshot_json
 
 
 

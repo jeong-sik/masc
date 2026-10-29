@@ -137,7 +137,10 @@ type build_context = {
   pending_approvals : Yojson.Safe.t list;
   keeper_metas : Keeper_meta_contract.keeper_meta list;
   latest_receipts : (string * Yojson.Safe.t) list;
-  latest_runtime_trusts : (string * Yojson.Safe.t) list;
+  runtime_trust_of : string -> Yojson.Safe.t option;
+      (** The Keeper's runtime trust snapshot, [None] for a name that is not
+          one of [keeper_metas]. [build_tree] asks only for the Keepers its
+          goal's tasks are assigned to. *)
   goal_task_index : (string, string list) Hashtbl.t;
 }
 

@@ -91,7 +91,7 @@ Board 글에 Keeper 17명이 댓글 22개로 답했다. 7명은 RFC 원문을 �
 | 세 가지 "없음" | 상태 넷과 "N개 중 M개 판정"(§4.4). 결과는 평가 기록에 `turn_ref` 로 남긴다(§4.6) |
 | Jev 가 놓침 | 애매한 후보도 `possibly_needed` 로 고르게 묻는다(§4.3). 오프라인 재생에서 놓침을 잰다(§7). 식별자·발동 조건형 사실의 별도 통로는 만들지 않는다(§8-4) |
 | Jev 반복 안정성 | 층 0 전제 측정(§5, §7) |
-| 제외, 속성 기준 | Keeper 별 반출 정책으로 #46555 에서 정한다(§8-1). 그 전까지 recall 은 `scope = "listed"` 테스트 Keeper 에만 켠다(§4.7) |
+| 제외, 속성 기준 | Keeper 별 반출 정책으로 #46555 에서 정한다(§8-1). 그 전까지 recall 은 `memory_recall_scope = "listed"` 테스트 Keeper 에만 켠다(§4.7) |
 | 비용, 읽기 API p99 | §4.8. 카나리 밖으로 넓히기 전 조건 |
 | 월드 프레임과 겹침 | 문항 조건과 R7(§7) |
 | 쓰기 도달, 결과 유실 | §2.6, 층 0 전제 측정. 쓰기 도구는 #46507 |
@@ -229,9 +229,9 @@ recall 이 실어 줄 수 있는 기억은 쓰기를 통과한 것뿐이다.
 
 ### 4.7 스위치
 
-- `config/runtime.toml` 에 `[memory_recall]` 을 더한다. `enabled = false` 가 기본이다. 범위는 둘 중 하나를 명시한다. `scope = "all"` 이거나 `scope = "listed"` 와 비어 있지 않은 `keepers = [...]` 다. 목록이 비어 있다고 전원이 켜지는 일은 없다. 모르는 이름은 부팅 때 알린다(`typesafeai_config.ml` 의 제외 목록 검사와 같다). 설정 레지스트리에 행을 더한다.
-- `[typesafeai]` 에 `memory_recall = false` 를 더한다. 데이터를 TypeSafe 로 보내는 기능마다 스위치를 따로 두는 기존 방식이다(`absorb_gate`, `skill_applicability`, `workspace_memory_selection_enabled`). 스위치 키는 여러 곳에서 읽는다(`runtime_schema`, `runtime_toml`, `typesafeai_config`, `board_attention`·`absorb_gate` 의 디코더). `absorb_gate` 쪽 디코더는 문자열이라 컴파일러가 못 잡는다.
-- Keeper 별 모드는 `Off` 와 `Judged` 둘이다. 스위치가 꺼져 있거나, 범위 밖이거나, `[typesafeai] excluded_keepers` 에 있으면 `Off` 다. `Off` Keeper 는 판정도 상태 줄도 없고 기존 안내문을 그대로 받는다.
+- `[typesafeai]` 에 `memory_recall = false` 를 더한다. 데이터를 TypeSafe 로 보내는 기능마다 스위치를 따로 두는 기존 방식이다(`absorb_gate`, `skill_applicability`, `workspace_memory_selection_enabled`). 스위치를 켜면 범위도 같은 표에 쓴다. `memory_recall_scope = "all"` 이거나 `memory_recall_scope = "listed"` 와 비어 있지 않은 `memory_recall_keepers = [...]` 다. 켜는데 범위가 없거나, `"listed"` 인데 이름이 없거나, `"all"` 옆에 목록을 두면 설정을 읽을 때 거절한다. 목록이 비어 있다고 전원이 켜지는 일은 없다. 스위치와 범위는 하나의 값(`Runtime_schema.memory_recall`)이라 "켰는데 범위 없음"을 만들 수 없다. 모르는 이름은 부팅 때 알린다(제외 목록 검사와 같다). `[typesafeai]` 의 키는 설정 레지스트리(`keeper_runtime_setting_registry`)에 올리지 않는다.
+- 새 이유(`Memory_recall_disabled`)는 `unavailable_reason` 을 `match` 하는 곳마다 짝을 맞춘다: `typesafeai_config`, `keeper_board_attention_exact_flow`, `keeper_librarian_absorb_gate`. `absorb_gate` 쪽 디코더는 문자열이라 컴파일러가 못 잡는다.
+- Keeper 별 모드는 `Typesafeai_config.memory_recall_destinations` 의 답이다. `Error` 면 `Off`, `Ok` 면 판정한다. 스위치가 꺼져 있거나 범위 밖이면 `memory_recall_disabled`, `[typesafeai] excluded_keepers` 에 있으면 `keeper_excluded`, 레인이 꺼졌거나 키가 없으면 그 이유로 `Off` 다. 범위 밖인 Keeper 가 제외 목록에도 있으면 앞의 이유가 나온다. `Off` Keeper 는 판정도 상태 줄도 없고 기존 안내문을 그대로 받는다.
 - 라이브 설정은 이 RFC 의 PR 이 바꾸지 않는다. 카나리를 켤 때 운영자가 정한다.
 
 ### 4.8 비용과 지연
@@ -259,7 +259,7 @@ claim 바이트는 그날 턴을 낸 Keeper 의 현재 사실 바이트를 턴 �
 
 한 층에 PR 하나(층 1a 는 둘), 층마다 20k 토큰 이하다.
 
-**층 0 — 측정 하네스와 전제 측정.** 제품 코드를 바꾸지 않는다. `scripts/` 와 시험 디렉터리에 둔다. 실제 Keeper 기억을 밖으로 보내는 측정(1, 3)은 운영자가 이름으로 허용한 Keeper 에만 한다. 허용 목록은 recall 의 `scope = "listed"` 와 같다. `scripts/keeper-recall-jev-probe.py` 는 `--allow-send-for` 로 Keeper 이름을 받고 `excluded_keepers` 에 있는 Keeper 는 거절한다.
+**층 0 — 측정 하네스와 전제 측정.** 제품 코드를 바꾸지 않는다. `scripts/` 와 시험 디렉터리에 둔다. 실제 Keeper 기억을 밖으로 보내는 측정(1, 3)은 운영자가 이름으로 허용한 Keeper 에만 한다. 허용 목록은 recall 의 `memory_recall_scope = "listed"` 와 같다. `scripts/keeper-recall-jev-probe.py` 는 `--allow-send-for` 로 Keeper 이름을 받고 `excluded_keepers` 에 있는 Keeper 는 거절한다.
 
 1. Jev 용량: 중앙값 크기와 상위 10% 크기 Keeper 로 조각 크기(`STATE_BYTES_PER_PIECE`)를 맞춘다. 한 조각이 받아들여지는 가장 큰 크기, 조각을 동시에 보냈을 때 걸리는 시간이 제한 시간 안인지, 한도를 넘은 요청이 돌려주는 오류 본문을 기록한다. 시험은 둘 했고 결과는 [증거](../evidence/keeper-recall-jev-probe-2026-10-28/README.md)에 있다. `won-chik`(claim 66KB, 중앙값 크기)은 조각 둘이 모두 받아들여졌고 0.5초 안에 끝났다. `goo-yang-bong`(claim 149KB, 상위 10% 크기)은 `state` 159.7KB 요청이 HTTP 400 으로 거절됐고(프로브는 `max_tokens_exceeded` 일 때만 반으로 나누므로 용량 거절이다) 반쪽 둘(`state` 77.9KB, 82.1KB)은 받아들여졌다. 코덱이 만드는 요청 모양은 합성 후보로 따로 시험했다([증거](../evidence/keeper-recall-jev-shape-2026-10-28/README.md)). 71자 `sha256:` 질문 키로 질문 120개를 한 요청에 실은 요청(본문 100.5KB)은 HTTP 200 이었고 입력이 39,334토큰이었다. 질문 300개 요청(본문 250.8KB)은 HTTP 400 이었고 `detail` 이 `{"error_type": "max_tokens_exceeded"}` 였다. 클라이언트가 용량 거절로 인정하는 모양이다. 150개씩 나눈 두 요청은 둘 다 HTTP 200 이었다. 후보 120개 요청의 입력 토큰당 바이트는 12자 키가 2.91, 71자 키가 2.56 이다. 아직 못 본 것은 입력 토큰당 2.5바이트 이하인 Keeper 에서 80KB 조각이 거절되는지, 여러 Keeper 가 동시에 보낼 때다. 문서는 오류 이름을 적지 않고 클라이언트는 400 `max_tokens_exceeded` 만 용량 거절로 인정한다.
 2. Jev 반복 일치율: 같은 입력을 N번 보내 라벨이 바뀐 비율(label-flip rate)을 센다. mad-scientist 의 동결 실험(`p-2025afbfe12116ac9ac73199f9400080`)의 지표 A 와 같은 측정이다. 먼저 나오는 결과를 서로 쓴다. 응답의 `model` 필드로 실제 버전을 함께 기록한다. 선택 집합이 달라지는 정도와 후보별 평균 확률도 함께 센다(프로브 `--detail`). `won-chik` 에서 후보 56개를 한 요청으로 10번 보낸 결과는 아래와 같고, 원문과 해석은 [증거](../evidence/keeper-recall-jev-probe-2026-10-28/README.md)에 있다.
@@ -282,7 +282,7 @@ claim 바이트는 그날 턴을 낸 Keeper 의 현재 사실 바이트를 턴 �
 **층 1a — 판정.** 기본 꺼짐이라 동작이 안 바뀐다. 층이 둘이다.
 
 - 1a-1 부품: 닫힌 판정 타입(`candidate_decision`, `turn_need`, `time_nature`, 판정 못 한 이유 `unjudged_reason`), 후보 한 줄 만들기, `STATE_BYTES_PER_PIECE` 로 조각 나누기, Jev 요청·응답 코덱(§4.2, §4.3), 결과를 상태 줄 넷으로 줄이는 규칙(§4.4). 순수 함수이고 시험이 같이 간다.
-- 1a-2 흐름: Jev 호출(조각을 동시에 보내기, 거절 뒤 반으로 나누기, 제한 시간, 같은 턴 안 재사용, §4.6), 평가 기록, 지표, `[memory_recall]` 과 `[typesafeai] memory_recall` 스위치, Keeper 별 모드(§4.7).
+- 1a-2 흐름: Jev 호출(조각을 동시에 보내기, 거절 뒤 반으로 나누기, 제한 시간, 같은 턴 안 재사용, §4.6), 평가 기록, 지표, `[typesafeai] memory_recall` 스위치와 범위, Keeper 별 모드(§4.7).
 
 **층 1b — 싣기.** 새 블록 id 둘과 그 id 를 쓰는 자리 전부, 블록 렌더와 문구, 공식 클라이언트 전달(§4.5), 컨텍스트 조립 연결을 더한다. 블록 id 를 쓰는 OCaml 자리는 `prompt_block_id.ml` 의 타입, `equal`, `to_string`, `of_string`, `all_known`, `cache_rank`, `injected_on_post_tool_round`, `resent_when_held` 와 `.mli`, 컨텍스트 조립, 다음 요청 예보, 제출 연결, 공식 클라이언트 전달, TUI 인스펙터다. 컴파일러 밖 자리는 대시보드 `dashboard-turn-records.ts` 의 블록 id 목록과 `memory-inspector.ts`, 손으로 쓴 시험 표 셋이고 같은 PR 에 넣는다. `cache_rank` 는 `Temporal_summary` 와 `Operator_note` 를 뒤로 밀어야 한다. 대시보드 화면에서 새 블록이 보이는지 확인한다. 운영자가 켜는 기능이라 사용 가이드 1장이 같은 PR 에 들어간다.
 
@@ -375,7 +375,7 @@ claim 바이트는 그날 턴을 낸 Keeper 의 현재 사실 바이트를 턴 �
   - 제외 목록은 `kidsnote-slack-context-collector` 하나이고, `board_attention`·`absorb_gate`·후속 판정이 같은 목록을 읽는다.
   - 이 RFC 의 recall 은 새로 하나가 더 늘어나는 경로이고 양이 다르다. 지금까지 나간 기억 판정 1,623건은 `state` 중앙값이 7.6KB 였다. recall 은 하루 3,793턴에 턴마다 Keeper 의 사실 전체(평균 약 100KB)와 이번 턴 입력을 보낸다(§4.8).
   - in-house 레인도 "레인이면 안전"이 아니다. 라이브 슬롯이 `glm-coding`, `ollama_cloud`, `claude_code` CLI 라서 외부 클라우드로 간다. Keeper 별 레인 설정은 허용된 슬롯의 순서만 바꿀 수 있어서(`keeper_exact_lane_preference.mli`) 제외 Keeper 를 자기 슬롯으로만 보내려면 새 계약이 필요하다.
-  - 운영자 결정(2026-10-28): 이름 몇 개를 목록에 넣는 것보다 넓은 제외 기능이 있어야 한다. Keeper 별 반출 정책으로 #46555 에서 별도 RFC 로 정한다. 그 전까지 recall 은 `scope = "listed"` 로 명시한 테스트 Keeper 에만 켠다. kidsnote 4종(`kidsnote-incoming-dd-manager`, `kidsnote-job-manager`, `kidsnote-qa-hub-manager`, `kidsnote-slack-reader`)은 명시하지 않는다.
+  - 운영자 결정(2026-10-28): 이름 몇 개를 목록에 넣는 것보다 넓은 제외 기능이 있어야 한다. Keeper 별 반출 정책으로 #46555 에서 별도 RFC 로 정한다. 그 전까지 recall 은 `memory_recall_scope = "listed"` 로 명시한 테스트 Keeper 에만 켠다. kidsnote 4종(`kidsnote-incoming-dd-manager`, `kidsnote-job-manager`, `kidsnote-qa-hub-manager`, `kidsnote-slack-reader`)은 명시하지 않는다.
 - **2 — 층 2 의 hard cut.** 안정 id·제목·출처 좌표·연결은 저장 계약을 바꿔서 백업 후 기억을 다시 쓴다. 운영자가 하기로 했다(2026-10-28). 실행은 백업을 만든 뒤 한 번 더 확인받는다.
 - **3 — 기본 검색 안의 후속 판정.** 기능별 스위치를 달고 기본값을 정한다(§2.3).
 - **4 — `constraint` 사실이 Jev 를 거치지 않고 항상 고른 것으로 올라가게 할지.** 20%(466개)가 `constraint` 라서 블록이 그만큼 커지고 category 로 가르는 규칙이 하나 생긴다. 제안은 하지 않는 것이다. 오프라인 재생에서 Jev 가 `constraint` 를 `not_needed` 로 보내는 비율을 먼저 센다.

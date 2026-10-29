@@ -3169,6 +3169,9 @@ let typesafeai_keys =
   ; "skill_applicability"
   ; "librarian_preflight"
   ; "workspace_memory_selection_enabled"
+  ; "memory_recall"
+  ; "memory_recall_scope"
+  ; "memory_recall_keepers"
   ; "excluded_keepers"
   ]
 ;;
@@ -3181,14 +3184,15 @@ let result_errors = function
   | Error errors -> errors
 ;;
 
-(* A keeper name in [excluded_keepers]: a keeper is named by its directory
-   name, so an empty name or one with whitespace names nothing and would
-   exclude nothing while looking as if it did. Whether the name is a keeper
-   of this base path is checked at boot, where the keepers are known. *)
-let parse_typesafeai_excluded_keepers ~(path : string) (tbl : Otoml.t) =
-  match typed_find "an array of strings" path tbl "excluded_keepers" (Otoml.get_array Otoml.get_string) with
+(* A keeper name in [excluded_keepers] or [memory_recall_keepers]: a keeper is
+   named by its directory name, so an empty name or one with whitespace names
+   nothing and would exclude nothing, or recall for nobody, while looking as
+   if it did. Whether the name is a keeper of this base path is checked at
+   boot, where the keepers are known. [None] is a key that is not there. *)
+let parse_typesafeai_keeper_names ~(path : string) ~(key : string) (tbl : Otoml.t) =
+  match typed_find "an array of strings" path tbl key (Otoml.get_array Otoml.get_string) with
   | Error _ as error -> error
-  | Ok None -> Ok []
+  | Ok None -> Ok None
   | Ok (Some names) ->
     let bad =
       List.concat_map
@@ -3196,12 +3200,77 @@ let parse_typesafeai_excluded_keepers ~(path : string) (tbl : Otoml.t) =
            if String.trim name = "" || String.exists (fun c -> c = ' ' || c = '\t' || c = '\n' || c = '\r') name
            then
              error
-               (path ^ ".excluded_keepers")
+               (path ^ "." ^ key)
                (Printf.sprintf "keeper name %S must be non-empty without whitespace" name)
            else [])
         names
     in
-    if bad = [] then Ok names else Error bad
+    if bad = [] then Ok (Some names) else Error bad
+;;
+
+let parse_typesafeai_excluded_keepers ~(path : string) (tbl : Otoml.t) =
+  Result.map
+    (Option.value ~default:[])
+    (parse_typesafeai_keeper_names ~path ~key:"excluded_keepers" tbl)
+;;
+
+(* [memory_recall] is the switch and [memory_recall_scope] says which keepers:
+   "all", or "listed" with the names in [memory_recall_keepers]. Switching it
+   on without a scope is refused, so is a "listed" scope with no names, and so
+   is a list next to "all" or to no scope. No way of leaving a key out or
+   writing it empty reaches every keeper, and a list is never ignored while it
+   looks like a limit. The scope keys are read whatever the switch says: a
+   misspelt scope is refused while the switch is off. *)
+let parse_typesafeai_memory_recall ~(path : string) (tbl : Otoml.t)
+  : (Runtime_schema.memory_recall, parse_error list) result
+  =
+  let scope_key = path ^ ".memory_recall_scope" in
+  let keepers_key = path ^ ".memory_recall_keepers" in
+  let keepers_only_listed =
+    error
+      keepers_key
+      "needs memory_recall_scope = \"listed\"; remove the list or set that scope"
+  in
+  let switch =
+    typed_find_or "a boolean" path tbl "memory_recall" Otoml.get_boolean ~default:false
+  in
+  let scope =
+    match
+      ( typed_find "a string" path tbl "memory_recall_scope" Otoml.get_string
+      , parse_typesafeai_keeper_names ~path ~key:"memory_recall_keepers" tbl )
+    with
+    | Error scope_errors, Error keeper_errors -> Error (scope_errors @ keeper_errors)
+    | Error scope_errors, Ok _ -> Error scope_errors
+    | Ok _, Error keeper_errors -> Error keeper_errors
+    | Ok None, Ok None -> Ok None
+    | Ok None, Ok (Some _) | Ok (Some "all"), Ok (Some _) -> Error keepers_only_listed
+    | Ok (Some "all"), Ok None -> Ok (Some Runtime_schema.All_keepers)
+    | Ok (Some "listed"), Ok (Some (first :: rest)) ->
+      Ok (Some (Runtime_schema.Listed_keepers (first, rest)))
+    | Ok (Some "listed"), Ok (None | Some []) ->
+      Error
+        (error
+           keepers_key
+           "memory_recall_scope = \"listed\" needs at least one keeper name; an empty list does \
+            not mean every keeper")
+    | Ok (Some other), Ok _ ->
+      Error
+        (error
+           scope_key
+           (Printf.sprintf "must be \"all\" or \"listed\", got %S" other))
+  in
+  match switch, scope with
+  | Error switch_errors, Error scope_errors -> Error (switch_errors @ scope_errors)
+  | Error switch_errors, Ok _ -> Error switch_errors
+  | Ok _, Error scope_errors -> Error scope_errors
+  | Ok false, Ok (Some _ | None) -> Ok Runtime_schema.Memory_recall_off
+  | Ok true, Ok (Some scope) -> Ok (Runtime_schema.Memory_recall_on scope)
+  | Ok true, Ok None ->
+    Error
+      (error
+         scope_key
+         "memory_recall = true needs memory_recall_scope: \"all\" or \"listed\" with \
+          memory_recall_keepers")
 ;;
 
 (* One entry of [destinations]: the table naming where to post, which model
@@ -3357,6 +3426,7 @@ let parse_typesafeai (toml : Otoml.t)
       typed_find_or "a boolean" path tbl "workspace_memory_selection_enabled" Otoml.get_boolean
         ~default:d.workspace_memory_selection_enabled
     in
+    let memory_recall = parse_typesafeai_memory_recall ~path tbl in
     (match
        ( unknown
        , enabled
@@ -3368,6 +3438,7 @@ let parse_typesafeai (toml : Otoml.t)
        , skill_applicability
        , librarian_preflight
        , workspace_memory_selection_enabled
+       , memory_recall
        , excluded_keepers )
      with
      | ( []
@@ -3380,6 +3451,7 @@ let parse_typesafeai (toml : Otoml.t)
        , Ok skill_applicability
        , Ok librarian_preflight
        , Ok workspace_memory_selection_enabled
+       , Ok memory_recall
        , Ok excluded_keepers ) ->
        Ok
          { Runtime_schema.lane_enabled
@@ -3391,9 +3463,11 @@ let parse_typesafeai (toml : Otoml.t)
          ; skill_applicability
          ; librarian_preflight
          ; workspace_memory_selection_enabled
+         ; memory_recall
          ; excluded_keepers
          }
      | ( ([] | _ :: _)
+       , (Ok _ | Error _)
        , (Ok _ | Error _)
        , (Ok _ | Error _)
        , (Ok _ | Error _)
@@ -3415,6 +3489,7 @@ let parse_typesafeai (toml : Otoml.t)
           @ result_errors skill_applicability
           @ result_errors librarian_preflight
           @ result_errors workspace_memory_selection_enabled
+          @ result_errors memory_recall
           @ result_errors excluded_keepers))
   | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
   | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)

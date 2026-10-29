@@ -6654,6 +6654,7 @@ let typesafeai_table =
    ]\n\
    board_attention = false\nboard_attention_confidence_floor = 0.45\n\
    absorb_gate = true\ncontext_review = true\nskill_applicability = true\nlibrarian_preflight = true\nworkspace_memory_selection_enabled = true\n\
+   memory_recall = true\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"won-chik\", \"goo-yang-bong\"]\n\
    excluded_keepers = [\"kidsnote-slack-context-collector\", \"other\"]\n"
 ;;
 
@@ -6674,6 +6675,8 @@ let test_typesafeai_absent_is_the_default () =
     check bool "Skill applicability is off" false t.Runtime_schema.skill_applicability;
     check bool "Librarian preflight is off" false t.Runtime_schema.librarian_preflight;
     check bool "Shared memory selection is off" false t.Runtime_schema.workspace_memory_selection_enabled;
+    check bool "Memory recall is off" true
+      (Runtime_schema.equal_memory_recall Runtime_schema.Memory_recall_off t.Runtime_schema.memory_recall);
     check (list string) "nobody is excluded" [] t.Runtime_schema.excluded_keepers
 ;;
 
@@ -6701,9 +6704,50 @@ let test_typesafeai_reads_the_whole_table () =
     check bool "Skill applicability enabled" true t.Runtime_schema.skill_applicability;
     check bool "Librarian preflight enabled" true t.Runtime_schema.librarian_preflight;
     check bool "Shared memory selection enabled" true t.Runtime_schema.workspace_memory_selection_enabled;
+    check bool "Memory recall listed, in order" true
+      (Runtime_schema.equal_memory_recall
+         (Runtime_schema.Memory_recall_on
+            (Runtime_schema.Listed_keepers ("won-chik", [ "goo-yang-bong" ])))
+         t.Runtime_schema.memory_recall);
     check (list string) "excluded keepers, in order"
       [ "kidsnote-slack-context-collector"; "other" ]
       t.Runtime_schema.excluded_keepers
+;;
+
+(* Switching recall on names the keepers it reaches. Each way to write the
+   scope is read to the value it means; the scope keys of a switch that is off
+   are read too, but they reach nobody. *)
+let test_typesafeai_reads_the_memory_recall_scope () =
+  List.iter
+    (fun (label, tail, expected) ->
+       match Runtime_toml.parse_string (lsp_probe_config ("[typesafeai]\n" ^ tail)) with
+       | Error errors -> failf "%s must parse: %s" label (error_messages errors)
+       | Ok config ->
+         check bool label true
+           (Runtime_schema.equal_memory_recall expected
+              config.Runtime_schema.typesafeai.Runtime_schema.memory_recall))
+    [ ( "no key is off"
+      , ""
+      , Runtime_schema.Memory_recall_off )
+    ; ( "false is off"
+      , "memory_recall = false\n"
+      , Runtime_schema.Memory_recall_off )
+    ; ( "false keeps no scope"
+      , "memory_recall = false\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"a\"]\n"
+      , Runtime_schema.Memory_recall_off )
+    ; ( "a scope without the switch is off"
+      , "memory_recall_scope = \"all\"\n"
+      , Runtime_schema.Memory_recall_off )
+    ; ( "all keepers"
+      , "memory_recall = true\nmemory_recall_scope = \"all\"\n"
+      , Runtime_schema.Memory_recall_on Runtime_schema.All_keepers )
+    ; ( "one listed keeper"
+      , "memory_recall = true\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"a\"]\n"
+      , Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers ("a", [])) )
+    ; ( "listed keepers keep their order"
+      , "memory_recall = true\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"b\", \"a\"]\n"
+      , Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers ("b", [ "a" ])) )
+    ]
 ;;
 
 let test_typesafeai_reads_destinations_written_as_table_headers () =
@@ -6745,6 +6789,54 @@ let test_typesafeai_refuses_a_stray_key () =
   typesafeai_rejects ~what:"nonboolean shared-memory selection opt-in"
     "[typesafeai]\nworkspace_memory_selection_enabled = \"true\"\n"
     "workspace_memory_selection_enabled must be a boolean"
+;;
+
+(* No way of leaving a key out or writing it empty reaches every keeper, and a
+   list is never read as a limit it does not make. *)
+let test_typesafeai_refuses_a_memory_recall_that_names_no_keepers () =
+  typesafeai_rejects ~what:"the switch without a scope"
+    "[typesafeai]\nmemory_recall = true\n" "typesafeai.memory_recall_scope: memory_recall = true needs memory_recall_scope";
+  typesafeai_rejects ~what:"a listed scope without keepers"
+    "[typesafeai]\nmemory_recall = true\nmemory_recall_scope = \"listed\"\n"
+    "an empty list does not mean every keeper";
+  typesafeai_rejects ~what:"a listed scope with an empty list"
+    "[typesafeai]\nmemory_recall = true\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = []\n"
+    "an empty list does not mean every keeper";
+  typesafeai_rejects ~what:"a listed scope with an empty list while the switch is off"
+    "[typesafeai]\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = []\n"
+    "an empty list does not mean every keeper";
+  typesafeai_rejects ~what:"keepers next to the all scope"
+    "[typesafeai]\nmemory_recall = true\nmemory_recall_scope = \"all\"\nmemory_recall_keepers = [\"a\"]\n"
+    "typesafeai.memory_recall_keepers: needs memory_recall_scope = \"listed\"";
+  typesafeai_rejects ~what:"keepers with no scope"
+    "[typesafeai]\nmemory_recall = true\nmemory_recall_keepers = [\"a\"]\n"
+    "typesafeai.memory_recall_keepers: needs memory_recall_scope = \"listed\"";
+  typesafeai_rejects ~what:"keepers with no scope while the switch is off"
+    "[typesafeai]\nmemory_recall_keepers = [\"a\"]\n"
+    "typesafeai.memory_recall_keepers: needs memory_recall_scope = \"listed\""
+;;
+
+let test_typesafeai_refuses_a_memory_recall_value_that_names_nothing () =
+  typesafeai_rejects ~what:"a scope that is neither all nor listed"
+    "[typesafeai]\nmemory_recall = true\nmemory_recall_scope = \"everyone\"\n"
+    "memory_recall_scope: must be \"all\" or \"listed\", got \"everyone\"";
+  typesafeai_rejects ~what:"a misspelt scope while the switch is off"
+    "[typesafeai]\nmemory_recall_scope = \"All\"\n"
+    "must be \"all\" or \"listed\", got \"All\"";
+  typesafeai_rejects ~what:"a scope that is not a string"
+    "[typesafeai]\nmemory_recall_scope = 1\n" "memory_recall_scope must be a string";
+  typesafeai_rejects ~what:"a switch that is not a boolean"
+    "[typesafeai]\nmemory_recall = \"true\"\nmemory_recall_scope = \"all\"\n"
+    "memory_recall must be a boolean";
+  typesafeai_rejects ~what:"a non-string keeper list"
+    "[typesafeai]\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [1]\n"
+    "memory_recall_keepers must be an array of strings";
+  typesafeai_rejects ~what:"a recall keeper name with whitespace"
+    "[typesafeai]\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"a b\"]\n"
+    "typesafeai.memory_recall_keepers: keeper name \"a b\" must be non-empty without whitespace";
+  typesafeai_rejects ~what:"a blank recall keeper name"
+    "[typesafeai]\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"\"]\n"
+    "keeper name \"\" must be non-empty without whitespace"
 ;;
 
 (* otoml's strict float getter still reads a TOML integer, so the two
@@ -7531,9 +7623,15 @@ let () =
     ; ( "typesafeai"
       , [ test_case "absent is the default" `Quick test_typesafeai_absent_is_the_default
         ; test_case "reads the whole table" `Quick test_typesafeai_reads_the_whole_table
+        ; test_case "reads the memory recall scope" `Quick
+            test_typesafeai_reads_the_memory_recall_scope
         ; test_case "reads destinations written as table headers" `Quick
             test_typesafeai_reads_destinations_written_as_table_headers
         ; test_case "refuses a stray key" `Quick test_typesafeai_refuses_a_stray_key
+        ; test_case "refuses a memory recall that names no keepers" `Quick
+            test_typesafeai_refuses_a_memory_recall_that_names_no_keepers
+        ; test_case "refuses a memory recall value that names nothing" `Quick
+            test_typesafeai_refuses_a_memory_recall_value_that_names_nothing
         ; test_case "reads integer confidence floor boundaries" `Quick
             test_typesafeai_reads_integer_confidence_floor_boundaries
         ; test_case "refuses a confidence floor outside 0 to 1" `Quick

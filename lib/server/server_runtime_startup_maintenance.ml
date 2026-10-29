@@ -196,6 +196,42 @@ let report_unknown_typesafeai_exclusions ~base_path =
       names
 ;;
 
+(* The same check for the keepers [memory_recall_keepers] limits recall to: a
+   misspelt name limits recall to nobody by that name, and the keepers that
+   are named right still get it. *)
+let unknown_memory_recall_keepers ~keepers_dir =
+  (* With an empty roster every listed name is unknown, so an empty answer
+     means no name is listed: recall is off or covers every keeper. Then there
+     is nothing to check and the directory is not read, so a base path without
+     keepers does not warn about a key nobody set. *)
+  match Typesafeai_config.unknown_memory_recall_keepers ~known:[] with
+  | [] -> Ok []
+  | _ :: _ ->
+    Result.map
+      (fun known -> Typesafeai_config.unknown_memory_recall_keepers ~known)
+      (declared_keeper_names ~keepers_dir)
+;;
+
+let report_unknown_memory_recall_keepers ~base_path =
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  match unknown_memory_recall_keepers ~keepers_dir with
+  | Error detail ->
+    Log.Server.warn
+      "[typesafeai].memory_recall_keepers could not be checked against declarations in %s: %s"
+      keepers_dir
+      detail
+  | Ok names ->
+    List.iter
+      (fun name ->
+         Log.Server.warn
+           "[typesafeai].memory_recall_keepers names %S, but no keeper of this base path is \
+            declared by that name (%s/%s.toml): recall reaches nobody by that name"
+           name
+           keepers_dir
+           name)
+      names
+;;
+
 let report_unarmed_typesafeai_destinations () =
   List.iter
     (fun (destination : Runtime_schema.typesafeai_destination) ->

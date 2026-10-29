@@ -412,6 +412,7 @@ let policy
       ?(skill_applicability = false)
       ?(librarian_preflight = false)
       ?(workspace_memory_selection_enabled = false)
+      ?(memory_recall = Runtime_schema.Memory_recall_off)
       ?(excluded_keepers = [])
       ()
   : Runtime_schema.typesafeai
@@ -425,6 +426,7 @@ let policy
   ; skill_applicability
   ; librarian_preflight
   ; workspace_memory_selection_enabled
+  ; memory_recall
   ; excluded_keepers
   }
 ;;
@@ -658,11 +660,66 @@ let test_workspace_memory_selection_requires_its_own_opt_in () =
       Alcotest.(check string) "selection requires an armed destination" "no_armed_destination" (state ())))
 ;;
 
+(* Recall is asked about a keeper only when the switch is on and the scope
+   covers it. A keeper outside the scope is told apart from nothing else: the
+   operator did not turn recall on for it. *)
+let test_memory_recall_requires_its_own_opt_in_and_scope () =
+  let state ?(keeper_id = "reader") () = match C.memory_recall_destinations ~keeper_id with
+    | Ok _ -> "enabled"
+    | Error reason -> C.unavailable_reason_to_string reason in
+  let all = Runtime_schema.Memory_recall_on Runtime_schema.All_keepers in
+  let listed first rest = Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (first, rest)) in
+  with_key (Some "synthetic-jev-key") (fun () ->
+    with_policy (policy ~absorb_gate:true ~context_review:true ~skill_applicability:true
+        ~librarian_preflight:true ~workspace_memory_selection_enabled:true ()) (fun () ->
+      Alcotest.(check string) "other gates cannot authorize recall"
+        "memory_recall_disabled" (state ()));
+    with_policy (policy ~memory_recall:all ~board_attention:false ()) (fun () ->
+      Alcotest.(check string) "recall has an independent opt-in" "enabled" (state ()));
+    with_policy (policy ~memory_recall:(listed "reader" [ "other" ]) ()) (fun () ->
+      Alcotest.(check string) "a listed keeper" "enabled" (state ());
+      Alcotest.(check string) "another listed keeper" "enabled" (state ~keeper_id:"other" ());
+      Alcotest.(check string) "a keeper outside the list" "memory_recall_disabled"
+        (state ~keeper_id:"stranger" ()));
+    with_policy (policy ~memory_recall:all ~excluded_keepers:[ "reader" ] ()) (fun () ->
+      Alcotest.(check string) "all keepers still honors Keeper exclusion" "keeper_excluded" (state ()));
+    with_policy (policy ~memory_recall:(listed "reader" []) ~excluded_keepers:[ "reader" ] ()) (fun () ->
+      Alcotest.(check string) "a listed keeper still honors Keeper exclusion" "keeper_excluded" (state ()));
+    with_policy (policy ~memory_recall:(listed "reader" []) ~excluded_keepers:[ "stranger" ] ()) (fun () ->
+      Alcotest.(check string) "a keeper outside the list is out of scope before it is excluded"
+        "memory_recall_disabled" (state ~keeper_id:"stranger" ()));
+    with_policy (policy ~memory_recall:all ~enabled:false ()) (fun () ->
+      Alcotest.(check string) "recall honors lane disable" "lane_disabled" (state ())));
+  with_key None (fun () ->
+    with_policy (policy ~memory_recall:all ()) (fun () ->
+      Alcotest.(check string) "recall requires an armed destination" "no_armed_destination" (state ())))
+;;
+
 (* Names are checked against the declared Keeper roster at boot. *)
 let test_unknown_excluded_keepers_are_named () =
   with_policy (policy ~excluded_keepers:[ "kidsnote-slack-context-collector"; "collecter" ] ()) (fun () ->
     Alcotest.(check (list string)) "the name that is no keeper" [ "collecter" ]
       (C.unknown_excluded_keepers ~known:[ "kidsnote-slack-context-collector"; "polisher" ]))
+;;
+
+(* A misspelt name limits recall to nobody by that name; there is no name to
+   check when recall is off or covers everybody. *)
+let test_unknown_memory_recall_keepers_are_named () =
+  let known = [ "won-chik"; "goo-yang-bong" ] in
+  let unknown memory_recall = with_policy (policy ~memory_recall ()) (fun () ->
+    C.unknown_memory_recall_keepers ~known) in
+  Alcotest.(check (list string)) "the names that are no keeper, in order" [ "wonchik"; "gooyangbong" ]
+    (unknown (Runtime_schema.Memory_recall_on
+      (Runtime_schema.Listed_keepers ("wonchik", [ "won-chik"; "gooyangbong" ]))));
+  Alcotest.(check (list string)) "a name written twice is reported once" [ "wonchik" ]
+    (unknown (Runtime_schema.Memory_recall_on
+      (Runtime_schema.Listed_keepers ("wonchik", [ "won-chik"; "wonchik" ]))));
+  Alcotest.(check (list string)) "every name right" []
+    (unknown (Runtime_schema.Memory_recall_on
+      (Runtime_schema.Listed_keepers ("won-chik", [ "goo-yang-bong" ]))));
+  Alcotest.(check (list string)) "all keepers name nobody" []
+    (unknown (Runtime_schema.Memory_recall_on Runtime_schema.All_keepers));
+  Alcotest.(check (list string)) "off names nobody" [] (unknown Runtime_schema.Memory_recall_off)
 ;;
 
 
@@ -722,8 +779,12 @@ let () =
             test_context_and_skill_reviews_require_their_own_opt_in
         ; Alcotest.test_case "Shared memory selection requires separate opt-in" `Quick
             test_workspace_memory_selection_requires_its_own_opt_in
+        ; Alcotest.test_case "Memory recall requires separate opt-in and scope" `Quick
+            test_memory_recall_requires_its_own_opt_in_and_scope
         ; Alcotest.test_case "unknown excluded keepers are named" `Quick
             test_unknown_excluded_keepers_are_named
+        ; Alcotest.test_case "unknown memory recall keepers are named" `Quick
+            test_unknown_memory_recall_keepers_are_named
         ; Alcotest.test_case "each gate has its own switch" `Quick
             test_each_gate_has_its_own_switch
         ] )

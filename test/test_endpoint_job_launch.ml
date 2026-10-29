@@ -450,12 +450,13 @@ let output_owner_teardown_finishes_entered_metadata = fixture (fun ~env ~sw ~sto
       (read (leaf fixture binding "stdout.bin"))))
 
 let supervise value = value |> Result.map_error S.error_to_string |> require
-let supervised ?(after_spawn=fun _ -> ()) ?(before_result_publish=fun () -> ())
+let supervised ?execution ?(after_spawn=fun _ -> ()) ?(before_result_publish=fun () -> ())
     ?(after_result_publish=fun () -> ()) ?(before_result_read=fun _ -> ())
     ?(on_result_read_busy=fun _ -> ()) ~sw ~env fixture permit =
+  let execution=match execution with None -> fixture.execution | Some execution -> execution in
   match S.For_testing.launch_effect_workspace ~before_result_read ~on_result_read_busy
       ~after_spawn ~before_result_publish ~after_result_publish ~sw ~fs:env#fs
-      ~cgroup_parent_path:"/sys/fs/cgroup" ~execution:fixture.execution permit with
+      ~cgroup_parent_path:"/sys/fs/cgroup" ~execution permit with
   | S.Not_performed {error;_} -> Alcotest.fail (S.error_to_string error)
   | S.Performed {value;registry_release_error=None;pipe_cleanup_errors=[]} -> supervise value
   | S.Performed _ -> Alcotest.fail "original owner cleanup was not confirmed"
@@ -661,10 +662,12 @@ let result_busy_observer_and_owner_cancellation = fixture (fun ~env ~sw ~store f
         let original=supervised ~sw:job_sw ~env fixture permit
           ~before_result_read:(function
             | S.For_testing.Observe_original -> Eio.Promise.resolve signal_entered ();Eio.Promise.await resume
-            | Open_storage | Reopen_stdout | Reopen_stderr | Validate_stdout | Validate_stderr | Refresh_after_publication -> ())
+            | Open_storage | Reopen_stdout | Reopen_stderr | Validate_stdout | Validate_stderr | Refresh_after_publication
+            | Cancel_held_original -> ())
           ~on_result_read_busy:(function
             | S.For_testing.Observe_original -> release busy signal_busy
-            | Open_storage | Reopen_stdout | Reopen_stderr | Validate_stdout | Validate_stderr | Refresh_after_publication -> ()) in
+            | Open_storage | Reopen_stdout | Reopen_stderr | Validate_stdout | Validate_stderr | Refresh_after_publication
+            | Cancel_held_original -> ()) in
         Eio.Promise.resolve signal_created (original,job_sw);
         Eio.Fiber.await_cancel ()) with
        | () -> Alcotest.fail "job owner unexpectedly survived teardown"
@@ -742,6 +745,173 @@ let result_owner_teardown_settles_external_observers = fixture (fun ~env ~sw:_ ~
   match S.await_result original with
   | Error S.Interrupted | Error (S.Output_error {cause=O.Interrupted;_}) -> ()
   | Error _ | Ok _ -> Alcotest.fail "owner teardown left a result observer waiting or invented readiness")
+
+let block_activation fixture binding =
+  let path=leaf fixture binding L.activation_leaf in
+  Out_channel.with_open_bin path (fun oc -> output_string oc "preserved conflicting activation");Unix.chmod path 0o400
+
+let held_startup_is_stopped_and_durably_proves_nonstart = fixture (fun ~env ~sw ~store fixture ->
+  let marker=Filename.concat fixture.work "activated" in
+  let binding,receipt=Eio.Switch.run (fun job_sw ->
+    let binding,permit=prepare ~stdin:"original\000input" store fixture "05" ": > activated" in
+    block_activation fixture binding;
+    let original=supervised ~sw:job_sw ~env fixture permit in
+    (match S.await_settled original with Error (S.Launch_error _) -> ()
+     | Error _ | Ok _ -> Alcotest.fail "held startup lost its original error");
+    let receipt=S.await_result original |> supervise in
+    check "terminal cleanup does not hide the original startup failure" (Result.is_error (S.availability original));
+    (match receipt.status with
+     | P.Status {phase=P.Not_started P.Cancelled_before_activation;cancel_requested=true;
+         result=P.Result_ready hash;stdout=P.Sealed {byte_length=0L;_};stderr=P.Sealed {byte_length=0L;_};_} ->
+       check "proven cancelled non-start refers to the exact committed receipt" (hash=receipt.sha256)
+     | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "held startup became payload exit or indefinite readiness uncertainty");
+    binding,receipt) in
+  check "payload marker never ran before activation" (not (Sys.file_exists marker));
+  let record=R.load store ~binding |> registry in
+  check "cleanup recorded original cancellation before stopping its kernel tree"
+    (R.cancellation_state record=R.Cancellation_requested);
+  let rebooted=R.open_registry ~sw ~fs:env#fs ~root_path:fixture.registry_path
+    ~route:{route with boot_id=id "09"} ~owner ~payload_uid:fixture.uid |> registry in
+  let storage=R.load rebooted ~binding |> registry |> R.open_storage ~sw |> registry in
+  let restored=D.load ~sw ~storage ~expected_sha256:(Some receipt.sha256) |> Result.map_error D.error_to_string |> require in
+  check "bootstrap physical status is retained without inventing a payload exit" (D.physical_exit restored=P.Signaled 9);
+  (match D.inspect restored |> Result.map_error D.error_to_string |> require with
+   | P.Status {phase=P.Not_started P.Cancelled_before_activation;cancel_requested=true;_} -> ()
+   | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "cold read lost the proven original non-start"))
+
+let native_exec_rejection_is_distinct_from_payload_exit127 = fixture (fun ~env ~sw ~store fixture ->
+  let binding,receipt=Eio.Switch.run (fun job_sw ->
+    let binding,permit=prepare store fixture "05" ": > activated" in
+    let execution={fixture.execution with executable=Filename.concat fixture.work "missing-program"} in
+    let original=supervised ~execution ~sw:job_sw ~env fixture permit in
+    let settled=S.await_settled original |> supervise in
+    (match settled.physical_exit.boundary.preparation with
+     | G.Rejected {stage=G.Child_exec;error=Unix.ENOENT} -> ()
+     | G.Pending | Ready | Rejected _ -> Alcotest.fail "actual missing executable was not authoritatively rejected");
+    let receipt=S.await_result original |> supervise in
+    (match receipt.status with
+     | P.Status {phase=P.Not_started P.Launch_rejected;cancel_requested=false;result=P.Result_ready _;_} -> ()
+     | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "native rejection was promoted to a payload exit");
+    binding,receipt) in
+  check "rejected executable performed no payload marker" (not (Sys.file_exists (Filename.concat fixture.work "activated")));
+  let storage=R.load store ~binding |> registry |> R.open_storage ~sw |> registry in
+  let restored=D.load ~sw ~storage ~expected_sha256:(Some receipt.sha256) |> Result.map_error D.error_to_string |> require in
+  check "native bootstrap exit remains separate receipt evidence" (D.physical_exit restored=P.Exited 127);
+  let _,next=prepare store fixture "07" "exit 127" in
+  let actual=Eio.Switch.run (fun job_sw -> supervised ~sw:job_sw ~env fixture next |> S.await_result |> supervise) in
+  match actual.status with
+  | P.Status {phase=P.Termination_observed (P.Exited 127);result=P.Result_ready _;_} -> ()
+  | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "exit code alone fabricated a non-start")
+
+let held_cleanup_cannot_hide_unavailable_output = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let binding,permit=prepare store fixture "05" ": > activated" in
+    block_activation fixture binding;
+    let path=leaf fixture binding "stdout.seal.json" in
+    Out_channel.with_open_bin path (fun oc -> output_string oc "preserved conflicting seal");Unix.chmod path 0o400;
+    let original=supervised ~sw ~env fixture permit in
+    (match S.await_result original with
+     | Error (S.Output_error {stream=P.Stdout;cause=O.Publication_failed _}) -> ()
+     | Error _ | Ok _ -> Alcotest.fail "held cleanup hid unavailable output behind a non-start receipt");
+    check "failed output did not recreate a terminal receipt" (not (Sys.file_exists (leaf fixture binding S.result_leaf)));
+    check "original held child was actually stopped" ((S.await_quiescent original |> supervise).status=G.Signaled 9);
+    Alcotest.(check string) "failed held cleanup preserves conflicting output evidence" "preserved conflicting seal" (read path);
+    let _,next=prepare store fixture "07" "exit 8" in
+    ignore (Eio.Switch.run (fun job_sw -> supervised ~sw:job_sw ~env fixture next |> S.await_result |> supervise))))
+
+let held_cleanup_missing_authority_does_not_signal = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let binding,permit=prepare store fixture "05" ": > activated" in
+    block_activation fixture binding;
+    let actual=ref None in
+    let claim=Filename.concat fixture.registry_path (P.Id.to_string binding.operation_id ^ ".claim.json") in
+    let original=supervised ~sw ~env fixture permit ~after_spawn:(fun owner ->
+      actual:=Some owner;Unix.rename claim (claim ^ ".evidence")) in
+    (match S.await_result original with
+     | Error (S.Launch_error (L.Registry_error R.Missing_original)) -> ()
+     | Error _ | Ok _ -> Alcotest.fail "missing original authority permitted a non-start or cancellation claim");
+    let owner=match !actual with Some owner -> owner | None -> Alcotest.fail "actual held owner missing" in
+    let entered,signal=Eio.Promise.create () in
+    let cancelled=ref false in
+    Eio.Fiber.first
+      (fun () -> try Eio.Promise.resolve signal ();ignore (L.await_quiescent owner |> get);
+        Alcotest.fail "missing original authority signalled the still-paused child"
+        with Eio.Cancel.Cancelled _ as ex -> cancelled:=true;raise ex)
+      (fun () -> Eio.Promise.await entered;
+        let _,next=prepare store fixture "07" "exit 8" in
+        ignore (Eio.Switch.run (fun job_sw -> supervised ~sw:job_sw ~env fixture next |> S.await_result |> supervise)));
+    check "failed original cleanup leaves kernel ownership for explicit teardown" !cancelled;
+    check "unavailable original has no fabricated receipt" (not (Sys.file_exists (leaf fixture binding S.result_leaf)))))
+
+let held_cancel_waits_for_a_contended_original = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let locked,signal_locked=Eio.Promise.create () and unlock,signal_unlock=Eio.Promise.create () in
+    let busy,signal_busy=Eio.Promise.create () and finished,signal_finished=Eio.Promise.create () in
+    let release promise resolver = if Eio.Promise.peek promise=None then Eio.Promise.resolve resolver () in
+    Fun.protect ~finally:(fun () -> release unlock signal_unlock) (fun () ->
+      let binding,permit=prepare store fixture "05" ": > activated" in
+      block_activation fixture binding;
+      let record=R.load store ~binding |> registry in
+      let original=supervised ~sw ~env fixture permit
+        ~after_spawn:(fun _ ->
+          (* A shared reader owns the original's lease before the held startup
+             starts its own cancellation. *)
+          Eio.Fiber.fork ~sw (fun () ->
+            ignore (R.For_testing.refresh ~after_lock:(fun () ->
+              Eio.Promise.resolve signal_locked ();Eio.Promise.await unlock) record));
+          Eio.Promise.await locked)
+        ~on_result_read_busy:(function
+          | S.For_testing.Cancel_held_original -> release busy signal_busy
+          | Observe_original | Open_storage | Reopen_stdout | Reopen_stderr | Validate_stdout | Validate_stderr
+          | Refresh_after_publication -> ()) in
+      Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve signal_finished (S.await_result original));
+      (match Eio.Fiber.first
+               (fun () -> Eio.Promise.await busy;`Waiting)
+               (fun () -> ignore (Eio.Promise.await finished);`Settled) with
+       | `Waiting -> ()
+       | `Settled -> Alcotest.fail "a contended held cancellation settled the result instead of waiting");
+      check "the contended cancellation recorded nothing while the lease was taken"
+        (R.cancellation_state (R.load store ~binding |> registry)=R.No_cancellation);
+      release unlock signal_unlock;
+      let receipt=Eio.Promise.await finished |> supervise in
+      (match receipt.status with
+       | P.Status {phase=P.Not_started P.Cancelled_before_activation;cancel_requested=true;
+           result=P.Result_ready hash;stdout=P.Sealed {byte_length=0L;_};stderr=P.Sealed {byte_length=0L;_};_} ->
+         check "the waiting cancellation produced the exact committed non-start receipt" (hash=receipt.sha256)
+       | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ ->
+         Alcotest.fail "a contended held cancellation lost the proven non-start");
+      check "waiting for the lease does not hide the original startup failure" (Result.is_error (S.availability original));
+      check "cancellation was recorded once the lease was free"
+        (R.cancellation_state (R.load store ~binding |> registry)=R.Cancellation_requested);
+      check "the held tree was stopped once the lease was free"
+        ((S.await_quiescent original |> supervise).status=G.Signaled 9);
+      check "payload marker never ran" (not (Sys.file_exists (Filename.concat fixture.work "activated"))))))
+
+let held_result_observer_cancel_preserves_cleanup_publication = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+    let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+    Fun.protect ~finally:unblock (fun () ->
+      let binding,permit=prepare store fixture "05" ": > activated" in
+      block_activation fixture binding;
+      let original=supervised ~sw ~env fixture permit ~before_result_publish:(fun () ->
+        Eio.Promise.resolve signal ();Eio.Promise.await resume) in
+      Eio.Promise.await entered;
+      let waiting,notice=Eio.Promise.create () in
+      let cancelled=ref false in
+      Eio.Fiber.first
+        (fun () -> try Eio.Promise.resolve notice ();ignore (S.await_result original |> supervise);
+          Alcotest.fail "paused held result was acknowledged before publication"
+          with Eio.Cancel.Cancelled _ as ex -> cancelled:=true;raise ex)
+        (fun () -> Eio.Promise.await waiting);
+      check "held-result observer cancellation leaves cleanup publication alive" !cancelled;
+      let _,next=prepare store fixture "07" "exit 8" in
+      ignore (Eio.Switch.run (fun job_sw -> supervised ~sw:job_sw ~env fixture next |> S.await_result |> supervise));
+      unblock ();
+      let receipt=S.await_result original |> supervise in
+      match receipt.status with
+      | P.Status {phase=P.Not_started P.Cancelled_before_activation;result=P.Result_ready _;_} -> ()
+      | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "cancelled held observer lost its original terminal result")))
 
 let result_readiness_requires_current_original_files stage change = fixture (fun ~env ~sw:_ ~store fixture ->
   Eio.Switch.run (fun sw ->
@@ -877,6 +1047,22 @@ let persisted_result ~env ~store fixture script = Eio.Switch.run (fun sw ->
   let binding,permit=prepare store fixture "05" script in
   let original=supervised ~sw ~env fixture permit in
   binding,(S.await_result original |> supervise))
+let empty_output_or_bootstrap_code_cannot_invent_nonstart = fixture (fun ~env ~sw ~store fixture ->
+  let binding,receipt=persisted_result ~env ~store fixture ": > activated; exit 7" in
+  check "actual silent payload performed its marker" (Sys.file_exists (Filename.concat fixture.work "activated"));
+  let record=R.load store ~binding |> registry in
+  let cancelled=R.request_cancel record ~confirmed_admission_id:(id "04") |> registry in
+  let storage=R.open_storage ~sw cancelled |> registry in
+  let loaded=D.load ~sw ~storage ~expected_sha256:(Some receipt.sha256) |> result_read in
+  let empty=P.Sealed {byte_length=0L;sha256=digest ""} in
+  let original=P.original ~binding ~admission_id:(id "04") in
+  List.iter (fun phase ->
+    let status : P.response=P.Status {original;revision=R.revision cancelled;phase;cancel_requested=true;
+      result=P.Result_pending;stdout=empty;stderr=empty} in
+    check "actual activated gate rejects a fabricated non-start or mismatched raw physical status"
+      (Result.is_error (D.encode ~status ~physical_exit:(D.physical_exit loaded) ~launch_id:(id "06")
+        ~input:(D.input_delivery loaded) ~gate:(D.gate loaded))))
+    [P.Not_started P.Cancelled_before_activation;P.Not_started P.Launch_rejected;P.Termination_observed (P.Exited 8)])
 let recovered_bytes original stream byte_length =
   let buffer=Buffer.create 128 in
   let rec read offset=if offset=byte_length then Buffer.contents buffer else
@@ -933,6 +1119,12 @@ let terminal_result_strictly_rejects_corrupt_records () =
       | `Wrong_admission -> update "status" (object_ (update "admission_id" (fun _ -> `String (P.Id.to_string (id "13"))))) values
       | `Old_revision -> update "status" (object_ (update "revision" (fun _ -> `String "1"))) values
       | `Duplicate_gate -> update "gate" (object_ (fun fields -> ("control",`String "ended")::fields)) values
+      | `Physical_mismatch -> update "physical_status" (fun _ ->
+          `Assoc ["kind",`String "exited";"code",`String "8"]) values
+      | `Noncanonical_physical -> update "physical_status" (fun _ ->
+          `Assoc ["kind",`String "exited";"code",`String "07"]) values
+      | `Duplicate_physical -> update "physical_status" (object_ (fun fields -> ("kind",`String "exited")::fields)) values
+      | `Missing_physical -> List.remove_assoc "physical_status" values
       | `Checksum -> update "status" (object_ (update "phase" (fun _ ->
           `Assoc ["state",`String "termination_observed";"physical_status",`Assoc ["kind",`String "exited";"code",`String "8"]]))) values
       | `Missing_version -> values in
@@ -953,7 +1145,8 @@ let terminal_result_strictly_rejects_corrupt_records () =
       (R.commit_launch (R.storage_record storage) ~confirmed_admission_id:(id "04") ~launch_id:(id "14")=Error R.Launch_already_requested);
     let _,next=prepare store fixture "07" "printf independent; exit 8" in
     ignore (Eio.Switch.run (fun next_sw -> supervised ~sw:next_sw ~env fixture next |> S.await_result |> supervise))) ())
-    [`Unknown;`Bad_input;`Bad_launch;`Wrong_admission;`Old_revision;`Duplicate_gate;`Checksum;`Missing_version]
+    [`Unknown;`Bad_input;`Bad_launch;`Wrong_admission;`Old_revision;`Duplicate_gate;
+     `Physical_mismatch;`Noncanonical_physical;`Duplicate_physical;`Missing_physical;`Checksum;`Missing_version]
 
 let terminal_result_missing_data_never_becomes_empty () =
   List.iter (fun missing -> fixture (fun ~env ~sw ~store fixture ->
@@ -1164,7 +1357,7 @@ let failed_gate_channel_is_written_to_the_receipt () =
   let gate : D.gate={preparation=D.Ready;decision=G.Activate_requested;
       control=D.Failed {diagnostic="control IO: Connection reset by peer"}} in
   (* encode reads its payload back, so Ok means the failed state decodes. *)
-  let content=D.encode ~status ~launch_id:(id "06") ~input:(D.Accepted 0L) ~gate
+  let content=D.encode ~status ~physical_exit:(P.Signaled 9) ~launch_id:(id "06") ~input:(D.Accepted 0L) ~gate
     |> Result.map_error D.error_to_string |> require in
   let control=Yojson.Safe.Util.(Yojson.Safe.from_string content |> member "payload" |> member "gate" |> member "control") in
   (* The second value is the base64 of the diagnostic above. *)
@@ -1242,6 +1435,13 @@ let () =
       "terminal reader rejects corrupt schema, checksum and original coordinates",terminal_result_strictly_rejects_corrupt_records;
       "missing terminal receipt or changed output never becomes empty completion",terminal_result_missing_data_never_becomes_empty;
       "terminal readiness rejects later byte-identical inode replacement",terminal_result_final_attachment_mutation_is_refused;
-      "terminal reader cancellation and scope preserve the original",terminal_reader_cancel_and_scope_preserve_original] in
+      "terminal reader cancellation and scope preserve the original",terminal_reader_cancel_and_scope_preserve_original;
+      "held startup stops original and durably proves non-start",held_startup_is_stopped_and_durably_proves_nonstart;
+      "native rejection differs from an actual payload exit127",native_exec_rejection_is_distinct_from_payload_exit127;
+      "held cleanup preserves unavailable output instead of readiness",held_cleanup_cannot_hide_unavailable_output;
+      "held cleanup missing original authority never signals",held_cleanup_missing_authority_does_not_signal;
+      "held cancellation waits for a contended original lease",held_cancel_waits_for_a_contended_original;
+      "held result observer cancellation preserves cleanup and publication",held_result_observer_cancel_preserves_cleanup_publication;
+      "silent actual payload or raw exit cannot invent non-start",empty_output_or_bootstrap_code_cannot_invent_nonstart] in
   Alcotest.run "Endpoint job launch" ["original supervisor",List.map
     (fun (name,test) -> Alcotest.test_case name `Quick test) cases]

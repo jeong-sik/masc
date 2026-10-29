@@ -22,9 +22,10 @@ type preparation = Pending | Ready | Rejected of { diagnostic : string }
 type control = Open | Ended | Failed of { diagnostic : string }
 type gate = { preparation : preparation; decision : G.decision; control : control }
 type seal = { byte_length : int64; sha256 : P.Sha256.t }
+type terminal = Observed of P.exit_status | Never_started of P.non_start
 type frozen = {
   original : P.original; revision : int64; cancel_requested : bool;
-  physical_status : P.exit_status; launch_id : P.Id.t; input : input_delivery;
+  terminal : terminal; physical_exit : P.exit_status; launch_id : P.Id.t; input : input_delivery;
   gate : gate; stdout : seal; stderr : seal;
 }
 type t = {
@@ -36,6 +37,7 @@ let leaf="terminal-result.json"
 let sha256 t=t.digest
 let input_delivery t=t.frozen.input
 let gate t=t.frozen.gate
+let physical_exit t=t.frozen.physical_exit
 let cpu f=Domain_pool_ref.submit_cpu_or_inline f
 let io f=try Ok (f ()) with
   | Eio.Io _ | Unix.Unix_error _ | Sys_error _ | Invalid_argument _ | End_of_file -> Error Storage_unavailable
@@ -95,25 +97,50 @@ let read_gate value =
     | "abort_requested" -> Ok G.Abort_requested | _ -> invalid () in
   let* control=read_control (List.assoc "control" values) in
   Ok {preparation;decision;control}
+let read_physical value =
+  let* kind=match value with
+    | `Assoc fields -> (match List.assoc_opt "kind" fields with Some value -> text value | None -> invalid ())
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> invalid () in
+  match kind with
+  | "exited" -> let* values=fields ["kind";"code"] value in
+    let* n=count (List.assoc "code" values) in
+    if n<=Int64.of_int max_int then Ok (P.Exited (Int64.to_int n)) else invalid ()
+  | "signaled" -> let* values=fields ["kind";"signal"] value in
+    let* n=count (List.assoc "signal" values) in
+    if n>0L && n<=Int64.of_int max_int then Ok (P.Signaled (Int64.to_int n)) else invalid ()
+  | _ -> invalid ()
+let terminal gate phase physical_exit =
+  match phase with
+  | P.Termination_observed actual when actual=physical_exit -> Ok (Observed actual)
+  (* Only EOF on the private gate channel backs a non-start. *)
+  | P.Not_started P.Launch_rejected ->
+    (match gate.control, gate.preparation with
+     | Ended, Rejected _ -> Ok (Never_started P.Launch_rejected)
+     | Ended, (Pending | Ready) | (Open | Failed _), (Pending | Ready | Rejected _) -> invalid ())
+  | P.Not_started P.Cancelled_before_activation ->
+    (match gate.control, gate.decision with
+     | Ended, (G.Undecided | Abort_requested) -> Ok (Never_started P.Cancelled_before_activation)
+     | Ended, Activate_requested
+     | (Open | Failed _), (G.Undecided | Activate_requested | Abort_requested) -> invalid ())
+  | P.Queued | Starting | Running | Finished _ | Termination_observed _ -> invalid ()
 let decode_payload json =
-  let* values=fields ["status";"launch_id";"stdin";"gate"] json in
+  let* values=fields ["status";"physical_status";"launch_id";"stdin";"gate"] json in
   let* status=P.response_of_json (List.assoc "status" values) |> Result.map_error (fun e -> Codec_error e) in
+  let* physical_exit=read_physical (List.assoc "physical_status" values) in
   let* launch_id=text (List.assoc "launch_id" values) in
   let* launch_id=P.Id.of_string launch_id |> Result.map_error (fun _ -> Invalid_receipt) in
   let* input=read_input (List.assoc "stdin" values) in
   let* gate=read_gate (List.assoc "gate" values) in
   match status with
   | P.Status {original;revision;cancel_requested;phase;result;stdout;stderr} ->
-    let* physical_status=match phase with
-      | P.Termination_observed physical -> Ok physical
-      | Queued | Starting | Running | Finished _ | Not_started _ -> invalid () in
+    let* terminal=terminal gate phase physical_exit in
     let* ()=match result with P.Result_pending -> Ok () | Result_ready _ -> invalid () in
     let sealed = function
       | P.Sealed {byte_length;sha256} -> Ok ({byte_length;sha256} : seal)
       | Growing _ -> invalid () in
     let* stdout=sealed stdout in
     let* stderr=sealed stderr in
-    Ok {original;revision;cancel_requested;physical_status;launch_id;input;gate;
+    Ok {original;revision;cancel_requested;terminal;physical_exit;launch_id;input;gate;
       stdout;stderr}
   | P.Admitted _ | Output _ | Released _ | Refused _ | Held _ -> invalid ()
 let payload_digest payload =
@@ -129,7 +156,7 @@ let decode content =
   let* expected=P.Sha256.of_string expected |> Result.map_error (fun _ -> Invalid_receipt) in
   let* ()=if payload_digest payload=P.Sha256.to_string expected then Ok () else invalid () in
   decode_payload payload
-let encode ~status ~launch_id ~input ~(gate : gate) =
+let encode ~status ~physical_exit ~launch_id ~input ~(gate : gate) =
   let* status=P.response_to_json status |> Result.map_error (fun e -> Codec_error e) in
   let input=match input with
     | Accepted bytes -> `Assoc ["state",`String "written";"byte_length",`String (Int64.to_string bytes)]
@@ -142,7 +169,10 @@ let encode ~status ~launch_id ~input ~(gate : gate) =
   let control=match gate.control with
     | Open -> `Assoc ["state",`String "open"] | Ended -> `Assoc ["state",`String "ended"]
     | Failed {diagnostic} -> `Assoc ["state",`String "failed";"diagnostic_b64",`String (Base64.encode_string diagnostic)] in
-  let payload=`Assoc ["status",status;"launch_id",`String (P.Id.to_string launch_id);"stdin",input;
+  let physical=match physical_exit with
+    | P.Exited code -> `Assoc ["kind",`String "exited";"code",`String (string_of_int code)]
+    | P.Signaled signal -> `Assoc ["kind",`String "signaled";"signal",`String (string_of_int signal)] in
+  let payload=`Assoc ["status",status;"physical_status",physical;"launch_id",`String (P.Id.to_string launch_id);"stdin",input;
     "gate",`Assoc ["preparation",preparation;"decision",`String decision;"control",control]] in
   let* _=decode_payload payload in
   Ok (Yojson.Safe.to_string (`Assoc ["version",`Int 1;"payload",payload;"payload_sha256",`String (payload_digest payload)]))
@@ -188,7 +218,7 @@ let inspect t =
   let* record=validate t in
   let extent (seal : seal)=P.Sealed {byte_length=seal.byte_length;sha256=seal.sha256} in
   Ok (P.Status {original=t.frozen.original;revision=R.revision record;
-    phase=P.Termination_observed t.frozen.physical_status;
+    phase=(match t.frozen.terminal with Observed status -> P.Termination_observed status | Never_started reason -> P.Not_started reason);
     cancel_requested=R.cancellation_state record=R.Cancellation_requested;
     result=P.Result_ready t.digest;stdout=extent t.frozen.stdout;stderr=extent t.frozen.stderr})
 let read_output t ~stream ~offset ~max_bytes =

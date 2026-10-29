@@ -69,7 +69,7 @@ val await_settled : t -> (settled,error) result
 type observation = private { settled : settled; status : P.response }
 val await_observation : t -> (observation,error) result
 (** Join this actual supervisor and refresh its original record before projecting
-    Termination_observed with the raw physical status and both actual seals.
+    Termination_observed or a proven Not_started with both actual seals.
     The raw gate and input-delivery facts remain in [settled]. The result stays
     Result_pending: no immutable terminal receipt, exec proof, host ACK or
     Release is fabricated. Original authority or capture failure remains an
@@ -90,8 +90,19 @@ val await_result : t -> (result_receipt,error) result
     receipt bytes/attachment are revalidated after publication before readiness;
     the exact readback file and its actual parent are fsynced together.
     These are bounded observations, not protection against later mutation.
-    The result remains an
-    uncertain-execution observation, never payload or Task/Goal success.
+    The result remains a
+    physical or proven non-start observation, never payload or Task/Goal success.
+
+    A held startup automatically commits cancellation against its original
+    source before retiring/killing its original tree. A Busy cancellation never
+    entered the lease body, so it is awaited like a contended read; any other
+    cancellation error is returned unchanged. Only actual quiescence,
+    input settlement and both complete seals can produce a terminal receipt.
+    Native rejection or a settled pre-activation gate with durable cancellation
+    and empty actual output may prove Not_started; raw bootstrap status remains
+    in the receipt. The original startup error stays visible through
+    [availability]/[await_settled]. Missing authority or output never becomes
+    readiness, and no launch is replayed.
 
     Transient contention on the original registry read lock leaves the
     job-owned publisher pending; it retries only that read, including after
@@ -111,6 +122,7 @@ module For_testing : sig
   type result_read =
     | Observe_original | Open_storage | Reopen_stdout | Reopen_stderr
     | Validate_stdout | Validate_stderr | Refresh_after_publication
+    | Cancel_held_original
   val launch_effect_workspace :
     ?before_result_read:(result_read -> unit) ->
     ?on_result_read_busy:(result_read -> unit) ->

@@ -61,12 +61,27 @@ let availability t =
 let await_settled t = Eio.Promise.await t.done_
 let await_result t = Eio.Promise.await t.result
 type observation = { settled : settled; status : P.response }
+let physical_status (settled : settled) = match settled.physical_exit.status with
+  | G.Exited code -> P.Exited code | G.Signaled signal -> P.Signaled signal
+let terminal_phase record (settled : settled) =
+  let observed=P.Termination_observed (physical_status settled) in
+  if settled.stdout.byte_length<>0L || settled.stderr.byte_length<>0L then observed else
+  let boundary=settled.physical_exit.boundary in
+  match boundary.control with
+  (* A failed channel may have cut the gate evidence short; only EOF backs a non-start. *)
+  | G.Open | G.Failed _ -> observed
+  | G.Ended -> (match boundary.preparation with
+      | G.Rejected _ -> P.Not_started P.Launch_rejected
+      | G.Pending | Ready -> (match boundary.decision with
+          | G.Activate_requested -> observed
+          | G.Undecided | Abort_requested ->
+            match R.cancellation_state record with
+            | R.Cancellation_requested -> P.Not_started P.Cancelled_before_activation
+            | R.No_cancellation -> observed))
 let status record (settled : settled) result : P.response =
-  let physical_status=match settled.physical_exit.status with
-    | G.Exited code -> P.Exited code | G.Signaled signal -> P.Signaled signal in
   let sealed (seal : O.seal)=P.Sealed {byte_length=seal.byte_length;sha256=seal.sha256} in
   P.Status {original=P.original ~binding:(R.binding record) ~admission_id:(R.admission_id record);
-    revision=R.revision record;phase=P.Termination_observed physical_status;
+    revision=R.revision record;phase=terminal_phase record settled;
     cancel_requested=(R.cancellation_state record=R.Cancellation_requested);
     result;stdout=sealed settled.stdout;stderr=sealed settled.stderr}
 let observe_settled t settled =
@@ -98,7 +113,7 @@ let result_content (observation : observation) launch_id =
       (* Display evidence only, like a rejection diagnostic. *)
       Failed {diagnostic=G.error_to_string (G.control_failure_error failure)} in
   let gate : Endpoint_job_result.gate={preparation;decision=boundary.decision;control} in
-  Endpoint_job_result.encode ~status:observation.status ~launch_id ~input ~gate
+  Endpoint_job_result.encode ~status:observation.status ~physical_exit:(physical_status observation.settled) ~launch_id ~input ~gate
   |> Result.map_error (fun e -> Result_encoding_failed e)
 
 let verify_receipt ~sw ~storage ~root_stat ~content ~sha256 =
@@ -134,6 +149,7 @@ let verify_receipt ~sw ~storage ~root_stat ~content ~sha256 =
 type result_read =
   | Observe_original | Open_storage | Reopen_stdout | Reopen_stderr
   | Validate_stdout | Validate_stderr | Refresh_after_publication
+  | Cancel_held_original
 
 let validation_stage = function P.Stdout -> Validate_stdout | P.Stderr -> Validate_stderr
 let busy_stage ~default = function
@@ -149,7 +165,10 @@ let busy_stage ~default = function
    same lease only temporarily; do not settle the job-owned result on Busy.
    Retrying each read separately also avoids replaying the exclusive receipt
    publication when the final refresh is contended. Pace retries with the
-   existing file-lock interval and no timeout, while preserving cancellation. *)
+   existing file-lock interval and no timeout, while preserving cancellation.
+   The held-startup cancellation waits here too: its Busy comes from the
+   non-blocking lease before the body runs, so no claim was written and no
+   tree was killed, and every other cancellation error is returned unchanged. *)
 let await_result_read ~before_result_read ~on_result_read_busy stage f =
   before_result_read stage;
   let rec await () =
@@ -343,8 +362,9 @@ let supervise ~before_result_read ~on_result_read_busy ~before_result_publish ~a
   let finished=Atomic.make false in
   let result_finished=Atomic.make false in
   let finish_result value=if Atomic.compare_and_set result_finished false true then Eio.Promise.resolve resolve_result value in
+  let finish_raw value=if Atomic.compare_and_set finished false true then Eio.Promise.resolve resolve value in
   let finish value=
-    if Atomic.compare_and_set finished false true then Eio.Promise.resolve resolve value;
+    finish_raw value;
     match value with Ok _ -> () | Error e -> finish_result (Error e) in
   let t={owner;stdout;stderr;availability;done_;result} in
   let daemon f =
@@ -359,30 +379,43 @@ let supervise ~before_result_read ~on_result_read_busy ~before_result_publish ~a
          let bt=Printexc.get_raw_backtrace () in finish (Error Supervisor_failed);
          Printexc.raise_with_backtrace ex bt);
       `Stop_daemon) in
+  let settle () =
+    let* physical_exit=await_quiescent t in
+    let* stdin=Eio.Promise.await input in
+    let* out=stdout in let* err=stderr in
+    let* stdout=O.await_sealed out |> Result.map_error (fun cause -> Output_error {stream=P.Stdout;cause}) in
+    let* stderr=O.await_sealed err |> Result.map_error (fun cause -> Output_error {stream=P.Stderr;cause}) in
+    Ok {physical_exit;stdin;stdout;stderr} in
+  let publish = function
+    | Error e -> finish_result (Error e)
+    | Ok settled -> finish_result (publish_result ~before_result_read ~on_result_read_busy
+        ~before_result_publish ~after_result_publish ~sw ~fs t settled) in
+  let watch_collectors () =
+    let watch stream capture=daemon (fun () ->
+      match capture with
+      | Error e -> finish (Error e)
+      | Ok captured -> (match O.await_sealed captured with
+        | Ok _ -> () | Error cause -> finish (Error (Output_error {stream;cause})))) in
+    watch P.Stdout stdout;watch P.Stderr stderr;
+    daemon (fun () -> match Eio.Promise.await input with Ok _ -> () | Error e -> finish (Error e)) in
   (match availability with
-   | Error e -> finish (Error e)
    | Ok () ->
-     let settle () =
-       let* physical_exit=await_quiescent t in
-       let* stdin=Eio.Promise.await input in
-       let* out=stdout in let* err=stderr in
-       let* stdout=O.await_sealed out |> Result.map_error (fun cause -> Output_error {stream=P.Stdout;cause}) in
-       let* stderr=O.await_sealed err |> Result.map_error (fun cause -> Output_error {stream=P.Stderr;cause}) in
-       Ok {physical_exit;stdin;stdout;stderr} in
-     daemon (fun () ->
-       let settled=settle () in
-       finish settled;
-       match settled with
-       | Error _ -> ()
-       | Ok settled -> finish_result (publish_result ~before_result_read ~on_result_read_busy
-           ~before_result_publish ~after_result_publish ~sw ~fs t settled));
-     let watch stream capture=daemon (fun () ->
-       match capture with
-       | Error e -> finish (Error e)
-       | Ok captured -> (match O.await_sealed captured with
-         | Ok _ -> () | Error cause -> finish (Error (Output_error {stream;cause})))) in
-     watch P.Stdout stdout;watch P.Stderr stderr;
-     daemon (fun () -> match Eio.Promise.await input with Ok _ -> () | Error e -> finish (Error e)));
+     daemon (fun () -> let settled=settle () in finish settled;publish settled);
+     watch_collectors ()
+   | Error e -> (match L.activation owner with
+       | L.Requested -> finish (Error e)
+       | L.Held _ ->
+         (* The original startup failure remains observable. Its separate
+            terminal result requires durable original cancellation, actual
+            stop and complete original bytes; no effect is replayed. *)
+         finish_raw (Error e);
+         daemon (fun () ->
+           let stopped=
+             let* _=await_result_read ~before_result_read ~on_result_read_busy
+               Cancel_held_original (fun () -> cancel t) in
+             settle () in
+           publish stopped);
+         watch_collectors ()));
   t
 
 let launch_with_hook ~before_result_read ~on_result_read_busy ~after_spawn ~before_result_publish
@@ -411,6 +444,7 @@ module For_testing = struct
   type nonrec result_read = result_read =
     | Observe_original | Open_storage | Reopen_stdout | Reopen_stderr
     | Validate_stdout | Validate_stderr | Refresh_after_publication
+    | Cancel_held_original
   let launch_effect_workspace ?(before_result_read=fun _ -> ()) ?(on_result_read_busy=fun _ -> ())
       ~after_spawn ~before_result_publish ~after_result_publish ~sw ~fs ~cgroup_parent_path ~execution intent =
     launch_with_hook ~before_result_read ~on_result_read_busy ~after_spawn ~before_result_publish

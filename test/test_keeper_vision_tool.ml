@@ -2344,7 +2344,15 @@ let test_browser_screenshot_reaches_vision_reader () =
     let base_path = Filename.concat ambient_base "served-workspace" in
     Unix.mkdir base_path 0o700;
     let config = Masc.Workspace.default_config base_path in
-    with_temp_runtime_toml single_vision_runtime_toml (fun () ->
+    (* The scripted native worker owns an Automation allocation but never
+       launches its driver or browser. Make an accidental launch fail locally,
+       and declare that exact source rather than borrowing installed settings. *)
+    let unused_browser=Filename.concat base_path "unexpected-browser" in
+    write_file unused_browser "#!/bin/sh\nexit 1\n";
+    Unix.chmod unused_browser 0o700;
+    let runtime = single_vision_runtime_toml ^ Printf.sprintf
+      "\n[browser.automation]\ngeckodriver = %S\nbinary = %S\n" unused_browser unused_browser in
+    with_temp_runtime_toml runtime (fun () ->
       let meta = make_meta "browser-screenshot" in
       let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
       let image_bytes = Base64.decode_exn encoded in
@@ -2396,7 +2404,10 @@ let test_browser_screenshot_reaches_vision_reader () =
               | Page_elements {tab_id=Some 73;_} -> `Assoc ["tabId",`Int 73;"elements",`List []]
               | _ -> failwith "unexpected screenshot command" in
             Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",data]) in
-          Browser_addon_fixture.with_worker ~env ~config ~clients:[first;second] ~respond (fun _browser ->
+          Browser_addon_fixture.with_workers ~env ~config
+            ~workers:[{serves=Browser_lane.Backend.Automation;clients=[];exports=true};
+              {serves=External_host;clients=[first;second];exports=true}]
+            ~respond:(fun ~serves:_ ~route verb -> respond ~route verb) (fun _workers ->
           let result = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
             ~config ~meta ~args:(`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
           assert (result.disposition = Tool_result.Completed ());
@@ -2533,7 +2544,9 @@ let test_native_browser_screenshot_artifact_scope () =
       | _ -> failwith "native screenshot request lost its options or target" in
     Eio_main.run (fun env ->
       Time_compat.set_clock (Eio.Stdenv.clock env);
-      Browser_addon_fixture.with_worker ~env ~config ~clients:[client] ~respond (fun _ ->
+      Browser_addon_fixture.with_workers ~env ~config
+        ~workers:[{serves=Browser_lane.Backend.External_host;clients=[client];exports=true}]
+        ~respond:(fun ~serves:_ ~route verb -> respond ~route verb) (fun _workers ->
         let capture options = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
           ~config ~meta ~args:(`Assoc ["lane",`String "live";
             "clientId",`String (Browser_lane.client_id_to_string client_id);

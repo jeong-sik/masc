@@ -216,7 +216,8 @@ max_reply_bytes = 2097152
     done);
   let stop ()=if not !settled then Eio.Cancel.protect (fun () ->
     ignore (dispatch ~config R.Detach ["instance_id",`String id]);
-    wait ~env (fun () -> phase ~config id=Lane_addon_types.Detached);
+    (* Detach already awaits settlement. Never-created workers may leave no
+       retained record, so another Inspect cannot confirm this cleanup. *)
     running:=false;settled:=true) in
   id,stop
 let serving ~config id = match phase ~config id with

@@ -442,4 +442,3 @@ Page.keyboard.paste
 Send native paste with a string or { text, html? }, then restore the clipboard.
 
 await page.keyboard.paste(textOrContent)
-

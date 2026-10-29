@@ -3,7 +3,9 @@
     advertised-tool request and its answer passes through selected hooks. *)
 type t
 val detach : t -> unit
-(** Wait for confirmed settlement of this fixture's workers. Idempotent. *)
+(** Wait for confirmed settlement of this fixture's workers. Idempotent.
+    Successful native Detach is authoritative even when a never-created
+    worker leaves no retained Inspect record. *)
 val with_worker :
   ?clients:Browser_lane.client_info list ->
   ?downloads:(string * Yojson.Safe.t) list ->

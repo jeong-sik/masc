@@ -39,6 +39,14 @@ let scope_of_request_id id =
       when kind=request_kind && String_util.is_lowercase_sha256_hex hash && Yojson.Safe.to_string json=id ->
     let+ _nonce=Random_id.parse_uuid_v7 nonce in scope_for_hash hash
   | _ -> Error "Invalid original floor step request ID"
+let minted_on id =
+  let* json=parse id in
+  match json with
+  | `List [`String kind;`String hash;`String nonce]
+      when kind=request_kind && String_util.is_lowercase_sha256_hex hash && Yojson.Safe.to_string json=id ->
+    let+ time_ms=Random_id.uuid_v7_time_ms nonce in
+    Jsonl_writer.day_key ~ts:(Int64.to_float time_ms /. 1000.)
+  | _ -> Error "Invalid original floor step request ID"
 
 type link = {request_id:string;request_digest:string}
 let link_json link = `Assoc ["request_id",`String link.request_id;"request_digest",`String link.request_digest]

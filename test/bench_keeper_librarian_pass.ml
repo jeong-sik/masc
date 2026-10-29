@@ -34,6 +34,9 @@ module Protocol = Lane_addon_worker_protocol
 module F = Exact_output_fixture
 (* A 20 MB prefix pass can take longer than the test fixture's 30 s. *)
 let bench_wait_seconds = 600.0
+(* A turn the worker frame refuses is read one message per pass, so a run is
+   hundreds of passes. Each wait keeps the limit above; the whole run gets this one. *)
+let bench_run_seconds = 7200.0
 let get = function Ok value -> value | Error detail -> fail detail
 let owned result=get (Result.map_error Owner.error_to_string result)
 let member=Yojson.Safe.Util.member
@@ -129,6 +132,7 @@ type fixture = {
   base_path:string; config:Workspace.config; keepers_dir:string; store:Store.t;
   source:string; declaration:bool -> string; server:F.test_server;
   set_response:(Capture.t -> Cohttp.Code.status_code * string) -> unit;
+  set_step_response:(string -> Cohttp.Code.status_code * string) -> unit;
   delivery_loss:bool ref; deliveries:int ref; delivery_changed:Eio.Condition.t;
   clock:float Eio.Time.clock_ty Eio.Resource.t;
 }
@@ -167,6 +171,24 @@ let drive_advanced fixture =
   | Ok (Nothing_to_read | Baseline_advanced _ | Memory_not_committed _) ->
     fail "actual completed-history source was not submitted"
   | Error error -> fail (Consumer.error_to_string error)
+(* A turn the worker frame refuses is read message by message, one pass per
+   step: the first two passes are refused, as the consumer narrows its read,
+   and the rest wait on the worker. Returns the passes it took. *)
+let progress_line passes =
+  if passes mod 25 = 0 then Printf.eprintf "pass %d at %.0fs\n%!" passes (Unix.gettimeofday ())
+let drive_until_advanced fixture =
+  let rec go passes =
+    let before= !(fixture.deliveries) in
+    match run_worker fixture with
+    | Ok (Consumer.Progress_advanced _ | Official_advanced _) -> passes
+    | Ok Consumer.Pending -> await_delivery fixture ~after:before;progress_line passes;go (passes+1)
+    | Ok (Consumer.Memory_not_committed _) -> go (passes+1)
+    | Ok (Nothing_to_read | Baseline_advanced _) -> fail "actual completed-history source was not submitted"
+    | Error error -> fail (Consumer.error_to_string error) in
+  go 1
+let step_answer n = `Assoc ["new_claims",`List [`Assoc ["claim",`String (Printf.sprintf "claim number %d" n);
+    "category",`String "fact";"board_post_id",`Null;"board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []]];
+  "dropped",`List [];"working_contexts",`List [];"working_state",`String (Printf.sprintf "working state %d" n)]
 let reconcile fixture=Runtime.reconcile_configuration ~config:fixture.config
   ~directory:(Runtime.configuration_directory fixture.config) |> get |> ignore
 let set_enabled fixture enabled=io (fun () -> write fixture.source (fixture.declaration enabled));reconcile fixture
@@ -314,6 +336,8 @@ let with_fixture ?(history_kind=Atoms) f =
         enabled (Yojson.Safe.to_string (`String (Filename.concat package.directory "lane.toml"))) in
       io (fun () -> write source (declaration true));
       let response=ref (fun capture -> `OK,F.openai_response (answer capture)) in
+      (* A request that is no history original is a floor step. *)
+      let step_response=ref (fun _ -> fail "a floor step has no answer in this run") in
       let original_for body=
         let body=Yojson.Safe.from_string body in
         let messages=member "messages" body in
@@ -345,10 +369,13 @@ let with_fixture ?(history_kind=Atoms) f =
            | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
            | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> true)
           && Yojson.Safe.equal (`List sent) messages) captures in
-        match matches with [_,capture] -> capture
-        | [] | _::_::_ -> fail "actual provider request has no unique fully restored original capture" in
+        match matches with [_,capture] -> Some capture
+        | [] -> None
+        | _::_::_ -> fail "actual provider request has no unique fully restored original capture" in
       let start_server respond=F.start_server ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
-        (F.Reply_with (fun _ body -> respond (original_for body))) in
+        (F.Reply_with (fun _ body -> match original_for body with
+          | Some capture -> respond capture
+          | None -> !step_response body)) in
       let server=start_server (fun capture -> !response capture) in
       publish_routes base_path [server.base_url];
       Runtime.register_exact_runner ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path)
@@ -356,7 +383,8 @@ let with_fixture ?(history_kind=Atoms) f =
       let deliveries=ref 0 and delivery_changed=Eio.Condition.create () and delivery_loss=ref false in
       let delivery_observed ()=incr deliveries;Eio.Condition.broadcast delivery_changed in
       let fixture={base_path;config;keepers_dir;store;source;declaration;server;
-        set_response=(fun callback -> response:=callback);delivery_loss;deliveries;delivery_changed;
+        set_response=(fun callback -> response:=callback);
+        set_step_response=(fun callback -> step_response:=callback);delivery_loss;deliveries;delivery_changed;
         clock=Eio.Stdenv.clock env} in
       Runtime.For_testing.with_backend
         (backend env base_path delivery_loss delivery_observed) (fun () ->
@@ -370,7 +398,7 @@ let with_fixture ?(history_kind=Atoms) f =
         (* The export event precedes publication of the stable Runtime metadata.
            Reconcile once after that actual event before dispatching original work. *)
         reconcile fixture;
-        (match Eio.Time.with_timeout_exn fixture.clock bench_wait_seconds (fun () -> f ~sw fixture) with
+        (match Eio.Time.with_timeout_exn fixture.clock bench_run_seconds (fun () -> f ~sw fixture) with
          | () -> ()
          | exception Eio.Time.Timeout ->
            let backtrace=Printexc.get_raw_backtrace () in
@@ -491,7 +519,9 @@ let measure ~prefix_mib ~unread_mib =
     let stored_before = fold_files store_root ~init:0 ~f:( + ) in
     let allocated_before = allocated_bytes () in
     let started = Unix.gettimeofday () in
-    drive_advanced fixture;
+    let steps=ref 0 in
+    fixture.set_step_response (fun _ -> incr steps;`OK,F.openai_response (step_answer !steps));
+    let passes=drive_until_advanced fixture in
     let wall_s = Unix.gettimeofday () -. started in
     let allocated = allocated_bytes () -. allocated_before in
     let stored_after = fold_files store_root ~init:0 ~f:( + ) in
@@ -509,6 +539,8 @@ let measure ~prefix_mib ~unread_mib =
       ; "pass_stored_bytes", `Int (stored_after - stored_before)
       ; "largest_store_file_bytes", `Int largest
       ; "pass_wall_s", `Float wall_s
+      ; "passes", `Int passes
+      ; "floor_steps", `Int !steps
       ; "provider_posts", `Int (F.post_count fixture.server) ])))
 
 let () =

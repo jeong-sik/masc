@@ -23,6 +23,7 @@ type request_error =
   | Invalid_target of string
   | Empty_prompt
   | Invalid_multimodal_input of string
+  | Media_store_unavailable of Agent_core.History.media_error
   | Invalid_wire_value of
       { field : string
       ; expected : string
@@ -178,7 +179,9 @@ let direct_message
          (function
            | [] -> None
            | blocks -> Some blocks)
-    |> Result.map_error (fun reason -> Invalid_multimodal_input reason)
+    |> Result.map_error (function
+      | Keeper_multimodal_input.Invalid_input reason -> Invalid_multimodal_input reason
+      | Media_store_unavailable error -> Media_store_unavailable error)
   in
   Ok
     { request
@@ -255,6 +258,9 @@ let request_error_to_string = function
   | Invalid_target reason -> reason
   | Empty_prompt -> "message is required"
   | Invalid_multimodal_input reason -> reason
+  | Media_store_unavailable error ->
+    Keeper_multimodal_input.input_error_to_string
+      (Keeper_multimodal_input.Media_store_unavailable error)
   | Invalid_wire_value { field; expected } ->
     Printf.sprintf "%S: %s" field expected
 ;;

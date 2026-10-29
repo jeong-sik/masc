@@ -122,6 +122,14 @@ val of_wire_blocks
   -> Llm_provider.Types.content_block list
   -> (content_block list, media_error) result
 
+(** The blocks {!of_wire_blocks} gives, without a store: each base64 payload
+    is decoded and named by {!stored_of_raw}, and nothing is put. Two
+    encodings of the same bytes give the same reference. Fails only with
+    [Invalid_base64]. *)
+val reference_of_wire_blocks
+  :  Llm_provider.Types.content_block list
+  -> (content_block list, media_error) result
+
 val to_wire_blocks
   :  media_store
   -> content_block list

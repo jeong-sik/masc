@@ -1156,10 +1156,21 @@ let operation_source_of_payload
     ~user_row_origin
 ;;
 
+(* Why a durable operation's input could not be rebuilt: the input itself, or
+   a media store that could not keep its valid attachments. *)
+type operation_payload_error =
+  | Operation_input_invalid of string
+  | Operation_media_store_unavailable of string
+
+let operation_payload_error_to_string = function
+  | Operation_input_invalid detail | Operation_media_store_unavailable detail -> detail
+;;
+
 let operation_payload_of_json ~media_store ~keeper_name ~operation_id ~source ~input =
   let open Result.Syntax in
-  let* source = Keeper_chat_operation_payload.source_of_json source in
-  let* input = Keeper_chat_operation_payload.input_of_json input in
+  let invalid result = Result.map_error (fun detail -> Operation_input_invalid detail) result in
+  let* source = invalid (Keeper_chat_operation_payload.source_of_json source) in
+  let* input = invalid (Keeper_chat_operation_payload.input_of_json input) in
   let raw_message = input.message in
   let message =
     if String.equal (String.trim raw_message) ""
@@ -1197,7 +1208,12 @@ let operation_payload_of_json ~media_store ~keeper_name ~operation_id ~source ~i
       ~user_blocks:input.user_blocks
       ~attachments:input.attachments
       ()
-    |> Result.map_error Keeper_invocation_contract.request_error_to_string
+    |> Result.map_error (function
+      | Keeper_invocation_contract.Media_store_unavailable _ as error ->
+        Operation_media_store_unavailable (Keeper_invocation_contract.request_error_to_string error)
+      | ( Keeper_invocation_contract.Invalid_target _ | Empty_prompt | Invalid_multimodal_input _
+        | Invalid_wire_value _ ) as error ->
+        Operation_input_invalid (Keeper_invocation_contract.request_error_to_string error))
   in
   let payload =
     { request_id = operation_id
@@ -3108,7 +3124,8 @@ let persist_batch_user_rows ~base_dir ~keeper_name members =
       let* decoded = operation_payload_of_json
         ~media_store:(Tool_blob_media_store.of_base_path ~base_path:base_dir)
         ~keeper_name ~operation_id:operation.operation_id
-        ~source:operation.source ~input in
+        ~source:operation.source ~input
+        |> Result.map_error operation_payload_error_to_string in
       let source = decoded.source in
       match source.user_row_origin with
       | Keeper_chat_store.Already_persisted_upstream -> Ok ()
@@ -3167,7 +3184,10 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
               ~source:operation.source
               ~input
           with
-          | Error detail -> failed Keeper_chat_operation.Invalid_input detail
+          | Error (Operation_input_invalid detail) ->
+            failed Keeper_chat_operation.Invalid_input detail
+          | Error (Operation_media_store_unavailable detail) ->
+            failed Keeper_chat_operation.Store_unavailable detail
           | Ok operation_payload ->
             let payload = operation_payload.payload in
             let operation_id =

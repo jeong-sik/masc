@@ -12,23 +12,24 @@ let remove_once expected blocks =
   in
   loop [] blocks
 
-let retains ~media_store ~seed ~messages ~results =
+let retains ~seed ~messages ~results =
   match results, after_seed seed messages with
-  | [], _ -> true
-  | _ :: _, None -> false
+  | [], _ -> Ok true
+  | _ :: _, None -> Ok false
   | _ :: _, Some suffix ->
     let blocks = List.concat_map
         (fun (message : Agent_core.Types.message) -> message.content) suffix in
-    (* The journal records provider blocks; the transcript is compared in that
-       form. A transcript whose media cannot be read back proves nothing. *)
-    match Agent_core.History.to_wire_blocks media_store blocks with
-    | Error _ -> false
-    | Ok blocks ->
-    let rec consume remaining = function
-      | [] -> true
-      | result :: rest ->
-        match remove_once result remaining with
-        | None -> false
-        | Some remaining -> consume remaining rest
-    in
-    consume blocks results
+    (* The journal records provider blocks. In history form they name their
+       media by digest, as the transcript does, so the comparison reads no
+       store and does not depend on how the base64 was written. *)
+    Result.map
+      (fun results ->
+         let rec consume remaining = function
+           | [] -> true
+           | result :: rest ->
+             (match remove_once result remaining with
+              | None -> false
+              | Some remaining -> consume remaining rest)
+         in
+         consume blocks results)
+      (Agent_core.History.reference_of_wire_blocks results)

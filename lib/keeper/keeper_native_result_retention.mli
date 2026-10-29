@@ -4,7 +4,9 @@
     An empty result set imposes no transcript constraint; the caller owns
     separate seed/history admission rules for calls with tool attempts. *)
 val retains :
-  media_store:Agent_core.History.media_store ->
   seed:Agent_core.Types.message list ->
   messages:Agent_core.Types.message list ->
-  results:Llm_provider.Types.content_block list -> bool
+  results:Llm_provider.Types.content_block list ->
+  (bool, Agent_core.History.media_error) result
+(** [Error] when a result's media does not decode: such a result cannot be
+    in a transcript, whatever it holds. *)

@@ -22,7 +22,7 @@ let check label expected messages results =
   let results =
     List.map (fun block -> Agent_core.History.to_wire_block media_store block |> Result.get_ok) results
   in
-  Alcotest.(check bool) label expected (Retention.retains ~media_store ~seed ~messages ~results)
+  Alcotest.(check bool) label true (Retention.retains ~seed ~messages ~results = Ok expected)
 
 let test_previous_receipt_does_not_settle_current_call () =
   check "prior identical receipt cannot close current checkpoint gap" false
@@ -47,10 +47,50 @@ let test_empty_result_set_preserves_provider_projection () =
   check "provider-only media projection has no settled results to lose" true
     [T.user_msg "existing media fallback projection"] []
 
+(* A result's image as the journal recorded it, and as history holds it. *)
+let image_result source =
+  Agent_core.Llm_provider.Types.ToolResult
+    { tool_use_id = "image-call"; content = ""; outcome = Agent_core.Llm_provider.Types.Tool_succeeded
+    ; json = None
+    ; content_blocks = Some [ Agent_core.Llm_provider.Types.Image { media_type = "image/png"; source } ] }
+
+let held_image_result =
+  T.ToolResult
+    { tool_use_id = "image-call"; content = ""; outcome = T.Tool_succeeded; json = None
+    ; content_blocks =
+        Some
+          [ T.Image
+              { media_type = "image/png"
+              ; source = T.Stored (Agent_core.History.stored_of_raw "\000")
+              } ] }
+
+(* "AB==" is not the canonical encoding of the byte 0 ("AA==") but decodes to
+   it. The comparison is over the bytes, so either writing settles the call. *)
+let test_media_is_compared_by_its_bytes () =
+  let messages = seed @ [ current_request; message T.Tool [ held_image_result ] ] in
+  List.iter
+    (fun encoded ->
+       Alcotest.(check bool) ("retained when the journal wrote " ^ encoded) true
+         (Retention.retains ~seed ~messages
+            ~results:[ image_result (Agent_core.Llm_provider.Types.Base64 encoded) ]
+          = Ok true))
+    [ "AA=="; "AB==" ]
+
+let test_undecodable_media_is_an_error_not_a_miss () =
+  match
+    Retention.retains ~seed ~messages:(seed @ [ current_request ])
+      ~results:[ image_result (Agent_core.Llm_provider.Types.Base64 "abc") ]
+  with
+  | Error (Agent_core.History.Invalid_base64 _) -> ()
+  | Error _ | Ok _ -> Alcotest.fail "a result whose media does not decode must be a decode error"
+
 let () =
   Alcotest.run "native result retention"
     ["scope and occurrence",
      [Alcotest.test_case "prior identical result" `Quick test_previous_receipt_does_not_settle_current_call;
       Alcotest.test_case "repeated invocation" `Quick test_one_occurrence_cannot_settle_two_invocations;
       Alcotest.test_case "exact transcript and payload" `Quick test_changed_seed_or_payload_rejects;
-      Alcotest.test_case "provider-only projection" `Quick test_empty_result_set_preserves_provider_projection]]
+      Alcotest.test_case "provider-only projection" `Quick test_empty_result_set_preserves_provider_projection];
+     "media",
+     [Alcotest.test_case "compared by its bytes" `Quick test_media_is_compared_by_its_bytes;
+      Alcotest.test_case "undecodable media is an error" `Quick test_undecodable_media_is_an_error_not_a_miss]]

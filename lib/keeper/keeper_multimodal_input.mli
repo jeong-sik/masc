@@ -65,11 +65,20 @@ val fallback_message :
     blocks retain their original bytes, joined by paragraph separators.
     Raw media data is never included. *)
 
+(** [Invalid_input]: the blocks or an attachment payload are malformed,
+    including base64 that does not decode. [Media_store_unavailable]: the
+    payloads were valid and the store could not keep them. *)
+type input_error =
+  | Invalid_input of string
+  | Media_store_unavailable of Agent_core.History.media_error
+
+val input_error_to_string : input_error -> string
+
 val to_agent_core_blocks :
   media_store:Agent_core.History.media_store ->
   attachments:Keeper_chat_store.attachment list ->
   user_input_block list ->
-  (Agent_core.Types.content_block list, string) result
+  (Agent_core.Types.content_block list, input_error) result
 (** Convert semantic MASC input blocks to AGENT_CORE history blocks.  Media
     blocks resolve their payload through [attachments] by [attachment_id] and
     are put in [media_store]; the block holds the [Stored] reference.

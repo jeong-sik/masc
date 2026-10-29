@@ -24,19 +24,23 @@ type report =
 type error =
   | Prior_input_history_unavailable of { path : string }
   | Store_missing of { path : string }
-      (** A keeper with metadata has no operation store, so what that keeper
-          names is unknown and nothing was removed. An owner that has not
-          started yet and a store that was moved aside look the same here;
-          read as naming nothing, moved stores cost every retained file they
-          named (#45076). A keeper whose owner never starts keeps the pass
-          skipped, and the startup log names that store. A directory with
-          neither metadata nor a store names nothing. *)
+      (** A keeper with metadata has no operation store, with or without its
+          directory, so what that keeper names is unknown and nothing was
+          removed. An owner that has not started yet and a store that was
+          moved aside look the same here; read as naming nothing, moved stores
+          cost every retained file they named (#45076). A keeper whose owner
+          never starts keeps the pass skipped, and the startup log names that
+          store. A directory with neither metadata nor a store names
+          nothing. *)
   | Store_unreadable of { path : string; detail : string }
       (** A keeper's operation store could not be read, so the live set is
           unknown and nothing was removed. One unreadable store stops the
           whole pass, including a store whose last transaction left a hot
           journal that a read-only open cannot roll back; the next startup
           after that store opens tries again. *)
+  | Metadata_unreadable of { path : string; detail : string }
+      (** Whether a keeper's metadata exists could not be told, so whether it
+          is registered is unknown and nothing was removed. *)
   | Keeper_shares_store_directory of { keeper_name : string }
       (** A keeper is named like a store kept directly under [keepers/]
           ([Common.Keepers_root_scoped]), so its directory cannot be told

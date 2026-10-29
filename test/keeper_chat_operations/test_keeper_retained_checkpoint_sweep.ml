@@ -181,7 +181,8 @@ let test_unreadable_store_removes_nothing () = with_root (fun root ->
   (match Sweep.run ~runtime_root:root with
    | Error (Sweep.Store_unreadable _) -> ()
    | Error ((Sweep.Keeper_shares_store_directory _ | Sweep.Prior_input_history_unavailable _
-            | Sweep.Store_missing _) as error) -> fail (Sweep.error_to_string error)
+            | Sweep.Store_missing _ | Sweep.Metadata_unreadable _) as error) ->
+     fail (Sweep.error_to_string error)
    | Ok _ -> fail "an unreadable store must stop the sweep");
   check bool "orphan kept while the live set is unknown" true (Sys.file_exists orphan))
 
@@ -201,10 +202,46 @@ let test_missing_store_removes_nothing () = with_root (fun root ->
    | Error (Sweep.Store_missing { path }) ->
      check string "the missing store is named" moved_aside path
    | Error ((Sweep.Store_unreadable _ | Sweep.Keeper_shares_store_directory _
-            | Sweep.Prior_input_history_unavailable _) as error) -> fail (Sweep.error_to_string error)
+            | Sweep.Prior_input_history_unavailable _ | Sweep.Metadata_unreadable _) as error) ->
+     fail (Sweep.error_to_string error)
    | Ok _ -> fail "a missing store must stop the sweep");
   check bool "what the missing store named is kept" true (Sys.file_exists kept_moved);
   check bool "what a present store names is kept" true (Sys.file_exists kept_held))
+
+(* The stores were moved aside with their keepers' whole directories: the
+   metadata alone still says each keeper is registered. *)
+let test_a_registered_keeper_without_its_directory_removes_nothing () = with_root (fun root ->
+  register root "moved-whole";
+  let kept = retained root ~session:["sweep-trace"] (checkpoint "named-by-moved-directory") in
+  write kept "{}";
+  let expected =
+    Store.path_for_keeper
+      ~keepers_runtime_dir:(Filename.concat root Common.keepers_runtime_dirname)
+      ~keeper_name:"moved-whole"
+  in
+  (match Sweep.run ~runtime_root:root with
+   | Error (Sweep.Store_missing { path }) -> check string "the missing store is named" expected path
+   | Error ((Sweep.Store_unreadable _ | Sweep.Keeper_shares_store_directory _
+            | Sweep.Prior_input_history_unavailable _ | Sweep.Metadata_unreadable _) as error) ->
+     fail (Sweep.error_to_string error)
+   | Ok _ -> fail "a registered keeper without its directory must stop the sweep");
+  check bool "what the moved directory's store named is kept" true (Sys.file_exists kept))
+
+(* Metadata that is a link to nothing is still an entry naming the keeper. *)
+let test_a_dangling_metadata_link_still_registers () = with_root (fun root ->
+  ignore (keeper_store root "linked" : string);
+  Unix.symlink (Filename.concat root "absent-target.json")
+    (Filename.concat (Filename.concat root Common.keepers_runtime_dirname)
+       (Keeper_runtime_root_entry.keeper_basename ~keeper_name:"linked" Keeper_runtime_root_entry.Metadata));
+  let kept = retained root ~session:["sweep-trace"] (checkpoint "named-by-linked") in
+  write kept "{}";
+  (match Sweep.run ~runtime_root:root with
+   | Error (Sweep.Store_missing _) -> ()
+   | Error ((Sweep.Store_unreadable _ | Sweep.Keeper_shares_store_directory _
+            | Sweep.Prior_input_history_unavailable _ | Sweep.Metadata_unreadable _) as error) ->
+     fail (Sweep.error_to_string error)
+   | Ok _ -> fail "a dangling metadata link must count as registered");
+  check bool "what the linked keeper's store named is kept" true (Sys.file_exists kept))
 
 (* 2026-10-26 to 10-29: keepers/mother held only an answer queued for a name no
    keeper is registered under. Read as a keeper whose store is missing, it
@@ -270,7 +307,8 @@ let test_prior_input_history_keeps_unnamed_retained_evidence () = with_root (fun
   write unnamed "accepted answer whose old owner may have retired";
   (match Sweep.run ~runtime_root:root with
    | Error (Sweep.Prior_input_history_unavailable _) -> ()
-   | Error (Store_unreadable _ | Keeper_shares_store_directory _ | Store_missing _) | Ok _ ->
+   | Error (Store_unreadable _ | Keeper_shares_store_directory _ | Store_missing _
+           | Metadata_unreadable _) | Ok _ ->
      fail "sweep did not preserve the unknown prior input boundary");
   check bool "unreferenced bytes survive while prior ownership is unknown" true (Sys.file_exists unnamed))
 
@@ -337,6 +375,10 @@ let () =
         ; test_case "a missing store removes nothing" `Quick test_missing_store_removes_nothing
         ; test_case "an unregistered directory names nothing" `Quick
             test_an_unregistered_directory_names_nothing
+        ; test_case "a registered keeper without its directory removes nothing" `Quick
+            test_a_registered_keeper_without_its_directory_removes_nothing
+        ; test_case "a dangling metadata link still registers" `Quick
+            test_a_dangling_metadata_link_still_registers
         ; test_case "lifecycle record directories are not keepers" `Quick
             test_lifecycle_record_directories_are_not_keepers
         ; test_case "missing directories are an empty sweep" `Quick

@@ -767,3 +767,8 @@
  (name test_agent_core_digest)
  (modules test_agent_core_digest)
  (libraries agent_core_digest alcotest))
+
+(test
+ (name test_history)
+ (modules test_history)
+ (libraries agent_core agent_core_base llm_provider alcotest yojson base64))

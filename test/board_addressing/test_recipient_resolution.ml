@@ -91,22 +91,29 @@ let test_candidate_shape () =
   check name_or_none "possessive" None (shape "alice's");
   check name_or_none "space" None (shape "a b");
   (* RFC §3.2: an alias with Hangul or a space cannot be written after an [@]. *)
-  check name_or_none "Hangul" None (shape "리더")
+  check name_or_none "Hangul" None (shape "리더");
+  check name_or_none "a non-ASCII letter" None (shape "caf\xc3\xa9");
+  (* The shape has no length bound. The lookup answers for a name it cannot
+     hold, so a long name is a candidate and the lookup says it is not declared. *)
+  let long = String.make 300 'a' in
+  check name_or_none "a name longer than any Keeper name" (Some long) (shape long)
 
 (* Every string up to length 5 over name characters, a path separator, a dot,
    a backslash, NUL, a colon, a space and the first byte of a multi-byte
    character. Whatever passes is not empty and holds nothing that steps out
-   of a directory. *)
+   of a directory, and every non-empty string over the name characters passes. *)
 let test_candidate_cannot_leave_a_directory () =
   let alphabet = [ 'a'; '-'; '_'; '/'; '.'; '\\'; '\000'; ':'; ' '; '\xc3' ] in
   let path_significant = [ '/'; '.'; '\\'; '\000' ] in
   let checked = ref 0 in
+  let accepted = ref 0 in
   let rec extend reversed remaining =
     let name = String.of_seq (List.to_seq (List.rev reversed)) in
     incr checked;
     (match Candidate.of_string name with
      | None -> ()
      | Some candidate ->
+       incr accepted;
        check string "the candidate is the name" name (Candidate.to_string candidate);
        if String.equal name "" then fail "an empty name became a candidate";
        String.iter
@@ -118,20 +125,27 @@ let test_candidate_cannot_leave_a_directory () =
     then List.iter (fun character -> extend (character :: reversed) (remaining - 1)) alphabet
   in
   extend [] 5;
-  check bool "every name was tried" true (!checked > 100_000)
+  check bool "every name was tried" true (!checked > 100_000);
+  (* Strings of length 1 to 5 over the three name characters: 3 + 9 + 27 + 81 + 243. *)
+  check int "every name made of name characters was accepted" 363 !accepted
 
 let test_resolve_sorts_the_answers () =
   check_resolve "a Keeper name" ~recipients:[ "alice" ] ~unresolved:[] [ "alice" ];
   check_resolve "an alias" ~recipients:[ "alice" ] ~unresolved:[] [ "al" ];
   check_resolve "a name nobody declared" ~recipients:[] ~unresolved:[ "check" ] [ "check" ];
-  check_resolve "no candidates" ~recipients:[] ~unresolved:[] []
+  check_resolve "no candidates" ~recipients:[] ~unresolved:[] [];
+  let long = String.make 300 'a' in
+  check_resolve "a name too long for any Keeper is prose" ~recipients:[]
+    ~unresolved:[ long ] [ long ]
 
+(* The samples are in neither ascending nor descending order, so a sort cannot
+   pass for "the order written". *)
 let test_resolve_order () =
-  check_resolve "recipients follow the order written" ~recipients:[ "bob"; "alice" ]
-    ~unresolved:[] [ "bob"; "alice" ];
+  check_resolve "recipients follow the order written" ~recipients:[ "carol"; "alice"; "bob" ]
+    ~unresolved:[] [ "carol"; "alice"; "bob" ];
   check_resolve "unresolved sits beside recipients, each in the order written"
-    ~recipients:[ "bob"; "alice" ] ~unresolved:[ "check"; "runtest" ]
-    [ "check"; "bob"; "runtest"; "alice" ]
+    ~recipients:[ "carol"; "alice"; "bob" ] ~unresolved:[ "runtest"; "check"; "lint" ]
+    [ "runtest"; "carol"; "check"; "alice"; "lint"; "bob" ]
 
 let test_resolve_merges_duplicates () =
   check_resolve "one name written twice" ~recipients:[ "alice" ] ~unresolved:[]
@@ -139,7 +153,12 @@ let test_resolve_merges_duplicates () =
   check_resolve "a name and its alias" ~recipients:[ "alice" ] ~unresolved:[]
     [ "alice"; "al" ];
   check_resolve "an unknown name written twice" ~recipients:[] ~unresolved:[ "check" ]
-    [ "check"; "check" ]
+    [ "check"; "check" ];
+  (* A duplicate between two other names keeps the place of its first mention. *)
+  check_resolve "a recipient written again after another one" ~recipients:[ "alice"; "bob" ]
+    ~unresolved:[] [ "alice"; "bob"; "al" ];
+  check_resolve "an unknown name written again after another one" ~recipients:[]
+    ~unresolved:[ "check"; "lint" ] [ "check"; "lint"; "check" ]
 
 let test_resolve_case () =
   check_resolve "the declaration folds case, so two spellings are one recipient"

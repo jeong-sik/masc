@@ -17,7 +17,7 @@ module Candidate : sig
   (** A name written after [@] that has the shape of a name. *)
 
   val of_string : string -> t option
-  (** [of_string name] is [Some] when [name] is not empty and holds only
+  (** [of_string name] is [Some] when [name] is not empty and holds only ASCII
       letters, digits, ['_'] and ['-'] ({!Board_addressing.is_routable_target}).
       Anything else, such as ["types/node"], ["../x"], ["a.b"] or ["alice's"],
       is prose and gives [None].  Such a token is not a candidate, so it never
@@ -26,8 +26,9 @@ module Candidate : sig
       A Keeper's metadata file is its name plus a suffix, so a lookup builds a
       file name from the candidate it is given.  Stopping a path separator or a
       dot here means no lookup gets a candidate that leaves its directory.  The
-      shape is necessary and not sufficient: it does not say the name is a
-      valid Keeper name, which the lookup still decides. *)
+      shape is necessary and not sufficient.  It has no length bound, and it
+      does not say the name is a valid Keeper name.  The lookup decides that,
+      and a name it cannot hold is not declared (see {!resolve}). *)
 
   val to_string : t -> string
   (** The name as the author wrote it.  Case is preserved; folding it is the
@@ -54,7 +55,10 @@ val resolve :
     - [Ok (Some recipient)]: the name is declared.  [equal] merges candidates
       that name the same recipient, such as ["Alice"] and ["alice"], or a
       Keeper's name and its alias.
-    - [Ok None]: the name is not declared.  It is prose.
+    - [Ok None]: the name is not declared.  It is prose.  A name the lookup
+      cannot hold, such as one longer than any Keeper name, is not declared
+      either: the lookup answers [Ok None] for it and never builds a file name
+      from it.
     - [Error failure]: the lookup could not tell, for example a Keeper's
       metadata could not be read.  That is not prose.  [resolve] returns the
       failure at once, asks [declared] no more, and makes no result from the

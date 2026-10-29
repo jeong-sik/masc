@@ -602,7 +602,7 @@ let test_history_delete_preserves_session_files () =
         [ Agent_core.Types.user_msg (Printf.sprintf "saved turn %d" turn_count) ] } in
   let previous = checkpoint 1 and current = checkpoint 2 in
   List.iter (fun checkpoint ->
-    match Store.save_agent_core_classified ~session_dir ~history_retained:2 checkpoint with
+    match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:2 checkpoint with
     | Ok (Store.Saved _) -> ()
     | Ok (Store.Stale_noop _) -> fail "fixture checkpoint was stale"
     | Error detail -> fail detail) [ previous; current ];
@@ -664,7 +664,7 @@ let test_history_archive_identity_excludes_canonical_filename () =
   let checkpoint =
     make_inventory_checkpoint ~session_id ~turn_count:1 ~created_at:2.0
   in
-  (match Store.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
+  (match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 checkpoint with
    | Ok (Store.Saved _) -> ()
    | Ok (Store.Stale_noop _) -> fail "fresh canonical checkpoint was stale"
    | Error detail -> fail detail);
@@ -766,7 +766,7 @@ let test_checkpoint_inventory_preserves_partial_load_failures () =
   |> Result.get_ok;
   let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
   let current = make_inventory_checkpoint ~session_id:trace_id ~turn_count:2 ~created_at:2.0 in
-  (match Keeper_checkpoint_store.save_agent_core_classified
+  (match Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
     ~history_retained:(history_retained ()) ~session_dir current with
    | Ok _ -> ()
    | Error detail -> fail ("checkpoint inventory current save failed: " ^ detail));
@@ -920,7 +920,7 @@ let with_input_wait_inventory ?(install_owner=true) ?(prior_unavailable=false) f
     let status,body=get_checkpoint_inventory state ~keeper_name in
     check int "checkpoint GET succeeds" 200 status;
     Yojson.Safe.Util.member "input_wait_observation" body in
-  let save checkpoint = match Store.save_agent_core_classified ~history_retained:2 ~session_dir checkpoint with
+  let save checkpoint = match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~history_retained:2 ~session_dir checkpoint with
     | Ok (Store.Saved _) -> () | Ok (Store.Stale_noop _) -> fail "canonical fixture was stale"
     | Error detail -> fail detail in
   let change_trace trace_id =
@@ -1003,7 +1003,7 @@ let test_input_response_http_accepts_only_original_wait ~commit_fault () =
   let snapshot=Keeper_checkpoint_store.exact_snapshot_of_value ~expected_session_id:meta.runtime.trace_id checkpoint |> Result.get_ok in
   let reference=Keeper_checkpoint_store.retain_exact_snapshot ~session_dir snapshot
       |> Keeper_checkpoint_store.require_confirmed_installation |> Result.get_ok in
-  (match Keeper_checkpoint_store.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
+  (match Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 checkpoint with
    | Ok (Keeper_checkpoint_store.Saved _) -> () | Ok (Stale_noop _) | Error _ -> fail "HTTP response canonical fixture was not installed");
   let path=Journal.path_for_keeper ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config) ~keeper_name in
   Fs_compat.mkdir_p (Filename.dirname path);
@@ -1037,8 +1037,10 @@ let test_input_response_http_accepts_only_original_wait ~commit_fault () =
        | Some _ -> Agent_core.Context.set_scoped context Session "message_count" (`Int (List.length messages)));
       (* This is a canonical history extension with global input still W, not
          an independent Producer G lineage integration fixture. *)
-      Fs_compat.save_file (Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id)
-        (Agent_core.Checkpoint.to_string {checkpoint with context;messages});
+      ignore
+        (Masc_test_deps.write_checkpoint_head ~session_dir
+           ~path:(Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id)
+           {checkpoint with context;messages} : string);
       let authority=Response.authorize ~session_root:(Filename.dirname session_dir) ~operation_id ~waiting ~destination:Keeper_semantic_execution.Canonical_input ~recorded:None in
       let plan=Response.prepare_installation ~net:env#net ~authority ~response:Agent_core.Hooks.Declined
         |> Result.map_error Response.installation_error_to_string |> ok in
@@ -1182,9 +1184,9 @@ let test_input_response_http_requires_explicit_exact_proof () =
       ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
       ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
       ~net:(Eio.Stdenv.net env) ~base_path:dir in
-  let checkpoint=Keeper_checkpoint_ref.create
+  let checkpoint=Keeper_checkpoint_ref.of_persisted
       ~trace_id:(Keeper_id.Trace_id.of_string "original-http-response-trace" |> Result.get_ok)
-      ~turn_count:2 ~canonical_checkpoint_bytes:"original input bytes" |> Result.get_ok in
+      ~turn_count:2 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "original input bytes") |> Result.get_ok in
   let pending=inventory_pending ~run_id:"original-run" ~request_id:"original-request" ~question:"Original question?" in
   let fields=["action",`String "respond_input";"operation_id",`String "original-http-response";
     "checkpoint_ref",`Assoc ["trace_id",`String (Keeper_id.Trace_id.to_string checkpoint.trace_id);
@@ -1284,7 +1286,9 @@ let test_input_wait_inventory_refuses_unavailable_retained () =
   check_unavailable_inventory "retained_unavailable" (read ());
   replace_inventory_checkpoint_bytes retained "{invalid retained bytes";
   check_unavailable_inventory "retained_unavailable" (read ());
-  replace_inventory_checkpoint_bytes retained ("\n" ^ bytes);
+  (* Other content under the same name (RFC-0476 §3.2). *)
+  replace_inventory_checkpoint_bytes retained
+    (Masc_test_deps.checkpoint_head_bytes_with_field bytes "turn_count" (`Int 1000));
   check_unavailable_inventory "retained_unavailable" (read ());
   replace_inventory_checkpoint_bytes retained bytes;
   check_owned_inventory ~status:"owned_pending" ~pending:(Agent_core.Agent_input_request.pending_to_json pending)
@@ -1385,7 +1389,7 @@ let test_purge_keeps_the_librarian_position_and_every_message () =
     { (make_inventory_checkpoint ~session_id:trace_id ~turn_count:3 ~created_at:3.0) with
       Agent_core.Checkpoint.messages }
   in
-  (match Store.save_agent_core_classified ~session_dir ~history_retained:2 checkpoint with
+  (match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:2 checkpoint with
    | Ok (Store.Saved _) -> ()
    | Ok (Store.Stale_noop _) -> fail "fixture checkpoint was stale"
    | Error detail -> fail detail);
@@ -1571,7 +1575,7 @@ let test_purge_preview_reports_what_a_structural_break_drops () =
      rejects overlapping tool cycles before the recovery preview can read them. *)
   let canonical = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
   Fs_compat.mkdir_p (Filename.dirname canonical);
-  Fs_compat.save_file canonical (Agent_core.Checkpoint.to_string checkpoint);
+  ignore (Masc_test_deps.write_checkpoint_head ~session_dir ~path:canonical checkpoint : string);
   match Checkpoints.purge_current config ~keeper_name ~apply:false with
   | Error error -> fail (Checkpoints.purge_error_to_string error)
   | Ok preview ->

@@ -663,3 +663,53 @@ let antigravity_oauth_fixture ?(revision = "initial") subject =
       "expiry", `String (if revision = "initial" then "2000-01-01T00:00:00Z" else "2000-01-02T00:00:00Z")];
     "id_token", `String id_token])
 ;;
+
+(** Write [checkpoint] at [path] as the Keeper checkpoint store lays it out
+    (RFC-0476 §3.2): its messages as one closed-turn bundle under
+    [session_dir]'s objects, then a head that names it. Answers the head bytes.
+    For a fixture that places a canonical, archived or retained checkpoint by
+    hand. *)
+let write_checkpoint_head ~session_dir ~path (checkpoint : Agent_core.Checkpoint.t) =
+  let module Objects = Agent_core.Checkpoint_objects in
+  match Objects.plan_save (Objects.create_memo ()) Objects.Turn_closes checkpoint with
+  | Error error -> invalid_arg ("write_checkpoint_head: " ^ Agent_core.Error.to_string error)
+  | Ok plan ->
+    (* The store's writers need the session root to exist, as the session
+       lock's location makes it. *)
+    Fs_compat.mkdir_p session_dir;
+    (match Masc.Keeper_checkpoint_object_store.write ~session_dir plan.objects with
+     | Error error ->
+       invalid_arg
+         ("write_checkpoint_head: " ^ Masc.Keeper_checkpoint_object_store.write_error_to_string error)
+     | Ok (_ : int) -> ());
+    Fs_compat.mkdir_p (Filename.dirname path);
+    Out_channel.with_open_bin path (fun channel -> output_string channel plan.head_bytes);
+    plan.head_bytes
+
+(** [bytes], a checkpoint head, with the checkpoint field's [name] set to
+    [value]: the same head for other content (RFC-0476 §3.2). *)
+let checkpoint_head_bytes_with_field bytes name value =
+  match Yojson.Safe.from_string bytes with
+  | `Assoc fields ->
+    Yojson.Safe.to_string
+      (`Assoc
+        (List.map
+           (fun (key, field_value) ->
+              match key, field_value with
+              | "checkpoint", `Assoc checkpoint ->
+                ( key
+                , `Assoc
+                    (List.map
+                       (fun (field, current) ->
+                          if String.equal field name then field, value else field, current)
+                       checkpoint) )
+              | _ -> key, field_value)
+           fields))
+  | _ -> invalid_arg "checkpoint_head_bytes_with_field: not a JSON object"
+
+(** The head at [path] with its checkpoint field naming [version], as a build
+    of that [checkpoint_version] would have written it. *)
+let checkpoint_head_with_version path version =
+  checkpoint_head_bytes_with_field
+    (In_channel.with_open_bin path In_channel.input_all)
+    "version" (`Int version)

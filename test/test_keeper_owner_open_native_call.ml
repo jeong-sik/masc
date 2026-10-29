@@ -58,10 +58,10 @@ let retired_disposition =
 
 let checkpoint =
   match
-    Keeper_checkpoint_ref.create
+    Keeper_checkpoint_ref.of_persisted
       ~trace_id:(Keeper_id.Trace_id.of_string "open-native-trace" |> Result.get_ok)
       ~turn_count:1
-      ~canonical_checkpoint_bytes:"open native call seed"
+      ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "open native call seed")
   with
   | Ok reference -> reference
   | Error _ -> fail "checkpoint fixture"
@@ -588,7 +588,7 @@ let test_owned_input_wait ?response fixture () =
           ~call_id ~disposition:{Agent.outcome=Agent.Terminal_succeeded;recovery=Agent.Retire});
         (* A readable old pending canonical cannot substitute for retained evidence. *)
         let canonical = {checkpoint with pending_input=Some pending} in
-        (match Keeper_checkpoint_store.save_agent_core_classified ~session_dir ~history_retained:0 canonical with
+        (match Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 canonical with
          | Ok (Keeper_checkpoint_store.Saved _) -> ()
          | Ok (Stale_noop _) -> fail "fixture canonical did not install"
          | Error detail -> fail detail);
@@ -606,7 +606,11 @@ let test_owned_input_wait ?response fixture () =
              | Some _ -> ())
          | Missing_retained -> Unix.unlink retained
          | Corrupt_retained -> Fs_compat.save_file retained "corrupt retained"
-         | Changed_retained -> Fs_compat.save_file retained ("\n" ^ Fs_compat.load_file retained)
+         | Changed_retained ->
+           (* Other content under the same name (RFC-0476 §3.2). *)
+           Fs_compat.save_file retained
+             (Masc_test_deps.checkpoint_head_bytes_with_field (Fs_compat.load_file retained)
+                "turn_count" (`Int 1000))
          | Consumed_input | Foreign_scope -> ());
         (match fixture with
          | Owned_wait ->

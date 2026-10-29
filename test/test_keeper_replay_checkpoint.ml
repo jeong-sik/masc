@@ -167,7 +167,7 @@ let test_finalization_preserves_reasoning_source_through_restore () =
       true (unchanged.messages == original.messages);
     let patched = finalize "final" in
     with_temp_dir (fun session_dir ->
-      (match Masc.Keeper_checkpoint_store.save_agent_core_classified
+      (match Masc.Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
           ~history_retained:(history_retained ()) ~session_dir patched |> expect_ok with
        | Saved _ -> ()
        | Stale_noop _ -> Alcotest.fail "fresh checkpoint was not saved");
@@ -307,7 +307,7 @@ let test_finalization_persists_context_only_progress () =
   with_temp_dir (fun session_dir ->
     let save checkpoint =
       match
-        Masc.Keeper_checkpoint_store.save_agent_core_classified
+        Masc.Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
           ~history_retained:(history_retained ()) ~session_dir checkpoint
         |> expect_ok
       with
@@ -781,7 +781,7 @@ let test_media_degraded_projection_persists_canonical_checkpoint () =
   in
   with_temp_dir (fun session_dir ->
     (match
-       Masc.Keeper_checkpoint_store.save_agent_core_classified
+       Masc.Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
          ~history_retained:(history_retained ())
          ~session_dir
          checkpoint_for_save
@@ -1007,7 +1007,7 @@ let test_two_autonomous_cycles_do_not_grow_the_conversation () =
   in
   with_temp_dir (fun session_dir ->
     (match
-       Masc.Keeper_checkpoint_store.save_agent_core_classified
+       Masc.Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
          ~history_retained:(history_retained ()) ~session_dir first
      with
      | Ok (Masc.Keeper_checkpoint_store.Saved _) -> ()

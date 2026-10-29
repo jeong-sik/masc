@@ -17,7 +17,7 @@ let input = match Operation.canonical_json input with
   | Ok input -> input | Error _ -> fail "invalid canonical input fixture"
 let checkpoint bytes =
   let trace_id = Keeper_id.Trace_id.of_string "direct-runtime-trace" |> string_ok in
-  match Keeper_checkpoint_ref.create ~trace_id ~turn_count:3 ~canonical_checkpoint_bytes:bytes with
+  match Keeper_checkpoint_ref.of_persisted ~trace_id ~turn_count:3 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes bytes) with
   | Ok value -> value | Error _ -> fail "invalid checkpoint fixture"
 let continuation ?(bytes = "original input and three completed tool results") () =
   Semantic.runtime_retry ~not_before:None ~checkpoint:(checkpoint bytes) ~assignment_id:"direct-assignment"

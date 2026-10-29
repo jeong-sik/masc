@@ -131,7 +131,7 @@ let durable_restart () = with_directory (fun root ->
   let b = Agent_core.Types.user_msg "B progressed after approval input" in
   let newer = { first with messages = first.messages @ [b]; turn_count = 3 } in
   Agent_core.Context.set newer.context "newer" (`String "B");
-  ignore (Masc.Keeper_checkpoint_store.save_agent_core_classified
+  ignore (Masc.Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
     ~history_retained:(history_retained ()) ~session_dir newer |> unwrap);
   let after = admit (checkpoint []) in
   Alcotest.(check int) "fresh canonical turn retained" 3 after.turn_count;
@@ -144,11 +144,11 @@ let durable_restart () = with_directory (fun root ->
 let cold_creation_race () = with_directory (fun root ->
   let session_dir = Filename.concat root "session" in
   let first = checkpoint [Agent_core.Types.user_msg "winner"] in
-  (match Masc.Keeper_checkpoint_store.save_agent_core_if_absent ~session_dir first with
+  (match Masc.Keeper_checkpoint_store.save_agent_core_if_absent ~boundary:Agent_core.Checkpoint_objects.Turn_continues ~session_dir first with
    | Installed { auxiliary = []; _ } -> ()
    | _ -> Alcotest.fail "cold checkpoint creation failed");
   let loser = checkpoint [Agent_core.Types.user_msg "late cold writer"] in
-  (match Masc.Keeper_checkpoint_store.save_agent_core_if_absent ~session_dir loser with
+  (match Masc.Keeper_checkpoint_store.save_agent_core_if_absent ~boundary:Agent_core.Checkpoint_objects.Turn_continues ~session_dir loser with
    | Not_installed { cause = Source_changed _; _ } -> ()
    | _ -> Alcotest.fail "cold loser overwrote existing equal-turn checkpoint");
   let after = Masc.Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:first.session_id |> unwrap in
@@ -210,7 +210,7 @@ let gate_and_answer_co_admission () = with_directory (fun root ->
     (Admission.contains ~identity:ask_identity ~message:answer disk.messages);
   let later = { disk with turn_count = 12;
     messages = disk.messages @ List.init 10 (fun _ -> Agent_core.Types.user_msg "Continue.") } in
-  ignore (Masc.Keeper_checkpoint_store.save_agent_core_classified
+  ignore (Masc.Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
     ~history_retained:(history_retained ()) ~session_dir later |> unwrap);
   let retried = admit (checkpoint []) in
   Alcotest.(check int) "same Gate and Ask retry retains ten later turns without duplication" 12

@@ -222,7 +222,7 @@ max-concurrent = 1
   in
   let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
   (match
-     Keeper_checkpoint_store.save_agent_core_classified ~session_dir ~history_retained:0
+     Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0
        checkpoint
    with
    | Ok _ -> ()
@@ -509,7 +509,7 @@ max-concurrent = 1
   in
   let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
   (match
-     Keeper_checkpoint_store.save_agent_core_classified ~session_dir ~history_retained:0
+     Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0
        checkpoint
    with
    | Ok _ -> ()
@@ -613,7 +613,7 @@ max-concurrent = 1
   in
   let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
   (match
-     Keeper_checkpoint_store.save_agent_core_classified ~session_dir ~history_retained:0
+     Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0
        checkpoint
    with
    | Ok _ -> ()
@@ -1272,7 +1272,7 @@ let test_observed_boundary_forecast ~samples ~expected_front () =
     ; context = Agent_core.Context.create_sync (); pending_input = None; mcp_sessions = []; working_context = None }
   in
   let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
-  ignore (Keeper_checkpoint_store.save_agent_core_classified
+  ignore (Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
     ~session_dir ~history_retained:0 checkpoint |> unwrap);
   (* A completed turn has a real boundary as well as a checkpoint. This
      exercises the forecast path that must preserve the observed front. *)

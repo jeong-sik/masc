@@ -514,6 +514,10 @@ let test_checkpoint_write_rejects_orphan_tool_result () =
         Alcotest.failf
           "invalid checkpoint produced an unexpected store result: %s"
           detail
+      | Error (Masc.Keeper_checkpoint_store.Objects_invalid _ as error) ->
+        Alcotest.failf
+          "invalid checkpoint produced an unexpected store result: %s"
+          (Masc.Keeper_checkpoint_store.checkpoint_load_error_to_string error)
       | Ok _ -> Alcotest.fail "invalid checkpoint created a durable file")
 
 let test_naming_a_session_does_not_open_one () =

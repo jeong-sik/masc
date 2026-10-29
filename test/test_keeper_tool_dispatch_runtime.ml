@@ -9946,7 +9946,7 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
       let original = {original with Agent_core.Checkpoint.session_id; context;
         messages=[Agent_core.Types.user_msg "Finish the original research";
           Agent_core.Types.assistant_msg "Earlier completed effect receipt remains available"]} in
-      Checkpoint.save_agent_core_classified
+      Checkpoint.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
         ~history_retained:(history_retained ()) ~session_dir original |> require "original checkpoint" |> ignore;
       if checkpoint_failure then (
         let channel = open_out_bin (Filename.concat session_dir "accepted-checkpoints") in
@@ -10012,7 +10012,7 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
               messages=original.messages @ List.init index (fun offset ->
                 Agent_core.Types.user_msg ("Independent history " ^ string_of_int (offset + 1)));
               created_at=original.created_at +. float_of_int index} in
-            (match Checkpoint.save_agent_core_classified
+            (match Checkpoint.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
               ~history_retained:(history_retained ()) ~session_dir later |> require "rolling history during accepted-store outage" with
              | Checkpoint.Saved _ -> ()
              | _ -> fail "rolling history was not installed")
@@ -10068,7 +10068,7 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
         [Agent_core.Types.user_msg "Independent newer user context"];
         turn_count=original.turn_count + (if retention_rollover then 21 else 1);
         context=newer_context; created_at=original.created_at +. 21.} in
-      (match Checkpoint.save_agent_core_classified
+      (match Checkpoint.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
         ~history_retained:(history_retained ()) ~session_dir newer |> require "newer history" with
        | Checkpoint.Saved _ -> ()
        | _ -> fail "newer history was not installed");
@@ -10077,9 +10077,9 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
       Gate.reconcile ~config ~meta |> require "pending reconciliation";
       let after_reconcile = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
         |> require "current checkpoint after reconciliation" in
-      check string "source retention leaves newer canonical bytes unchanged"
-        (Checkpoint.exact_snapshot_canonical_bytes before_reconcile)
-        (Checkpoint.exact_snapshot_canonical_bytes after_reconcile);
+      check bool "source retention leaves the newer canonical unchanged" true
+        (Keeper_checkpoint_ref.equal (Checkpoint.exact_snapshot_reference before_reconcile)
+           (Checkpoint.exact_snapshot_reference after_reconcile));
       if not recover_retention && not recover_binding then (
         check bool "no resolution invented" true
           ((Masc.Keeper_owner.claim_next_operation owner |> require "still pending") = None);

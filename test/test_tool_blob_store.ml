@@ -1663,8 +1663,19 @@ let test_maintenance_reads_chat_operation_store_and_prepared_gate_checkpoint () 
             | Some op -> op
             | None -> Alcotest.fail "expected gate operation to claim"
           in
+          (* The Gate keeps a head (RFC-0476 §3.2); the message naming the
+             blob is a bundle object in the trace's session, which the sweep
+             reads as JSON lines. *)
+          let gate_session_dir =
+            Filename.concat
+              (Masc.Keeper_fs.session_store_path_for_runtime_root
+                 (Common.masc_dir_from_base_path ~base_path))
+              "gate-trace"
+          in
           let canonical_checkpoint_bytes =
-            Agent_core.Checkpoint.to_string
+            Masc_test_deps.write_checkpoint_head
+              ~session_dir:gate_session_dir
+              ~path:(Filename.temp_file "gate-head" ".json")
               Agent_core.Checkpoint.
                 { provider_binding = None; version = checkpoint_version
                 ; session_id = "gate-trace"
@@ -1697,10 +1708,14 @@ let test_maintenance_reads_chat_operation_store_and_prepared_gate_checkpoint () 
                 }
           in
           let reference =
-            Keeper_checkpoint_ref.create
+            Keeper_checkpoint_ref.of_persisted
               ~trace_id:(Keeper_id.Trace_id.of_string "gate-trace" |> require)
               ~turn_count:1
-              ~canonical_checkpoint_bytes
+              ~sha256:
+                (match Agent_core.Checkpoint_objects.head_of_string canonical_checkpoint_bytes with
+                 | Ok head -> (Agent_core.Checkpoint_objects.head_content_digest head :> string)
+                 | Error error ->
+                   Alcotest.fail (Agent_core.Checkpoint_objects.load_error_to_string error))
             |> Result.map_error Masc.Keeper_checkpoint_store.checkpoint_ref_create_error_to_string
             |> require
           in

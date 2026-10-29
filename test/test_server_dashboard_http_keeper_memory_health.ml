@@ -1109,7 +1109,7 @@ let test_the_librarian_stalled_alarm_is_read_from_files () =
     }
   in
   let (_ : _) =
-    Masc.Keeper_checkpoint_store.save_agent_core_classified
+    Masc.Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
       ~session_dir:(Masc.Keeper_types_support.keeper_session_dir config trace_id)
       ~history_retained:0 checkpoint
     |> get

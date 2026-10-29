@@ -84,8 +84,36 @@ let make_checkpoint ~session_id ~turn_count ~marker =
     working_context = None;
   }
 
+(* A reference names the head's content digest (RFC-0476 §3.2). *)
+let content_digest_of_head bytes =
+  match Agent_core.Checkpoint_objects.head_of_string bytes with
+  | Ok head -> (Agent_core.Checkpoint_objects.head_content_digest head :> string)
+  | Error error -> fail (Agent_core.Checkpoint_objects.load_error_to_string error)
+
+(* What the head and its objects hold, read back through the store. A save
+   without a lineage keeps no value, so the load reads the files. *)
+let stored_value ~session_dir ~session_id =
+  match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id with
+  | Ok checkpoint -> checkpoint
+  | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+
+(* The value the head at [path] and its objects hold, decoded here without
+   the store, so no kept value can answer for them. *)
+let decode_head_files ~session_dir path =
+  match Agent_core.Checkpoint_objects.head_of_string (Fs_compat.load_file path) with
+  | Error error -> fail (Agent_core.Checkpoint_objects.load_error_to_string error)
+  | Ok head ->
+    (match
+       Agent_core.Checkpoint_objects.load
+         (Agent_core.Checkpoint_objects.create_memo ())
+         ~read_object:(Masc.Keeper_checkpoint_object_store.read ~session_dir)
+         head
+     with
+     | Ok checkpoint -> checkpoint
+     | Error error -> fail (Agent_core.Checkpoint_objects.load_error_to_string error))
+
 let save_ok ~session_dir ckpt label =
-  match Keeper_checkpoint_store.save_agent_core_classified
+  match Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
     ~history_retained:(history_retained ()) ~session_dir ckpt with
   | Ok _ -> ()
   | Error e -> fail (label ^ " unexpectedly failed: " ^ e)
@@ -98,14 +126,22 @@ let test_measured_save_counts_noop_and_fallback () =
     let session_id = "measured-write" and keeper_name = "measured-keeper" in
     let checkpoint turn = make_checkpoint ~session_id ~turn_count:turn ~marker:(string_of_int turn) in
     let save ckpt =
-      match Keeper_checkpoint_store.For_testing.save_agent_core_for_keeper_measured
+      match Keeper_checkpoint_store.For_testing.save_agent_core_for_keeper_measured ~boundary:Agent_core.Checkpoint_objects.Turn_closes
           ~keeper_name ~session_dir ~history_retained:1 ckpt with
       | Ok value -> value
       | Error error -> fail error in
     let canonical = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id in
+    (* The messages are written as objects before the head (RFC-0476 §3.3). *)
+    let object_bytes () =
+      let directory = Filename.concat session_dir Masc.Keeper_checkpoint_object_store.dirname in
+      if Sys.file_exists directory
+      then Keeper_checkpoint_store.For_testing.retained_payload_bytes ~directory
+      else 0
+    in
     (match save (checkpoint 2) with
      | Keeper_checkpoint_store.Saved _, Some bytes ->
-       check int "hardlinked history adds no payload write" (Unix.stat canonical).Unix.st_size bytes
+       check int "hardlinked history adds no payload write"
+         ((Unix.stat canonical).Unix.st_size + object_bytes ()) bytes
      | Keeper_checkpoint_store.Saved _, None | Keeper_checkpoint_store.Stale_noop _, _ ->
        fail "first write lacked an exact receipt");
     (match save (checkpoint 1) with
@@ -113,14 +149,16 @@ let test_measured_save_counts_noop_and_fallback () =
      | Keeper_checkpoint_store.Stale_noop _, None | Keeper_checkpoint_store.Saved _, _ ->
        fail "stale save did not report an exact no-op");
     let next = { (checkpoint 3) with Agent_core.Checkpoint.created_at = 1001.0 } in
+    let objects_before = object_bytes () in
     let fallback = Keeper_checkpoint_store.For_testing.with_before_history_link
       (fun () -> failwith "force history copy") (fun () -> save next) in
     let history = Keeper_checkpoint_store.agent_core_history_path ~session_dir
         ~snapshot_id:(Keeper_checkpoint_store.agent_core_history_snapshot_id_of_checkpoint next) in
     (match fallback with
     | Keeper_checkpoint_store.Saved _, Some bytes ->
-      check int "fallback counts canonical and actual history copy"
-        ((Unix.stat canonical).Unix.st_size + (Unix.stat history).Unix.st_size) bytes
+      check int "fallback counts new objects, the head and the actual history copy"
+        (object_bytes () - objects_before + (Unix.stat canonical).Unix.st_size
+         + (Unix.stat history).Unix.st_size) bytes
     | Keeper_checkpoint_store.Saved _, None | Keeper_checkpoint_store.Stale_noop _, _ ->
       fail "fallback write lacked an exact receipt");
     let blocked = { (checkpoint 4) with Agent_core.Checkpoint.created_at = 1002.0 } in
@@ -185,7 +223,7 @@ let test_structurally_invalid_checkpoint_is_refused_at_the_store () =
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
   let sid = "structural-guard" in
   match
-    Keeper_checkpoint_store.save_agent_core_classified
+    Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
       ~history_retained:(history_retained ())
       ~session_dir
       (checkpoint_with_orphan_tool_result ~session_id:sid)
@@ -254,7 +292,7 @@ let test_unencodable_payload_is_recovered_at_the_sink () =
   let sid = "sink-recovery" in
   let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
   match
-    Keeper_checkpoint_store.save_agent_core_classified
+    Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
       ~history_retained:(history_retained ())
       ~session_dir
       (checkpoint_with_unencodable_tool_use ~session_id:sid)
@@ -263,20 +301,16 @@ let test_unencodable_payload_is_recovered_at_the_sink () =
   | Ok (Keeper_checkpoint_store.Stale_noop _) -> fail "a first save cannot be stale"
   | Ok (Keeper_checkpoint_store.Saved { checkpoint = stored; _ }) ->
     check bool "the recovery copy was written" true (Sys.file_exists path);
-    let bytes = Fs_compat.load_file path in
-    check string "the outcome names the checkpoint the file holds" bytes
-      (Agent_core.Checkpoint.to_string stored);
-    (match Agent_core.Checkpoint.of_string bytes with
-     | Ok loaded ->
-       (* The call itself survives; only the unencodable args became empty. *)
-       (match loaded.Agent_core.Checkpoint.messages with
-        | _ :: { Agent_core.Types.content = [ ToolUse { id; input; _ } ]; _ } :: _ ->
-          check string "the tool call id survives" "call-1" id;
-          check bool "the duplicate-key input became an empty object" true
-            (input = `Assoc [])
-        | messages -> failf "expected the poisoned assistant message, got %d" (List.length messages))
-     | Error error ->
-       fail ("the stored recovery copy must decode: " ^ Agent_core.Error.to_string error))
+    let loaded = stored_value ~session_dir ~session_id:sid in
+    check string "the outcome names the checkpoint the files hold"
+      (Agent_core.Checkpoint.to_string loaded) (Agent_core.Checkpoint.to_string stored);
+    (* The call itself survives; only the unencodable args became empty. *)
+    match loaded.Agent_core.Checkpoint.messages with
+    | _ :: { Agent_core.Types.content = [ ToolUse { id; input; _ } ]; _ } :: _ ->
+      check string "the tool call id survives" "call-1" id;
+      check bool "the duplicate-key input became an empty object" true
+        (input = `Assoc [])
+    | messages -> failf "expected the poisoned assistant message, got %d" (List.length messages)
 ;;
 
 (* A save that needed no recovery stores the checkpoint it was given, and the
@@ -288,10 +322,9 @@ let test_saved_outcome_returns_the_checkpoint_it_stored () =
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
   let sid = "saved-outcome-checkpoint" in
-  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
   let ckpt = make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"plain" in
   match
-    Keeper_checkpoint_store.save_agent_core_classified
+    Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
       ~history_retained:(history_retained ())
       ~session_dir
       ckpt
@@ -300,7 +333,8 @@ let test_saved_outcome_returns_the_checkpoint_it_stored () =
   | Ok (Keeper_checkpoint_store.Stale_noop _) -> fail "a first save cannot be stale"
   | Ok (Keeper_checkpoint_store.Saved { checkpoint = stored; _ }) ->
     check bool "the outcome returns the checkpoint it was given" true (stored == ckpt);
-    check string "and the file holds it" (Fs_compat.load_file path)
+    check string "and the files hold it"
+      (Agent_core.Checkpoint.to_string (stored_value ~session_dir ~session_id:sid))
       (Agent_core.Checkpoint.to_string stored)
 ;;
 
@@ -314,7 +348,6 @@ let test_stage_saves_sharing_one_memo_write_canonical_bytes () =
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
   let sid = "stage-saves-memo" in
-  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
   let append (cp : Agent_core.Checkpoint.t) ~turn_count messages =
     { cp with Agent_core.Checkpoint.turn_count; messages = cp.messages @ messages }
   in
@@ -332,13 +365,15 @@ let test_stage_saves_sharing_one_memo_write_canonical_bytes () =
   in
   let save label (cp : Agent_core.Checkpoint.t) expected =
     match
-      Keeper_checkpoint_store.save_agent_core_classified
+      Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
         ~history_retained:(history_retained ())
         ~session_dir
         cp
     with
     | Error message -> fail (label ^ ": " ^ message)
-    | Ok _ -> check string label (Agent_core.Checkpoint.to_string expected) (Fs_compat.load_file path)
+    | Ok _ ->
+      check string label (Agent_core.Checkpoint.to_string expected)
+        (Agent_core.Checkpoint.to_string (stored_value ~session_dir ~session_id:sid))
   in
   save "first stage" first first;
   save "second stage" second second;
@@ -420,7 +455,7 @@ let test_forward_equal_and_stale () =
     save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:6 ~marker:"v6b") "equal save";
     (* Stale write must be a nonfatal no-op and must not touch disk. *)
     (match
-       Keeper_checkpoint_store.save_agent_core_classified
+       Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
          ~history_retained:(history_retained ()) ~session_dir
          (make_checkpoint ~session_id:sid ~turn_count:4 ~marker:"v4-stale")
      with
@@ -448,7 +483,7 @@ let test_disk_is_the_watermark_ssot () =
     let sid = "sess-cold" in
     save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:8 ~marker:"v8") "seed save";
     (match
-       Keeper_checkpoint_store.save_agent_core_classified
+       Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
          ~history_retained:(history_retained ()) ~session_dir
          (make_checkpoint ~session_id:sid ~turn_count:3 ~marker:"v3-stale")
      with
@@ -472,11 +507,12 @@ let test_externally_replaced_canonical_is_the_watermark () =
     save_ok ~session_dir
       (make_checkpoint ~session_id ~turn_count:5 ~marker:"v5")
       "seed save";
-    Fs_compat.save_file canonical_path
-      (make_checkpoint ~session_id ~turn_count:9 ~marker:"external-v9"
-       |> Agent_core.Checkpoint.to_string);
+    ignore
+      (Masc_test_deps.write_checkpoint_head ~session_dir ~path:canonical_path
+         (make_checkpoint ~session_id ~turn_count:9 ~marker:"external-v9")
+       : string);
     match
-      Keeper_checkpoint_store.save_agent_core_classified
+      Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
         ~history_retained:(history_retained ()) ~session_dir
         (make_checkpoint ~session_id ~turn_count:7 ~marker:"stale-v7")
     with
@@ -524,7 +560,7 @@ let test_superseded_canonical_is_replaced () =
         ~version:(Agent_core.Checkpoint.checkpoint_version - 1)
     in
     (match
-       Keeper_checkpoint_store.save_agent_core_classified
+       Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
          ~history_retained:(history_retained ()) ~session_dir
          (make_checkpoint ~session_id ~turn_count:1 ~marker:"after-the-bump")
      with
@@ -556,7 +592,7 @@ let test_newer_canonical_is_not_replaced () =
     in
     let before = Fs_compat.load_file canonical_path in
     (match
-       Keeper_checkpoint_store.save_agent_core_classified
+       Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
          ~history_retained:(history_retained ()) ~session_dir
          (make_checkpoint ~session_id ~turn_count:1 ~marker:"older-binary")
      with
@@ -951,7 +987,7 @@ let test_empty_session_id_rejected () =
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
     (match
-       Keeper_checkpoint_store.save_agent_core_classified
+       Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
          ~history_retained:(history_retained ()) ~session_dir
          (make_checkpoint ~session_id:"" ~turn_count:1 ~marker:"empty")
      with
@@ -1077,7 +1113,7 @@ let test_invalid_existing_checkpoint_fails_closed () =
     let corrupt = "{not-a-checkpoint" in
     Fs_compat.save_file path corrupt;
     (match
-       Keeper_checkpoint_store.save_agent_core_classified
+       Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
          ~history_retained:(history_retained ())
          ~session_dir
          (make_checkpoint ~session_id ~turn_count:9 ~marker:"must-not-write")
@@ -1087,13 +1123,12 @@ let test_invalid_existing_checkpoint_fails_closed () =
     check string "corrupt canonical bytes remain untouched" corrupt
       (Fs_compat.load_file path);
     let mismatched =
-      make_checkpoint ~session_id:"another-session" ~turn_count:10
-        ~marker:"wrong-identity"
-      |> Agent_core.Checkpoint.to_string
+      Masc_test_deps.write_checkpoint_head ~session_dir ~path
+        (make_checkpoint ~session_id:"another-session" ~turn_count:10
+           ~marker:"wrong-identity")
     in
-    Fs_compat.save_file path mismatched;
     (match
-       Keeper_checkpoint_store.save_agent_core_classified
+       Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
          ~history_retained:(history_retained ())
          ~session_dir
          (make_checkpoint ~session_id ~turn_count:11 ~marker:"must-not-replace")
@@ -1122,7 +1157,7 @@ let test_multi_domain_writers_leave_max_turn_on_disk () =
       while not (Atomic.get start) do
         Domain.cpu_relax ()
       done;
-      Keeper_checkpoint_store.save_agent_core_classified ~history_retained
+      Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~history_retained
         ~session_dir
         (make_checkpoint
            ~session_id
@@ -1198,7 +1233,7 @@ let test_ready_runtime_raw_domain_save () =
   let history_retained = history_retained () in
   let result =
     Domain.spawn (fun () ->
-      Keeper_checkpoint_store.save_agent_core_classified ~history_retained ~session_dir
+      Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~history_retained ~session_dir
         (make_checkpoint ~session_id ~turn_count:11 ~marker:"raw-domain"))
     |> Domain.join
   in
@@ -1270,7 +1305,7 @@ let allocated_minor_words f =
   Gc.minor_words () -. before
 ;;
 
-let test_a_summarised_source_is_hashed_and_not_parsed () =
+let test_a_summarised_source_is_admitted_without_a_parse () =
   let session_id = "sess-cas-hash-only" in
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
@@ -1278,16 +1313,16 @@ let test_a_summarised_source_is_hashed_and_not_parsed () =
       (chatty_checkpoint ~session_id ~turn_count:8 ~marker:"source"
          ~messages:(many_short_messages 8_000))
       "hash-only seed save";
-    let source_ref =
+    let source_value, source_ref =
       match
         Keeper_checkpoint_store.load_agent_core_with_ref ~session_dir ~session_id
       with
-      | Ok (_, reference) -> reference
+      | Ok (checkpoint, reference) -> checkpoint, reference
       | Error _ -> fail "hash-only source load failed"
     in
-    let source_path = Filename.concat session_dir (session_id ^ ".json") in
-    let source_bytes = (Unix.stat source_path).Unix.st_size in
-    let source = Fs_compat.load_file source_path in
+    (* What a parse of the source's history costs, in the value codec. *)
+    let source = Agent_core.Checkpoint.to_string source_value in
+    let source_bytes = String.length source in
     let parse_words =
       allocated_minor_words (fun () ->
         match Agent_core.Checkpoint.of_string source with
@@ -1307,7 +1342,7 @@ let test_a_summarised_source_is_hashed_and_not_parsed () =
       allocated_minor_words (fun () ->
         installation
         := Some
-             (Keeper_checkpoint_store.save_agent_core_if_source
+             (Keeper_checkpoint_store.save_agent_core_if_source ~boundary:Agent_core.Checkpoint_objects.Turn_continues
                 ~session_dir
                 ~expected_source_ref:source_ref
                 candidate))
@@ -1342,7 +1377,7 @@ let test_exact_source_cas_allows_one_equal_turn_writer () =
     let left_ref = Atomic.make None in
     let right_ref = Atomic.make None in
     let writer marker observed observed_ref =
-      Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_observer
+      Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_observer ~boundary:Agent_core.Checkpoint_objects.Turn_continues
         ~on_checkpoint_commit_observer:(fun installed_ref ->
           Atomic.incr observed;
           Atomic.set observed_ref (Some installed_ref))
@@ -1430,7 +1465,7 @@ let test_exact_source_cas_updates_canonical_watermark () =
     in
     let observer_count = ref 0 in
     (match
-       Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_release_failure
+       Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_release_failure ~boundary:Agent_core.Checkpoint_objects.Turn_continues
          ~release_failure
          ~on_checkpoint_commit_observer:(fun _ -> incr observer_count)
          ~session_dir
@@ -1463,7 +1498,7 @@ let test_exact_source_cas_updates_canonical_watermark () =
      | Keeper_checkpoint_store.Not_installed _ ->
        fail "release failure downgraded the installed checkpoint");
     match
-      Keeper_checkpoint_store.save_agent_core_classified
+      Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
         ~history_retained:(history_retained ()) ~session_dir
         (make_checkpoint ~session_id ~turn_count:8 ~marker:"stale!")
     with
@@ -1491,7 +1526,7 @@ let test_post_rename_durability_unknown_is_installed () =
       }
     in
     match
-      Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_writer
+      Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_writer ~boundary:Agent_core.Checkpoint_objects.Turn_continues
         ~write_checkpoint_bytes:
           (fun ~on_durable_commit:_ ~ownership_root:_ ~path ~bytes ->
              Fs_compat.save_file path bytes;
@@ -1523,7 +1558,7 @@ let test_post_rename_durability_unknown_is_installed () =
         true
         (Keeper_checkpoint_ref.equal installed.installed_ref disk_ref);
       match
-        Keeper_checkpoint_store.save_agent_core_if_source
+        Keeper_checkpoint_store.save_agent_core_if_source ~boundary:Agent_core.Checkpoint_objects.Turn_continues
           ~session_dir
           ~expected_source_ref:source_ref
           candidate
@@ -1554,7 +1589,7 @@ let test_pre_rename_write_failure_is_not_installed_and_retryable () =
     in
     let observer_count = ref 0 in
     match
-      Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_writer
+      Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_writer ~boundary:Agent_core.Checkpoint_objects.Turn_continues
         ~write_checkpoint_bytes:
           (fun ~on_durable_commit:_ ~ownership_root:_ ~path:_ ~bytes:_ ->
              Error write_error)
@@ -1582,7 +1617,7 @@ let test_pre_rename_write_failure_is_not_installed_and_retryable () =
            (Keeper_checkpoint_ref.equal source_ref disk_ref)
        | Error _ -> fail "pre-rename failure removed the canonical checkpoint");
       (match
-         Keeper_checkpoint_store.save_agent_core_if_source
+         Keeper_checkpoint_store.save_agent_core_if_source ~boundary:Agent_core.Checkpoint_objects.Turn_continues
            ~session_dir
            ~expected_source_ref:source_ref
            candidate
@@ -1603,7 +1638,7 @@ let test_release_failure_preserves_not_installed_cause () =
   with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
     let advanced =
       match
-        Keeper_checkpoint_store.save_agent_core_if_source
+        Keeper_checkpoint_store.save_agent_core_if_source ~boundary:Agent_core.Checkpoint_objects.Turn_continues
           ~session_dir
           ~expected_source_ref:source_ref
           (make_checkpoint ~session_id ~turn_count:9 ~marker:"advanced")
@@ -1625,7 +1660,7 @@ let test_release_failure_preserves_not_installed_cause () =
     in
     let observer_count = ref 0 in
     match
-      Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_release_failure
+      Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_release_failure ~boundary:Agent_core.Checkpoint_objects.Turn_continues
         ~release_failure
         ~on_checkpoint_commit_observer:(fun _ -> incr observer_count)
         ~session_dir
@@ -1668,7 +1703,7 @@ let test_acquire_failure_prevents_lock_body () =
     in
     let observer_count = ref 0 in
     match
-      Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_acquire_failure
+      Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_acquire_failure ~boundary:Agent_core.Checkpoint_objects.Turn_continues
         ~acquire_failure
         ~on_checkpoint_commit_observer:(fun _ -> incr observer_count)
         ~session_dir
@@ -1696,7 +1731,7 @@ let test_commit_observer_failure_is_installed () =
   with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
     let outcome =
       with_recorded_backtraces (fun () ->
-        Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_observer
+        Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_observer ~boundary:Agent_core.Checkpoint_objects.Turn_continues
           ~on_checkpoint_commit_observer:(fun _ ->
             failwith "injected commit observer failure")
           ~session_dir
@@ -1726,7 +1761,7 @@ let test_post_commit_unwind_is_installed () =
   with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
     let outcome =
       with_recorded_backtraces (fun () ->
-        Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_post_commit_unwind
+        Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_post_commit_unwind ~boundary:Agent_core.Checkpoint_objects.Turn_continues
           ~post_commit_unwind:(fun () ->
             failwith "injected post-commit unwind")
           ~on_checkpoint_commit_observer:(fun _ -> ())
@@ -1752,7 +1787,7 @@ let test_post_commit_unwind_is_installed () =
       | _ -> fail "post-commit unwind was not preserved as auxiliary")
 ;;
 
-let test_exact_snapshot_preserves_locked_canonical_bytes () =
+let test_exact_snapshot_names_content_not_bytes () =
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
     let session_id = "sess-exact-snapshot" in
@@ -1760,12 +1795,17 @@ let test_exact_snapshot_preserves_locked_canonical_bytes () =
       (make_checkpoint ~session_id ~turn_count:4 ~marker:"exact")
       "exact snapshot seed";
     let canonical_path = Filename.concat session_dir (session_id ^ ".json") in
-    let expected_bytes =
+    let compact =
+      match Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir ~session_id with
+      | Ok snapshot -> Keeper_checkpoint_store.exact_snapshot_reference snapshot
+      | Error _ -> fail "exact snapshot load failed"
+    in
+    let pretty_bytes =
       Fs_compat.load_file canonical_path
       |> Yojson.Safe.from_string
       |> Yojson.Safe.pretty_to_string
     in
-    Fs_compat.save_file canonical_path expected_bytes;
+    Fs_compat.save_file canonical_path pretty_bytes;
     match
       Keeper_checkpoint_store.load_agent_core_exact_snapshot
         ~session_dir
@@ -1773,24 +1813,25 @@ let test_exact_snapshot_preserves_locked_canonical_bytes () =
     with
     | Error _ -> fail "exact snapshot load failed"
     | Ok snapshot ->
-      check string "canonical bytes are not re-encoded" expected_bytes
-        (Keeper_checkpoint_store.exact_snapshot_canonical_bytes snapshot);
       let reference =
         Keeper_checkpoint_store.exact_snapshot_reference snapshot
       in
+      check bool "a head written with other whitespace names the same content" true
+        (Keeper_checkpoint_ref.equal compact reference);
       let expected_session_id =
         Result.get_ok (Keeper_id.Trace_id.of_string session_id)
       in
       match
-        Keeper_checkpoint_store.exact_snapshot_of_canonical_bytes
+        Keeper_checkpoint_store.exact_snapshot_of_head_bytes
+          ~session_dir
           ~expected_session_id
-          expected_bytes
+          pretty_bytes
       with
       | Ok decoded ->
-        check bool "pure decode derives the same exact ref" true
+        check bool "the head bytes give the same exact ref" true
           (Keeper_checkpoint_ref.equal reference
              (Keeper_checkpoint_store.exact_snapshot_reference decoded))
-      | Error _ -> fail "exact snapshot bytes did not decode")
+      | Error _ -> fail "exact snapshot head did not load")
 
 let test_exact_snapshot_callback_serializes_checkpoint_writer () =
   Eio_main.run @@ fun env ->
@@ -1806,8 +1847,8 @@ let test_exact_snapshot_callback_serializes_checkpoint_writer () =
   let captured_bytes = Fs_compat.load_file canonical_path in
   let result = Keeper_checkpoint_store.with_agent_core_exact_snapshot
     ~session_dir ~session_id (fun snapshot ->
-      check string "callback receives exact captured bytes" captured_bytes
-        (Keeper_checkpoint_store.exact_snapshot_canonical_bytes snapshot);
+      check string "callback receives the captured head's content" (content_digest_of_head captured_bytes)
+        (Keeper_checkpoint_store.exact_snapshot_reference snapshot).sha256;
       let writer_done = Eio.Fiber.fork_promise ~sw (fun () ->
         save_ok ~session_dir
           (make_checkpoint ~session_id ~turn_count:5 ~marker:"following")
@@ -1892,8 +1933,7 @@ let test_pooled_saves_and_loads_derive_the_digest_of_the_file () =
   let digest_on_disk () =
     Filename.concat session_dir (session_id ^ ".json")
     |> Fs_compat.load_file
-    |> Agent_core_sha256.digest_string
-    |> Agent_core_sha256.to_hex
+    |> content_digest_of_head
   in
   save_ok ~session_dir
     (make_checkpoint ~session_id ~turn_count:3 ~marker:"seed")
@@ -1910,19 +1950,19 @@ let test_pooled_saves_and_loads_derive_the_digest_of_the_file () =
     | Ok snapshot -> Keeper_checkpoint_store.exact_snapshot_reference snapshot
     | Error _ -> fail "pooled exact snapshot load failed"
   in
-  check string "a pooled load derives the digest of the file" (digest_on_disk ())
+  check string "a pooled load derives the content digest of the head" (digest_on_disk ())
     source.Keeper_checkpoint_ref.sha256;
   (match
-     Keeper_checkpoint_store.save_agent_core_if_source ~session_dir
+     Keeper_checkpoint_store.save_agent_core_if_source ~boundary:Agent_core.Checkpoint_objects.Turn_continues ~session_dir
        ~expected_source_ref:source
        (make_checkpoint ~session_id ~turn_count:4 ~marker:"next")
    with
    | Keeper_checkpoint_store.Installed installed ->
-     check string "the installed ref is the digest of the bytes written"
+     check string "the installed ref is the content digest of the head written"
        (digest_on_disk ()) installed.installed_ref.sha256
    | Keeper_checkpoint_store.Not_installed _ -> fail "pooled source-checked save was refused");
   match
-    Keeper_checkpoint_store.save_agent_core_if_source ~session_dir
+    Keeper_checkpoint_store.save_agent_core_if_source ~boundary:Agent_core.Checkpoint_objects.Turn_continues ~session_dir
       ~expected_source_ref:source
       (make_checkpoint ~session_id ~turn_count:5 ~marker:"late")
   with
@@ -1987,7 +2027,7 @@ let test_summary_answers_watermark_and_count_without_reading () =
    | Ok None -> fail "summary reported no checkpoint"
    | Error _ -> fail "message count read the unreadable file");
   match
-    Keeper_checkpoint_store.save_agent_core_classified
+    Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
       ~history_retained:(history_retained ())
       ~session_dir
       (make_checkpoint ~session_id:sid ~turn_count:2 ~marker:"stale")
@@ -2116,7 +2156,7 @@ let kept_keeper = "lineage-test-keeper"
 
 let save_kept_ok ~keeper_name ~session_dir (ckpt : Agent_core.Checkpoint.t) label =
   match
-    Keeper_checkpoint_store.save_agent_core_for_keeper ~keeper_name
+    Keeper_checkpoint_store.save_agent_core_for_keeper ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~keeper_name
       ~history_retained:(history_retained ()) ~session_dir
       { ckpt with agent_name = shared_runtime_agent_name }
   with
@@ -2141,11 +2181,7 @@ let test_load_after_a_save_answers_from_the_written_bytes () =
   let saved = checkpoint_with_parsed_tool_result ~session_id:sid ~turn_count:1 in
   save_kept_ok ~keeper_name:kept_keeper ~session_dir saved "save turn 1";
   let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
-  let decoded_file =
-    match Agent_core.Checkpoint.of_string (Fs_compat.load_file path) with
-    | Ok checkpoint -> checkpoint
-    | Error error -> fail (Agent_core.Error.to_string error)
-  in
+  let decoded_file = decode_head_files ~session_dir path in
   Unix.chmod path 0o000;
   let first, second =
     Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) @@ fun () ->
@@ -2158,7 +2194,7 @@ let test_load_after_a_save_answers_from_the_written_bytes () =
     (parsed_tool_result_json first = Some None);
   check bool "its messages equal the file's decode" true
     (first.messages = decoded_file.messages);
-  check string "it encodes to the file's bytes" (Fs_compat.load_file path)
+  check string "it encodes as the files' decode does" (Agent_core.Checkpoint.to_string decoded_file)
     (Agent_core.Checkpoint.to_string first);
   check bool "both loads hand out the same records" true (first.messages == second.messages);
   check bool "each load gets its own context" true (first.context != second.context)
@@ -2248,8 +2284,9 @@ let test_a_save_after_a_load_encodes_only_the_new_messages () =
       Agent_core.Checkpoint.messages = history }
     "save turn 1";
   let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
-  let document_bytes = (Unix.stat path).Unix.st_size in
   let loaded = load_or_fail ~session_dir ~session_id:sid "load turn 1" in
+  (* The document a whole-history save would write. *)
+  let document_bytes = String.length (Agent_core.Checkpoint.to_string loaded) in
   let next =
     { loaded with
       Agent_core.Checkpoint.turn_count = 2
@@ -2259,8 +2296,8 @@ let test_a_save_after_a_load_encodes_only_the_new_messages () =
   let before = Gc.allocated_bytes () in
   save_kept_ok ~keeper_name:kept_keeper ~session_dir next "save turn 2";
   let allocated = Gc.allocated_bytes () -. before in
-  check string "the save wrote the bytes of to_string" (Agent_core.Checkpoint.to_string next)
-    (Fs_compat.load_file path);
+  check string "the files hold what to_string writes" (Agent_core.Checkpoint.to_string next)
+    (Agent_core.Checkpoint.to_string (decode_head_files ~session_dir path));
   check bool
     (Printf.sprintf "the save allocated %.0f bytes for a %d byte document" allocated document_bytes)
     true
@@ -2328,20 +2365,19 @@ let test_a_file_renamed_over_a_save_right_after_its_rename_is_read () =
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
   let sid = "renamed-over-a-save" in
   let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
-  let foreign_bytes =
-    Agent_core.Checkpoint.to_string
-      { (make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"the other writer") with
-        agent_name = shared_runtime_agent_name }
+  let foreign_checkpoint =
+    { (make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"the other writer") with
+      agent_name = shared_runtime_agent_name }
   in
   let replaced = ref false in
   let replace_the_path () =
     let foreign = path ^ ".foreign" in
-    Out_channel.with_open_bin foreign (fun oc -> output_string oc foreign_bytes);
+    ignore (Masc_test_deps.write_checkpoint_head ~session_dir ~path:foreign foreign_checkpoint : string);
     Unix.rename foreign path;
     replaced := true
   in
   (match
-     Keeper_checkpoint_store.For_testing.save_agent_core_for_keeper_with_before_stage
+     Keeper_checkpoint_store.For_testing.save_agent_core_for_keeper_with_before_stage ~boundary:Agent_core.Checkpoint_objects.Turn_closes
        ~before_stage:(function
          | Keeper_fs.Parent_directory_fsync_after_rename when not !replaced -> replace_the_path ()
          | _ -> ())
@@ -2425,7 +2461,7 @@ let test_a_load_for_save_keeps_what_it_read () =
     load_or_fail ~session_dir ~session_id:sid "load of an unreadable file after a load for save"
   in
   check bool "the next load answers from what was read" true (again.messages == read.messages);
-  let document_bytes = (Unix.stat path).Unix.st_size in
+  let document_bytes = String.length (Agent_core.Checkpoint.to_string read) in
   let next =
     { read with
       Agent_core.Checkpoint.turn_count = 2
@@ -2435,8 +2471,8 @@ let test_a_load_for_save_keeps_what_it_read () =
   let before = Gc.allocated_bytes () in
   save_kept_ok ~keeper_name:kept_keeper ~session_dir next "save turn 2";
   let allocated = Gc.allocated_bytes () -. before in
-  check string "the save wrote the bytes of to_string" (Agent_core.Checkpoint.to_string next)
-    (Fs_compat.load_file path);
+  check string "the files hold what to_string writes" (Agent_core.Checkpoint.to_string next)
+    (Agent_core.Checkpoint.to_string (decode_head_files ~session_dir path));
   check bool
     (Printf.sprintf "the save allocated %.0f bytes for a %d byte document" allocated document_bytes)
     true
@@ -2590,10 +2626,7 @@ let test_summary_follows_a_checkpoint_replaced_behind_it () =
     }
   in
   let staged = path ^ ".replacement" in
-  Out_channel.with_open_bin staged (fun channel ->
-    output_string
-      channel
-      (Yojson.Safe.to_string (Agent_core.Checkpoint.to_json replacement)));
+  ignore (Masc_test_deps.write_checkpoint_head ~session_dir ~path:staged replacement : string);
   Sys.rename staged path;
   (match
      Keeper_checkpoint_store.canonical_message_count ~session_dir ~session_id:sid
@@ -2602,7 +2635,7 @@ let test_summary_follows_a_checkpoint_replaced_behind_it () =
    | Ok None -> fail "replacement reported no checkpoint"
    | Error _ -> fail "replacement could not be read");
   (match
-     Keeper_checkpoint_store.save_agent_core_classified
+     Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
        ~history_retained:(history_retained ())
        ~session_dir
        (make_checkpoint ~session_id:sid ~turn_count:4 ~marker:"four")
@@ -2638,8 +2671,8 @@ let test_history_link_keeps_transaction_until_cancelled_job_finishes () =
   let history = Keeper_checkpoint_store.agent_core_history_path ~session_dir
     ~snapshot_id:(Keeper_checkpoint_store.agent_core_history_snapshot_id_of_checkpoint (checkpoint 1)) in
   let turn path =
-    match Agent_core.Checkpoint.of_string (Fs_compat.load_file path) with
-    | Ok checkpoint -> checkpoint.turn_count
+    match Agent_core.Checkpoint_objects.head_of_string (Fs_compat.load_file path) with
+    | Ok head -> head.checkpoint.turn_count
     | Error _ -> fail "checkpoint bytes were corrupted"
   in
   let caller_thread = Thread.id (Thread.self ()) in
@@ -2894,8 +2927,8 @@ let () =
             test_canonical_checkpoint_is_written_compact;
           test_case "exact source CAS permits one equal-turn writer" `Quick
             test_exact_source_cas_allows_one_equal_turn_writer;
-          test_case "a summarised source is hashed and not parsed" `Quick
-            test_a_summarised_source_is_hashed_and_not_parsed;
+          test_case "a summarised source is admitted without a parse" `Quick
+            test_a_summarised_source_is_admitted_without_a_parse;
           test_case "exact source CAS updates the canonical watermark" `Quick
             test_exact_source_cas_updates_canonical_watermark;
           test_case "release failure preserves Not_installed cause" `Quick
@@ -2910,13 +2943,13 @@ let () =
             test_commit_observer_failure_is_installed;
           test_case "post-commit unwind stays installed" `Quick
             test_post_commit_unwind_is_installed;
-          test_case "exact snapshot preserves canonical bytes" `Quick
-            test_exact_snapshot_preserves_locked_canonical_bytes;
+          test_case "exact snapshot names content, not bytes" `Quick
+            test_exact_snapshot_names_content_not_bytes;
           test_case "exact callback holds the source until checkpoint publication returns" `Quick
             test_exact_snapshot_callback_serializes_checkpoint_writer;
           test_case "exact callback refuses missing source and propagates cancellation" `Quick
             test_exact_snapshot_callback_refuses_missing_and_propagates_cancellation;
-          test_case "pooled saves and loads derive the digest of the file" `Quick
+          test_case "pooled saves and loads derive the content digest of the head" `Quick
             test_pooled_saves_and_loads_derive_the_digest_of_the_file;
           test_case "structurally invalid checkpoint is refused at the store" `Quick
             test_structurally_invalid_checkpoint_is_refused_at_the_store;

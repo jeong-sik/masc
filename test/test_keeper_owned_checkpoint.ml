@@ -64,9 +64,8 @@ let with_session f =
 
 let accepted marker =
   let checkpoint = make_checkpoint ~session_id:"session" ~turn_count:1 ~marker in
-  let bytes = Yojson.Safe.pretty_to_string (Agent_core.Checkpoint.to_json checkpoint) in
   let trace_id = Keeper_id.Trace_id.of_string "session" |> Result.get_ok in
-  match Store.exact_snapshot_of_canonical_bytes ~expected_session_id:trace_id bytes with
+  match Store.exact_snapshot_of_value ~expected_session_id:trace_id checkpoint with
   | Ok snapshot -> checkpoint, snapshot
   | Error _ -> fail "fixture checkpoint was refused"
 
@@ -78,9 +77,9 @@ let load session_dir reference =
   match Store.load_retained_exact_snapshot ~session_dir ~reference with
   | Ok snapshot -> snapshot | Error _ -> fail "retained checkpoint unavailable"
 let assert_snapshot label expected actual =
-  check string (label ^ " exact immutable bytes")
-    (Store.exact_snapshot_canonical_bytes expected)
-    (Store.exact_snapshot_canonical_bytes actual);
+  check string (label ^ " exact checkpoint")
+    (Agent_core.Checkpoint.to_string (Store.exact_snapshot_checkpoint expected))
+    (Agent_core.Checkpoint.to_string (Store.exact_snapshot_checkpoint actual));
   check bool (label ^ " exact reference") true
     (Keeper_checkpoint_ref.equal (Store.exact_snapshot_reference expected)
        (Store.exact_snapshot_reference actual))
@@ -92,9 +91,11 @@ let read path = In_channel.with_open_bin path In_channel.input_all
 
 let test_large_canonical_read_keeps_exact_source () = with_session (fun session_dir ->
   let marker = String.make (1024 * 1024 + 17) 'x' ^ "한글\n\"tail" in
-  let _checkpoint, expected = accepted marker in
-  write (Store.agent_core_checkpoint_path ~session_dir ~session_id:"session")
-    (Store.exact_snapshot_canonical_bytes expected);
+  let checkpoint, expected = accepted marker in
+  ignore
+    (Masc_test_deps.write_checkpoint_head ~session_dir
+       ~path:(Store.agent_core_checkpoint_path ~session_dir ~session_id:"session") checkpoint
+     : string);
   match Store.load_agent_core_exact_snapshot ~session_dir ~session_id:"session" with
   | Ok actual -> assert_snapshot "large canonical checkpoint" expected actual
   | Error _ -> fail "the large canonical checkpoint was unavailable")
@@ -105,7 +106,7 @@ let test_survives_canonical_and_history () = with_session (fun session_dir ->
   for turn_count = 2 to 21 do
     let b = {a with Agent_core.Checkpoint.turn_count; created_at=float_of_int turn_count;
                     messages=(make_checkpoint ~session_id:"session" ~turn_count ~marker:"B active").messages} in
-    (match Store.save_agent_core_classified
+    (match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
       ~history_retained:(history_retained ()) ~session_dir b with Ok _ -> () | Error e -> fail e)
   done;
   check int "rolling archive actually pruned" 3
@@ -126,7 +127,7 @@ let test_same_reference_retry () = with_session (fun session_dir ->
 
 let test_missing_never_uses_canonical () = with_session (fun session_dir ->
   let a, snapshot = accepted "canonical only" in
-  (match Store.save_agent_core_classified
+  (match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
     ~history_retained:(history_retained ()) ~session_dir a with Ok _ -> () | Error e -> fail e);
   match Store.load_retained_exact_snapshot ~session_dir ~reference:(Store.exact_snapshot_reference snapshot) with
   | Error (Store.Source_unavailable Store.Ref_not_found) -> ()
@@ -135,16 +136,18 @@ let test_missing_never_uses_canonical () = with_session (fun session_dir ->
 let test_corruption_is_never_repaired () =
   List.iter (fun corrupt -> with_session (fun session_dir ->
     let a, snapshot = accepted "A" in
-    let _b, other = accepted "different valid checkpoint" in
+    let other, _ = accepted "different valid checkpoint" in
     Store.retain_exact_snapshot ~session_dir snapshot |> require_installed;
-    let bytes = if corrupt then "{broken checkpoint" else Store.exact_snapshot_canonical_bytes other in
-    let path = artifact_path session_dir snapshot in write path bytes;
+    let path = artifact_path session_dir snapshot in
+    let bytes =
+      if corrupt then (write path "{broken checkpoint"; "{broken checkpoint")
+      else Masc_test_deps.write_checkpoint_head ~session_dir ~path other in
     (match Store.load_retained_exact_snapshot ~session_dir ~reference:(Store.exact_snapshot_reference snapshot) with
      | Error _ -> () | Ok _ -> fail "corrupt addressed content accepted");
     (match Store.retain_exact_snapshot ~session_dir snapshot with
      | Store.Not_installed _ -> () | Store.Installed _ -> fail "corrupt evidence was silently repaired");
     check string "corrupt bytes retained" bytes (read path);
-    (match Store.save_agent_core_classified
+    (match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
       ~history_retained:(history_retained ()) ~session_dir {a with turn_count=2} with Ok _ -> () | Error e -> fail e);
     match Store.load_agent_core ~session_dir ~session_id:"session" with
     | Ok b -> check int "unrelated canonical remains usable" 2 b.turn_count

@@ -101,14 +101,14 @@ streaming = false
             it supplies no save witness for the incoming consumer. *)
          let ahead = {checkpoint with turn_count=checkpoint.turn_count+1;
            messages=[Agent_core.Types.user_msg "newer canonical owner data"]} in
-         (match Keeper_checkpoint_store.save_agent_core_classified ~session_dir ~history_retained ahead |> get with
+         (match Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained ahead |> get with
           | Keeper_checkpoint_store.Saved _ -> ()
           | Stale_noop _ -> fail "fixture did not install its ahead canonical checkpoint")
        | (Completed | Deferred | Projection_failed | Provider_failed | Rejected | Save_failed
          | Noop_sink | No_sink | Review), _
        | Stale_save, (Agent_core.Agent.After_input_wait_changed | After_tool_results_appended
          | After_context_injection | After_rejected_response_dropped) -> ());
-      (match Keeper_checkpoint_store.save_agent_core_classified ~session_dir ~history_retained checkpoint with
+      (match Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained checkpoint with
        | Ok (Keeper_checkpoint_store.Saved _) ->
          Keeper_turn_driver_try_provider.observe_checkpoint_saved progress snapshot.stage;
          (match snapshot.stage with

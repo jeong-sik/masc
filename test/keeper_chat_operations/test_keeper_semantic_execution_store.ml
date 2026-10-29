@@ -31,7 +31,7 @@ let get store id = match Store.semantic_get store id |> execution_ok with
   | Some execution -> execution | None -> fail "durable execution disappeared"
 let checkpoint () =
   let trace_id = Keeper_id.Trace_id.of_string "semantic-test-trace" |> string_ok in
-  match Keeper_checkpoint_ref.create ~trace_id ~turn_count:3 ~canonical_checkpoint_bytes:"checkpoint bytes" with
+  match Keeper_checkpoint_ref.of_persisted ~trace_id ~turn_count:3 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "checkpoint bytes") with
   | Ok reference -> reference | Error _ -> fail "checkpoint fixture rejected"
 let rec remove_tree path =
   match Unix.lstat path with
@@ -382,7 +382,7 @@ let with_adoption_source f = with_path (fun original_path ->
 
 let adoption_reference name bytes =
   let trace_id = Keeper_id.Trace_id.of_string name |> string_ok in
-  Keeper_checkpoint_ref.create ~trace_id ~turn_count:3 ~canonical_checkpoint_bytes:bytes
+  Keeper_checkpoint_ref.of_persisted ~trace_id ~turn_count:3 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes bytes)
   |> (function Ok reference -> reference | Error _ -> fail "adoption reference refused")
 let adopt reference = Store.Offline.Operator_adopts_checkpoint reference
 let derivative_path source_path name = Filename.concat (Filename.dirname source_path) name

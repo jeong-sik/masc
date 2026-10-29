@@ -2841,10 +2841,10 @@ let defer_direct_gate_on ~base_path ~keeper_name ~approval_id =
        let trace_id = Keeper_id.Trace_id.of_string "gate-wait-trace" |> string_ok in
        let checkpoint =
          match
-           Keeper_checkpoint_ref.create
+           Keeper_checkpoint_ref.of_persisted
              ~trace_id
              ~turn_count:3
-             ~canonical_checkpoint_bytes:"gate-wait-checkpoint"
+             ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "gate-wait-checkpoint")
          with
          | Ok reference -> reference
          | Error _ -> Alcotest.fail "checkpoint fixture rejected"

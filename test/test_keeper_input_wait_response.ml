@@ -281,22 +281,21 @@ let test_install_refuses_stale_nonhistory () =
     ; {checkpoint with turn_count=checkpoint.turn_count+1} ] in
   List.iter (fun stale ->
     let canonical=Store.agent_core_checkpoint_path ~session_dir ~session_id:checkpoint.session_id in
-    (match Fs_compat.save_file_atomic canonical (Core.Checkpoint.to_string stale) with
-     | Ok () -> () | Error detail -> fail detail);
+    ignore (Masc_test_deps.write_checkpoint_head ~session_dir ~path:canonical stale : string);
     let before=Fs_compat.load_file canonical in
     (match Response.prepare_installation ~net:env#net ~authority ~response:Core.Hooks.Declined with
      | Error (Response.Invalid_response _) -> ()
      | Error _ | Ok _ -> fail "stale nonhistory was accepted or misclassified");
     check string "refused response does not overwrite canonical evidence" before (Fs_compat.load_file canonical);
     let after=Store.load_retained_exact_snapshot ~session_dir ~reference |> Result.get_ok in
-    check string "refused response preserves exact original retained bytes"
-      (Store.exact_snapshot_canonical_bytes retained) (Store.exact_snapshot_canonical_bytes after)) candidates;
+    check bool "refused response preserves the exact original retained checkpoint" true
+      (Keeper_checkpoint_ref.equal (Store.exact_snapshot_reference retained)
+         (Store.exact_snapshot_reference after))) candidates;
   let context=Core.Context.copy checkpoint.context in
   Core.Context.set_scoped context Session "message_count" (`Int (List.length checkpoint.messages));
   let canonical={checkpoint with Core.Checkpoint.context} in
   let path=Store.agent_core_checkpoint_path ~session_dir ~session_id:checkpoint.session_id in
-  (match Fs_compat.save_file_atomic path (Core.Checkpoint.to_string canonical) with
-   | Ok () -> () | Error detail -> fail detail);
+  ignore (Masc_test_deps.write_checkpoint_head ~session_dir ~path canonical : string);
   (* Unsorted nested objects must derive the same exact C after the response
      intent is supplied to fresh authority with a different answer key order. *)
   let answer=Core.Hooks.Answer (`Assoc ["z",`Int 2;"a",`Assoc ["n",`Int 1;"b",`String "yes"]]) in
@@ -338,10 +337,12 @@ let test_install_refuses_stale_nonhistory () =
     |> function Ok plan -> plan | Error error -> fail (Response.installation_error_to_string error) in
   let canonical_before=Store.load_agent_core_exact_snapshot ~session_dir ~session_id:checkpoint.session_id |> Result.get_ok in
   let changed={consumed with working_context=Some (`Assoc ["other",`Bool true])} in
-  Fs_compat.save_file path (Core.Checkpoint.to_string changed);
+  ignore (Masc_test_deps.write_checkpoint_head ~session_dir ~path changed : string);
   (match Response.install recovered with
    | Error (Response.Installation_unconfirmed _) -> () | Error _ | Ok _ -> fail "captured C CAS overwrote foreign canonical");
-  Fs_compat.save_file path (Store.exact_snapshot_canonical_bytes canonical_before);
+  ignore
+    (Masc_test_deps.write_checkpoint_head ~session_dir ~path
+       (Store.exact_snapshot_checkpoint canonical_before) : string);
   let recovered=Response.prepare_installation ~net:env#net ~authority:fresh ~response:replay_answer
     |> function Ok plan -> plan | Error error -> fail (Response.installation_error_to_string error) in
   let receipt=Response.install recovered |> function Ok receipt -> receipt | Error error -> fail (Response.installation_error_to_string error) in
@@ -381,7 +382,7 @@ let test_operation_response_preserves_producer_g ~canonical_intent ~fault () =
   let session_dir=Keeper_types_support.keeper_session_dir workspace original.session_id in
   Fs_compat.mkdir_p session_dir;
   let canonical=Store.agent_core_checkpoint_path ~session_dir ~session_id:original.session_id in
-  let save checkpoint = match Store.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
+  let save checkpoint = match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 checkpoint with
     | Ok (Store.Saved _) -> () | Ok (Stale_noop _) | Error _ -> fail "physical canonical fixture was not installed" in
   let reference=Store.retain_exact_snapshot ~session_dir (exact original)
     |> Store.require_confirmed_installation |> Result.get_ok in
@@ -431,7 +432,7 @@ let test_operation_response_preserves_producer_g ~canonical_intent ~fault () =
     pending_input=Some newer_pending;working_context=Some (`Assoc ["independent",`Bool true])} in
   let newer_snapshot=exact newer in
   let g=Store.exact_snapshot_reference newer_snapshot in
-  let g_payload_bytes=Store.exact_snapshot_canonical_bytes newer_snapshot in
+
   Eio.Switch.run (fun owner_sw ->
     Keeper_owner_registry.install_from_store ~sw:owner_sw ~operation_runner:None ~on_turn_slot_released:None workspace |> prepared |> ignore;
     let owner=Keeper_owner_registry.get ~base_path:root ~keeper_name |> prepared in
@@ -464,8 +465,8 @@ let test_operation_response_preserves_producer_g ~canonical_intent ~fault () =
     check bool "operation branch never replaces global input G" true
       (Journal.input_checkpoint journal ~trace_id:meta.runtime.trace_id |> journal_ok=Journal.Input_observed g);
     let retained=Store.load_retained_exact_snapshot ~session_dir ~reference:g |> Result.get_ok in
-    check bool "G keeps other pending context and complete bytes" true
-      (Store.exact_snapshot_canonical_bytes retained=g_payload_bytes) in
+    check bool "G keeps other pending context and its complete content" true
+      (Keeper_checkpoint_ref.equal (Store.exact_snapshot_reference retained) g) in
   with_journal (fun journal ->
     Journal.prepare_direct_input_response journal ~now:8. ~operation_id ~execution_digest:operation.execution_digest ~intent:branched |> journal_ok;
     let actual=Journal.direct_input_response_intent journal ~operation_id |> journal_ok |> Option.get in

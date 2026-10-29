@@ -11,9 +11,9 @@ let original = Operation.Operation_id.of_string "original-input-wait" |> value
 let other = Operation.Operation_id.of_string "independent-input" |> value
 let call_id = "019a0010-1000-7000-8000-000000000031"
 let input = `Assoc ["message",`String "original request";"metadata",`Assoc ["speaker",`String "operator"]]
-let checkpoint bytes = Keeper_checkpoint_ref.create
+let checkpoint bytes = Keeper_checkpoint_ref.of_persisted
   ~trace_id:(Keeper_id.Trace_id.of_string "trace-direct-input" |> value)
-  ~turn_count:2 ~canonical_checkpoint_bytes:bytes
+  ~turn_count:2 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes bytes)
   |> function Ok reference -> reference | Error _ -> fail "invalid checkpoint fixture"
 let seed = checkpoint "seed"
 let owned = checkpoint "exact pending bytes"
@@ -212,8 +212,8 @@ let test_response_commit_uncertainty after_commit () = with_path @@ fun path ->
 
 (* These refs deliberately permit S to extend W. They are journal identity
    fixtures, not proof of a valid physical checkpoint transformation. *)
-let response_checkpoint turn bytes = Keeper_checkpoint_ref.create ~trace_id:owned.trace_id
-  ~turn_count:turn ~canonical_checkpoint_bytes:bytes
+let response_checkpoint turn bytes = Keeper_checkpoint_ref.of_persisted ~trace_id:owned.trace_id
+  ~turn_count:turn ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes bytes)
   |> function Ok reference -> reference | Error _ -> fail "invalid response reference"
 let response_source=response_checkpoint 3 "canonical extended original history"
 let response_candidate=response_checkpoint 3 "frozen consumed response"
@@ -350,8 +350,8 @@ let test_intent_strict_codec_and_reference_domain () = with_path @@ fun path -> 
     check bool "all three response kinds retain their exact identity" true
       (Option.equal Semantic.equal_input_response_intent (Some intent) restored.input_response_intent))
     [Agent_core.Hooks.Answer (`Assoc ["choice",`String "yes"]);Agent_core.Hooks.Declined;Agent_core.Hooks.Timeout];
-  let foreign=Keeper_checkpoint_ref.create ~trace_id:(Keeper_id.Trace_id.of_string "foreign-trace" |> value)
-      ~turn_count:3 ~canonical_checkpoint_bytes:"foreign candidate" |> Result.get_ok in
+  let foreign=Keeper_checkpoint_ref.of_persisted ~trace_id:(Keeper_id.Trace_id.of_string "foreign-trace" |> value)
+      ~turn_count:3 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "foreign candidate") |> Result.get_ok in
   List.iter (fun (source,candidate) -> rejected (Semantic.input_response_intent ~destination:Semantic.Canonical_input ~waiting ~source ~candidate ~response:Agent_core.Hooks.Declined))
     [response_source,foreign;response_source,response_source;response_source,owned;
      response_checkpoint 1 "regressed source",response_checkpoint 1 "regressed candidate";
@@ -475,8 +475,8 @@ let test_branch_strict_codec () = with_path @@ fun path -> with_store path @@ fu
   let replace name value json = `Assoc ((name,value)::List.remove_assoc name (fields json)) in
   let encoded=Semantic.to_json branched in
   let branch=List.assoc "input_branch" (fields encoded) in
-  let foreign=Keeper_checkpoint_ref.create ~trace_id:(Keeper_id.Trace_id.of_string "foreign-branch-trace" |> value)
-    ~turn_count:4 ~canonical_checkpoint_bytes:"foreign" |> Result.get_ok in
+  let foreign=Keeper_checkpoint_ref.of_persisted ~trace_id:(Keeper_id.Trace_id.of_string "foreign-branch-trace" |> value)
+    ~turn_count:4 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "foreign") |> Result.get_ok in
   let checkpoint_json reference = `Assoc ["trace_id",`String (Keeper_id.Trace_id.to_string reference.Keeper_checkpoint_ref.trace_id);
     "turn_count",`Int reference.turn_count;"sha256",`String reference.sha256] in
   let with_branch branch=replace "input_branch" branch encoded in

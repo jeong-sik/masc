@@ -51,9 +51,9 @@ let outcome_label (disposition : Agent.execution_terminal_disposition) =
 
 let late_call (operation : Keeper_chat_operation.t) =
   let seed_checkpoint =
-    Keeper_checkpoint_ref.create
+    Keeper_checkpoint_ref.of_persisted
       ~trace_id:(Keeper_id.Trace_id.of_string session_id |> require "trace id")
-      ~turn_count:1 ~canonical_checkpoint_bytes:"late bind seed"
+      ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "late bind seed")
     |> require "late checkpoint" in
   let locator = Agent.execution_locator_of_yojson
       (`Assoc ["version", `Int 1; "run_id", `String "execution-run-late-bind"])

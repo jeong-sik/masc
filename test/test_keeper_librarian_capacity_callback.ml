@@ -235,7 +235,7 @@ let test_prefit_real_continuity ~base_path () =
      preserve_thinking=None;response_format=Agent_core.Types.Off;cache_system_prompt=false;
      context=Agent_core.Context.create_sync ();pending_input = None; mcp_sessions = [];working_context=None} in
   let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
-  (match C.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
+  (match C.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 checkpoint with
    | Ok (C.Saved _) -> () | Ok (C.Stale_noop _) -> Alcotest.fail "stale fixture"
    | Error detail -> Alcotest.fail detail);
   B.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id
@@ -696,7 +696,7 @@ let test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~regi
      preserve_thinking=None;response_format=Agent_core.Types.Off;cache_system_prompt=false;
      context=Agent_core.Context.create_sync ();pending_input = None; mcp_sessions = [];working_context=None} in
   let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
-  (match C.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
+  (match C.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 checkpoint with
    | Ok (C.Saved _) -> () | Ok (C.Stale_noop _) -> Alcotest.fail "stale fixture"
    | Error detail -> Alcotest.fail detail);
   B.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id
@@ -783,7 +783,7 @@ let test_durable_runtime_returns_refusal_reports ~base_path () =
      preserve_thinking=None;response_format=Agent_core.Types.Off;cache_system_prompt=false;
      context=Agent_core.Context.create_sync ();pending_input=None;mcp_sessions=[];working_context=None} in
   let session_dir = Filename.concat (Keeper_fs.session_store_path config) keeper_id in
-  (match Keeper_checkpoint_store.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
+  (match Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 checkpoint with
    | Ok (Keeper_checkpoint_store.Saved _) -> ()
    | Ok (Stale_noop _) -> Alcotest.fail "stale durable refusal fixture"
    | Error detail -> Alcotest.fail detail);

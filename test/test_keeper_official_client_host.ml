@@ -2201,7 +2201,7 @@ let test_persist_appends_roundtrips_in_call_order () =
   Fs_compat.mkdir_p session_dir;
   let session_id = "trace-reject-persist" in
   (match
-     Keeper_checkpoint_store.save_agent_core_classified
+     Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
        ~history_retained:(history_retained ())
        ~session_dir
        (persistence_checkpoint ~session_id)

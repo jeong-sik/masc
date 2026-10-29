@@ -21,7 +21,7 @@ let checkpoint messages : Agent_core.Checkpoint.t =
   }
 
 let save session_dir messages =
-  match Store.save_agent_core_classified ~session_dir ~history_retained:0 (checkpoint messages) with
+  match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 (checkpoint messages) with
   | Ok (Store.Saved _) -> ()
   | Ok (Store.Stale_noop _) -> fail "fixture checkpoint was stale"
   | Error error -> failf "fixture checkpoint: %s" error

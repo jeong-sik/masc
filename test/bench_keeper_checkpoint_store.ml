@@ -5,18 +5,20 @@
     2026-10-28: a message body near the 1.3 KB median without media, and,
     when asked, an image in some tool results the size of a [masc_dos_screen]
     frame (those averaged 80.8 KB of base64). It then:
-    - saves the whole history once;
-    - runs tool rounds shaped like the pipeline's: save after the assistant
-      tool call, save after its result, save once more for the context
-      injection stage. Each save carries its own [created_at], so the store
-      keeps and prunes snapshot files as it does live;
+    - saves the whole history once, as closed turns;
+    - runs tool rounds shaped like the pipeline's, inside an open turn: save
+      after the assistant tool call, save after its result, save once more for
+      the context injection stage. Each save carries its own [created_at], so
+      the store keeps and prunes snapshot files as it does live;
     - reads the exact snapshot while the store still holds what it wrote
       (Librarian's case during a Keeper's run), and again after dropping it;
     - drops what the store keeps and loads the history through
       [load_agent_core_for_save], the first turn after a restart.
 
-    [write_B] counts the average successful logical payload bytes written by the
-    current canonical and history paths, not metadata, fsync or device traffic.
+    [write_B] counts the average successful logical payload bytes a round
+    writes: message objects, the head and history fallbacks, not metadata,
+    fsync or device traffic. [file_MiB] is the canonical file, which is the
+    head (RFC-0476 §3.2).
     An uncertain archive write stops the case instead of reporting a number.
     [disk_MiB] recursively counts retained regular files once per device/inode.
     New checkpoint object writers must join the same observation boundary.
@@ -146,9 +148,9 @@ let run_case ~history_retained spec =
   let rng = Random.State.make [| messages; images |] in
   let saves = ref 0 in
   (* One second apart, so every save names its own snapshot file. *)
-  let save turn_count messages =
+  let save ~boundary turn_count messages =
     incr saves;
-    let _, written = Store.For_testing.save_agent_core_for_keeper_measured
+    let _, written = Store.For_testing.save_agent_core_for_keeper_measured ~boundary
       ~keeper_name ~session_dir ~history_retained
       (checkpoint ~turn_count ~created_at:(1000.0 +. float_of_int !saves) messages)
     |> get "save" in
@@ -158,7 +160,10 @@ let run_case ~history_retained spec =
     file_bytes canonical, written
   in
   let initial = history rng ~messages ~images in
-  let (file_after_first, _), first_save_ms = timed (fun () -> save 1 initial) in
+  let (file_after_first, _), first_save_ms =
+    timed (fun () -> save ~boundary:Agent_core.Checkpoint_objects.Turn_closes 1 initial)
+  in
+  let save = save ~boundary:Agent_core.Checkpoint_objects.Turn_continues in
   let round_ms, round_written =
     List.init rounds Fun.id
     |> List.fold_left

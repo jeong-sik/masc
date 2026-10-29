@@ -10,6 +10,7 @@ open Alcotest
 let () = Masc.Server_startup_state.mark_state_ready () |> Result.get_ok
 
 module Helpers = Server_h2_gateway_helpers
+module Mcp_error_code = Masc.Mcp_error_code
 
 (* The request's :authority and the gateway's trust policy name the same
    listener; a mismatch would make the gateway refuse every request as an

@@ -6,9 +6,8 @@ runs instead when it grows without bound.
 ## Why the server does not prune it
 
 What MASC reclaims by itself shares one boundary: state under the
-server's own base path (JSONL retention), or runtime objects the server
-itself created and can name through a typed SSOT (a dissolved keeper's
-volume names and playground bundle). The dune cache fails both tests, so
+server's own base path (JSONL retention), or runtime objects whose owner
+the server can establish. The dune cache fails both tests, so
 pruning it from the server is deliberately out of scope:
 
 - **No typed ownership.** The cache location is dune's and opam's
@@ -27,26 +26,23 @@ pruning it from the server is deliberately out of scope:
   misreads as product bugs. A maintenance loop that can do that without
   an operator in the loop is a liability, not a feature.
 
-The product-side disk leaks the server *can* name are fixed where a
-keeper is dissolved:
-[#42618](https://github.com/jeong-sik/masc/pull/42618) deletes its
-microVM volumes and [#42619](https://github.com/jeong-sik/masc/pull/42619)
-removes its git worktrees. The dune cache is the remaining grower, and it
-stays the operator's to trim.
+Keeper dissolution removes its git worktrees through
+[#42619](https://github.com/jeong-sik/masc/pull/42619). Apple microVM
+volume names, however, contain the Keeper name without a workspace identity.
+Automatic removal is skipped until ownership can be established; retained
+volumes as well as the dune cache can consume disk space.
 
 ## The incident this addresses
 
 2026-10 disk-pressure incident (host at 98%): the dune cache alone had
 grown to **531 GB**. Volumes left by keepers dissolved before #42618
-(18 volumes / 10.77 GB) were removed by hand. Keepers dissolved after it
-take their volumes and worktrees with them; the cache is not handled, by
-the boundary above.
+(18 volumes / 10.77 GB) were removed by hand. That historical cleanup does
+not establish who owns a similarly named volume today.
 
-Volumes and worktrees from keepers dissolved earlier stay until the
-operator removes them. Before deleting a `masc-keeper-work-<name>` or
-`masc-keeper-build-<name>` volume, check that no keeper named `<name>` is
-registered in any workspace on the host: volume names carry no workspace
-part.
+Before deleting a `masc-keeper-work-<name>` or `masc-keeper-build-<name>`
+volume, establish ownership across all workspaces that use that runtime,
+including stopped Keepers, and preserve the volume if ownership is unclear.
+A list of running guests or registered Keepers alone is insufficient.
 
 ## Operator procedure
 

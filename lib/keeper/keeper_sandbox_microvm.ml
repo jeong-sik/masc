@@ -1987,9 +1987,10 @@ let apple_volume_delete_argv ~volume_name =
   command_argv_for Backend.Apple_container @ [ "volume"; "delete"; volume_name ]
 ;;
 
-(* Both volumes are named by the same functions that created them, so the
-   removal reaches exactly this keeper's volumes and nothing that merely
-   shares a prefix. Each delete is attempted whatever the other returned. A
+(* Both volume names are exact, but same-named Keepers in other workspaces
+   may own the same volumes. The caller must establish ownership separately;
+   the operation itself checks no workspace. Each delete is attempted
+   whatever the other returned. A
    delete's exit code cannot prove absence: an already-absent volume and one
    a guest still holds can both exit non-zero. One listing after both deletes
    settles it, the same way the trim helper's removal is settled. *)

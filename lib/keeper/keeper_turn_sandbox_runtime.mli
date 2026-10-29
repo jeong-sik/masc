@@ -360,20 +360,19 @@ val remove_keeper_volumes_by_name :
   ?microvm_backend:Keeper_microvm_backend.t ->
   unit ->
   (unit, string) result
-(** Remove a dissolved keeper's volumes after {!teardown_keeper_sandbox_by_name}
-    has removed the guest that held them. Teardown alone leaves them, because a
+(** Decide whether a dissolved keeper's volumes can be removed after
+    {!teardown_keeper_sandbox_by_name}. Teardown alone leaves them, because a
     paused keeper is torn down too and comes back to its work volume.
 
-    Apple runs {!Keeper_sandbox_microvm.remove_apple_keeper_volumes} under the
-    microVM lifecycle lock. Docker and remote SSH keepers own no volume.
+    Apple volume names are shared by same-named Keepers in different
+    workspaces. Until durable ownership can establish which workspaces own a
+    volume, automatic deletion returns an error and leaves it in place.
+    Docker and remote SSH keepers own no volume.
     Microsandbox and nerdctl create the work volume as a host directory but
     have no established removal spelling, so they return [Error] naming the
     volume left behind, as does a [Micro_vm] keeper with no
-    [microvm_backend]. The default per-command timeout is the
-    {!Env_config_sandbox.Shell_timeout.Io} bucket (the same budget
-    {!Keeper_sandbox_microvm.recreate_apple_build_volume} uses for
-    [container volume] commands, rather than the 180s guest VM shutdown
-    budget). *)
+    [microvm_backend]. [timeout_sec] is retained for callers; no backend here
+    issues a volume deletion command while ownership remains unverified. *)
 
 val teardown_keeper_sandbox :
   ?timeout_sec:float ->

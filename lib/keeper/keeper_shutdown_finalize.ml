@@ -852,6 +852,12 @@ let deliver_finalized_completion ~config ?successor_operation_id operation =
   | Superseded _ -> Error Unsupported_phase
 ;;
 
+let remove_volumes_after_teardown ~teardown ~remove =
+  match teardown with
+  | Ok () -> remove ()
+  | Error detail -> Error ("sandbox teardown was not confirmed: " ^ detail)
+;;
+
 let complete_cleanup
     ~(config : Workspace.config)
     ~entry
@@ -986,7 +992,7 @@ let complete_cleanup
              blocking -- the keeper is already gone from the registry, and
              refusing to finish would leave the shutdown half-applied over a
              container that can be removed by hand. *)
-          (match
+          let teardown =
              match sandbox_backend with
              | Error detail -> Error detail
              | Ok (backend, microvm_backend) ->
@@ -995,8 +1001,8 @@ let complete_cleanup
                  ~keeper_name:operation.keeper_name
                  ~backend
                  ?microvm_backend
-                 ()
-           with
+                 () in
+          (match teardown with
            | Ok () -> ()
            | Error detail ->
              Log.Keeper.warn
@@ -1013,9 +1019,9 @@ let complete_cleanup
            | Remove_meta ->
              (* The teardown above leaves the volumes, since a paused keeper
                 comes back to its work volume. This one is not coming back.
-                Logged rather than blocking, like the teardown: the warning
-                names what to remove by hand. *)
-             (match
+                Logged rather than blocking, like the teardown: a skipped or
+                unconfirmed cleanup is reported for ownership reconciliation. *)
+             (match remove_volumes_after_teardown ~teardown ~remove:(fun () ->
                 match sandbox_backend with
                 | Error detail -> Error detail
                 | Ok (backend, microvm_backend) ->
@@ -1023,13 +1029,13 @@ let complete_cleanup
                     ~keeper_name:operation.keeper_name
                     ~backend
                     ?microvm_backend
-                    ()
+                    ())
               with
               | Ok () -> ()
               | Error detail ->
                 Log.Keeper.warn
                   ~keeper_name:operation.keeper_name
-                  "keeper removed but its volumes were not: %s"
+                  "keeper removed; volume cleanup was skipped or unconfirmed: %s"
                   detail);
              (* The worktrees its clones registered stay on disk the same
                 way. A dirty one is removed with it; a locked one is refused by git
@@ -1197,6 +1203,7 @@ let plan_blocked_replay ~config operation replay =
 
 module For_testing = struct
   let paused_meta = paused_meta
+  let remove_volumes_after_teardown = remove_volumes_after_teardown
 
   let remove_pending_confirms_by_target ~config ~target_type ~target_id =
     Atomic.get remove_pending_confirms_by_target_callback config ~target_type ~target_id

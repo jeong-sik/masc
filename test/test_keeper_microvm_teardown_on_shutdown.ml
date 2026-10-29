@@ -35,6 +35,8 @@ let test_removing_an_absent_guest_succeeds () =
   let base_path = Filename.temp_dir "microvm_teardown_" "" in
   let cli = Filename.concat base_path "container" in
   let calls_path = Filename.concat base_path "calls" in
+  let config = Masc.Workspace.default_config base_path in
+  let keeper_name = "microvm-teardown-probe-never-started" in
   Out_channel.with_open_bin cli (fun channel ->
     Printf.fprintf channel {|#!/bin/sh
 printf '%%s\n' "$*" >> %s
@@ -42,6 +44,7 @@ case "$1" in
   stop|delete) exit 0 ;;
   inspect) exit 1 ;;
   list) printf '[]\n' ;;
+  volume) if [ "$2" = list ]; then printf '[]\n'; fi; exit 0 ;;
   *) exit 99 ;;
 esac
 |} (Filename.quote calls_path));
@@ -53,8 +56,6 @@ esac
       Unix.putenv "PATH" previous_path;
       Fs_compat.remove_tree base_path)
     (fun () ->
-       let config = Masc.Workspace.default_config base_path in
-       let keeper_name = "microvm-teardown-probe-never-started" in
        (match Runtime.teardown_keeper_sandbox_by_name ~timeout_sec:30. ~config
            ~keeper_name ~backend:Masc.Keeper_sandbox.Micro_vm
            ~microvm_backend:Masc.Keeper_microvm_backend.Apple_container () with
@@ -71,7 +72,17 @@ esac
            (List.mem ("stop " ^ guest) calls);
          Alcotest.(check bool) ("actual delete reached " ^ guest) true
            (List.mem ("delete --force " ^ guest) calls))
-         Keeper_types_profile_sandbox.all_network_modes)
+         Keeper_types_profile_sandbox.all_network_modes;
+       Out_channel.with_open_bin calls_path (fun _ -> ());
+       let remove_volumes () = Runtime.remove_keeper_volumes_by_name ~timeout_sec:30.
+           ~keeper_name ~backend:Masc.Keeper_sandbox.Micro_vm
+           ~microvm_backend:Masc.Keeper_microvm_backend.Apple_container () in
+       (match remove_volumes () with
+        | Ok () -> Alcotest.fail "an unowned shared volume was reported removed"
+        | Error detail -> Alcotest.(check bool) "unverified ownership is named" true
+            (Astring.String.is_infix ~affix:"microvm_volume_removal_owner_unverified" detail));
+       let calls = In_channel.with_open_bin calls_path In_channel.input_all in
+       Alcotest.(check string) "no CLI calls for unverified ownership" "" calls)
 ;;
 
 (* A caller that forgets the runtime gets a refusal, not a guess. Shutdown
@@ -125,6 +136,22 @@ let test_local_teardown_skips_container_runtimes () =
        | Error detail ->
          Alcotest.failf "Local teardown called a container runtime: %s" detail)
 
+let test_failed_teardown_preserves_volumes () =
+  let remove_calls = ref 0 in
+  let remove () = incr remove_calls; Ok () in
+  let cleanup = Masc.Keeper_shutdown_finalize.For_testing.remove_volumes_after_teardown in
+  (match cleanup ~teardown:(Error "guest state unknown") ~remove with
+   | Ok () -> Alcotest.fail "unknown teardown state permitted volume removal"
+   | Error detail ->
+     Alcotest.(check bool) "original teardown error remains visible" true
+       (Astring.String.is_infix ~affix:"guest state unknown" detail));
+  Alcotest.(check int) "failed teardown never invokes removal" 0 !remove_calls;
+  (match cleanup ~teardown:(Ok ()) ~remove with
+   | Error detail -> Alcotest.fail detail
+   | Ok () -> ());
+  Alcotest.(check int) "confirmed teardown permits removal" 1 !remove_calls
+;;
+
 let () =
   Alcotest.run
     "keeper_microvm_teardown_on_shutdown"
@@ -135,5 +162,7 @@ let () =
             test_an_unnamed_runtime_is_refused
         ; Alcotest.test_case "Local teardown skips container runtimes" `Quick
             test_local_teardown_skips_container_runtimes
+        ; Alcotest.test_case "failed teardown preserves volumes" `Quick
+            test_failed_teardown_preserves_volumes
         ] )
     ]

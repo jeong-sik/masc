@@ -77,6 +77,12 @@ val plan_blocked_replay :
   replay_plan
 
 module For_testing : sig
+  val remove_volumes_after_teardown
+    :  teardown:(unit, string) result
+    -> remove:(unit -> (unit, string) result)
+    -> (unit, string) result
+  (** Refuse the removal callback when the sandbox teardown did not succeed. *)
+
   val paused_meta :
     Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta
 

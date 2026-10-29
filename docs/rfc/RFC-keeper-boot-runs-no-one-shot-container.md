@@ -111,7 +111,7 @@ helper 의 `-trim` 이름은 `Keeper_sandbox_container_name.Micro_vm_work_volume
 
 그래서 확인과 쓰기를 나눈다.
 
-- 확인: 부팅 때마다 호스트가 `container volume inspect` 의 `configuration.source`(볼륨 이미지 파일)를 열어 superblock 을 읽는다. 오프셋 1024 의 superblock 에서 magic(`0xEF53`, 오프셋 `0x38`)과 `s_default_mount_opts`(오프셋 `0x100`)의 `EXT4_DEFM_DISCARD`(`0x0400`)를 본다. 이 시점에는 어떤 게스트도 볼륨을 붙이고 있지 않다(§2 의 1단계 뒤). 결과는 타입으로 나눈다. `Discard_default_set | Discard_default_absent | Superblock_unreadable of string`.
+- 확인: 부팅 때마다 호스트가 `container volume inspect` 의 `configuration.source`(볼륨 이미지 파일)를 열어 superblock 을 읽는다. 오프셋 1024 의 superblock 에서 magic(`0xEF53`, 오프셋 `0x38`)과 `s_default_mount_opts`(오프셋 `0x100`)의 `EXT4_DEFM_DISCARD`(`0x0400`)를 본다. 이 작업 공간의 옛 게스트는 §2 의 1단계에서 종료하지만, 이것만으로 다른 작업 공간의 게스트나 중지된 Keeper 소유권을 알 수는 없다. 결과는 타입으로 나눈다. `Discard_default_set | Discard_default_absent | Superblock_unreadable of string`.
 - 쓰기: `Discard_default_absent` 일 때만 helper 를 띄운다. 지금 argv 에서 `CAP_DAC_OVERRIDE` 를 빼고 script 는 `findmnt` 와 `tune2fs -o discard` 만 한다. 새 Keeper 의 첫 부팅에서 한 번 일어나고, 그때는 40~65초 막힘이 한 번 생긴다. 다른 게스트가 볼륨을 붙이고 있으면 helper 는 시작하지 못한다. Virtualization.framework 는 VM 이 붙인 이미지를 다시 붙이지 않는다(10-06 측정, "The storage device attachment is invalid"). 그래서 helper 가 살아 있는 게스트의 볼륨을 두 번째로 마운트하는 일은 없다.
 - 실패해도 부팅은 계속한다(Q7). helper 는 그 부팅에서 한 번만 돈다. helper 가 실패하면 WARN 로그 한 줄에 볼륨 이름, 종료 상태, 출력을 남기고, 게스트는 `discard` 기본값 없이 뜬다. `Superblock_unreadable` 이면 helper 를 띄우지 않고 부팅한다. 고칠 수 있는 볼륨인지 모르기 때문이다. 파일 시스템이 깨졌다면 게스트의 mount 가 실패하고, 그 실패는 지금의 다른 시작 실패와 같은 길로 보인다. 볼륨을 만든 직후 서버가 죽어 기본값 없이 남으면, 다음 새 부팅이 helper 를 띄워 고친다(Q1).
 - 반복이 생기지 않는 이유: 부팅이 끝났으므로 다음 도구 호출은 그 게스트를 adopt 한다. superblock 확인과 helper 는 다음 새 부팅(서버 재시작이나 게스트 교체)에서 다시 일어난다. 그래서 helper 가 계속 실패하는 볼륨 하나는 새 부팅마다 40~65초 막힘을 한 번 만든다. 그 반복을 멈추는 상태는 두지 않는다.
@@ -119,9 +119,9 @@ helper 의 `-trim` 이름은 `Keeper_sandbox_container_name.Micro_vm_work_volume
 - 보이는 곳: Keeper 의 sandbox 상태(`Keeper_sandbox_control.live_status_json`, TUI sandbox 패널)에 `work_volume_discard_default` 를 보인다. 값은 superblock 확인 결과(`set`, `absent`, `unreadable` 과 그 이유)다. `guest_size_error` 처럼 읽을 때마다 superblock 을 새로 읽어 만들고, 저장하지 않는다. 운영자가 고치면 다음 읽기에서 바로 바뀐다.
 - 운영자가 고치는 법과 잃는 것:
   1. `container volume inspect <volume>` 의 `source` 를 읽기만 해서 확인한다. `xxd -s 1080 -l 2 -p` 가 `53ef` 이고 `xxd -s 1280 -l 4 -p` 의 둘째 바이트에서 `0x04` 비트가 켜져 있으면 flag 가 있다. 지금 34개는 모두 `00040000` 이다.
-  2. flag 만 없으면 helper 와 같은 argv 를 손으로 한 번 돌린다. `tune2fs` 가 있는 이미지(`masc-sandbox:general` 은 있다)를 쓴다. 볼륨을 붙인 게스트가 있으면 helper 가 시작하지 못하므로, 그 Keeper 의 게스트를 먼저 멈춘다. 잃는 것은 없고, 40~65초 막힘이 한 번 생긴다.
-  3. superblock 을 못 읽거나 파일 시스템이 깨졌으면, 먼저 이미지를 복사해 둔다(`cp -c <source> <백업>`, APFS clone 이라 바로 끝난다). 그다음 일회용 컨테이너에서 `e2fsck` 를 돌리고, 고쳐지면 2로 간다.
-  4. 그래도 안 되면 `container volume delete <volume>` 뒤 `masc_keeper_sandbox_start` 를 부른다. 다음 부팅이 새 볼륨을 만들고 helper 를 띄운다. 이때 `/masc-work/<keeper>` 전체를 잃는다. checkout, push 하지 않은 커밋, 커밋하지 않은 변경, Keeper 가 쓴 task·문서 파일이 다 사라진다. 3의 복사본이 남는 유일한 자료다. 복사본에서 파일을 꺼내는 방법은 이 RFC 범위 밖이다(Q7).
+  2. 쓰기나 수리 전에 정확한 볼륨·이미지와 이 런타임 저장소를 쓰는 모든 작업 공간의 소유자를 확인한다. 동명 Keeper와 중지된 Keeper도 확인 대상이다. 관련 게스트와 helper 의 사용을 모두 멈추고 부재를 확인하며, 작업 중 재시작·재연결을 막는다. 그 뒤 런타임 볼륨 디렉터리 밖에 백업을 만들고, 복사 완료와 동일성뿐 아니라 별도 복사본에서 실제 복구할 수 있는지도 검증한다. 어느 하나라도 확인할 수 없으면 볼륨을 보존하고 여기서 멈춘다. 현재 이름만으로 소유권을 판별하는 기능은 없다.
+  3. 위 조건을 모두 충족한 뒤에만 flag 가 없으면 `tune2fs` helper 를 돌리거나, 파일 시스템이 깨졌으면 일회용 컨테이너에서 `e2fsck` 를 실행한다. 둘 다 볼륨을 변경하며 helper 의 마운트 자체도 파일 시스템을 변경할 수 있다. 수리 실패 시 원본과 검증된 백업을 보존한다.
+  4. 그래도 안 되면 볼륨을 보존한다. 이름은 작업 공간을 구별하지 않으므로 삭제 전에 해당 런타임을 쓰는 모든 작업 공간의 소유권과 복구 가능한 백업을 확인해야 한다. 기존의 무조건 삭제·재생성 제안은 더 이상 안전한 절차가 아니다.
 
 `Created` 결과(`ensure_work_volume_for`)에만 helper 를 띄우는 방법도 있다. 이 방법은 superblock 을 읽지 않는다. 대신 만든 직후 서버가 죽으면 기본값 없는 볼륨이 남고 아무도 고치지 않는다. 그래서 확인을 고른다(§10 Q1).
 

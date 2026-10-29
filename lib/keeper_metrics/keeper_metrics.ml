@@ -208,6 +208,9 @@ type t =
   | MemoryRecallRequests        (* counter: recall judgment requests, by question kind and result *)
   | MemoryRecallInputBytes      (* counter: bytes of the request records the recall judgment saved before sending *)
   | MemoryRecallRequestSeconds  (* histogram: seconds a recall judgment request took, from sending to its result *)
+  | MemoryRecallTotal           (* counter: recall judgments, by outcome *)
+  | MemoryRecallSelected        (* counter: candidates a recall judgment carried *)
+  | MemoryRecallJudgmentSeconds (* histogram: seconds a recall judgment took, from its first request to its saved outcome *)
 [@@deriving enumerate]
 
 (** String conversion
@@ -429,6 +432,9 @@ let to_string = function
   | MemoryRecallRequests -> "masc_keeper_memory_recall_requests_total"
   | MemoryRecallInputBytes -> "masc_keeper_memory_recall_input_bytes_total"
   | MemoryRecallRequestSeconds -> "masc_keeper_memory_recall_request_seconds"
+  | MemoryRecallTotal -> "masc_keeper_memory_recall_total"
+  | MemoryRecallSelected -> "masc_keeper_memory_recall_selected_total"
+  | MemoryRecallJudgmentSeconds -> "masc_keeper_memory_recall_judgment_seconds"
 ;;
 
 type collection =
@@ -491,7 +497,8 @@ let collection = function
   | WireCaptureWriteFailures | WireCaptureRecordSkipped | TurnBoundaryFailures
   | HistoryFragmentFailures | QuietFinals | WorkingStateNotCarried | WorkspaceMemoryBriefingBytes
   | WorkspaceMemoryLedgerClaims | MemoryRecallRequests | MemoryRecallInputBytes
-  | MemoryRecallRequestSeconds -> Metric_store
+  | MemoryRecallRequestSeconds | MemoryRecallTotal | MemoryRecallSelected
+  | MemoryRecallJudgmentSeconds -> Metric_store
 ;;
 
 (* Zero-fill: register the unlabeled 0-cell of every counter at module

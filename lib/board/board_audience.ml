@@ -119,7 +119,17 @@ let audience_for_post ~lookup ~post_kind ~visibility ~title ~content =
   Result.bind address (fun (address, unresolved) ->
     audience_of_address ~visibility address ~unaddressed:(fun () ->
       match visibility with
-      | Direct -> Error (Validation_error "Direct Board posts require explicit targets")
+      | Direct ->
+        (* The refusal is the only answer this write gives, so it carries the
+           names that were written and not declared. *)
+        Error
+          (Validation_error
+             (match unresolved with
+              | [] -> "Direct Board posts require explicit targets"
+              | _ :: _ ->
+                Printf.sprintf
+                  "Direct Board posts require a declared target, and no Keeper declares %s"
+                  (String.concat ", " (List.map (Printf.sprintf "@%s") unresolved))))
       | Unlisted -> Ok Thread_participants
       | Public | Internal -> Ok Discoverable)
     |> Result.map (fun audience -> audience, unresolved))

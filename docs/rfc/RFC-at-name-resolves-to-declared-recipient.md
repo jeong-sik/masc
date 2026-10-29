@@ -124,7 +124,7 @@ val resolve :
   -> ('recipient resolution, 'failure) result
 ```
 
-받는 사람 타입(`'recipient`)과 조회 실패 타입(`'failure`)은 부르는 쪽이 정한다. 이 잎 라이브러리는 Keeper 모듈을 부를 수 없다 (§4). 사람과 계정 이름도 Keeper 별칭으로 선언하므로(D2) L2c 의 받는 사람은 Keeper 하나이고, board 에서는 그 Keeper 의 이름을 담은 `Agent_id` 다. `Targets` 가 이미 담는 타입이다. 받는 사람을 만드는 곳은 서버가 넘긴 조회(`Recipient_lookup`)뿐이고, 쓰기 경로는 `resolve` 가 돌려준 값만 `Targets` 에 넣는다. `Targets` 에 Keeper 만 들어가게 타입으로 막으려면 저장된 `audience` 를 읽는 쪽도 바꿔야 해서 L2c 에서 하지 않았다.
+받는 사람 타입(`'recipient`)과 조회 실패 타입(`'failure`)은 부르는 쪽이 정한다. 이 잎 라이브러리는 Keeper 모듈을 부를 수 없다 (§4). 사람과 계정 이름도 Keeper 별칭으로 선언하므로(D2) L2c 의 받는 사람은 선언된 이름 하나이고, board 에서는 그 이름을 소문자로 담은 `Agent_id` 다. Keeper 의 이름이든 별칭이든 같다. 라우터가 기록된 대상을 Keeper 가 답하는 이름과 맞춰 보기 때문이다 (§3.2). `Targets` 가 이미 담는 타입이다. 받는 사람을 만드는 곳은 서버가 넘긴 조회(`Recipient_lookup`)뿐이고, 쓰기 경로는 `resolve` 가 돌려준 값만 `Targets` 에 넣는다. `Targets` 에 Keeper 만 들어가게 타입으로 막으려면 저장된 `audience` 를 읽는 쪽도 바꿔야 해서 L2c 에서 하지 않았다.
 
 `declared` 는 부르는 쪽이 인자로 넘긴다. 전역 설정자나 시험용 우회 함수를 만들지 않는다. `resolve` 는 같은 철자를 한 번만 묻는다. 조회가 실패하면 그 자리에서 실패를 돌려주고 더 묻지 않으며, 그때까지 가른 결과는 버린다.
 
@@ -134,7 +134,7 @@ val resolve :
 
 `Keeper_id.t` 는 공백을 없애고 소문자로 바꿀 뿐 문자를 거르지 않는다 (`lib/keeper/keeper_identity.ml:42`). 그래서 타입이 위 제한을 대신하지 않는다.
 
-`resolve` 는 철자를 바꾸지 않고 `declared` 에 넘긴다. 소문자로 바꿔서 Keeper 이름과 별칭에 맞춰 보는 일은 `declared` 가 한다. 별칭 조회가 지금도 이렇게 맞춘다 (`lib/keeper/keeper_meta_store.ml:439`). `@Alice` 와 `@alice` 는 `declared` 가 같은 Keeper 로 답하고 `resolve` 가 한 명으로 합친다. `unresolved` 에는 쓴 철자 그대로 나온다.
+`resolve` 는 철자를 바꾸지 않고 `declared` 에 넘긴다. 소문자로 바꿔서 Keeper 이름과 별칭에 맞춰 보는 일은 `declared` 가 한다. 별칭 조회가 지금도 이렇게 맞춘다 (`lib/keeper/keeper_meta_store.ml:439`). `@Alice` 와 `@alice` 는 `declared` 가 같은 이름(`alice`)으로 답하고 `resolve` 가 하나로 합친다. `unresolved` 에는 쓴 철자 그대로 나온다.
 
 `None`(선언에 없음)과 `Error`(조회 실패)를 섞지 않는다. 지금 브로드캐스트도 둘을 나눈다. 선언 없음은 `Rejected Target_not_configured`, 조회 실패는 `Deferred Target_state_unavailable` 이다 (`lib/server/server_bootstrap_loops.ml:202`). 조회 실패를 글 속 말로 바꾸면 설정 오류가 조용히 사라진다. 쓰기에서 조회가 실패하면 쓰기를 오류로 돌려주고 아무것도 저장하지 않는다 (D5).
 
@@ -145,6 +145,8 @@ val resolve :
 3. 사람과 계정 이름. 받는 사람이어야 하면 어느 한 Keeper 의 별칭으로 선언한다 (D2).
 
 새 파일이나 새 필드를 만들지 않는다.
+
+선언의 기준은 게시판이 글을 Keeper 에게 보낼 때 쓰는 기준과 같다. 라우터는 Keeper 가 `mention_targets` 를 가지면 그 목록만 주소로 보고, 가지지 않으면 Keeper 이름을 주소로 본다 (`Keeper_lane_mentions.effective_target_ids`). 그래서 `mention_targets` 를 가진 Keeper 가 자기 이름을 목록에 넣지 않았으면 그 이름은 선언이 아니다. 선언으로 치면 아무도 받지 않는 대상이 기록되고 쓴 사람은 그 사실을 알 수 없다. 이 이름은 글 속 말이고 `unresolved` 에 나온다. 별칭은 소문자로 맞춘 이름 그대로 기록한다. 브로드캐스트는 목록과 상관없이 Keeper 이름을 먼저 찾아서 이 기준과 다르다. 지금도 다르고 이 RFC 는 바꾸지 않는다. 2026-10-30 에 읽은 설정 41개는 모두 목록에 자기 이름이 있어서 이 차이로 달라지는 Keeper 는 없다.
 
 별칭 하나는 Keeper 한 명만 가리킨다. 같은 별칭을 둘 이상이 쓰면 지금도 조회가 오류로 끝난다 (`lib/keeper/keeper_meta_store.ml:439`, 오류 문구 `multiple persisted Keepers claim mention_target`). 그래서 `pangyo-preachers` 처럼 Keeper 여럿이 나눠 쓰는 계정은 별칭으로 선언할 수 없다. 이 RFC 는 이 규칙을 바꾸지 않는다.
 
@@ -210,7 +212,7 @@ val resolve :
 | L1 | `Candidate` 와 `resolve`, 순수 시험. 선언은 인자로 받는다. 이름이 경로가 되기 전의 막음은 `Candidate.of_string` 에 둔다 (§3.1). 재생 도구 `tools/recipient_replay` 가 board 글을 센다 (§7) |
 | L2a | Keeper 의 게시판 스캔과 `Board_dispatch` 의 글 신호(`create_post_once_by_fusion_run_id`, `update_post`)가 글에 기록된 `audience` 를 쓴다. 제목과 본문에서 다시 계산하지 않는다. `audience` 가 기록되지 않은 글은 스캔이 건너뛴다. 댓글은 아직 글자에서 읽는다. 스캔이 닿는 글에서 동작은 바뀌지 않는다 (D4) |
 | L2b | 댓글에도 `audience` 를 기록한다. `add_comment_with_audience` 가 정한 값을 댓글과 함께 저장하고(`lib/board/board_core.ml`), 스캔이 그 값을 쓴다. 스캔이 댓글의 `audience` 를 글자에서 계산하는 길은 없어진다. `Thread_participants` 로 기록된 댓글에서 Keeper 를 깨우는 판단(`wake_reason`)은 아직 글자를 읽고, 그 읽기는 L2d 에서 바꾼다 (§3.4). 이미 쓴 댓글에는 값이 없고, 읽을 때 짐작하지 않는다 (D4) |
-| L2c | board 쓰기 경로(글 만들기·고치기·댓글)가 `resolution` 으로 `audience` 를 정하고 응답에 `unresolved` 를 싣는다. 조회 함수는 `Board_dispatch.init_jsonl` 의 필수 인자(`~recipient_lookup`)로 서버 시작점에서 넘기고, 후보로 파일 경로를 만들기 전에 `Keeper_name.of_string` 을 거친다 (§3.1). 읽기가 먼저 시작한 백엔드에는 조회가 없어서 주소가 든 글은 거절되고, 이후 `init_jsonl` 이 조회를 넣으면 풀린다. `unresolved` 는 MCP 도구 `masc_board_post`·`masc_board_post_edit`·`masc_board_comment` 의 응답에 실린다 |
+| L2c | board 쓰기 경로(글 만들기·고치기·댓글)가 `resolution` 으로 `audience` 를 정하고 응답에 `unresolved` 를 싣는다. 조회 함수는 `Board_dispatch.init_jsonl` 의 필수 인자(`~recipient_lookup`)로 서버 시작점에서 넘기고, 후보로 파일 경로를 만들기 전에 `Keeper_name.of_string` 을 거친다 (§3.1). 선언 여부는 라우터와 같은 `effective_target_ids` 로 가리고(§3.2), Keeper 설정은 쓰기 하나에 한 번만 읽는다(`Recipient_lookup.make_per_write`). 글 고치기는 락을 잡기 전에 조회하고, 락 안에서 글이 그대로일 때만 그 결과를 쓴다. 읽기가 먼저 시작한 백엔드에는 조회가 없어서 주소가 든 글은 거절되고, 이후 `init_jsonl` 이 조회를 넣으면 풀린다. `unresolved` 는 MCP 도구 `masc_board_post`·`masc_board_post_edit`·`masc_board_comment` 의 응답에 실린다 |
 | L2d | Keeper 가 글자에서 `@이름` 을 다시 읽는 두 곳(`match_observation`, `wake_reason` 의 `match_signal`)이 기록된 `audience` 를 쓴다. 읽는 쪽을 지우는 일이고 새 상태는 없다 (§3.4) |
 | L3 | 브로드캐스트 쓰기와 알림이 `resolution` 을 쓰고, 전달은 정해 둔 받는 사람으로 Keeper 를 찾는다. `Board_addressing.routing_target` 을 지운다. 지우기 전에 후보 추출이 선택자 옆의 `@이름` 을 놓치지 않는지 시험한다 (§3.4). 재생 도구에 저장된 메시지를 더한다 (§7) |
 | L4 | gRPC `mentions` 를 후보로 바로 넘기고, 선언에 없는 이름은 오류로 돌려준다 (D3) |

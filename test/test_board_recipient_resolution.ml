@@ -115,8 +115,17 @@ let test_an_undeclared_name_does_not_reject_the_post =
     let post, unresolved = get (write ~visibility:Board.Public "@check please") in
     check string "the post is open to discovery" "discoverable" (label post.audience);
     check (list string) "the name is reported" [ "check" ] unresolved;
-    match write ~visibility:Board.Direct "@check please" with
-    | Error (Board.Validation_error _) -> ()
+    (* A refused post returns no [unresolved], so the refusal names them. *)
+    match write ~visibility:Board.Direct "@check and @param please" with
+    | Error (Board.Validation_error detail) ->
+      List.iter
+        (fun name ->
+           check
+             bool
+             (Printf.sprintf "the refusal names @%s (%s)" name detail)
+             true
+             (contains ~sub:("@" ^ name) detail))
+        [ "check"; "param" ]
     | Ok _ -> fail "a Direct post with no declared target must be refused"
     | Error error -> fail (Board.show_board_error error))
 ;;

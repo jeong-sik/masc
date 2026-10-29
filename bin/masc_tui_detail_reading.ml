@@ -1,7 +1,7 @@
 module Position = Masc_tui_scroll.Position
 
 type section = { heading : string; body : string }
-type document_kind = Captured | Observation
+type document_kind = Captured of bool | Observation
 type row = Heading of string | Content of string | Note of string
 type search_mark = No_match | Match | Current_match
 type search = { query : string; editing : bool; landing : (int * int) option }
@@ -9,7 +9,7 @@ type t = { title : string; sections : section list; position : Position.t;
   kind : document_kind; prepared : (int * row list) option; hints : string option; search : search option }
 type movement = First | Last | By of int
 
-let create ~title sections = { title; sections; position = Position.first; kind = Captured; prepared=None; hints=None;search=None }
+let create ?(ko = false) ~title sections = { title; sections; position = Position.first; kind = Captured ko; prepared=None; hints=None;search=None }
 let create_observation ~title sections = { title; sections; position = Position.first; kind = Observation; prepared=None; hints=None;search=None }
 let forget_landing = Option.map (fun search -> {search with landing=None})
 let replace ~title sections reading = {reading with title;sections;prepared=None;hints=None;
@@ -31,8 +31,9 @@ let rows ~width reading = match reading.prepared with
           (Masc.Tui_terminal_text.sanitize_terminal_text line))
   in
   let note = match reading.kind with
-    | Captured -> List.map (fun line -> Note line)
-        (wrap "Captured reading · close and reopen after refreshing to read updates.")
+    | Captured ko -> List.map (fun line -> Note line)
+        (wrap (if ko then "고정된 관측 · 닫고 다시 열어 현재 관측 확인 · 필요하면 닫은 뒤 r로 새로고침"
+               else "Captured reading · close and reopen after refreshing to read updates."))
     | Observation -> [] in
   note @ List.concat_map (fun section ->
       Content "" ::

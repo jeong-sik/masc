@@ -352,30 +352,30 @@ let memory_no_values =
   ; mrow_delta = ""
   }
 
-let memory_cells ?(state_style = "") ?(size_style = "") ?(delta_style = "")
+let memory_cells ?(ko = false) ?(state_style = "") ?(size_style = "") ?(delta_style = "")
     columns values =
   let revision =
     if columns.mcol_show_updated then
-      [ Table.cell ~align:Table.Right ~header:"UPDATED"
+      [ Table.cell ~align:Table.Right ~header:(if ko then "갱신" else "UPDATED")
           ~width:memory_updated_width values.mrow_updated
       ]
     else []
   in
   let source =
     if columns.mcol_show_source then
-      [ Table.cell ~header:"SOURCE" ~width:memory_source_width
+      [ Table.cell ~header:(if ko then "원본" else "SOURCE") ~width:memory_source_width
           values.mrow_source
       ]
     else []
   in
-  [ Table.cell ~style:state_style ~header:"ST" ~width:memory_state_width
+  [ Table.cell ~style:state_style ~header:(if ko then "상" else "ST") ~width:memory_state_width
       values.mrow_state
-  ; Table.cell ~header:"KEEPER" ~width:columns.mcol_name values.mrow_name
+  ; Table.cell ~header:(if ko then "키퍼" else "KEEPER") ~width:columns.mcol_name values.mrow_name
   ]
   @ revision
-  @ [ Table.cell ~align:Table.Right ~header:"FACTS" ~width:memory_facts_width
+  @ [ Table.cell ~align:Table.Right ~header:(if ko then "기억" else "FACTS") ~width:memory_facts_width
         values.mrow_facts
-    ; Table.cell ~align:Table.Right ~style:size_style ~header:"STORED"
+    ; Table.cell ~align:Table.Right ~style:size_style ~header:(if ko then "저장" else "STORED")
         ~width:memory_size_width values.mrow_size
     ]
   @ source
@@ -430,8 +430,8 @@ let allocate_memory_columns ~inner_width =
     in
     { base with mcol_name = base.mcol_name + growth }
 
-let memory_header_row columns =
-  Table.header_row (memory_cells columns memory_no_values)
+let memory_header_row ?(ko = false) columns =
+  Table.header_row (memory_cells ~ko columns memory_no_values)
 
 let memory_row ?state_style ?size_style ?delta_style ?close columns values =
   Table.row ?close

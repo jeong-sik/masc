@@ -151,8 +151,8 @@ val memory_columns_used_width : memory_columns -> int
     it: every Memory cell has a widest known reading, so surplus width stays
     margin instead of padding one cell out to the frame. *)
 
-val memory_header_row : memory_columns -> string
-(** The column names, laid out on the allocation. *)
+val memory_header_row : ?ko:bool -> memory_columns -> string
+(** The column names, laid out on the allocation. [ko] selects Korean. *)
 
 val memory_row :
   ?state_style:string ->

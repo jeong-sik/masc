@@ -928,6 +928,8 @@ let for_surface = function
       [ b Navigate "j/k" "move" ~help:"move the keeper row"
       ; b Act "Enter" "facts"
           ~help:"browse what the selected keeper actually remembers"
+      ; b Act "v" "health details"
+          ~help:"read the complete fleet summary and selected keeper health in a scrollable capture"
       ; b Act "a / A" "all fleet"
           ~help:"browse and search consolidated memory across the entire fleet"
       ; b Act "s" "sort"

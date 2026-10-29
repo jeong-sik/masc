@@ -593,6 +593,7 @@ count is drawn beyond the available space.
 |---|---|
 | `j/k` | move the keeper row |
 | `Enter` | browse what the selected keeper actually remembers |
+| `v` | read the complete fleet summary and selected keeper health in a scrollable capture |
 | `a / A` | browse and search consolidated memory across the entire fleet |
 | `s` | cycle sort keepers (facts, size, delta, state, name) |
 | `u` | switch stored memory and request input between tokens and KiB |

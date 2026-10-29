@@ -61,6 +61,10 @@ let message_count history =
   + List.length history.open_messages
 ;;
 
+let history_objects history =
+  List.map (fun turn -> turn.bundle) history.turns @ history.open_messages
+;;
+
 let head_format = "masc.checkpoint.head"
 
 let header_json ~before_messages ~after_messages =
@@ -198,22 +202,33 @@ let advance chain entries n =
   go chain entries n
 ;;
 
+module Digest_set = Set.Make (String)
+
+let rec first n = function
+  | [] -> []
+  | entry :: rest -> if n = 0 then [] else entry :: first (n - 1) rest
+;;
+
 (* The longest run of [previous] turns whose chain values the new messages
    reproduce at the same positions; a match there is a match of every message
-   before it. *)
-let kept_turns entries previous_turns =
-  let rec keep rev_kept chain entries = function
-    | [] -> List.rev rev_kept, chain, entries
+   before it. A kept turn whose bundle is [absent] gets its bundle back from
+   those messages, as an object to write. *)
+let kept_turns ~absent entries previous_turns =
+  let rec keep rev_kept rev_objects chain entries = function
+    | [] -> List.rev rev_kept, List.rev rev_objects, chain, entries
     | turn :: turns ->
       (match advance chain entries turn.messages with
        | Some (chain', rest) when String.equal chain' turn.chain ->
-         keep (turn :: rev_kept) chain' rest turns
-       | Some _ | None -> List.rev rev_kept, chain, entries)
+         if Digest_set.mem turn.bundle absent
+         then (
+           let bytes = bundle_bytes (first turn.messages entries) in
+           let bundle = digest_of_bytes bytes in
+           keep ({ turn with bundle } :: rev_kept) ((bundle, bytes) :: rev_objects) chain' rest turns)
+         else keep (turn :: rev_kept) rev_objects chain' rest turns
+       | Some _ | None -> List.rev rev_kept, List.rev rev_objects, chain, entries)
   in
-  keep [] chain_start entries previous_turns
+  keep [] [] chain_start entries previous_turns
 ;;
-
-module Digest_set = Set.Make (String)
 
 let unwritten_open_objects ~previous_open entries =
   let rec collect written rev_objects = function
@@ -226,7 +241,7 @@ let unwritten_open_objects ~previous_open entries =
   collect (Digest_set.of_list previous_open) [] entries
 ;;
 
-let plan_save memo ?previous boundary (cp : Checkpoint_types.t) =
+let plan_save memo ?previous ?(absent = []) boundary (cp : Checkpoint_types.t) =
   let* (before_messages, after_messages), decoded_header =
     Checkpoint_codec.validated_fields_around_messages cp
   in
@@ -239,15 +254,18 @@ let plan_save memo ?previous boundary (cp : Checkpoint_types.t) =
       encode (entry :: rev_entries) rest
   in
   let* entries = encode [] cp.messages in
+  let absent = Digest_set.of_list absent in
   let previous_turns, previous_open =
     match previous with
     | None -> [], []
-    | Some previous -> previous.turns, previous.open_messages
+    | Some previous ->
+      ( previous.turns
+      , List.filter (fun digest -> not (Digest_set.mem digest absent)) previous.open_messages )
   in
-  let kept, chain, rest = kept_turns entries previous_turns in
+  let kept, restored, chain, rest = kept_turns ~absent entries previous_turns in
   let history, objects =
     match boundary, rest with
-    | Turn_closes, [] -> { turns = kept; open_messages = [] }, []
+    | Turn_closes, [] -> { turns = kept; open_messages = [] }, restored
     | Turn_closes, (_ :: _ as closing) ->
       let bytes = bundle_bytes closing in
       let bundle = digest_of_bytes bytes in
@@ -255,10 +273,10 @@ let plan_save memo ?previous boundary (cp : Checkpoint_types.t) =
       ( { turns = kept @ [ { bundle; messages = List.length closing; chain } ]
         ; open_messages = []
         }
-      , [ bundle, bytes ] )
+      , restored @ [ bundle, bytes ] )
     | Turn_continues, open_entries ->
       ( { turns = kept; open_messages = List.map (fun entry -> entry.digest) open_entries }
-      , unwritten_open_objects ~previous_open open_entries )
+      , restored @ unwritten_open_objects ~previous_open open_entries )
   in
   memo.entries <- next;
   let header = header_json ~before_messages ~after_messages in
@@ -407,49 +425,58 @@ let history_of_json = function
     Error "history must be an object"
 ;;
 
-(* A document without [format] is not a head. One that names an earlier or
-   later [checkpoint_version] is reported as that version, so a reader can
-   tell the hard cut apart from damage. *)
-let not_a_head fields json =
-  match Checkpoint_codec.checkpoint_json_version json with
-  | Ok got when got <> Checkpoint_types.checkpoint_version ->
-    Error
-      (Checkpoint_invalid
-         (Error.Serialization
-            (VersionMismatch { expected = Checkpoint_types.checkpoint_version; got })))
-  | Ok _ | Error _ ->
-    Error
-      (Head_invalid
-         (Printf.sprintf "document fields are [%s], not a head"
-            (String.concat "," (List.map fst fields))))
+(* The [checkpoint_version] a document names: a head's in its checkpoint
+   field, any other document's at its top. It is read before the head's
+   shape, so the hard cut and a later binary's head (another field, another
+   format) read as their version, not as damage. *)
+let named_version fields json =
+  match List.mem_assoc "format" fields, List.assoc_opt "checkpoint" fields with
+  | true, Some checkpoint -> Checkpoint_codec.checkpoint_json_version checkpoint
+  | true, None | false, (Some _ | None) -> Checkpoint_codec.checkpoint_json_version json
+;;
+
+let head_of_fields fields =
+  let invalid detail = Error (Head_invalid detail) in
+  let what = "head" in
+  match exact_fields ~what [ "format"; "checkpoint"; "history" ] fields with
+  | Error detail -> invalid detail
+  | Ok () ->
+    (match string_field ~what fields "format" with
+     | Error detail -> invalid detail
+     | Ok format when not (String.equal format head_format) ->
+       invalid (Printf.sprintf "head.format is %S, expected %S" format head_format)
+     | Ok _ ->
+       (match List.assoc_opt "checkpoint" fields, List.assoc_opt "history" fields with
+        | None, _ -> invalid "head.checkpoint is missing"
+        | _, None -> invalid "head.history is missing"
+        | Some checkpoint_json, Some history_json ->
+          (match Checkpoint_codec.of_json checkpoint_json, history_of_json history_json with
+           | Error error, _ -> Error (Checkpoint_invalid error)
+           | Ok _, Error detail -> invalid detail
+           | Ok checkpoint, Ok history ->
+             (match checkpoint.messages with
+              | [] -> Ok { checkpoint; history }
+              | _ :: _ -> invalid "head.checkpoint.messages must be empty"))))
 ;;
 
 let head_of_string text =
   let invalid detail = Error (Head_invalid detail) in
   match Yojson.Safe.from_string text with
   | exception Yojson.Json_error detail -> invalid ("not JSON: " ^ detail)
-  | `Assoc fields as json when not (List.mem_assoc "format" fields) -> not_a_head fields json
-  | `Assoc fields ->
-    let what = "head" in
-    (match exact_fields ~what [ "format"; "checkpoint"; "history" ] fields with
-     | Error detail -> invalid detail
-     | Ok () ->
-       (match string_field ~what fields "format" with
-        | Error detail -> invalid detail
-        | Ok format when not (String.equal format head_format) ->
-          invalid (Printf.sprintf "head.format is %S, expected %S" format head_format)
-        | Ok _ ->
-          (match List.assoc_opt "checkpoint" fields, List.assoc_opt "history" fields with
-           | None, _ -> invalid "head.checkpoint is missing"
-           | _, None -> invalid "head.history is missing"
-           | Some checkpoint_json, Some history_json ->
-             (match Checkpoint_codec.of_json checkpoint_json, history_of_json history_json with
-              | Error error, _ -> Error (Checkpoint_invalid error)
-              | Ok _, Error detail -> invalid detail
-              | Ok checkpoint, Ok history ->
-                (match checkpoint.messages with
-                 | [] -> Ok { checkpoint; history }
-                 | _ :: _ -> invalid "head.checkpoint.messages must be empty")))))
+  | `Assoc fields as json ->
+    (match named_version fields json with
+     | Ok got when got <> Checkpoint_types.checkpoint_version ->
+       Error
+         (Checkpoint_invalid
+            (Error.Serialization
+               (VersionMismatch { expected = Checkpoint_types.checkpoint_version; got })))
+     | Ok _ | Error _ ->
+       if List.mem_assoc "format" fields
+       then head_of_fields fields
+       else
+         invalid
+           (Printf.sprintf "document fields are [%s], not a head"
+              (String.concat "," (List.map fst fields))))
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
     invalid "head must be an object"
 ;;

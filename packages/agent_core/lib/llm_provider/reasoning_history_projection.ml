@@ -19,13 +19,15 @@ type reasoning_block_kind =
   | Redacted_thinking_block
 [@@deriving show]
 
-type t =
-  { messages : Types.message list
+type 'source projection =
+  { messages : 'source Types.message_with list
   ; reasoning_target : Types.Reasoning_source.t
   ; reasoning_replay_drops : reasoning_replay_drop list
   ; removed_empty_assistant_indices : int list
   }
 [@@deriving show]
+
+type t = Types.media_source projection [@@deriving show]
 
 type error =
   | Invalid_control_lowering of Message_origin_lowering.error
@@ -173,7 +175,7 @@ let without_reasoning content =
     content
 ;;
 
-let content_has_generic_reasoning =
+let content_has_generic_reasoning content =
   List.exists (function
     | Thinking _ | ReasoningDetails _ -> true
     | Text _
@@ -183,6 +185,7 @@ let content_has_generic_reasoning =
     | Image _
     | Document _
     | Audio _ -> false)
+    content
 ;;
 
 let without_generic_reasoning content =
@@ -346,11 +349,13 @@ let validate_replay_continuity_for_provider_config
 ;;
 
 let project
+      (type source)
       ?(control_lowering = Message_origin_lowering.Preserve_positions)
-      ~assistant_has_payload
-      ~reasoning_block_supported
+      ~(assistant_has_payload : source Types.content_block_with list -> bool)
+      ~(reasoning_block_supported : source Types.content_block_with -> bool)
       ~(replay_capability : Reasoning_dialect.replay_capability)
-      (messages : Types.message list)
+      (messages : source Types.message_with list)
+  : (source projection, error) result
   =
   let reasoning_target = replay_capability.target in
   let replay_policy =
@@ -385,7 +390,7 @@ let project
           ; reasoning_replay_drops = List.rev replay_drops
           ; removed_empty_assistant_indices = List.rev removed_empty
           }
-      | (message_index, (message : Types.message), source_classification) :: rest ->
+      | (message_index, (message : _ Types.message_with), source_classification) :: rest ->
         let has_reasoning = content_has_reasoning message.content in
         let content_result =
           match message.role, has_reasoning with

@@ -716,7 +716,7 @@ let transmitted_history ?(tools = []) ~(config : Provider_config.t) messages =
       Backend_openai_serialize.project_history ~tools_present config messages
   in
   Result.map
-    (fun (projection : Reasoning_history_projection.t) -> projection.messages)
+    (fun (projection : _ Reasoning_history_projection.projection) -> projection.messages)
     projected
 ;;
 

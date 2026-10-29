@@ -521,7 +521,7 @@ let content_has_reasoning =
     | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
 ;;
 
-let content_has_tool_use =
+let content_has_tool_use content =
   List.exists (function
     | ToolUse _ -> true
     | Text _
@@ -532,9 +532,10 @@ let content_has_tool_use =
     | Image _
     | Document _
     | Audio _ -> false)
+    content
 ;;
 
-let content_has_visible_assistant_text =
+let content_has_visible_assistant_text content =
   List.exists (function
     | Text text -> not (Api_common.string_is_blank text)
     | Thinking _
@@ -545,6 +546,7 @@ let content_has_visible_assistant_text =
     | Image _
     | Document _
     | Audio _ -> false)
+    content
 ;;
 
 (* Returned structured reasoning is a replay carrier. The request's optional

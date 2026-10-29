@@ -776,14 +776,14 @@ type request_view =
   ; carried_wire : Agent_core.Llm_provider.Types.message list
         (** [carried] with its media read back from the store, and nothing
             else of the history. *)
-  ; wire :
-      ( Agent_core.Llm_provider.Types.message list
+  ; transmitted :
+      ( Agent_core.Types.message list
         , Agent_core.Llm_provider.Reasoning_history_projection.error )
         result
-        (** The dialect's reasoning projection over [carried_wire] alone, or
-            why it declined; [carried_wire] itself is then handed over, and
-            the backend, running the same projection, refuses the request
-            with its typed error. *)
+        (** The dialect's reasoning projection over [carried] alone, still in
+            history form, or why it declined; [carried] itself is then handed
+            over, and the backend, running the same projection, refuses the
+            request with its typed error. *)
   }
 (** One request as {!For_testing.request_view} views it: composed in the
     durable vocabulary first, projected for the wire afterwards. The order

@@ -59,15 +59,9 @@ let view ?front snapshot messages =
     ~materialize:(fun ~pending:_ _ -> fail "unsummarized history entered tool demotion") messages
 ;;
 
-(* The wire messages, read back as history so they compare with the history
-   these tests write. They carry no media. *)
-let wire (view : Driver.request_view) = match view.wire with
-  | Ok messages ->
-    List.map (fun message ->
-      match Agent_core.History.of_wire_message (Agent_core.History.Memory_store.create ()) message with
-      | Ok message -> message
-      | Error error -> fail (Agent_core.Error.to_string (Agent_core.Error.Media error)))
-      messages
+(* The messages the dialect's projection keeps, in history form. *)
+let wire (view : Driver.request_view) = match view.transmitted with
+  | Ok messages -> messages
   | Error error -> fail (Agent_core.Llm_provider.Reasoning_history_projection.error_to_string error)
 ;;
 

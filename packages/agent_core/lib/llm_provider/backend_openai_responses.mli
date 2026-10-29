@@ -10,8 +10,8 @@
 val project_history
   :  ?tools_present:bool
   -> Provider_config.t
-  -> Types.message list
-  -> (Reasoning_history_projection.t, Reasoning_history_projection.error) result
+  -> 'source Types.message_with list
+  -> ('source Reasoning_history_projection.projection, Reasoning_history_projection.error) result
 (** The history this codec will actually serialize: plaintext Thinking and opaque
     Responses reasoning are supported carriers. The declared replay policy still
     decides which may be sent (OpenAI opaque-only excludes plaintext). Other

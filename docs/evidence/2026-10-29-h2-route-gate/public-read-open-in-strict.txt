@@ -1,0 +1,16 @@
+public_read rows: 133; closed without a credential: 118; open: 15
+  GET  /api/v1/gate/connector/status              exact  status 400
+  GET  /api/v1/gate/connectors                    exact  status 200
+  GET  /api/v1/gate/events                        exact  status 200
+  GET  /api/v1/gate/health                        exact  status 200
+  GET  /api/v1/gate/status                        exact  status 200
+  GET  /api/v1/msx/carts                          exact  status 503
+  GET  /api/v1/multimodal/get/                    prefix status 400
+  GET  /api/v1/multimodal/list                    prefix status 200
+  GET  /api/v1/multimodal/provenance/             prefix status 400
+  GET  /api/v1/voice/audio/                       prefix status 400
+  GET  /dashboard                                 exact  status 503
+  GET  /dashboard/                                exact  status 503
+  GET  /dashboard/                                prefix status 503
+  GET  /favicon.ico                               exact  status 200
+  GET  /favicon.svg                               exact  status 200

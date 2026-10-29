@@ -569,34 +569,62 @@ let render_acceptance_frame (v : major) : string =
 type acceptance_head =
   | Head_pending
   | Head_payload
-  | Head_frame of { v : major; rest : string }
+  | Head_frame of { v : major; preamble : string; rest : string }
 
-(* A frame is a few dozen bytes. A head that has not closed within this many
-   bytes is payload that happens to start with a record separator. *)
-let acceptance_frame_max_bytes = 128
+(* The transport (ssh, container exec) may print a line of its own before the
+   shim runs, so the frame is the first record separator in the stream, not
+   necessarily the first byte. The bound covers such a line plus the frame; a
+   head that has not resolved within it is payload. *)
+let acceptance_frame_max_bytes = 4096
+
+(* Every frame this build can read starts this way, so a held tail that is
+   not a prefix of one can never become a frame. *)
+let is_acceptance_frame_prefix tail =
+  List.exists
+    (fun v -> String.starts_with ~prefix:tail (render_acceptance_frame v))
+    majors
 
 let split_acceptance_head (head : string) : acceptance_head =
   let n = String.length head in
-  if n = 0 then Head_pending
-  else if head.[0] <> rs then Head_payload
-  else
-    match String.index_from_opt head 1 rs with
-    | None -> if n >= acceptance_frame_max_bytes then Head_payload else Head_pending
-    | Some closing ->
-      let decoded =
-        let* json = parse_json ~what:"acceptance frame" (String.sub head 1 (closing - 1)) in
-        let* fields = expect_assoc ~what:"acceptance frame" json in
-        let* body =
-          member ~what:"acceptance frame" acceptance_wrapper_key fields
-          >>= expect_assoc ~what:"acceptance frame"
-        in
-        member ~what:"acceptance frame" "v" body
-        >>= expect_int ~what:"acceptance frame" "v"
-        >>= check_version ~what:"acceptance frame"
-      in
-      (match decoded with
-       | Ok v -> Head_frame { v; rest = String.sub head (closing + 1) (n - closing - 1) }
-       | Error _ -> Head_payload)
+  match String.index_opt head rs with
+  | None -> if n >= acceptance_frame_max_bytes then Head_payload else Head_pending
+  | Some opening ->
+    let tail = String.sub head opening (n - opening) in
+    (match String.index_from_opt tail 1 rs with
+     | None ->
+       if n < acceptance_frame_max_bytes && is_acceptance_frame_prefix tail
+       then Head_pending
+       else Head_payload
+     | Some closing ->
+       let decoded =
+         let* json =
+           parse_json ~what:"acceptance frame" (String.sub tail 1 (closing - 1))
+         in
+         let* fields = expect_assoc ~what:"acceptance frame" json in
+         let* body =
+           member ~what:"acceptance frame" acceptance_wrapper_key fields
+           >>= expect_assoc ~what:"acceptance frame"
+         in
+         member ~what:"acceptance frame" "v" body
+         >>= expect_int ~what:"acceptance frame" "v"
+         >>= check_version ~what:"acceptance frame"
+       in
+       (match decoded with
+        | Ok v ->
+          Head_frame
+            { v
+            ; preamble = String.sub head 0 opening
+            ; rest = String.sub tail (closing + 1) (String.length tail - closing - 1)
+            }
+        | Error _ -> Head_payload))
+
+(* The stream ended while [head] was still pending. A held tail that is a
+   prefix of a frame is what the wire cut off, not payload. *)
+let settle_acceptance_head (head : string) : string =
+  match String.index_opt head rs with
+  | Some opening when is_acceptance_frame_prefix (String.sub head opening (String.length head - opening)) ->
+    String.sub head 0 opening
+  | Some _ | None -> head
 
 (* --- shim probe --- *)
 

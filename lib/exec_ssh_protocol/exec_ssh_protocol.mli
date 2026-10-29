@@ -300,17 +300,26 @@ type acceptance_head =
     (** these bytes could still become a frame; hold them *)
   | Head_payload
     (** these bytes are not a frame and are payload from the first byte *)
-  | Head_frame of { v : major; rest : string }
-    (** a frame was read; [rest] is whatever followed it *)
+  | Head_frame of { v : major; preamble : string; rest : string }
+    (** a frame was read. [preamble] is what the transport itself wrote before
+        the shim ran, [rest] what followed the frame; the caller sees
+        [preamble ^ rest] *)
 
 val acceptance_frame_max_bytes : int
-(** A head that has not closed within this many bytes is payload. *)
+(** A head that has not resolved within this many bytes is payload. *)
 
 val split_acceptance_head : string -> acceptance_head
-(** Reads the first bytes of a stderr stream. Total: a head that starts with
-    anything but a record separator, that does not close within a bounded
-    length, or that closes on something other than a frame is [Head_payload]
-    and is released unchanged. *)
+(** Reads the front of a stderr stream. The frame is the first record
+    separator in it: the transport may print a line of its own ahead of the
+    shim, but the child cannot, because the shim writes the frame before the
+    child runs. Total: a head with no frame, one that diverges from every
+    frame this build reads, or one that does not resolve within the bound is
+    [Head_payload] and is released unchanged. *)
+
+val settle_acceptance_head : string -> string
+(** The bytes to release when the stream ends while the head is still
+    {!Head_pending}: all of it, except a trailing prefix of a frame, which
+    is what a wire cut off mid-frame leaves and is not payload. *)
 
 val parse_trailer : string -> (trailer, string) result
 (** [parse_trailer tail] extracts the trailer from the TAIL of a

@@ -274,6 +274,7 @@ data and paint. A missing finish record remains an unfinished observation.
 | `v` | presets: show hidden unsent chat save receipts and their original commands |
 | `i` | on prompts, the input this prompt was last given |
 | `a` | runtime.toml: declare an account by copying a provider |
+| `m` | runtime.toml: choose which keepers memory recall asks Jev about |
 | `a` | prompts: show or hide internal fragments |
 | `a` | voice: assign a voice to a keeper |
 | `u` | presets: restore the selected preset; press twice to confirm |
@@ -413,7 +414,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Ctrl-U` | clear the draft |
 | `Ctrl-K / Ctrl-P` | cancel / edit the last queued line |
 | `F9` | fold or expand this Keeper's scheduled Jobs, pending occurrences, holds and latest result |
-| `Ctrl-T` / `/queue` | open the Keeper queue panel; select with Up/Down, read with Enter, change supported priorities with `n`/`l` |
+| `Ctrl-T` | inspect and manage waiting turns |
 | `PgUp/PgDn` | scroll history by a page |
 | `Ctrl-R` | cycle reasoning hidden / folded / full |
 | `Ctrl-D` | cycle compact / results / full tool detail |
@@ -717,6 +718,11 @@ count is drawn beyond the available space.
 | `( / )` | select the previous or next original text part for copying |
 | `s` | choose a local destination; exclusively create the selected report revision's exact bytes |
 | `o` | open the selected fixed report revision; the browser uses its own authentication |
+| `P` | enable or revoke external access to all revisions of this report |
+| `U` | inspect the original recorded share operation |
+| `!` | confirm the displayed original operation after its preview is shown |
+| `Y` | copy the selected revision's link when external sharing is enabled |
+| `R` | reread the exact open resource, including an older report revision |
 | `y` | send the selected text part's original bytes via OSC 52; terminal support is unconfirmed |
 | `Esc` | the text hands back to the list; the list leaves for System |
 | `/` | find a resource name in the list, or text in the loaded detail |

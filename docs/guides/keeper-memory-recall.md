@@ -93,6 +93,33 @@ Start with one or two Keepers. The canary (RFC section 5, layer 1c) measures
 the time before the first request, how often the judgment fails and how often
 the chosen set changes.
 
+### From the TUI
+
+Config > runtime.toml, key `m`, opens a form for the same three keys. The
+range row chooses off, picked Keepers only, or every Keeper. In the picked
+range the form lists the Keepers the TUI knows, and a name the file lists that
+the TUI does not know stays in the list, marked. Space picks, Enter saves, Esc
+closes.
+
+- Enter hands the new runtime.toml text to the pane's raw-edit save, the one
+  `e` ends in: the same preview, revision check and conflict handling. The form
+  is refused when the file changed after it was opened.
+- The server republishes `[typesafeai]` when a save lands, so the change
+  applies from the next model request. No restart.
+- Off writes only `memory_recall = false`, so a Keeper list in the file stays
+  for the next time recall is switched on by hand. Every Keeper removes the
+  list, which the file refuses next to scope `"all"`. The text is read back with
+  the loader before it is handed on; a `[typesafeai]` the line editor cannot
+  change (an inline table, for one) is refused and left for `e`.
+- A form on a draft that is not saved yet starts from the draft, so a hand edit
+  is neither dropped nor written over.
+- Every line outside the three keys stays as it was. A key that already holds
+  what the choice needs is not rewritten, and the same Keepers in another order
+  are the same choice. A list that changes is written whole, so the comments
+  inside it and on its line go. A key the file does not have yet is added at
+  the end of the table, below a comment that sits above the next table's header
+  (the line editor does this for every file it edits, issue #46797).
+
 ## Watch it
 
 - **Journal.** `memory-recall-evaluations.jsonl` in the Keeper's runtime

@@ -21,6 +21,7 @@ let target =
       | Some Tui_types.Text_runtime_param -> "runtime-param"
       | Some Tui_types.Text_runtime_model_form -> "runtime-model-form"
       | Some Tui_types.Text_runtime_account_form -> "runtime-account-form"
+      | Some Tui_types.Text_memory_recall_form -> "memory-recall-form"
       | Some Tui_types.Text_voice_wizard -> "voice-wizard"
       | Some Tui_types.Text_palette -> "palette"
       | Some Tui_types.Text_row_search -> "row-search"
@@ -581,6 +582,29 @@ let test_the_account_form_claims_only_on_the_runtime_pane () =
   check target "another pane keeps its keys" None (resolved state)
 ;;
 
+(* The recall form stands on the runtime.toml pane too. It takes every key
+   there, so left open behind another pane it must not take that pane's keys,
+   and on a frame too small to draw the pane it lets go. *)
+let test_the_recall_form_claims_only_on_the_runtime_pane () =
+  let state = fresh_state () in
+  let form =
+    match
+      Masc_tui_memory_recall_form.open_on ~keepers:[ "alpha" ]
+        "[models.probe]\napi-name = \"probe\"\n"
+    with
+    | Ok form -> form
+    | Error reason -> Alcotest.fail reason
+  in
+  state.Tui_types.view <- Tui_types.Config;
+  state.Tui_types.config_pane <- Tui_types.Config_runtime;
+  state.Tui_types.memory_recall_form <- Some form;
+  check target "the recall form owns the keys"
+    (Some Tui_types.Text_memory_recall_form) (resolved state);
+  check target "a compact frame lets go" None (resolved ~compact_viewport:true state);
+  state.Tui_types.config_pane <- Tui_types.Config_prompts;
+  check target "another pane keeps its keys" None (resolved state)
+;;
+
 (* The form outlives nothing. The loop asks this every iteration rather than
    the places that move the surface: the Activity pane's mouse handler and
    the async Task handoff both change [view] without passing any
@@ -714,7 +738,9 @@ let () =
           test_case "the loop drops a launch form left on another surface" `Quick
             test_the_loop_drops_a_launch_form_left_on_another_surface;
           test_case "the account form claims only on the runtime pane" `Quick
-            test_the_account_form_claims_only_on_the_runtime_pane
+            test_the_account_form_claims_only_on_the_runtime_pane;
+          test_case "the recall form claims only on the runtime pane" `Quick
+            test_the_recall_form_claims_only_on_the_runtime_pane
         ] )
     ]
 ;;

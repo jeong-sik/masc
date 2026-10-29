@@ -3,6 +3,8 @@ open Server_auth
 module Http = Http_server_eio
 module Store = Published_artifact_store
 module Share = Published_artifact_share
+type response = { status : Httpun.Status.t; json : Yojson.Safe.t }
+type read_result = Private | Response of response
 
 let error_response error =
   let status, code, extra = match error with
@@ -18,13 +20,11 @@ let error_response error =
        "recovery", `String "Read this artifact before retrying publication."] in
   `Assoc (("error", `String (Store.error_message error)) :: ("code", `String code) :: extra), status
 
-let respond ?(status = `OK) request reqd json =
+let respond ?cors ?(status = `OK) request reqd json =
+  let cors = match cors with Some headers -> headers | None -> public_read_cors_headers request in
   Http.Response.json_value ~status
-    ~extra_headers:(["cache-control", "private, no-store"] @ cors_headers (get_origin request))
+    ~extra_headers:(["cache-control", "private, no-store"] @ cors)
     json reqd
-
-let refuse request reqd error =
-  let json, status = error_response error in respond ~status request reqd json
 
 let share_error_response error =
   let status, code, extra = match error with
@@ -37,9 +37,6 @@ let share_error_response error =
       ["attempted_receipt", Share.receipt_to_json receipt;
        "recovery", `String "Retry the identical operation for its settled result."] in
   `Assoc (("error", `String (Store.share_error_message error)) :: ("code", `String code) :: extra), status
-
-let refuse_share request reqd error =
-  let json, status = share_error_response error in respond ~status request reqd json
 
 let check_error_response error =
   let module Checks = Published_artifact_check_store in
@@ -55,9 +52,6 @@ let check_error_response error =
   | Commit_uncertain check -> response `Service_unavailable "artifact_check_commit_uncertain"
         ["attempted_check", Published_artifact_check.to_json check;
          "recovery", `String "Refresh artifact checks before retrying."]
-
-let refuse_check request reqd error =
-  let json, status = check_error_response error in respond ~status request reqd json
 
 let validate_body_workspace ~config json =
   match Workspace.validate_expected_workspace ~config json with
@@ -132,6 +126,7 @@ let decode_share_request ~config ~body =
        | _ -> Error (error_response (Store.Invalid "invalid artifact share operation")))
   | _ -> Error (error_response (Store.Invalid "expected a JSON object"))
 
+
 (* A shared artifact reads without a token and a private one only with the admin
    token. The route is registered [Public_read]; this checks the token when the
    request carries one. *)
@@ -155,92 +150,116 @@ let revision_param request =
     | Some n when n > 0 -> Ok (Some n)
     | Some _ | None -> Error (Store.Invalid "revision must be a positive integer")
 
+let response_of_pair (json, status) = { status; json }
+let ok json = { status = `OK; json }
+let artifact_error error = response_of_pair (error_response error)
+let check_error error = response_of_pair (check_error_response error)
+
+let list ~base_path =
+  match Eio_unix.run_in_systhread (fun () -> Store.list ~base_path) with
+  | Error error -> artifact_error error
+  | Ok listing -> ok (`Assoc
+      ["artifacts", `List listing.artifacts;
+       "diagnostics", `List (List.map (fun (id, message) ->
+         `Assoc ["id", `String id; "error", `String message]) listing.diagnostics)])
+
+let read ~base_path ~actor ~request =
+  match extract_path_param ~prefix:"/api/v1/published-artifacts/" (Http.Request.path request),
+        revision_param request with
+  | None, _ -> Response (artifact_error (Store.Invalid "artifact id required"))
+  | Some _, Error error -> Response (artifact_error error)
+  | Some id, Ok revision ->
+    match Eio_unix.run_in_systhread (fun () ->
+      Store.read_with_share ~base_path ~id ~revision ~allow_private:(Option.is_some actor)) with
+    | Error (`Share Store.Share_missing) when Option.is_none actor -> Private
+    | Error (`Share (( Store.Share_invalid _ | Store.Share_missing
+                     | Store.Share_operation_reused | Store.Share_unavailable _
+                     | Store.Share_commit_uncertain _ ) as error)) ->
+      Response (response_of_pair (share_error_response error))
+    | Error (`Artifact error) -> Response (artifact_error error)
+    | Ok `Private -> Private
+    | Ok (`Allowed (snapshot, artifact, selected, content)) ->
+      Response (ok (`Assoc
+        ["artifact", Published_artifact.summary_to_json ~id:artifact.id selected;
+         "content", `String content;
+         "revisions", `List (List.map Published_artifact.revision_to_json artifact.revisions);
+         "shared", `Bool snapshot.shared; "share_version", `Int snapshot.version]))
+
+let publish ~config ~actor ~body =
+  match decode_publication_request ~config ~body with
+  | Error response -> response_of_pair response
+  | Ok publication ->
+    match Eio_unix.run_in_systhread (fun () -> Store.publish ~base_path:config.base_path ~author:actor publication) with
+    | Error error -> artifact_error error
+    | Ok (artifact, revision) ->
+      { status = `Created; json = Published_artifact.publication_to_json ~id:artifact.id revision }
+
+let list_checks ~base_path =
+  match Eio_unix.run_in_systhread (fun () -> Published_artifact_check_store.list ~base_path) with
+  | Error error -> check_error error
+  | Ok listing -> ok (`Assoc
+      ["checks", `List (List.map Published_artifact_check.to_json listing.checks);
+       "diagnostics", `List (List.map (fun (file, message) ->
+         `Assoc ["file", `String file; "error", `String message]) listing.diagnostics)])
+
+let set_check ~config ~actor ~body =
+  match decode_check_request ~config ~body with
+  | Error response -> response_of_pair response
+  | Ok change ->
+    match Eio_unix.run_in_systhread (fun () ->
+      Published_artifact_check_store.set ~base_path:config.base_path ~actor change) with
+    | Error error -> check_error error
+    | Ok check -> ok (`Assoc ["check", Published_artifact_check.to_json check])
+
+let set_share ~config ~body =
+  match decode_share_request ~config ~body with
+  | Error response -> response_of_pair response
+  | Ok (id, change) ->
+    match Eio_unix.run_in_systhread (fun () ->
+      let open Result.Syntax in
+      let* receipt = Store.change_share ~base_path:config.base_path ~id change in
+      let* current = Store.read_share ~base_path:config.base_path ~id in
+      Ok (receipt, current)) with
+    | Error error -> response_of_pair (share_error_response error)
+    | Ok (receipt, current) ->
+      let status = match receipt.Share.outcome with Share.Applied _ -> `OK | Share.Conflict _ -> `Conflict in
+      { status; json = `Assoc ["id", `String id;
+          "receipt", Share.receipt_to_json receipt; "current", Share.snapshot_to_json current] }
+
+let respond_operation ?cors request reqd response =
+  respond ?cors ~status:response.status request reqd response.json
+
 let add_routes router =
   router
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/published-artifacts" (fun state _actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
-    match Eio_unix.run_in_systhread (fun () -> Store.list ~base_path) with
-    | Error error -> refuse request reqd error
-    | Ok listing ->
-      respond request reqd (`Assoc
-        ["artifacts", `List listing.artifacts;
-         "diagnostics", `List (List.map (fun (id, message) ->
-           `Assoc ["id", `String id; "error", `String message]) listing.diagnostics)]))
+    respond_operation request reqd (list ~base_path))
   |> Server_route.prefix_get Server_route.Public_read "/api/v1/published-artifacts/" (capability_read (fun state actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
-    match extract_path_param ~prefix:"/api/v1/published-artifacts/" (Http.Request.path request),
-          revision_param request with
-    | None, _ -> refuse request reqd (Store.Invalid "artifact id required")
-    | Some _, Error error -> refuse request reqd error
-    | Some id, Ok revision ->
-      let refuse_private () =
-        respond_auth_error request reqd
-          (Masc_domain.Auth
-             (Masc_domain.Auth_error.Unauthorized
-                { reason = Missing_token
-                ; message = "Authentication required unless external sharing is enabled for this artifact."
-                })) in
-      match Eio_unix.run_in_systhread (fun () ->
-        Store.read_with_share ~base_path ~id ~revision ~allow_private:(Option.is_some actor)) with
-      | Error (`Share Store.Share_missing) when Option.is_none actor -> refuse_private ()
-      | Error (`Share (( Store.Share_invalid _ | Store.Share_missing
-                       | Store.Share_operation_reused | Store.Share_unavailable _
-                       | Store.Share_commit_uncertain _ ) as error)) ->
-        refuse_share request reqd error
-      | Error (`Artifact error) -> refuse request reqd error
-      | Ok `Private -> refuse_private ()
-      | Ok (`Allowed (snapshot, artifact, selected, content)) ->
-        respond request reqd (`Assoc
-          ["artifact", Published_artifact.summary_to_json ~id:artifact.id selected;
-           "content", `String content;
-           "revisions", `List (List.map Published_artifact.revision_to_json artifact.revisions);
-           "shared", `Bool snapshot.shared; "share_version", `Int snapshot.version])))
+    match read ~base_path ~actor ~request with
+    | Response response -> respond_operation request reqd response
+    | Private ->
+      respond_auth_error request reqd
+        (Masc_domain.Auth
+           (Masc_domain.Auth_error.Unauthorized
+              { reason = Missing_token
+              ; message = "Authentication required unless external sharing is enabled for this artifact."
+              }))))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/published-artifacts" (fun state actor request reqd ->
     let config = Mcp_server.workspace_config state in
-    let base_path = config.base_path in
+    let cors = public_read_cors_headers request in
     Http.Request.read_body_async reqd (fun body ->
-      match decode_publication_request ~config ~body with
-      | Error (json, status) -> respond ~status request reqd json
-      | Ok publication ->
-        match Eio_unix.run_in_systhread (fun () -> Store.publish ~base_path ~author:actor publication) with
-        | Error error -> refuse request reqd error
-        | Ok (artifact, revision) ->
-          respond ~status:`Created request reqd
-            (Published_artifact.publication_to_json ~id:artifact.id revision)))
+      respond_operation ~cors request reqd (publish ~config ~actor ~body)))
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/published-artifact-checks" (fun state _actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
-    match Eio_unix.run_in_systhread (fun () -> Published_artifact_check_store.list ~base_path) with
-    | Error error -> refuse_check request reqd error
-    | Ok listing -> respond request reqd (`Assoc
-      ["checks", `List (List.map Published_artifact_check.to_json listing.checks);
-       "diagnostics", `List (List.map (fun (file, message) ->
-         `Assoc ["file", `String file; "error", `String message]) listing.diagnostics)]))
+    respond_operation request reqd (list_checks ~base_path))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/published-artifact-checks" (fun state actor request reqd ->
     let config = Mcp_server.workspace_config state in
-    let base_path = config.base_path in
+    let cors = public_read_cors_headers request in
     Http.Request.read_body_async reqd (fun body ->
-      match decode_check_request ~config ~body with
-      | Error (json, status) -> respond ~status request reqd json
-      | Ok change ->
-        match Eio_unix.run_in_systhread (fun () ->
-          Published_artifact_check_store.set ~base_path ~actor change) with
-        | Error error -> refuse_check request reqd error
-        | Ok check -> respond request reqd
-          (`Assoc ["check", Published_artifact_check.to_json check])))
+      respond_operation ~cors request reqd (set_check ~config ~actor ~body)))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/published-artifact-shares" (fun state _actor request reqd ->
     let config = Mcp_server.workspace_config state in
-    let base_path = config.base_path in
+    let cors = public_read_cors_headers request in
     Http.Request.read_body_async reqd (fun body ->
-      match decode_share_request ~config ~body with
-      | Error (json, status) -> respond ~status request reqd json
-      | Ok (id, change) ->
-        match Eio_unix.run_in_systhread (fun () ->
-          let open Result.Syntax in
-          let* receipt = Store.change_share ~base_path ~id change in
-          let* current = Store.read_share ~base_path ~id in
-          Ok (receipt, current)) with
-        | Error error -> refuse_share request reqd error
-        | Ok (receipt, current) ->
-          let status = match receipt.Share.outcome with Share.Applied _ -> `OK | Share.Conflict _ -> `Conflict in
-          respond ~status request reqd (`Assoc ["id", `String id;
-            "receipt", Share.receipt_to_json receipt; "current", Share.snapshot_to_json current])))
+      respond_operation ~cors request reqd (set_share ~config ~body)))

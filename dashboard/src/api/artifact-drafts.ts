@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
-import { getWithResponse, post } from './core'
-import { PublishedArtifactSchema, artifactWorkspaceBody, artifactWorkspaceHeaders, artifactWorkspaceQuery, requireArtifactWorkspaceRead, type ArtifactWorkspace } from './published-artifacts'
+import { DEFAULT_POST_TIMEOUT_MS, getWithResponse, post } from './core'
+import { PublishedArtifactSchema, artifactWorkspaceBody, artifactWorkspaceHeaders, artifactWorkspaceQuery, requireArtifactWorkspaceRead, type ArtifactPublication, type ArtifactWorkspace } from './published-artifacts'
+
 import type { ArtifactDiscussionRequest } from './artifact-discussion'
 
 const Integer = Schema.Int.pipe(Schema.between(0, Number.MAX_SAFE_INTEGER))
@@ -59,16 +60,50 @@ function decode(input: unknown, artifactId: string, target?: ArtifactDraftTarget
 }
 export async function fetchArtifactDraft(artifactId: string, workspace: ArtifactWorkspace, signal?: AbortSignal): Promise<ArtifactDraftView> {
   const response = await getWithResponse<unknown>(`${path}/${encodeURIComponent(artifactId)}?${artifactWorkspaceQuery(workspace)}`, {
-    signal, extraHeaders: artifactWorkspaceHeaders(workspace),
+    signal, extraHeaders: artifactWorkspaceHeaders(workspace), consumeWithinTimeout: true,
   })
   requireArtifactWorkspaceRead(response.headers)
   return decode(response.data, artifactId)
 }
-export async function sendArtifactDraftCommand(command: ArtifactDraftCommand, workspace: ArtifactWorkspace): Promise<ArtifactDraftView> {
+export async function sendArtifactDraftCommand(command: ArtifactDraftCommand, workspace: ArtifactWorkspace, signal?: AbortSignal): Promise<ArtifactDraftView> {
   const target = command.action === 'open' ? undefined : (command.action === 'edit' || command.action === 'resolve') ? command.selection.target : command.target
   const artifactId = command.action === 'open' ? command.artifact_id
     : (command.action === 'edit' || command.action === 'resolve') ? command.selection.target.artifact_id : command.target.artifact_id
   // The transport sends once. A caller retains its local CRDT updates and
   // reconciles uncertain responses; it must not blindly repeat Keeper edits.
-  return decode(await post<unknown>(path, { ...command, expected_workspace: artifactWorkspaceBody(workspace) }, artifactWorkspaceHeaders(workspace)), artifactId, target)
+  const headers = artifactWorkspaceHeaders(workspace)
+  const body = { ...command, expected_workspace: artifactWorkspaceBody(workspace) }
+  const response = await post<unknown>(path, body, headers, DEFAULT_POST_TIMEOUT_MS, signal, true)
+  return decode(response, artifactId, target)
+}
+
+const CheckpointRequestSchema = Schema.Struct({
+  target: ArtifactDraftTargetSchema,
+  expected_sequence: Integer,
+  revision: Integer.pipe(Schema.positive()),
+})
+const CheckpointResponseSchema = Schema.Struct({
+  checkpoint: Schema.Literal('checkpointed', 'already_current'),
+  document: ArtifactDraftViewSchema,
+})
+export async function checkpointArtifactDraft(
+  target: ArtifactDraftTarget, expectedSequence: number, publication: ArtifactPublication, workspace: ArtifactWorkspace,
+): Promise<{ checkpoint: 'checkpointed' | 'already_current'; document: ArtifactDraftView }> {
+  const request = Schema.decodeUnknownSync(CheckpointRequestSchema, { onExcessProperty: 'error' })({
+    target, expected_sequence: expectedSequence, revision: publication.artifact.revision,
+  })
+  if (publication.artifact.id !== target.artifact_id) throw new Error('게시된 문서와 공유 원고가 다릅니다.')
+  // This request is sent once; callers must not replay an uncertain outcome.
+  const response = Schema.decodeUnknownSync(CheckpointResponseSchema, { onExcessProperty: 'error' })(
+    await post<unknown>('/api/v1/artifact-draft-checkpoints',
+      { ...request, expected_workspace: artifactWorkspaceBody(workspace) }, artifactWorkspaceHeaders(workspace), DEFAULT_POST_TIMEOUT_MS, undefined, true),
+  )
+  const document = decode(response.document, target.artifact_id, target)
+  if (document.draft.base_revision !== publication.artifact.revision
+    || document.draft.base_sha256 !== publication.artifact.body._blob.sha256
+    || document.draft.sequence < expectedSequence
+    || (response.checkpoint === 'checkpointed' && document.draft.sequence !== expectedSequence + 1)) {
+    throw new Error('공유 원고의 게시 기준 응답이 요청과 다릅니다. 원고를 다시 확인해 주세요.')
+  }
+  return { checkpoint: response.checkpoint, document }
 }

@@ -4225,6 +4225,48 @@ let rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing
     content
 ;;
 
+(* A cursor can repeat after an inode is recycled. Compare the full observed
+   bytes under the stable sibling lock before replacing the current store. *)
+let rewrite_private_jsonl_durable_locked_at_snapshot_with_io
+      ~io path ~(expected : private_jsonl_snapshot) content =
+  if not (String.equal content "")
+     && not (Char.equal content.[String.length content - 1] '\n')
+  then Error Invalid_transaction_suffix
+  else
+    let success cursor = Cursor_succeeded cursor in
+    with_private_jsonl_stable_lock ~io ~success path @@ fun ~dir ~path ->
+    let open Result.Syntax in
+    let* opened = private_jsonl_open_existing ~close_fd:io.close_fd path [Unix.O_RDONLY; Unix.O_NONBLOCK] in
+    match opened with
+    | None ->
+      let actual = Private_jsonl_cursor.Missing in
+      if not (Private_jsonl_cursor.equal expected.cursor actual)
+      then Error (Cursor_mismatch { expected = expected.cursor; actual })
+      else if not (String.equal expected.bytes "") then Error (Transaction_content_changed { path })
+      else private_jsonl_replace_locked ~dir path content
+    | Some fd ->
+      private_jsonl_with_fd ~close_operation:Close_transaction_data ~close_fd:io.close_fd ~success fd (fun () ->
+        let* stats = private_jsonl_capture Inspect_transaction_data (fun () -> Unix.fstat fd)
+          |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure) in
+        let* actual = private_jsonl_cursor_of_stats stats in
+        let* () = if Private_jsonl_cursor.equal expected.cursor actual then Ok ()
+          else Error (Cursor_mismatch { expected = expected.cursor; actual }) in
+        let* () = private_jsonl_validate_complete_tail fd stats.Unix.st_size in
+        let* bytes = private_jsonl_read_exact fd ~from:0 ~end_offset:stats.Unix.st_size in
+        let* () = if String.equal expected.bytes bytes then Ok () else Error (Transaction_content_changed { path }) in
+        let* () = private_jsonl_validate_open_binding ~operation:Inspect_transaction_path ~path fd in
+        private_jsonl_replace_locked ~dir path content)
+;;
+
+let rewrite_private_jsonl_durable_locked_at_snapshot_result path ~expected content =
+  rewrite_private_jsonl_durable_locked_at_snapshot_with_io
+    ~io:private_jsonl_transaction_unix_io path ~expected content
+;;
+
+let rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing ~io path ~expected content =
+  rewrite_private_jsonl_durable_locked_at_snapshot_with_io ~io path ~expected content
+;;
+
 module Private_jsonl_slice = struct
   type t =
     { bytes : string

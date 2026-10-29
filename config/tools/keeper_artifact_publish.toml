@@ -49,9 +49,9 @@ description = "Expected current revision. Required together with id for an updat
 [[params]]
 name = "task_id"
 type = "string"
-description = "Related MASC task id, when applicable."
+description = "Related MASC task id. When revising, omit to retain the existing link or supply an id to replace it."
 
 [[params]]
 name = "goal_id"
 type = "string"
-description = "Related MASC goal id, when applicable."
+description = "Related MASC goal id. When revising, omit to retain the existing link or supply an id to replace it."

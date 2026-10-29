@@ -1,3 +1,4 @@
+import { artifactPublicationOutcomes } from '../../lib/artifact-publication-outcomes'
 import { html } from 'htm/preact'
 import type { Signal } from '@preact/signals'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
@@ -52,6 +53,7 @@ const checkReceipt = { id: firstId, revision: 2, body_sha256: first.body._blob.s
   change_id: `check-${'c'.repeat(32)}`, changed_by: 'original-human', changed_at: '2026-10-22T01:00:00Z' }
 
 beforeEach(() => {
+  artifactPublicationOutcomes.clear()
   localStorage.clear()
   window.dispatchEvent(new StorageEvent('storage'))
   expect(executionWorkspaceAuthority).toBe(workspace.current)

@@ -172,6 +172,18 @@ module Response : sig
       Exposed so the rule is testable in full without constructing a
       [Httpun.Reqd.t]. *)
 
+  val prepare_json
+    :  ?status:Httpun.Status.t
+    -> ?compress:bool
+    -> ?extra_headers:(string * string) list
+    -> request:Httpun.Request.t
+    -> ?etag:string
+    -> string
+    -> Httpun.Response.t * string
+  (** Prepare the same conditional, compressed JSON response for transports
+      which write it themselves. The caller owns timeout-envelope status
+      selection and must write the returned body before closing its stream. *)
+
   (** JSON response with optional negotiated zstd or gzip compression.
       Default status [`OK]. Compression from an Eio fiber runs on the shared
       CPU pool when available; bodies below the codec minimum, identity

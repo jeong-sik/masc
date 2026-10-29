@@ -43,9 +43,9 @@ export async function streamArtifactDraft(target: ArtifactDraftTarget, workspace
   if (!signal.aborted) throw new Error('공동 편집 연결이 끊겼습니다. 원고를 보관하고 다시 연결해 주세요.')
 }
 export async function sendArtifactPresence(target: ArtifactDraftTarget, sessionId: string, workspace: ArtifactWorkspace,
-  command: { action: 'position'; position: ArtifactDraftPosition | null } | { action: 'leave' }): Promise<void> {
+  command: { action: 'position'; position: ArtifactDraftPosition | null } | { action: 'leave' }, signal?: AbortSignal): Promise<void> {
   const path = '/api/v1/artifact-draft-presence'
-  const response = await fetchControlPlane(path, { method: 'POST', keepalive: command.action === 'leave',
+  const response = await fetchControlPlane(path, { method: 'POST', keepalive: command.action === 'leave', signal,
     headers: { ...authHeaders(), ...artifactWorkspaceHeaders(workspace), 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...command, target, session_id: sessionId, expected_workspace: artifactWorkspaceBody(workspace) }) })
   if (!response.ok) throw await apiRequestErrorFromResponse('POST', path, response)

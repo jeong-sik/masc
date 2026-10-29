@@ -17,6 +17,12 @@ let publish ~base_path content =
     ["title", `String "shared draft fixture"; "summary", `String "native integration";
      "format", `String "markdown"; "content", `String content]) |> ok in
   Publications.publish ~base_path ~author:"publisher" request |> Result.map_error Publications.error_message |> ok
+let revise ~base_path ~id ~expected_revision ~author ?(format = "markdown") content =
+  let request = Masc.Published_artifact.request_of_json (`Assoc
+    ["id", `String id; "expected_revision", `Int expected_revision;
+     "title", `String "shared draft fixture"; "summary", `String "native integration";
+     "format", `String format; "content", `String content]) |> ok in
+  Publications.publish ~base_path ~author request |> Result.map_error Publications.error_message |> ok
 let boundary_tests = [
   "strict request actor and target boundaries", `Quick, (fun () ->
     let good = ["action", `String "select"; "target", Draft.target_to_json target; "anchor", `Int 0; "head", `Int 0] in
@@ -35,6 +41,44 @@ let boundary_tests = [
       [`Assoc (("schema", `String "unknown") :: List.remove_assoc "schema" fields);
        `Assoc (("state", `String "AB==") :: List.remove_assoc "state" fields);
        `Assoc (("sequence", `Int 1) :: fields)]);
+  "catalog preserves earlier authors without changing the ordinary list", `Quick, (fun () -> with_base (fun base_path ->
+    let artifact, _ = publish ~base_path "one" in
+    ignore (revise ~base_path ~id:artifact.id ~expected_revision:1 ~author:"other" "two");
+    let ordinary = Publications.list ~base_path |> Result.map_error Publications.error_message |> ok in
+    let expanded = Publications.list_with_authors ~base_path |> Result.map_error Publications.error_message |> ok in
+    let member = Yojson.Safe.Util.member in
+    let normal = List.hd ordinary.artifacts and detailed = List.hd expanded.artifacts in
+    Alcotest.(check bool) "ordinary list shape unchanged" true (member "authors" normal = `Null);
+    Alcotest.(check bool) "all revision authors retained" true
+      (member "authors" detailed = `List [`String "other"; `String "publisher"]);
+    Alcotest.(check int) "latest revision" 2 (member "revision" detailed |> Yojson.Safe.Util.to_int)));
+  "revising preserves omitted Task and Goal links", `Quick, (fun () -> with_base (fun base_path ->
+    let make fields = Masc.Published_artifact.request_of_json (`Assoc
+      (fields @ ["title", `String "linked report"; "summary", `String "work links";
+        "format", `String "markdown"; "content", `String "body"])) |> ok in
+    let artifact, _ = Publications.publish ~base_path ~author:"one"
+      (make ["task_id", `String "task-1"; "goal_id", `String "goal-1"])
+      |> Result.map_error Publications.error_message |> ok in
+    let _, next = Publications.publish ~base_path ~author:"two"
+      (make ["id", `String artifact.id; "expected_revision", `Int 1])
+      |> Result.map_error Publications.error_message |> ok in
+    Alcotest.(check (option string)) "task inherited" (Some "task-1") next.task_id;
+    Alcotest.(check (option string)) "goal inherited" (Some "goal-1") next.goal_id;
+    let _, replaced = Publications.publish ~base_path ~author:"three"
+      (make ["id", `String artifact.id; "expected_revision", `Int 2;
+        "task_id", `String "task-2"; "goal_id", `Null])
+      |> Result.map_error Publications.error_message |> ok in
+    Alcotest.(check (option string)) "explicit task replaces" (Some "task-2") replaced.task_id;
+    Alcotest.(check (option string)) "null explicitly clears" None replaced.goal_id));
+  "publication lock propagates callback exceptions", `Quick, (fun () -> with_base (fun base_path ->
+    let artifact, _ = publish ~base_path "one" in
+    let propagated =
+      match Publications.with_latest_locked ~base_path ~id:artifact.id ~expected_revision:1
+        ~f:(fun _ _ -> raise (Sys_error "callback sentinel")) with
+      | _ -> false
+      | exception Sys_error message -> String.equal message "callback sentinel" in
+    Alcotest.(check bool) "callback exception preserved" true propagated;
+    ignore (revise ~base_path ~id:artifact.id ~expected_revision:1 ~author:"other" "two")));
 ]
 let integration_tests runner =
   let execute base_path actor command = Store.execute ~runner ~base_path ~actor command |> stored in
@@ -63,6 +107,129 @@ let integration_tests runner =
       let unchanged = execute base_path "idle reader" (Draft.Merge { target = recovered.draft.target; updates = [] }) in
       Alcotest.(check int) "no-op does not advance" 2 unchanged.draft.sequence;
       Alcotest.(check string) "no-op does not claim editing" "keeper" unchanged.draft.updated_by));
+    "publication checkpoint preserves edits and discussion across versions", `Quick, (fun () -> with_base (fun base_path ->
+      let artifact, _ = publish ~base_path "alpha beta" in
+      let opened = open_draft base_path artifact.id in
+      let left = selection base_path opened.draft.target 0 5 and right = selection base_path opened.draft.target 6 10 in
+      ignore (edit base_path "human" left "alpha" "ALPHA");
+      let edited = edit base_path "keeper" right "beta" "BETA" in
+      let chosen = selection base_path opened.draft.target 0 5 in
+      let request = { Masc.Artifact_discussion.id = Random_id.uuid_v7 ();
+        command = Masc.Artifact_discussion.Comment { position = chosen.position; quote = "ALPHA";
+          body = "shared comment"; proposal = None } } in
+      let discussed = execute base_path "human" (Draft.Discuss { target = opened.draft.target; request }) in
+      let prior_state = discussed.draft.state and prior_discussion = discussed.draft.discussion in
+      ignore (revise ~base_path ~id:artifact.id ~expected_revision:1 ~author:"keeper" edited.content);
+      let checkpoint = Store.checkpoint ~runner ~base_path ~actor:"keeper" ~target:opened.draft.target
+        ~expected_sequence:discussed.draft.sequence ~revision:2 () in
+      let settled = match checkpoint with
+        | Ok (Store.Checkpointed view) -> view
+        | Ok (Store.Already_current _) -> Alcotest.fail "new base was not committed"
+        | Error error -> Alcotest.fail (Store.checkpoint_error_message error) in
+      Alcotest.(check int) "base advanced" 2 settled.draft.base_revision;
+      Alcotest.(check int) "sequence advanced" (discussed.draft.sequence + 1) settled.draft.sequence;
+      Alcotest.(check string) "CRDT state unchanged" prior_state settled.draft.state;
+      Alcotest.(check bool) "discussion retained" true (prior_discussion = settled.draft.discussion);
+      let replay = Store.checkpoint ~runner ~base_path ~actor:"keeper" ~target:opened.draft.target
+        ~expected_sequence:discussed.draft.sequence ~revision:2 () in
+      (match replay with Ok (Store.Already_current view) ->
+        Alcotest.(check int) "repeat is observation only" settled.draft.sequence view.draft.sequence
+       | Ok (Store.Checkpointed _) -> Alcotest.fail "repeat committed another checkpoint"
+       | Error error -> Alcotest.fail (Store.checkpoint_error_message error));
+      let prefix = selection base_path opened.draft.target 0 0 in
+      let continued = edit base_path "other-keeper" prefix "" "next " in
+      let replay = Store.checkpoint ~runner ~base_path ~actor:"keeper" ~target:opened.draft.target
+        ~expected_sequence:discussed.draft.sequence ~revision:2 () in
+      (match replay with Ok (Store.Already_current view) ->
+        Alcotest.(check string) "later edit remains" "next ALPHA BETA" view.content
+       | Ok (Store.Checkpointed _) -> Alcotest.fail "repeat replaced later edit"
+       | Error error -> Alcotest.fail (Store.checkpoint_error_message error));
+      ignore (revise ~base_path ~id:artifact.id ~expected_revision:2 ~author:"other-keeper" continued.content);
+      (match Store.checkpoint ~runner ~base_path ~actor:"other-keeper" ~target:opened.draft.target
+          ~expected_sequence:continued.draft.sequence ~revision:3 () with
+       | Ok (Store.Checkpointed view) ->
+         Alcotest.(check int) "next base" 3 view.draft.base_revision;
+         Alcotest.(check string) "next source" "next ALPHA BETA" view.content;
+         Alcotest.(check bool) "discussion survives" true (prior_discussion = view.draft.discussion)
+       | Ok (Store.Already_current _) -> Alcotest.fail "third publication not checkpointed"
+       | Error error -> Alcotest.fail (Store.checkpoint_error_message error));
+      List.iter (fun (revision, expected) ->
+        let _, _, content = Publications.read ~base_path ~id:artifact.id ~revision:(Some revision)
+          |> Result.map_error Publications.error_message |> ok in
+        Alcotest.(check string) "immutable publication" expected content)
+        [1, "alpha beta"; 2, "ALPHA BETA"; 3, "next ALPHA BETA"]));
+    "checkpoint refuses stale sequence, changed publication and changed format", `Quick, (fun () -> with_base (fun base_path ->
+      let artifact, _ = publish ~base_path "source" in
+      let draft = open_draft base_path artifact.id in
+      ignore (revise ~base_path ~id:artifact.id ~expected_revision:1 ~author:"other" "different");
+      (match Store.checkpoint ~runner ~base_path ~actor:"keeper" ~target:draft.draft.target
+          ~expected_sequence:1 ~revision:2 () with
+       | Error (Store.Sequence_conflict { expected = 1; actual = 0 }) -> ()
+       | Error error -> Alcotest.fail (Store.checkpoint_error_message error)
+       | Ok _ -> Alcotest.fail "wrong draft sequence accepted");
+      (match Store.checkpoint ~runner ~base_path ~actor:"keeper" ~target:draft.draft.target
+          ~expected_sequence:0 ~revision:2 () with
+       | Error Store.Published_content_mismatch -> ()
+       | Error error -> Alcotest.fail (Store.checkpoint_error_message error)
+       | Ok _ -> Alcotest.fail "different publication accepted");
+      ignore (revise ~base_path ~id:artifact.id ~expected_revision:2 ~author:"other" ~format:"html" "source");
+      (match Store.checkpoint ~runner ~base_path ~actor:"keeper" ~target:draft.draft.target
+          ~expected_sequence:0 ~revision:2 () with
+       | Error (Store.Draft_error (Store.Artifact_error (Publications.Conflict { expected = 2; actual = 3 }))) -> ()
+       | Error error -> Alcotest.fail (Store.checkpoint_error_message error)
+       | Ok _ -> Alcotest.fail "older publication accepted");
+      (match Store.checkpoint ~runner ~base_path ~actor:"keeper" ~target:draft.draft.target
+          ~expected_sequence:0 ~revision:3 () with
+       | Error Store.Published_format_mismatch -> ()
+       | Error error -> Alcotest.fail (Store.checkpoint_error_message error)
+       | Ok _ -> Alcotest.fail "changed format accepted");
+      let current = Store.read ~runner ~base_path ~artifact_id:artifact.id () |> stored in
+      Alcotest.(check int) "old base retained" 1 current.draft.base_revision;
+      Alcotest.(check string) "draft source retained" "source" current.content));
+    "checkpoint detects an edit between observation and commit", `Quick, (fun () -> with_base (fun base_path ->
+      let artifact, _ = publish ~base_path "source" in
+      let draft = open_draft base_path artifact.id in
+      ignore (revise ~base_path ~id:artifact.id ~expected_revision:1 ~author:"other" "source");
+      let prefix = selection base_path draft.draft.target 0 0 in
+      let once = ref false in
+      let interleaved input =
+        let result = runner input in
+        if not !once then begin
+          once := true;
+          ignore (edit base_path "human" prefix "" "new ")
+        end;
+        result in
+      (match Store.checkpoint ~runner:interleaved ~base_path ~actor:"keeper" ~target:draft.draft.target
+          ~expected_sequence:0 ~revision:2 () with
+       | Error Store.Draft_snapshot_changed -> ()
+       | Error error -> Alcotest.fail (Store.checkpoint_error_message error)
+       | Ok _ -> Alcotest.fail "interleaved edit overwritten");
+      let current = Store.read ~runner ~base_path ~artifact_id:artifact.id () |> stored in
+      Alcotest.(check int) "base unchanged" 1 current.draft.base_revision;
+      Alcotest.(check string) "interleaved edit retained" "new source" current.content));
+    "checkpoint detects a publication after draft observation", `Quick, (fun () -> with_base (fun base_path ->
+      let artifact, _ = publish ~base_path "source" in
+      let draft = open_draft base_path artifact.id in
+      ignore (revise ~base_path ~id:artifact.id ~expected_revision:1 ~author:"other" "source");
+      let once = ref false in
+      let interleaved input =
+        let result = runner input in
+        if not !once then begin
+          once := true;
+          ignore (revise ~base_path ~id:artifact.id ~expected_revision:2 ~author:"other" "newer")
+        end;
+        result in
+      (match Store.checkpoint ~runner:interleaved ~base_path ~actor:"keeper" ~target:draft.draft.target
+          ~expected_sequence:0 ~revision:2 () with
+       | Error (Store.Draft_error (Store.Artifact_error (Publications.Conflict { expected = 2; actual = 3 }))) -> ()
+       | Error error -> Alcotest.fail (Store.checkpoint_error_message error)
+       | Ok _ -> Alcotest.fail "interleaved publication ignored");
+      let current = Store.read ~runner ~base_path ~artifact_id:artifact.id () |> stored in
+      Alcotest.(check int) "base unchanged" 1 current.draft.base_revision;
+      let _, latest, content = Publications.read ~base_path ~id:artifact.id ~revision:None
+        |> Result.map_error Publications.error_message |> ok in
+      Alcotest.(check int) "new publication retained" 3 latest.revision;
+      Alcotest.(check string) "new publication content retained" "newer" content));
     "concurrent distinct edits recompute after CAS", `Quick, (fun () -> with_base (fun base_path ->
       let artifact, _ = publish ~base_path "alpha beta" in
       let draft = open_draft base_path artifact.id in

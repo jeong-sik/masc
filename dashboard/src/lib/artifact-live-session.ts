@@ -26,14 +26,15 @@ export class ArtifactLiveSession {
   readonly doc: Y.Doc
   private state: ArtifactLiveState
   private pending: Uint8Array | null = null
-  private sending = false
-  private positionSending = false
+  private mergeFlight: { batch: Uint8Array; controller: AbortController } | null = null
+  private positionFlight: AbortController | null = null
   private position: ArtifactDraftPosition | null = null
   private announcedPosition: { sessionId: string; position: ArtifactDraftPosition | null } | null = null
   private lastSelection: Omit<ArtifactSourceAnchor, 'state'> | null = null
   private positionDirty = false
   private connection: AbortController | null = null
   private disposed = false
+  private lifecycle = 0
   private recoveryId = crypto.randomUUID()
   private recoveryCopy: ArtifactDraftRecovery | null = null
   private persisted = true
@@ -45,6 +46,10 @@ export class ArtifactLiveSession {
   get snapshot(): ArtifactLiveState { return this.state }
   get content(): string { return sharedSource(this.doc) }
   get current(): boolean { return !this.disposed && this.isCurrent() }
+  captureCurrent(): () => boolean {
+    const lifecycle = this.lifecycle
+    return () => this.current && this.lifecycle === lifecycle
+  }
   captureSource(): ArtifactSourceAnchor {
     if (!this.current || !this.lastSelection) throw new Error('원문에서 문장을 먼저 선택해 주세요.')
     const range = resolveSharedSelection(this.doc, { anchor: [...this.lastSelection.position.anchor], head: [...this.lastSelection.position.head] })
@@ -59,7 +64,7 @@ export class ArtifactLiveSession {
   }
   private emit(patch: Partial<ArtifactLiveState> = {}): void {
     if (this.disposed) return
-    this.state = { ...this.state, ...patch, pending: this.pending !== null || this.sending, saving: this.sending, recoveryPersisted: this.persisted }
+    this.state = { ...this.state, ...patch, pending: this.pending !== null || this.mergeFlight !== null, saving: this.mergeFlight !== null, recoveryPersisted: this.persisted }
     this.changed(this.state)
   }
   private update = (update: Uint8Array, origin: unknown) => {
@@ -109,25 +114,38 @@ export class ArtifactLiveSession {
     this.emit({ peers: [], sessionId: null, connection: 'disconnected' })
   }
   private async flush(): Promise<void> {
-    if (this.disposed || this.sending || this.state.connection !== 'connected' || !this.isCurrent()) return
+    if (this.disposed || this.mergeFlight || this.state.connection !== 'connected' || !this.isCurrent()) return
     if (!this.pending) { void this.flushPosition(); return }
     const batch = this.pending
-    this.pending = null; this.sending = true; this.emit()
+    const currentAttempt = this.captureCurrent()
+    const flight = { batch, controller: new AbortController() }
+    this.pending = null; this.mergeFlight = flight; this.emit()
     try {
-      const view = await sendArtifactDraftCommand({ action: 'merge', target: this.state.view.draft.target, updates: [draftBase64(batch)] }, this.workspace)
-      if (!this.disposed) this.receive(view)
-    } catch (error) {
-      this.pending = this.pending ? Y.mergeUpdates([batch, this.pending]) : batch
-      this.disconnect()
-      this.emit({ message: error instanceof Error ? error.message : '공유 원고 저장 결과를 확인하지 못했습니다.' })
-    } finally {
-      this.sending = false
-      if (!this.disposed && !this.pending && this.recoveryCopy) {
-        discardArtifactDraftRecovery(this.recoveryCopy); this.recoveryCopy = null
+      const view = await sendArtifactDraftCommand({ action: 'merge', target: this.state.view.draft.target, updates: [draftBase64(batch)] }, this.workspace, flight.controller.signal)
+      if (this.mergeFlight === flight && currentAttempt()) this.receive(view)
+      else if (this.mergeFlight === flight && !this.disposed) {
+        // A pre-hide reply must not update a restored session. Preserve the
+        // CRDT update for the existing explicit reconnect/reconciliation path.
+        this.pending = this.pending ? Y.mergeUpdates([batch, this.pending]) : batch
+        this.retain()
+        this.emit({ message: '이전 저장 요청을 확인하려면 다시 연결해 주세요.' })
       }
-      this.emit()
+    } catch (error) {
+      if (this.mergeFlight === flight) {
+        this.pending = this.pending ? Y.mergeUpdates([batch, this.pending]) : batch
+        if (currentAttempt()) this.disconnect()
+        this.emit({ message: error instanceof Error ? error.message : '공유 원고 저장 결과를 확인하지 못했습니다.' })
+      }
+    } finally {
+      if (this.mergeFlight === flight) {
+        this.mergeFlight = null
+        if (!this.disposed && !this.pending && this.recoveryCopy) {
+          discardArtifactDraftRecovery(this.recoveryCopy); this.recoveryCopy = null
+        }
+        this.emit()
+      }
     }
-    if (this.state.connection === 'connected') void this.flush()
+    if (currentAttempt() && this.state.connection === 'connected') void this.flush()
   }
   select(selection: SourceSelection | null, mode: ArtifactSourceAnchor['mode'] = 'source'): void {
     if (this.disposed) return
@@ -139,28 +157,52 @@ export class ArtifactLiveSession {
     void this.flushPosition()
   }
   private async flushPosition(): Promise<void> {
-    if (this.disposed || this.positionSending || this.sending || this.pending || !this.positionDirty
+    if (this.disposed || this.positionFlight || this.mergeFlight || this.pending || !this.positionDirty
       || this.state.connection !== 'connected' || !this.state.sessionId || !this.isCurrent()) return
     const sessionId = this.state.sessionId, position = this.position
+    const currentAttempt = this.captureCurrent()
     this.positionDirty = false
     if (this.announcedPosition?.sessionId === sessionId && samePosition(this.announcedPosition.position, position)) return
-    this.positionSending = true
+    const flight = new AbortController()
+    this.positionFlight = flight
     try {
-      await sendArtifactPresence(this.state.view.draft.target, sessionId, this.workspace, { action: 'position', position })
-      if (this.state.sessionId === sessionId) this.announcedPosition = { sessionId, position }
+      await sendArtifactPresence(this.state.view.draft.target, sessionId, this.workspace, { action: 'position', position }, flight.signal)
+      if (currentAttempt() && this.state.sessionId === sessionId) this.announcedPosition = { sessionId, position }
     } catch (error) {
       // A refused/uncertain position is no longer advertised as current.
-      if (this.state.sessionId === sessionId) {
+      if (currentAttempt() && this.state.sessionId === sessionId) {
         this.disconnect()
         this.emit({ message: error instanceof Error ? error.message : '편집 위치를 전달하지 못했습니다.' })
       }
     } finally {
-      this.positionSending = false
-      void this.flushPosition()
+      if (this.positionFlight === flight) {
+        this.positionFlight = null
+        if (currentAttempt()) void this.flushPosition()
+      }
     }
   }
+  suspend(): void {
+    if (this.disposed) return
+    this.lifecycle++
+    const merge = this.mergeFlight, position = this.positionFlight
+    if (merge) {
+      const batch = merge.batch
+      this.pending = this.pending ? Y.mergeUpdates([batch, this.pending]) : batch
+      this.mergeFlight = null
+    }
+    // An earlier position belongs only to its old SSE session. Detach it so a
+    // stuck response cannot block a new session; its finally owns only its token.
+    this.positionFlight = null
+    merge?.controller.abort(); position?.abort()
+    if (this.pending) this.retain()
+    this.connection?.abort(); this.connection = null
+    this.announcedPosition = null; this.positionDirty = true
+    this.emit({ peers: [], sessionId: null, connection: 'disconnected',
+      message: '페이지가 복원되면 다시 연결해 주세요.' })
+  }
   dispose(): void {
-    if (this.pending || this.sending) this.retain()
+    if (this.pending || this.mergeFlight) this.retain()
+    this.mergeFlight?.controller.abort(); this.positionFlight?.abort()
     this.disconnect(); this.disposed = true
     this.doc.off('update', this.update); this.doc.destroy()
   }

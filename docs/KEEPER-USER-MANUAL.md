@@ -637,6 +637,33 @@ the replacement fields. A stale revision is rejected. Previous versions remain
 readable through their version links. Existing workspace files appear only when
 a Keeper or authenticated operator explicitly publishes their content.
 
+Published artifacts are discoverable by Keepers throughout the same workspace.
+Use `keeper_artifact_draft` with `action: "find"` and a `query` to find candidates
+by title, summary, any revision author, Task or Goal. An empty query lists the catalog.
+Pass the returned `next_cursor` with the same query until it is null; a change
+to the matching candidates, catalog diagnostics or query invalidates the cursor.
+Unrelated publications do not interrupt the search. `unreadable_count` reports catalog entries
+that could not be read. The catalog is read entry by entry, so even with no
+errors an empty result is not an atomic proof of absence while other writers
+are publishing; concurrent first publications can create separate artifacts.
+A very large candidate can omit metadata while retaining its ID and
+revision; read that publication to inspect it.
+
+`action: "published"` reads an artifact's latest published source and revision
+history. `action: "open"` joins its shared draft, including edits by other
+Keepers or people. Compare the draft's `base_revision` with the latest publication
+before publishing its contents; a draft can remain based on an older revision.
+After publishing an exact draft snapshot, use `action: "checkpoint"` with its
+`target`, observed `expected_sequence` and the returned publication `revision`.
+The checkpoint advances the draft base only while its content, sequence and
+format match that latest publication. `already_current` means the observed draft
+base already names the publication, not that this call committed the checkpoint.
+A conflict or uncertain result calls for reading both records again; it never
+discards intervening edits.
+Choose whether a candidate is the same document from the work context, not its
+title alone. Workspace discovery does not enable the separate external-sharing
+switch or make private HTTP reads public.
+
 See the [artifact design and HTTP contract](design/report-artifacts.md).
 
 ## Where the numbers here came from

@@ -12,6 +12,14 @@ type error =
   | Unavailable of string
   | Commit_uncertain of Draft.t
 type view = { draft : Draft.t; content : string; selection : (Draft.selection * int * int) option }
+type checkpoint_outcome = Checkpointed of view | Already_current of view
+type checkpoint_error =
+  | Draft_error of error
+  | Sequence_conflict of { expected : int; actual : int }
+  | Draft_snapshot_changed
+  | Published_content_mismatch
+  | Published_base_mismatch
+  | Published_format_mismatch
 open Result.Syntax
 let error_message = function
   | Invalid message | Unavailable message | Discussion_conflict message -> message
@@ -20,6 +28,14 @@ let error_message = function
   | Artifact_error error -> Artifacts.error_message error
   | Transform_error error -> Engine.error_message error
   | Commit_uncertain _ -> "draft may have been saved; reread before retrying"
+let checkpoint_error_message = function
+  | Draft_error error -> error_message error
+  | Sequence_conflict { expected; actual } ->
+    Printf.sprintf "shared draft changed: expected sequence %d, current sequence %d" expected actual
+  | Draft_snapshot_changed -> "shared draft changed while checkpointing; reread before retrying"
+  | Published_content_mismatch -> "published source does not match the shared draft"
+  | Published_base_mismatch -> "shared draft publication base does not match the publication history"
+  | Published_format_mismatch -> "published format changed since the shared draft's base"
 let view_to_json view = Draft.document_to_json ~draft:view.draft ~content:view.content ~selection:view.selection
 let root ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) "artifact_drafts"
 let path ~base_path artifact_id = Filename.concat (root ~base_path) (artifact_id ^ ".json")
@@ -64,19 +80,25 @@ let matching (target : Draft.target) (draft : Draft.t) =
 (* A cursor mismatch proves this attempt did not commit. Merge/edit can be
    recomputed against the winner. An uncertain commit is never retried. *)
 let rec write_error draft = function
-  | Fs_compat.Cursor_mismatch _ -> Ok `Retry
+  | Fs_compat.Cursor_mismatch _ | Transaction_content_changed _ -> Ok `Retry
   | Rewrite_published_durability_unknown _ -> Error (Commit_uncertain draft)
   | Transaction_settlement_failed { primary = Transaction_succeeded (Cursor_succeeded _); _ } -> Error (Commit_uncertain draft)
-  | Transaction_settlement_failed { primary = Transaction_failed error; _ } -> write_error draft error
+  | (Transaction_settlement_failed { primary = Transaction_failed error; _ } as settlement) ->
+    (match write_error draft error with
+     | Error (Commit_uncertain _ as uncertain) -> Error uncertain
+     | Ok _
+     | Error (Invalid _ | Missing | Generation_conflict _ | Discussion_conflict _ | Artifact_error _
+             | Transform_error _ | Unavailable _) ->
+       Error (Unavailable (Fs_compat.private_jsonl_transaction_error_to_string settlement)))
   | (Transaction_settlement_failed { primary = Transaction_succeeded (Snapshot_succeeded _ | Cursor_precondition_succeeded _); _ }
     | Stable_lock_contended _ | Unexpected_stable_lock_permissions _ | Invalid_stable_lock_state _
     | Unexpected_transaction_file_kind _ | Ambiguous_transaction_file_identity _ | Transaction_path_binding_changed _
-    | Transaction_content_changed _ | Incomplete_transaction_tail _ | Invalid_transaction_suffix
+    | Incomplete_transaction_tail _ | Invalid_transaction_suffix
     | Private_jsonl_operation_failed _ | Rewrite_stage_failed _ | Transaction_append_failed _) as error ->
     Error (Unavailable (Fs_compat.private_jsonl_transaction_error_to_string error))
 let commit ~base_path (snapshot : Fs_compat.private_jsonl_snapshot) draft =
-  match Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
-    (path ~base_path draft.Draft.target.artifact_id) ~expected:snapshot.cursor (Yojson.Safe.to_string (Draft.to_json draft) ^ "\n") with
+  match Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result
+    (path ~base_path draft.Draft.target.artifact_id) ~expected:snapshot (Yojson.Safe.to_string (Draft.to_json draft) ^ "\n") with
   | Ok _ -> Ok `Saved
   | Error error -> write_error draft error
 let read ?runner ~base_path ~artifact_id () = protect (fun () ->
@@ -85,6 +107,66 @@ let read ?runner ~base_path ~artifact_id () = protect (fun () ->
     match exists with None -> Error Missing | Some _ ->
       let* _, draft = load ~base_path artifact_id in
       match draft with None -> Error Missing | Some draft -> observe ?runner draft)
+
+let checkpoint ?runner ~base_path ~actor ~(target : Draft.target) ~expected_sequence ~revision () =
+  let draft_error result = Result.map_error (fun error -> Draft_error error) result in
+  let* () =
+    if String.trim actor = "" || not (String.is_valid_utf_8 actor) then
+      Error (Draft_error (Invalid "actor must be nonblank UTF-8"))
+    else if not (Published_artifact.valid_id target.artifact_id) then
+      Error (Draft_error (Invalid "invalid artifact id"))
+    else if expected_sequence < 0 || Int64.of_int expected_sequence > 9_007_199_254_740_991L then
+      Error (Draft_error (Invalid "invalid draft sequence"))
+    else if revision <= 0 || Int64.of_int revision > 9_007_199_254_740_991L then
+      Error (Draft_error (Invalid "invalid publication revision"))
+    else Ok () in
+  (* Rendering can start a transformer process. Observe it before taking the
+     publication lock, then require the exact draft cursor under that lock. *)
+  let* snapshot, view = protect (fun () ->
+    let* exists = directory ~base_path in
+    let* () = match exists with None -> Error Missing | Some _ -> Ok () in
+    let* snapshot, previous = load ~base_path target.artifact_id in
+    let* previous = match previous with None -> Error Missing | Some draft -> Ok draft in
+    let* () = matching target previous in
+    let* view = observe ?runner previous in
+    Ok (snapshot, view)) |> draft_error in
+  let* result = Artifacts.with_latest_locked ~base_path ~id:target.artifact_id
+    ~expected_revision:revision ~f:(fun latest published_content ->
+      let* current_snapshot, current = protect (fun () -> load ~base_path target.artifact_id) |> draft_error in
+      let* current = match current with None -> Error (Draft_error Missing) | Some draft -> Ok draft in
+      let* () = matching target current |> draft_error in
+      if not (Fs_compat.Private_jsonl_cursor.equal snapshot.cursor current_snapshot.cursor)
+         || not (String.equal snapshot.bytes current_snapshot.bytes) then
+        Error Draft_snapshot_changed
+      else if current.base_revision = revision then
+        if String.equal current.base_sha256 latest.Published_artifact.body.sha256 then
+          Ok (Already_current view)
+        else Error Published_base_mismatch
+      else if current.base_revision > revision then Error Published_base_mismatch
+      else if current.sequence <> expected_sequence then
+        Error (Sequence_conflict { expected = expected_sequence; actual = current.sequence })
+      else
+        let* _, base, _ = Artifacts.read ~base_path ~id:target.artifact_id
+          ~revision:(Some current.base_revision)
+          |> Result.map_error (fun error -> Draft_error (Artifact_error error)) in
+        if not (String.equal current.base_sha256 base.Published_artifact.body.sha256) then
+          Error Published_base_mismatch
+        else if base.format <> latest.Published_artifact.format then Error Published_format_mismatch
+        else if not (String.equal view.content published_content) then Error Published_content_mismatch
+        else
+        let* next = Draft.checkpoint current ~base_revision:revision
+          ~base_sha256:latest.body.sha256 ~actor ~at:(Types_core.now_iso ())
+          |> Result.map_error (fun message -> Draft_error (Invalid message)) in
+        let* committed = commit ~base_path current_snapshot next |> draft_error in
+        match committed with
+        | `Retry -> Error Draft_snapshot_changed
+        | `Saved -> Ok (Checkpointed { view with draft = next }))
+    |> Result.map_error (fun error -> Draft_error (Artifact_error error)) in
+  (match result with
+   | Ok (Checkpointed view) -> Artifact_draft_live.publish ~base_path ~draft:view.draft ~content:view.content
+   | Ok (Already_current _) | Error _ -> ());
+  result
+
 let open_draft ?runner ~base_path ~actor ~artifact_id ~revision () =
   let* _, base, content = Artifacts.read ~base_path ~id:artifact_id ~revision:(Some revision)
     |> Result.map_error (fun error -> Artifact_error error) in

@@ -1,7 +1,14 @@
 name = "keeper_artifact_draft"
 defer_loading = true
 description = """
-Read and edit a shared artifact source together with dashboard editors. Open an
+Find published workspace artifacts, read their latest published source, and
+edit a shared artifact source together with other Keepers and dashboard editors.
+find searches title, summary, all revision authors, Task and Goal references, returning
+candidate ids and current revisions. It does not decide whether a candidate is
+the same document. Follow next_cursor with the same query; if matching artifacts
+or catalog diagnostics change, restart the search. An unreadable_count above zero means that absence
+is not established. The catalog is read entry by entry, so an empty result is
+not an atomic proof of absence while other writers publish. published reads the latest immutable publication. Open an
 artifact revision to obtain its bound target, then select UTF-16 source indices
 and copy the returned selection unchanged into edit with the exact expected
 text and replacement. Other edits move relative positions; changed selected
@@ -9,6 +16,11 @@ text is refused. Read current source after a refused or uncertain write before
 retrying. No CRDT state/base64 is exposed. Your actual Keeper turn owns the
 visible editing position; leave or turn completion removes it. This changes
 the shared draft; publishing a document revision is a separate operation.
+After publishing the exact shared draft content, checkpoint its target, observed
+sequence and returned revision. It only advances the draft's base if the latest
+publication, format, source and draft sequence still match. A refusal or
+uncertain result requires reading the publication and draft before deciding
+what to do next; later edits are never discarded.
 For comments and proposals use discuss with target and request. Copy next_request_id
 from the previous result into request.id once per new operation; reuse it only to
 reconcile that exact operation. request.command.kind is comment/reply/resolve/
@@ -20,24 +32,48 @@ additional_properties = false
 [[params]]
 name = "action"
 type = "string"
-enum = ["open", "read", "select", "resolve", "edit", "leave", "discuss"]
+enum = ["find", "published", "open", "read", "select", "resolve", "edit", "leave", "discuss", "checkpoint"]
+required = true
+
+[[params]]
+name = "query"
+type = "string"
+description = "find: whitespace-separated search terms; an empty string lists all published workspace artifacts."
+[[params]]
+name = "cursor"
+type = "object"
+additional_properties = false
+description = "find: copy next_cursor from the previous result with the same query."
+[[params.params]]
+name = "after_id"
+type = "string"
+required = true
+[[params.params]]
+name = "snapshot"
+type = "string"
 required = true
 
 [[params]]
 name = "artifact_id"
 type = "string"
-description = "open: existing published artifact id."
+description = "open or published: existing published artifact id."
 [[params]]
 name = "revision"
 type = "integer"
 minimum = 1
-description = "open: published revision used only when creating the shared draft."
+description = "open: publication used to create the draft; checkpoint: the newly published revision."
+
+[[params]]
+name = "expected_sequence"
+type = "integer"
+minimum = 0
+description = "checkpoint: exact shared draft sequence whose content was published."
 
 [[params]]
 name = "target"
 type = "object"
 additional_properties = false
-description = "read/select/leave: exact target returned by open."
+description = "read/select/leave/checkpoint: exact target returned by open."
 [[params.params]]
 name = "artifact_id"
 type = "string"
@@ -164,14 +200,26 @@ minimum = 0
 maximum = 255
 
 [[one_of]]
+description = "Find published artifacts across the current workspace."
+required = ["query"]
+forbidden = ["artifact_id", "revision", "expected_sequence", "target", "selection", "anchor", "head", "expected", "replacement", "request"]
+[[one_of]]
+description = "Read the latest published revision of an existing artifact."
+required = ["artifact_id"]
+forbidden = ["revision", "expected_sequence", "query", "cursor", "target", "selection", "anchor", "head", "expected", "replacement", "request"]
+[[one_of]]
 description = "Open a publication revision. Action-specific fields are validated by the producer."
 required = ["artifact_id", "revision"]
-forbidden = ["target", "selection", "anchor", "head", "expected", "replacement"]
+forbidden = ["query", "cursor", "expected_sequence", "target", "selection", "anchor", "head", "expected", "replacement", "request"]
+[[one_of]]
+description = "Advance a shared draft's base after its exact content was published."
+required = ["target", "expected_sequence", "revision"]
+forbidden = ["artifact_id", "query", "cursor", "selection", "anchor", "head", "expected", "replacement", "request"]
 [[one_of]]
 description = "Read, select, leave, or discuss the exact shared draft target."
 required = ["target"]
-forbidden = ["artifact_id", "revision", "selection", "expected", "replacement"]
+forbidden = ["artifact_id", "revision", "expected_sequence", "query", "cursor", "selection", "expected", "replacement"]
 [[one_of]]
 description = "Resolve or edit a previously selected source range."
 required = ["selection"]
-forbidden = ["artifact_id", "revision", "target", "anchor", "head"]
+forbidden = ["artifact_id", "revision", "expected_sequence", "query", "cursor", "target", "anchor", "head"]

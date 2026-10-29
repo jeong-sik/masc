@@ -6884,17 +6884,27 @@ let test_memory_recall_declaration_keeps_the_scope_of_a_switch_that_is_off () =
 ;;
 
 let test_memory_recall_declaration_is_refused_where_the_loader_refuses () =
+  let pairs errors =
+    List.map (fun (error : Runtime_toml.parse_error) -> error.path, error.message) errors
+  in
   List.iter
     (fun (label, tail) ->
-       (match
-          Runtime_toml.memory_recall_declaration_of_string
-            (lsp_probe_config ("[typesafeai]\n" ^ tail))
-        with
-        | Ok _ -> failf "%s: the declaration must be refused" label
-        | Error _ -> ());
-       match Runtime_toml.parse_string (lsp_probe_config ("[typesafeai]\n" ^ tail)) with
-       | Ok _ -> failf "%s: the loader must refuse it too" label
-       | Error _ -> ())
+       let text = lsp_probe_config ("[typesafeai]\n" ^ tail) in
+       match
+         ( Runtime_toml.memory_recall_declaration_of_string text
+         , Runtime_toml.parse_string text )
+       with
+       | Ok _, _ -> failf "%s: the declaration must be refused" label
+       | _, Ok _ -> failf "%s: the loader must refuse it too" label
+       | Error declared, Error loaded ->
+         check bool (label ^ ": the declaration says why") true (declared <> []);
+         List.iter
+           (fun (path, message) ->
+              check bool
+                (Printf.sprintf "%s: the loader says %s as well" label path)
+                true
+                (List.mem (path, message) (pairs loaded)))
+           (pairs declared))
     [ "a scope that names nothing", "memory_recall_scope = \"everyone\"\n"
     ; "a listed scope with an empty list", "memory_recall_scope = \"listed\"\nmemory_recall_keepers = []\n"
     ; "a list next to all", "memory_recall_scope = \"all\"\nmemory_recall_keepers = [\"a\"]\n"
@@ -6904,8 +6914,13 @@ let test_memory_recall_declaration_is_refused_where_the_loader_refuses () =
 ;;
 
 let test_memory_recall_declaration_and_parse_string_decide_alike () =
+  let off = Some Runtime_schema.Memory_recall_off in
+  let on scope = Some (Runtime_schema.Memory_recall_on scope) in
+  let decision =
+    option (testable Runtime_schema.pp_memory_recall Runtime_schema.equal_memory_recall)
+  in
   List.iter
-    (fun tail ->
+    (fun (tail, expected) ->
        let decided =
          match
            Runtime_toml.parse_string (lsp_probe_config ("[typesafeai]\n" ^ tail))
@@ -6921,18 +6936,17 @@ let test_memory_recall_declaration_and_parse_string_decide_alike () =
            Some (Runtime_schema.Memory_recall_on scope)
          | { Runtime_toml.switch = true; scope = None } -> None
        in
-       check
-         (option (testable Runtime_schema.pp_memory_recall Runtime_schema.equal_memory_recall))
-         tail
-         decided
-         from_declaration)
-    [ ""
-    ; "memory_recall = false\n"
-    ; "memory_recall = false\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"a\"]\n"
-    ; "memory_recall_scope = \"all\"\n"
-    ; "memory_recall = true\nmemory_recall_scope = \"all\"\n"
-    ; "memory_recall = true\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"b\", \"a\"]\n"
-    ; "memory_recall = true\n"
+       check decision (tail ^ " (the loader)") expected decided;
+       check decision (tail ^ " (the declaration)") expected from_declaration)
+    [ "", off
+    ; "memory_recall = false\n", off
+    ; ( "memory_recall = false\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"a\"]\n"
+      , off )
+    ; "memory_recall_scope = \"all\"\n", off
+    ; "memory_recall = true\nmemory_recall_scope = \"all\"\n", on Runtime_schema.All_keepers
+    ; ( "memory_recall = true\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"b\", \"a\"]\n"
+      , on (Runtime_schema.Listed_keepers ("b", [ "a" ])) )
+    ; "memory_recall = true\n", None
     ]
 ;;
 

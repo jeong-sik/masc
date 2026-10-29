@@ -229,6 +229,46 @@ let test_a_list_kept_while_off_is_restored_by_switching_on () =
     (recall_of (text_of widened))
 ;;
 
+(* The gate asks whether a name is in the list, not where or how often, so a
+   kept list the form shows in another order -- or with a name written twice --
+   is still the list the form chose. Switching on writes the switch alone, and
+   the read-back accepts the file's own list. *)
+let test_a_kept_list_in_another_order_is_still_the_chosen_list () =
+  let off_with names =
+    with_table
+      ("memory_recall = false\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = "
+       ^ names ^ "\n")
+  in
+  let on_with names =
+    with_table
+      ("memory_recall = true\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = "
+       ^ names ^ "\n")
+  in
+  let kept = "[\"a\", \"b\"]" in
+  Alcotest.(check string)
+    "a dropped and picked again goes after b"
+    (on_with kept)
+    (text_of (edited (opened (off_with kept)) [ "right"; "down"; " "; " " ]));
+  let twice = "[\"a\", \"a\", \"b\"]" in
+  Alcotest.(check string)
+    "a name written twice stays as written"
+    (on_with twice)
+    (text_of (edited (opened (off_with twice)) [ "right" ]))
+;;
+
+(* A file that switched recall off and kept scope "all" has nothing to rewrite
+   but the switch when recall goes back on for every keeper. *)
+let test_all_over_a_switched_off_all_writes_the_switch_alone () =
+  let text =
+    with_table "memory_recall = false # paused\nmemory_recall_scope = \"all\" # why\n"
+  in
+  let form = edited (opened text) [ "right"; "right" ] in
+  Alcotest.(check string)
+    "only the switch is rewritten"
+    (with_table "memory_recall = true # paused\nmemory_recall_scope = \"all\" # why\n")
+    (text_of form)
+;;
+
 let detail =
   let show (d : F.detail) =
     let mode = function F.Off -> "off" | F.Listed -> "listed" | F.All -> "all" in
@@ -254,6 +294,13 @@ let expect_changed form =
 let listed_ab =
   with_table
     "memory_recall = true\nmemory_recall_scope = \"listed\"\n\
+     memory_recall_keepers = [\"a\", \"b\"]\n"
+;;
+
+(* The same list in a file that switched recall off by hand. *)
+let off_kept_ab =
+  with_table
+    "memory_recall = false\nmemory_recall_scope = \"listed\"\n\
      memory_recall_keepers = [\"a\", \"b\"]\n"
 ;;
 
@@ -303,6 +350,11 @@ let test_change_and_text_on_agree_about_nothing_to_write () =
     ; "a pick", listed_ab, [ "down"; "down"; "down"; " " ]
     ; "to every keeper", listed_ab, [ "right" ]
     ; "off", listed_ab, [ "left" ]
+    ; "off over a kept list, left off", off_kept_ab, []
+    ; "back on over a kept list", off_kept_ab, [ "right" ]
+    ; "back on, a kept keeper dropped and picked again", off_kept_ab, [ "right"; "down"; " "; " " ]
+    ; "back on, another keeper picked", off_kept_ab, [ "right"; "down"; "down"; "down"; " " ]
+    ; "over a kept list, to every keeper", off_kept_ab, [ "right"; "right" ]
     ]
   in
   List.iter
@@ -421,11 +473,56 @@ let test_a_table_the_line_editor_cannot_change_is_refused_not_written () =
 (* A keeper name comes from the file and from the server; an escape sequence in
    it must not reach the terminal. *)
 let test_a_keeper_name_cannot_colour_the_pane () =
-  let form = edited (opened ~keepers:(entries [ "x\027[31my" ]) probe) [ "right" ] in
+  (* Picked, so the name is in the list and in the line that says what saving
+     would do. *)
+  let form =
+    edited (opened ~keepers:(entries [ "x\027[31my" ]) probe) [ "right"; "down"; " " ]
+  in
   List.iter
     (fun row ->
        Alcotest.(check bool) "no escape byte in a row" false (String.contains row '\027'))
     (F.rows ~width:80 ~height:20 form)
+;;
+
+(* Which words mark a stopped Keeper is the pane's to choose. That it is drawn
+   apart from a running one, and that a Keeper whose state is not known is
+   drawn like a running one, is the form's. *)
+let test_a_stopped_keeper_is_drawn_apart_from_a_running_one () =
+  let rows_with presence =
+    let form = edited (opened ~keepers:[ { F.name = "a"; presence } ] probe) [ "right" ] in
+    F.rows ~width:80 ~height:30 form
+  in
+  Alcotest.(check bool)
+    "stopped is not drawn as running"
+    true
+    (rows_with F.Stopped <> rows_with F.Running);
+  Alcotest.(check (list string))
+    "unknown is drawn as running"
+    (rows_with F.Running)
+    (rows_with F.Unknown)
+;;
+
+(* The Keeper list takes the rows the other rows leave, the line that says
+   what saving would do among them. *)
+let test_the_rows_fit_the_height_they_are_given () =
+  let long = List.init 40 (fun index -> Printf.sprintf "keeper-%02d" index) in
+  List.iter
+    (fun keys ->
+       let form = edited (opened ~keepers:(entries long) probe) keys in
+       List.iter
+         (fun height ->
+            List.iter
+              (fun width ->
+                 let rows = F.rows ~width ~height form in
+                 Alcotest.(check bool)
+                   (Printf.sprintf "%d rows in a pane of %d x %d" (List.length rows) width height)
+                   true
+                   (List.length rows <= height))
+              [ 60; 80; 200 ])
+         [ 14; 20; 50 ])
+    [ [ "right"; "down"; " " ]
+    ; [ "right"; "down"; " "; "down"; "down"; " "; "down"; "down"; "down"; " " ]
+    ]
 ;;
 
 let test_rows_are_drawn_at_any_size () =
@@ -460,6 +557,10 @@ let () =
             test_the_same_keepers_in_another_order_write_nothing
         ; Alcotest.test_case "a list kept while off is restored by switching on" `Quick
             test_a_list_kept_while_off_is_restored_by_switching_on
+        ; Alcotest.test_case "a kept list in another order is still the chosen list" `Quick
+            test_a_kept_list_in_another_order_is_still_the_chosen_list
+        ; Alcotest.test_case "all over a switched-off all writes the switch alone" `Quick
+            test_all_over_a_switched_off_all_writes_the_switch_alone
         ; Alcotest.test_case "change names what saving would do" `Quick
             test_change_names_what_saving_would_do
         ; Alcotest.test_case "change and text_on agree about nothing to write" `Quick
@@ -501,6 +602,10 @@ let () =
       , [ Alcotest.test_case "a keeper name cannot colour the pane" `Quick
             test_a_keeper_name_cannot_colour_the_pane
         ; Alcotest.test_case "rows are drawn at any size" `Quick test_rows_are_drawn_at_any_size
+        ; Alcotest.test_case "a stopped keeper is drawn apart from a running one" `Quick
+            test_a_stopped_keeper_is_drawn_apart_from_a_running_one
+        ; Alcotest.test_case "the rows fit the height they are given" `Quick
+            test_the_rows_fit_the_height_they_are_given
         ] )
     ]
 ;;

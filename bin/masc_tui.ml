@@ -25548,21 +25548,19 @@ let main
     | Some _, Some reading ->
       let session = runtime_config_working_session reading in
       let module Form = Masc_tui_memory_recall_form in
-      (* A paused Keeper, or one the roster reading says is not running, is
-         marked in the list. A roster that could not be read says nothing:
-         [Unknown] is not drawn. *)
+      (* A paused Keeper, or one no fiber runs, is marked in the list. The
+         reading is the Keepers surface's own, so the two say the same. A
+         roster that could not be read says nothing: [Unknown] is not drawn. *)
       let roster_entry (keeper : keeper) =
+        let reading = Masc_tui_types.keeper_reading state keeper in
         { Form.name = keeper.k_name
         ; presence =
-            (if keeper.k_paused then Form.Stopped
+            (if reading.Masc_tui_keeper_control.paused then Form.Stopped
              else
-               match
-                 Masc_tui_keeper_control.liveness_of_roster state.keeper_roster keeper.k_name
-               with
-               | Masc_tui_keeper_control.Present _ -> Form.Running
-               | Masc_tui_keeper_control.Absent -> Form.Stopped
-               | Masc_tui_keeper_control.Unobserved | Masc_tui_keeper_control.Invalid _ ->
-                   Form.Unknown) }
+               match Masc_tui_keeper_control.runs reading with
+               | Some true -> Form.Running
+               | Some false -> Form.Stopped
+               | None -> Form.Unknown) }
       in
       (match
          Form.open_on ~source_revision:session.base.source_revision

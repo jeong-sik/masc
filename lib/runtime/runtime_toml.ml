@@ -3226,12 +3226,14 @@ type memory_recall_declaration =
 let memory_recall_scope_key path = path ^ ".memory_recall_scope"
 
 (* [memory_recall] is the switch and [memory_recall_scope] says which keepers:
-   "all", or "listed" with the names in [memory_recall_keepers]. Switching it
-   on without a scope is refused, so is a "listed" scope with no names, and so
-   is a list next to "all" or to no scope. No way of leaving a key out or
-   writing it empty reaches every keeper, and a list is never ignored while it
-   looks like a limit. The scope keys are read whatever the switch says: a
-   misspelt scope is refused while the switch is off. *)
+   "all", or "listed" with the names in [memory_recall_keepers]. A "listed"
+   scope with no names is refused, and so is a list next to "all" or to no
+   scope. No way of leaving a key out or writing it empty reaches every
+   keeper, and a list is never ignored while it looks like a limit. The scope
+   keys are read whatever the switch says: a misspelt scope is refused while
+   the switch is off. A switch that is on without a scope is answered here as
+   [{ switch = true; scope = None }]; refusing it is the decision of
+   [parse_typesafeai_memory_recall]. *)
 let parse_typesafeai_memory_recall_declaration ~(path : string) (tbl : Otoml.t)
   : (memory_recall_declaration, parse_error list) result
   =

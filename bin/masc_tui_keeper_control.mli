@@ -162,6 +162,13 @@ val requires_confirmation : action -> bool
     those, matching the Approvals surface's arm-then-submit gate; the
     reversible actions submit on the first press. *)
 
+val runs : reading -> bool option
+(** Whether a fiber runs the keeper, as the roster says: [Some true] for a row
+    whose keepalive is running, [Some false] for a keeper the roster lacks or
+    holds without a running keepalive (boot is what {!available} offers then),
+    [None] when the roster was not read. Pause is a different axis: a paused
+    keeper's fiber runs. *)
+
 val available : reading -> action list
 (** The actions that apply to a reading, in the order the footer lists them.
 

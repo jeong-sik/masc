@@ -232,15 +232,17 @@ let unchangeable =
   "[typesafeai] 가 폼으로 고칠 수 있는 모양이 아니에요. e 로 파일을 직접 고쳐 주세요."
 ;;
 
+(* What the form stands for, or [None] for [Listed] with nobody picked, which
+   is no choice to write. *)
 let chosen t =
   match t.mode with
-  | Off -> Ok Runtime_schema.Memory_recall_off
-  | All -> Ok (Runtime_schema.Memory_recall_on Runtime_schema.All_keepers)
+  | Off -> Some Runtime_schema.Memory_recall_off
+  | All -> Some (Runtime_schema.Memory_recall_on Runtime_schema.All_keepers)
   | Listed ->
     (match t.picked with
-     | [] -> Error nobody_picked
+     | [] -> None
      | first :: rest ->
-       Ok
+       Some
          (Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (first, rest))))
 ;;
 
@@ -268,9 +270,9 @@ let same_choice left right =
 
 let change t =
   match chosen t with
-  | Error (_ : string) -> Nobody_picked
-  | Ok chosen when same_choice chosen t.initial -> Unchanged
-  | Ok _ ->
+  | None -> Nobody_picked
+  | Some chosen when same_choice chosen t.initial -> Unchanged
+  | Some _ ->
     let held = held_names t.declared in
     let picked = without_repeats t.picked in
     let after = t.mode in
@@ -339,16 +341,19 @@ let write ~(declared : Runtime_toml.memory_recall_declaration) chosen text =
     if scope_is_listed && same_names held names then text else set_keepers names text
 ;;
 
+(* The read-back asks [same_choice], as the decision above does: a list the
+   file keeps may name the choice's keepers in another order, or twice, and
+   the gate reads that as the same list. *)
 let text_on t =
   let refuse reason = Error { t with error = Some reason } in
   match chosen t with
-  | Error reason -> refuse reason
-  | Ok chosen when same_choice chosen t.initial -> Ok t.text
-  | Ok chosen ->
+  | None -> refuse nobody_picked
+  | Some chosen when same_choice chosen t.initial -> Ok t.text
+  | Some chosen ->
     let edited = write ~declared:t.declared chosen t.text in
     (match Runtime_toml.parse_string edited with
      | Ok config
-       when Runtime_schema.equal_memory_recall
+       when same_choice
               config.Runtime_schema.typesafeai.Runtime_schema.memory_recall
               chosen -> Ok edited
      | Ok _ -> refuse unchangeable

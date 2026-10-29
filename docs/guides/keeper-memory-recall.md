@@ -98,8 +98,9 @@ the chosen set changes.
 Config > runtime.toml, key `m`, opens a form for the same three keys. The
 range row chooses off, picked Keepers only, or every Keeper. In the picked
 range the form lists the Keepers the TUI knows, and a name the file lists that
-the TUI does not know stays in the list, marked. A Keeper the roster says is
-not running is marked too. Space picks, Enter saves, Esc closes. A line under
+the TUI does not know stays in the list, marked. A Keeper that is paused, or
+that no fiber runs (the roster lacks it, or holds it without a running
+keepalive), is marked too. Space picks, Enter saves, Esc closes. A line under
 the list says what saving would do, for example "off -> picked Keepers only",
 the Keepers added to or dropped from the list, or that nothing changes.
 

@@ -82,8 +82,10 @@ type change =
   | Changed of detail
 
 val change : t -> change
-(** The same decision {!text_on} makes, without writing. A list that names
-    the same Keepers in another order is {!Unchanged}. *)
+(** The decision {!text_on} makes about the choice, without writing. A list
+    that names the same Keepers in another order is {!Unchanged}. It does not
+    try the write: for a [\[typesafeai\]] the line editor cannot change,
+    {!text_on} still refuses a choice this calls {!Changed}. *)
 
 val text_on : t -> (string, t) result
 (** The text the form was opened on, with the form's choice written into
@@ -105,7 +107,9 @@ val text_on : t -> (string, t) result
     [Error] is the form with the reason on it: {!Listed} with nobody picked,
     or a [\[typesafeai\]] written in a shape the line editor cannot change
     (the edited text is read back, and anything but the chosen value is
-    refused rather than written). *)
+    refused rather than written). The read-back compares lists as sets of
+    Keepers, like {!change}: a list the file keeps in another order, or with a
+    name twice, is the chosen list. *)
 
 val rows : width:int -> height:int -> t -> string list
 (** The form as rows of a pane [width] cells wide. The Keeper list gets the

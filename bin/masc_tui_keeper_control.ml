@@ -232,15 +232,22 @@ let requires_confirmation = function
   | Shutdown | Delete -> true
   | Pause | Resume | Boot | Wakeup -> false
 
+(* A row the roster has but whose keepalive is not running is registered
+   without a fiber: nothing runs it, the same as a keeper the roster lacks. *)
+let runs reading =
+  match reading.liveness with
+  | Unobserved | Invalid _ -> None
+  | Absent -> Some false
+  | Present runtime -> Some runtime.Decode.kr_keepalive_running
+
 (* Confirmed deletion uses the server's durable shutdown operation, which
    stops and joins the exact lane before removing its artifacts. *)
 let available reading =
-  match reading.liveness with
-  | Unobserved | Invalid _ -> [ Delete ]
-  | Absent -> [ Boot; Delete ]
-  | Present runtime ->
-      if not runtime.Decode.kr_keepalive_running then [ Boot; Delete ]
-      else if reading.paused then [ Resume; Wakeup; Shutdown; Delete ]
+  match runs reading with
+  | None -> [ Delete ]
+  | Some false -> [ Boot; Delete ]
+  | Some true ->
+      if reading.paused then [ Resume; Wakeup; Shutdown; Delete ]
       else [ Pause; Wakeup; Shutdown; Delete ]
 
 let primary reading =

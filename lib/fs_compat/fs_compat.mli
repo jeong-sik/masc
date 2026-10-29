@@ -1776,8 +1776,12 @@ type 'a private_file_decision =
   | Confirm_existing of 'a
   | Append_confirmed of string * 'a
 
+type private_file_locking = Wait_for_lock | Try_lock
+(** [Try_lock] fails with [Sys_error] on in-process or cross-process lock
+    contention. It never changes the durable append or confirmation rules. *)
+
 val reconcile_private_file_durable_locked_result :
-  string -> (string -> 'a private_file_decision) ->
+  ?locking:private_file_locking -> string -> (string -> 'a private_file_decision) ->
   ('a, durable_append_error) private_file_transaction_outcome
 (** The same complete-byte, path-mutex and exclusive data-descriptor transaction
     as {!update_private_file_durable_locked_result}. [Refuse_update] returns
@@ -1822,6 +1826,7 @@ type 'a private_jsonl_recovery_validation =
     neither creates a missing journal nor prepares its parent. *)
 val recover_and_update_private_jsonl_durable_locked_result :
   ?create:bool ->
+  ?locking:private_file_locking ->
   validate_prefix:(string -> 'a private_jsonl_recovery_validation) ->
   string -> (string -> string option * 'a) ->
   ('a, durable_append_error) private_file_transaction_outcome

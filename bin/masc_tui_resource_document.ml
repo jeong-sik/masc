@@ -9,6 +9,10 @@ type t = Reading.t
 
 let entry (reading : t) = reading.entry
 
+let recovery_preview_lead ~requested = Printf.sprintf
+  "**%s all revisions**\n\n**! retries the original request; it may apply.**"
+  (if requested then "ENABLE" else "REVOKE")
+
 let current (state : state) =
   let entries = match visible_resources state with Some rows -> rows | None -> [] in
   let cursor = max 0 (min state.resources_cursor (List.length entries - 1)) in
@@ -17,13 +21,15 @@ let current (state : state) =
       state.resource_content_error, state.resource_content with
     | Some key, _, _ | None, Some (key, _), _ | None, None, Some (key, _) -> Some key
     | None, None, None ->
-      (match state.resource_share_pending, selected with
-       | Some request, Some (Catalog.Report report)
-         when request.share_workspace = state.workspace_authority
-              && String.equal request.share_report.id report.id ->
-         Some (Catalog.Report_revision request.share_report)
-       | (Some _ | None), Some (Catalog.Report _ | Catalog.Mcp _) -> Option.map Catalog.key selected
-       | (Some _ | None), None -> None) in
+      (match selected with
+       | Some (Catalog.Report report) ->
+         (match List.find_opt (fun request ->
+           request.share_workspace = state.workspace_authority
+           && String.equal request.share_report.id report.id) state.resource_share_pending with
+          | Some request -> Some (Catalog.Report_revision request.share_report)
+          | None -> Option.map Catalog.key selected)
+       | Some (Catalog.Mcp _) -> Option.map Catalog.key selected
+       | None -> None) in
   Option.bind shown_key (fun key ->
     Option.map (fun entry ->
       let contents = match state.resource_content with
@@ -54,7 +60,8 @@ let current (state : state) =
         ~image_cursor:state.resource_image_cursor ~text_cursor:state.resource_text_cursor
         ~revisions:state.resource_revision_history ~presentation:state.resource_presentation
         ~metadata_expanded:state.resource_metadata_expanded
-        ~diagrams:(match state.resource_diagrams, contents, requested, error,
+        ~diagrams:(if Option.is_some state.resource_share_recovery_prompt then None else
+          match state.resource_diagrams, contents, requested, error,
             state.resource_presentation with
           | Some diagrams, Some parts, false, None, Catalog.Document
               when Masc_tui_resource_diagrams.owns parts diagrams
@@ -64,8 +71,19 @@ let current (state : state) =
         ~confirmation:(match entry with Catalog.Mcp _ -> None
           | Report report -> Some (resource_check_status state report))
         ~shared:(match entry with Catalog.Mcp _ -> None
-          | Report _ -> if share_uncertain then None else state.resource_shared)
+          | Report _ ->
+            if share_uncertain || requested || Option.is_some error then None
+            else state.resource_shared)
         ~share_uncertain
+        ~recovery_preview:(match state.resource_share_recovery_prompt with
+          | Some prompt when prompt.recovery_workspace = state.workspace_authority
+              && Catalog.equal_key prompt.recovery_key key ->
+            let request = prompt.recovery_entry.request in
+            Some (Printf.sprintf
+              "%s\n\nShare version %d · publication v%d\n\nOperation `%s` · SHA-256 `%s`"
+              (recovery_preview_lead ~requested:request.requested) request.expected_version
+              request.expected_artifact_revision request.operation_id request.expected_artifact_sha256)
+          | Some _ | None -> None)
         ~public_url)
       (Catalog.entry_for_key entries key))
 
@@ -116,7 +134,7 @@ let copy_public_url state =
   let open Result.Syntax in
   let* () = match current state with
     | Some { share_uncertain = true; _ } ->
-      Error "External sharing result is unconfirmed; P and Y are disabled for this artifact during this TUI session"
+      Error "External sharing is unconfirmed; U reconciles the recorded operation and may apply it"
     | Some _ | None -> Ok () in
   let* _ = export_source state in
   match state.resource_shared, current state with
@@ -132,7 +150,7 @@ let external_share_change state =
     Error "Focus a published report to change external sharing"
   else match current state, state.resource_shared with
     | Some { entry = Catalog.Report _; share_uncertain = true; _ }, (Some _ | None) ->
-      Error "External sharing result is unconfirmed; P and Y are disabled for this artifact during this TUI session"
+      Error "External sharing is unconfirmed; U reconciles the recorded operation and may apply it"
     | Some { entry = Catalog.Report report; _ }, Some true -> Ok (report, false)
     | Some { entry = Catalog.Report report; _ }, Some false ->
       let* _ = export_source state in Ok (report, true)
@@ -189,7 +207,7 @@ type origin = Metadata | Selection | Part_heading of int | Part_body of int
   | Read_status | Progress | Failure of int
 
 let resource_document entry
-    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions ~presentation ~metadata_expanded ~confirmation ~shared ~share_uncertain ~public_url =
+    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions ~presentation ~metadata_expanded ~confirmation ~shared ~share_uncertain ~recovery_preview ~public_url =
   let resource = Catalog.metadata entry in
   let present = function
     | Some text when String.trim text <> "" -> text
@@ -269,15 +287,16 @@ let resource_document entry
   let sharing = match entry, share_uncertain, shared with
     | Catalog.Mcp _, (true | false), (Some _ | None) -> ""
     | Catalog.Report _, true, (Some _ | None) ->
-      "\n\n**External sharing:** change unconfirmed; it may still apply. P and Y are disabled for this artifact during this TUI session."
+      "\n\n**External sharing:** change unconfirmed; it may still apply. U shows the recorded change before confirmation."
     | Catalog.Report _, false, None -> "\n\n**External sharing:** unknown (R: reread this revision)"
-    | Catalog.Report _, false, Some true -> "\n\n**External sharing:** enabled (P: revoke)"
-    | Catalog.Report _, false, Some false -> "\n\n**External sharing:** private (P: enable)" in
+    | Catalog.Report _, false, Some true -> "\n\n**External sharing:** last observed enabled (P: revoke)"
+    | Catalog.Report _, false, Some false -> "\n\n**External sharing:** last observed private (P: enable)" in
   let public_link = match public_url with
     | Some (Ok url) -> "\n\n**Public link:** `" ^ url ^ "` · Y: copy (origin not verified)"
     | Some (Error detail) -> "\n\n**Public link unavailable:** " ^ detail
     | None -> "" in
-  (Metadata, Markdown_text (metadata ^ confirmation ^ sharing ^ public_link ^ "\n\n---")) :: body
+  let recovery = Option.fold ~none:[] ~some:(fun preview -> [Metadata, Markdown_text preview]) recovery_preview in
+  recovery @ ((Metadata, Markdown_text (metadata ^ confirmation ^ sharing ^ public_link ^ "\n\n---")) :: body)
 
 type diagram = {
   first_row : int;
@@ -304,6 +323,7 @@ let anchored_layout ~cols (reading : t) =
     ~text_cursor:reading.text_cursor ~revisions:reading.revisions
     ~presentation:reading.presentation ~metadata_expanded:reading.metadata_expanded
     ~confirmation:reading.confirmation ~shared:reading.shared ~share_uncertain:reading.share_uncertain
+    ~recovery_preview:reading.recovery_preview
     ~public_url:reading.public_url in
   let pieces = match reading.diagrams with
     | None -> pieces
@@ -362,6 +382,15 @@ let layout ~cols reading =
   rendered.lines,rendered.pictures
 
 let rows ~cols reading = fst (layout ~cols reading)
+
+let recovery_preview_fits ~cols ~height ~requested (reading : t) =
+  match reading.recovery_preview, reading.diagrams with
+  | Some _, None ->
+    let width = max 1 (framed_inner_width cols - 4) in
+    let preview_rows = Message_layout.wrap_body ~markdown:Masc_tui_markdown_theme.document
+      ~max_cells:width ~sanitize:Terminal_text.single_line (recovery_preview_lead ~requested) in
+    preview_rows <> [] && List.length preview_rows <= height
+  | (Some _ | None), (Some _ | None) -> false
 
 let search_rows ~cols state =
   match current state with

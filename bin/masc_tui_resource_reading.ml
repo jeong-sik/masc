@@ -11,13 +11,14 @@ type t = {
   confirmation : Masc_tui_artifact_checks.status option;
   shared : bool option;
   share_uncertain : bool;
+  recovery_preview : string option;
   public_url : (string, string) result option;
   diagrams : Masc_tui_resource_diagrams.t option;
 }
 let create ~entry ~contents ~error ~requested ~image_cursor ~text_cursor
-    ~revisions ~presentation ~metadata_expanded ~confirmation ~shared ~share_uncertain ~public_url ~diagrams =
+    ~revisions ~presentation ~metadata_expanded ~confirmation ~shared ~share_uncertain ~recovery_preview ~public_url ~diagrams =
   {entry;contents;error;requested;image_cursor;text_cursor;revisions;presentation;
-   metadata_expanded;confirmation;shared;share_uncertain;public_url;diagrams}
+   metadata_expanded;confirmation;shared;share_uncertain;recovery_preview;public_url;diagrams}
 let searchable reading = match reading.contents, reading.error with
   | Some _, None -> true
   | (Some _ | None), (Some _ | None) -> false
@@ -34,7 +35,8 @@ let same_reading a b =
   && a.image_cursor=b.image_cursor && a.text_cursor=b.text_cursor
   && a.revisions=b.revisions && a.presentation=b.presentation
   && a.metadata_expanded=b.metadata_expanded && a.confirmation=b.confirmation
-  && a.shared=b.shared && a.share_uncertain=b.share_uncertain && a.public_url=b.public_url
+  && a.shared=b.shared && a.share_uncertain=b.share_uncertain
+  && a.recovery_preview=b.recovery_preview && a.public_url=b.public_url
   && Option.equal (==) a.diagrams b.diagrams
 let landing ~cols ~query reading = function
   | Landed original when original.cols=cols && original.query=query

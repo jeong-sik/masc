@@ -6783,8 +6783,24 @@
 (test
  (name test_tui_resource_copy)
  (modules test_tui_resource_copy)
- (libraries masc_tui_resource_reading masc_tui_scroll alcotest base64 masc masc_tui_link masc_tui_types masc_tui_resource_document
+ (libraries masc_tui_artifact_share_pending masc_tui_resource_reading masc_tui_scroll alcotest base64 masc masc_tui_link masc_tui_types masc_tui_resource_document
   masc_tui_resource_catalog masc_tui_resources_updates masc_tui_mcp masc.masc_tool_blob_store unix))
+
+(test
+ (name test_tui_workspace_share_cancel)
+ (modules test_tui_workspace_share_cancel)
+ (libraries alcotest masc_tui_types masc_tui_workspace_result masc_tui_workspace_job masc_tui_artifact_share_attempt
+  masc_eio_context eio eio_main))
+
+(test
+ (name test_tui_artifact_share_pending)
+ (modules test_tui_artifact_share_pending)
+ (libraries alcotest masc masc_tui_artifact_share_pending eio eio_main unix))
+
+(test
+ (name test_tui_artifact_share_confirmation)
+ (modules test_tui_artifact_share_confirmation)
+ (libraries alcotest masc_tui_artifact_share_confirmation))
 
 (test
  (name test_tui_image_payload)

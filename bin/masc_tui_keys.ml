@@ -1043,6 +1043,10 @@ let for_surface = function
           ~help:"open the selected fixed report revision; the browser uses its own authentication"
       ; b Act "P" "external sharing" ~detail:Detail_only
           ~help:"enable or revoke external access to all revisions of this report"
+      ; b Act "U" "reconcile share" ~detail:Detail_only
+          ~help:"inspect the original recorded share operation"
+      ; b Act "!" "confirm share recovery" ~detail:Detail_only
+          ~help:"confirm the displayed original operation after its preview is shown"
       ; b Act "Y" "copy public link" ~detail:Detail_only
           ~help:"copy the selected revision's link when external sharing is enabled"
       ; b Act "R" "reread revision" ~detail:Detail_only

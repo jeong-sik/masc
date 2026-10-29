@@ -8611,8 +8611,11 @@ type resource_save_prompt = {
 type resource_share_request = {
   share_owner : unit ref;
   share_workspace : workspace_authority;
+  share_workspace_identity : workspace_input_identity;
   share_report : Masc_tui_resource_catalog.report;
   share_target : bool;
+  share_recovery : bool;
+  share_entry : Masc_tui_artifact_share_pending.entry;
 }
 
 type queue_panel_notice = Queue_info of string | Queue_error of string
@@ -8651,6 +8654,40 @@ type queue_panel_owner = {
 }
 
 type resource_share_outcome = Resource_share_applied of bool | Resource_share_conflict of bool
+  | Resource_share_not_sent of string | Resource_share_not_prepared of string
+type resource_share_failure = Resource_share_unknown of string | Resource_share_not_started of string
+
+type resource_share_journal_observation =
+  | Share_journal_not_needed
+  | Share_journal_unavailable of string * Masc_tui_artifact_share_pending.entry list
+  | Share_journal_checked of {
+      journal_workspace : workspace_input_identity;
+      journal_pending : Masc_tui_artifact_share_pending.entry option;
+      journal_observed : Masc_tui_artifact_share_pending.entry list;
+      journal_stable : bool;
+    }
+
+type resource_share_recovery_lookup = {
+  recovery_lookup_owner : unit ref;
+  recovery_lookup_workspace : workspace_authority;
+  recovery_lookup_origin : workspace_input_identity;
+  recovery_lookup_key : Masc_tui_resource_catalog.key;
+}
+
+type resource_public_copy = {
+  public_copy_url : string;
+  public_copy_workspace : workspace_authority;
+  public_copy_read_authority : unit ref;
+  public_copy_origin : workspace_input_identity;
+  public_copy_key : Masc_tui_resource_catalog.key;
+}
+
+type resource_share_recovery_prompt = {
+  recovery_entry : Masc_tui_artifact_share_pending.entry;
+  recovery_workspace : workspace_authority;
+  recovery_key : Masc_tui_resource_catalog.key;
+  recovery_confirmation : Masc_tui_artifact_share_confirmation.t;
+}
 
 type state = {
   observation_instance : Masc_tui_observation_origin.instance;
@@ -9063,13 +9100,23 @@ type state = {
   mutable resource_content_error: (Masc_tui_resource_catalog.key * string) option;
   mutable resource_pending_key: Masc_tui_resource_catalog.key option;
   mutable resource_read_owner: unit ref option;
+  mutable resource_copy_pending: Masc_tui_resource_catalog.read_request option;
+  mutable resource_copy_ready: resource_public_copy option;
+  mutable resource_share_recovery_lookup: resource_share_recovery_lookup option;
+  mutable resource_share_recovery_prompt: resource_share_recovery_prompt option;
   mutable resource_revision_history: Masc_tui_resource_catalog.report list;
   mutable resource_shared: bool option;
   mutable resource_share_version: int option;
-  mutable resource_share_pending: resource_share_request option;
+  mutable resource_share_pending: resource_share_request list;
   (* An interrupted write may still commit after any later GET. Keep these
      artifact IDs uncertain for this TUI session, across workspace epochs. *)
-  mutable resource_share_uncertain_ids: string list;
+  mutable resource_share_uncertain_ids: (workspace_input_identity * string) list;
+  (* Exact unresolved entries remain even if a later journal read is empty. *)
+  mutable resource_share_witnesses: Masc_tui_artifact_share_pending.entry list;
+  (* Worker observations survive selection and workspace cancellation. *)
+  resource_share_observations: Masc_tui_artifact_share_pending.entry list Atomic.t;
+  (* A delayed observation cannot re-taint a tuple whose receipt was verified. *)
+  mutable resource_share_receipts: Masc_tui_artifact_share_pending.entry list;
   mutable resource_scroll: Masc_tui_scroll.Position.t;
   (* Logical search match is independent of last-page scroll clamping. *)
   mutable resource_search_position: Masc_tui_resource_reading.search_position;
@@ -11819,8 +11866,50 @@ let server_authority_ready state =
       && not (Canonical_path.is_empty identity.sid_masc_root)
   | None -> false
 
+let record_resource_share_observation state entry =
+  let rec record () =
+    let before = Atomic.get state.resource_share_observations in
+    if List.mem entry before then ()
+    else if not (Atomic.compare_and_set state.resource_share_observations before (entry :: before)) then record () in
+  record ()
+
+let known_resource_share_entries state ~origin ~artifact_id =
+  let entries = state.resource_share_witnesses @ Atomic.get state.resource_share_observations in
+  List.fold_left (fun known (entry : Masc_tui_artifact_share_pending.entry) ->
+    if entry.base_path = origin.wi_base_path && entry.masc_root = origin.wi_masc_root
+       && entry.artifact_id = artifact_id && not (List.mem entry state.resource_share_receipts)
+    then Masc_tui_artifact_share_pending.witness entry known else known) [] entries
+
+let resource_share_identity_conflict state (entry : Masc_tui_artifact_share_pending.entry) =
+  List.exists (fun (known : Masc_tui_artifact_share_pending.entry) ->
+    known.base_path = entry.base_path && known.masc_root = entry.masc_root
+    && known.artifact_id = entry.artifact_id
+    && known.request.operation_id = entry.request.operation_id && known <> entry)
+    (state.resource_share_witnesses @ Atomic.get state.resource_share_observations @ state.resource_share_receipts)
+
+let resource_share_dispatch_refusal state ~origin ~(entry : Masc_tui_artifact_share_pending.entry) ~recovery =
+  if resource_share_identity_conflict state entry then
+    Some "The original operation ID has conflicting request details"
+  else if not recovery && List.exists ((<>) entry)
+      (known_resource_share_entries state ~origin ~artifact_id:entry.artifact_id) then
+    Some "Another share operation became unconfirmed before dispatch"
+  else None
+
+let observe_resource_share state entry =
+  record_resource_share_observation state entry;
+  if not (List.mem entry state.resource_share_receipts) then
+    state.resource_share_witnesses <- Masc_tui_artifact_share_pending.witness entry state.resource_share_witnesses
+
+let settle_resource_share state entry =
+  state.resource_share_witnesses <- Masc_tui_artifact_share_pending.resolve entry state.resource_share_witnesses;
+  state.resource_share_receipts <- Masc_tui_artifact_share_pending.witness entry state.resource_share_receipts
+
 let resource_share_uncertain state (report : Masc_tui_resource_catalog.report) =
-  List.exists (String.equal report.id) state.resource_share_uncertain_ids
+  match workspace_input_identity_of_server state.server_identity with
+  | None -> false
+  | Some workspace ->
+    List.mem (workspace, report.id) state.resource_share_uncertain_ids
+    || known_resource_share_entries state ~origin:workspace ~artifact_id:report.id <> []
 
 let code_draft_address state =
   match state.server_identity, Masc_tui_fetched.current_key state.code_file with
@@ -12307,6 +12396,10 @@ let retain_resource_read state ~key =
     | Some (current, _) -> Masc_tui_resource_catalog.equal_key current key
     | None -> false in
   state.resource_read_owner <- None;
+  state.resource_copy_pending <- None;
+  state.resource_copy_ready <- None;
+  state.resource_share_recovery_lookup <- None;
+  state.resource_share_recovery_prompt <- None;
   let known_revision = match key with
     | Masc_tui_resource_catalog.Mcp_uri _ -> false
     | Report_revision report -> List.exists (fun candidate ->
@@ -13115,6 +13208,10 @@ let suspend_workspace_readings state =
     ~reason:(Masc_tui_original_task_read.Workspace_unconfirmed "Waiting for original workspace identity.");
   suspend_verification_evidence_read state;
   state.resource_read_owner <- None;
+  state.resource_copy_pending <- None;
+  state.resource_copy_ready <- None;
+  state.resource_share_recovery_lookup <- None;
+  state.resource_share_recovery_prompt <- None;
   state.chat_call_reader <- None;
   state.chat_call_pending <- None;
   state.task_history <- Masc_tui_fetched.suspend state.task_history;
@@ -16918,11 +17015,18 @@ let create_state
   resource_content_error = None;
   resource_pending_key = None;
   resource_read_owner = None;
+  resource_copy_pending = None;
+  resource_copy_ready = None;
+  resource_share_recovery_lookup = None;
+  resource_share_recovery_prompt = None;
   resource_revision_history = [];
   resource_shared = None;
   resource_share_version = None;
-  resource_share_pending = None;
+  resource_share_pending = [];
   resource_share_uncertain_ids = [];
+  resource_share_witnesses = [];
+  resource_share_observations = Atomic.make [];
+  resource_share_receipts = [];
   resource_scroll = Masc_tui_scroll.Position.first;
   resource_search_position = Masc_tui_resource_reading.first;
   resource_focus = Left_pane;
@@ -18556,6 +18660,21 @@ let help_is_presented = function
 
    [max_int] is above every representable row count. The frame normalizes the
    request through that surface's own scroll report. *)
+
+(* The Resources document position, when the reader holds that pane. *)
+let resource_scroll_position = function
+  | Resource_scroll position -> Some position
+  | Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _ | Keeper_detail _
+  | Keeper_calls _ | Keeper_logs_scroll _ | Acting _ | Acting_selection _
+  | Acting_detail_scroll _ | Memory_fact_detail_scroll _ | Client_detail_scroll _
+  | Verification_detail_scroll _ | Harness_detail_scroll _ | Fusion_detail_scroll _
+  | Runtime_detail_scroll _ | Runtime_params_scroll _ | System_log_detail_scroll _
+  | Planning_confirmation_scroll _ | Planning_detail_scroll _ | Lane_run_detail_scroll _
+  | Changes_diff_scroll _ | Repository_changes_diff_scroll _ | Metrics_scroll _
+  | Approval_detail_scroll _ | Patch_modal_scroll _ | Link_modal_scroll _ | Play_invite_scroll _
+  | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _ | Context_inspector_scroll _
+  | Context_inspector_response_scroll _ -> None
+
 let clamped_scroll_end = max_int
 
 (* Moving down from [clamped_scroll_end]. The sentinel waits for a frame to

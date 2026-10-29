@@ -31,11 +31,12 @@ val launch_list
 val launch_read
   :  Masc_tui_types.state
   -> host:string
+  -> share_origin:Masc_tui_types.workspace_input_identity option
   -> launch:
        (deliver:
-          ((Masc_tui_resource_catalog.reading, string) result
+          (((Masc_tui_resource_catalog.reading, string) result * Masc_tui_types.resource_share_journal_observation, string) result
            -> Masc_tui_async_protocol.async_msg)
-        -> (unit -> (Masc_tui_resource_catalog.reading, string) result)
+        -> (unit -> ((Masc_tui_resource_catalog.reading, string) result * Masc_tui_types.resource_share_journal_observation, string) result)
         -> unit)
   -> check:(unit -> (unit, string) result)
   -> key:Masc_tui_resource_catalog.key

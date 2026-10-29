@@ -116,16 +116,44 @@ let retain_unread_revision state key =
       (key, "Report is not currently read; press R to reread this revision")
   | (Some _ | None), (Some _ | None) -> ()
 
-let begin_share_change state ~report ~shared =
+let begin_share_recovery_lookup state ~origin ~report =
+  let key = Catalog.Report_revision report in
+  (* An earlier read may already be queued with an older empty journal. *)
+  (match state.resource_pending_key with
+   | Some pending when Catalog.equal_key pending key ->
+     (match state.resource_content with
+      | Some (held, _) when Catalog.equal_key held key -> ()
+      | Some _ | None -> state.resource_content_error <- Some (key, "Press R to reread this report"));
+     state.resource_pending_key <- None
+   | Some _ | None -> ());
+  state.resource_read_owner <- None;
+  state.resource_copy_pending <- None;
+  let uncertain_key = origin, report.id in
+  if not (List.mem uncertain_key state.resource_share_uncertain_ids) then
+    state.resource_share_uncertain_ids <- uncertain_key :: state.resource_share_uncertain_ids
+
+let begin_share_change ?(recovery = false) state ~report ~(entry : Masc_tui_artifact_share_pending.entry) =
   if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
-  else if resource_share_uncertain state report then
+  else if resource_share_uncertain state report && not recovery then
     Error "External sharing outcome is unconfirmed; an operation receipt is required"
-  else match state.resource_share_pending with
-  | Some _ -> Error "An external sharing change is still pending"
-  | None ->
+  else match workspace_input_identity_of_server state.server_identity with
+  | None -> Error "Workspace identity is unconfirmed"
+  | Some share_workspace_identity when
+      entry.base_path <> share_workspace_identity.wi_base_path
+      || entry.masc_root <> share_workspace_identity.wi_masc_root
+      || entry.artifact_id <> report.Catalog.id ->
+    Error "The share request belongs to another workspace or artifact"
+  | Some _ when resource_share_identity_conflict state entry ->
+    Error "The recovered operation ID does not match the originally observed request"
+  | Some share_workspace_identity when List.exists (fun request ->
+      request.share_workspace_identity = share_workspace_identity
+      && String.equal request.share_report.id report.id) state.resource_share_pending ->
+    Error "An external sharing change for this artifact is still pending"
+  | Some share_workspace_identity ->
     let request = { share_owner = ref (); share_workspace = state.workspace_authority;
-      share_report = report; share_target = shared } in
-    state.resource_share_pending <- Some request;
+      share_workspace_identity; share_report = report; share_target = entry.request.requested;
+      share_recovery = recovery; share_entry = entry } in
+    state.resource_share_pending <- request :: state.resource_share_pending;
     state.resource_shared <- None;
     state.resource_share_version <- None;
     (match state.resource_pending_key with
@@ -139,39 +167,49 @@ let begin_share_change state ~report ~shared =
 (* Sharing belongs to the artifact, including every fixed revision. Keep the
    guard across authority changes too: a read in a successor generation may
    have started before the older write settled against the same workspace. *)
-let share_matches_key request = function
+let share_matches_workspace state request =
+  workspace_input_identity_of_server state.server_identity = Some request.share_workspace_identity
+
+let share_matches_key state request = function
   | Catalog.Report_revision report ->
-    String.equal request.share_report.id report.id
+    share_matches_workspace state request && String.equal request.share_report.id report.id
   | Catalog.Mcp_uri _ -> false
 
 let share_changed state request ~result =
-  match state.resource_share_pending with
-  | Some current when current.share_owner == request.share_owner ->
+  match List.find_opt (fun current -> current.share_owner == request.share_owner) state.resource_share_pending with
+  | Some current ->
     let request = current in
     let current_key = match Masc_tui_resource_document.current state with
       | Some { entry = Catalog.Report report; _ }
-        when share_matches_key request (Catalog.Report_revision report) ->
+        when share_matches_key state request (Catalog.Report_revision report) ->
         Some (Catalog.Report_revision report)
       | Some { entry = Catalog.Mcp _; _ }
       | Some { entry = Catalog.Report _; _ }
       | None -> None in
+    let uncertain_key = request.share_workspace_identity, request.share_report.id in
     (match result with
-     | Error _ when not (resource_share_uncertain state request.share_report) ->
-       state.resource_share_uncertain_ids <- request.share_report.id :: state.resource_share_uncertain_ids
-     | Ok _ | Error _ -> ());
-    state.resource_share_pending <- None;
+     | Ok (Resource_share_applied _ | Resource_share_conflict _) ->
+       settle_resource_share state request.share_entry;
+       state.resource_share_uncertain_ids <- List.filter ((<>) uncertain_key) state.resource_share_uncertain_ids
+     | Ok (Resource_share_not_sent _) | Error (Resource_share_unknown _) ->
+       observe_resource_share state request.share_entry;
+       if not (List.mem uncertain_key state.resource_share_uncertain_ids) then
+         state.resource_share_uncertain_ids <- uncertain_key :: state.resource_share_uncertain_ids
+     | Ok (Resource_share_not_prepared _) | Error (Resource_share_not_started _) -> ());
+    state.resource_share_pending <- List.filter
+      (fun current -> current.share_owner != request.share_owner) state.resource_share_pending;
     (* Even a read launched after the POST can have observed its old state.
        Retire it on settlement before a caller asks for a fresh observation. *)
     (match state.resource_pending_key with
-     | Some key when share_matches_key request key ->
+     | Some key when share_matches_key state request key ->
        retain_unread_revision state key;
        state.resource_pending_key <- None;
        state.resource_read_owner <- None
      | Some _ | None -> ());
     Option.iter (fun _ -> state.resource_shared <- None; state.resource_share_version <- None) current_key;
-    if request.share_workspace = state.workspace_authority && server_authority_ready state
+    if share_matches_workspace state request && server_authority_ready state
     then current_key else None
-  | Some _ | None -> None
+  | None -> None
 
 let toggle_layout state =
   state.resource_layout <- (match state.resource_layout with
@@ -195,18 +233,21 @@ let read_done state ~(request : Catalog.read_request) result =
        (* Acquisition retains original bytes; only display copies are sanitized. *)
        state.resource_content <- Some (key, reading.parts);
        state.resource_revision_history <- reading.revisions;
-       state.resource_shared <- (match state.resource_share_pending, key with
-         | Some pending, _ when share_matches_key pending key -> None
-         | (Some _ | None), Catalog.Report_revision report
+       state.resource_shared <- (match key with
+         | _ when List.exists (fun pending -> share_matches_key state pending key) state.resource_share_pending -> None
+         | Catalog.Report_revision report
            when resource_share_uncertain state report -> None
-         | (Some _ | None), (Catalog.Report_revision _ | Catalog.Mcp_uri _) -> reading.shared);
-       state.resource_share_version <- (match state.resource_shared with Some _ -> reading.share_version | None -> None);
+         | Catalog.Report_revision _ | Catalog.Mcp_uri _ -> reading.shared);
+       state.resource_share_version <- (match state.resource_shared with
+         | Some _ -> reading.share_version | None -> None);
        state.resource_image_cursor <- 0;
        state.resource_text_cursor <- 0;
        state.resource_search_position <- Masc_tui_resource_reading.first;
        state.resource_content_error <- None
      | Error detail ->
-       state.resource_shared <- None; state.resource_share_version <- None;
+       (* Keep the last versioned observation for a possible revoke. An
+          enable still requires a readable body, and the server compares this
+          retained share version and publication before applying either write. *)
        state.resource_content_error <- Some (key, detail))
   | (Some _ | None), (Some _ | None) -> ()
 

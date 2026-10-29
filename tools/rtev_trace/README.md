@@ -44,5 +44,28 @@ longest runs on domain 0 alone and group its runs of 10 ms or more by label
 and open `masc.turn` depth. Domain 0 is the main domain; a run there of 100 ms is 100 ms of
 scheduler lag for every other fiber on it.
 
+`rtev_fibers` also reads the traced sections Eio reports for
+`Eio.Private.Trace.with_span`; masc opens one per pool job, named after the
+submitting function (RFC-0474 L4c). For each section it counts the time the
+section's fibers ran, including fibers created inside it, and the time they
+spent suspended, by suspend reason. Sections nest, and an outer section also
+counts the time spent in the sections inside it. Both numbers are sums over
+the section's fibers, not a split of its wall time: a job whose fibers run
+at the same time on several domains, or whose parent waits while a child
+waits on something else, counts the same stretch of wall time more than once,
+so a run or wait can exceed the wall time and `run%` can pass 100. For a job
+that runs one fiber at a time the sums split the wall time into computing
+and waiting, and into what it waited on. Sections are grouped by name and
+the longest are listed.
+
+It also reads the lock events Eio emits (`Try_get`, `Get`, `Put`). Mutexes
+are created at module initialisation, before the tracer attaches, so a lock
+is known by its object id only. For the locks fibers waited on longest it
+lists who waited and who held them, by section, the longest holds with what
+the holder suspended on while holding, and what holders suspended on just
+before taking and just after releasing the lock. A holder that suspends on a
+file stat keeps every waiter behind that stat; the file operations around
+the critical section place an unnamed lock in the code.
+
 Numbers from these tools are recorded in
 `docs/rfc/RFC-main-domain-scheduler-latency.md` section 8.7.

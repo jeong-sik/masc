@@ -262,8 +262,9 @@ val observed_refusal :
     can run the request boxed passes it, every other caller omits it. The
     Gate calls it at exactly one point — Auto Judge mode, after the one-shot
     grant, both Always Allow switches, the exact rules and the observation
-    tables have all declined — and only there, so an always-allowed keeper
-    never pays a box run and a Manual workspace still sees every request.
+    tables have all declined — and only there. A recognized request requiring
+    prior judgment also skips [observe]. An always-allowed keeper never pays
+    a box run and a Manual workspace still sees every request.
     [intent=Request_effect] bypasses static/Observe shortcuts in Auto Judge
     mode, but never bypasses permission or grants permission itself.
     [Observed_result] is returned through source {!Observed_in_box}.

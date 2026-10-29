@@ -136,6 +136,11 @@ microVM에서 `observation_run = "guest_local"`을 설정해도 관측 단계는
 경로나 승인된 실행에서 공유 볼륨에 쓰는 것은 이 제한만으로 막지 못한다. 현재
 Keeper 트리 안의 `Write`/`Edit`도 별도 Gate 없이 원격 쓰기 경로로 갈 수 있다.
 
+Auto Judge에서는 `file`, `uniq`, `git ls-remote`, `git cat-file`,
+`git rev-list`, `git shortlog`를 알아보면 관측 실행보다 먼저 judge에게 묻는다.
+읽기만 하는 형태도 대기할 수 있다. 기존 승인이나 Always Allow가 먼저 적용될 수
+있고, 인식할 수 없는 동적 명령까지 모두 판별하는 기능은 아니다.
+
 진단을 정확하게 만드는 세 가지 사실:
 
 - **비어 있을 수 있다.** 새 작업 트리는 비어 있을 수 있다. 빈 디렉토리에 `ls`가

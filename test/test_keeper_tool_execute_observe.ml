@@ -477,6 +477,58 @@ let test_approved_effect_replay_consumes_one_exact_grant () =
   check string "side effect happened exactly once" "x" (Fs_compat.load_file path)
 ;;
 
+let test_effect_capable_auto_request_waits_and_runs_once_after_approval () =
+  with_execution_workspace @@ fun base_path ->
+  let module AQ = Masc.Keeper_approval_queue in
+  let recipient = `Assoc
+    [ "name", `String "settlement"; "trace_id", `String "trace-settlement" ] in
+  (match Masc_test_deps.meta_of_json_fixture recipient with
+   | Error detail -> fail detail
+   | Ok meta ->
+     match Masc.Keeper_meta_store.replace_snapshot (Masc.Workspace.default_config base_path) meta with
+     | Ok () -> ()
+     | Error detail -> fail detail);
+  let input_path = Filename.concat base_path "-input" in
+  let output_path = Filename.concat base_path "-output" in
+  let oc = open_out input_path in
+  output_string oc "one\none\ntwo\n";
+  close_out oc;
+  let argv = [ "uniq"; "--"; "-input"; "-output" ] in
+  let execute ?cycle_grant () = execute_through_gate
+    ~sandbox_profile:Keeper_types_profile_sandbox.Micro_vm
+    ?cycle_grant ~run:observe_run ~argv base_path in
+  let first, result, count, pending, _ = execute () in
+  check int "no observation or effect before judgment" 0 count;
+  check int "a decision is pending" 1 pending;
+  check bool "no output before judgment" false (Sys.file_exists output_path);
+  check bool "no premature result" true (Option.is_none result);
+  let approval_id = match first with Gate.Deferred { approval_id; _ } -> approval_id
+    | Gate.Allow _ | Gate.Unavailable _ -> fail "effect-capable command bypassed judgment" in
+  (match AQ.resolve_with_policy ~base_path ~id:approval_id
+      ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+      ~source:Keeper_approval_queue_rules_types.Human_operator () with
+   | Ok _ -> () | Error error -> fail (AQ.resolve_error_to_string error));
+  let queue = match Masc.Keeper_registry_event_queue.snapshot_result ~base_path "settlement" with
+    | Ok queue -> queue | Error detail -> fail detail in
+  let grant = Keeper_event_queue.to_list queue |> List.find_map
+    (fun (stimulus : Keeper_event_queue.stimulus) -> match stimulus.payload with
+      | Keeper_event_queue.Hitl_resolved resolution when resolution.approval_id = approval_id ->
+        Gate.cycle_grant_of_resolution resolution
+      | _ -> None)
+    |> function Some grant -> grant | None -> fail "approved request has no exact replay grant" in
+  let decision, result, count, _, _ = execute ~cycle_grant:grant () in
+  check int "the approved command ran once" 1 count;
+  check bool "the approved execution returned a result" true (Option.is_some result);
+  (match decision with
+   | Gate.Allow { source = Gate.One_shot_resolution id; _ } ->
+     check string "the grant belongs to this request" approval_id id
+   | Gate.Allow _ | Gate.Deferred _ | Gate.Unavailable _ -> fail "the exact grant did not authorize execution");
+  check string "the approved effect reached the output" "one\ntwo\n" (Fs_compat.load_file output_path);
+  let _, result, count, _, _ = execute ~cycle_grant:grant () in
+  check int "the consumed grant cannot run the command again" 0 count;
+  check bool "reused grant did not return a second result" true (Option.is_none result)
+;;
+
 let test_git_diff_nonzero_is_a_result_without_judge () =
   with_execution_workspace @@ fun base_path ->
   let write name text = let oc = open_out (Filename.concat base_path name) in output_string oc text; close_out oc in
@@ -780,6 +832,8 @@ let () =
             test_unverified_microvm_guest_local_reaches_the_judge_without_running
         ; test_case "approved effect replay consumes one exact grant" `Quick
             test_approved_effect_replay_consumes_one_exact_grant
+        ; test_case "effect-capable auto request waits and runs once after approval" `Quick
+            test_effect_capable_auto_request_waits_and_runs_once_after_approval
         ; test_case "git diff keeps changed and unchanged exit statuses" `Quick
             test_git_diff_nonzero_is_a_result_without_judge
         ; test_case "Observe payload failure returns without effect authorization" `Quick

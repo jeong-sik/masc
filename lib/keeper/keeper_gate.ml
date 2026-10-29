@@ -1924,6 +1924,21 @@ let decide_from_selected_mode ~intent ?observe request = function
           source
       in
       allow request source [ audit_receipt ]
+     | Observation (Keeper_gate_readonly.Needs_judgment _ as classification) ->
+       Log.Keeper.emit
+         Log.Info
+         ~keeper_name:request.keeper_name
+         ~category:Log.Tool
+         ~details:
+           (`Assoc
+              ([ "operation", `String request.operation
+               ; "classification", Keeper_gate_readonly.classification_to_yojson classification
+               ]
+               @ (match request_turn_id request with
+                  | Some turn_id -> [ "turn_id", `Int turn_id ]
+                  | None -> [])))
+         "Command requires judgment before observation";
+       defer request Judge_requested
      | Observation (Keeper_gate_readonly.Needs_observation reason as classification) ->
        (match reason with
         | Keeper_gate_readonly.Unproven_request -> ()

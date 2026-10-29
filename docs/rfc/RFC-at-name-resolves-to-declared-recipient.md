@@ -133,17 +133,17 @@ val resolve :
 
 ### 3.3 선언에 없는 이름은 글 속 말이다
 
-거절하지 않는다. `@check` 가 든 글은 받는 사람이 없는 글이 된다. board 에서는 기존 규칙대로 `Discoverable` 이다.
+거절하지 않는다. `@check` 가 든 글은 받는 사람이 없는 글이 된다. board 는 받는 사람이 없는 글에 이미 정해 둔 규칙을 그대로 따른다. 공개·내부 글은 `Discoverable`, 목록 밖(`Unlisted`) 글과 댓글은 `Thread_participants` 다 (`lib/board/board_audience.ml` 의 `audience_for_post`, `audience_for_comment`). `Direct` 글은 받는 사람이 하나는 있어야 해서, 선언된 받는 사람이 없으면 지금처럼 쓰기가 거절된다.
 
 쓴 사람에게는 쓰기 응답에 `unresolved: ["check"]` 를 돌려준다. 응답에만 싣는 값이라 저장 형식은 바뀌지 않는다.
 
 `unresolved` 만 더하면 고친 것이 아니다. 알려 주기만 하고 글은 계속 사라진다. 이 RFC 는 기준(§3.1~§3.2)과 알림(`unresolved`)을 함께 바꾼다.
 
-선언에서 빠진 정상 이름도 글 속 말이 된다. 사람과 계정 이름(약 74개 글)이 여기에 걸린다. 그 이름은 지금도 어떤 Keeper 에게도 닿지 않아서(§3.2) 깨어나는 Keeper 는 달라지지 않는다. 달라지는 것은 두 가지다. board 글이 대상 지정 글에서 `Discoverable` 글로 바뀌고, 브로드캐스트 응답이 `ok:false` 에서 `unresolved` 표시로 바뀐다.
+선언에서 빠진 정상 이름도 글 속 말이 된다. 사람과 계정 이름(약 74개 글)이 여기에 걸린다. 그 이름은 지금도 어떤 Keeper 에게도 닿지 않아서(§3.2) 깨어나는 Keeper 는 달라지지 않는다. 달라지는 것은 두 가지다. board 글이 대상 지정 글에서 받는 사람이 없는 글로 바뀌고, 브로드캐스트 응답이 `ok:false` 에서 `unresolved` 표시로 바뀐다.
 
 ### 3.4 소비자는 해석된 결과만 받는다
 
-- board: 쓰기 경로가 `recipients` 로 `audience` 를 정해 기록한다. 비면 `Discoverable`(기존 규칙)이고, 있으면 `Targets` 다. 글에는 `audience` 가 이미 기록된다 (`lib/board_types/board_types.ml:224`).
+- board: 쓰기 경로가 `recipients` 로 `audience` 를 정해 기록한다. 비면 받는 사람이 없는 글의 기존 규칙(§3.3)을 따르고, 있으면 `Targets` 다. 글에는 `audience` 가 이미 기록된다 (`lib/board_types/board_types.ml:224`).
 - 브로드캐스트 전달: 쓸 때 정한 `recipients` 의 Keeper 를 깨운다. 전달할 때 별칭을 다시 찾지 않는다. 글 속 말 때문에 `Rejected` 가 되는 일이 없어진다.
 - 알림: 알림에 쓰는 이름도 `recipient` 에서 온다. PR #46755 가 넣은 문자 규칙(`is_routable_selector`, `is_routable_target`)은 해석 전의 임시 방어선이라 필요 없어진다.
 - gRPC: `mentions` 필드를 글로 바꾸지 않고 후보로 바로 넘긴다. 선언에 없는 이름은 호출한 쪽이 명시한 값이 틀린 것이므로 오류로 돌려준다 (D3).

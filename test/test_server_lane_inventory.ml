@@ -318,7 +318,7 @@ let h2_read ~sw ~clock ~state token =
   Server_auth.publish_server_state state;
   Fun.protect ~finally:(fun () -> Server_auth.For_testing.restore_server_state previous) (fun () ->
     let server_flow,client_flow = Eio_unix.Net.socketpair_stream ~sw () in
-    let gateway = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~clock ~server_start_time:0. in
+    let gateway = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:clock) ~trust_policy ~sw ~clock ~server_start_time:0. in
     let server = Eio.Fiber.fork_promise ~sw (fun () -> Eio.Switch.run (fun conn_sw ->
       Server_bootstrap_http.serve_h2_connection ~sw:conn_sw ~h2_request_handler:gateway
         ~h2_error_handler:(Server_h2_gateway.make_error_handler ())

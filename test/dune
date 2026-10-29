@@ -2848,6 +2848,8 @@
 (include stanzas/test_play_pad.inc)
 (include stanzas/test_play_pad_routes.inc)
 (include stanzas/test_server_route.inc)
+(include stanzas/test_server_h2_route_gate.inc)
+(include stanzas/test_h2_route_gate_http.inc)
 (include stanzas/test_play_invite.inc)
 (include stanzas/test_play_invite_routes.inc)
 (include stanzas/test_pool_body_limit.inc)

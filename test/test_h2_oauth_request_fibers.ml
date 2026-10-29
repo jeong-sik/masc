@@ -38,7 +38,7 @@ let with_gateway run =
           ignore (Masc.Workspace.init (Masc.Mcp_server.workspace_config state)
             ~agent_name:None);
           Server_auth.For_testing.restore_server_state (Some state);
-          let gateway = Server_h2_gateway.make_request_handler
+          let gateway = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env))
             ~trust_policy:(trust_policy ()) ~sw ~clock:(Eio.Stdenv.clock env)
             ~server_start_time:0. in
           let pool = Domain_pool.create ~sw ~domain_count:1 env#domain_mgr in

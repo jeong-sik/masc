@@ -12,11 +12,11 @@ val dispatch :
   cors:(string * string) list ->
   path:string ->
   config:Workspace.config option ->
-  with_public_read:((unit -> unit) -> unit) ->
+  gate:((unit -> unit) -> unit) ->
   [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
   | `CONNECT | `TRACE | `Other of string ] ->
   bool
-(** [dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read method_]
+(** [dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~gate method_]
     handles the following routes:
 
     {2 Public Play guide}
@@ -49,13 +49,14 @@ val dispatch :
       values return [400 Bad Request].  Matched after every fixed
       [/api/v1/board/...] path above, so it never answers those paths.
 
-    {2 Read gate}
+    {2 Gate}
 
-    Every GET route above except [/api/v1/board/flairs] and the static
-    assets runs inside [with_public_read], the parent gateway's
-    counterpart of {!Server_auth.with_public_read}.  Under
-    [MASC_HTTP_AUTH_STRICT=1] a token-less request to any of them is
-    refused with [401], as on HTTP/1.
+    Every route above runs inside [gate], which the parent gateway
+    builds from the kind the HTTP/1 router records for the request
+    ({!Server_h2_route_gate}).  A route HTTP/1 registers as
+    [Public_read] is refused with [401] under [MASC_HTTP_AUTH_STRICT=1]
+    when the request carries no credential, as on HTTP/1; a route it
+    registers as [Always_public] runs without one.
 
     {2 Karma}
     - [GET /api/v1/karma] — full karma table sorted descending by

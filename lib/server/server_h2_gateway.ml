@@ -40,7 +40,7 @@ let make_error_handler () =
 
   h2_error_handler
 
-let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
+let make_request_handler ~trust_policy ~routes ~sw ~clock ~server_start_time:_ =
   let embedded_resources = Server_h2_response_resources.create
     ~max_pending_bytes:(H2_response_limits.max_pending_bytes ()) in
   let mcp_eio_profile_of_transport_profile = function
@@ -367,6 +367,61 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
              | Error () -> ())
         | Error err -> h2_respond_auth_error h2_reqd err)
     in
+    (* The kind of this request, as the HTTP/1 router recorded it when the route
+       was registered. An arm does not name a kind: it runs the gate that goes
+       with the one the table holds, so HTTP/1 and HTTP/2 cannot give a path two
+       kinds. [with_h2_public_read], [with_h2_read_auth] and
+       [with_h2_token_permission_auth] are called by the gates below and by the
+       arms under a [Subpath_dispatch] prefix, whose sub-routes have no kind in
+       the table. The table is read at the first gate, so a request that runs
+       none (a preflight, the 404 fallback) does not look the path up. *)
+    let route_access =
+      lazy
+        (Server_h2_route_gate.access_of_resolution
+           (Http_server_eio.Router.resolve routes httpun_request))
+    in
+    let h2_respond_gate_refusal h2_reqd refusal =
+      match refusal with
+      | Server_h2_route_gate.No_route ->
+          h2_respond_text h2_reqd (Printf.sprintf "404 Not Found: %s" path)
+            ~status:`Not_found ~extra_headers:cors
+      | Server_h2_route_gate.Wrong_method ->
+          h2_respond_text h2_reqd "405 Method Not Allowed"
+            ~status:`Method_not_allowed ~extra_headers:cors
+      | Server_h2_route_gate.Kind_not_served _ | Server_h2_route_gate.Actor_not_provided _ ->
+          Log.Http.error "h2 route gate refused %s: %s" path
+            (Server_h2_route_gate.refusal_to_string refusal);
+          h2_respond_text h2_reqd
+            "500 Internal Server Error: the route table and this HTTP/2 route disagree about who may call it"
+            ~status:`Internal_server_error ~extra_headers:cors
+    in
+    (* For an arm that needs nothing from its gate. *)
+    let h2_gate_unit h2_reqd f =
+      match Result.bind (Lazy.force route_access) Server_h2_route_gate.plan with
+      | Error refusal -> h2_respond_gate_refusal h2_reqd refusal
+      | Ok Server_h2_route_gate.Open -> f ()
+      | Ok Server_h2_route_gate.Public_read -> with_h2_public_read h2_reqd (fun _state -> f ())
+      | Ok Server_h2_route_gate.Read_auth -> with_h2_read_auth h2_reqd (fun _state -> f ())
+      | Ok (Server_h2_route_gate.Token_permission permission) ->
+          with_h2_token_permission_auth h2_reqd ~permission (fun _state _actor -> f ())
+    in
+    (* For an arm that takes the server state. *)
+    let h2_gate_state h2_reqd f =
+      match Result.bind (Lazy.force route_access) Server_h2_route_gate.plan with
+      | Error refusal -> h2_respond_gate_refusal h2_reqd refusal
+      | Ok Server_h2_route_gate.Open -> with_server_state h2_reqd f
+      | Ok Server_h2_route_gate.Public_read -> with_h2_public_read h2_reqd f
+      | Ok Server_h2_route_gate.Read_auth -> with_h2_read_auth h2_reqd f
+      | Ok (Server_h2_route_gate.Token_permission permission) ->
+          with_h2_token_permission_auth h2_reqd ~permission (fun state _actor -> f state)
+    in
+    (* For an arm that takes the authenticated actor: only a kind bound to a
+       token provides one. *)
+    let h2_gate_actor h2_reqd f =
+      match Result.bind (Lazy.force route_access) Server_h2_route_gate.plan_actor with
+      | Error refusal -> h2_respond_gate_refusal h2_reqd refusal
+      | Ok permission -> with_h2_token_permission_auth h2_reqd ~permission f
+    in
     let h2_respond_board_reaction_result h2_reqd = function
       | Ok json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
       | Error error ->
@@ -438,6 +493,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          Health & Metrics
          ───────────────────────────────────────────────────────────────────── *)
       | `GET, "/health" ->
+          h2_gate_unit h2_reqd @@ fun () ->
           let body, timing_headers =
             Server_routes_http_runtime.make_health_response_body
               ~listener:"h2"
@@ -447,6 +503,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
           h2_respond_json h2_reqd body ~extra_headers:(cors @ timing_headers)
 
       | `GET, p when String.equal p Server_health_paths.liveness ->
+          h2_gate_unit h2_reqd @@ fun () ->
           let json =
             `Assoc [
               ("live", `Bool true);
@@ -456,6 +513,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
           h2_respond_json_value h2_reqd json ~extra_headers:cors
 
       | `GET, p when String.equal p Server_health_paths.readiness ->
+          h2_gate_unit h2_reqd @@ fun () ->
           let current = Server_startup_state.snapshot () in
           let json, status =
             if Option.is_some (ready_server_state ()) then
@@ -475,6 +533,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
           h2_respond_json_value ~status h2_reqd json ~extra_headers:cors
 
       | `GET, ("/.well-known/agent.json" | "/.well-known/agent-card.json") ->
+          h2_gate_unit h2_reqd @@ fun () ->
           h2_respond_json_value h2_reqd
             (Server_routes_http_runtime.agent_card_json
                ~request_authority
@@ -485,6 +544,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         ( "/.well-known/oauth-protected-resource"
         | "/.well-known/oauth-protected-resource/mcp"
         | "/mcp/.well-known/oauth-protected-resource" ) ->
+          h2_gate_unit h2_reqd @@ fun () ->
           with_h2_oauth (fun () ->
             h2_respond_json_value
               h2_reqd
@@ -492,6 +552,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               ~extra_headers:[ "cache-control", "no-store" ])
 
       | `GET, "/.well-known/oauth-authorization-server" ->
+          h2_gate_unit h2_reqd @@ fun () ->
           with_h2_oauth (fun () ->
             h2_respond_json_value
               h2_reqd
@@ -499,6 +560,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               ~extra_headers:[ "cache-control", "no-store" ])
 
       | `GET, "/oauth/authorize" ->
+          h2_gate_unit h2_reqd @@ fun () ->
           with_h2_oauth_base_path (fun base_path ->
             match
               Server_oauth_service.authorize_get
@@ -511,6 +573,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               h2_respond_oauth_form authorization_request)
 
       | `POST, "/oauth/authorize" ->
+          h2_gate_unit h2_reqd @@ fun () ->
           with_h2_oauth_authorize_context (fun ~base_path ~fetch_client_metadata ->
             match
               ensure_same_origin_browser_request
@@ -539,6 +602,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                   h2_respond_oauth_redirect location))
 
       | `POST, "/oauth/register" ->
+          h2_gate_unit h2_reqd @@ fun () ->
           with_h2_oauth_base_path (fun base_path ->
             match
               ensure_same_origin_if_browser_request
@@ -559,6 +623,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                     ~extra_headers:[ "cache-control", "no-store" ]))
 
       | `POST, "/oauth/token" ->
+          h2_gate_unit h2_reqd @@ fun () ->
           with_h2_oauth_base_path (fun base_path ->
             match
               ensure_same_origin_if_browser_request
@@ -584,6 +649,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                       [ "cache-control", "no-store"; "pragma", "no-cache" ]))
 
       | `GET, "/ws" ->
+          h2_gate_unit h2_reqd @@ fun () ->
           let json =
             Server_routes_http_runtime.websocket_discovery_json
               ~request_authority
@@ -594,9 +660,11 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       (* RFC-0217 S4-2 — Otel_metric_store scrape endpoint removed; metrics
          now export via OTLP push (Otel_metrics observable). *)
       | `GET, "/" ->
+          h2_gate_unit h2_reqd @@ fun () ->
           h2_respond_text h2_reqd "MASC MCP Server (HTTP/2)" ~extra_headers:cors
 
       | `GET, "/favicon.ico" | `GET, "/favicon.svg" ->
+          h2_gate_unit h2_reqd @@ fun () ->
           h2_respond_bytes
             h2_reqd
             favicon_svg
@@ -622,6 +690,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | `POST, "/mcp/managed"
       | `POST, "/mcp/operator"
       | `POST, "/mcp/play" ->
+          h2_gate_unit h2_reqd @@ fun () ->
           let session_id_opt =
             if Server_mcp_transport_http_headers.header_selects_per_request_protocol
                  httpun_request
@@ -906,6 +975,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | `DELETE, "/mcp/managed"
       | `DELETE, "/mcp/operator"
       | `DELETE, "/mcp/play" ->
+          h2_gate_unit h2_reqd @@ fun () ->
           let profile = profile_for_mcp_path path in
           let base_path = match current_server_state () with
             | Some s -> (Mcp_server.workspace_config s).base_path
@@ -990,10 +1060,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          Dashboard
          ───────────────────────────────────────────────────────────────────── *)
       | `GET, "/dashboard" | `GET, "/dashboard/" ->
-          with_h2_public_read h2_reqd (fun _state -> h2_respond_dashboard_index ())
+          h2_gate_state h2_reqd (fun _state -> h2_respond_dashboard_index ())
 
       | `GET, p when is_dashboard_spa_deep_link p ->
-          with_h2_public_read h2_reqd (fun _state -> h2_respond_dashboard_index ())
+          h2_gate_state h2_reqd (fun _state -> h2_respond_dashboard_index ())
 
       (* ─────────────────────────────────────────────────────────────────────
          GraphQL
@@ -1003,7 +1073,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          [with_read_auth]). /graphql is not in [is_public_read_path], so an
          unauthenticated caller must be rejected on either transport. *)
       | `GET, (("/api/v1/lane-addons/package-catalog" | "/api/v1/lane-addons/package-preview") as package_path) ->
-          with_h2_read_auth h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let module Packages = Server_routes_http_routes_lane_addons in
             let fields = Packages.query_fields httpun_request in
             let result = match package_path with
@@ -1015,7 +1085,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                 (`Assoc ["error",`String detail]) ~status:`Bad_request ~extra_headers:cors)
 
       | `GET, "/graphql" ->
-          with_h2_read_auth h2_reqd (fun _state ->
+          h2_gate_state h2_reqd (fun _state ->
             let nonce = fresh_graphql_csp_nonce () in
             let csp_header = ("content-security-policy", graphql_csp_header nonce) in
             h2_respond_html h2_reqd (graphql_playground_html ~nonce) ~extra_headers:(csp_header :: cors))
@@ -1024,7 +1094,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          wraps [handle_post_graphql]; otherwise a client that will be refused
          still gets the server to buffer its whole body first. *)
       | `POST, "/graphql" ->
-          with_h2_read_auth h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             h2_read_body h2_reqd (fun body_str ->
               let response = Graphql_api.handle_request ~config:(Mcp_server.workspace_config state) body_str in
               let status = match response.status with `OK -> `OK | `Bad_request -> `Bad_request in
@@ -1034,7 +1104,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          REST API
          ───────────────────────────────────────────────────────────────────── *)
       | `GET, "/api/v1/dashboard" ->
-          with_h2_public_read h2_reqd (fun _state ->
+          h2_gate_state h2_reqd (fun _state ->
             let json =
               `Assoc
                 [
@@ -1080,7 +1150,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                      ~status:(status :> H2.Status.t) ~extra_headers:cors))
 
       | `GET, "/api/v1/dashboard/shell" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let light =
               Server_utils.bool_query_param httpun_request "light" ~default:false
             in
@@ -1092,7 +1162,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/fusion-runs" ->
-          with_h2_public_read h2_reqd (fun _state ->
+          h2_gate_state h2_reqd (fun _state ->
             let json =
               Server_dashboard_fusion_run_projection.list_response
                 ~generated_at:(Masc_domain.now_iso ())
@@ -1104,7 +1174,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         when String.starts_with
                ~prefix:Server_dashboard_fusion_run_projection.detail_prefix
                p ->
-          with_h2_public_read h2_reqd (fun _state ->
+          h2_gate_state h2_reqd (fun _state ->
             let status, json =
               Server_dashboard_fusion_run_projection.detail_response
                 ~generated_at:(Masc_domain.now_iso ())
@@ -1122,7 +1192,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          fetches state; under MASC_HTTP_AUTH_STRICT it left the workspace
          timeline readable over h2c while H1 demanded a token. *)
       | `GET, "/api/v1/dashboard/workspace" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let limit =
               Server_utils.int_query_param httpun_request "limit" ~default:50
               |> Server_utils.clamp ~min_v:1 ~max_v:200
@@ -1140,14 +1210,14 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/config" ->
-          with_h2_public_read h2_reqd (fun _state ->
+          h2_gate_state h2_reqd (fun _state ->
             let json = Env_config_introspect.to_json () in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       (* Same owner and same shape as the HTTP/1 route; a client that reaches
          the server over H2 must not see a different projection. *)
       | `GET, "/api/v1/dashboard/scheduled-automation" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let json =
               dashboard_scheduled_automation_query_http_json
                 ~config:(Mcp_server.workspace_config state)
@@ -1159,7 +1229,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          an HTTP/1 client got the inventory. Same selector as the HTTP/1 route,
          so the snapshot fast path and exact Keeper projection both apply. *)
       | `GET, "/api/v1/dashboard/tools" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let timing = Server_timing.create () in
             let response =
               Server_dashboard_snapshot_select.select_tools_response
@@ -1189,7 +1259,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               else h2_respond_json h2_reqd body ~compress:false ~extra_headers)
 
       | `GET, "/api/v1/dashboard/skill-activations" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             match trimmed_query_param httpun_request "trace_id" with
             | None ->
               h2_respond_json_value h2_reqd
@@ -1211,9 +1281,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                  in
                  h2_respond_json_value h2_reqd json ~extra_headers:cors))
 
-      | `GET, "/api/v1/dashboard/project-snapshot"
-      | `GET, "/api/v1/dashboard/namespace-truth" ->
-          with_h2_public_read h2_reqd (fun state ->
+      | `GET, "/api/v1/dashboard/project-snapshot" ->
+          h2_gate_state h2_reqd (fun state ->
             let json =
               (* RFC-0138 Phase 3 Step 3 follow-up — route H/2 gateway
                  through the snapshot selector for parity with the H/1
@@ -1226,7 +1295,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/execution" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let respond_cached ~body ~etag ~headers =
               let extra_headers =
                 cors @ headers
@@ -1257,7 +1326,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                  respond_cached ~body ~etag:payload.etag ~headers))
 
       | `GET, "/api/v1/dashboard/execution-trust" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let json =
               dashboard_execution_trust_http_json ~state ~sw ~clock
                 httpun_request
@@ -1265,12 +1334,12 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/board" ->
-          with_h2_public_read h2_reqd (fun _state ->
+          h2_gate_state h2_reqd (fun _state ->
             let json = dashboard_memory_http_json httpun_request in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/gate" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let json =
               dashboard_gate_http_json httpun_request
                 ~base_path:(Mcp_server.workspace_config state).base_path
@@ -1278,7 +1347,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/proof" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let json =
               dashboard_proof_http_json
                 ~config:(Mcp_server.workspace_config state) httpun_request
@@ -1286,7 +1355,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/planning" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let json =
               dashboard_planning_http_json
                 ~config:(Mcp_server.workspace_config state)
@@ -1297,21 +1366,21 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
           (* Same SSOT as the HTTP/1.1 router so the HTTP/2 client sees
              the identical payload shape, slice list, and error
              contract.  See [Server_dashboard_http.dashboard_bootstrap_http_json]. *)
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let json =
               dashboard_bootstrap_http_json ~state ~sw ~clock httpun_request
             in
             h2_respond_json_value_on_cpu h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/goals" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let payload =
               cached_goals_tree_payload ~config:(Mcp_server.workspace_config state)
             in
             h2_respond_json_value h2_reqd payload.json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/goals/detail" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let goal_id =
               match Server_utils.query_param httpun_request "goal_id" with
               | Some value -> String.trim value
@@ -1334,7 +1403,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                 ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/tasks/search-text" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let config = Mcp_server.workspace_config state in
             let status, json = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
               Server_dashboard_task_search_text.read ~config)
@@ -1343,7 +1412,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               ~status:(status :> H2.Status.t) ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/tasks/detail" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let task_id = Server_utils.query_param httpun_request "task_id" in
             let config = Mcp_server.workspace_config state in
             let status, json = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
@@ -1353,7 +1422,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               ~status:(status :> H2.Status.t) ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/tasks/history/page" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let status,json=Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
               Server_dashboard_task_history_page.read ~config:(Mcp_server.workspace_config state)
                 ~task_id:(Server_utils.query_param httpun_request "task_id")
@@ -1363,7 +1432,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               ~status:(status :> H2.Status.t) ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/tasks/history" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let task_id =
               match Server_utils.query_param httpun_request "task_id" with
               | Some value -> String.trim value
@@ -1386,26 +1455,26 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                 ~extra_headers:cors)
 
       | `GET, "/api/v1/repositories/pulls" ->
-          with_h2_public_read h2_reqd (fun _state ->
+          h2_gate_state h2_reqd (fun _state ->
             h2_respond_json_value h2_reqd
               (Server_repository_pulls.snapshot_to_yojson
                  (Server_repository_pulls.current ()))
               ~extra_headers:cors)
 
       | `GET, "/api/v1/lanes" ->
-          with_h2_token_permission_auth h2_reqd ~permission:Masc_domain.CanAdmin
+          h2_gate_actor h2_reqd
             (fun state _agent_name ->
               Server_lane_inventory.snapshot ~config:(Mcp_server.workspace_config state)
               |> Server_lane_inventory.to_json
               |> fun json -> h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/briefing" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let json = dashboard_briefing_http_json ~state ~sw ~clock httpun_request in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/briefing/sections" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let json =
               dashboard_briefing_sections_http_json ~state ~sw ~clock
                 httpun_request
@@ -1413,29 +1482,29 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/transport-health" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let json = dashboard_transport_health_http_json ~state in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/diagnostics/memprof" ->
-          with_h2_token_permission_auth h2_reqd ~permission:Masc_domain.CanAdmin
+          h2_gate_actor h2_reqd
             (fun _state _agent_name ->
                let json = Server_diagnostics_memprof.report_json () in
                h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/diagnostics/heap-roots" ->
-          with_h2_token_permission_auth h2_reqd ~permission:Masc_domain.CanAdmin
+          h2_gate_actor h2_reqd
             (fun _state _agent_name ->
                let json = Server_diagnostics_heap_roots.report_json () in
                h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/perf" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let json = dashboard_perf_http_json (Mcp_server.workspace_config state) in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/agent_core/telemetry/recent" ->
-          with_h2_public_read h2_reqd (fun _state ->
+          h2_gate_state h2_reqd (fun _state ->
             let provider = agent_core_telemetry_provider_param httpun_request in
             let limit = agent_core_telemetry_limit_param httpun_request in
             let json = Dashboard_agent_core_bridge.recent_json ?provider ~limit () in
@@ -1443,7 +1512,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/agent_core/telemetry/summary" ->
-          with_h2_public_read h2_reqd (fun _state ->
+          h2_gate_state h2_reqd (fun _state ->
             let provider = agent_core_telemetry_provider_param httpun_request in
             let limit = agent_core_telemetry_limit_param httpun_request in
             let json = Dashboard_agent_core_bridge.summary_json ?provider ~limit () in
@@ -1452,7 +1521,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
 
       (* H1 serves this through [with_public_read] (server_ide_http.ml:609). *)
       | `GET, "/api/v1/status" ->
-          with_h2_public_read h2_reqd (fun state ->
+          h2_gate_state h2_reqd (fun state ->
             let config = (Mcp_server.workspace_config state) in
             let workspace_state = Workspace.read_state config in
             let tempo = Tempo.get_tempo config in
@@ -1467,7 +1536,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
           (* HTTP/1 wraps this in Server_auth.with_public_read and the path is
              not in the public-read allowlist, so strict mode answers 401
              there; this arm used to answer the document (#28161). *)
-          with_h2_public_read h2_reqd (fun _state ->
+          h2_gate_state h2_reqd (fun _state ->
             let resolved_host = Server_request_authority.host request_authority in
             let resolved_port =
               Option.value
@@ -1677,15 +1746,14 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                         | Error _ -> ()))
 
       | `GET, "/api/v1/board/reactions/catalog" ->
-          with_h2_public_read h2_reqd (fun _state ->
+          h2_gate_state h2_reqd (fun _state ->
             h2_respond_json_value
               h2_reqd
               (Server_board_reaction_http.catalog_json ())
               ~extra_headers:cors)
 
       | `GET, path when path = Server_routes_http_routes_play_room.path ->
-          with_h2_token_permission_auth h2_reqd
-            ~permission:Masc_domain.CanPlayMachine (fun state viewer ->
+          h2_gate_actor h2_reqd (fun state viewer ->
               let base_path = (Mcp_server.workspace_config state).base_path in
               let status, json =
                 Server_routes_http_routes_play_room.read ~base_path httpun_request
@@ -1695,8 +1763,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                 ~status:(status :> H2.Status.t) ~extra_headers:cors)
 
       | `POST, path when path = Server_routes_http_routes_play_room.path ->
-          with_h2_token_permission_auth h2_reqd
-            ~permission:Masc_domain.CanPlayMachine (fun state viewer ->
+          h2_gate_actor h2_reqd (fun state viewer ->
               let config = Mcp_server.workspace_config state in
               h2_read_body h2_reqd (fun body ->
                 let status, json =
@@ -1706,9 +1773,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                   ~status:(status :> H2.Status.t) ~extra_headers:cors))
 
       | `GET, "/api/v1/board/reactions/batch" ->
-          with_h2_token_permission_auth
+          h2_gate_actor
             h2_reqd
-            ~permission:Masc_domain.CanReadState
             (fun _state actor ->
                let actor = String.trim actor in
                let result =
@@ -1722,9 +1788,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                h2_respond_board_reaction_result h2_reqd result)
 
       | `GET, "/api/v1/board/reactions" ->
-          with_h2_token_permission_auth
+          h2_gate_actor
             h2_reqd
-            ~permission:Masc_domain.CanReadState
             (fun _state actor ->
                let actor = String.trim actor in
                let result =
@@ -1739,9 +1804,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                h2_respond_board_reaction_result h2_reqd result)
 
       | `POST, "/api/v1/board/reactions" ->
-          with_h2_token_permission_auth
+          h2_gate_actor
             h2_reqd
-            ~permission:Masc_domain.CanVote
             (fun _state actor ->
                let actor = String.trim actor in
                h2_read_body h2_reqd (fun body ->
@@ -1768,9 +1832,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          shape the report through Server_voice_probe, so a client that selects
          h2c is answered by the same code as one that does not. *)
       | `POST, "/api/v1/voice/probe/tts" ->
-          with_h2_token_permission_auth
+          h2_gate_actor
             h2_reqd
-            ~permission:Masc_domain.CanAdmin
             (fun _state _actor ->
                h2_read_body h2_reqd (fun body ->
                  match Server_voice_probe.tts_report ~body with
@@ -1784,9 +1847,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
 
       (* The audio arrives in the raw body, not as a multipart part. *)
       | `POST, "/api/v1/voice/probe/stt" ->
-          with_h2_token_permission_auth
+          h2_gate_actor
             h2_reqd
-            ~permission:Masc_domain.CanAdmin
             (fun _state _actor ->
                h2_read_body h2_reqd (fun body ->
                  match
@@ -1804,8 +1866,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                      ~extra_headers:cors))
 
       | `GET, path when String.starts_with ~prefix:"/api/v1/artifact-bytes/" path ->
-          with_h2_token_permission_auth
-            h2_reqd ~permission:Masc_domain.CanAdmin
+          h2_gate_actor
+            h2_reqd
             (fun state _actor ->
                let prefix = "/api/v1/artifact-bytes/" in
                let sha256 = String.sub path (String.length prefix)
@@ -1855,8 +1917,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                (* The delegated routes take this gateway's own public-read gate
                   rather than deciding for themselves; five of them answered
                   unauthenticated over h2c while HTTP/1 answered 401 (#28161). *)
-               ~with_public_read:(fun f ->
-                 with_h2_public_read h2_reqd (fun _state -> f ()))
+               ~gate:(fun f -> h2_gate_unit h2_reqd f)
                httpun_meth ->
           ()
 

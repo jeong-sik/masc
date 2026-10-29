@@ -121,9 +121,22 @@ module Entries = Hashtbl.Make (struct
     let hash = Types.Message_value.hash
   end)
 
-type memo = { mutable entries : entry Entries.t }
+(* The messages of the last plan or load, by position, with each one's entry
+   and [chains.(i)], the chain over the first [i]. A later save whose
+   messages begin with these values, physically, takes their entries and
+   chain values as they are, so it hashes only what follows. *)
+type last =
+  { last_messages : Types.message array
+  ; last_entries : entry array
+  ; last_chains : chain array
+  }
 
-let create_memo () = { entries = Entries.create 0 }
+type memo =
+  { mutable entries : entry Entries.t
+  ; mutable last : last option
+  }
+
+let create_memo () = { entries = Entries.create 0; last = None }
 
 let encoded_entry memo message =
   match Entries.find_opt memo.entries message with
@@ -188,46 +201,72 @@ let head_json ~header history =
     ]
 ;;
 
-(* [n] entries from [entries] with the chain stepped over them, or [None] when
-   fewer remain. *)
-let advance chain entries n =
-  let rec go chain entries n =
-    if n = 0
-    then Some (chain, entries)
-    else (
-      match entries with
-      | [] -> None
-      | entry :: rest -> go (chain_step chain entry.digest) rest (n - 1))
-  in
-  go chain entries n
-;;
-
 module Digest_set = Set.Make (String)
 
-let rec first n = function
-  | [] -> []
-  | entry :: rest -> if n = 0 then [] else entry :: first (n - 1) rest
+(* How many of [messages] begin as [last] did: the same value at each
+   position, or the value [last] decoded there. *)
+let shared_prefix last (messages : Types.message array) =
+  match last with
+  | None -> 0
+  | Some last ->
+    let limit = min (Array.length last.last_messages) (Array.length messages) in
+    let rec count index =
+      if index < limit
+         && (last.last_messages.(index) == messages.(index)
+             || last.last_entries.(index).decoded == messages.(index))
+      then count (index + 1)
+      else index
+    in
+    count 0
+;;
+
+(* Every message's entry and the chain over each prefix: the shared prefix
+   from [memo.last], the rest encoded (through [memo.entries]) and hashed. *)
+let entries_and_chains memo (messages : Types.message array) =
+  let length = Array.length messages in
+  let shared = shared_prefix memo.last messages in
+  let chains = Array.make (length + 1) chain_start in
+  let entries =
+    match memo.last with
+    | Some last when shared > 0 ->
+      Array.blit last.last_chains 0 chains 0 (shared + 1);
+      Array.sub last.last_entries 0 shared
+    | Some _ | None -> [||]
+  in
+  let rec encode rev_entries index =
+    if index = length
+    then Ok (Array.append entries (Array.of_list (List.rev rev_entries)))
+    else
+      let* entry = encoded_entry memo messages.(index) in
+      chains.(index + 1) <- chain_step chains.(index) entry.digest;
+      encode (entry :: rev_entries) (index + 1)
+  in
+  let* entries = encode [] shared in
+  Ok (shared, entries, chains)
 ;;
 
 (* The longest run of [previous] turns whose chain values the new messages
    reproduce at the same positions; a match there is a match of every message
    before it. A kept turn whose bundle is [absent] gets its bundle back from
-   those messages, as an object to write. *)
-let kept_turns ~absent entries previous_turns =
-  let rec keep rev_kept rev_objects chain entries = function
-    | [] -> List.rev rev_kept, List.rev rev_objects, chain, entries
+   those messages, as an object to write. Answers the kept turns, those
+   objects and how many messages the kept turns hold. *)
+let kept_turns ~absent (entries : entry array) (chains : chain array) previous_turns =
+  let length = Array.length entries in
+  let rec keep rev_kept rev_objects covered = function
+    | [] -> List.rev rev_kept, List.rev rev_objects, covered
     | turn :: turns ->
-      (match advance chain entries turn.messages with
-       | Some (chain', rest) when String.equal chain' turn.chain ->
-         if Digest_set.mem turn.bundle absent
-         then (
-           let bytes = bundle_bytes (first turn.messages entries) in
-           let bundle = digest_of_bytes bytes in
-           keep ({ turn with bundle } :: rev_kept) ((bundle, bytes) :: rev_objects) chain' rest turns)
-         else keep (turn :: rev_kept) rev_objects chain' rest turns
-       | Some _ | None -> List.rev rev_kept, List.rev rev_objects, chain, entries)
+      let through = covered + turn.messages in
+      if through <= length && String.equal chains.(through) turn.chain
+      then
+        if Digest_set.mem turn.bundle absent
+        then (
+          let bytes = bundle_bytes (Array.to_list (Array.sub entries covered turn.messages)) in
+          let bundle = digest_of_bytes bytes in
+          keep ({ turn with bundle } :: rev_kept) ((bundle, bytes) :: rev_objects) through turns)
+        else keep (turn :: rev_kept) rev_objects through turns
+      else List.rev rev_kept, List.rev rev_objects, covered
   in
-  keep [] [] chain_start entries previous_turns
+  keep [] [] 0 previous_turns
 ;;
 
 let unwritten_open_objects ~previous_open entries =
@@ -241,19 +280,30 @@ let unwritten_open_objects ~previous_open entries =
   collect (Digest_set.of_list previous_open) [] entries
 ;;
 
+(* After a plan of [messages]: the table holds every message under its own
+   identity and its decoded record (a save after a load passes those). A
+   plan that extends the last one adds what is new; any other plan builds
+   the table again from its own messages. *)
+let remember_plan memo ~shared (messages : Types.message array) (entries : entry array) chains =
+  let extends_last =
+    match memo.last with
+    | Some last -> shared = Array.length last.last_messages
+    | None -> false
+  in
+  let table = if extends_last then memo.entries else Entries.create (Array.length messages) in
+  for index = (if extends_last then shared else 0) to Array.length messages - 1 do
+    remember table messages.(index) entries.(index)
+  done;
+  memo.entries <- table;
+  memo.last <- Some { last_messages = messages; last_entries = entries; last_chains = chains }
+;;
+
 let plan_save memo ?previous ?(absent = []) boundary (cp : Checkpoint_types.t) =
   let* (before_messages, after_messages), decoded_header =
     Checkpoint_codec.validated_fields_around_messages cp
   in
-  let next = Entries.create (List.length cp.messages) in
-  let rec encode rev_entries = function
-    | [] -> Ok (List.rev rev_entries)
-    | message :: rest ->
-      let* entry = encoded_entry memo message in
-      remember next message entry;
-      encode (entry :: rev_entries) rest
-  in
-  let* entries = encode [] cp.messages in
+  let messages = Array.of_list cp.messages in
+  let* shared, entries, chains = entries_and_chains memo messages in
   let absent = Digest_set.of_list absent in
   let previous_turns, previous_open =
     match previous with
@@ -262,15 +312,16 @@ let plan_save memo ?previous ?(absent = []) boundary (cp : Checkpoint_types.t) =
       ( previous.turns
       , List.filter (fun digest -> not (Digest_set.mem digest absent)) previous.open_messages )
   in
-  let kept, restored, chain, rest = kept_turns ~absent entries previous_turns in
+  let kept, restored, covered = kept_turns ~absent entries chains previous_turns in
+  let length = Array.length entries in
+  let rest = Array.to_list (Array.sub entries covered (length - covered)) in
   let history, objects =
     match boundary, rest with
     | Turn_closes, [] -> { turns = kept; open_messages = [] }, restored
     | Turn_closes, (_ :: _ as closing) ->
       let bytes = bundle_bytes closing in
       let bundle = digest_of_bytes bytes in
-      let chain = List.fold_left (fun chain entry -> chain_step chain entry.digest) chain closing in
-      ( { turns = kept @ [ { bundle; messages = List.length closing; chain } ]
+      ( { turns = kept @ [ { bundle; messages = List.length closing; chain = chains.(length) } ]
         ; open_messages = []
         }
       , restored @ [ bundle, bytes ] )
@@ -278,18 +329,17 @@ let plan_save memo ?previous ?(absent = []) boundary (cp : Checkpoint_types.t) =
       ( { turns = kept; open_messages = List.map (fun entry -> entry.digest) open_entries }
       , restored @ unwritten_open_objects ~previous_open open_entries )
   in
-  memo.entries <- next;
+  remember_plan memo ~shared messages entries chains;
   let header = header_json ~before_messages ~after_messages in
   Ok
     { objects
     ; head_bytes = Yojson.Safe.to_string (head_json ~header history)
     ; head = { checkpoint = decoded_header; history }
-    ; content =
-        content_digest_of
-          ~header_bytes:(Yojson.Safe.to_string header)
-          ~chain:(List.fold_left (fun chain (entry : entry) -> chain_step chain entry.digest) chain_start entries)
+    ; content = content_digest_of ~header_bytes:(Yojson.Safe.to_string header) ~chain:chains.(length)
     ; decoded =
-        { decoded_header with messages = List.map (fun (entry : entry) -> entry.decoded) entries }
+        { decoded_header with
+          messages = Array.to_list (Array.map (fun (entry : entry) -> entry.decoded) entries)
+        }
     }
 ;;
 
@@ -297,17 +347,12 @@ let content_digest memo (cp : Checkpoint_types.t) =
   let* (before_messages, after_messages), _decoded_header =
     Checkpoint_codec.validated_fields_around_messages cp
   in
-  let rec chain_over chain = function
-    | [] -> Ok chain
-    | message :: rest ->
-      let* entry = encoded_entry memo message in
-      chain_over (chain_step chain entry.digest) rest
-  in
-  let* chain = chain_over chain_start cp.messages in
+  let messages = Array.of_list cp.messages in
+  let* (_ : int), (_ : entry array), chains = entries_and_chains memo messages in
   Ok
     (content_digest_of
        ~header_bytes:(Yojson.Safe.to_string (header_json ~before_messages ~after_messages))
-       ~chain)
+       ~chain:chains.(Array.length messages))
 ;;
 
 (* ── Loading ────────────────────────────────────────────── *)
@@ -549,8 +594,11 @@ let bundle_entries ~bundle bytes =
 
 let load memo ~read_object head =
   let next = Entries.create 0 in
-  let rec load_turns chain rev_entries = function
-    | [] -> Ok rev_entries
+  (* Each message's entry with the chain through it, newest first: the turns'
+     values come from checking them against the head, the open messages'
+     from stepping on. *)
+  let rec load_turns chain rev_loaded = function
+    | [] -> Ok (chain, rev_loaded)
     | turn :: turns ->
       let* bytes = read_checked ~read_object turn.bundle in
       let* entries = bundle_entries ~bundle:turn.bundle bytes in
@@ -563,24 +611,36 @@ let load memo ~read_object head =
              ; detail = Printf.sprintf "it holds %d messages, the turn names %d" count turn.messages
              })
       else (
-        let chain = List.fold_left (fun chain entry -> chain_step chain entry.digest) chain entries in
+        let chain, rev_loaded =
+          List.fold_left
+            (fun (chain, rev_loaded) entry ->
+               let chain = chain_step chain entry.digest in
+               chain, (entry, chain) :: rev_loaded)
+            (chain, rev_loaded) entries
+        in
         if not (String.equal chain turn.chain)
         then Error (Turn_mismatch { bundle = turn.bundle; detail = "its messages give another chain" })
-        else load_turns chain (List.rev_append entries rev_entries) turns)
+        else load_turns chain rev_loaded turns)
   in
-  let* rev_entries = load_turns chain_start [] head.history.turns in
-  let* rev_entries =
+  let* chain, rev_loaded = load_turns chain_start [] head.history.turns in
+  let* (_ : chain), rev_loaded =
     List.fold_left
       (fun acc digest ->
-         let* rev_entries = acc in
+         let* chain, rev_loaded = acc in
          let* bytes = read_checked ~read_object digest in
          let* decoded = decode_message ~digest bytes in
-         Ok ({ bytes; digest; decoded } :: rev_entries))
-      (Ok rev_entries)
+         let chain = chain_step chain digest in
+         Ok (chain, ({ bytes; digest; decoded }, chain) :: rev_loaded))
+      (Ok (chain, rev_loaded))
       head.history.open_messages
   in
-  let entries = List.rev rev_entries in
-  List.iter (fun (entry : entry) -> Entries.replace next entry.decoded entry) entries;
+  let loaded = Array.of_list (List.rev rev_loaded) in
+  let entries = Array.map fst loaded in
+  let chains = Array.make (Array.length loaded + 1) chain_start in
+  Array.iteri (fun index ((_ : entry), chain) -> chains.(index + 1) <- chain) loaded;
+  Array.iter (fun (entry : entry) -> Entries.replace next entry.decoded entry) entries;
+  let messages = Array.map (fun (entry : entry) -> entry.decoded) entries in
   memo.entries <- next;
-  Ok { head.checkpoint with messages = List.map (fun (entry : entry) -> entry.decoded) entries }
+  memo.last <- Some { last_messages = messages; last_entries = entries; last_chains = chains };
+  Ok { head.checkpoint with messages = Array.to_list messages }
 ;;

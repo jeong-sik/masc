@@ -64,7 +64,7 @@ let with_listener mode ~capacity make_handler run =
         ~bind_host:"localhost" ~bind_port:port ~explicit_base_url:None with
         | Ok policy -> policy
         | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
-      let gateway=Server_h2_gateway.make_request_handler ~trust_policy ~sw
+      let gateway=Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~sw
         ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. in
       let handler=make_handler ~gateway in
       let clients=ref [] in

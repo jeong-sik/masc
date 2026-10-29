@@ -138,7 +138,7 @@ let with_gateway capacity run =
                 ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None
                 |> Result.map_error Server_request_authority.trust_policy_error_to_string
                 |> require in
-              let gateway = Server_h2_gateway.make_request_handler ~trust_policy ~sw
+              let gateway = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~sw
                 ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. in
               let escaped = ref [] in
               let login_closed, close_login = Eio.Promise.create () in

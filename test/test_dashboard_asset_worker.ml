@@ -175,7 +175,7 @@ let test_h2 encoding () = with_assets @@ fun () ->
       ~headers:(Httpun.Headers.of_list (H2.Headers.to_list request.headers)) `GET path in
     check bool "actual dashboard asset route matched" true
       (Server_h2_gateway_routes_extra.dispatch ~h2_reqd:reqd ~httpun_request
-        ~cors:[] ~path ~config:None ~with_public_read:(fun f -> f ()) `GET);
+        ~cors:[] ~path ~config:None ~gate:(fun f -> f ()) `GET);
     if String.equal path slow_path then Eio.Promise.resolve finish () in
   let server_flow, client_flow = Eio_unix.Net.socketpair_stream ~sw () in
   let server = Eio.Fiber.fork_promise ~sw (fun () ->

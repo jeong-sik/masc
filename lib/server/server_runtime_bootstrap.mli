@@ -283,6 +283,7 @@ val run :
                         Eio.Net.Sockaddr.stream ->
                         Httpun.Reqd.t Gluten.Reqd.t -> unit) ->
   make_h2_request_handler:(trust_policy:Server_request_authority.trust_policy ->
+                           routes:'a ->
                            sw:Eio.Switch.t ->
                            clock:float Eio.Time.clock_ty Eio.Resource.t ->
                            server_start_time:float ->

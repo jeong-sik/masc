@@ -431,7 +431,7 @@ let with_gateway_and_switch ?(prepare_workspace=Fun.id) f =
             ; require_token = true
             };
           let handler =
-            Server_h2_gateway.make_request_handler
+            Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env))
               ~trust_policy:(trust_policy ()) ~sw ~request_sw:sw
               ~clock:(Eio.Stdenv.clock env) ~server_start_time:0.
               (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
@@ -724,7 +724,7 @@ let test_oauth_scope_refusal_preserves_request_ids () =
     | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)
   in
   let public_handler =
-    Server_h2_gateway.make_request_handler
+    Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:clock)
       ~trust_policy:public_policy ~sw ~request_sw:sw ~clock ~server_start_time:0.
       (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
   in

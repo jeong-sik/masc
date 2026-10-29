@@ -326,7 +326,7 @@ let h2_exchange ~env headers =
     | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)
   in
   let handler =
-    Server_h2_gateway.make_request_handler
+    Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env))
       ~trust_policy
       ~sw
       ~request_sw:sw

@@ -1,0 +1,11 @@
+[default] route probes: 388 before, 388 after, 388 shared
+[default] extra ('GET /api/v1/dashboard/namespace-truth', 'h2', 'bad') before=(200, '') after=(404, '')
+[default] extra ('GET /api/v1/dashboard/namespace-truth', 'h2', 'none') before=(200, '') after=(404, '')
+[default] extra cases: 78 before, 78 after
+[strict] GET    /.well-known/agent-card.json                         before=(401, 401, 200, 200) after=(401, 401, 401, 401)
+[strict] GET    /.well-known/agent.json                              before=(401, 401, 200, 200) after=(401, 401, 401, 401)
+[strict] route probes: 388 before, 388 after, 388 shared
+[strict] extra ('GET /api/v1/dashboard/namespace-truth', 'h2', 'bad') before=(401, 'Bearer') after=(404, '')
+[strict] extra ('GET /api/v1/dashboard/namespace-truth', 'h2', 'none') before=(401, 'Bearer') after=(404, '')
+[strict] extra cases: 78 before, 78 after
+compared 3260 statuses, 6 problems

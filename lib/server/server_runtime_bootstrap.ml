@@ -2148,6 +2148,7 @@ let run ~sw ~env ~address ~port ~base_path ?input_base_path ?on_ready ~accept_st
           let h2_request_handler =
             make_h2_request_handler
               ~trust_policy:request_trust_policy
+              ~routes
               ~sw:serving_sw
               ~clock
               ~server_start_time
@@ -2169,6 +2170,7 @@ let run ~sw ~env ~address ~port ~base_path ?input_base_path ?on_ready ~accept_st
     let h2_request_handler =
       make_h2_request_handler
         ~trust_policy:request_trust_policy
+        ~routes
         ~sw
         ~clock
         ~server_start_time

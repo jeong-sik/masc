@@ -13,6 +13,7 @@ val make_error_handler :
 
 val make_request_handler :
   trust_policy:Server_request_authority.trust_policy ->
+  routes:Http_server_eio.Router.t ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   server_start_time:float ->
@@ -20,7 +21,13 @@ val make_request_handler :
   Eio.Net.Sockaddr.stream ->
   H2.Reqd.t ->
   unit
-(** [sw] retains the server lifetime for durable MCP work and shared
+(** [routes] is the table the HTTP/1 listener dispatches on. An arm runs the
+    gate that goes with the kind the table records for its request
+    ({!Server_h2_route_gate}), so the kind is written once, in the HTTP/1
+    registration. A request the table has no route for is answered 404 and a
+    method it has no route for is answered 405, as on HTTP/1.
+
+    [sw] retains the server lifetime for durable MCP work and shared
     producers. [request_sw] belongs to this request stream and is cancelled
     when the peer resets the stream or connection I/O ends; body completions
     and SSE producers use that scope.

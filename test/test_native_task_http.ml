@@ -122,7 +122,7 @@ let with_fixture f =
     let trust_policy = require_ok Server_request_authority.trust_policy_error_to_string
       (Server_request_authority.make_trust_policy ~bind_host:"localhost"
         ~bind_port:8935 ~explicit_base_url:None) in
-    let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~request_sw:sw
+    let handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~sw ~request_sw:sw
       ~clock:(Eio.Stdenv.clock env) ~server_start_time:0.
       (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
     let h1 headers path =

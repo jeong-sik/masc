@@ -181,7 +181,7 @@ let http2_dashboard_asset_response path =
           ~cors:[]
           ~path:h2_request.target
           ~config:None
-          ~with_public_read:(fun f -> f ())
+          ~gate:(fun f -> f ())
           `GET
       in
       if not handled then failf "HTTP/2 route was not handled: %s" path)

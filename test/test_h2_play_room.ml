@@ -31,7 +31,7 @@ let with_gateway run =
           ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
           | Ok policy -> policy
           | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
-        let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw
+        let handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~sw
           ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. in
         let server_flow, client_flow = Eio_unix.Net.socketpair_stream ~sw () in
         let server = Eio.Fiber.fork_promise ~sw (fun () ->

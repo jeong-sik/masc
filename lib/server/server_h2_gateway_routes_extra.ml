@@ -6,13 +6,14 @@ open Server_h2_gateway_helpers
 
 (* Dispatch board, Gate, voice, karma, and static asset routes.
    Returns [true] if the route was handled, [false] otherwise. *)
-(* [with_public_read] is the parent gateway's own H2 public-read gate, handed
-   in rather than rebuilt here. Every route below that HTTP/1 wraps in
-   Server_auth.with_public_read takes it, so under MASC_HTTP_AUTH_STRICT=1 a
-   token-less h2c read is refused exactly where HTTP/1 answers 401 (#28161).
-   The Board list and post-detail arms resolve their optional reaction actor
-   inside that gate, in the same order as HTTP/1. *)
-let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
+(* [gate] is the parent gateway's gate for a request whose arm needs nothing
+   from it, handed in rather than rebuilt here. It runs the gate that goes with
+   the kind the HTTP/1 router records for the route, so under
+   MASC_HTTP_AUTH_STRICT=1 a token-less h2c read is refused exactly where
+   HTTP/1 answers 401 (#28161). Every arm below runs it, and no arm names a
+   kind. The Board list and post-detail arms resolve their optional reaction
+   actor inside that gate, in the same order as HTTP/1. *)
+let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~gate
     (httpun_meth : [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
                     | `CONNECT | `TRACE | `Other of string ]) =
   let h2_respond_auth_error error =
@@ -48,19 +49,20 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
   in
   match httpun_meth, path with
   | `GET, path when path = Play_invite.agent_guide_path ->
-      (match Server_routes_http_routes_play_guide.guide_response () with
-       | Ok text ->
-         h2_respond_bytes h2_reqd text
-           ~content_type:Server_routes_http_routes_play_guide.markdown_content_type
-           ~extra_headers:(("cache-control", "no-store")
-                           :: ("x-content-type-options", "nosniff") :: cors)
-       | Error (status, json) ->
-         h2_respond_json_value h2_reqd json ~status:(status :> H2.Status.t)
-           ~extra_headers:cors);
+      gate (fun () ->
+      match Server_routes_http_routes_play_guide.guide_response () with
+      | Ok text ->
+        h2_respond_bytes h2_reqd text
+          ~content_type:Server_routes_http_routes_play_guide.markdown_content_type
+          ~extra_headers:(("cache-control", "no-store")
+                          :: ("x-content-type-options", "nosniff") :: cors)
+      | Error (status, json) ->
+        h2_respond_json_value h2_reqd json ~status:(status :> H2.Status.t)
+          ~extra_headers:cors);
       true
 
   | `GET, "/api/v1/voice/config" ->
-      with_public_read (fun () ->
+      gate (fun () ->
         let status, json = voice_config_payload () in
         let status =
           match status with `OK -> `OK | `Error -> `Internal_server_error
@@ -69,7 +71,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
       true
 
   | `GET, "/api/v1/board" ->
-      with_public_read (fun () ->
+      gate (fun () ->
       with_optional_board_reaction_actor (fun reaction_actor ->
       let payload =
         Server_board_list_http.payload ?config ~reaction_actor
@@ -79,7 +81,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
       true
 
   | `GET, "/api/v1/board/curation" ->
-      with_public_read (fun () ->
+      gate (fun () ->
         let json =
           match Board_dispatch.latest_curation_snapshot () with
           | None -> `Assoc [("snapshot", `Null)]
@@ -90,7 +92,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
       true
 
   | `GET, "/api/v1/board/hearths" ->
-      with_public_read (fun () ->
+      gate (fun () ->
         let exclude_system =
           bool_query_param httpun_request "exclude_system" ~default:false
         in
@@ -109,13 +111,14 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
       true
 
   | `GET, "/api/v1/board/flairs" ->
+      gate (fun () ->
       let flairs = List.map Board.flair_to_yojson Board.available_flairs in
       let json = `Assoc [("flairs", `List flairs)] in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
+      h2_respond_json_value h2_reqd json ~extra_headers:cors);
       true
 
   | `GET, "/api/v1/board/sub-boards" ->
-      with_public_read (fun () ->
+      gate (fun () ->
         let sub_boards = Board_dispatch.list_sub_boards () in
         let json =
           `Assoc
@@ -128,7 +131,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
       true
 
   | `GET, "/api/v1/board/karma/ledger" ->
-      with_public_read (fun () ->
+      gate (fun () ->
         (* Karma ledger contract endpoint — attributed karma events.
            Query params:
              agent  — filter to a single recipient (case-sensitive)
@@ -170,7 +173,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
      remainder, so a sub-board path placed after it would be answered as a
      post lookup under the post arm's gate. *)
   | `GET, p when String.starts_with ~prefix:board_sub_board_detail_prefix p ->
-      with_public_read (fun () ->
+      gate (fun () ->
         let status, json = board_sub_board_detail_json ~path:p in
         h2_respond_json_value h2_reqd json ~status ~extra_headers:cors);
       true
@@ -178,7 +181,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
   | `GET, p
     when String.starts_with ~prefix:"/api/v1/board/" p
          && String.length p > 14 ->
-      with_public_read (fun () ->
+      gate (fun () ->
       with_optional_board_reaction_actor (fun reaction_actor ->
       let post_id = String.sub p 14 (String.length p - 14) in
       match
@@ -211,7 +214,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
       true
 
   | `GET, "/api/v1/karma" ->
-      with_public_read (fun () ->
+      gate (fun () ->
         let karma_list = Board_dispatch.get_all_karma () in
         let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
         let json = `Assoc [
@@ -223,28 +226,29 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
       true
 
   | `GET, "/static/css/middleware.css" ->
-      (match Option.map read_file (playground_asset_path "static/css/middleware.css") with
-       | Some (Ok body) ->
-           h2_respond_bytes ~content_type:"text/css; charset=utf-8" h2_reqd body
-       | None | Some (Error _) -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
+      gate (fun () ->
+      match Option.map read_file (playground_asset_path "static/css/middleware.css") with
+      | Some (Ok body) ->
+          h2_respond_bytes ~content_type:"text/css; charset=utf-8" h2_reqd body
+      | None | Some (Error _) -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
       true
 
   | `GET, "/static/js/middleware.js" ->
-      (match Option.map read_file (playground_asset_path "static/js/middleware.js") with
-       | Some (Ok body) ->
-           h2_respond_bytes ~content_type:"application/javascript; charset=utf-8" h2_reqd body
-       | None | Some (Error _) -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
+      gate (fun () ->
+      match Option.map read_file (playground_asset_path "static/js/middleware.js") with
+      | Some (Ok body) ->
+          h2_respond_bytes ~content_type:"application/javascript; charset=utf-8" h2_reqd body
+      | None | Some (Error _) -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
       true
 
   | `GET, p
     when String.starts_with ~prefix:"/dashboard/assets/" p
          && String.length p > 18 ->
+      gate (fun () ->
       let filename = String.sub p 18 (String.length p - 18) in
-      if not (Web_dashboard.is_public_asset_relative_path filename) then begin
-        h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found;
-        true
-      end
-      else begin
+      if not (Web_dashboard.is_public_asset_relative_path filename) then
+        h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found
+      else
         (match Web_dashboard.load_dashboard_asset ("assets/" ^ filename) with
          | Ok body ->
              let ct = asset_content_type filename in
@@ -273,8 +277,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
               h2_respond_text
                 h2_reqd
                 "Dashboard assets unavailable; inspect /health dashboard_surface.recovery"
-                ~status:`Service_unavailable));
-        true
-      end
+                ~status:`Service_unavailable)));
+      true
 
   | _ -> false

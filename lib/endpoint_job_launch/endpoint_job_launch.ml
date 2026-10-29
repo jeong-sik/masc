@@ -36,7 +36,7 @@ let activation_leaf = "activation-intent.json"
 
 let io f = try Ok (f ()) with
   | Eio.Io _ | Unix.Unix_error _ | Sys_error _ -> Error Storage_unavailable
-let cpu f = Domain_pool_ref.submit_cpu_or_inline f
+let cpu f = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ f
 let process value = Result.map_error (fun e -> Process_error e) value
 let group value = Result.map_error (fun e -> Group_error e) value
 let scope (spec : P.spec) =

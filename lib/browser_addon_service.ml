@@ -30,32 +30,27 @@ let read_frame reader =
       then String.sub raw 0 (length - 1) else raw in
     raw, true
 
-type watched_state = Waiting | Finished of W.reply | Abandoned
+type watched_decision = Finished of W.reply | Abandoned
 
 let handle_watched_with_hook ~before_observation ~dispatch reader request =
-  (* Both branches update this state without yielding, on the same Eio domain.
-     Completion checks bytes read by the watcher before it commits. Bytes not
-     yet read from the kernel have no observed ordering. *)
-  let state = ref Waiting in
-  Eio.Fiber.first
-    (fun () ->
-      let reply = dispatch request in
-      match !state with
-      | Waiting -> state := (if Eio.Buf_read.buffered_bytes reader > 0
-          then Abandoned else Finished reply)
-      | Finished _ | Abandoned -> ())
-    (fun () ->
-      (match Eio.Buf_read.peek_char reader with
-       | None | Some _ -> ()
-       | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ());
-      before_observation ();
-      match !state with
-      | Waiting -> state := Abandoned
-      | Finished _ | Abandoned -> ());
-  match !state with
+  (* The branch that returns first decides. Both decide without yielding, on
+     the same Eio domain. Completion checks bytes read by the watcher before it
+     commits. Bytes not yet read from the kernel have no observed ordering. *)
+  let decision =
+    Eio.Fiber.first
+      (fun () ->
+        let reply = dispatch request in
+        if Eio.Buf_read.buffered_bytes reader > 0 then Abandoned else Finished reply)
+      (fun () ->
+        (match Eio.Buf_read.peek_char reader with
+         | None | Some _ -> ()
+         | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ());
+        before_observation ();
+        Abandoned)
+  in
+  match decision with
   | Finished reply -> Some reply
   | Abandoned -> None
-  | Waiting -> failwith "browser caller observation returned without a decision"
 let handle_watched ~dispatch reader request =
   handle_watched_with_hook ~before_observation:(fun () -> ()) ~dispatch reader request
 let read_request ~dispatch ~reader ~max_message_bytes =

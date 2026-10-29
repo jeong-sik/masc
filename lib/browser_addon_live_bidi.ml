@@ -254,17 +254,24 @@ let run_with ~before_command_validation ~connection_timeout_sec ~env ~owner ~dir
                         |> Result.map_error (fun detail -> Peer.Before_effect detail) in
                       Peer.dispatch ?actor ~request_id:command.id ?deadline ~interruptions:[interrupted;stopping] peer ~verb args in
                     deliver result in
+                  (* The caller already holds its timeout or cancellation, so a
+                     command it no longer waits for is skipped, not failed. *)
+                  let skipped reason =
+                    Log.Server.debug "browser Add-on Firefox command %s was not run: %s" command.id reason;
+                    Ok () in
+                  let caller_gone () = skipped "its caller is no longer waiting" in
+                  let deadline_passed () = skipped "its caller's deadline has passed" in
                   (match window () with
-                   | B.No_live_waiter -> Ok ()
-                   | B.Live_waiting_until (deadline,_) when Monotonic_deadline.passed deadline -> Ok ()
+                   | B.No_live_waiter -> caller_gone ()
+                   | B.Live_waiting_until (deadline,_) when Monotonic_deadline.passed deadline -> deadline_passed ()
                    | B.Live_executor_owned _ | B.Live_waiting_until _ ->
                      (match check ~before:before_command_validation () with
                       | Error detail -> deliver (Error (Peer.Before_effect detail))
                       | Ok () ->
                         (* Validation may yield while the issuer stops waiting. *)
                         match window () with
-                        | B.No_live_waiter -> Ok ()
-                        | B.Live_waiting_until (deadline,_) when Monotonic_deadline.passed deadline -> Ok ()
+                        | B.No_live_waiter -> caller_gone ()
+                        | B.Live_waiting_until (deadline,_) when Monotonic_deadline.passed deadline -> deadline_passed ()
                         | B.Live_waiting_until (deadline,interrupted) -> dispatch (Some deadline) interrupted
                         | B.Live_executor_owned interrupted -> dispatch None interrupted)) in
                 if Browser_addon_owner.is_retired owner then Ok () else serve () in

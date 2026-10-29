@@ -102,8 +102,15 @@ let live_references ~runtime_root =
            let path =
              Store.path_for_keeper ~keepers_runtime_dir:keepers_dir ~keeper_name
            in
-           let* shas = live_references_of_store path in
-           Ok (List.fold_left (fun set sha -> String_set.add sha set) live shas))
+           (* A directory no keeper metadata names and that has no store, such
+              as one holding only an answer queued for an unregistered name,
+              names nothing. *)
+           match live_references_of_store path with
+           | Error (Store_missing _) when not (has_metadata ()) -> Ok live
+           | Error
+               ( Store_missing _ | Store_unreadable _ | Prior_input_history_unavailable _
+               | Keeper_shares_store_directory _ ) as error -> error
+           | Ok shas -> Ok (List.fold_left (fun set sha -> String_set.add sha set) live shas))
       (Ok String_set.empty)
       keeper_names
 

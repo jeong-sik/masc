@@ -1126,8 +1126,11 @@ let emit_trailer_stderr ?execution_receipt (t : Exec_ssh_protocol.trailer) =
    ahead of it. *)
 let emit_acceptance_frame ~v =
   let s = Exec_ssh_protocol.render_acceptance_frame v in
+  (* The frame is advisory and the child is already forked: a stderr that
+     cannot be written must not end the run before supervision cleans up. The
+     host reads a missing frame as not accepted, which is the safe side. *)
   try write_all Unix.stderr s 0 (String.length s) with
-  | Unix.Unix_error (Unix.EPIPE, _, _) -> ()
+  | Unix.Unix_error _ -> ()
 
 (* [v] is the request's major once a request has been read; before that --
    a frame that did not decode -- there is no caller version to echo, and

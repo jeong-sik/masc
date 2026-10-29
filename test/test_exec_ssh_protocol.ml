@@ -458,12 +458,27 @@ let test_acceptance_frame_roundtrip () =
     let frame = render_acceptance_frame v in
     check bool "delimited by record separators" true
       (frame.[0] = '\x1e' && frame.[String.length frame - 1] = '\x1e');
-    check bool "the whole frame is a frame with nothing after it" true
-      (split_acceptance_head frame = Head_frame { v; rest = "" });
+    check bool "the whole frame is a frame with nothing around it" true
+      (split_acceptance_head frame = Head_frame { v; preamble = ""; rest = "" });
     check bool "payload after the frame is kept, byte for byte" true
       (split_acceptance_head (frame ^ "out\x1e\x00\xff")
-       = Head_frame { v; rest = "out\x1e\x00\xff" }))
+       = Head_frame { v; preamble = ""; rest = "out\x1e\x00\xff" }))
     majors
+
+(* ssh and container exec print lines of their own before the shim runs. The
+   frame is the first record separator, and what came ahead of it is returned
+   to the caller untouched. *)
+let test_acceptance_frame_after_a_transport_line () =
+  let open Exec_ssh_protocol in
+  let frame = render_acceptance_frame newest in
+  let line = "** WARNING: connection is not using a post-quantum key exchange\n" in
+  check bool "a transport line ahead of the frame is the preamble" true
+    (split_acceptance_head (line ^ frame ^ "out")
+     = Head_frame { v = newest; preamble = line; rest = "out" });
+  check bool "the line alone, with no separator yet, is pending" true
+    (split_acceptance_head line = Head_pending);
+  check bool "the line and a started frame are pending" true
+    (split_acceptance_head (line ^ String.sub frame 0 7) = Head_pending)
 
 (* Every prefix of a frame is held back; the frame is recognized at its closing
    separator and not before. A shorter prefix released early would put frame
@@ -480,17 +495,28 @@ let test_acceptance_head_that_is_not_a_frame_is_payload () =
   let open Exec_ssh_protocol in
   List.iter (fun (name, head) ->
     check bool name true (split_acceptance_head head = Head_payload))
-    [ "ordinary output", "hello\n"
-    ; "a record separator in the middle only", "a\x1e{}\x1e"
-    ; "separators around something else", "\x1e{\"masc_exec_result\":{}}\x1e"
+    [ "separators around something else", "\x1e{\"masc_exec_result\":{}}\x1e"
     ; "separators around non-JSON", "\x1enot json\x1e"
+    ; "a separator followed by bytes no frame starts with", "\x1ejunk"
     ; "a frame of a major no build speaks",
       "\x1e{\"masc_request_accepted\":{\"v\":99}}\x1e"
     ; "a frame without a major", "\x1e{\"masc_request_accepted\":{}}\x1e"
-    ; "an opening separator that never closes within the bound",
-      "\x1e" ^ String.make acceptance_frame_max_bytes 'x' ];
-  check bool "an opening separator still short of the bound is pending" true
-    (split_acceptance_head ("\x1e" ^ String.make 10 'x') = Head_pending)
+    ; "output with no separator that outgrows the bound",
+      String.make acceptance_frame_max_bytes 'x' ];
+  check bool "short output with no separator is pending" true
+    (split_acceptance_head "hello\n" = Head_pending)
+
+(* The stream ended on a head still pending. A frame the wire cut off is not
+   payload; everything else is. *)
+let test_a_cut_off_frame_is_not_payload () =
+  let open Exec_ssh_protocol in
+  let frame = render_acceptance_frame newest in
+  let cut = String.sub frame 0 9 in
+  check string "a cut frame is dropped" "" (settle_acceptance_head cut);
+  check string "a transport line before it is kept" "warn\n"
+    (settle_acceptance_head ("warn\n" ^ cut));
+  check string "output without a separator is kept" "warn\n"
+    (settle_acceptance_head "warn\n")
 
 let () =
   run "exec ssh protocol"
@@ -521,8 +547,12 @@ let () =
     ; "acceptance frame",
       [ test_case "is opt in on the wire" `Quick test_acceptance_frame_is_opt_in_on_the_wire
       ; test_case "roundtrip" `Quick test_acceptance_frame_roundtrip
+      ; test_case "follows a transport line" `Quick
+          test_acceptance_frame_after_a_transport_line
       ; test_case "is held until it closes" `Quick
           test_acceptance_frame_is_held_until_it_closes
+      ; test_case "a cut off frame is not payload" `Quick
+          test_a_cut_off_frame_is_not_payload
       ; test_case "a head that is not a frame is payload" `Quick
           test_acceptance_head_that_is_not_a_frame_is_payload ]
     ; "two majors", [ test_case "a v2 frame has no mode and means effect" `Quick

@@ -133,6 +133,10 @@ let stub_main () =
   | "accept-partial" ->
     write_all Unix.stderr (half acceptance);
     exit 1
+  | "accept-preamble" ->
+    (* The transport prints a line of its own before the shim runs. *)
+    write_all Unix.stderr ("Warning: transport line\n" ^ acceptance ^ "guest-err" ^ trailer ~exit:3 ());
+    exit 0
   | "accept-silent" -> exit 1
   | "accept-rs-payload" ->
     write_all Unix.stderr ("\x1e{\"not\":\"a frame\"}\x1eguest-err" ^ trailer ~exit:3 ());
@@ -1534,6 +1538,22 @@ let test_acceptance_frame_never_reaches_the_payload_stderr () =
     ["accept-ok"; "accept-split"]
 ;;
 
+(* A line the transport printed ahead of the shim is the caller's, in its
+   place; the frame behind it is not. *)
+let test_a_transport_line_ahead_of_the_frame_stays_and_the_frame_goes () =
+  with_eio @@ fun () ->
+  match run_with_stderr_chunks "accept-preamble" with
+  | Masc_exec.Sandbox_target.Ran { stderr; _ }, observed, streamed, true ->
+    let expected = "Warning: transport line\nguest-err" in
+    check string "the result keeps the line and drops the frame" expected stderr;
+    check string "the stream keeps the line and drops the frame" expected streamed;
+    check bool "a run that finished leaves no unknown effect behind" true
+      (List.for_all (function
+         | Keeper_sandbox_remote.Execution_unavailable (Transport_unavailable _) -> false
+         | _ -> true) observed)
+  | _ -> fail "the run did not finish as a payload result"
+;;
+
 (* A payload may start with a record separator of its own. When the request
    asked for a frame and the first bytes are not one, nothing is lost. *)
 let test_a_head_that_is_not_the_frame_stays_payload () =
@@ -1550,7 +1570,9 @@ let test_acceptance_evidence_stays_with_an_unknown_effect () =
   with_eio @@ fun () ->
   List.iter (fun (mode, expected, wire_word) ->
     match run_with_stderr_chunks mode with
-    | Masc_exec.Sandbox_target.Transport_failed _, [observation], _, _ ->
+    | Masc_exec.Sandbox_target.Transport_failed { stderr; _ }, [observation], streamed, _ ->
+      check bool (mode ^ ": no frame byte reaches the caller") false
+        (String.contains stderr '\x1e' || String.contains streamed '\x1e');
       (match observation with
        | Keeper_sandbox_remote.Execution_unavailable
            (Keeper_sandbox_remote.Transport_unavailable evidence) ->
@@ -1582,6 +1604,8 @@ let () =
               test_acceptance_frame_is_asked_only_of_a_shim_that_advertises_it
           ; test_case "the acceptance frame never reaches the payload stderr" `Quick
               test_acceptance_frame_never_reaches_the_payload_stderr
+          ; test_case "a transport line ahead of the frame stays" `Quick
+              test_a_transport_line_ahead_of_the_frame_stays_and_the_frame_goes
           ; test_case "a head that is not the frame stays payload" `Quick
               test_a_head_that_is_not_the_frame_stays_payload
           ; test_case "acceptance evidence stays with an unknown effect" `Quick

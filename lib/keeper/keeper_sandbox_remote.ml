@@ -545,20 +545,22 @@ let stream_stderr_chunk stream chunk =
      | Exec_ssh_protocol.Head_payload ->
        stream.head <- Head_settled;
        stream_payload_chunk stream head
-     | Exec_ssh_protocol.Head_frame { rest; _ } ->
+     | Exec_ssh_protocol.Head_frame { preamble; rest; _ } ->
        stream.head <- Head_settled;
        stream.on_accepted ();
-       if rest <> "" then stream_payload_chunk stream rest)
+       let payload = preamble ^ rest in
+       if payload <> "" then stream_payload_chunk stream payload)
 ;;
 
 (* The process ended while the front was still undecided: those bytes are
-   payload. *)
+   payload, less a frame the wire cut off. *)
 let settle_stderr_head stream =
   match stream.head with
   | Head_settled -> ()
   | Awaiting_head held ->
     stream.head <- Head_settled;
-    if held <> "" then stream_payload_chunk stream held
+    let payload = Exec_ssh_protocol.settle_acceptance_head held in
+    if payload <> "" then stream_payload_chunk stream payload
 ;;
 
 let flush_stderr_payload stream payload =
@@ -846,10 +848,14 @@ let report_openssh ~scope ~base_path (o : openssh) =
    that said so in its probe writes one. An endpoint not yet probed, or whose
    probe failed, is not asked, so the absence of a frame is never read as
    evidence about a shim that cannot send it. *)
-let acceptance_requested_of_probe : probe_answer option -> bool = function
-  | Some { major = Exec_ssh_protocol.V3; capabilities; _ } ->
-    List.mem Exec_ssh_protocol.request_acceptance_capability capabilities
-  | Some { major = Exec_ssh_protocol.V2; _ } | None -> false
+let acceptance_requested_of_probe ~(v : Exec_ssh_protocol.major) : probe_answer option -> bool =
+  function
+  | Some { capabilities; _ } ->
+    (match v with
+     | Exec_ssh_protocol.V3 ->
+       List.mem Exec_ssh_protocol.request_acceptance_capability capabilities
+     | Exec_ssh_protocol.V2 -> false)
+  | None -> false
 ;;
 
 (* The protocol major this endpoint's shim speaks, asked once per endpoint
@@ -1013,7 +1019,9 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
          after it, not beside it. *)
       let v = wire_major t in
       let acceptance_frame =
-        acceptance_requested_of_probe (Atomic.get t.shared.probe_answer)
+        (* A v2 frame cannot carry the request, so a probe that changed
+           between the two reads never yields a frame that cannot be encoded. *)
+        acceptance_requested_of_probe ~v (Atomic.get t.shared.probe_answer)
       in
       let request : Exec_ssh_protocol.request =
         { v
@@ -1097,8 +1105,10 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
              then raw_stderr
              else
                match Exec_ssh_protocol.split_acceptance_head raw_stderr with
-               | Exec_ssh_protocol.Head_frame { rest; _ } -> rest
-               | Exec_ssh_protocol.Head_pending | Exec_ssh_protocol.Head_payload -> raw_stderr
+               | Exec_ssh_protocol.Head_frame { preamble; rest; _ } -> preamble ^ rest
+               | Exec_ssh_protocol.Head_pending ->
+                 Exec_ssh_protocol.settle_acceptance_head raw_stderr
+               | Exec_ssh_protocol.Head_payload -> raw_stderr
            in
            let local_timed_out =
              Process_eio.exit_reason_of_status status = Process_eio.Timed_out

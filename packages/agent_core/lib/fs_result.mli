@@ -44,6 +44,5 @@ val remove_file : string -> (unit, Error.t) result
 (** {1 Utilities} *)
 
 (** Convert I/O exceptions to [Error.t].
-    Re-raises non-recoverable exceptions.
-    Extracted from checkpoint_store.ml for reuse. *)
+    Re-raises non-recoverable exceptions. *)
 val io_error_of_exn : op:string -> path:string -> exn -> (_, Error.t) result

@@ -43,60 +43,6 @@ type t = Checkpoint_types.t =
   ; pending_input : Agent_input_request.pending option
   }
 
-type message_splice =
-  { start_index : int
-  ; delete_count : int
-  ; insert : Types.message list
-  }
-
-type identity_patch =
-  { session_id : string
-  ; agent_name : string
-  ; model : Types.model
-  ; provider_binding : Llm_provider.Types.Reasoning_source.t option
-  ; created_at : float
-  }
-
-type sampling_patch =
-  { temperature : float option
-  ; top_p : float option
-  ; top_k : int option
-  ; min_p : float option
-  ; enable_thinking : bool option
-  ; preserve_thinking : bool option
-  ; reasoning_effort : Llm_provider.Reasoning_effort.t option
-  }
-
-type limits_patch =
-  { disable_parallel_tool_use : bool
-  ; response_format : Types.response_format
-  ; cache_system_prompt : bool
-  }
-
-type delta_op =
-  | Replace_identity of identity_patch
-  | Replace_system_prompt of string option
-  | Splice_messages of message_splice
-  | Replace_usage of Types.usage_stats
-  | Replace_turn_count of int
-  | Replace_tools of Types.tool_schema list
-  | Replace_tool_choice of Types.tool_choice option
-  | Replace_sampling of sampling_patch
-  | Replace_limits of limits_patch
-  | Patch_context of Context.diff
-  | Replace_mcp_sessions of Mcp_session.info list
-  | Replace_working_context of Yojson.Safe.t option
-  | Replace_pending_input of Agent_input_request.pending option
-
-type delta =
-  { delta_version : int
-  ; base_checkpoint_version : int
-  ; base_checkpoint_hash : string
-  ; result_checkpoint_hash : string
-  ; created_at : float
-  ; operations : delta_op list
-  }
-
 (** {1 Serialization} *)
 
 (** Serialize an exact current checkpoint to JSON. Raises [Invalid_argument]
@@ -204,19 +150,6 @@ val of_string_with_encoding_memo : string -> (t * encoding_memo, Error.t) result
 (** Deserialize checkpoint from a JSON string under the same current-only
     contract as {!of_json}. *)
 val of_string : string -> (t, Error.t) result
-
-(** Serialize a checkpoint delta sidecar to JSON. *)
-val delta_to_json : delta -> Yojson.Safe.t
-
-(** Deserialize a checkpoint delta sidecar from JSON. *)
-val delta_of_json : Yojson.Safe.t -> (delta, Error.t) result
-
-(** Compute a delta from a base checkpoint to a target checkpoint. *)
-val compute_delta : t -> t -> delta
-
-(** Apply a delta to a base checkpoint. Both the base and resulting checkpoint
-    must satisfy the exact current contract. *)
-val apply_delta : t -> delta -> (t, Error.t) result
 
 (** {1 Queries} *)
 

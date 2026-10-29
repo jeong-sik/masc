@@ -179,9 +179,8 @@ provider 프로토콜을 바꾸지 않아도 된다.
 바꾸고 이미 있는 `mu : Eio.Mutex.t` 로 확장을 보호하는 것이다. 확장 자체의 선례는
 같은 파일에 있다 — `agent.ml:663` 이 handoff 에서
 `Tool_set.merge agent.tools (Tool_set.of_list handoff_tools)` 로 집합을 넓힌다.
-영속화도 새로 만들 것이 없다: `checkpoint_types.ml:69` 에 `Replace_tools of
-tool_schema list` 델타가 이미 있고 `checkpoint_delta.ml:149` 가 도구가 바뀌면 그것을
-기록한다.
+영속화도 새로 만들 것이 없다: checkpoint 의 `tools` 필드(`checkpoint_types.ml:16`)가
+저장할 때의 도구 목록을 그대로 담는다.
 
 ### C. 사용 기반 자동 축소
 

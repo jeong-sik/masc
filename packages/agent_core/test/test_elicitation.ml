@@ -313,7 +313,7 @@ let test_current_wait_survives_rejection_and_replacement () =
       after_decline.messages @ [{ (Types.user_msg "[Input timed out] question") with origin=Types.Recovery_instruction }])
 ;;
 
-let test_checkpoint_delta_retains_current_wait () =
+let test_checkpoint_retains_current_wait () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   let request : Hooks.elicitation_request = {question="question";schema=None;timeout_s=None} in
   let before_turn = function Hooks.BeforeTurn _ -> Hooks.ElicitInput request | _ -> Hooks.Continue in
@@ -329,13 +329,12 @@ let test_checkpoint_delta_retains_current_wait () =
     (Agent.provide_input a pb Hooks.Declined = Error (Agent.Input_not_current Agent_input_request.Request_not_current));
   let before = Agent.checkpoint a in
   let after = {before with Checkpoint.pending_input=Some pb} in
-  let delta = Checkpoint.compute_delta before after in
-  let decoded = Result.get_ok (Checkpoint.delta_of_json (Checkpoint.delta_to_json delta)) in
-  let restored = Result.get_ok (Checkpoint.apply_delta before decoded) in
-  Alcotest.(check bool) "delta retains exact pending proof" true (restored.pending_input = Some pb);
+  let round_trip cp = Result.get_ok (Checkpoint.of_string (Checkpoint.to_string cp)) in
+  Alcotest.(check bool) "checkpoint retains exact pending proof" true
+    ((round_trip after).pending_input = Some pb);
   let cleared = {after with Checkpoint.pending_input=None} in
-  let restored = Result.get_ok (Checkpoint.apply_delta after (Checkpoint.compute_delta after cleared)) in
-  Alcotest.(check bool) "delta records settlement" true (restored.pending_input = None)
+  Alcotest.(check bool) "checkpoint records settlement" true
+    ((round_trip cleared).pending_input = None)
 ;;
 
 let test_accepted_resume_failure_consumes_old_wait () =
@@ -566,7 +565,7 @@ let () =
         ; test_case "uncertain writes require host reconciliation" `Quick test_uncertain_input_commit_is_not_a_stale_response ] )
     ; ( "owned current input"
       , [ test_case "rejected resume and stale response preserve current wait" `Quick test_current_wait_survives_rejection_and_replacement
-        ; test_case "concurrent same-name runs and durable deltas" `Quick test_checkpoint_delta_retains_current_wait
+        ; test_case "concurrent same-name runs and durable checkpoints" `Quick test_checkpoint_retains_current_wait
         ; test_case "accepted low-level resume then failure consumes old wait" `Quick test_accepted_resume_failure_consumes_old_wait ] )
     ; ( "types"
       , [ test_case "request basic" `Quick test_elicitation_request_basic

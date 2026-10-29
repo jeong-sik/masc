@@ -36,60 +36,6 @@ type t = Checkpoint_types.t =
   ; pending_input : Agent_input_request.pending option
   }
 
-type message_splice = Checkpoint_types.message_splice =
-  { start_index : int
-  ; delete_count : int
-  ; insert : message list
-  }
-
-type identity_patch = Checkpoint_types.identity_patch =
-  { session_id : string
-  ; agent_name : string
-  ; model : model
-  ; provider_binding : Llm_provider.Types.Reasoning_source.t option
-  ; created_at : float
-  }
-
-type sampling_patch = Checkpoint_types.sampling_patch =
-  { temperature : float option
-  ; top_p : float option
-  ; top_k : int option
-  ; min_p : float option
-  ; enable_thinking : bool option
-  ; preserve_thinking : bool option
-  ; reasoning_effort : Llm_provider.Reasoning_effort.t option
-  }
-
-type limits_patch = Checkpoint_types.limits_patch =
-  { disable_parallel_tool_use : bool
-  ; response_format : response_format
-  ; cache_system_prompt : bool
-  }
-
-type delta_op = Checkpoint_types.delta_op =
-  | Replace_identity of identity_patch
-  | Replace_system_prompt of string option
-  | Splice_messages of message_splice
-  | Replace_usage of usage_stats
-  | Replace_turn_count of int
-  | Replace_tools of tool_schema list
-  | Replace_tool_choice of tool_choice option
-  | Replace_sampling of sampling_patch
-  | Replace_limits of limits_patch
-  | Patch_context of Context.diff
-  | Replace_mcp_sessions of Mcp_session.info list
-  | Replace_working_context of Yojson.Safe.t option
-  | Replace_pending_input of Agent_input_request.pending option
-
-type delta = Checkpoint_types.delta =
-  { delta_version : int
-  ; base_checkpoint_version : int
-  ; base_checkpoint_hash : string
-  ; result_checkpoint_hash : string
-  ; created_at : float
-  ; operations : delta_op list
-  }
-
 let checkpoint_version = Checkpoint_types.checkpoint_version
 let usage_to_json = Checkpoint_codec.usage_to_json
 let usage_of_json = Checkpoint_codec.usage_of_json
@@ -138,9 +84,5 @@ let create_encoding_memo = Checkpoint_codec.create_encoding_memo
 let to_pieces_with_encoding_memo = Checkpoint_codec.to_pieces_with_encoding_memo
 let of_string_with_encoding_memo = Checkpoint_codec.of_string_with_encoding_memo
 let of_string = Checkpoint_codec.of_string
-let delta_to_json = Checkpoint_codec.delta_to_json
-let delta_of_json = Checkpoint_codec.delta_of_json
-let compute_delta = Checkpoint_delta.compute_delta
-let apply_delta = Checkpoint_delta.apply_delta
 let message_count cp = List.length cp.messages
 let token_usage cp = cp.usage

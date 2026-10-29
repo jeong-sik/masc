@@ -70,7 +70,6 @@ Core types and interfaces that downstream consumers depend on.
 | Hooks | `lib/base/hooks.mli` |
 | Raw_trace | `lib/raw_trace.mli` |
 | Checkpoint | `lib/checkpoint.mli` |
-| Checkpoint_store | `lib/checkpoint_store.mli` |
 | Context | `lib/base/context.mli` |
 
 ### Evolving modules

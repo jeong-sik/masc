@@ -267,9 +267,6 @@ let delete_agent_core_history_files ~(session_dir : string) ~(snapshot_ids : str
     snapshot_ids
 ;;
 
-(* Delta Checkpoint Shadow-Apply removed: Agent_core.Checkpoint.delta
-   type was removed upstream. Functions had zero callers. *)
-
 type checkpoint_read_failure =
   | Os_error of Unix.error
   | Changed_while_read
@@ -297,28 +294,12 @@ type checkpoint_load_error =
       surfaced during a load. (#8605 family) *)
   | Agent_core_error of string
 
-(* RFC-0089 G4 (#15514-sibling): [Not_found] classification was previously
-   string-matched against [FileOpFailed.detail] across four prefixes
-   ("no_such_file", "no such file", "unix_error (enoent", "eio.io fs
-   not_found") + a substring fallback. This was a string classifier
-   workaround (CLAUDE.md §워크어라운드 #2): [Agent_core.Error] is already a
-   closed sum type, but [FileOpFailed.detail] flattens the underlying
-   filesystem exception via [Printexc.to_string], throwing away typed
-   provenance.
-
-   Root fix: lift ENOENT detection to the OS boundary *before* invoking
-   agent core. [Agent_core.Checkpoint_store.exists : t -> string -> bool] gives
-   us a typed presence check, so the cold-start "file absent" case is now
-   first-class [bool] and never reaches [classify_core_error]. Any agent-core error
-   that *does* surface from [load] is, by construction, a real I/O /
-   serialization / agent-core fault and routes to [Io_error] / [Store_error] /
-   [Parse_error] / [Agent_core_error] without inspecting strings.
-
-   #8605 family: exhaustive on [Agent_core.Error.t] top-level
-   variants. The wildcards on Io _ and Serialization _ remain narrow (one
-   level deep) so a future inner variant lands in the semantically correct
-   category, and a future top-level core_error variant becomes a build
-   error forcing a deliberate routing decision. *)
+(* A missing checkpoint never reaches here: [read_checkpoint_bytes]'s typed
+   owned-file read decides absence before agent core runs. Every
+   [Agent_core.Error.t] seen here is a real I/O, serialization or agent-core
+   fault, routed by its variant without reading detail strings, so there is
+   no [Not_found] arm. The match names every variant, so a new one is a build
+   error that forces a routing decision. *)
 let classify_core_error (e : Agent_core.Error.t) : checkpoint_load_error =
   match e with
   | Io (FileOpFailed r) ->
@@ -715,13 +696,9 @@ let load_agent_core_as ~read_use ~(session_dir : string) ~(session_id : string) 
      existing checkpoint must not become a fresh Keeper history.
      One read path for Eio and non-Eio contexts: [read_checkpoint_bytes]
      reads on a system thread when the fs capability is installed, and the
-     decode is routed off the calling fiber (#25077). The previous
-     [Agent_core.Checkpoint_store.load] branch read the same file but
-     decoded the 0.7-1.4MB payload inline in agent core on the calling fiber
-     (agent-core boundary), and its [create] could mkdir on a pure read. Agent Core
-     branch also validated [session_id] (empty / separator / NUL); the
-     segment check below keeps that rejection, mapped to [Store_error]
-     exactly as agent core's ValidationFailed was via [classify_core_error]. *)
+     decode is routed off the calling fiber (#25077). A [session_id] that is
+     not one real path segment (empty, a separator, NUL) is a
+     [Store_error]. *)
   if not (leaf_is_real_segment session_id) then
     Error (Store_error "session_id is not a real path segment")
   else

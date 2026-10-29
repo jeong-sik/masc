@@ -955,7 +955,7 @@ let test_usage_payload_coverage_contract () =
     (restored.usage.pricing_gap = Some Types.Usage_not_reported)
 ;;
 
-let test_typed_message_origins_survive_full_and_delta_checkpoint () =
+let test_typed_message_origins_survive_full_checkpoint () =
   let open Types in
   let original = make_message ~role:User [Text "actual request"] in
   let controls = List.map (fun origin ->
@@ -966,11 +966,6 @@ let test_typed_message_origins_survive_full_and_delta_checkpoint () =
   let target = {base with messages=original::controls} in
   let restored = Checkpoint.of_json (Checkpoint.to_json target) |> Result.get_ok in
   Alcotest.(check bool) "full checkpoint preserves exact source identities" true
-    (List.equal Message_value.equal target.messages restored.messages);
-  let delta = Checkpoint.compute_delta base target |> Checkpoint.delta_to_json
-    |> Checkpoint.delta_of_json |> Result.get_ok in
-  let restored = Checkpoint.apply_delta base delta |> Result.get_ok in
-  Alcotest.(check bool) "delta checkpoint preserves exact source identities" true
     (List.equal Message_value.equal target.messages restored.messages);
   let fields = match Checkpoint.message_to_json original with
     | `Assoc fields -> fields | _ -> Alcotest.fail "expected message object" in
@@ -1042,8 +1037,8 @@ let () =
   run
     "Checkpoint"
     [ "provider_binding", [Alcotest.test_case "actual producer roundtrip without reasoning" `Quick test_provider_binding_persistence]
-    ; ( "message origins", [test_case "full, delta and strict message origins" `Quick
-            test_typed_message_origins_survive_full_and_delta_checkpoint] )
+    ; ( "message origins", [test_case "full and strict message origins" `Quick
+            test_typed_message_origins_survive_full_checkpoint] )
     ; ( "media replay"
       , [ test_case "image carriers remain canonical" `Quick
             test_image_carriers_remain_canonical

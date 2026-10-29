@@ -60,7 +60,6 @@ module Structured = Structured
 module Checkpoint = Checkpoint
 module Checkpoint_snapshot = Checkpoint_snapshot
 module Checkpoint_objects = Checkpoint_objects
-module Checkpoint_store = Checkpoint_store
 module Session = Session
 module Raw_trace = Raw_trace
 module Raw_trace_query = Raw_trace_query

@@ -1,27 +1,9 @@
-(** Regression tests for [Keeper_checkpoint_store.classify_core_error]
-    after RFC-0089 G4 (#15514 sibling): typed ENOENT classification at
-    the OS boundary.
-
-    Background: on 2026-04-12 /loop observed a keeper logging 334 copies
-    of [AGENT_CORE checkpoint I/O error: file load failed on trace-...: Eio.Io
-    Fs Not_found Unix_error (No such file or directory, "openat", ...)]
-    in a tight retry loop. The root fix in #6654 used four string-prefix
-    matches + a substring fallback on [FileOpFailed.detail] to recognise
-    cold-start absence — a string classifier workaround (CLAUDE.md
-    §워크어라운드 #2).
-
-    Replacement (RFC-0089 G4): agent core provides
-    [Agent_core.Checkpoint_store.exists : t -> string -> bool], so the
-    keeper-side load path now branches on that [bool] *before* invoking
-    [load]. Any [core_error] reaching [classify_core_error] is therefore by
-    construction a real I/O / serialization / agent-core fault, never a missing
-    file. The classifier consequently has no [Not_found] arm.
-
-    These tests pin the invariant: classify_core_error must never return
-    [Not_found], regardless of the rendered detail string. Cold-start
-    [Not_found] coverage is end-to-end behaviour of [load_agent_core] /
-    [load_agent_core_history_file] and is exercised separately via the
-    [Fs_compat.file_exists] / [Checkpoint_store.exists] branches. *)
+(** [Keeper_checkpoint_store.classify_core_error] never returns [Not_found],
+    whatever the rendered detail string says: a missing checkpoint is decided
+    by the typed owned-file read before agent core runs, so any [core_error]
+    it sees is a real I/O, serialization or agent-core fault. Cold-start
+    absence is covered end to end by [load_agent_core] and
+    [load_agent_core_history_file]. *)
 
 module Store = Masc.Keeper_checkpoint_store
 

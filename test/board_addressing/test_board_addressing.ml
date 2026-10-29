@@ -145,7 +145,10 @@ let test_routing_target_selectors () =
     "@ollama please notify @@gemini";
   (* The [@@] that opens a diff hunk header names nobody. *)
   check_routing "hunk header names nobody" None
-    "moved the hunk '@@ -1435,6 +1435,7 @@' by hand"
+    "moved the hunk '@@ -1435,6 +1435,7 @@' by hand";
+  (* An empty selector must not hide a real one written beside it. *)
+  check_routing "an empty selector does not hide a real one" (Some "delta")
+    "the hunk '@@ -1,2 +1,2 @@' then @@delta"
 
 (* A dune alias in a code span is not a recipient, and it must not hide the
    recipient written after it. *)

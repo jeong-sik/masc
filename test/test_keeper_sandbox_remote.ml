@@ -859,7 +859,10 @@ let test_openssh_observation_reads_the_dispatch_cache () =
     { endpoint; ssh_bin; identity_file = "key"; known_hosts_file = "hosts"
     }
   in
-  let cached () = Keeper_sandbox_remote.report_openssh ~base_path openssh in
+  let cached () =
+    Keeper_sandbox_remote.report_openssh
+      ~scope:Keeper_sandbox_remote.Endpoint_dispatch ~base_path openssh
+  in
   (match (cached ()).probe with
    | Probe_not_asked -> ()
    | _ -> fail "an unused endpoint cannot have a probe observation");
@@ -887,7 +890,8 @@ let test_openssh_observation_reads_the_dispatch_cache () =
   List.iter
     (fun (label, changed) ->
        assert_unobserved (label ^ " projection")
-         (Keeper_sandbox_remote.report_openssh ~base_path changed);
+         (Keeper_sandbox_remote.report_openssh
+            ~scope:Keeper_sandbox_remote.Endpoint_dispatch ~base_path changed);
        let runner = Keeper_sandbox_remote.of_openssh ~base_path ~keeper_name:"keeper-a" changed in
        assert_unobserved (label ^ " runner") (Keeper_sandbox_remote.report runner))
     [ "host", { openssh with endpoint = { endpoint with host = "changed.invalid" } }
@@ -903,9 +907,61 @@ let test_openssh_observation_reads_the_dispatch_cache () =
     ; "capabilities", { openssh with endpoint = { endpoint with capabilities = [ "observe" ] } }
     ; "SSH binary", { openssh with ssh_bin = "another-ssh" }
     ];
-  (match (Keeper_sandbox_remote.report_openssh ~base_path:(base_path ^ "-other") openssh).probe with
+  (match (Keeper_sandbox_remote.report_openssh
+            ~scope:Keeper_sandbox_remote.Endpoint_dispatch
+            ~base_path:(base_path ^ "-other") openssh).probe with
    | Probe_not_asked -> ()
    | _ -> fail "another workspace cannot see this workspace's observation")
+;;
+
+let test_shared_openssh_dispatches_belong_to_their_keepers () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, _ = make_stub ~dir:base_path ~mode:"receipt" in
+  let openssh : Keeper_sandbox_remote.openssh =
+    { endpoint =
+        { name = "shared-box"; host = "fleet.invalid"; user = "masc"; port = 22
+        ; identity_file = "key"; known_hosts_file = "hosts"
+        ; remote_root = "/srv/masc"; connect_timeout_sec = 1
+        ; max_concurrent_sessions = 2; env_allowlist = [ "LANG" ]; capabilities = []
+        ; private_home = false; allowed_paths = [] }
+    ; ssh_bin = cli; identity_file = "key"; known_hosts_file = "hosts" }
+  in
+  let state keeper_name =
+    Keeper_sandbox_remote.of_openssh ~base_path ~keeper_name openssh
+  in
+  let keeper_a = state "keeper-a" and keeper_b = state "keeper-b" in
+  let report keeper_name =
+    Keeper_sandbox_remote.report_openssh
+      ~scope:(Keeper_sandbox_remote.Keeper_dispatch keeper_name) ~base_path openssh
+  in
+  let expect_status label expected report =
+    match report.Keeper_sandbox_remote.last_dispatch with
+    | Some (Payload_finished { status; _ }) -> check status_testable label expected status
+    | Some (Dispatch_failed _) | None -> fail (label ^ ": expected a completed dispatch")
+  in
+  let status_a, _, _ =
+    run_request (Keeper_sandbox_remote.runner ~mode:Exec_ssh_protocol.Effect
+      ~timeout_sec:2.0 keeper_a) ()
+  in
+  check status_testable "keeper A actually ran" (Unix.WEXITED 7) status_a;
+  (match (report "keeper-b").probe with
+   | Probe_answered _ -> ()
+   | Probe_not_asked | Probe_failed _ -> fail "endpoint probe should be shared");
+  check bool "keeper B has not dispatched" true
+    (Option.is_none (report "keeper-b").last_dispatch);
+  let status_b, _, _ =
+    run_request (Keeper_sandbox_remote.runner ~mode:Exec_ssh_protocol.Observe
+      ~timeout_sec:2.0 keeper_b) ()
+  in
+  check status_testable "keeper B actually ran" (Unix.WEXITED 0) status_b;
+  expect_status "keeper A keeps its own result" (Unix.WEXITED 7) (report "keeper-a");
+  expect_status "keeper B sees its own result" (Unix.WEXITED 0) (report "keeper-b");
+  expect_status "runner A agrees with its projection" (Unix.WEXITED 7)
+    (Keeper_sandbox_remote.report keeper_a);
+  expect_status "endpoint view sees the latest dispatch" (Unix.WEXITED 0)
+    (Keeper_sandbox_remote.report_openssh
+       ~scope:Keeper_sandbox_remote.Endpoint_dispatch ~base_path openssh)
 ;;
 
 let () =
@@ -952,6 +1008,8 @@ let () =
               test_the_lane_status_names_a_shim_from_another_release
           ; test_case "SSH observation reads the dispatch cache" `Quick
               test_openssh_observation_reads_the_dispatch_cache
+          ; test_case "shared SSH dispatches belong to their Keepers" `Quick
+              test_shared_openssh_dispatches_belong_to_their_keepers
           ; test_case "lane error codes" `Quick test_lane_error_codes
           ; test_case "preflight unreachable names the guest" `Quick
               test_preflight_unreachable_names_the_guest

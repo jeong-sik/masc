@@ -83,13 +83,8 @@ let parsed_rows ~stage entries =
     | [] -> Ok (List.rev acc)
     | Dated_jsonl.Parsed row :: rest -> collect (row :: acc) rest
     | Dated_jsonl.Malformed_json { path; line_number; detail } :: _ ->
-      let location =
-        match line_number with
-        | Some line -> Printf.sprintf "%s:%d" path line
-        | None -> path
-      in
       Error
-        ({ stage; detail = Printf.sprintf "%s: %s" location detail }
+        ({ stage; detail = Audit_recent_index.malformed_row_detail ~path ~line_number ~detail }
           : read_error)
   in
   collect [] entries
@@ -521,59 +516,156 @@ let record_rule_deleted ~base_path ~deleted_by (rule : approval_rule) =
   record_rule ~base_path ~event_type:Rule_deleted ~actor:deleted_by rule
 ;;
 
+let read_recent_max_rows = Audit_recent_index.max_rows
+
+(* RFC-0474 L4f. One index per store, shared by every read. A read must see
+   the store as it is at that read, so it can use an advance only if the
+   advance began after the read arrived. Reads that arrive while an advance
+   runs wait for the next one instead of each reading the changed files:
+   the first of them runs it, the rest await its promise. The mutex guards
+   only the slot; the advance runs outside it, and a waiting read suspends
+   its fiber instead of blocking its domain on a lock.
+
+   The whole of a read, arrival included, is one job on the domain pool
+   (inline when the read is already a pool job). So whoever runs an advance
+   already holds a worker. A read outside the pool that ran the advance
+   itself would submit it as a job and wait for a worker, while reads inside
+   pool jobs held every worker waiting for that advance. A read inside a pool
+   job still holds that job's place while it waits. *)
+type recent_flight_result =
+  | Finished of (Audit_recent_index.t * Audit_recent_index.refusal option, string) result
+  | Abandoned  (** Its runner was cancelled or raised. Its waiters arrive again. *)
+
+type recent_flight = recent_flight_result Eio.Promise.t * recent_flight_result Eio.Promise.u
+
+type recent_slot =
+  { mutable index : Audit_recent_index.t option  (** Written only by the running flight. *)
+  ; mutable running : recent_flight option
+  ; mutable queued : recent_flight option
+        (** Created only while [running] runs, and begun only once it ends,
+            so it begins after every read that awaits it arrived. *)
+  }
+
+let recent_slots : (string, recent_slot) Hashtbl.t = Hashtbl.create 4
+let recent_slots_mu = Stdlib.Mutex.create ()
+
+type recent_arrival =
+  | Run of recent_flight
+  | Await of recent_flight_result Eio.Promise.t
+  | Run_after of recent_flight_result Eio.Promise.t * recent_flight
+  | Read_alone of Audit_recent_index.t option
+      (** Outside Eio a read cannot await a promise; while a flight runs it
+          advances its own copy and publishes nothing. *)
+
+let advance_recent_index store = function
+  | None -> Audit_recent_index.rebuild store
+  | Some index ->
+    (match Audit_recent_index.advance store index with
+     | Error _ as error -> error
+     | Ok (Audit_recent_index.Advanced (index, refused)) -> Ok (index, refused)
+     | Ok Audit_recent_index.Rebuild_needed -> Audit_recent_index.rebuild store)
+;;
+
+(* The caller has made [flight] the slot's running one. *)
+let run_recent_flight store slot ((_, resolver) as flight) =
+  let index = Stdlib.Mutex.protect recent_slots_mu (fun () -> slot.index) in
+  match advance_recent_index store index with
+  | result ->
+    Stdlib.Mutex.protect recent_slots_mu (fun () ->
+      (match result with
+       | Ok (index, _) -> slot.index <- Some index
+       | Error _ -> ());
+      slot.running <- None);
+    Eio.Promise.resolve resolver (Finished result);
+    result
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Stdlib.Mutex.protect recent_slots_mu (fun () ->
+      match slot.running with
+      | Some running when running == flight -> slot.running <- None
+      | Some _ | None -> ());
+    Eio.Promise.resolve resolver Abandoned;
+    Printexc.raise_with_backtrace exn backtrace
+;;
+
+let arrive_at_recent_slot ~base_path =
+  let in_eio =
+    match Fs_compat.execution_context () with
+    | Fs_compat.Eio_fiber -> true
+    | Fs_compat.Non_eio -> false
+  in
+  Stdlib.Mutex.protect recent_slots_mu (fun () ->
+    let slot =
+      match Hashtbl.find_opt recent_slots base_path with
+      | Some slot -> slot
+      | None ->
+        let slot = { index = None; running = None; queued = None } in
+        Hashtbl.replace recent_slots base_path slot;
+        slot
+    in
+    let arrival =
+      match slot.queued, slot.running with
+      | None, None ->
+        let flight = Eio.Promise.create () in
+        slot.running <- Some flight;
+        Run flight
+      | (Some _, _ | None, Some _) when not in_eio -> Read_alone slot.index
+      | Some (queued, _), _ -> Await queued
+      | None, Some (running, _) ->
+        let flight = Eio.Promise.create () in
+        slot.queued <- Some flight;
+        Run_after (running, flight)
+    in
+    slot, arrival)
+;;
+
+let rec current_recent_index ~base_path store =
+  let slot, arrival = arrive_at_recent_slot ~base_path in
+  match arrival with
+  | Run flight -> run_recent_flight store slot flight
+  | Read_alone index -> advance_recent_index store index
+  | Await queued ->
+    (match Eio.Promise.await queued with
+     | Finished result -> result
+     | Abandoned -> current_recent_index ~base_path store)
+  | Run_after (running, ((_, resolver) as flight)) ->
+    (match Eio.Promise.await running with
+     | Finished _ | Abandoned ->
+       Stdlib.Mutex.protect recent_slots_mu (fun () ->
+         slot.queued <- None;
+         slot.running <- Some flight);
+       run_recent_flight store slot flight
+     | exception exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       Stdlib.Mutex.protect recent_slots_mu (fun () -> slot.queued <- None);
+       Eio.Promise.resolve resolver Abandoned;
+       Printexc.raise_with_backtrace exn backtrace)
+;;
+
 let read_recent ~base_path ?keeper_name ?(n = 20) ()
   : (Yojson.Safe.t list, read_error) result
   =
+  let refused detail = Error ({ stage = Read_recent; detail } : read_error) in
   if n <= 0
   then Ok []
+  else if n > read_recent_max_rows
+  then
+    refused
+      (Printf.sprintf "n=%d is above the %d newest rows read_recent keeps" n
+         read_recent_max_rows)
   else (
     match get_audit_store ~base_path () with
-    | Error detail -> Error ({ stage = Read_recent; detail } : read_error)
+    | Error detail -> refused detail
     | Ok store ->
-      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-        let rows = ref [] in
-        let count = ref 0 in
-        let select = function
-          | Dated_jsonl.Malformed_json _ as entry ->
-            (* Reuse the strict reader's location-bearing error. *)
-            (match parsed_rows ~stage:Read_recent [ entry ] with
-             | Error error -> Some (Error error)
-             | Ok _ -> None)
-          | Dated_jsonl.Parsed row ->
-            let matches =
-              match keeper_name with
-              | None -> Ok true
-              | Some name ->
-                let owners =
-                  match row with
-                  | `Assoc fields ->
-                    List.filter (fun (key, _) -> String.equal key "keeper") fields
-                  | _ -> []
-                in
-                (match owners with
-                 | [ (_, `String owner) ] -> Ok (String.equal name owner)
-                 | _ ->
-                   Error
-                     ({ stage = Read_recent
-                      ; detail = "audit row must contain exactly one string keeper"
-                      } : read_error))
-            in
-            (match matches with
-             | Error error -> Some (Error error)
-             | Ok false -> None
-             | Ok true ->
-               rows := row :: !rows;
-               incr count;
-               if !count = n then Some (Ok (List.rev !rows)) else None)
-        in
-        match Dated_jsonl.find_latest_entry_result store select with
-        | Error error ->
-          Error
-            ({ stage = Read_recent
-             ; detail = Dated_jsonl.read_error_to_string error
-             } : read_error)
-        | Ok (Some result) -> result
-        | Ok None -> Ok (List.rev !rows)))
+      (match
+         Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+           current_recent_index ~base_path store)
+       with
+       | Error detail -> refused detail
+       | Ok (index, refused_at) ->
+         (match Audit_recent_index.select index ~refused:refused_at ~keeper_name ~n with
+          | Ok rows -> Ok rows
+          | Error detail -> refused detail)))
 ;;
 
 let resolved_history_event json =

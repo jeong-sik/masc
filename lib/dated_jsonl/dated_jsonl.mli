@@ -225,6 +225,24 @@ val find_latest_entry_result :
     match. Malformed rows are delivered to the callback. Missing stores return
     [Ok None]; layout and I/O failures remain explicit. *)
 
+val month_dir_paths_newest_first_result : t -> (string list, read_error) result
+(** The store's month directories, newest first, listed and validated as
+    {!find_latest_entry_result} lists them. A missing store is empty. *)
+
+val day_file_paths_newest_first_result : string -> (string list, read_error) result
+(** The day files of one month directory from
+    {!month_dir_paths_newest_first_result}, newest first, listed and validated
+    as {!find_latest_entry_result} lists them. *)
+
+val compare_day_file_names : string -> string -> int
+(** The order of two day file names within one month, oldest first: the order
+    {!day_file_paths_newest_first_result} lists them in, reversed. *)
+
+val entry_of_physical_line : path:string -> string -> recent_entry option
+(** One physical line of a day file of [path], without its newline, as
+    {!find_latest_entry_result} reads it: [None] when it holds only whitespace,
+    which no reader counts as a row, and the decoded row otherwise. *)
+
 val find_latest_entry_in_file_result :
   string -> (recent_entry -> 'a option) -> ('a option, read_error) result
 (** Single-file reverse scan using the same chunked reader as

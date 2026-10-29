@@ -294,6 +294,18 @@ let list_day_files_result month_path =
   |> Result.map (List.sort (fun left right -> compare_day_files right left))
 ;;
 
+let month_dir_paths_newest_first_result t =
+  list_month_dirs_result t.base_dir
+  |> Result.map (List.map (Filename.concat t.base_dir))
+;;
+
+let day_file_paths_newest_first_result month_path =
+  list_day_files_result month_path
+  |> Result.map (List.map (Filename.concat month_path))
+;;
+
+let compare_day_file_names = compare_day_files
+
 (* ── Lines from a single file ─────────────────────────── *)
 
 (* Keep the physical-row predicate identical to [String.trim]'s OCaml 5.4
@@ -618,6 +630,10 @@ let recent_entry_of_line ~path ?line_number line =
   | json -> Parsed json
   | exception Yojson.Json_error detail ->
     Malformed_json { path; line_number; detail }
+;;
+
+let entry_of_physical_line ~path line =
+  if line_is_non_empty line then Some (recent_entry_of_line ~path line) else None
 ;;
 
 (* One step of a backwards scan: read the bytes that end at [scan_position]

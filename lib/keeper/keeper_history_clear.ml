@@ -53,7 +53,8 @@ let canonical ~session_dir ~session_id =
   | Error (Store.Ref_read_failed (Store.Parse_error _ | Store.Store_error _)) -> Ok Undecodable
   | Error (Store.Ref_read_failed (Store.Objects_invalid
       ( Agent_core.Checkpoint_objects.Head_invalid _ | Checkpoint_invalid _ | Object_missing _
-      | Object_digest_mismatch _ | Bundle_invalid _ | Turn_mismatch _ | Message_invalid _ ))) ->
+      | Object_digest_mismatch _ | Bundle_invalid _ | Turn_mismatch _ | Message_invalid _
+      | Segment_invalid _ | Header_object_invalid _ ))) ->
     Ok Undecodable
   | Error (Store.Ref_read_failed (Store.Not_found | Store.Newer_version _
       | Store.Io_error _ | Store.Read_failed _ | Store.Agent_core_error _

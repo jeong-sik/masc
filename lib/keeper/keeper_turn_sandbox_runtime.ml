@@ -1453,6 +1453,9 @@ let microvm_start_failure_cause failure =
   | Github_identity_invalid _ -> Identity_unavailable detail
   | Backend_unresolved _
   | Runtime_context_unavailable
+  (* [Guest_identity_store_unavailable] is named for what the store holds, the
+     credential snapshot. It fails in the host's filesystem, registry, lock or
+     lifecycle checks, which say nothing about whether the login is valid. *)
   | Guest_identity_store_unavailable _
   | Guest_facts_refused _
   | Image_unresolved _

@@ -23,6 +23,8 @@ class Reason(str, Enum):
     AWAITING_OWNER = "awaiting_owner"
     FIRST_REVIEW = "first_review"
     REVIEW_NEEDED = "review_needed"
+    INDEPENDENT_REVIEW = "independent_review"
+    COMMIT_IDENTITY_UNKNOWN = "commit_identity_unknown"
     ADMITTED = "admitted"
     DRAFT = "draft"
     CLOSED = "closed"
@@ -47,6 +49,13 @@ class ReviewState(str, Enum):
     DISMISSED = "DISMISSED"
     COMMENTED = "COMMENTED"
     PENDING = "PENDING"
+
+
+class ReviewerEligibility(str, Enum):
+    ELIGIBLE = "eligible"
+    PR_AUTHOR = "pr_author"
+    COMMIT_ACTOR = "commit_actor"
+    UNKNOWN = "unknown"
 
 
 class BlockerState(str, Enum):
@@ -79,6 +88,7 @@ class Identity:
 @dataclass(frozen=True)
 class Review:
     actor: str
+    actor_id: int
     review_id: int
     state: ReviewState
     head: str
@@ -99,10 +109,16 @@ class Pull:
     state: PullState
     draft: bool
     author: str
+    author_id: int
     requested_reviewers: tuple[str, ...]
     requested_teams: tuple[str, ...]
+    commit_accounts: tuple[str, ...]
+    commit_actor_ids: tuple[int, ...]
+    account_ids: tuple[tuple[str, int], ...]
+    commit_identities_complete: bool
     reviews: tuple[Review, ...]
     admission: bool
+    independent_source_review: bool
     blockers: tuple[Blocker, ...]
 
 
@@ -112,15 +128,22 @@ class Action:
     reason: Reason
     assignment: Assignment
     account: str | None = None
+    account_id: int | None = None
     team: str | None = None
     actionable: bool = False
+    reviewer_eligibility: ReviewerEligibility | None = None
+    independent_source_review: bool = False
     review_ids: tuple[int, ...] = ()
     blockers: tuple[Blocker, ...] = ()
 
     def to_json(self) -> dict:
         return {**self.identity.to_json(), "reason": self.reason.value,
                 "assignment": self.assignment.value, "account": self.account,
+                "account_id": self.account_id,
                 "team": self.team, "actionable": self.actionable,
+                "reviewer_eligibility": (self.reviewer_eligibility.value
+                                         if self.reviewer_eligibility else None),
+                "independent_source_review": self.independent_source_review,
                 "review_ids": list(self.review_ids),
                 "blockers": [json.loads(b.raw_json) for b in self.blockers]}
 
@@ -225,6 +248,7 @@ def parse_review(raw: object) -> Review | None:
     if not isinstance(user, dict):
         raise ValueError("review.user must be an API object")
     return Review(login(user.get("login"), "review.user.login"),
+                  positive_id(user.get("id"), "review.user.id"),
                   positive_id(raw.get("id"), "review.id"), state,
                   sha(raw.get("commit_id"), "review.commit_id"),
                   instant(raw.get("submitted_at"), "review.submitted_at"))
@@ -253,7 +277,9 @@ def parse_pull(raw: object) -> Pull:
         raise ValueError("pull must be an object")
     required = {"number", "title", "url", "state", "draft", "author", "head",
                 "base_ref", "base_sha", "stack", "created_at", "requested_reviewers",
-                "requested_teams", "reviews", "admission", "blockers"}
+                "requested_teams", "author_id", "account_ids", "commit_accounts",
+                "commit_actor_ids", "commit_identities_complete",
+                "reviews", "admission", "independent_source_review", "blockers"}
     missing = required.difference(raw)
     if missing:
         raise ValueError("pull missing fields: " + ",".join(sorted(missing)))
@@ -272,15 +298,51 @@ def parse_pull(raw: object) -> Pull:
                         instant(raw["created_at"], "created_at"))
     reviews = tuple(r for r in (parse_review(r) for r in sequence(raw["reviews"], "reviews"))
                     if r is not None)
-    return Pull(identity, state, boolean(raw["draft"], "draft"), login(raw["author"], "author"),
+    if not isinstance(raw["account_ids"], dict):
+        raise ValueError("account_ids must be an object")
+    accounts = tuple((login(name, "account_ids").casefold(), positive_id(value, "account_ids"))
+                     for name, value in raw["account_ids"].items())
+    if len({name for name, _ in accounts}) != len(accounts):
+        raise ValueError("duplicate account identity")
+    author = login(raw["author"], "author")
+    author_id = positive_id(raw["author_id"], "author_id")
+    known = dict(accounts)
+    if known.get(author.casefold()) != author_id or any(
+            known.get(r.actor.casefold()) != r.actor_id for r in reviews):
+        raise ValueError("account identity does not match author or review")
+    commit_ids = tuple(positive_id(i, "commit_actor_ids")
+                       for i in sequence(raw["commit_actor_ids"], "commit_actor_ids"))
+    commit_names = unique_logins(raw["commit_accounts"], "commit_accounts")
+    if (len(commit_names) != len(commit_ids)
+            or any(known.get(name.casefold()) != actor_id
+                   for name, actor_id in zip(commit_names, commit_ids))):
+        raise ValueError("commit account identity mismatch")
+    return Pull(identity, state, boolean(raw["draft"], "draft"), author, author_id,
                 unique_logins(raw["requested_reviewers"], "requested_reviewers"),
-                unique_logins(raw["requested_teams"], "requested_teams"), reviews,
+                unique_logins(raw["requested_teams"], "requested_teams"),
+                commit_names, commit_ids, accounts,
+                boolean(raw["commit_identities_complete"], "commit_identities_complete"), reviews,
                 boolean(raw["admission"], "admission"),
+                boolean(raw["independent_source_review"], "independent_source_review"),
                 tuple(parse_blocker(b) for b in sequence(raw["blockers"], "blockers")))
 
 
+def reviewer_eligibility(pull: Pull, account: str) -> ReviewerEligibility:
+    key = account.casefold()
+    actor_id = dict(pull.account_ids).get(key)
+    if actor_id is None:
+        return ReviewerEligibility.UNKNOWN
+    if actor_id == pull.author_id:
+        return ReviewerEligibility.PR_AUTHOR
+    if actor_id in pull.commit_actor_ids:
+        return ReviewerEligibility.COMMIT_ACTOR
+    if not pull.commit_identities_complete:
+        return ReviewerEligibility.UNKNOWN
+    return ReviewerEligibility.ELIGIBLE
+
+
 def current_crs(pull: Pull) -> tuple[Review, ...]:
-    latest: dict[str, Review] = {}
+    latest: dict[int, Review] = {}
     # Match the admission guard's formal-state reduction by review ID.
     # COMMENTED does not resolve a prior formal change request; a later
     # APPROVED review does, even if both submissions share an API timestamp.
@@ -288,9 +350,9 @@ def current_crs(pull: Pull) -> tuple[Review, ...]:
     for review in pull.reviews:
         if review.state not in formal:
             continue
-        previous = latest.get(review.actor.casefold())
+        previous = latest.get(review.actor_id)
         if previous is None or review.review_id > previous.review_id:
-            latest[review.actor.casefold()] = review
+            latest[review.actor_id] = review
     return tuple(sorted((r for r in latest.values() if r.state is ReviewState.CHANGES_REQUESTED),
                         key=lambda r: (r.actor.casefold(), r.review_id)))
 
@@ -298,43 +360,59 @@ def current_crs(pull: Pull) -> tuple[Review, ...]:
 def plan(snapshot: Sequence[dict], roster: Sequence[str]) -> Worklist:
     """Return exact-scope proposed and existing work without changing inputs."""
     pool = unique_logins(roster, "roster")
-    pool_keys = {a.casefold() for a in pool}
-    canonical = {actor.casefold(): actor for actor in pool}
     pulls = tuple(parse_pull(raw) for raw in sequence(snapshot, "snapshot"))
     if len({p.identity.number for p in pulls}) != len(pulls):
         raise ValueError("snapshot contains duplicate pull numbers")
+    identities = {}
+    for pull in pulls:
+        for name, actor_id in pull.account_ids:
+            if name in identities and identities[name] != actor_id:
+                raise ValueError("account identity changed during snapshot")
+            identities[name] = actor_id
+
+    def key(actor):
+        return identities.get(actor.casefold(), "login:" + actor.casefold())
+
+    pool_keys = {key(a) for a in pool}
+    canonical = {key(actor): actor for actor in pool}
     outstanding: Counter = Counter()
     proposed: Counter = Counter()
     for pull in pulls:
         if pull.state is PullState.OPEN and not pull.draft:
-            outstanding.update(actor.casefold() for actor in pull.requested_reviewers)
+            outstanding.update(key(actor) for actor in pull.requested_reviewers)
         for actor in pull.requested_reviewers:
-            canonical.setdefault(actor.casefold(), actor)
+            canonical.setdefault(key(actor), actor)
     actions = []
 
     def add(pull: Pull, reason: Reason, assignment=Assignment.NONE, *, account=None,
             team=None, actionable=False, reviews=(), blockers=()):
         if account is not None:
-            key = account.casefold()
-            canonical.setdefault(key, account)
-            account = canonical[key]
+            actor_key = key(account)
+            canonical.setdefault(actor_key, account)
+            account = canonical[actor_key]
             if assignment is Assignment.PROPOSED_USER:
-                proposed[key] += 1
-        actions.append(Action(pull.identity, reason, assignment, account, team,
-                              actionable, tuple(r.review_id for r in reviews), tuple(blockers)))
+                proposed[actor_key] += 1
+        eligibility = reviewer_eligibility(pull, account) if account is not None else None
+        account_id = identities.get(account.casefold()) if account is not None else None
+        actions.append(Action(pull.identity, reason, assignment, account=account,
+                              account_id=account_id, team=team, actionable=actionable,
+                              reviewer_eligibility=eligibility,
+                              independent_source_review=pull.independent_source_review,
+                              review_ids=tuple(r.review_id for r in reviews), blockers=tuple(blockers)))
 
     # Ownership routes are planned first so first-review balancing includes the
     # requests needed to return changed code to the reviewers who refused it.
     unassigned = []
     for pull in sorted(pulls, key=lambda p: (p.identity.created_at, p.identity.number)):
+        first_action = len(actions)
         active = pull.state is PullState.OPEN and not pull.draft
         inactive_reason = Reason.CLOSED if pull.state is PullState.CLOSED else Reason.DRAFT
-        requested = {actor.casefold() for actor in pull.requested_reviewers}
+        requested = {key(actor) for actor in pull.requested_reviewers}
         crs = current_crs(pull)
         for actor in pull.requested_reviewers:
-            own = tuple(r for r in crs if r.actor.casefold() == actor.casefold())
+            own = tuple(r for r in crs if key(r.actor) == key(actor))
             owned = tuple(b for b in pull.blockers if b.actor is not None
-                          and b.actor.casefold() == actor.casefold())
+                          and key(b.actor) == key(actor))
             add(pull, Reason.EXISTING_REQUEST if active else inactive_reason,
                 Assignment.EXISTING_USER, account=actor, actionable=active,
                 reviews=own, blockers=owned)
@@ -347,13 +425,13 @@ def plan(snapshot: Sequence[dict], roster: Sequence[str]) -> Worklist:
             continue
         # Exact-head structured refusals cannot be inferred resolved by a code
         # change, formal approval, comment, or a different account's review.
-        blocker_groups: dict[str | None, list[Blocker]] = {}
+        blocker_groups: dict[int | str | None, list[Blocker]] = {}
         for blocker in pull.blockers:
-            owner = blocker.actor.casefold() if blocker.actor is not None else None
+            owner = key(blocker.actor) if blocker.actor is not None else None
             blocker_groups.setdefault(owner, []).append(blocker)
         for owner, blockers in blocker_groups.items():
             if owner not in requested:
-                own = tuple(r for r in crs if r.actor.casefold() == owner)
+                own = tuple(r for r in crs if key(r.actor) == owner)
                 same_head_ids = {r.review_id for r in own if r.head == pull.identity.head}
                 independent = tuple(b for b in blockers
                                     if not (b.record_id in same_head_ids
@@ -362,7 +440,7 @@ def plan(snapshot: Sequence[dict], roster: Sequence[str]) -> Worklist:
                     add(pull, Reason.AWAITING_OWNER, account=blockers[0].actor,
                         reviews=own, blockers=independent)
         for review in crs:
-            owner = review.actor.casefold()
+            owner = key(review.actor)
             if owner in requested:
                 continue
             if review.head == pull.identity.head:
@@ -374,31 +452,56 @@ def plan(snapshot: Sequence[dict], roster: Sequence[str]) -> Worklist:
             elif owner in blocker_groups:
                 continue
             elif not pull.admission and owner in pool_keys \
-                    and owner != pull.author.casefold():
+                    and reviewer_eligibility(pull, review.actor) is ReviewerEligibility.ELIGIBLE:
                 add(pull, Reason.CHANGED_HEAD_CR, Assignment.PROPOSED_USER,
                     account=review.actor, actionable=True, reviews=(review,))
             else:
                 add(pull, Reason.AWAITING_OWNER, account=review.actor, reviews=(review,))
+        # An existing request or CR stays owned even when that account also
+        # contributed to the current diff. It does not supply an independent
+        # reviewer, so propose one separately while retaining all old facts.
+        conflicting = any(reviewer_eligibility(pull, actor) in
+                          (ReviewerEligibility.PR_AUTHOR, ReviewerEligibility.COMMIT_ACTOR)
+                          for actor in pull.requested_reviewers)
+        conflicting |= any(reviewer_eligibility(pull, review.actor) in
+                           (ReviewerEligibility.PR_AUTHOR, ReviewerEligibility.COMMIT_ACTOR)
+                           for review in crs)
+        independent_requested = any(reviewer_eligibility(pull, actor) is ReviewerEligibility.ELIGIBLE
+                                    for actor in pull.requested_reviewers)
+        unknown_requested = any(reviewer_eligibility(pull, actor) is ReviewerEligibility.UNKNOWN
+                                for actor in pull.requested_reviewers)
+        independent_proposed = any(a.assignment is Assignment.PROPOSED_USER
+                                   and a.reviewer_eligibility is ReviewerEligibility.ELIGIBLE
+                                   for a in actions[first_action:])
+        if (conflicting and not pull.admission and not pull.independent_source_review
+                and not pull.requested_teams
+                and not independent_requested and not unknown_requested and not independent_proposed
+                and not any(r.head == pull.identity.head for r in crs)):
+            unassigned.append((pull, Reason.INDEPENDENT_REVIEW))
+            continue
         if crs or pull.blockers or requested or pull.requested_teams:
             continue
         if pull.admission:
             add(pull, Reason.ADMITTED)
         else:
-            unassigned.append(pull)
-    for pull in unassigned:
-        eligible = [actor for actor in pool if actor.casefold() != pull.author.casefold()]
+            unassigned.append((pull, Reason.REVIEW_NEEDED if pull.reviews else Reason.FIRST_REVIEW))
+    for pull, reason in unassigned:
+        if not pull.commit_identities_complete:
+            add(pull, Reason.COMMIT_IDENTITY_UNKNOWN)
+            continue
+        eligible = [actor for actor in pool
+                    if reviewer_eligibility(pull, actor) is ReviewerEligibility.ELIGIBLE]
         if not eligible:
             add(pull, Reason.NO_REVIEWER)
             continue
-        actor = min(eligible, key=lambda a: (outstanding[a.casefold()] + proposed[a.casefold()],
+        actor = min(eligible, key=lambda a: (outstanding[key(a)] + proposed[key(a)],
                                              a.casefold()))
-        add(pull, Reason.REVIEW_NEEDED if pull.reviews else Reason.FIRST_REVIEW,
-            Assignment.PROPOSED_USER, account=actor, actionable=True)
+        add(pull, reason, Assignment.PROPOSED_USER, account=actor, actionable=True)
     rank = {reason: i for i, reason in enumerate(Reason)}
     ordered = tuple(sorted(actions, key=lambda a: (rank[a.reason], a.identity.created_at,
                                                   a.identity.number, a.account or "", a.team or "")))
-    loads = tuple(AccountLoad(canonical[key], key in pool_keys, outstanding[key], proposed[key],
+    loads = tuple(AccountLoad(canonical[actor_key], actor_key in pool_keys, outstanding[actor_key], proposed[actor_key],
                               tuple(a for a in ordered if a.account is not None
-                                    and a.account.casefold() == key))
-                  for key in sorted(canonical))
+                                    and key(a.account) == actor_key))
+                  for actor_key in sorted(canonical, key=lambda k: canonical[k].casefold()))
     return Worklist(ordered, loads)

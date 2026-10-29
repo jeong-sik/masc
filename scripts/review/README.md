@@ -94,9 +94,10 @@ concrete guard diagnostic instead of being collapsed to `review`.
 
 ## Assigning the next review
 
-`review-worklist.py` reads every open PR and every page of its reviews and
-issue comments. It keeps GitHub's user/team requests and proposes missing
-requests across an explicit pool of GitHub logins:
+`review-worklist.py` reads every open PR, every page of its reviews and issue
+comments, and the commit comparison for its exact base and head. It keeps
+GitHub's user/team requests and proposes missing requests across an explicit
+pool of GitHub logins:
 
 ```bash
 python3 scripts/review/review-worklist.py --repo OWNER/REPO \
@@ -111,10 +112,26 @@ and proposed requests. Changed-head CRs return to each actual account owner;
 same-head CRs wait for author action unless an explicit rereview request exists.
 Shared logins count once. COMMENT/PENDING does not establish approval. Existing
 approval evidence uses the complete-diff/scope guard before being admitted.
+Proposed reviewers must have a different GitHub user ID from the PR author and
+every linked author or committer in the comparison. The tool resolves reviewer
+logins to IDs, repeats that lookup immediately before a request, and checks the
+returned request IDs. An incomplete comparison or an unlinked commit identity
+stops new proposals for that PR. The same account check also
+applies to approval receipts used by this worklist; it does not prove that the
+reviewer's actual session was independent. Existing conflicting requests and
+CR ownership remain visible and untouched; when appropriate a separate
+independent reviewer is proposed. Existing team requests are preserved without
+assuming their membership. A separately validated current independent source
+approval avoids a redundant extra request even if another account's CR remains
+open; this does not clear the CR or grant merge admission. Release decisions
+still use their own CI policy.
 
 Assignments mean requested, not running or reviewed. Each action retains its
 head/base/stack identity. Before posting, the tool rereads PR/evidence and skips
-changed snapshots. Requests cannot be atomically bound to a SHA. After a POST
+changed snapshots, including changed commit-account links. Receipt scope and
+policy must match the observed PR, and a source admission is rechecked against
+PR scope and commit identities. Requests and these observations cannot be made
+atomic with a SHA or an account mapping. After a POST
 it reads scope/requests back and reports races or uncertainty without blindly
 retrying. Existing requests are never removed; a transport/read failure stops
 further notifications and preserves earlier receipts. No timer, daemon, lease,

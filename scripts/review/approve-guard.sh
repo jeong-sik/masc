@@ -215,7 +215,7 @@ if [ "$merge_check" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
   [ -n "$approvals" ] || refuse "approval changed after final diff read"
   check_verdict
   if [ "$receipt_json" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
-    python3 -c 'import json,sys; print(json.dumps({"pr":int(sys.argv[1]),"head":sys.argv[2],"approval_ids":[int(x) for x in sys.argv[3].split()]}))' "$pr" "$head" "$approvals"
+    python3 -c 'import json,sys; print(json.dumps({"pr":int(sys.argv[1]),"head":sys.argv[2],"approval_ids":[int(x) for x in sys.argv[3].split()],"scope":json.loads(sys.argv[4]),"policy":sys.argv[5]}))' "$pr" "$head" "$approvals" "$(compute_scope)" "$review_policy"
   else echo "MERGE-CHECK PASS #$pr head $head approvals:$approvals"; fi
   exit 0
 fi

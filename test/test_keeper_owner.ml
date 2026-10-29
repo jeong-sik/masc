@@ -1188,9 +1188,9 @@ let test_direct_waiter_skips_continuations_and_wakes_on_new_input () =
   let running = Option.get (owner_ok (Owner.claim_next_operation owner)) in
   check bool "newer operation claimed first" true
     (Chat_operation.Operation_id.equal continued running.operation_id);
-  let checkpoint = Keeper_checkpoint_ref.create
+  let checkpoint = Keeper_checkpoint_ref.of_persisted
     ~trace_id:(Keeper_id.Trace_id.of_string "trace-waiter" |> Result.get_ok)
-    ~turn_count:1 ~canonical_checkpoint_bytes:"durable prior progress" |> Result.get_ok in
+    ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "durable prior progress") |> Result.get_ok in
   ignore (owner_ok (Owner.defer_direct_checkpoint owner ~operation_id:continued
     ~execution_digest:running.execution_digest
     ~checkpoint:(Keeper_semantic_execution.Agent_core checkpoint)));
@@ -1458,9 +1458,9 @@ let test_gate_wait_releases_owner_without_repeated_children () =
   let waiting_p, resolve_waiting = Eio.Promise.create () in
   let finished_p, resolve_finished = Eio.Promise.create () in
   let attempts = ref 0 in
-  let checkpoint = Keeper_checkpoint_ref.create
+  let checkpoint = Keeper_checkpoint_ref.of_persisted
     ~trace_id:(Keeper_id.Trace_id.of_string "gate-wait-trace" |> Result.get_ok)
-    ~turn_count:2 ~canonical_checkpoint_bytes:"original Gate checkpoint" |> Result.get_ok in
+    ~turn_count:2 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "original Gate checkpoint") |> Result.get_ok in
   let obligation = Keeper_semantic_execution.gate_obligation ~approval_id:"owner-gate-approval"
     ~tool_name:"tool_execute" ~input_hash:(String.make 64 'a') |> Result.get_ok in
   let waiting = Keeper_semantic_execution.gate_wait ~checkpoint ~obligations:[obligation] |> Result.get_ok in
@@ -1641,9 +1641,9 @@ let test_cooling_retry_readiness_refreshes_on_wake () =
   Owner.submit_operation owner ~operation_id ~source:operation_source
     ~input:(operation_input "resume after provider backoff") |> owner_ok |> ignore;
   let operation = Owner.claim_next_operation owner |> owner_ok |> Option.get in
-  let checkpoint = Keeper_checkpoint_ref.create
+  let checkpoint = Keeper_checkpoint_ref.of_persisted
       ~trace_id:(Keeper_id.Trace_id.of_string "cooling-readiness" |> Result.get_ok)
-      ~turn_count:1 ~canonical_checkpoint_bytes:"cooling checkpoint" |> Result.get_ok in
+      ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "cooling checkpoint") |> Result.get_ok in
   let continuation = Keeper_semantic_execution.runtime_retry ~not_before:(Some 100.0)
       ~checkpoint ~assignment_id:"original-lane" ~failed_runtime_id:"primary.test_model"
       ~next_runtime_id:"alternate.test_model" ~later_runtime_ids:[] |> Result.get_ok in
@@ -1698,9 +1698,9 @@ let test_retry_read_failure_recovers_and_rearms_after_deadline () =
   Owner.submit_operation owner ~operation_id ~source:operation_source
     ~input:(operation_input "resume after store recovery") |> owner_ok |> ignore;
   let operation = Owner.claim_next_operation owner |> owner_ok |> Option.get in
-  let checkpoint = Keeper_checkpoint_ref.create
+  let checkpoint = Keeper_checkpoint_ref.of_persisted
     ~trace_id:(Keeper_id.Trace_id.of_string "retry-read-recovery" |> Result.get_ok)
-    ~turn_count:1 ~canonical_checkpoint_bytes:"owned retry checkpoint" |> Result.get_ok in
+    ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "owned retry checkpoint") |> Result.get_ok in
   let continuation = Keeper_semantic_execution.runtime_retry ~not_before:(Some 100.) ~checkpoint
     ~assignment_id:"original-lane" ~failed_runtime_id:"primary.test_model"
     ~next_runtime_id:"alternate.test_model" ~later_runtime_ids:[] |> Result.get_ok in
@@ -1754,9 +1754,9 @@ let test_cooling_retry_rearms_earliest ~earlier_added_second () =
   let interval = Env_config_keeper.KeeperKeepalive.sleep_chunk_sec () in
   let earlier = interval /. 4. and later = interval *. 2. in
   let first = operation_id "kmsg-earliest-first" and second = operation_id "kmsg-earliest-second" in
-  let checkpoint = Keeper_checkpoint_ref.create
+  let checkpoint = Keeper_checkpoint_ref.of_persisted
     ~trace_id:(Keeper_id.Trace_id.of_string "earliest-retry" |> Result.get_ok)
-    ~turn_count:1 ~canonical_checkpoint_bytes:"earliest retry checkpoint" |> Result.get_ok in
+    ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "earliest retry checkpoint") |> Result.get_ok in
   let defer operation_id deadline =
     Owner.submit_operation owner ~operation_id ~source:operation_source
       ~input:(operation_input "preserve this retry") |> owner_ok |> ignore;
@@ -1817,9 +1817,9 @@ let test_retry_deadline_crossing_automatically_wakes () =
   Owner.submit_operation owner ~operation_id ~source:operation_source
     ~input:(operation_input "resume when ready") |> owner_ok |> ignore;
   let operation = Owner.claim_next_operation owner |> owner_ok |> Option.get in
-  let checkpoint = Keeper_checkpoint_ref.create
+  let checkpoint = Keeper_checkpoint_ref.of_persisted
       ~trace_id:(Keeper_id.Trace_id.of_string "deadline-crossing" |> Result.get_ok)
-      ~turn_count:1 ~canonical_checkpoint_bytes:"deadline checkpoint" |> Result.get_ok in
+      ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "deadline checkpoint") |> Result.get_ok in
   let continuation = Keeper_semantic_execution.runtime_retry ~not_before:(Some 100.0)
       ~checkpoint ~assignment_id:"original-lane" ~failed_runtime_id:"primary.test_model"
       ~next_runtime_id:"alternate.test_model" ~later_runtime_ids:[] |> Result.get_ok in
@@ -1847,9 +1847,9 @@ let test_runtime_deferred_child_keeps_same_operation_and_drains () =
     "turn_instructions", `String "retain original context"] in
   let input = Keeper_chat_operation.canonical_json input |> Result.get_ok in
   let source = Keeper_chat_operation.canonical_json source |> Result.get_ok in
-  let checkpoint = Keeper_checkpoint_ref.create
+  let checkpoint = Keeper_checkpoint_ref.of_persisted
       ~trace_id:(Keeper_id.Trace_id.of_string "trace-direct-resume" |> Result.get_ok)
-      ~turn_count:3 ~canonical_checkpoint_bytes:"owner fixture checkpoint" |> Result.get_ok in
+      ~turn_count:3 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "owner fixture checkpoint") |> Result.get_ok in
   let continuation = Keeper_semantic_execution.runtime_retry ~not_before:None ~checkpoint
       ~assignment_id:"frozen-lane" ~failed_runtime_id:"primary.test_model"
       ~next_runtime_id:"alternate.test_model" ~later_runtime_ids:[] |> Result.get_ok in
@@ -2416,9 +2416,9 @@ let test_operation_id_interrupt_leaves_an_autonomous_slot_holder_alone () =
   let operation_executor ~sw:_ ~keeper_name:_ ~claim =
     match claim (), !owner_ref with
     | Ok (Some (operation : Chat_operation.t)), Some owner ->
-      let checkpoint = Keeper_checkpoint_ref.create
+      let checkpoint = Keeper_checkpoint_ref.of_persisted
         ~trace_id:(Keeper_id.Trace_id.of_string "refused-settle-trace" |> Result.get_ok)
-        ~turn_count:1 ~canonical_checkpoint_bytes:"refused settle seed" |> Result.get_ok in
+        ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "refused settle seed") |> Result.get_ok in
       let locator = Agent_core.Agent.execution_locator_of_yojson
         (`Assoc ["version", `Int 1; "run_id", `String "execution-run-refused-settle"]) |> Result.get_ok in
       let call = Keeper_native_call.create
@@ -3250,9 +3250,9 @@ let test_startup_requeues_exact_native_call () =
     ignore (Keeper_chat_operation_store.submit seed ~now:10. ~operation_id
       ~source:operation_source ~input:(operation_input "retain original native input") |> Result.get_ok);
     let operation = Keeper_chat_operation_store.claim_next seed ~now:11. |> Result.get_ok |> Option.get in
-    let checkpoint = Keeper_checkpoint_ref.create
+    let checkpoint = Keeper_checkpoint_ref.of_persisted
       ~trace_id:(Keeper_id.Trace_id.of_string "native-owner-trace" |> Result.get_ok)
-      ~turn_count:1 ~canonical_checkpoint_bytes:"exact owner seed" |> Result.get_ok in
+      ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "exact owner seed") |> Result.get_ok in
     let locator = Agent_core.Agent.execution_locator_of_yojson
       (`Assoc ["version", `Int 1; "run_id", `String "execution-run-native-owner"]) |> Result.get_ok in
     let call = Keeper_native_call.create
@@ -3278,9 +3278,9 @@ let test_startup_requeues_exact_native_call () =
       (Keeper_native_call.equal_state observed (Keeper_native_call.Active call));
     Owner.bind_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
       ~observed ~call |> owner_ok;
-    let advanced_checkpoint = Keeper_checkpoint_ref.create
+    let advanced_checkpoint = Keeper_checkpoint_ref.of_persisted
       ~trace_id:checkpoint.trace_id ~turn_count:2
-      ~canonical_checkpoint_bytes:"native progress after restart" |> Result.get_ok in
+      ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "native progress after restart") |> Result.get_ok in
     Owner.checkpoint_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
       ~call_id:call.call_id ~observed:checkpoint ~checkpoint:advanced_checkpoint |> owner_ok;
     (match Owner.checkpoint_direct_native_call owner ~operation_id
@@ -6036,9 +6036,9 @@ let test_scheduled_source_handoff case () =
         | Unavailable_handoff | Scoped_release_handoff | Failed_listener_handoff
         | Missing_listener_handoff | Paused_handoff | Ended_consumer_handoff
         | Replaced_consumer_handoff ->
-          let checkpoint = Keeper_checkpoint_ref.create
+          let checkpoint = Keeper_checkpoint_ref.of_persisted
             ~trace_id:(Option.get (Owner.projection owner).meta).runtime.trace_id
-            ~turn_count:1 ~canonical_checkpoint_bytes:"settled original chat boundary"
+            ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "settled original chat boundary")
             |> Result.get_ok in
           let checkpoint = Keeper_semantic_execution.Agent_core checkpoint in
           Owner.defer_direct_checkpoint owner ~operation_id:first
@@ -6224,8 +6224,8 @@ let test_input_writer_is_bound_to_child_and_predecessor () =
       ~store:{replace=(fun _ -> Ok ());remove=(fun _ -> Ok ())}
       ~keeper_name:meta.name ~initial_meta:(Some meta) |> owner_ok in
   let trace_id = meta.runtime.trace_id in
-  let checkpoint bytes = Keeper_checkpoint_ref.create ~trace_id ~turn_count:0
-      ~canonical_checkpoint_bytes:bytes |> function
+  let checkpoint bytes = Keeper_checkpoint_ref.of_persisted ~trace_id ~turn_count:0
+      ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes bytes) |> function
     | Ok reference -> reference | Error _ -> fail "checkpoint identity" in
   let refused label = function
     | Error (Owner.Operation_rejected (Keeper_chat_operation_store.Invalid_input _)) -> ()

@@ -47,6 +47,9 @@ let error_json = function
       | Candidate_identity_invalid error -> "identity_invalid",Store.checkpoint_identity_error_to_string error
       | Candidate_session_mismatch _ -> "session_mismatch","retained input session differs from the owned trace"
       | Candidate_turn_regressed _ -> "turn_regressed","retained input turn differs from the owned reference"
+      | Candidate_unencodable error -> "unencodable",Agent_core.Error.to_string error
+      | Candidate_content_mismatch _ -> "content_mismatch","retained input content differs from its reference"
+      | Objects_not_installed error -> "objects_not_installed",Keeper_checkpoint_object_store.write_error_to_string error
       | Commit_not_installed _ -> "commit_not_installed","retained input could not be read without installation failure" in
     `Assoc ["kind",`String "retained_unavailable";"cause",`String kind;"detail",`String detail]
 let reference_json (reference:Keeper_checkpoint_ref.t) = `Assoc

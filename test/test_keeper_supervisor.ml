@@ -369,7 +369,7 @@ let seed_durable_librarian_baseline
   in
   let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
   (match
-     Librarian_checkpoint_store.save_agent_core_classified
+     Librarian_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
        ~session_dir
        ~history_retained:0
        checkpoint

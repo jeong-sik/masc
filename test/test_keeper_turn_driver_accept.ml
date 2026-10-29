@@ -318,7 +318,7 @@ let run_tool_then_empty_with_checkpoint_store store_case () =
       with session_id; model="mock-model"; turn_count=100 } in
   (match store_case with
    | Ahead_checkpoint ->
-     (match Store.save_agent_core_classified ~session_dir ~history_retained:0 newer with
+     (match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 newer with
       | Ok (Store.Saved _) -> ()
       | Ok (Store.Stale_noop _) -> Alcotest.fail "fresh canonical fixture was stale"
       | Error detail -> Alcotest.fail detail)
@@ -334,7 +334,7 @@ let run_tool_then_empty_with_checkpoint_store store_case () =
      | Failed_tool_checkpoint, Core.Agent.After_tool_results_appended ->
        write_file (Store.agent_core_checkpoint_path ~session_dir ~session_id) "{unreadable canonical"
      | (Fresh_checkpoint | Ahead_checkpoint | Failed_tool_checkpoint), _ -> ());
-    match Store.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
+    match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 checkpoint with
     | Ok (Store.Saved _) ->
       incr saves;
       Attempt.observe_checkpoint_saved progress snapshot.stage;

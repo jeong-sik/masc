@@ -4349,9 +4349,9 @@ let test_direct_retry_owner_revalidates_recovery_and_reassignment () =
       let resumed, resolve_resumed = Eio.Promise.create () in
       let owner_p, resolve_owner = Eio.Promise.create () in
       let operation_id = Operation.Operation_id.of_string "direct-wait-owned-operation" |> string_ok in
-      let checkpoint = Keeper_checkpoint_ref.create
+      let checkpoint = Keeper_checkpoint_ref.of_persisted
         ~trace_id:(Keeper_id.Trace_id.of_string "direct-wait-trace" |> string_ok)
-        ~turn_count:3 ~canonical_checkpoint_bytes:"original input and completed effects"
+        ~turn_count:3 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "original input and completed effects")
         |> Result.get_ok in
       let runner : Owner.operation_runner =
         { ready=(fun ~keeper_name:_ -> !ready)
@@ -4428,9 +4428,9 @@ let test_direct_retry_retains_turn_entry_dispatch_witness () =
     reset_quota_lane_rests ();
     Fun.protect ~finally:reset_quota_lane_rests (fun () ->
       let snapshot = Runtime.keeper_dispatch_snapshot ~keeper_name in
-      let checkpoint = Keeper_checkpoint_ref.create
+      let checkpoint = Keeper_checkpoint_ref.of_persisted
         ~trace_id:(Keeper_id.Trace_id.of_string "inflight-retry-trace" |> Result.get_ok)
-        ~turn_count:1 ~canonical_checkpoint_bytes:"owned effects" |> Result.get_ok in
+        ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "owned effects") |> Result.get_ok in
       let lane = Driver.restore_deferred_runtime_lane ~assignment_id:"quota_lane"
         ~failed_runtime_id:"shared_a.test_model" ~next_runtime_id:"shared_a.test_model"
         ~later_runtime_ids:["other.test_model"] ~failure:(Agent_core.Error.Internal "refused") in
@@ -4455,9 +4455,9 @@ let test_direct_retry_retains_turn_entry_dispatch_witness () =
          | Ok (Owner.Update_retry_wait _) | Error _ -> Alcotest.fail "unchanged replacement must not extend its deadline")
       | Ok Owner.Keep_retry_wait | Error _ -> Alcotest.fail "turn-entry witness lost same-name lane change"));
   with_runtime_config (config ["shared_a.test_model"; "other.test_model"]) (fun () ->
-    let checkpoint = Keeper_checkpoint_ref.create
+    let checkpoint = Keeper_checkpoint_ref.of_persisted
       ~trace_id:(Keeper_id.Trace_id.of_string "restart-retry-trace" |> Result.get_ok)
-      ~turn_count:1 ~canonical_checkpoint_bytes:"owned effects" |> Result.get_ok in
+      ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "owned effects") |> Result.get_ok in
     let retry = Semantic.runtime_retry ~not_before:(Some 100.) ~checkpoint
       ~assignment_id:"quota_lane" ~failed_runtime_id:"shared_a.test_model"
       ~next_runtime_id:"other.test_model" ~later_runtime_ids:["shared_a.test_model"] |> Result.get_ok in

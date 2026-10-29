@@ -258,7 +258,8 @@ let with_input_result ?(before_close=(fun ~base_path:_ ~store:_ ~snapshot:_ -> (
     (Filename.concat base_path Common.masc_dirname)) checkpoint.session_id in
   Fs_compat.mkdir_p session_dir;
   let canonical = Checkpoint.agent_core_checkpoint_path ~session_dir ~session_id:checkpoint.session_id in
-  write canonical (Checkpoint.exact_snapshot_canonical_bytes snapshot); Unix.chmod canonical 0o600;
+  ignore (Masc_test_deps.write_checkpoint_head ~session_dir ~path:canonical
+    (Checkpoint.exact_snapshot_checkpoint snapshot) : string); Unix.chmod canonical 0o600;
   let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String "imp";
     "trace_id",`String checkpoint.session_id;"activation_mode",`String "manual"]) |> fixture_ok in
   let metadata = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path)
@@ -517,8 +518,10 @@ let test_retention_post_commit_cancel_propagates_with_evidence () =
      | Ok _ | Error _ -> fail "post-commit cancellation became normal adoption result"
      | exception (Eio.Cancel.Cancelled _ as cause) ->
        check bool "same cancellation propagates" true (cause==cancellation));
-    check string "committed artifact remains" (Checkpoint.exact_snapshot_canonical_bytes snapshot)
-      (contents (input_retained_path session_dir snapshot));
+    check string "committed artifact remains" (Checkpoint.exact_snapshot_reference snapshot).sha256
+      (match Agent_core.Checkpoint_objects.head_of_string (contents (input_retained_path session_dir snapshot)) with
+       | Ok head -> (Agent_core.Checkpoint_objects.head_content_digest head :> string)
+       | Error error -> fail (Agent_core.Checkpoint_objects.load_error_to_string error));
     let failure = Checkpoint.Installed {installed_ref=Checkpoint.exact_snapshot_reference snapshot;
       auxiliary=[Checkpoint.Commit_observer_failed (Failure "observer failed",original_backtrace)]} in
     (match Journal.For_testing.confirm_input_retention failure with
@@ -649,7 +652,10 @@ let test_rollback_refuses_later_journal_input_and_companion_changes () =
     check string "rollback preserves later canonical bytes" canonical_before (contents canonical);
     ignore (Journal.load_installation ~base_path ~installation_id:(Journal.installation_id record) |> ok)))
     [(fun path _ -> write path (contents path ^ "later operation"));
-     (fun _ canonical -> write canonical (contents canonical ^ " "));
+     (* A later save: the head names other content (RFC-0476 §3.2). *)
+     (fun _ canonical ->
+       write canonical
+         (Masc_test_deps.checkpoint_head_bytes_with_field (contents canonical) "turn_count" (`Int 1000)));
      (fun path _ -> write (path ^ "-wal") "unrecovered SQLite evidence")]
 let test_post_rename_cancellation_retains_intent_and_actual_bytes () =
   with_installation (fun ~base_path ~run_dir ~path:_ ~canonical:_ ~metadata:_ ~snapshot:_ ~adoption:_ ~original:_ plan ->

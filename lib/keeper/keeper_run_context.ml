@@ -133,7 +133,8 @@ let prepare_run_context
          | Keeper_checkpoint_store.Newer_version _
          | Keeper_checkpoint_store.Io_error _
          | Keeper_checkpoint_store.Read_failed _
-         | Keeper_checkpoint_store.Agent_core_error _ ) as error) ->
+         | Keeper_checkpoint_store.Agent_core_error _
+         | Keeper_checkpoint_store.Objects_invalid _ ) as error) ->
       Error (Checkpoint_unread error)
   in
   let loaded_checkpoint_present = Option.is_some ctx_opt in

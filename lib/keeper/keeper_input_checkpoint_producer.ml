@@ -22,7 +22,9 @@ let error_to_string = function
   | Source_read_failed (Store.Source_unavailable error) -> Store.checkpoint_ref_load_error_to_string error
   | Source_read_failed (Store.Source_changed _) -> "retained input checkpoint identity changed"
   | Source_read_failed (Store.Candidate_identity_invalid _ | Store.Candidate_session_mismatch _
-      | Store.Candidate_turn_regressed _ | Store.Commit_not_installed _) -> "retained input checkpoint is unavailable"
+      | Store.Candidate_turn_regressed _ | Store.Candidate_unencodable _
+      | Store.Candidate_content_mismatch _ | Store.Objects_not_installed _
+      | Store.Commit_not_installed _) -> "retained input checkpoint is unavailable"
   | Snapshot_failed error -> Store.checkpoint_ref_load_error_to_string error
   | Retention_unconfirmed (Store.Installed _) -> "input checkpoint installed with unconfirmed auxiliary outcomes"
   | Retention_unconfirmed (Store.Not_installed _) -> "input checkpoint was not installed"

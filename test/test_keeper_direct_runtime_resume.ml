@@ -327,7 +327,7 @@ is-default = true
       Keeper_repetition_scope.save context frame;
       let checkpoint_sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
         let checkpoint = {snapshot.checkpoint with session_id} in
-        Checkpoint.save_agent_core_classified
+        Checkpoint.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
           ~history_retained:(history_retained ()) ~session_dir checkpoint |> Result.map (fun _ -> ()) in
       let deferred = ref None in
       Option.iter (fun admission -> Continuation.consume ~base_path ~keeper_name ~operation_id admission
@@ -436,7 +436,7 @@ is-default = true
         Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
           [Agent_core.Types.Text "Board receipt: newer shared work already posted once"]];
       turn_count=checkpoint.turn_count + 1} in
-    Checkpoint.save_agent_core_classified
+    Checkpoint.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
       ~history_retained:(history_retained ()) ~session_dir checkpoint |> require "advance shared canonical history" |> ignore;
     if lose_retained then (
       (* Model the observed pre-fix store: the original reference exists in the
@@ -617,7 +617,7 @@ is-default = true
         Atomic.make Keeper_turn_driver_try_provider.No_checkpoint_stage in
       let checkpoint_sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
         let checkpoint = {snapshot.checkpoint with session_id} in
-        match Checkpoint.save_agent_core_classified
+        match Checkpoint.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
                 ~history_retained:(history_retained ()) ~session_dir checkpoint with
         | Ok (Checkpoint.Saved _) ->
           Keeper_turn_driver_try_provider.observe_checkpoint_saved
@@ -784,9 +784,9 @@ let test_server_transcript_deferral_preserves_final_slot ~native () =
     let keeper_name = "transcript-proof" in
     let operation_id = Keeper_chat_delivery_identity.Request_id.of_string "same-original-operation"
       |> require "delivery ID" in
-    let checkpoint = Keeper_checkpoint_ref.create
+    let checkpoint = Keeper_checkpoint_ref.of_persisted
         ~trace_id:(Keeper_id.Trace_id.of_string "original-session" |> require "trace")
-        ~turn_count:2 ~canonical_checkpoint_bytes:"original input and completed first tool"
+        ~turn_count:2 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "original input and completed first tool")
         |> require "checkpoint reference" in
     let resumed_checkpoint =
       if native then Keeper_semantic_execution.Official_client

@@ -66,8 +66,9 @@ let retain_initial (session : session) ~checkpoint ~outcome =
     |> Result.map_error (fun cause -> Snapshot_failed cause) in
   let* expected = Checkpoint.exact_snapshot_of_value ~expected_session_id:creation.trace_id checkpoint
     |> Result.map_error (fun cause -> Snapshot_failed cause) in
-  let* () = if Checkpoint.exact_snapshot_canonical_bytes snapshot
-      = Checkpoint.exact_snapshot_canonical_bytes expected then Ok () else Error Initial_source_changed in
+  (* Equal content digests are equal content (RFC-0476 §3.2). *)
+  let* () = if Keeper_checkpoint_ref.equal (Checkpoint.exact_snapshot_reference snapshot)
+      (Checkpoint.exact_snapshot_reference expected) then Ok () else Error Initial_source_changed in
   let* () = retain ~session_dir snapshot in
   if not (live ~base_path ~intake_token creation) then Error Intake_expired else
   Ok {session;snapshot}
@@ -90,9 +91,10 @@ let validate ~session_root ~keeper_name ~(meta : Keeper_meta_contract.keeper_met
     |> Result.map_error (fun cause -> match cause with
       | Checkpoint.Source_unavailable cause -> Snapshot_failed cause
       | Source_changed _ | Candidate_identity_invalid _ | Candidate_session_mismatch _
-      | Candidate_turn_regressed _ | Commit_not_installed _ -> Initial_source_changed) in
-  let same snapshot = Checkpoint.exact_snapshot_canonical_bytes snapshot
-    = Checkpoint.exact_snapshot_canonical_bytes seed.snapshot in
+      | Candidate_turn_regressed _ | Candidate_unencodable _ | Candidate_content_mismatch _
+      | Objects_not_installed _ | Commit_not_installed _ -> Initial_source_changed) in
+  let same snapshot = Keeper_checkpoint_ref.equal (Checkpoint.exact_snapshot_reference snapshot)
+    (Checkpoint.exact_snapshot_reference seed.snapshot) in
   if not (live ~base_path:source.base_path ~intake_token:source.intake_token creation)
   then Error Intake_expired
   else if same current && same retained then Ok reference else Error Initial_source_changed

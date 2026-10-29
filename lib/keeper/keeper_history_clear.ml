@@ -51,14 +51,22 @@ let canonical ~session_dir ~session_id =
   | Error Store.Ref_not_found -> Ok Absent
   | Error (Store.Ref_read_failed (Store.Superseded_version _)) -> Ok Superseded
   | Error (Store.Ref_read_failed (Store.Parse_error _ | Store.Store_error _)) -> Ok Undecodable
+  | Error (Store.Ref_read_failed (Store.Objects_invalid
+      ( Agent_core.Checkpoint_objects.Head_invalid _ | Checkpoint_invalid _ | Object_missing _
+      | Object_digest_mismatch _ | Bundle_invalid _ | Turn_mismatch _ | Message_invalid _ ))) ->
+    Ok Undecodable
   | Error (Store.Ref_read_failed (Store.Not_found | Store.Newer_version _
-      | Store.Io_error _ | Store.Read_failed _ | Store.Agent_core_error _)
+      | Store.Io_error _ | Store.Read_failed _ | Store.Agent_core_error _
+      | Store.Objects_invalid (Agent_core.Checkpoint_objects.Object_unreadable _))
       | Store.Ref_identity_invalid _ | Store.Ref_session_mismatch _
       | Store.Ref_lock_failed _ as error) -> Error (Canonical_unreadable error)
 
 let decode bytes = Agent_core.Checkpoint.of_string bytes
   |> Result.map_error (fun error -> Invalid_clear (Agent_core.Error.to_string error))
-let snapshot_checkpoint snapshot = decode (Store.exact_snapshot_canonical_bytes snapshot)
+(* A private copy: a snapshot's Context is a mutable table. *)
+let snapshot_checkpoint snapshot =
+  let checkpoint = Store.exact_snapshot_checkpoint snapshot in
+  Ok { checkpoint with Agent_core.Checkpoint.context = Agent_core.Context.copy checkpoint.context }
 let nonwaiting checkpoint = match checkpoint.Agent_core.Checkpoint.pending_input with
   | None -> Ok ()
   | Some _ -> Error (Invalid_clear "history clear cannot discard a pending input request; resolve it first")
@@ -160,10 +168,13 @@ let prepare ~(authority:authority) ~session_dir ~preserve_system =
       |> Result.map_error (fun error -> Invalid_clear (Keeper_repetition_judged.error_to_string error)) in
     Agent_core.Context.set_scoped context Session "message_count" (`Int (List.length messages));
     let candidate = {original with messages;context} in
-    let* snapshot = Store.exact_snapshot_of_value ~expected_session_id:authority.trace_id candidate
+    let* _snapshot = Store.exact_snapshot_of_value ~expected_session_id:authority.trace_id candidate
       |> Result.map_error (fun error -> Canonical_unreadable error) in
+    let* bytes = Agent_core.Checkpoint.to_json_result candidate
+      |> Result.map Yojson.Safe.to_string
+      |> Result.map_error (fun error -> Invalid_clear (Agent_core.Error.to_string error)) in
     Ok {authority;session_dir;action=Payload {source;
-      bytes=Store.exact_snapshot_canonical_bytes snapshot;remove_undecodable;
+      bytes;remove_undecodable;
       cleared_message_count=List.length original.messages - List.length messages;
       allow_turn_reset}}
 
@@ -182,14 +193,17 @@ let execute plan =
   let session_id = Keeper_id.Trace_id.to_string authority.trace_id in
   match action with
   | Payload {source;bytes;remove_undecodable=remove;cleared_message_count;allow_turn_reset} ->
-    let* snapshot = Store.exact_snapshot_of_canonical_bytes ~expected_session_id:authority.trace_id bytes
+    let* frozen = decode bytes in
+    let* snapshot = Store.exact_snapshot_of_value ~expected_session_id:authority.trace_id frozen
       |> Result.map_error (fun error -> Canonical_unreadable error) in
     let* _retained = confirmed (Store.retain_exact_snapshot ~session_dir snapshot) in
     let* () = if remove then Result.map ignore (remove_undecodable ~session_dir ~session_id) else Ok () in
     let* candidate = decode bytes in
+    let boundary = Agent_core.Checkpoint_objects.Turn_continues in
     let* checkpoint = confirmed (match source with
-      | Some expected_source_ref -> Store.save_agent_core_if_source ~session_dir ~expected_source_ref candidate
-      | None -> Store.save_agent_core_if_absent ~session_dir candidate) in
+      | Some expected_source_ref ->
+        Store.save_agent_core_if_source ~session_dir ~expected_source_ref ~boundary candidate
+      | None -> Store.save_agent_core_if_absent ~session_dir ~boundary candidate) in
     if not (Keeper_checkpoint_ref.equal checkpoint (Store.exact_snapshot_reference snapshot))
     then Error (Invalid_clear "installed history differs from its retained clear payload") else
     Ok {authority;checkpoint=Some checkpoint;marker=Some checkpoint;allow_turn_reset;

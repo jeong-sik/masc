@@ -16,8 +16,8 @@ let with_store path f =
 let seed root n =
   with_store (file root "prefix" n) (fun store ->
   let trace_id = Keeper_id.Trace_id.of_string "membership-fixture" |> text_ok in
-  let checkpoint = Keeper_checkpoint_ref.create ~trace_id ~turn_count:1
-    ~canonical_checkpoint_bytes:"retained checkpoint" |> function
+  let checkpoint = Keeper_checkpoint_ref.of_persisted ~trace_id ~turn_count:1
+    ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "retained checkpoint") |> function
     | Ok value -> value | Error _ -> failwith "invalid fixture checkpoint" in
   let retry = Semantic.runtime_retry ~not_before:(Some 100.) ~checkpoint
     ~assignment_id:"membership-fixture" ~failed_runtime_id:"provider-a"

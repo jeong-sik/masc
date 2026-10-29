@@ -24,7 +24,7 @@ let with_source f =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) @@ fun () ->
   let config=Masc.Workspace.default_config root in
   let session_dir=Filename.concat (Masc.Keeper_fs.session_store_path config) trace_id in
-  let save messages = match C.save_agent_core_classified ~session_dir ~history_retained:0 (checkpoint messages) with
+  let save messages = match C.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 (checkpoint messages) with
     | Ok (C.Saved _) -> () | Ok (C.Stale_noop _) -> fail "stale fixture" | Error detail -> fail detail in
   let append event = B.append ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
     ~keeper_id:keeper_name {B.recorded_at=1000.;event} |> Result.map_error B.append_error_to_string |> get in
@@ -738,12 +738,9 @@ let test_a_superseded_checkpoint_leaves_nothing_to_read () = with_source @@ fun 
     | P.No_source (P.Drained | P.Source_unreadable | P.Empty_range) -> fail "the current checkpoint is a source" in
   let session_dir = Filename.concat (Masc.Keeper_fs.session_store_path config) trace_id in
   let path = C.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
-  let earlier = match Yojson.Safe.from_string (In_channel.with_open_bin path In_channel.input_all) with
-    | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
-        if String.equal key "version" then key, `Int (Agent_core.Checkpoint.checkpoint_version - 1)
-        else key, value) fields)
-    | _ -> fail "a checkpoint document is a JSON object" in
-  Fs_compat.save_file_atomic path (Yojson.Safe.to_string earlier) |> get;
+  let earlier =
+    Masc_test_deps.checkpoint_head_with_version path (Agent_core.Checkpoint.checkpoint_version - 1) in
+  Fs_compat.save_file_atomic path earlier |> get;
   (match C.load_agent_core ~session_dir ~session_id:trace_id with
    | Error (C.Superseded_version _) -> ()
    | Error error -> fail (C.checkpoint_load_error_to_string error)
@@ -1419,7 +1416,7 @@ let test_context_only_api_holes case () =
     check_memory ());
   let save messages =
     let session_dir=Filename.concat (Masc.Keeper_fs.session_store_path config) trace_id in
-    match C.save_agent_core_classified ~session_dir ~history_retained:0 (checkpoint messages) with
+    match C.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 (checkpoint messages) with
     | Ok (C.Saved _) -> ()
     | Ok (C.Stale_noop _) -> fail "context source mutation fixture was stale"
     | Error detail -> fail detail in
@@ -1614,7 +1611,7 @@ let test_uncommitted_memory_message_floor ?native case () =
   let bytes () = List.map Fs_compat.load_file_opt stores in
   let before_steps = ref None in
   let save_source messages =
-    match C.save_agent_core_classified ~session_dir ~history_retained:0 (checkpoint messages) with
+    match C.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 (checkpoint messages) with
     | Ok (C.Saved _) -> ()
     | Ok (C.Stale_noop _) -> fail "source mutation was not saved"
     | Error detail -> fail detail in

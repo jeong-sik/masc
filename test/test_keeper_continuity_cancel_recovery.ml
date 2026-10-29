@@ -53,7 +53,7 @@ let test_cancelled_memory_commit_resumes_without_reapplication () =
   ignore (F.publish_registry ~lane_id:"librarian_exact" ~slot_ids:[]
     ~cli_slot_ids:[F.cli_primary_runtime] (F.resolver_snapshot ~source:"cancel-recovery" []));
   let session_dir=Filename.concat (Masc.Keeper_fs.session_store_path config) trace_id in
-  let save messages=match C.save_agent_core_classified ~session_dir ~history_retained:0 (checkpoint messages) with
+  let save messages=match C.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 (checkpoint messages) with
     | Ok (C.Saved _) -> () | Ok (C.Stale_noop _) -> fail "stale fixture" | Error detail -> fail detail in
   let source=[message "The project is called Meridian.";message "Wait for publication approval."] in
   save source;

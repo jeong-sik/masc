@@ -4853,7 +4853,7 @@ supports_native_streaming = false
       |> fun ctx -> List.fold_left Keeper_context_runtime.append ctx history
       |> Keeper_context_runtime.checkpoint_of_context in
     let checkpoint = { checkpoint with session_id = trace_id; turn_count = 1 } in
-    (match Keeper_checkpoint_store.save_agent_core_if_absent
+    (match Keeper_checkpoint_store.save_agent_core_if_absent ~boundary:Agent_core.Checkpoint_objects.Turn_continues
       ~session_dir:(Filename.concat (Filename.concat base_path "keeper-sessions") trace_id)
       checkpoint with
      | Installed {auxiliary = []; _} -> ()
@@ -5014,7 +5014,7 @@ for line in sys.stdin:
       |> fun ctx -> List.fold_left Keeper_context_runtime.append ctx history
       |> Keeper_context_runtime.checkpoint_of_context in
     let checkpoint = { checkpoint with session_id = trace_id; turn_count = 1 } in
-    (match Keeper_checkpoint_store.save_agent_core_if_absent
+    (match Keeper_checkpoint_store.save_agent_core_if_absent ~boundary:Agent_core.Checkpoint_objects.Turn_continues
       ~session_dir:(Filename.concat (Filename.concat base_path "keeper-sessions") trace_id)
       checkpoint with
      | Installed { auxiliary = []; _ } -> ()

@@ -257,17 +257,7 @@ let session_entries session_dir =
 
 (* The saved checkpoint rewritten as a later [checkpoint_version] wrote it. *)
 let as_newer_version path =
-  match Yojson.Safe.from_string (Fs_compat.load_file path) with
-  | `Assoc fields ->
-    Yojson.Safe.to_string
-      (`Assoc
-        (List.map
-           (fun (key, value) ->
-              if String.equal key "version"
-              then key, `Int (Agent_core.Checkpoint.checkpoint_version + 1)
-              else key, value)
-           fields))
-  | _ -> fail "checkpoint is not a JSON object"
+  Masc_test_deps.checkpoint_head_with_version path (Agent_core.Checkpoint.checkpoint_version + 1)
 ;;
 
 (* A checkpoint no turn can decode fails every turn, so the operator's clear
@@ -539,19 +529,8 @@ let test_superseded_checkpoint_clears_like_an_absent_one () =
   with_keeper ~paused:false ~install_owner:true
   @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ~restart:_ ->
   let path = checkpoint_path config meta in
-  let earlier =
-    match Yojson.Safe.from_string (Fs_compat.load_file path) with
-    | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (key, value) ->
-              if String.equal key "version"
-              then key, `Int (Agent_core.Checkpoint.checkpoint_version - 1)
-              else key, value)
-           fields)
-    | _ -> fail "checkpoint is not a JSON object"
-  in
-  Fs_compat.save_file path (Yojson.Safe.to_string earlier);
+  Fs_compat.save_file path
+    (Masc_test_deps.checkpoint_head_with_version path (Agent_core.Checkpoint.checkpoint_version - 1));
   let result = clear () in
   check bool (Tool_result.message result) true (Tool_result.is_success result);
   check bool "a superseded checkpoint is not current history" false
@@ -884,7 +863,7 @@ let test_clear_cas_refuses_equal_turn_external_change () =
      let snapshot=Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir:session.session_dir ~session_id:session.session_id
        |> Result.map_error Keeper_checkpoint_store.checkpoint_ref_load_error_to_string |> require_ok in
      let changed={original with Agent_core.Checkpoint.messages=original.messages @ [Agent_core.Types.user_msg "external equal-turn write"]} in
-     (match Keeper_checkpoint_store.save_agent_core_if_source ~session_dir:session.session_dir
+     (match Keeper_checkpoint_store.save_agent_core_if_source ~boundary:Agent_core.Checkpoint_objects.Turn_continues ~session_dir:session.session_dir
        ~expected_source_ref:(Keeper_checkpoint_store.exact_snapshot_reference snapshot) changed
        |> Keeper_checkpoint_store.require_confirmed_installation with
       | Ok _ -> () | Error _ -> fail "external canonical write failed");

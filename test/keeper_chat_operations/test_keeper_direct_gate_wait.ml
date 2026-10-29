@@ -12,17 +12,21 @@ let input = Operation.canonical_json (`Assoc ["message", `String "complete origi
   "attachments", `List [`String "original-evidence"]; "channel", `String "original-channel";
   "task", `String "original-task"]) |> require
 let source = `Assoc ["kind", `String "dashboard"]
-let canonical_bytes marker =
-  Agent_core.Checkpoint.to_string Agent_core.Checkpoint.{ provider_binding = None;
+let fixture_checkpoint marker =
+  Agent_core.Checkpoint.{ provider_binding = None;
     version=checkpoint_version;session_id="original-trace";agent_name="gate-fixture";model="fixture";
     system_prompt=None;messages=[Agent_core.Types.user_msg marker];usage=Agent_core.Types.empty_usage;
     turn_count=3;created_at=1000.;tools=[];tool_choice=None;disable_parallel_tool_use=false;
     temperature=None;top_p=None;top_k=None;min_p=None;enable_thinking=None;preserve_thinking=None;
     response_format=Agent_core.Types.Off;reasoning_effort=None;cache_system_prompt=false;
     context=Agent_core.Context.create_sync ();pending_input = None; mcp_sessions = [];working_context=None}
-let checkpoint bytes = Keeper_checkpoint_ref.create
+(* A Gate keeps a checkpoint head, named by its content digest (RFC-0476 §3.2). *)
+let head_plan (checkpoint : Agent_core.Checkpoint.t) =
+  Agent_core.Checkpoint_objects.(plan_save (create_memo ()) Turn_closes checkpoint) |> require
+let canonical_bytes marker = (head_plan (fixture_checkpoint marker)).head_bytes
+let checkpoint marker = Keeper_checkpoint_ref.of_persisted
     ~trace_id:(Keeper_id.Trace_id.of_string "original-trace" |> require)
-    ~turn_count:3 ~canonical_checkpoint_bytes:(canonical_bytes bytes) |> require
+    ~turn_count:3 ~sha256:((head_plan (fixture_checkpoint marker)).content :> string) |> require
 let obligation = Semantic.gate_obligation ~approval_id:"approval-original"
     ~tool_name:"tool_execute" ~input_hash:(Agent_core_sha256.(digest_string "original tool input" |> to_hex)) |> require
 let waiting = Semantic.gate_wait ~checkpoint:(checkpoint "input and effect references") ~obligations:[obligation] |> require
@@ -249,9 +253,9 @@ let test_unprepared_source_reconciliation_after_restart () = with_path (fun path
     let observed = Store.direct_gate_binding store ~operation_id:original |> ok |> Option.get in
     check bool "original preparation survives SQLite restart without a wait" true
       (observed.preparation = preparation && observed.unconfirmed_wait = None);
-    let wrong_reference = Keeper_checkpoint_ref.create
+    let wrong_reference = Keeper_checkpoint_ref.of_persisted
       ~trace_id:(Keeper_id.Trace_id.of_string "another-session" |> require)
-      ~turn_count:3 ~canonical_checkpoint_bytes:"input and effect references" |> require in
+      ~turn_count:3 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "input and effect references") |> require in
     let wrong_session = Semantic.gate_wait ~checkpoint:wrong_reference
       ~obligations:[obligation] |> require in
     rejected (Store.reconcile_direct_gate_binding store ~now:5. ~operation_id:original ~binding:observed ~waiting:wrong_session);
@@ -266,22 +270,25 @@ let test_unprepared_source_reconciliation_after_restart () = with_path (fun path
 
 let test_changed_preparation_bytes () =
   let source = Semantic.Prepared_agent_core {reference=checkpoint "original exact bytes";
-    canonical_checkpoint_bytes="substituted bytes"} in
+    canonical_checkpoint_bytes=canonical_bytes "substituted bytes"} in
   rejected (Semantic.gate_binding ~preparation:source
     ~approval_ids:[obligation.approval_id] ~obligations:[] ~runtime_suffix:None)
 
 let test_invalid_preparation_checkpoint () =
-  List.iter (fun bytes ->
-    let reference = Keeper_checkpoint_ref.create ~trace_id:(Keeper_id.Trace_id.of_string "original-trace" |> require)
-      ~turn_count:3 ~canonical_checkpoint_bytes:bytes |> require in
+  (* A reference whose digest matches the bytes, so only what the bytes hold
+     can refuse them. *)
+  let named bytes sha256 =
+    let reference = Keeper_checkpoint_ref.of_persisted ~trace_id:(Keeper_id.Trace_id.of_string "original-trace" |> require)
+      ~turn_count:3 ~sha256 |> require in
     rejected (Semantic.gate_binding
       ~preparation:(Semantic.Prepared_agent_core {reference;canonical_checkpoint_bytes=bytes})
-      ~approval_ids:[obligation.approval_id] ~obligations:[] ~runtime_suffix:None))
-    ["not JSON";"{}";
-     (let checkpoint = Agent_core.Checkpoint.of_string (canonical_bytes "valid") |> require in
-      Agent_core.Checkpoint.to_string {checkpoint with session_id="another-session"});
-     (let checkpoint = Agent_core.Checkpoint.of_string (canonical_bytes "valid") |> require in
-      Agent_core.Checkpoint.to_string {checkpoint with turn_count=4})]
+      ~approval_ids:[obligation.approval_id] ~obligations:[] ~runtime_suffix:None) in
+  List.iter (fun bytes -> named bytes (Keeper_checkpoint_ref.sha256_of_canonical_bytes bytes))
+    ["not JSON";"{}"; Agent_core.Checkpoint.to_string (fixture_checkpoint "a whole checkpoint, not a head")];
+  List.iter (fun checkpoint ->
+    let plan = head_plan checkpoint in named plan.head_bytes (plan.content :> string))
+    [{(fixture_checkpoint "valid") with session_id="another-session"};
+     {(fixture_checkpoint "valid") with turn_count=4}]
 
 let test_invalid_native_preparation () =
   let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty

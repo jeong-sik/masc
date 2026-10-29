@@ -180,15 +180,18 @@ let prepare_installation ~net ~(authority:authority) ~response =
      so restart never has to infer S from C or from an original history prefix. *)
   let* _ = confirmed (Store.retain_exact_snapshot ~session_dir:authority.session_dir source) in
   let* retained_candidate = confirmed (Store.retain_exact_snapshot ~session_dir:authority.session_dir frozen) in
-  let* candidate=Agent_core.Checkpoint.of_string (Store.exact_snapshot_canonical_bytes frozen)
-    |> Result.map_error (fun error -> Invalid_response (Agent_core.Error.to_string error)) in
+  (* A private copy: the snapshot's Context is a mutable table. *)
+  let candidate=
+    let frozen=Store.exact_snapshot_checkpoint frozen in
+    {frozen with Agent_core.Checkpoint.context=Agent_core.Context.copy frozen.context} in
   if Keeper_checkpoint_ref.equal retained_candidate intent.candidate then Ok {authority;intent;target;candidate}
   else Error (Installation_mismatch {retained=retained_candidate;canonical=intent.candidate})
 let install (plan:plan) =
   let* installed = match plan.target with
     | Canonical_predecessor predecessor ->
       confirmed (Store.save_agent_core_if_source ~session_dir:plan.authority.session_dir
-        ~expected_source_ref:predecessor plan.candidate)
+        ~expected_source_ref:predecessor ~boundary:Agent_core.Checkpoint_objects.Turn_continues
+        plan.candidate)
     | Branch_retention ->
       let* snapshot=Store.exact_snapshot_of_value ~expected_session_id:plan.authority.waiting.checkpoint.trace_id
           plan.candidate |> Result.map_error (fun error -> Canonical_unavailable error) in

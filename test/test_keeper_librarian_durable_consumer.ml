@@ -111,7 +111,7 @@ let checkpoint ~trace_id messages turn_count : Agent_core.Checkpoint.t =
 let save_checkpoint config ~trace_id messages turn_count =
   let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
   match
-    Store.save_agent_core_classified
+    Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
       ~session_dir
       ~history_retained:0
       (checkpoint ~trace_id messages turn_count)
@@ -2854,18 +2854,9 @@ let supersede_checkpoint config ~trace_id =
   let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
   let path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
   let earlier =
-    match Yojson.Safe.from_string (In_channel.with_open_bin path In_channel.input_all) with
-    | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (key, value) ->
-             if String.equal key "version"
-             then key, `Int (Agent_core.Checkpoint.checkpoint_version - 1)
-             else key, value)
-           fields)
-    | _ -> fail "a checkpoint document is a JSON object"
+    Masc_test_deps.checkpoint_head_with_version path (Agent_core.Checkpoint.checkpoint_version - 1)
   in
-  let (_ : string) = overwrite_checkpoint config ~trace_id (Yojson.Safe.to_string earlier) in
+  let (_ : string) = overwrite_checkpoint config ~trace_id earlier in
   match Store.load_agent_core ~session_dir ~session_id:trace_id with
   | Error (Store.Superseded_version _) -> ()
   | Error error -> failf "superseded fixture: %s" (Store.checkpoint_load_error_to_string error)

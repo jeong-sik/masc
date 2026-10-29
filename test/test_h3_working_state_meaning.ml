@@ -48,7 +48,7 @@ let config = Masc.Workspace.default_config root
 
 let save messages =
   let session_dir = Filename.concat (Masc.Keeper_fs.session_store_path config) trace_id in
-  match C.save_agent_core_classified ~session_dir ~history_retained:0 (checkpoint messages) with
+  match C.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 (checkpoint messages) with
   | Ok (C.Saved _) -> ()
   | Ok (C.Stale_noop _) -> fail "stale h3 fixture"
   | Error detail -> fail detail
@@ -208,7 +208,7 @@ let phase_s1_continue () =
    itself, not the memory-coverage precondition. *)
 let save_or_keep messages =
   let session_dir = Filename.concat (Masc.Keeper_fs.session_store_path config) trace_id in
-  match C.save_agent_core_classified ~session_dir ~history_retained:0 (checkpoint messages) with
+  match C.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained:0 (checkpoint messages) with
   | Ok (C.Saved _) | Ok (C.Stale_noop _) -> ()
   | Error detail -> fail detail
 

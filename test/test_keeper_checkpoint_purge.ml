@@ -738,7 +738,7 @@ let test_cli_workspace ?(linked_worktree = false) () =
         Masc.Keeper_checkpoint_store.agent_core_checkpoint_path
           ~session_dir ~session_id:checkpoint.session_id
       in
-      (match Masc.Keeper_checkpoint_store.save_agent_core_classified
+      (match Masc.Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
         ~session_dir ~history_retained:0 checkpoint with
        | Ok (Masc.Keeper_checkpoint_store.Saved _) -> ()
        | Ok (Masc.Keeper_checkpoint_store.Stale_noop _) ->

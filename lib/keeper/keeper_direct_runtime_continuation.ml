@@ -149,7 +149,8 @@ let load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
     Keeper_repetition_scope.save context frame;
     let checkpoint = {checkpoint with Agent_core.Checkpoint.context; messages} in
     let* () = match Checkpoint.save_agent_core_if_source ~session_dir
-        ~expected_source_ref:(Checkpoint.exact_snapshot_reference current) checkpoint with
+        ~expected_source_ref:(Checkpoint.exact_snapshot_reference current)
+        ~boundary:Agent_core.Checkpoint_objects.Turn_continues checkpoint with
       | Checkpoint.Installed {auxiliary=[]; _} -> Ok ()
       | Checkpoint.Installed _ | Checkpoint.Not_installed _ ->
         Error "current-history direct runtime admission is not durably confirmed" in

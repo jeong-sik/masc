@@ -10,10 +10,10 @@ let trace_id =
 ;;
 
 let create bytes =
-  Keeper_checkpoint_ref.create
+  Keeper_checkpoint_ref.of_persisted
     ~trace_id
     ~turn_count:7
-    ~canonical_checkpoint_bytes:bytes
+    ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes bytes)
   |> result_ok
 ;;
 
@@ -29,10 +29,10 @@ let test_exact_bytes_identity () =
 
 let test_typed_rejections () =
   let make turn_count =
-    Keeper_checkpoint_ref.create
+    Keeper_checkpoint_ref.of_persisted
       ~trace_id
       ~turn_count
-      ~canonical_checkpoint_bytes:"{}"
+      ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "{}")
   in
   Alcotest.(check bool)
     "negative turn"

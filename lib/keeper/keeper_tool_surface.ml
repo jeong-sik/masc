@@ -328,7 +328,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                 | Canonical_unreadable (Keeper_checkpoint_store.Ref_not_found
                     | Ref_identity_invalid _ | Ref_session_mismatch _ | Ref_lock_failed _
                     | Ref_read_failed (Not_found | Store_error _ | Parse_error _
-                      | Superseded_version _ | Io_error _ | Agent_core_error _))
+                      | Superseded_version _ | Io_error _ | Agent_core_error _ | Objects_invalid _))
                 | Invalid_clear _ | Retained_unavailable _
                 | Installation_unconfirmed _ | Removal_unconfirmed _ -> [] in
               let class_,code = match error with
@@ -338,7 +338,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                 | Canonical_unreadable (Keeper_checkpoint_store.Ref_not_found
                     | Ref_identity_invalid _ | Ref_session_mismatch _ | Ref_lock_failed _
                     | Ref_read_failed (Not_found | Store_error _ | Parse_error _ | Read_failed _
-                      | Superseded_version _ | Io_error _ | Agent_core_error _))
+                      | Superseded_version _ | Io_error _ | Agent_core_error _ | Objects_invalid _))
                 | Retained_unavailable _ | Installation_unconfirmed _ | Removal_unconfirmed _ ->
                   Tool_result.Runtime_failure,Tool_args.Internal_error in
               before_effect ~class_ ~code (Keeper_history_clear.error_to_string error) (("checkpoint_path",`String path)::fields)

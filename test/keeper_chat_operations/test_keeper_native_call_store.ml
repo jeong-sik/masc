@@ -12,9 +12,9 @@ let operation_id = Operation.Operation_id.of_string "native-owned-operation" |> 
 let locator call_id = Agent.execution_locator_of_yojson
   (`Assoc ["version", `Int 1; "run_id", `String ("execution-run-" ^ call_id)]) |> value
 let checkpoint_of_bytes ~turn_count bytes =
-  Keeper_checkpoint_ref.create
+  Keeper_checkpoint_ref.of_persisted
     ~trace_id:(Keeper_id.Trace_id.of_string "native-trace" |> value)
-    ~turn_count ~canonical_checkpoint_bytes:(string_of_int bytes)
+    ~turn_count ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes (string_of_int bytes))
   |> function Ok reference -> reference | Error _ -> fail "checkpoint fixture"
 let checkpoint turn_count = checkpoint_of_bytes ~turn_count turn_count
 let make_call ?(id=call_id) ?(seed=1) operation = Native.create ~call_id:id ~runtime_id:"native.primary"
@@ -502,9 +502,9 @@ let test_input_identity_is_not_an_ordinal () = with_store @@ fun _path store _op
      check bool "same turn replacement is detected by exact bytes" true
        (Keeper_checkpoint_ref.equal actual same_turn)
    | Input_checkpoint_updated | Input_checkpoint_source_changed (Input_unobserved | Prior_input_unavailable) -> fail "ordinal was substituted for identity");
-  let foreign = Keeper_checkpoint_ref.create
+  let foreign = Keeper_checkpoint_ref.of_persisted
     ~trace_id:(Keeper_id.Trace_id.of_string "other-input-trace" |> value)
-    ~turn_count:4 ~canonical_checkpoint_bytes:"foreign input"
+    ~turn_count:4 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "foreign input")
     |> function Ok reference -> reference | Error _ -> fail "foreign trace fixture" in
   rejected "a previous trace authorized a new trace"
     (Store.update_input_checkpoint store ~observed:(Some same_turn) ~checkpoint:foreign);

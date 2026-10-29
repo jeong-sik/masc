@@ -281,6 +281,7 @@ let finalize
                  ~session_dir:session.session_dir
                  ~history_retained:
                    (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
+                 ~boundary:Agent_core.Checkpoint_objects.Turn_closes
                  patched
              in
              let save_finished_mono = Mtime_clock.now () in

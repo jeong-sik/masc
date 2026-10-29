@@ -237,7 +237,7 @@ let test_native_input_checkpoint_order ?(fail_before_canonical=false) ~uncertain
       if !resume then Agent_core.Hooks.Continue else Agent_core.Hooks.ElicitInput request)} in
     let sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
       if !resume && fail_before_canonical then Error "canonical write refused before installation" else
-      let saved = Keeper_checkpoint_store.save_agent_core_classified
+      let saved = Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
           ~history_retained:0 ~session_dir snapshot.checkpoint in
       match saved with
       | Error detail -> Error detail

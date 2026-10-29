@@ -157,7 +157,7 @@ let test_workspace_checkpoint_is_replayed ?(damaged_inputs = false)
             ~role:(if index mod 2 = 0 then Agent_core.Types.User else Agent_core.Types.Assistant)
             [ Agent_core.Types.Text (Printf.sprintf "synthetic-message-%d" index) ])
       in
-      (match Store.save_agent_core_classified
+      (match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
          ~session_dir ~history_retained:0 (checkpoint ~trace_id messages) with
        | Ok (Store.Saved _) -> ()
        | Ok (Store.Stale_noop _) -> fail "fixture checkpoint was not saved"

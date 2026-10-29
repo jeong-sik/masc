@@ -21,6 +21,8 @@ let pp_err fmt = function
   | Store.Io_error s -> Format.fprintf fmt "Io_error(%s)" s
   | Store.Read_failed { detail; _ } -> Format.fprintf fmt "Read_failed(%s)" detail
   | Store.Agent_core_error s -> Format.fprintf fmt "Agent_core_error(%s)" s
+  | Store.Objects_invalid error ->
+    Format.fprintf fmt "Objects_invalid(%s)" (Agent_core.Checkpoint_objects.load_error_to_string error)
 
 let load_err = Alcotest.testable pp_err ( = )
 

@@ -3,6 +3,12 @@ module Checkpoint = Keeper_checkpoint_store
 module Semantic = Keeper_semantic_execution
 open Result.Syntax
 let digest text = Agent_core_sha256.(digest_string text |> to_hex)
+(* A checkpoint reference names the head's content digest, not the digest of
+   its bytes (RFC-0476 §3.2). *)
+let checkpoint_digest bytes =
+  match Agent_core.Checkpoint_objects.head_of_string bytes with
+  | Ok head -> Some (Agent_core.Checkpoint_objects.head_content_digest head :> string)
+  | Error (_ : Agent_core.Checkpoint_objects.load_error) -> None
 
 type plan =
   { base_path : string; keeper_name : string; source_path : string
@@ -299,8 +305,11 @@ let decode_meta ~keeper_name ~trace_id bytes =
     |> Result.map_error (fun detail -> {bundle_id=None;failure=Input_selection_invalid detail}) in
   if meta.name=keeper_name && Keeper_id.Trace_id.equal meta.runtime.trace_id trace_id then Ok ()
   else error (Input_selection_invalid "Keeper metadata does not name the selected current trace")
-let decode_checkpoint ~trace_id bytes =
-  Checkpoint.exact_snapshot_of_canonical_bytes ~expected_session_id:trace_id bytes
+(* A copied checkpoint is a head (RFC-0476 §3.2); the objects it names are in
+   the trace's session directory. *)
+let decode_checkpoint ~base_path ~trace_id bytes =
+  Checkpoint.exact_snapshot_of_head_bytes ~session_dir:(session_dir base_path trace_id)
+    ~expected_session_id:trace_id bytes
   |> Result.map_error (fun cause -> {bundle_id=None;
     failure=Input_selection_invalid (Checkpoint.checkpoint_ref_load_error_to_string cause)})
 let same_pending left right = Option.equal (fun left right -> Yojson.Safe.equal
@@ -312,7 +321,7 @@ let rec preserves_messages prefix messages = match prefix,messages with
   | _::_,[] -> false
 let read_reference ~base_path ~path reference =
   let* file = read ~base_path ~absent:(Input_history_unresolved path) path in
-  let* snapshot = decode_checkpoint ~trace_id:reference.Keeper_checkpoint_ref.trace_id file.content in
+  let* snapshot = decode_checkpoint ~base_path ~trace_id:reference.Keeper_checkpoint_ref.trace_id file.content in
   if Keeper_checkpoint_ref.equal reference (Checkpoint.exact_snapshot_reference snapshot)
   then Ok (file,snapshot) else error (Input_history_unresolved ("retained reference changed: " ^ path))
 let unchanged ~base_path (path,(before : Fs_compat.owned_regular_file_contents)) =
@@ -401,7 +410,7 @@ let assess_input ~base_path ~bundle_id ~trace_id = blocking (fun () -> boundary 
   let canonical_path = Checkpoint.agent_core_checkpoint_path ~session_dir:(session_dir base_path trace_id)
     ~session_id:(Keeper_id.Trace_id.to_string trace_id) in
   let* canonical = read ~base_path ~absent:(Input_selection_invalid "current canonical checkpoint is absent") canonical_path in
-  let* checkpoint = decode_checkpoint ~trace_id canonical.content in
+  let* checkpoint = decode_checkpoint ~base_path ~trace_id canonical.content in
   let* continuations = continuation_evidence bundle checkpoint in
   let plan = {ip_bundle=bundle;ip_original=original;ip_metadata=(metadata_path,metadata);
     ip_canonical=(canonical_path,canonical);ip_checkpoint=checkpoint;ip_related=related @ continuations} in
@@ -513,7 +522,7 @@ let load_input_adoption ~base_path ~adoption_id:id = blocking (fun () -> boundar
     let* trace_id = Keeper_id.Trace_id.of_string trace
       |> Result.map_error (fun detail -> {bundle_id=None;failure=Input_selection_invalid detail}) in
     let* () = decode_meta ~keeper_name:bundle.keeper_name ~trace_id metadata.content in
-    let* snapshot = decode_checkpoint ~trace_id checkpoint.content in
+    let* snapshot = decode_checkpoint ~base_path ~trace_id checkpoint.content in
     let reference = Checkpoint.exact_snapshot_reference snapshot in
     let* related = capture_bundle_files bundle in
     let* retained,_ = read_reference ~base_path ~path:(retained_path base_path reference) reference in
@@ -567,7 +576,8 @@ let capture_adoption_files receipt =
   let* derivative = read_private ~base_path (Filename.concat directory "adopted.sqlite3") in
   let* manifest = read_private ~base_path (Filename.concat directory "manifest.json") in
   let* json = decode_json manifest.content in
-  if digest metadata.content<>receipt.ia_metadata_hash || digest checkpoint.content<>receipt.ia_reference.sha256
+  if digest metadata.content<>receipt.ia_metadata_hash
+      || checkpoint_digest checkpoint.content<>Some receipt.ia_reference.sha256
       || digest derivative.content<>receipt.ia_derivative_hash
       || not (Yojson.Safe.equal json (input_adoption_to_json receipt)) then error Invalid_bundle
   else Ok (derivative,List.map (fun (name,file) -> Filename.concat directory name,file)
@@ -686,7 +696,8 @@ let live_input_evidence record =
     (Keeper_runtime_root_entry.keeper_basename ~keeper_name:adoption.ia_bundle.keeper_name Keeper_runtime_root_entry.Metadata) in
   let* metadata = read ~base_path ~absent:(Input_source_changed metadata_path) metadata_path in
   let* canonical = read ~base_path ~absent:(Input_source_changed canonical_path) canonical_path in
-  let* () = if digest metadata.content=adoption.ia_metadata_hash && digest canonical.content=adoption.ia_reference.sha256
+  let* () = if digest metadata.content=adoption.ia_metadata_hash
+      && checkpoint_digest canonical.content=Some adoption.ia_reference.sha256
     then Ok () else error (Input_source_changed "current metadata/canonical differs from installation evidence") in
   Ok (derivative,(metadata_path,metadata)::(canonical_path,canonical)::files)
 let inspect_installation ~base_path ~installation_id = blocking (fun () -> boundary base_path (fun () ->

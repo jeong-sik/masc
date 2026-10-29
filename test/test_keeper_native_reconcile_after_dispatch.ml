@@ -94,9 +94,9 @@ let run_case ~how root =
     (match Runtime_agent.run ~sw:turn_sw ~net:env#net ~config goal with
      | Error _ -> ()
      | Ok _ -> fail "the failing host sink did not fail the Core call");
-    let checkpoint = Keeper_checkpoint_ref.create
+    let checkpoint = Keeper_checkpoint_ref.of_persisted
         ~trace_id:(Keeper_id.Trace_id.of_string session_id |> require "trace id")
-        ~turn_count:1 ~canonical_checkpoint_bytes:"reconcile seed"
+        ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "reconcile seed")
       |> require "checkpoint" in
     let call = Keeper_native_call.create ~call_id ~runtime_id
         ~operation_digest:operation.execution_digest

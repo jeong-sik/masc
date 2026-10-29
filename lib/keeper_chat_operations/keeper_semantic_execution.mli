@@ -56,6 +56,8 @@ val gate_wait_with_runtime_retry : checkpoint:Keeper_checkpoint_ref.t -> obligat
   runtime_retry:runtime_retry -> (gate_wait, string) result
 type gate_preparation =
   | Prepared_agent_core of { reference : Keeper_checkpoint_ref.t; canonical_checkpoint_bytes : string }
+      (** [canonical_checkpoint_bytes] is a checkpoint head (RFC-0476 §3.2);
+          the objects it names are in the trace's session directory. *)
   | Prepared_official_client of official_client_checkpoint
 val preparation_checkpoint : gate_preparation -> gate_checkpoint
 type gate_binding = private { approval_ids:string list; obligations:gate_obligation list; runtime_suffix:runtime_suffix option; unconfirmed_wait:gate_wait option; preparation:gate_preparation }

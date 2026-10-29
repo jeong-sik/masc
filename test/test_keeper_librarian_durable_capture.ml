@@ -40,7 +40,7 @@ let checkpoint ~trace_id messages turn_count : Agent_core.Checkpoint.t =
 let save_checkpoint config ~trace_id messages turn_count =
   let session_dir = Keeper_fs.keeper_session_dir config trace_id in
   match
-    C.save_agent_core_classified
+    C.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
       ~session_dir
       ~history_retained:0
       (checkpoint ~trace_id messages turn_count)

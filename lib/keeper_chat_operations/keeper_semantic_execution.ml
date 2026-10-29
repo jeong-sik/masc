@@ -119,11 +119,13 @@ type gate_binding = { approval_ids:string list; obligations:gate_obligation list
 let gate_binding ~(preparation : gate_preparation) ~approval_ids ~obligations ~runtime_suffix =
   let* () = match preparation with
     | Prepared_agent_core {reference;canonical_checkpoint_bytes} ->
-      let* observed = Keeper_checkpoint_ref.create ~trace_id:reference.trace_id ~turn_count:reference.turn_count
-        ~canonical_checkpoint_bytes |> Result.map_error (fun _ -> "invalid Gate preparation reference") in
-      let* () = if Keeper_checkpoint_ref.equal reference observed then Ok () else Error "Gate preparation bytes changed" in
-      let* checkpoint = Agent_core.Checkpoint.of_string canonical_checkpoint_bytes
+      (* The bytes are a checkpoint head (RFC-0476 §3.2): its content digest
+         and its header's session and turn must be the reference's. *)
+      let* head = Agent_core.Checkpoint_objects.head_of_string canonical_checkpoint_bytes
         |> Result.map_error (fun _ -> "invalid canonical Gate preparation checkpoint") in
+      let content = (Agent_core.Checkpoint_objects.head_content_digest head :> string) in
+      let* () = if String.equal content reference.sha256 then Ok () else Error "Gate preparation bytes changed" in
+      let checkpoint = head.checkpoint in
       if checkpoint.session_id = Keeper_id.Trace_id.to_string reference.trace_id
          && checkpoint.turn_count = reference.turn_count then Ok ()
       else Error "Gate preparation embedded checkpoint identity changed"

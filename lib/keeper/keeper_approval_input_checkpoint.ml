@@ -34,13 +34,15 @@ let admit ?(co_inputs = []) ~session_dir ~identity ~message (fallback : Agent_co
      | Error _ as error -> error
      | Ok checkpoint ->
        Keeper_checkpoint_store.save_agent_core_if_source
-         ~session_dir ~expected_source_ref:reference checkpoint
+         ~session_dir ~expected_source_ref:reference
+         ~boundary:Agent_core.Checkpoint_objects.Turn_continues checkpoint
        |> installed checkpoint)
   | Error Keeper_checkpoint_store.Ref_not_found ->
     (match candidate ~co_inputs ~identity ~message fallback with
      | Error _ as error -> error
      | Ok checkpoint ->
-       Keeper_checkpoint_store.save_agent_core_if_absent ~session_dir checkpoint
+       Keeper_checkpoint_store.save_agent_core_if_absent ~session_dir
+         ~boundary:Agent_core.Checkpoint_objects.Turn_continues checkpoint
        |> installed checkpoint)
   | Error (Keeper_checkpoint_store.Ref_read_failed _)
   | Error (Keeper_checkpoint_store.Ref_identity_invalid _)

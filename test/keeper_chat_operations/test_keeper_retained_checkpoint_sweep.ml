@@ -8,7 +8,7 @@ let store_ok = function Ok value -> value | Error error -> fail (Store.error_to_
 let string_ok = function Ok value -> value | Error detail -> fail detail
 let checkpoint bytes =
   let trace_id = Keeper_id.Trace_id.of_string "sweep-trace" |> string_ok in
-  match Keeper_checkpoint_ref.create ~trace_id ~turn_count:3 ~canonical_checkpoint_bytes:bytes with
+  match Keeper_checkpoint_ref.of_persisted ~trace_id ~turn_count:3 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes bytes) with
   | Ok reference -> reference | Error _ -> fail "checkpoint fixture rejected"
 
 let rec remove_tree path =

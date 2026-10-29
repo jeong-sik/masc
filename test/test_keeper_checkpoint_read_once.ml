@@ -75,10 +75,14 @@ let with_session f =
 let canonical_path session_dir = Store.agent_core_checkpoint_path ~session_dir ~session_id:"session"
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 let write_file path bytes = Out_channel.with_open_bin path (fun ch -> output_string ch bytes)
-let one_shot_sha256 bytes = Agent_core_sha256.(to_hex (digest_string bytes))
+(* A reference names the head's content digest (RFC-0476 §3.2). *)
+let content_digest_of_head bytes =
+  match Agent_core.Checkpoint_objects.head_of_string bytes with
+  | Ok head -> (Agent_core.Checkpoint_objects.head_content_digest head :> string)
+  | Error error -> fail (Agent_core.Checkpoint_objects.load_error_to_string error)
 
 let save_plain ~session_dir checkpoint =
-  match Store.save_agent_core_classified ~history_retained:(history_retained ()) ~session_dir checkpoint with
+  match Store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~history_retained:(history_retained ()) ~session_dir checkpoint with
   | Ok _ -> ()
   | Error error -> fail ("save failed: " ^ error)
 
@@ -95,14 +99,18 @@ let refused_as label expected session_dir =
   | Error error, _ -> failf "%s: refused as %s" label (Store.checkpoint_ref_load_error_to_string error)
   | Ok _, _ -> failf "%s: the canonical was accepted" label
 
-let test_the_snapshot_holds_the_file_bytes_and_their_digest () = with_session (fun session_dir ->
-  save_plain ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:4 ~marker:several_reads_marker);
+let test_the_reference_is_the_content_digest_of_the_head () = with_session (fun session_dir ->
+  let checkpoint = make_checkpoint ~session_id:"session" ~turn_count:4 ~marker:several_reads_marker in
+  save_plain ~session_dir checkpoint;
   let on_disk = read_file (canonical_path session_dir) in
   let snapshot = load_snapshot ~session_dir "the canonical did not load" in
-  check bool "the file takes more than one read" true (String.length on_disk > 65_536);
-  check string "the snapshot holds the file's bytes" on_disk (Store.exact_snapshot_canonical_bytes snapshot);
-  check string "the reference is the digest of those bytes" (one_shot_sha256 on_disk)
+  check string "the reference is the head's content digest" (content_digest_of_head on_disk)
     (Store.exact_snapshot_reference snapshot).sha256;
+  (match Agent_core.Checkpoint_objects.content_digest (Agent_core.Checkpoint_objects.create_memo ()) checkpoint with
+   | Ok digest ->
+     check string "the saved value has the same content digest" (digest :> string)
+       (Store.exact_snapshot_reference snapshot).sha256
+   | Error error -> fail (Agent_core.Error.to_string error));
   check int "the reference carries the file's turn" 4 (Store.exact_snapshot_reference snapshot).turn_count)
 
 let test_a_missing_canonical_is_absent () = with_session (fun session_dir ->
@@ -158,7 +166,7 @@ let keeper = "read-once-keeper"
 
 let save_for_keeper ~session_dir checkpoint =
   match
-    Store.save_agent_core_for_keeper ~keeper_name:keeper ~history_retained:(history_retained ())
+    Store.save_agent_core_for_keeper ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~keeper_name:keeper ~history_retained:(history_retained ())
       ~session_dir checkpoint
   with
   | Ok _ -> ()
@@ -179,8 +187,7 @@ let test_a_keeper_snapshot_uses_the_kept_decode () = with_session (fun session_d
   let on_disk = read_file (canonical_path session_dir) in
   check bool "the snapshot's messages are the kept value's" true
     (Store.exact_snapshot_messages snapshot == kept.messages);
-  check string "the snapshot holds the file's bytes" on_disk (Store.exact_snapshot_canonical_bytes snapshot);
-  check string "the reference is their digest" (one_shot_sha256 on_disk)
+  check string "the reference is the head's content digest" (content_digest_of_head on_disk)
     (Store.exact_snapshot_reference snapshot).sha256;
   check int "the reference carries the kept turn" 2 (Store.exact_snapshot_reference snapshot).turn_count)
 
@@ -216,9 +223,7 @@ let test_a_changed_source_since_a_snapshot_uses_the_kept_decode () = with_sessio
   let check_changed label snapshot =
     check bool (label ^ ": the messages are the kept value's") true
       (Store.exact_snapshot_messages snapshot == kept.messages);
-    check string (label ^ ": the snapshot holds the file's bytes") on_disk
-      (Store.exact_snapshot_canonical_bytes snapshot);
-    check string (label ^ ": the reference is their digest") (one_shot_sha256 on_disk)
+    check string (label ^ ": the reference is the head's content digest") (content_digest_of_head on_disk)
       (Store.exact_snapshot_reference snapshot).sha256;
     check int (label ^ ": the reference carries the kept turn") 2
       (Store.exact_snapshot_reference snapshot).turn_count
@@ -254,7 +259,7 @@ let test_a_decode_after_a_later_save_answers_for_the_bytes_read () = with_sessio
     | Ok snapshot ->
       check int "the snapshot is the turn that was read" 2
         (Store.exact_snapshot_reference snapshot).turn_count;
-      check string "the reference is the digest of the bytes read" (one_shot_sha256 read_bytes)
+      check string "the reference is the content digest of the head read" (content_digest_of_head read_bytes)
         (Store.exact_snapshot_reference snapshot).sha256;
       check bool "the messages are not the later save's value" true
         (Store.exact_snapshot_messages snapshot != later.messages))
@@ -302,8 +307,8 @@ let test_a_repointed_root_moves_lookups_with_the_save () = with_session (fun ses
 let () =
   run "keeper checkpoint read once"
     [ ( "locked read"
-      , [ test_case "the snapshot holds the file's bytes and their digest" `Quick
-            test_the_snapshot_holds_the_file_bytes_and_their_digest
+      , [ test_case "the reference is the content digest of the head" `Quick
+            test_the_reference_is_the_content_digest_of_the_head
         ; test_case "a missing canonical is absent" `Quick test_a_missing_canonical_is_absent
         ; test_case "a symlinked canonical is refused" `Quick test_a_symlinked_canonical_is_refused
         ; test_case "a directory at the canonical path is refused" `Quick

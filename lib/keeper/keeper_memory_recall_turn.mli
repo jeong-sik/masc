@@ -65,7 +65,7 @@ val judge_with :
     the first request to the saved outcome. *)
 
 val judge :
-  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   memo:memo ->
   config:Workspace.config ->
   keeper_id:string ->
@@ -74,5 +74,6 @@ val judge :
   Keeper_memory_recall_candidates.t list ->
   (t, Keeper_memory_recall_jev_codec.build_error) result
 (** {!judge_with} with {!Keeper_memory_recall_evaluation.evaluate}: requests
-    go to the destinations the gate named, each with the client's own timeout.
-    No time limit is added around the judgment. *)
+    go to the destinations the gate named, each with the client's own time
+    limit. The client arms that limit only with a [clock], so the clock is
+    required. No time limit is added around the judgment as a whole. *)

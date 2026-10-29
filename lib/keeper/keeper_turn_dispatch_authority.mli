@@ -7,7 +7,10 @@
 type token
 
 val run : (token -> 'a) -> 'a
-(** Create one token for [f] and invalidate it before returning or re-raising. *)
+(** Create one token for [f] and invalidate it before returning or re-raising.
+    An invalidated token no longer retains its validator. A validation already
+    executing may still hold that callback and return its result after closure;
+    invalidation does not revoke that in-progress call. *)
 
 val install
   : token -> (unit -> (unit, string) result) -> (unit, string) result

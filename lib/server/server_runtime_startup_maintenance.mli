@@ -62,6 +62,17 @@ val report_unknown_typesafeai_exclusions : base_path:string -> unit
     directory-read warning without accusing any configured name. Called once
     the runtime table is loaded. *)
 
+val unknown_memory_recall_keepers :
+  keepers_dir:string -> (string list, string) result
+(** The names in [\[typesafeai\].memory_recall_keepers] that
+    {!declared_keeper_names} does not list, or the declaration-directory read
+    failure. *)
+
+val report_unknown_memory_recall_keepers : base_path:string -> unit
+(** One warning per name {!unknown_memory_recall_keepers} finds, or one
+    directory-read warning without accusing any configured name. Called once
+    the runtime table is loaded. *)
+
 val report_unarmed_typesafeai_destinations : unit -> unit
 (** One warning per destination {!Typesafeai_config.unarmed_destinations}
     finds. Called once the runtime table is loaded. *)

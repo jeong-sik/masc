@@ -808,7 +808,8 @@ let failure_detail ~absorbed = function
      | Typesafeai_config.Lane_disabled | Typesafeai_config.No_armed_destination
      | Typesafeai_config.Board_attention_disabled | Typesafeai_config.Context_review_disabled
      | Typesafeai_config.Skill_applicability_disabled | Typesafeai_config.Librarian_preflight_disabled
-     | Typesafeai_config.Workspace_memory_selection_disabled ->
+     | Typesafeai_config.Workspace_memory_selection_disabled
+     | Typesafeai_config.Memory_recall_disabled ->
        Some ("enabled absorb judgment unavailable: " ^
              Typesafeai_config.unavailable_reason_to_string reason))
   | Skipped { reason = No_absorptions; _ } -> None
@@ -1126,6 +1127,7 @@ let replay_authority_of_yojson (json : Yojson.Safe.t) : (replay_authority, strin
           | "skill_applicability_disabled" -> Typesafeai_config.Skill_applicability_disabled
           | "librarian_preflight_disabled" -> Typesafeai_config.Librarian_preflight_disabled
           | "workspace_memory_selection_disabled" -> Typesafeai_config.Workspace_memory_selection_disabled
+          | "memory_recall_disabled" -> Typesafeai_config.Memory_recall_disabled
           | "keeper_excluded" -> Typesafeai_config.Keeper_excluded
           | _ -> Replay.reject index "unknown gate unavailable reason"
         in
@@ -1155,7 +1157,8 @@ let restore_with ~missing ~authority ~new_observations ~facts ~new_claims ~super
         | Typesafeai_config.Lane_disabled | Typesafeai_config.No_armed_destination
         | Typesafeai_config.Board_attention_disabled | Typesafeai_config.Context_review_disabled
         | Typesafeai_config.Skill_applicability_disabled | Typesafeai_config.Librarian_preflight_disabled
-        | Typesafeai_config.Workspace_memory_selection_disabled -> [] in
+        | Typesafeai_config.Workspace_memory_selection_disabled
+        | Typesafeai_config.Memory_recall_disabled -> [] in
       finish (Skipped { reason = Unavailable reason; absorbed = applied })
     | _ :: _, Gate_available (first, rest) ->
       let destinations = first :: rest in
@@ -1419,7 +1422,8 @@ let run_resolved
           | Typesafeai_config.Context_review_disabled
           | Typesafeai_config.Skill_applicability_disabled
           | Typesafeai_config.Librarian_preflight_disabled
-          | Typesafeai_config.Workspace_memory_selection_disabled) as reason)
+          | Typesafeai_config.Workspace_memory_selection_disabled
+          | Typesafeai_config.Memory_recall_disabled) as reason)
        ->
        (* Another gate's switch: [absorb_gate_destinations] does not produce
           these. Named rather than caught so a new reason has to be placed;

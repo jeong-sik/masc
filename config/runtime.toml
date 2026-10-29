@@ -143,6 +143,16 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # this gate. Lane credentials and excluded_keepers still apply.
 # Capacity-driven host-memory retries support Agent Core, Codex and Claude Code.
 # Muse/Antigravity lack that retry path when their memory reader is suppressed.
+# memory_recall = false
+# Set true to send a Keeper's stored facts and the turn's input for the recall
+# judgment. It needs memory_recall_scope: "all" (every Keeper that
+# excluded_keepers does not name) or "listed" with memory_recall_keepers, at
+# least one Keeper name. true without a scope is a load error, so is an empty
+# list, and so is a list next to "all". A name that is no Keeper is reported at
+# boot. With memory_recall = false the scope does nothing but is still checked
+# at load. Lane credentials and excluded_keepers still apply.
+# memory_recall_scope = "listed"
+# memory_recall_keepers = ["keeper-name"]
 # excluded_keepers = []
 
 # max_output_tokens is the output budget a lane's requests send as max_tokens.

@@ -297,6 +297,38 @@ let test_unknown_typesafeai_exclusions_come_from_declarations () =
     true
     (Result.is_error (SM.unknown_typesafeai_exclusions ~keepers_dir:missing))
 
+(* Recall limited to listed keepers is limited by name, so a misspelt name
+   reaches nobody. The names are checked against the same declarations. *)
+let test_unknown_memory_recall_keepers_come_from_declarations () =
+  let root = fresh_dir "masc_memory_recall_keepers" in
+  List.iter
+    (fun name ->
+       Out_channel.with_open_text (Filename.concat root name) (fun oc -> output_string oc ""))
+    [ "alpha.toml"; "beta.toml"; "alpha.memory-current.json" ];
+  let inherited = Runtime_typesafeai_policy.current () in
+  let publish memory_recall =
+    Runtime_typesafeai_policy.publish { Runtime_schema.default_typesafeai with memory_recall }
+  in
+  Fun.protect
+    ~finally:(fun () -> Runtime_typesafeai_policy.publish inherited)
+    (fun () ->
+       publish
+         (Runtime_schema.Memory_recall_on
+            (Runtime_schema.Listed_keepers ("alpha", [ "gamma"; "alpha.memory-current.json" ])));
+       Alcotest.(check (list string)) "gamma and the memory store are no keepers"
+         [ "gamma"; "alpha.memory-current.json" ]
+         (SM.unknown_memory_recall_keepers ~keepers_dir:root |> Result.get_ok);
+       publish (Runtime_schema.Memory_recall_on Runtime_schema.All_keepers);
+       Alcotest.(check (list string)) "all keepers name nobody" []
+         (SM.unknown_memory_recall_keepers ~keepers_dir:root |> Result.get_ok);
+       publish
+         (Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers ("alpha", [ "beta" ])));
+       let missing = Filename.concat root "missing" in
+       Alcotest.(check bool)
+         "an unreadable directory cannot accuse every listed keeper"
+         true
+         (Result.is_error (SM.unknown_memory_recall_keepers ~keepers_dir:missing)))
+
 let () =
   Alcotest.run "server_runtime_startup_maintenance"
     [
@@ -316,6 +348,8 @@ let () =
         [
           Alcotest.test_case "unknown names come from the declarations" `Quick
             test_unknown_typesafeai_exclusions_come_from_declarations;
+          Alcotest.test_case "unknown memory recall keepers come from the declarations" `Quick
+            test_unknown_memory_recall_keepers_come_from_declarations;
         ] );
       ( "prune_shared_jsonl_stores",
         [

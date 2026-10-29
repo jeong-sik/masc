@@ -16,6 +16,7 @@ type unavailable_reason =
   | Skill_applicability_disabled
   | Librarian_preflight_disabled
   | Workspace_memory_selection_disabled
+  | Memory_recall_disabled
   | Keeper_excluded
 
 let unavailable_reason_to_string = function
@@ -27,6 +28,7 @@ let unavailable_reason_to_string = function
   | Skill_applicability_disabled -> "skill_applicability_disabled"
   | Librarian_preflight_disabled -> "librarian_preflight_disabled"
   | Workspace_memory_selection_disabled -> "workspace_memory_selection_disabled"
+  | Memory_recall_disabled -> "memory_recall_disabled"
   | Keeper_excluded -> "keeper_excluded"
 ;;
 
@@ -141,6 +143,22 @@ let workspace_memory_selection_destinations ~keeper_id =
     ~off:Workspace_memory_selection_disabled
 ;;
 
+(* The switch and the scope are one value, so a keeper outside the scope is
+   told apart from nothing else: both are a gate the operator did not turn on
+   for it. *)
+let memory_recall_covers ~keeper_id = function
+  | Runtime_schema.Memory_recall_off -> false
+  | Runtime_schema.Memory_recall_on Runtime_schema.All_keepers -> true
+  | Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (first, rest)) ->
+    List.mem keeper_id (first :: rest)
+;;
+
+let memory_recall_destinations ~keeper_id =
+  gate_destinations ~keeper_id
+    ~switched_on:(memory_recall_covers ~keeper_id (policy ()).Runtime_schema.memory_recall)
+    ~off:Memory_recall_disabled
+;;
+
 let is_absorb_gate_enabled () = is_enabled () && (policy ()).Runtime_schema.absorb_gate
 
 (* The names that exclude nobody: a keeper is excluded by its name, so a
@@ -148,6 +166,17 @@ let is_absorb_gate_enabled () = is_enabled () && (policy ()).Runtime_schema.abso
    it found and reports each. *)
 let unknown_excluded_keepers ~known =
   List.filter (fun name -> not (List.mem name known)) (policy ()).Runtime_schema.excluded_keepers
+;;
+
+(* The same for the keepers memory recall is limited to: a misspelt name
+   limits recall to nobody by that name. Switched off, or for every keeper,
+   there is no name to check. *)
+let unknown_memory_recall_keepers ~known =
+  match (policy ()).Runtime_schema.memory_recall with
+  | Runtime_schema.Memory_recall_off
+  | Runtime_schema.Memory_recall_on Runtime_schema.All_keepers -> []
+  | Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (first, rest)) ->
+    List.filter (fun name -> not (List.mem name known)) (first :: rest)
 ;;
 
 type readiness =
@@ -163,7 +192,7 @@ let readiness () =
     | Error
         ( Absorb_gate_disabled | Board_attention_disabled | Context_review_disabled
         | Skill_applicability_disabled | Librarian_preflight_disabled
-        | Workspace_memory_selection_disabled | Keeper_excluded ) ->
+        | Workspace_memory_selection_disabled | Memory_recall_disabled | Keeper_excluded ) ->
       (* [lane_destinations] answers only about the lane and its keys. *)
       Off
     | Ok (first, rest) ->

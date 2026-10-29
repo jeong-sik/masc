@@ -210,36 +210,37 @@ let cached_chat_markdown_with_preview ~preview ~link_previews_mode ~theme =
     | lines -> "" :: chat_journal_rows ~context ~width lines
   in
   let body_rows =
-  match entry.markdown_source with
-  | Message_layout.Markdown_stable
-      { keeper_name; request_id; observed_at; entry_index } ->
-      Markdown_cache.render chat_markdown_cache
-        ~theme_revision:chat_markdown_theme_revision
-        ~palette_generation ~width ~renderer:(chat_markdown ~context)
-        ~identity:
-          { cmi_style = entry.style;
-            cmi_keeper_name = keeper_name;
-            cmi_request_id = request_id;
-            cmi_observed_at = Some observed_at;
-            cmi_entry_index = entry_index;
-          }
-        ~text:body
-  | Message_layout.Markdown_growing
-      { keeper_name; request_id; entry_index } ->
-      Markdown_cache.render_growing chat_markdown_cache
-        ~theme_revision:chat_markdown_theme_revision
-        ~palette_generation ~width
-        ~renderer:(chat_markdown_streaming ~context)
-        ~identity:
-          { cmi_style = entry.style;
-            cmi_keeper_name = keeper_name;
-            cmi_request_id = request_id;
-            cmi_observed_at = None;
-            cmi_entry_index = entry_index;
-        }
-        ~text:body
-  | Message_layout.Markdown_streaming ->
-      chat_markdown ~context ~width body
+    Masc_tui_frame_timing.time_stage ~name:"chat.markdown" (fun () ->
+      match entry.markdown_source with
+      | Message_layout.Markdown_stable
+          { keeper_name; request_id; observed_at; entry_index } ->
+          Markdown_cache.render chat_markdown_cache
+            ~theme_revision:chat_markdown_theme_revision
+            ~palette_generation ~width ~renderer:(chat_markdown ~context)
+            ~identity:
+              { cmi_style = entry.style;
+                cmi_keeper_name = keeper_name;
+                cmi_request_id = request_id;
+                cmi_observed_at = Some observed_at;
+                cmi_entry_index = entry_index;
+              }
+            ~text:body
+      | Message_layout.Markdown_growing
+          { keeper_name; request_id; entry_index } ->
+          Markdown_cache.render_growing chat_markdown_cache
+            ~theme_revision:chat_markdown_theme_revision
+            ~palette_generation ~width
+            ~renderer:(chat_markdown_streaming ~context)
+            ~identity:
+              { cmi_style = entry.style;
+                cmi_keeper_name = keeper_name;
+                cmi_request_id = request_id;
+                cmi_observed_at = None;
+                cmi_entry_index = entry_index;
+            }
+            ~text:body
+      | Message_layout.Markdown_streaming ->
+          chat_markdown ~context ~width body)
   in
   body_rows @ journal
 

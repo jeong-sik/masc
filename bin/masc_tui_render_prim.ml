@@ -1542,7 +1542,9 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
     }
   in
   Masc_tui_frame_timing.finish_stage ~name:"surface.setup" setup_started;
+  let content_started = Masc_tui_frame_timing.start_stage () in
   body ~budget body_pushers;
+  Masc_tui_frame_timing.finish_stage ~name:"surface.content" content_started;
   let materialize_started = Masc_tui_frame_timing.start_stage () in
   let held = List.rev !pushed in
   let count = List.length held in

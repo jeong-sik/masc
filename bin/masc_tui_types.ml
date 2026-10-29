@@ -8371,6 +8371,101 @@ type acting_pane_preference =
   | Default_acting_pane
   | Chosen_acting_pane of Masc_tui_acting_pane.layout
 
+(* A retained observation keeps the workspace read epoch that produced it,
+   even when a later draw takes place during identity reconfirmation. *)
+type acting_pane_scope = workspace_authority * unit ref
+
+let same_acting_pane_scope (workspace, reading) (other_workspace, other_reading) =
+  workspace = other_workspace && reading == other_reading
+
+type acting_pane_key = {
+  apk_keeper : string;
+  apk_scope : acting_pane_scope;
+}
+
+let same_acting_pane_keeper left right =
+  String.equal left.apk_keeper right.apk_keeper
+
+let same_acting_pane_key left right =
+  same_acting_pane_keeper left right && same_acting_pane_scope left.apk_scope right.apk_scope
+
+(* A changed scope owes one read when the pane next becomes visible. The
+   fetched request key records the attempt even if that read later fails. *)
+let acting_pane_read_needed ~key reading =
+  match Masc_tui_fetched.current_key reading with
+  | Some current -> not (same_acting_pane_key key current)
+  | None -> true
+
+type acting_pane_read = {
+  apr_scope : acting_pane_scope;
+  apr_snapshot : Tui_decode.file_change_snapshot;
+}
+
+(* A file row owns the fetched snapshot that produced it. Every Activity
+   frame also belongs to the workspace in which it was drawn. *)
+type acting_pane_file_source = {
+  aps_keeper : string;
+  aps_read : acting_pane_read;
+}
+
+type acting_pane_source = {
+  aps_scope : acting_pane_scope;
+  aps_file_source : acting_pane_file_source option;
+}
+
+(* Decode makes a fresh object on every poll. Reuse the prior immutable value
+   only when the complete snapshot is equal, so a no-change read does not
+   force a presentation merely because its allocation changed. *)
+let retain_unchanged_acting_pane_changes ~scope ~previous
+      (snapshot : Tui_decode.file_change_snapshot) =
+  match previous with
+  | Masc_tui_fetched.Ready prior | Masc_tui_fetched.Stale (prior, _)
+    when same_acting_pane_scope prior.apr_scope scope
+         && prior.apr_snapshot = snapshot -> prior.apr_snapshot
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+  | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
+  | Masc_tui_fetched.Failed _ -> snapshot
+
+let same_acting_pane_target left right =
+  let open Masc_tui_acting_pane in
+  match left, right with
+  | Target_none, Target_none | Target_next_tab, Target_next_tab
+  | Target_more, Target_more | Target_call_order, Target_call_order -> true
+  | Target_keeper a, Target_keeper b | Target_calls a, Target_calls b -> String.equal a b
+  | Target_file a, Target_file b -> a = b
+  | Target_call (keeper_a, key_a), Target_call (keeper_b, key_b) ->
+      String.equal keeper_a keeper_b && Masc_tui_acting.call_key_equal key_a key_b
+  | (Target_none | Target_next_tab | Target_keeper _ | Target_more | Target_file _
+    | Target_calls _ | Target_call _ | Target_call_order), _ -> false
+
+let same_acting_pane_authority left right =
+  let same_file a b =
+    String.equal a.aps_keeper b.aps_keeper
+    && same_acting_pane_scope a.aps_read.apr_scope b.aps_read.apr_scope
+    && a.aps_read.apr_snapshot == b.aps_read.apr_snapshot
+  in
+  let same_source a b =
+    same_acting_pane_scope a.aps_scope b.aps_scope
+    && Option.equal same_file a.aps_file_source b.aps_file_source
+  in
+  left.Masc_tui_acting_pane.frame_columns = right.Masc_tui_acting_pane.frame_columns
+  && left.frame_scroll_max = right.frame_scroll_max
+  && List.equal same_acting_pane_target left.frame_targets right.frame_targets
+  && Option.equal same_source left.frame_source right.frame_source
+
+let presented_acting_pane_file frame ~scope ~selected_keeper ~line =
+  match Masc_tui_acting_pane.target_at frame ~line, frame.Masc_tui_acting_pane.frame_source with
+  | Target_file index, Some { aps_scope; aps_file_source = Some source }
+    when same_acting_pane_scope aps_scope scope
+         && same_acting_pane_scope source.aps_read.apr_scope scope
+         && Option.equal String.equal selected_keeper (Some source.aps_keeper)
+         && String.equal source.aps_keeper source.aps_read.apr_snapshot.fcs_keeper
+         && index >= 0
+         && index < List.length source.aps_read.apr_snapshot.fcs_changes ->
+      Some (source.aps_read.apr_snapshot, index)
+  | (Target_none | Target_next_tab | Target_keeper _ | Target_more | Target_file _
+    | Target_calls _ | Target_call _ | Target_call_order), _ -> None
+
 type home_chat_receipt =
   | No_chat_receipt
   | Saving_chat of Keeper_id.Keeper_name.t
@@ -8898,6 +8993,8 @@ type state = {
      terminal holds it is the terminal's. The default is resolved by surface:
      Home keeps its destinations alone, while other surfaces start narrow. *)
   mutable acting_pane_preference: acting_pane_preference;
+  (* Only a successfully presented frame supplies Activity input authority. *)
+  mutable acting_pane_presented: acting_pane_source Masc_tui_acting_pane.frame;
   (* Rows scrolled into the pane's full list; zero is the overview. The
      renderer clamps it to what the list holds and a toggle resets it. *)
   mutable acting_pane_scroll: int;
@@ -8925,7 +9022,7 @@ type state = {
      the pane's Changes tab. Refetched when the feed shows that keeper
      complete a tool call and on the operator cadence. *)
   mutable acting_pane_changes:
-    (string, Tui_decode.file_change_snapshot) Masc_tui_fetched.t;
+    (acting_pane_key, acting_pane_read) Masc_tui_fetched.t;
   (* When the answer on screen landed, so the tab can say how old it is. *)
   mutable acting_pane_changes_at: float option;
   (* Derived display phase for the selected long name in the narrow roster.
@@ -16935,6 +17032,7 @@ let create_state
   roster_pane_preference = Masc_tui_roster_pane.Hidden;
   keeper_navigation_open = false;
   acting_pane_preference = Default_acting_pane;
+  acting_pane_presented = Masc_tui_acting_pane.empty_frame;
   acting_pane_scroll = 0;
   acting_pane_cursor = None;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;

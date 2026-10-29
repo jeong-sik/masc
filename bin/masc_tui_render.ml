@@ -54,14 +54,6 @@ type memory_state = Render_memory.memory_state =
 
 let json_assoc_member_opt = Masc_tui_json.member_opt
 
-let acting_pane_target_at ~line =
-  let targets = !acting_pane_row_targets in
-  if line >= 0 && line < Array.length targets then targets.(line)
-  else Masc_tui_acting_pane.Target_none
-
-let acting_pane_drawn_cols () = !acting_pane_reserved_cols
-let acting_pane_row_count () = Array.length !acting_pane_row_targets
-let acting_pane_scroll_limit () = !acting_pane_scroll_max
 let set_table_frame enabled = table_frame_enabled := enabled
 
 let keeper_roster_name_cells = Masc_tui_roster_pane.pane_cols - 7
@@ -717,6 +709,7 @@ let render ~home ~compact_recovery_notice (state : state) =
   (* So do the panes: a frame that ends without recording any, the
      too-small notice, has none to select from. *)
   frame_panes := Masc_tui_pane_selection.no_panes;
+  frame_acting_pane := Masc_tui_acting_pane.empty_frame;
   (* And the candle, and any placed picture, is on this frame only if this
      frame draws it. *)
   Masc_tui_emblem_screen.begin_frame ();
@@ -798,4 +791,5 @@ let render ~home ~compact_recovery_notice (state : state) =
           (fun target -> not (press_changes_the_surface target))
           presses
   in
-  ({ frame with Frame_presenter.lines }, clamped, approval, presses, !frame_panes)
+  ({ frame with Frame_presenter.lines }, clamped, approval, presses, !frame_panes,
+   !frame_acting_pane)

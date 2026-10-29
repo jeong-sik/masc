@@ -48,13 +48,6 @@ val panel_input_owner :
   Masc_tui_types.state -> terminal_rows:int -> Masc_tui_presented.panel_owner option
 (** The command panel or its search editor selected by the actual frame. *)
 
-(** The Activity pane as the last frame drew it, for the input layer: how
-    many columns it held on the right (zero when none was drawn), what a
-    press on one of its rows acts on, and how far its list can scroll. A
-    press or a wheel notch between frames is answered from what was on
-    screen, which is this, not from what the next frame would draw. *)
-val acting_pane_drawn_cols : unit -> int
-
 val acting_pane_columns : Masc_tui_types.state -> terminal_cols:int -> int
 (** The current Activity pane reservation at this terminal width, usable
     before a frame is built when reconciling interaction bounds. *)
@@ -64,14 +57,6 @@ val acting_pane_suppressed : Masc_tui_types.state -> bool
     modal covers the whole terminal, and the Activity screen and the Browser
     Lane already fill their own. The pane's key reads this too, so a press
     cannot move a choice the reader has no way to see. *)
-
-val acting_pane_target_at : line:int -> Masc_tui_acting_pane.row_target
-
-val acting_pane_row_count : unit -> int
-(** How many rows the last frame drew in the Activity pane: the range
-    [acting_pane_target_at] answers for. Zero when the pane was not drawn. *)
-
-val acting_pane_scroll_limit : unit -> int
 
 (** What a press on this terminal row opens in the chat history the last frame
     drew, and {!Masc_tui_message_layout.Action_none} for any row outside it.
@@ -186,10 +171,11 @@ val render :
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option *
   Masc_tui_approvals_model.approval_row option *
   Masc_tui_press.press_target Masc_tui_hit.zones *
-  Masc_tui_pane_selection.layout
+  Masc_tui_pane_selection.layout *
+  Masc_tui_types.acting_pane_source Masc_tui_acting_pane.frame
 (** The frame without press marks, where each marked text landed in it, and
-    where each of its panes sits. Commit the zones and the panes only once
-    the terminal accepts the frame. [home] is a fresh, UI-domain-owned lazy
+    where each of its panes sits. Commit the zones, panes, and Activity
+    input authority only once the terminal accepts the frame. [home] is a fresh, UI-domain-owned lazy
     reading for this synchronous Build only. Frame preparation and drawing
     may force it; neither awaits, shares it with another domain, nor mutates
     its source inputs between those forces. Other surfaces leave it unforced. *)

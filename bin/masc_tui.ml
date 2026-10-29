@@ -6450,9 +6450,16 @@ let launch_file_changes_load state ~mailbox ~keeper_name =
 let launch_acting_pane_changes_load state ~mailbox ~keeper_name =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
+  let key = { apk_keeper = keeper_name
+            ; apk_scope = state.workspace_authority, state.workspace_read_authority } in
+  let start =
+    match Masc_tui_fetched.current_key state.acting_pane_changes with
+    | Some current when Masc_tui_fetched.in_flight state.acting_pane_changes
+                        && not (same_acting_pane_key current key) -> Masc_tui_fetched.refresh
+    | Some _ | None -> Masc_tui_fetched.start
+  in
   match
-    Masc_tui_fetched.start ~equal:String.equal state.acting_pane_changes
-      ~key:keeper_name
+    start ~equal:same_acting_pane_keeper state.acting_pane_changes ~key
   with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) -> (
@@ -6473,8 +6480,17 @@ let launch_acting_pane_changes_load state ~mailbox ~keeper_name =
    known; [ensure] asks only for a keeper never asked about, so the loop
    can call it after every input without repeating a settled fetch. *)
 
+let acting_pane_source_current (state : state) =
+  match state.acting_pane_presented.frame_source with
+  | Some source when same_acting_pane_scope source.aps_scope
+                       (state.workspace_authority, state.workspace_read_authority)
+                     && server_authority_ready state ->
+      true
+  | Some _ | None -> false
+
 let acting_pane_changes_keeper (state : state) =
-  if Masc_tui_render.acting_pane_drawn_cols () <= 0 then None
+  let _, cols = Masc_tui_ansi.get_terminal_size () in
+  if Masc_tui_render.acting_pane_columns state ~terminal_cols:cols <= 0 then None
   else
     match state.acting_pane_tab with
     | Masc_tui_acting_pane.Tab_fleet -> None
@@ -6489,16 +6505,11 @@ let refresh_acting_pane_changes state ~mailbox =
 let ensure_acting_pane_changes state ~mailbox =
   match acting_pane_changes_keeper state with
   | None -> ()
-  | Some keeper_name -> (
-      match
-        Masc_tui_fetched.view_for ~equal:String.equal state.acting_pane_changes
-          ~key:keeper_name
-      with
-      | Masc_tui_fetched.Absent ->
-          launch_acting_pane_changes_load state ~mailbox ~keeper_name
-      | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
-      | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ ->
-          ())
+  | Some keeper_name ->
+      let key = { apk_keeper = keeper_name
+                ; apk_scope = state.workspace_authority, state.workspace_read_authority } in
+      if acting_pane_read_needed ~key state.acting_pane_changes then
+        launch_acting_pane_changes_load state ~mailbox ~keeper_name
 
 let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
     ~keeper_name =
@@ -12036,12 +12047,13 @@ type acting_pane_hit =
   | Pane_miss
   | Pane_row of int  (** 0-based line within the pane *)
 
-let acting_pane_hit (_state : state) ~row ~column =
-  let pane_cols = Masc_tui_render.acting_pane_drawn_cols () in
+let acting_pane_hit (state : state) ~row ~column =
+  let frame = state.acting_pane_presented in
+  let pane_cols = frame.frame_columns in
   if pane_cols <= 0 then Pane_miss
   else
     let _terminal_rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
-    let body_rows = Masc_tui_render.acting_pane_row_count () in
+    let body_rows = List.length frame.frame_targets in
     let first_col = terminal_cols - pane_cols + 1 in
     (* Row 1 is the surface strip; the body starts on row 2. *)
     let first_row = 2 in
@@ -12063,7 +12075,7 @@ let scroll_acting_pane (state : state) ~delta =
   state.acting_pane_scroll
   <- max 0
        (min
-          (Masc_tui_render.acting_pane_scroll_limit ())
+          state.acting_pane_presented.frame_scroll_max
           (state.acting_pane_scroll + delta))
 
 (* A press on the pane is the roster's cursor by another hand: a fleet row
@@ -12072,27 +12084,25 @@ let scroll_acting_pane (state : state) ~delta =
    scrolls into the full list. Everything else on the pane is read, not
    pressed. *)
 let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
-  match Masc_tui_render.acting_pane_target_at ~line with
+  match Masc_tui_acting_pane.target_at state.acting_pane_presented ~line with
   | Masc_tui_acting_pane.Target_none -> ()
   | Masc_tui_acting_pane.Target_next_tab ->
       state.acting_pane_tab <- Masc_tui_acting_pane.next_tab state.acting_pane_tab;
       state.acting_pane_scroll <- 0
   | Masc_tui_acting_pane.Target_more -> scroll_acting_pane state ~delta:1
-  | Masc_tui_acting_pane.Target_file index -> (
+  | Masc_tui_acting_pane.Target_file _ when acting_pane_source_current state -> (
       (* The row indexes the snapshot the pane drew. The Changes surface
          opens on that same snapshot with the row's diff up, then asks for
          a fresh one the way [/changes] does; the loaded handler keeps the
          open row when the fresh answer holds the same change there. *)
-      match selected_keeper state with
-      | None -> ()
-      | Some (keeper : keeper) -> (
-          match
-            Masc_tui_fetched.view_for ~equal:String.equal
-              state.acting_pane_changes ~key:keeper.k_name
-          with
-          | (Masc_tui_fetched.Ready snapshot | Masc_tui_fetched.Stale (snapshot, _))
-            when index >= 0
-                 && index < List.length snapshot.Masc.Tui_decode.fcs_changes ->
+      let selected_keeper =
+        Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
+      in
+      match
+        presented_acting_pane_file state.acting_pane_presented
+          ~scope:(state.workspace_authority, state.workspace_read_authority) ~selected_keeper ~line
+      with
+      | Some (snapshot, index) ->
               goto_surface state ~mailbox Changes;
               state.changes <- Some snapshot;
               state.changes_error <- None;
@@ -12104,14 +12114,11 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
               state.changes_tree_diff <- None;
               state.changes_tree_diff_error <- None;
               state.changes_tree_diff_path <- None
-          | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
-          | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-          | Masc_tui_fetched.Failed _ ->
-              ()))
+      | None -> ())
   | Masc_tui_acting_pane.Target_call_order ->
       state.acting_pane_call_order
       <- Masc_tui_acting_pane.next_call_order state.acting_pane_call_order
-  | Masc_tui_acting_pane.Target_call (keeper_name, key) ->
+  | Masc_tui_acting_pane.Target_call (keeper_name, key) when acting_pane_source_current state ->
       (* A press on a call opens it: its detail rows draw under it until a
          press on the call or its detail closes it again. What stays open is
          only what the feed still holds -- a key for a call that has left
@@ -12140,7 +12147,7 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
       <- (if held (keeper_name, key) && not (List.exists same state.acting_pane_expanded)
           then (keeper_name, key) :: others
           else others)
-  | Masc_tui_acting_pane.Target_calls keeper_name -> (
+  | Masc_tui_acting_pane.Target_calls keeper_name when acting_pane_source_current state -> (
       (* An earlier turn's row is the keeper's calls surface by another hand,
          the way [t] opens it from the roster: the cursor lands on that
          keeper so the surface names the right one, and the snapshot is asked
@@ -12153,7 +12160,7 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
           state.keeper_calls_scroll <- 0;
           launch_keeper_calls_load state ~mailbox keeper_name;
           transition_keeper_view state (Keepers Keeper_calls))
-  | Masc_tui_acting_pane.Target_keeper keeper_name -> (
+  | Masc_tui_acting_pane.Target_keeper keeper_name when acting_pane_source_current state -> (
       match select_activity_keeper state keeper_name with
       | Activity_keeper_missing | Activity_keeper_selected -> ()
       | Activity_keeper_already_selected ->
@@ -12161,6 +12168,8 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
             ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox);
           launch_keeper_history_load state ~mailbox ~keeper_name;
           state.view <- Keepers Keeper_message)
+  | Masc_tui_acting_pane.Target_file _ | Masc_tui_acting_pane.Target_call _
+  | Masc_tui_acting_pane.Target_calls _ | Masc_tui_acting_pane.Target_keeper _ -> ()
 
 (* Keyboard focus on the Activity pane (#37672): Ctrl-W puts a cursor on the
    first row a press acts on, [j]/[k] walk those rows and past the frame's
@@ -12171,19 +12180,28 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
    cursor is a row of the last frame, the way a press is: what it opens is
    what was on screen. *)
 let acting_pane_drawn (state : state) =
-  Masc_tui_render.acting_pane_drawn_cols () > 0
+  state.acting_pane_presented.frame_columns > 0
   && not (Masc_tui_render.acting_pane_suppressed state)
 
-let acting_pane_frame_targets () =
-  Array.init (Masc_tui_render.acting_pane_row_count ()) (fun line ->
-    Masc_tui_render.acting_pane_target_at ~line)
+let acting_pane_frame_targets state =
+  let targets = state.acting_pane_presented.frame_targets in
+  let targets =
+    if acting_pane_source_current state then targets
+    else List.map (function
+      | Masc_tui_acting_pane.Target_none -> Masc_tui_acting_pane.Target_none
+      | Target_next_tab -> Target_next_tab
+      | Target_more -> Target_more
+      | Target_call_order -> Target_call_order
+      | Target_keeper _ | Target_file _ | Target_calls _ | Target_call _ -> Target_none) targets
+  in
+  Array.of_list targets
 
 (* [true] when the cursor went up; [false] when the frame drew no row a
    press acts on, so there is nothing to focus. *)
 let focus_acting_pane (state : state) =
   match
     Masc_tui_acting_pane.next_target_row
-      ~targets:(acting_pane_frame_targets ()) ~row:(-1) ~step:1
+      ~targets:(acting_pane_frame_targets state) ~row:(-1) ~step:1
   with
   | Some row ->
       state.acting_pane_cursor <- Some row;
@@ -12206,7 +12224,7 @@ let leave_acting_pane (state : state) =
 let move_acting_pane_cursor (state : state) ~row ~step =
   match
     Masc_tui_acting_pane.next_target_row
-      ~targets:(acting_pane_frame_targets ()) ~row ~step
+      ~targets:(acting_pane_frame_targets state) ~row ~step
   with
   | Some next -> state.acting_pane_cursor <- Some next
   | None ->
@@ -12531,7 +12549,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       in
       (match show_acting_pane_tab state tab with
        | Ok () ->
-           ensure_acting_pane_changes state ~mailbox;
+           (match tab with
+            | Masc_tui_acting_pane.Tab_changes -> refresh_acting_pane_changes state ~mailbox
+            | Masc_tui_acting_pane.Tab_fleet -> ());
            notice ~kind:Notice_reply
              ("Activity pane on " ^ Masc_tui_acting_pane.tab_label tab)
        | Error reason -> notice ~kind:Notice_failure reason)
@@ -12587,7 +12607,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         notice ~kind:Notice_reply
           (Printf.sprintf "Activity pane scrolled to row %d of %d"
              (state.acting_pane_scroll + 1)
-             (Masc_tui_render.acting_pane_scroll_limit () + 1))
+             (state.acting_pane_presented.frame_scroll_max + 1))
       end
   | Masc_tui_command.Acting_pane_scroll_unknown word ->
       Masc_tui_message_input.clear state.msg_input;
@@ -23267,15 +23287,36 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
       (* An answer for a keeper the cursor has left is not this tab's
          answer and [complete] drops it. The stamp belongs to an answer
          that landed. *)
-      let landed =
-        Masc_tui_fetched.is_current ~equal:String.equal state.acting_pane_changes
-          request
-        && Result.is_ok result
-      in
-      state.acting_pane_changes <-
-        Masc_tui_fetched.complete ~equal:String.equal state.acting_pane_changes
-          request result;
-      if landed then state.acting_pane_changes_at <- Some (Unix.gettimeofday ())
+      let key = Masc_tui_fetched.request_key request in
+      if same_acting_pane_scope key.apk_scope
+           (state.workspace_authority, state.workspace_read_authority) then begin
+        let result = match result with
+          | Ok snapshot when not (String.equal snapshot.Masc.Tui_decode.fcs_keeper key.apk_keeper) ->
+              Error (Printf.sprintf "file-change response named keeper %s, expected %s"
+                snapshot.fcs_keeper key.apk_keeper)
+          | Ok _ | Error _ -> result
+        in
+        let landed =
+          Masc_tui_fetched.is_current ~equal:same_acting_pane_key state.acting_pane_changes
+            request
+          && Result.is_ok result
+        in
+        let result = Result.map (fun snapshot ->
+          let snapshot =
+            if landed then
+              let previous =
+                Masc_tui_fetched.view_for ~equal:same_acting_pane_keeper state.acting_pane_changes ~key
+              in
+              retain_unchanged_acting_pane_changes ~scope:key.apk_scope ~previous snapshot
+            else snapshot
+          in
+          { apr_scope = key.apk_scope; apr_snapshot = snapshot }) result
+        in
+        state.acting_pane_changes <-
+          Masc_tui_fetched.complete ~equal:same_acting_pane_key state.acting_pane_changes
+            request result;
+        if landed then state.acting_pane_changes_at <- Some (Unix.gettimeofday ())
+      end
   | File_changes_loaded (keeper_name, result) ->
       (* An answer for a keeper the surface has since left is not this
          surface's answer. Dropping it keeps one keeper's files from being
@@ -24564,7 +24605,7 @@ let main
     Presented.panel_owner_matches !presented ~current_owner
       ~context_search_owner:(context_search_owner ())
   in
-  let present_frame frame approval presses panes ~input_pending ~write ~flush reader =
+  let present_frame frame approval presses panes acting_pane ~input_pending ~write ~flush reader =
     let panel_owner = Masc_tui_render.panel_input_owner state
         ~terminal_rows:frame.Frame_presenter.terminal_rows in
     let damaged = Terminal_write_repair.consume_damage () in
@@ -24627,12 +24668,18 @@ let main
         | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _
         | Preset_detail_scroll (_, None) | Keeper_list_scroll _ | Context_inspector_scroll _
         | Context_inspector_response_scroll _ | Queue_panel_presented _ | Help_presented) -> false in
+    let activity_authority_changed =
+      not (same_acting_pane_authority state.acting_pane_presented acting_pane)
+    in
     (* Approval identity, Help ownership, Queue ownership or selection, and the Play card can
        change while clipped terminal text stays byte-identical. Those changes
-       force presentation; ordinary async updates stay differential. *)
+       force presentation. Activity row authority changes force a full
+       presentation only if a differential draw would otherwise do nothing;
+       ordinary async updates stay differential. *)
     match
       Frame_presenter.present frame_presenter
         ~invalidate_before:(damaged || authority_changed || preset_confirmation_changed)
+        ~force_present:activity_authority_changed
         ~write ~flush frame
     with
     | Frame_presenter.Presented _ as frame_result ->
@@ -24689,6 +24736,7 @@ let main
         let input_pending = input_pending () in
         presented := Presented.presented !presented ~approval ~presses ~panes ~reader
             ~panel_owner ~owner_changed ~input_pending;
+        state.acting_pane_presented <- acting_pane;
         state.quit_armed <- Option.map (fun arm ->
             let was_visible = Option.exists (fun previous ->
                 Masc_tui_action_notice.same_quit previous arm.qa_confirmation) previous_quit in
@@ -36524,9 +36572,9 @@ and is loaded on demand through keeper_skill.
            (* Keys and async updates can change the pane reservation after
               the interaction snapshot. Store the focus the next frame shows. *)
            reconcile_chat_focus ();
-           let frame, clamped, approval, presses, panes =
+           let frame, clamped, approval, presses, panes, acting_pane =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
-               ~tag:(fun (frame, _, _, _, _) -> frame.Frame_presenter.surface_key)
+               ~tag:(fun (frame, _, _, _, _, _) -> frame.Frame_presenter.surface_key)
                (fun () ->
                  Masc_tui_message_layout.begin_frame ();
                  (* Event folding is frame preparation, so its cost belongs
@@ -36591,7 +36639,7 @@ and is loaded on demand through keeper_skill.
            Masc_tui_frame_timing.time_present
              ~tag:frame.Frame_presenter.surface_key
              ~write:(output_string stdout) ~flush:(fun () -> flush stdout)
-             (present_frame frame approval presses panes ~input_pending:input_unsettled clamped)
+             (present_frame frame approval presses panes acting_pane ~input_pending:input_unsettled clamped)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

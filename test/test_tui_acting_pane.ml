@@ -390,12 +390,33 @@ let ready : Pane.changes =
     ; calls = 12
     ; over_budget = 0
     ; malformed = 0
+    ; authority = Pane.Changes_current
     ; refresh_failed = None
     }
 
 let changes_fixture = { fixture with Pane.tab = Pane.Tab_changes; changes = ready }
 let changes_drawn = Pane.lines ~rows ~cols ~scroll:0 changes_fixture
 let changes_texts = List.map text changes_drawn.Pane.rows
+
+let test_file_targets_require_current_authority () =
+  let has_file_target authority =
+    let changes = match ready with
+      | Pane.Changes_ready value -> Pane.Changes_ready { value with authority }
+      | Pane.Changes_absent | Pane.Changes_loading | Pane.Changes_failed _ ->
+          fail "fixture has no file changes"
+    in
+    let view = Pane.lines ~rows:20 ~cols ~scroll:0 { changes_fixture with changes } in
+    List.exists (function
+      | Pane.Target_file _ -> true
+      | Pane.Target_none | Pane.Target_next_tab | Pane.Target_keeper _ | Pane.Target_more
+      | Pane.Target_calls _ | Pane.Target_call _ | Pane.Target_call_order -> false)
+      view.targets
+  in
+  check bool "a current source can open files" true (has_file_target Pane.Changes_current);
+  List.iter (fun authority ->
+    check bool "a retained source cannot open files" false (has_file_target authority))
+    [ Pane.Changes_workspace_unconfirmed; Pane.Changes_revalidating
+    ; Pane.Changes_needs_revalidation ]
 
 let test_changes_header_marks_its_tab () =
   let header = List.nth changes_texts 0 in
@@ -529,7 +550,7 @@ let test_hidden_rows_do_not_allocate_text_layout () =
       keeper = "tester";
       files = List.init count (fun i -> file ~at:990. (label long i));
       fetched_at = 990.; window_hours = 24.; calls = count;
-      over_budget = 0; malformed = 0; refresh_failed = None } } in
+      over_budget = 0; malformed = 0; authority = Pane.Changes_current; refresh_failed = None } } in
   let measure rows input =
     ignore (Sys.opaque_identity (Pane.lines ~rows ~cols ~scroll:0 input));
     (* The warm-up laid these texts out in this frame, and a text laid out
@@ -999,6 +1020,8 @@ let () =
         ;] )
     ; ( "changes tab"
       , [ test_case "header marks its tab" `Quick test_changes_header_marks_its_tab
+        ; test_case "file opening requires current source authority" `Quick
+            test_file_targets_require_current_authority
         ; test_case "status names the keeper and the fetch" `Quick
             test_changes_status_names_the_keeper_and_the_fetch
         ; test_case "rows list files newest first" `Quick

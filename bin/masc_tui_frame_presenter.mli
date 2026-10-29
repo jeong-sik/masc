@@ -54,6 +54,7 @@ val cleanup : t -> write:(string -> unit) -> flush:(unit -> unit) -> unit
 
 val present :
   t ->
+  ?force_present:bool ->
   invalidate_before:bool ->
   write:(string -> unit) ->
   flush:(unit -> unit) ->
@@ -62,6 +63,9 @@ val present :
 (** Present one fixed-viewport frame with at most one [write] and one [flush].
     [invalidate_before] discards the cached screen before comparison, coupling
     out-of-band terminal writes to the next full redraw.
+    [force_present] asks for a full redraw only if rows and cursor would
+    otherwise be unchanged, so changed input authority can be presented
+    without turning ordinary differential updates into full redraws.
     Content updates compare opaque ANSI rows byte-for-byte. Cursor-only moves
     remain differential and are emitted in the same atomic output buffer.
     [Presented] means the terminal accepted output for this frame, and says

@@ -71,6 +71,27 @@ let test_first_frame_and_identical_frame () =
   check int "identical frame writes nothing" 0 (List.length captured.writes);
   check int "identical frame does not flush" 0 captured.flushes
 
+let test_changed_authority_can_be_presented () =
+  let presenter = Presenter.create ~synchronized_output:true () in
+  let captured = sink () in
+  let original = frame [ "one"; "two" ] in
+  present presenter captured original;
+  let present_with_authority frame =
+    Presenter.present presenter ~force_present:true ~invalidate_before:false
+      ~write:(write captured) ~flush:(flush captured) frame
+  in
+  (match present_with_authority original with
+   | Presenter.Presented Presenter.Whole_screen -> ()
+   | Presenter.Presented (Presenter.Rows _) | Presenter.Unchanged ->
+       fail "unchanged content did not publish the changed authority");
+  (match present_with_authority (frame [ "one"; "changed" ]) with
+   | Presenter.Presented (Presenter.Rows _) -> ()
+   | Presenter.Presented Presenter.Whole_screen | Presenter.Unchanged ->
+       fail "changed content did not retain differential presentation");
+  (match present_result presenter captured (frame [ "one"; "changed" ]) with
+   | Presenter.Unchanged -> ()
+   | Presenter.Presented _ -> fail "unchanged authority kept forcing presentation")
+
 (* A picture placed over the frame is sent again only where the frame took
    its cells, so the presenter says which rows it wrote. *)
 let test_a_frame_says_which_rows_it_wrote () =
@@ -571,6 +592,8 @@ let () =
     [ ( "differential output"
       , [ test_case "first and identical frames" `Quick
             test_first_frame_and_identical_frame
+        ; test_case "changed authority can be presented" `Quick
+            test_changed_authority_can_be_presented
         ; test_case "repeated identical frames zero-alloc" `Quick
             test_repeated_identical_frames_retain_zero_alloc_unchanged
         ; test_case "a frame says which rows it wrote" `Quick

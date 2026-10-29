@@ -714,7 +714,7 @@ type async_msg =
      changes, stamped with the request so an answer for a keeper the
      cursor has left is dropped. *)
   | Acting_pane_changes_loaded of
-      string Masc_tui_fetched.request
+      Masc_tui_types.acting_pane_key Masc_tui_fetched.request
       * (Masc.Tui_decode.file_change_snapshot, string) result
   (* The path the margin describes; stamped so a late answer cannot caption
      another file. *)

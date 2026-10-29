@@ -149,6 +149,12 @@ type file_row = {
   file_where : string option;
 }
 
+type changes_authority =
+  | Changes_current
+  | Changes_workspace_unconfirmed
+  | Changes_revalidating
+  | Changes_needs_revalidation
+
 type changes =
   | Changes_absent
   | Changes_loading
@@ -161,6 +167,7 @@ type changes =
       calls : int;
       over_budget : int;
       malformed : int;
+      authority : changes_authority;
       refresh_failed : string option;
     }
 
@@ -289,6 +296,19 @@ type rendering = {
 
 let reconcile_context_cursor ~previous_rows ~current_rows cursor =
   if previous_rows = current_rows then cursor else Option.map (fun _ -> 0) cursor
+
+type 'source frame = {
+  frame_columns : int;
+  frame_targets : row_target list;
+  frame_scroll_max : int;
+  frame_source : 'source option;
+}
+
+let empty_frame = { frame_columns = 0; frame_targets = []; frame_scroll_max = 0; frame_source = None }
+
+let target_at frame ~line =
+  if line < 0 then Target_none
+  else Option.value ~default:Target_none (List.nth_opt frame.frame_targets line)
 
 (* ── Text ──────────────────────────────────────────────────────────────── *)
 
@@ -1630,7 +1650,18 @@ let changes_status_lines ~cols input =
             one [ { text = "refresh failed" ^ middle_dot ^ why; tone = Bad } ]
         | None -> []
       in
-      head @ refresh_failed @ dropped @ empty
+      let authority =
+        match r.authority with
+        | Changes_current -> []
+        | Changes_workspace_unconfirmed ->
+            one [ { text = "workspace unconfirmed; files cannot be opened"; tone = Warn } ]
+        | Changes_revalidating ->
+            one [ { text = "rechecking changes; files cannot be opened yet"; tone = Warn } ]
+        | Changes_needs_revalidation ->
+            one [ { text = "changes need a current read"; tone = Warn } ]
+            @ one [ { text = "retry: /activity changes"; tone = Warn } ]
+      in
+      head @ authority @ refresh_failed @ dropped @ empty
 
 let changes_lines ~cols ~below ~scroll input =
   let files =
@@ -1670,7 +1701,13 @@ let materialize_row ~cols input = function
   | Indicator (direction, n) ->
       let arrow = match direction with Above -> up_arrow | Below -> down_arrow in
       indicator_line ~cols arrow n
-  | File_row (index, file) -> file_line ~cols ~now:input.now index file
+  | File_row (index, file) ->
+      let line, target = file_line ~cols ~now:input.now index file in
+      (match input.changes with
+       | Changes_ready { authority = Changes_current; _ } -> line, target
+       | Changes_ready { authority = (Changes_workspace_unconfirmed | Changes_revalidating
+                                     | Changes_needs_revalidation); _ }
+       | Changes_absent | Changes_loading | Changes_failed _ -> line, Target_none)
   | Formatted_status (line, target) -> line, target
 
 (* Column headings, in the row the legend used to hold. With the parts in

@@ -49,8 +49,10 @@ module Change : sig
     | Policy_revoke
     | Credential_replace
 
-  (** The events that set the mode of the installation (design 5.1). *)
-  type mode_event =
+  (** The events that set the mode of the installation (design 5.1). This is the
+      type of {!Authz_mode_event.event}: the record that a mode change becomes in
+      the log carries the same event, with the same label. *)
+  type mode_event = Authz_mode_event.event =
     | Fresh_bootstrap
     | Off
     | Reactivate

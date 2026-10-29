@@ -6923,4 +6923,6 @@
 
 (include stanzas/test_authz_external_store.inc)
 
+(include stanzas/test_authz_bootstrap.inc)
+
 (include stanzas/test_authz_high_water.inc)

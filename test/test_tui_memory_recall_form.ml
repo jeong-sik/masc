@@ -165,6 +165,39 @@ let test_other_tables_and_comments_are_not_touched () =
     (recall_of written)
 ;;
 
+(* The picks are the form's, not the range's: a visit to the other ranges and
+   back shows the same list. *)
+let test_picks_survive_a_visit_to_the_other_ranges () =
+  let form = edited (opened probe) [ "right"; "down"; " "; "up" ] in
+  let visited = edited form [ "right"; "right"; "right" ] in
+  Alcotest.(check recall)
+    "a is still picked"
+    (listed [ "a" ])
+    (recall_of (text_of visited))
+;;
+
+(* The destinations may be written as [[typesafeai.destinations]] headers
+   below the table; the three keys belong in [typesafeai], above them. *)
+let test_destination_tables_below_the_table_are_kept () =
+  let text =
+    with_table
+      "absorb_gate = true\n\n[[typesafeai.destinations]]\n\
+       endpoint = \"http://127.0.0.1:9/judge\"\nmodel = \"jev-1.13\"\n\
+       api_key_env = \"TYPESAFEAI_API_KEY\"\n"
+  in
+  let form = edited (opened text) [ "right"; "down"; " " ] in
+  match Runtime_toml.parse_string (text_of form) with
+  | Error _ -> Alcotest.fail "the written text does not parse"
+  | Ok config ->
+    let typesafeai = config.Runtime_schema.typesafeai in
+    Alcotest.(check recall) "listed" (listed [ "a" ]) typesafeai.Runtime_schema.memory_recall;
+    Alcotest.(check string)
+      "the destination is still there"
+      "http://127.0.0.1:9/judge"
+      (fst typesafeai.Runtime_schema.destinations).Runtime_schema.endpoint;
+    Alcotest.(check bool) "another key is untouched" true typesafeai.Runtime_schema.absorb_gate
+;;
+
 let test_listed_with_nobody_picked_is_refused_until_someone_is () =
   let form = edited (opened probe) [ "right" ] in
   let refused =
@@ -266,6 +299,8 @@ let () =
             test_a_choice_the_file_already_has_writes_nothing
         ; Alcotest.test_case "picks are written in the order they were made" `Quick
             test_picks_are_written_in_the_order_they_were_made
+        ; Alcotest.test_case "picks survive a visit to the other ranges" `Quick
+            test_picks_survive_a_visit_to_the_other_ranges
         ; Alcotest.test_case "a pick made later goes after the file's own" `Quick
             test_a_pick_made_later_goes_after_the_file_s_own
         ; Alcotest.test_case "listed on a file without the table adds the three keys" `Quick
@@ -276,6 +311,8 @@ let () =
             test_off_writes_the_switch_alone_and_keeps_the_list
         ; Alcotest.test_case "other tables and comments are not touched" `Quick
             test_other_tables_and_comments_are_not_touched
+        ; Alcotest.test_case "destination tables below the table are kept" `Quick
+            test_destination_tables_below_the_table_are_kept
         ; Alcotest.test_case "a table the line editor cannot change is refused, not written"
             `Quick test_a_table_the_line_editor_cannot_change_is_refused_not_written
         ] )

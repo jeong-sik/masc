@@ -14031,6 +14031,23 @@ let release_composer_for_browser_reader (state : state) =
   state.composer_focused <- false;
   withdraw_voice_capture state
 
+(* A Home visit edits this TUI's local config. A Keeper name from a remote or
+   unconfirmed workspace must not become the local workspace's last chat.
+   Keep an earlier admitted visit and its receipt while declining a new one. *)
+let remember_local_chat_visit (state : state) ~sw keeper =
+  match state.workspace_identity, state.server_identity with
+  | Workspace_identity_match, Some identity
+    when workspace_identity_of_refresh ~local_paths:state.local_workspace_paths
+           (Ok identity) = Workspace_identity_match ->
+      let request = Masc_tui_chat_visit.submit state.home_chat_writer
+          ~sw ~base_path:state.local_base_path keeper in
+      state.home_chat_visit <- Some request;
+      state.home_last_chat <- Saving_chat keeper;
+      true
+  | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _
+    | Workspace_identity_mismatch _), (Some _ | None)
+  | Workspace_identity_match, (Some _ | None) -> false
+
 (* The latest explicit visit owns the Home receipt. The same name can be
    visited again before an older write settles, so compare the request too. *)
 let accept_chat_visit (state : state) (completion : Masc_tui_chat_visit.completion) =

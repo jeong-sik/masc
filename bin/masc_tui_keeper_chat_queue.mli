@@ -160,6 +160,11 @@ val replace_request :
     submission sequence, submitted_at, and dispatch position. The replacement
     must retain the same request_id. *)
 
+val replace_recalled_request :
+  t -> original:item -> Chat.request -> (t, string) result
+(** Replace only the payload the editor recalled. Changes to queue priority
+    are preserved; a changed or absent request is not overwritten. *)
+
 val join_target : t -> keeper_name:string -> item option
 (** The most recently submitted waiting next-turn line a newly typed line for
     this Keeper would join, or [None] when there is nothing to join. Reordering

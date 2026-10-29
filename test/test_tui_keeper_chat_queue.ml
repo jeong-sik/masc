@@ -38,6 +38,35 @@ let test_lines_wait_in_the_order_they_were_written () =
     (messages q)
 ;;
 
+let test_recall_replacement_checks_the_original_payload () =
+  let original = request ~keeper_name:"alpha" "original" in
+  let queue, _ = match Queue.push Queue.empty ~submitted_at:42. original with
+    | Ok pair -> pair | Error detail -> fail detail in
+  let item = Option.get (Queue.find queue ~request_id:original.request_id) in
+  let priority = match Queue.mark_run_next queue ~request_id:original.request_id with
+    | Ok queue -> queue | Error detail -> fail detail in
+  let edited = {original with Chat.message="edited"} in
+  (match Queue.replace_recalled_request priority ~original:item edited with
+   | Error detail -> fail detail
+   | Ok replaced ->
+       let actual = Option.get (Queue.find replaced ~request_id:original.request_id) in
+       check bool "the edited payload keeps the current priority and position" true
+         (actual.request = edited && actual.intent = Queue.Run_next {automatic=false}
+          && actual.submission_seq = item.submission_seq && actual.submitted_at = item.submitted_at));
+  let changed = {original with Chat.references=[Chat.Ref_url "https://example.org/image"]} in
+  let changed_queue = match Queue.replace_request queue ~request_id:original.request_id changed with
+    | Ok queue -> queue | Error detail -> fail detail in
+  check bool "a changed reference with the same request ID cannot be overwritten" true
+    (Result.is_error (Queue.replace_recalled_request changed_queue ~original:item edited));
+  let different_keeper = {original with Chat.keeper_name="beta"} in
+  let changed_queue = match Queue.replace_request queue ~request_id:original.request_id different_keeper with
+    | Ok queue -> queue | Error detail -> fail detail in
+  check bool "same ID for a different Keeper cannot be overwritten" true
+    (Result.is_error (Queue.replace_recalled_request changed_queue ~original:item edited));
+  check bool "a missing request cannot be recreated by editing" true
+    (Result.is_error (Queue.replace_recalled_request Queue.empty ~original:item edited))
+;;
+
 (* The operator can switch keepers while a turn runs. A queued line must reach
    the keeper it was written to, not whoever is selected when it finally goes. *)
 let test_a_line_keeps_the_keeper_it_was_written_to () =
@@ -519,6 +548,8 @@ let () =
     [ ( "queue"
       , [ test_case "lines wait in the order they were written" `Quick
             test_lines_wait_in_the_order_they_were_written
+        ; test_case "recall replacement checks its original payload" `Quick
+            test_recall_replacement_checks_the_original_payload
         ; test_case "a line keeps the keeper it was written to" `Quick
             test_a_line_keeps_the_keeper_it_was_written_to
         ; test_case "the cap refuses rather than forgetting" `Quick

@@ -338,6 +338,15 @@ let continuation_checkpoints execution =
     | Active call | Terminal_unacknowledged (call,_) -> [call.checkpoint] in
   native @ phase_checkpoints execution
   @ (match execution.input_branch with None -> [] | Some branch -> [branch.checkpoint])
+let gate_preparation_heads execution = match execution.phase with
+  | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> []
+  | Recovering {origin; _} ->
+    (match origin with
+     | Unconfirmed_sources | Confirmed_undispatched | Checkpointed _ | Official_checkpointed _
+     | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Input_wait _ -> []
+     | Gate_binding {preparation = Prepared_agent_core {reference; canonical_checkpoint_bytes}; _} ->
+       [reference, canonical_checkpoint_bytes]
+     | Gate_binding {preparation = Prepared_official_client _; _} -> [])
 (* Approval ids an unsettled execution may still read from the Gate store: a
    wait observes its obligations, a binding observes its approval ids, and a
    resuming wait still carries the obligation it resumed with, and an

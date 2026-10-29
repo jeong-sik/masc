@@ -32,3 +32,19 @@ val read
   :  session_dir:string
   -> Agent_core.Checkpoint_objects.digest
   -> (string option, string) result
+
+type segment_walk =
+  | Segments_reached of Agent_core.Checkpoint_objects.digest list
+      (** The segments behind the head's last one and their turns' bundles. *)
+  | Segment_unreachable of
+      { digest : Agent_core.Checkpoint_objects.digest
+      ; detail : string
+      }
+      (** A segment that is missing, unreadable, not what its digest names or
+          not a segment. Nothing behind it is known. *)
+
+(** Reads the head's last segment, then each [previous] one, in that order. *)
+val walk_segments
+  :  session_dir:string
+  -> Agent_core.Checkpoint_objects.head
+  -> segment_walk

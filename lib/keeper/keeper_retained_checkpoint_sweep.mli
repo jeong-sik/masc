@@ -49,6 +49,16 @@ type error =
 
 val error_to_string : error -> string
 
+(** What the keepers' operation stores hold outstanding. *)
+type owner_records =
+  { input_checkpoints : Keeper_checkpoint_ref.t list
+  ; semantic_executions : Keeper_semantic_execution.t list
+  }
+
+(** Every keeper's operation store under [<runtime_root>/keepers], read as
+    {!run} reads them, with the same failures. *)
+val owner_records : runtime_root:string -> (owner_records, error) result
+
 (** [run ~runtime_root] reads every keeper's operation store under
     [<runtime_root>/keepers], following symlinks as the runtime does, and
     removes the retained files under [<runtime_root>/traces] that none of them

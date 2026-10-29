@@ -1137,32 +1137,6 @@ let known_canonical ~canonical_path
 (* The segments before [head]'s last one and every segment's bundles, read
    from the last segment back, or the first segment that could not be read
    whole. *)
-type segment_walk =
-  | Segments_reached of Objects.digest list
-  | Segment_unreachable of
-      { digest : Objects.digest
-      ; detail : string
-      }
-
-let walk_segments ~session_dir (head : Objects.head) =
-  let rec walk reached = function
-    | None -> Segments_reached (List.rev reached)
-    | Some digest ->
-      let unreachable detail = Segment_unreachable { digest; detail } in
-      (match Keeper_checkpoint_object_store.read ~session_dir digest with
-       | Error detail -> unreachable detail
-       | Ok None -> unreachable "missing"
-       | Ok (Some bytes)
-         when not (String.equal (Objects.digest_of_bytes bytes :> string) (digest :> string)) ->
-         unreachable "its bytes have another digest"
-       | Ok (Some bytes) ->
-         (match Objects.segment_of_string ~digest bytes with
-          | Error error -> unreachable (Objects.load_error_to_string error)
-          | Ok segment ->
-            walk (List.rev_append (Objects.segment_objects segment) reached) segment.previous))
-  in
-  walk [] (Option.map (fun (segment : Objects.segment_ref) -> segment.segment) head.history.segment)
-
 (* The objects the canonical names that the session does not hold. A head
    this process has seen whole names none; one only parsed is checked file
    by file, so the save that follows writes the missing ones again instead
@@ -1180,10 +1154,10 @@ let absent_objects ~session_dir (known : known_canonical) =
         digests
     in
     let named = missing (Objects.head_objects head) in
-    (match head.history.segment, walk_segments ~session_dir head with
-     | None, (Segments_reached _ | Segment_unreachable _) -> named
-     | Some last, Segment_unreachable _ -> last.segment :: named
-     | Some last, Segments_reached reached ->
+    (match head.history.segment, Keeper_checkpoint_object_store.walk_segments ~session_dir head with
+     | None, (Keeper_checkpoint_object_store.Segments_reached _ | Segment_unreachable _) -> named
+     | Some last, Keeper_checkpoint_object_store.Segment_unreachable _ -> last.segment :: named
+     | Some last, Keeper_checkpoint_object_store.Segments_reached reached ->
        (match missing reached with
         | [] -> named
         | _ :: _ -> last.segment :: named))
@@ -2396,10 +2370,10 @@ let back_up_canonical ~session_dir ~session_id ~ownership_root ~backup_dir ~cont
          then Error (Backup_content_changed { expected = content; actual })
          else (
            (* The objects first, then the head that names them. *)
-           match walk_segments ~session_dir head with
-           | Segment_unreachable { digest; detail } ->
+           match Keeper_checkpoint_object_store.walk_segments ~session_dir head with
+           | Keeper_checkpoint_object_store.Segment_unreachable { digest; detail } ->
              Error (Backup_object_unreadable { digest = (digest :> string); detail })
-           | Segments_reached reached ->
+           | Keeper_checkpoint_object_store.Segments_reached reached ->
            match copy_objects 0 (Objects.head_objects head @ reached) with
            | Error _ as error -> error
            | Ok object_bytes ->

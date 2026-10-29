@@ -61,3 +61,30 @@ let read ~session_dir digest =
   | Ok bytes -> Ok bytes
   | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
 ;;
+
+type segment_walk =
+  | Segments_reached of Objects.digest list
+  | Segment_unreachable of
+      { digest : Objects.digest
+      ; detail : string
+      }
+
+let walk_segments ~session_dir (head : Objects.head) =
+  let rec walk reached = function
+    | None -> Segments_reached (List.rev reached)
+    | Some digest ->
+      let unreachable detail = Segment_unreachable { digest; detail } in
+      (match read ~session_dir digest with
+       | Error detail -> unreachable detail
+       | Ok None -> unreachable "missing"
+       | Ok (Some bytes)
+         when not (String.equal (Objects.digest_of_bytes bytes :> string) (digest :> string)) ->
+         unreachable "its bytes have another digest"
+       | Ok (Some bytes) ->
+         (match Objects.segment_of_string ~digest bytes with
+          | Error error -> unreachable (Objects.load_error_to_string error)
+          | Ok segment ->
+            walk (List.rev_append (Objects.segment_objects segment) reached) segment.previous))
+  in
+  walk [] (Option.map (fun (segment : Objects.segment_ref) -> segment.segment) head.history.segment)
+;;

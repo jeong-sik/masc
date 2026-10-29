@@ -185,24 +185,32 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
 - 턴 하나를 쓰는 history 읽기는 지금처럼 전체를 메모리에 올린다. 다만 media 를 빼면 msx-retro-mania 가 179MB 에서 약 58MB 가 된다. 같은 프로세스 안에서는 메모리 사본을 그대로 쓴다.
 - 기동 tail 복구는 마지막 묶음과 진행 중 턴만 읽어도 되는지 `close_open_tail` 의 규칙을 확인해서 정한다. 이 RFC 에서 약속하지 않는다.
 
-### 3.6 blob 정리와 기준점
+### 3.6 정리와 기준점
 
-blob 정리는 L1 과 같은 stack 에 들어간다. `Tool_blob_maintenance` 의 인터페이스도 "참조를 저장하는 변경과 같은 변경에서" 등록하라고 요구한다.
+정리는 두 가지다. media blob 정리와 checkpoint 객체 정리다. 둘 다 쓰는 쪽이 없을 때, BasePath lease 를 잡고만 돈다. 그래서 "이미 있으니 안 쓴다"와 "아무도 안 가리키니 지운다"가 같은 시각에 일어나지 않는다. 저장은 같은 이름의 파일이 있어도 객체를 다시 쓴다(§3.2). 크래시로 잘린 파일이나 sync 되지 않은 디렉터리 항목을 믿지 않는다.
 
-- 정리 경로는 head 와 객체를 JSON 으로 해석해서 `Stored` digest 를 모은다. 파일 내용을 문자열로 훑지 않는다.
-- 정리는 쓰는 쪽이 없을 때, BasePath lease 를 잡고만 돈다. 지금 `Tool_blob_maintenance` 는 배포 사전 점검 때(서버 정지 중) 돈다. checkpoint 객체 정리는 여기에 더해 기동 때 Keeper 가 시작하기 전에도 돈다(아래). 그래서 "이미 있으니 안 쓴다"와 "아무도 안 가리키니 지운다"가 같은 시각에 일어나지 않는다.
-- 저장은 같은 이름의 파일이 있어도 객체를 다시 쓴다(§3.2). 크래시로 잘린 파일이나 sync 되지 않은 디렉터리 항목을 믿지 않는다.
-- 기동 때 도는 정리는 Keeper 가 시작하기 전이라 쓰는 쪽이 없고, lease 도 서버가 잡고 있다. 그래서 진행 중 턴의 loose 객체는 묶음으로 다시 쓰인 뒤, 다음 기동이나 배포 사전 점검 때 지워진다. 그때까지 쌓이는 양은 서버 한 번 뜬 동안 쓴 메시지 수다. 기동 시간에 더해지는 비용은 L0 에서 잰다.
+**media blob 정리.** `Tool_blob_maintenance` 가 배포 사전 점검 때(서버 정지 중) 돈다. 이 인터페이스는 참조를 저장하는 변경과 같은 변경에서 consumer 를 등록하라고 요구한다.
+- `.masc` 아래 등록된 파일을 모두 JSON 으로 해석해서 `Stored` digest 를 모은다. 파일 내용을 문자열로 훑지 않는다.
+- 메시지 객체, 묶음, 머리 객체, segment 는 모두 JSON 으로 읽힌다. 그래서 그 안의 `Stored` 참조가 그대로 기준점이 된다. 아직 지우지 않은 객체도 훑으므로 blob 은 그 객체가 지워질 때까지 남는다.
+- official client session store 가 저장한 history 도 기준점이다.
 - purge 와 Keeper 별 삭제는 "어느 head 에서도 닿지 않게 만드는 것"이다. blob 저장소는 전역이라 서로 다른 Keeper 의 같은 바이트가 한 파일을 함께 쓴다. 그래서 파일은 다음 정리 때 지워진다. purge 를 기록하는 쪽은 "닿지 않게 된 시각"과 "파일이 지워진 시각"을 따로 적는다.
+
+**checkpoint 객체 정리.** `Keeper_checkpoint_object_sweep` 이 서버 기동 때 돈다.
+- 도는 때는 서버가 BasePath lease 를 쥔 뒤, 스케줄러와 Keeper 가 시작하기 전이다. accepted-checkpoints 정리(`Keeper_retained_checkpoint_sweep`) 바로 뒤다. 그때는 세션을 읽거나 쓰는 쪽이 없다. 그래서 head 는 잠금 안에서, 객체는 잠금 밖에서 읽는 `decode_changed_bytes` 와도 겹치지 않는다.
+- 배포 사전 점검에서는 돌리지 않는다. 배포 뒤에는 늘 기동이 따른다.
+- 세션마다 기준점 head 가 닿는 객체를 남기고 `objects/` 의 나머지를 지운다. 지울 후보를 적어 두었다가 다음 번에 지우는 두 단계는 두지 않는다. 기준점이 다 모였으면 닿지 않는 객체를 다시 찾는 읽기는 없다.
 - 기준점(root)은 다음과 같다.
-  - 살아 있는 head
-  - 보관 head
-  - accepted-checkpoints
-  - chat-operations SQLite 에 Gate 가 든 `Prepared_agent_core` 의 checkpoint head
-  - journal 준비 도구가 `upgrades/journal-inputs/` 에 복사한 checkpoint head
-  - official client session store 가 저장한 history
-- head 에서 닿는 객체는 head 가 직접 가리키는 것(머리 객체, 마지막 segment, 그 뒤의 묶음, 열린 메시지)과, 마지막 segment 부터 `previous` 를 따라가며 만나는 segment 와 그 묶음이다. store 의 `walk_segments` 가 이 순서로 읽는다.
-- media blob 정리는 지금처럼 `.masc` 아래 파일을 모두 훑는다. 메시지 객체와 묶음은 JSON lines 로 읽히므로, 그 안의 `Stored` 참조가 그대로 기준점이 된다. 아직 지우지 않은 객체도 훑으므로 blob 은 객체가 지워질 때까지 남는다.
+  - canonical head `<session>/<session_id>.json`
+  - 보관 head `<session>/agent-core-snapshot-*.json`
+  - `<session>/accepted-checkpoints/*.json`
+  - Keeper chat-operations SQLite 에 Gate 준비가 든 `Prepared_agent_core` head. 세션은 그 reference 의 trace id 다.
+  - journal 준비 도구가 `upgrades/journal-inputs/<id>/checkpoint.json` 에 복사한 head. 세션은 head 의 session id 다.
+- head 에서 닿는 객체는 head 가 직접 가리키는 것(머리 객체, 마지막 segment, 그 뒤의 묶음, 열린 메시지)과, 마지막 segment 부터 `previous` 를 따라가며 만나는 segment 와 그 묶음이다. `walk_segments` 가 이 순서로 읽는다.
+- `checkpoint_version` 이 더 낮은 head 는 기준점이 아니다. 이 binary 는 그 head 를 다시 읽지 않는다(§3.7). 그래서 하드컷 뒤 첫 기동이 이전 버전의 객체를 지운다.
+- 기준점을 하나라도 읽지 못하면 아무것도 지우지 않는다. 해석되지 않는 head, 더 높은 버전의 head, 끝까지 따라갈 수 없는 segment, 읽지 못한 Keeper store 도 같다. 그 head 가 무엇을 가리키는지 모르기 때문이다. 이유는 기동 로그에 남는다.
+- `objects/<aa>/<sha256>` 모양이 아닌 항목은 건드리지 않는다.
+- 진행 중 턴의 메시지 객체는 턴이 닫혀 묶음으로 다시 쓰인 뒤 다음 기동 때 지워진다. 그때까지 쌓이는 양은 서버가 한 번 뜬 동안 쓴 객체 수다.
+- 기동에 더해지는 비용은 기준점 head 와 segment 읽기, `objects/` 목록 읽기다. 걸린 시간을 기동 로그에 남긴다.
 
 ### 3.7 하드컷
 
@@ -244,10 +252,12 @@ blob 정리는 L1 과 같은 stack 에 들어간다. `Tool_blob_maintenance` 의
    2. L1-3b(#46776): Keeper store 와, store 밖에서 checkpoint 바이트를 다루는 곳. 객체 쓰기, head 쓰기, 턴 마무리 저장(`Turn_closes`) 인자, CAS 경로, 보관, accepted-checkpoints, v17. exact snapshot 이 바이트를 들지 않게 되므로 바이트를 비교하거나 풀던 곳(Gate, journal 준비, history clear, input history cut, input wait response, semantic execution, 대시보드 purge, bin 도구)이 같은 층에서 바뀐다. bench 를 턴 단위 저장으로 바꾼다.
    3. 리뷰 수정(#46790, #46791): purge 백업은 head 와 객체를 세션 경로 그대로 복사한다. head 만 해석한 저장은 객체가 있는지 보고 없는 것을 다시 쓴다. CAS 출처 확인은 head 를 늘 읽는다.
 4. **L1-4: head 로 읽기(§3.5).**
-   1. L1-4a: `plan_save` 와 load 가 메시지마다의 chain 값을 memo 에 남기고, 다음 저장은 물리적으로 같은 앞부분의 값을 이어 쓴다. 16000 메시지에서 라운드 저장이 메시지 수에 비례하지 않게 된다.
-   2. L1-4b, v18: 머리 객체와 turn segment(D8). head 크기가 머리 필드의 크기와 턴 수에 따라 늘지 않는다.
+   1. L1-4a(#46795): `plan_save` 와 load 가 메시지마다의 chain 값을 memo 에 남기고, 다음 저장은 물리적으로 같은 앞부분의 값을 이어 쓴다. 16000 메시지에서 라운드 저장이 메시지 수에 비례하지 않게 된다.
+   2. L1-4b(#46802), v18: 머리 객체와 turn segment(D8). head 크기가 머리 필드의 크기와 턴 수에 따라 늘지 않는다.
    3. 개수·미리보기, Librarian `chain(k)`.
-5. **L1-5: 객체 정리와 기준점(§3.6).** 정리는 잠금 밖에서 객체를 읽는 읽기(`decode_changed_bytes`)가 쥔 head 의 객체를 지우지 않아야 한다. purge 는 옛 묶음을 가리키는 보관 head 도 지운다.
+5. **L1-5: 객체 정리와 기준점(§3.6).**
+   1. L1-5a: 기동 때 객체 정리. Keeper 가 시작하기 전에 돌아서, 잠금 밖에서 객체를 읽는 `decode_changed_bytes` 와 겹치지 않는다.
+   2. L1-5b: purge 가 옛 묶음을 가리키는 보관 head 도 지운다. 그 전에는 purge 한 내용의 객체가 보관 head 가 바뀔 때까지 남는다.
 6. **L2.** 보관 snapshot 을 head 사본으로 바꾸고, 정리를 head 를 따라가게 한다.
 
 ## 6. 하지 않는 것
@@ -263,8 +273,12 @@ blob 정리는 L1 과 같은 stack 에 들어간다. `Tool_blob_maintenance` 의
   - 읽으면 `checkpoint version 17 was written by a later binary; this one reads 16` 오류가 난다(keeper_checkpoint_store.ml:868).
   - 저장은 기존 파일을 읽지 못해 `Existing_checkpoint_unreadable` 로 실패한다(:2255-2264).
   - 되돌릴 때는 `traces/` 를 옮겨 두고 새로 시작해야 한다.
+  - 새 binary 가 한 번 기동하면 객체 정리가 이전 버전 head 의 객체를 지운다. 그 뒤 이전 binary 로 되돌려도 그 head 는 객체가 없어 읽히지 않는다. 되돌리는 방법은 위와 같다.
 - **fsync 횟수.** 저장 한 번에 새 객체 1~3개와 head 를 fsync 한다. 작은 파일 여러 번이 179MB 한 번보다 느린지는 L0 bench 로 잰다.
-- **정리 오류.** 기준점이 빠지면 쓰는 blob 을 지운다. 그 이미지가 범위에 들어온 요청은 typed 오류로 실패하고, 범위 시작이 그 뒤로 넘어갈 때까지 계속 실패한다. 그래서 기준점은 §3.6 목록을 시험으로 고정하고, 정리는 쓰는 쪽이 없을 때만 한다(서버 정지 중, 또는 기동 때 Keeper 시작 전).
+- **정리 오류.** 기준점이 빠지면 쓰는 blob 이나 객체를 지운다.
+  - blob 이 지워지면 그 이미지가 범위에 들어온 요청은 typed 오류로 실패하고, 범위 시작이 그 뒤로 넘어갈 때까지 계속 실패한다.
+  - 객체가 지워지면 그 head 는 `Objects_invalid` 로 읽히지 않는다.
+  - 그래서 기준점은 §3.6 목록을 시험으로 고정하고, 정리는 쓰는 쪽이 없을 때만 한다. blob 은 서버 정지 중에, 객체는 기동 때 Keeper 시작 전에 정리한다.
 - **다른 프로세스.** 객체를 head 보다 먼저 내구화하므로, CLI 가 읽은 head 가 가리키는 객체는 언제나 있다.
 - **하드컷.** 배포 때 모든 Keeper 의 agent-core history 가 새로 시작한다(D1 에서 받아들였다).
 

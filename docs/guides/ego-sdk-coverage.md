@@ -84,8 +84,8 @@ local Space is visible or that its login is complete.
 | `Page.waitForTimeout` | Native workflow explicit finite nonnegative milliseconds | Real SDK/installed-route proof; elapsed time is not state verification |
 | `Page.title` | Native workflow title returns the SDK value as a step receipt | Installed MASC/Keeper route unverified |
 | `Page.info` | Native workflow info returns native state; dialog stops following steps | Installed MASC/Keeper route unverified |
-| `Page.acceptDialog` | `page.act` accept_dialog | Native boolean receipt and per-goal ownership evidence |
-| `Page.dismissDialog` | `page.act` dismiss_dialog | Native boolean receipt and per-goal ownership evidence |
+| `Page.acceptDialog` | `page.act` accept_dialog validates native true and returns answered=true; false refuses, malformed results remain uncertain | Real SDK/installed execution and per-goal ownership evidence |
+| `Page.dismissDialog` | `page.act` dismiss_dialog validates native true and returns answered=true; false refuses, malformed results remain uncertain | Real SDK/installed execution and per-goal ownership evidence |
 | `Page.evaluate` | Native workflow browser expression/call with JSON; structured timeout code, timeoutMs, executionStopped, mayHaveLateEffects and pageResponsive retained as diagnostics | Actual installed timeout path unverified; diagnostics never authorize replay or settle held input |
 | `Page.waitForFunction` | Native workflow waitForFunction with JSON and timeout/polling | Predicates count as possible effects; installed MASC/Keeper route unverified |
 | `Page.fetch` | Native workflow fetch with browser options; `saveAs` accepts an artifact filename, maps it to a fresh private path, and returns a download ID for the existing download broker | Actual SDK binary execution, installed MASC/Keeper route and registry recovery across SDK-process replacement remain unverified |

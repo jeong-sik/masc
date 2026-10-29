@@ -143,8 +143,10 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     file-input resolver. Its [chosen] receipt describes the staged files handed
     to the SDK, not a subsequent observation of the page's file list; this connection holds those copies until its
     space has ended, since the page reads them later.
-    [accept_dialog] and [dismiss_dialog] answer the JavaScript dialog such a
-    page is blocked on; a listed row of a managed page carries the dialog
+    [accept_dialog] and [dismiss_dialog] require the SDK boolean [true] and
+    return [answered=true]. Native [false] refuses the action before an effect;
+    a missing or malformed answer remains [Outcome_unknown] and never permits
+    replay. A listed row of a managed page carries the dialog
     blocking it, and while one is open, reads, moves and input on that page
     are refused before any effect. A pointer or key input that opens a
     dialog answers with it; a DOM input the dialog stopped is a

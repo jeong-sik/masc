@@ -860,6 +860,46 @@ let test_the_pinned_blocks_follow_the_assemblys_cache_order () =
     [ "skill_compositions"; "memory_os_recall"; "dynamic_context"; "temporal_summary" ]
     (block_names composition.Keeper_next_request_forecast.pinned_blocks)
 
+(* The two recall blocks ride the first round only, like the recall notice, so
+   they are pinned blocks and not part of the instructions. The body sits in
+   front of the dynamic context and the status line behind it, ahead of the
+   clock. *)
+let test_the_recall_blocks_are_pinned_blocks_in_cache_order () =
+  let composition =
+    Keeper_next_request_forecast.read_composition
+      [ component (Turn_record.Prompt_block Prompt_block_id.Temporal_summary) 36
+      ; component (Turn_record.Prompt_block Prompt_block_id.Recalled_memory_status) 140
+      ; component (Turn_record.Prompt_block Prompt_block_id.Dynamic_context) 17_218
+      ; component (Turn_record.Prompt_block Prompt_block_id.Recalled_memory) 2_400
+      ; component (Turn_record.Prompt_block Prompt_block_id.Memory_os_recall) 139_966
+      ; component (Turn_record.Prompt_block Prompt_block_id.Keeper_instructions) 10_832
+      ]
+  in
+  Alcotest.(check (list string)) "recall notice, body, dynamic context, status line, clock"
+    [ "memory_os_recall"
+    ; "recalled_memory"
+    ; "dynamic_context"
+    ; "recalled_memory_status"
+    ; "temporal_summary"
+    ]
+    (block_names composition.Keeper_next_request_forecast.pinned_blocks);
+  Alcotest.(check int) "the instructions do not take the recall blocks" 10_832
+    composition.Keeper_next_request_forecast.instructions_bytes;
+  Alcotest.(check (option int)) "the first round pins all five"
+    (Some (36 + 140 + 17_218 + 2_400 + 139_966))
+    composition.Keeper_next_request_forecast.first_round_pinned_bytes
+
+(* The status line alone marks a first round: it is not injected after tool
+   results, so a composition that carries it cannot be a post-tool round. *)
+let test_a_recall_status_line_alone_marks_a_first_round () =
+  let composition =
+    Keeper_next_request_forecast.read_composition
+      (component (Turn_record.Prompt_block Prompt_block_id.Recalled_memory_status) 140
+       :: post_tool_composition)
+  in
+  Alcotest.(check (option int)) "it is pinned" (Some 140)
+    composition.Keeper_next_request_forecast.first_round_pinned_bytes
+
 let test_goal_is_counted_once_in_the_system_slot () =
   let composition = Keeper_next_request_forecast.read_composition
       (component (Turn_record.Prompt_block Prompt_block_id.Active_goals) 1_094
@@ -1340,6 +1380,10 @@ let () =
             `Quick test_a_first_round_composition_yields_the_fixed_and_pinned_parts
         ; Alcotest.test_case "the pinned blocks follow the assembly's cache order" `Quick
             test_the_pinned_blocks_follow_the_assemblys_cache_order
+        ; Alcotest.test_case "the recall blocks are pinned blocks in cache order" `Quick
+            test_the_recall_blocks_are_pinned_blocks_in_cache_order
+        ; Alcotest.test_case "a recall status line alone marks a first round" `Quick
+            test_a_recall_status_line_alone_marks_a_first_round
         ; Alcotest.test_case "Goal bytes appear once in the stable system slot" `Quick
             test_goal_is_counted_once_in_the_system_slot
         ; Alcotest.test_case "a post-tool composition says nothing about the pinned blocks"

@@ -597,6 +597,8 @@ let prompt_block_label = function
   | Prompt_block_id.Temporal_summary -> "Temporal summary"
   | Prompt_block_id.Memory_os_recall -> "Recall block"
   | Prompt_block_id.Librarian_working_context -> "Librarian working context"
+  | Prompt_block_id.Recalled_memory -> "Recalled memory"
+  | Prompt_block_id.Recalled_memory_status -> "Recall status line"
   | Prompt_block_id.Operator_note -> "Operator note"
   | Prompt_block_id.Skill_compositions -> "Skill compositions"
 
@@ -723,6 +725,8 @@ let input_map_rows (record : Turn_record.t) (provider_input : provider_input opt
                  | Prompt_block_id.Temporal_summary
                  | Prompt_block_id.Memory_os_recall
                  | Prompt_block_id.Librarian_working_context
+                 | Prompt_block_id.Recalled_memory
+                 | Prompt_block_id.Recalled_memory_status
                  | Prompt_block_id.Operator_note
                  | Prompt_block_id.Skill_compositions )
              | Turn_record.Tool_schemas

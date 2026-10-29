@@ -80,6 +80,11 @@ const PROMPT_BLOCK_META: Readonly<Record<TurnPromptBlockId, BlockMeta>> = {
   temporal_summary: { lbl: '시간 요약', color: 'var(--status-warn)', mem: false },
   librarian_working_context: { lbl: 'Librarian 작업 맥락', color: 'var(--info)', mem: false },
   memory_os_recall: { lbl: '메모리 회상', color: 'var(--volt-strong)', mem: true },
+  // The recall judgment's two texts (Prompt_block_id Recalled_memory and
+  // Recalled_memory_status). The body carries recalled memory; the status line
+  // says which memories this turn carries and is not memory itself.
+  recalled_memory: { lbl: '판정한 기억', color: 'var(--volt-strong)', mem: true },
+  recalled_memory_status: { lbl: '기억 판정 줄', color: 'var(--volt-strong)', mem: false },
   // RFC-0366: one operator sentence, rendered for one turn and then stamped
   // consumed. Not memory — it never reaches the recall block.
   operator_note: { lbl: '운영자 노트', color: 'var(--status-warn)', mem: false },
@@ -126,6 +131,8 @@ const INPUT_COMPONENT_META: Readonly<Record<TurnInputComponentId, BlockMeta>> = 
   'prompt.temporal_summary': PROMPT_BLOCK_META.temporal_summary,
   'prompt.memory_os_recall': PROMPT_BLOCK_META.memory_os_recall,
   'prompt.librarian_working_context': PROMPT_BLOCK_META.librarian_working_context,
+  'prompt.recalled_memory': PROMPT_BLOCK_META.recalled_memory,
+  'prompt.recalled_memory_status': PROMPT_BLOCK_META.recalled_memory_status,
   'prompt.operator_note': PROMPT_BLOCK_META.operator_note,
   'prompt.skill_compositions': PROMPT_BLOCK_META.skill_compositions,
   tool_schemas: { lbl: '도구 스키마', color: 'var(--status-warn)', mem: false },

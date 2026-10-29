@@ -2687,6 +2687,66 @@ let test_issued_prefix_delivery_preserves_held_semantics () =
     (Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:duplicate [message duplicate]).prompt
 ;;
 
+(* The two recall blocks resume by their classes: the session holds the body
+   it was sent, so the same bytes are not sent again, and the status line names
+   its turn, so it goes on every resume. *)
+let test_the_recall_blocks_resume_by_their_resend_classes () =
+  let issued ~body ~status =
+    Keeper_run_prompt.assemble_extra_system_context ~dynamic_context_partition:None
+      ~existing_extra_system_context:None
+      ~blocks:
+        [ Prompt_block_id.Recalled_memory, body
+        ; Prompt_block_id.Recalled_memory_status, status
+        ]
+  in
+  let message assembly =
+    carrier_message (Option.get assembly.Keeper_context_assembly.extra_system_context)
+  in
+  let has prompt fragment = String_util.contains_substring prompt fragment in
+  let first = issued ~body:"BODY-ONE" ~status:"STATUS-ONE" in
+  let initial = Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:first [message first] in
+  check bool "the first delivery carries both" true
+    (has initial.prompt "BODY-ONE" && has initial.prompt "STATUS-ONE");
+  let repeated = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+    ~composed_context:first [message first] in
+  check bool "the same status line is sent again" true (has repeated.prompt "STATUS-ONE");
+  check bool "the same body is not" false (has repeated.prompt "BODY-ONE");
+  let next = issued ~body:"BODY-TWO" ~status:"STATUS-ONE" in
+  let replaced = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+    ~composed_context:next [message next] in
+  check bool "a changed body is sent" true (has replaced.prompt "BODY-TWO")
+;;
+
+(* A turn that chose nothing sends its status line alone. The session still
+   holds the body it was last sent, so a later turn that chooses the same
+   memories is not sent that body again, and its status line is. *)
+let test_a_status_only_turn_between_two_identical_selections_keeps_the_held_body () =
+  let issued blocks =
+    Keeper_run_prompt.assemble_extra_system_context ~dynamic_context_partition:None
+      ~existing_extra_system_context:None ~blocks
+  in
+  let message assembly =
+    carrier_message (Option.get assembly.Keeper_context_assembly.extra_system_context)
+  in
+  let has prompt fragment = String_util.contains_substring prompt fragment in
+  let chosen =
+    issued
+      [ Prompt_block_id.Recalled_memory, "BODY-ONE"
+      ; Prompt_block_id.Recalled_memory_status, "STATUS-ONE"
+      ]
+  in
+  let initial = Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:chosen [message chosen] in
+  let quiet = issued [ Prompt_block_id.Recalled_memory_status, "STATUS-NONE" ] in
+  let between = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+    ~composed_context:quiet [message quiet] in
+  check bool "the quiet turn sends its status line" true (has between.prompt "STATUS-NONE");
+  check bool "and no body" false (has between.prompt "BODY-ONE");
+  let again = Host.resume_prompt ~goal:"GOAL" ~held:between.held_context
+    ~composed_context:chosen [message chosen] in
+  check bool "the same status line is sent again" true (has again.prompt "STATUS-ONE");
+  check bool "the body the session still holds is not" false (has again.prompt "BODY-ONE")
+;;
+
 (* The log line a lane without a held set relies on to decide what a held set
    could skip: one entry per typed block, the digest changes with the bytes,
    and only the operator note is marked as sent on every resume. *)
@@ -3377,6 +3437,10 @@ let () =
     ; ( "carried context summaries"
       , [ test_case "issued prefix and held delivery" `Quick
             test_issued_prefix_delivery_preserves_held_semantics
+        ; test_case "recall blocks resume by their resend classes" `Quick
+            test_the_recall_blocks_resume_by_their_resend_classes
+        ; test_case "a status-only turn between two identical selections keeps the held body" `Quick
+            test_a_status_only_turn_between_two_identical_selections_keeps_the_held_body
         ; test_case
             "names blocks and digests"
             `Quick

@@ -103,7 +103,7 @@ Muse·Claude Code·Codex 처럼 공식 클라이언트 세션을 이어 쓰는 �
 
 ## system 자리에 실제로 실리는 것
 
-`config/prompts` 는 그 일부다. 블록은 여섯이다: `keeper_instructions`, `dynamic_context`(세계 상태), `temporal_summary`, `memory_os_recall`, `operator_note`, `skill_compositions` (`lib/types/prompt_block_id.ml`).
+`config/prompts` 는 그 일부다. 블록의 목록은 `lib/types/prompt_block_id.ml` 의 `all_known` 이 정한다.
 
 2026-09-03 11:10Z, analyst 한 턴의 실측 배분:
 

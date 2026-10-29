@@ -22,6 +22,8 @@ export const TURN_PROMPT_BLOCK_IDS = [
   'temporal_summary',
   'memory_os_recall',
   'librarian_working_context',
+  'recalled_memory',
+  'recalled_memory_status',
   'operator_note',
   'skill_compositions',
 ] as const

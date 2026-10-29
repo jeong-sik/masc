@@ -247,6 +247,24 @@ let test_rarely_changing_blocks_come_first () =
   before Block_id.Skill_compositions Block_id.Temporal_summary
 ;;
 
+(* The recall body changes only when the set of carried memories does, so it
+   comes before the context that changes on nearly every turn. Its status line
+   names the turn, so it comes after that context and before the clock. The
+   canary measures how often each really changes; until then this is the order
+   the RFC gives (keeper-recall-reaches-the-turn, section 4.4). *)
+let test_the_recall_blocks_sit_around_the_dynamic_context () =
+  let before a b =
+    Alcotest.(check bool)
+      (Printf.sprintf "%s is assembled before %s" (Block_id.to_string a) (Block_id.to_string b))
+      true
+      (Block_id.cache_rank a < Block_id.cache_rank b)
+  in
+  before Block_id.Memory_os_recall Block_id.Recalled_memory;
+  before Block_id.Recalled_memory Block_id.Dynamic_context;
+  before Block_id.Dynamic_context Block_id.Recalled_memory_status;
+  before Block_id.Recalled_memory_status Block_id.Temporal_summary
+;;
+
 (* [Operator_note] is someone speaking mid-turn. It follows the retained Goal
    snapshot and every other block, so it stays last in the assembly. *)
 let test_the_operator_note_stays_last () =
@@ -291,6 +309,8 @@ let () =
             test_every_block_ranks_apart
         ; Alcotest.test_case "rarely changing blocks come first" `Quick
             test_rarely_changing_blocks_come_first
+        ; Alcotest.test_case "the recall blocks sit around the dynamic context" `Quick
+            test_the_recall_blocks_sit_around_the_dynamic_context
         ; Alcotest.test_case "the operator note stays last" `Quick
             test_the_operator_note_stays_last
         ] )

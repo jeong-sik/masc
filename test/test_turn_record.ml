@@ -51,6 +51,8 @@ let test_block_id_post_tool_round_classes () =
     ; (Prompt_block_id.Temporal_summary, false)
     ; (Prompt_block_id.Memory_os_recall, false)
     ; (Prompt_block_id.Librarian_working_context, false)
+    ; (Prompt_block_id.Recalled_memory, false)
+    ; (Prompt_block_id.Recalled_memory_status, false)
     ; (Prompt_block_id.Operator_note, true)
     ; (Prompt_block_id.Skill_compositions, false)
     ]
@@ -71,6 +73,15 @@ let test_block_id_post_tool_round_classes () =
         true
         (List.exists (fun (row, _) -> Prompt_block_id.equal row block) pinned))
     Prompt_block_id.all_known
+
+(* A resumed official-client session keeps the recall body it holds, so an
+   unchanged body is not sent again. The status line names its turn, so each
+   turn's line is new even when the words repeat. *)
+let test_block_id_resend_classes_of_the_recall_blocks () =
+  check bool "the recall body is not sent again when the session holds it" false
+    (Prompt_block_id.resent_when_held Prompt_block_id.Recalled_memory);
+  check bool "the recall status line is sent every resume" true
+    (Prompt_block_id.resent_when_held Prompt_block_id.Recalled_memory_status)
 
 (* ── TurnRecord codec ─────────────────────────────────── *)
 
@@ -1246,6 +1257,8 @@ let () =
         ; test_case "unknown block rejected" `Quick test_block_id_unknown_rejected
         ; test_case "post-tool round classes" `Quick
             test_block_id_post_tool_round_classes
+        ; test_case "resend classes of the recall blocks" `Quick
+            test_block_id_resend_classes_of_the_recall_blocks
         ] )
     ; ( "codec"
       , [ test_case "roundtrip" `Quick test_codec_roundtrip

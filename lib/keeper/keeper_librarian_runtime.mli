@@ -393,6 +393,57 @@ val validate_durable_proposal : durable_preparation -> Yojson.Safe.t ->
     performed. [accepted] retains the normal Memory-only answer, including its
     independent working-context result; explicit-candidate fields stay empty. *)
 
+(** {1 Durable message-floor steps}
+
+    One question of the durable message floor (RFC librarian-durable-message-floor).
+    It is the question the Runtime floor asks for the same message: the same
+    prompt with the working state so far and the unread messages in its
+    continuity slot, answered under the schema that requires a nonblank working
+    state. A durable step freezes the policy and prompt resolutions as any
+    durable question does, so a restored step renders the bytes it was sent. *)
+type durable_step_context = {
+  previous_state : string option;
+  unread_messages : Keeper_librarian_unread.t list;
+}
+type durable_step_preparation = {
+  context : durable_step_context;
+  preparation : durable_preparation;
+      (** [preparation.source_input] is the question's input with its working
+          context cleared, as the Runtime floor clears it. *)
+}
+val prepare_durable_step : now:float -> context:durable_step_context -> Keeper_librarian.input ->
+  (durable_step_preparation, string) result
+(** Resolve the policy and both prompt assets once, on the caller fiber, for one
+    floor question. [input] is the question as {!Keeper_librarian_message_floor.Machine}
+    asks it. *)
+val validate_durable_step_preparation : durable_step_preparation -> (unit, string) result
+(** Pure restoration check: the captured input holds no working context, and the
+    substitutions, rendered prompt and continuity schema match the input,
+    context and retained resolutions. No environment or prompt lookup. *)
+val restore_durable_step_preparation : context:durable_step_context ->
+  source_input:Keeper_librarian.input -> parsing_now:float -> policy:durable_policy ->
+  rule_prompt:Prompt_registry.prompt_resolution -> prompt:Prompt_registry.prompt_resolution ->
+  output_schema:Yojson.Safe.t -> (durable_step_preparation, string) result
+(** Render the substitutions and prompt again from the captured input, context
+    and retained resolutions, then {!validate_durable_step_preparation}. *)
+type durable_step_proposal = private {
+  proposal : durable_proposal;
+      (** The Memory answer as a durable pass reads it, parsed against the
+          step's input. *)
+  working_state : string;
+}
+val validate_durable_step_proposal : durable_step_preparation -> Yojson.Safe.t ->
+  (durable_step_proposal, durable_proposal_error) result
+(** Check the restored preparation, parse the raw Memory answer against the
+    step's input at the frozen parsing time, and require a nonblank working
+    state. No provider, gate judgment or Memory write. *)
+val durable_memory_step : run_id:string -> durable_step_preparation -> durable_step_proposal ->
+  absorb_gate:Keeper_librarian_absorb_gate.run_result -> (memory_step, string) result
+(** The gated decision a retained step stands for, in the form the ordered
+    Memory plan and program take. The caller supplies the gate's judgment of this
+    step's proposal. A failed judgment, or a blank [run_id], is an error and no
+    decision. *)
+
 (** Shared original explicit-candidate preparation and complete validation.
     These ports perform no provider call or Memory/queue mutation. *)
 type admission_policy = {

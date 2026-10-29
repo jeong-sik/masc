@@ -377,17 +377,24 @@ let validate_resolution (resolution : Prompt_registry.prompt_resolution) =
     && resolution.file_exists=Option.is_some resolution.file_value
     && resolution.has_override=Option.is_some resolution.override_value
   then Ok () else Error "Original Librarian prompt resolution is inconsistent"
-let durable_substitutions ~(policy:durable_policy) ~rule_prompt ~prompt source_input =
+(* [continuity] is the document a floor step carries in the prompt's continuity
+   slot, the same one the Runtime floor's Volatile_memory_pass renders there.
+   Without it the slot keeps the placeholder every durable question has. *)
+let durable_substitutions ?continuity ~(policy:durable_policy) ~rule_prompt ~prompt source_input =
   let open Result.Syntax in
   let* rule=Prompt_registry.render_resolved_prompt_template
     Prompt_names.librarian_working_contexts_rule rule_prompt [] in
-  let variables=(working_contexts_rule_variable,String.trim rule)
-    ::Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
-      ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap
-      source_input in
+  let base=Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
+    ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap
+    source_input in
+  let base=match continuity with
+    | None -> base
+    | Some continuity ->
+      ("continuity",Yojson.Safe.to_string continuity)::List.remove_assoc "continuity" base in
+  let variables=(working_contexts_rule_variable,String.trim rule)::base in
   let+ rendered=Prompt_registry.render_resolved_prompt_template Prompt_names.librarian prompt variables in
   rule,variables,rendered
-let validate_durable_preparation (preparation : durable_preparation) =
+let check_durable_preparation ?continuity ~expected_schema (preparation : durable_preparation) =
   let open Result.Syntax in
   let policy=preparation.policy in
   let* ()=if Float.is_finite preparation.parsing_now && preparation.parsing_now>=0.
@@ -396,23 +403,25 @@ let validate_durable_preparation (preparation : durable_preparation) =
     then Ok () else Error "Original history Memory advisory limits are invalid" in
   let* ()=validate_resolution preparation.rule_prompt in
   let* ()=validate_resolution preparation.prompt in
-  let* rule,variables,rendered=durable_substitutions ~policy ~rule_prompt:preparation.rule_prompt
+  let* rule,variables,rendered=durable_substitutions ?continuity ~policy ~rule_prompt:preparation.rule_prompt
     ~prompt:preparation.prompt preparation.source_input in
   let* ()=if preparation.variables=variables then Ok ()
     else Error "Original history Memory substitutions differ from captured input" in
   let* actual_schema=Lane_addon_action.canonical preparation.output_schema in
-  let* expected_schema=Lane_addon_action.canonical
-    Keeper_structured_output_schema.librarian_current_output_schema in
+  let* expected_schema=Lane_addon_action.canonical expected_schema in
   if String.trim rule<>"" && String.trim rendered<>""
     && preparation.rendered_prompt=rendered && Yojson.Safe.equal actual_schema expected_schema
   then Ok () else Error "Original history Memory prompt/schema differs from captured templates and input"
+let validate_durable_preparation preparation =
+  check_durable_preparation
+    ~expected_schema:Keeper_structured_output_schema.librarian_current_output_schema preparation
 let restore_durable_preparation ~source_input ~parsing_now ~policy ~rule_prompt ~prompt ~output_schema =
   let open Result.Syntax in
   let* _rule,variables,rendered_prompt=durable_substitutions ~policy ~rule_prompt ~prompt source_input in
   let preparation : durable_preparation = {source_input;parsing_now;policy;rule_prompt;prompt;
     variables;rendered_prompt;output_schema} in
   let+ ()=validate_durable_preparation preparation in preparation
-let prepare_durable ~now source_input =
+let prepare_durable_with ?continuity ~output_schema ~now source_input =
   let open Result.Syntax in
   let policy : durable_policy = {
     facts_max_bytes=Env_config.KeeperMemoryOs.facts_max_bytes ();
@@ -420,14 +429,59 @@ let prepare_durable ~now source_input =
     facts_per_category_cap=Env_config.KeeperMemoryOs.facts_per_category_cap ()} in
   let* rule_prompt,rule=Prompt_registry.resolve_and_render_prompt_template
     Prompt_names.librarian_working_contexts_rule [] in
-  let variables=(working_contexts_rule_variable,String.trim rule)
-    ::Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
-      ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap source_input in
+  let base=Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
+    ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap source_input in
+  let base=match continuity with
+    | None -> base
+    | Some continuity ->
+      ("continuity",Yojson.Safe.to_string continuity)::List.remove_assoc "continuity" base in
+  let variables=(working_contexts_rule_variable,String.trim rule)::base in
   let* prompt,rendered_prompt=Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian variables in
   let preparation : durable_preparation = {source_input;parsing_now=now;policy;rule_prompt;prompt;
-    variables;rendered_prompt;output_schema=Keeper_structured_output_schema.librarian_current_output_schema} in
-  let* ()=validate_durable_preparation preparation in
+    variables;rendered_prompt;output_schema} in
+  let* ()=check_durable_preparation ?continuity ~expected_schema:output_schema preparation in
   Ok preparation
+let prepare_durable ~now source_input =
+  prepare_durable_with
+    ~output_schema:Keeper_structured_output_schema.librarian_current_output_schema ~now source_input
+(* One question of the durable message floor. It is the question the Runtime
+   floor asks for the same message (Volatile_memory_pass): the same prompt,
+   with the working state so far and the unread messages in the continuity slot,
+   and the schema that requires a nonblank working state. Only the policy and
+   the prompt resolutions are frozen here, as for any durable question, so a
+   restored step renders the bytes it was sent. *)
+type durable_step_context = {
+  previous_state : string option;
+  unread_messages : Keeper_librarian_unread.t list;
+}
+type durable_step_preparation = {context : durable_step_context; preparation : durable_preparation}
+let durable_step_continuity (context : durable_step_context) =
+  `Assoc ["previous_working_state",
+    (match context.previous_state with None -> `Null | Some state -> `String state);
+    "unread_messages", Keeper_librarian_unread.list_to_json context.unread_messages]
+let validate_durable_step_preparation (step : durable_step_preparation) =
+  let open Result.Syntax in
+  let* ()=if step.preparation.source_input.working_context=Keeper_librarian_context.empty then Ok ()
+    else Error "Original history floor step must not carry a working context" in
+  check_durable_preparation ~continuity:(durable_step_continuity step.context)
+    ~expected_schema:Keeper_structured_output_schema.librarian_continuity_output_schema step.preparation
+let restore_durable_step_preparation ~context ~source_input ~parsing_now ~policy ~rule_prompt ~prompt
+    ~output_schema =
+  let open Result.Syntax in
+  let continuity=durable_step_continuity context in
+  let* _rule,variables,rendered_prompt=durable_substitutions ~continuity ~policy ~rule_prompt ~prompt
+    source_input in
+  let step={context;preparation={source_input;parsing_now;policy;rule_prompt;prompt;variables;
+    rendered_prompt;output_schema}} in
+  let+ ()=validate_durable_step_preparation step in step
+let prepare_durable_step ~now ~context input =
+  let open Result.Syntax in
+  let source_input=input_for_pass
+    (Volatile_memory_pass (context.previous_state,context.unread_messages)) input in
+  let* preparation=prepare_durable_with ~continuity:(durable_step_continuity context)
+    ~output_schema:Keeper_structured_output_schema.librarian_continuity_output_schema ~now source_input in
+  let step={context;preparation} in
+  let+ ()=validate_durable_step_preparation step in step
 let render_librarian_prompt input =
   prepare_durable ~now:(Time_compat.now ()) input
   |> Result.map (fun (preparation : durable_preparation) -> preparation.rendered_prompt)
@@ -860,6 +914,33 @@ let validate_durable_proposal preparation output =
   let open Result.Syntax in
   let* ()=validate_durable_preparation preparation |> Result.map_error (fun detail -> Preparation_invalid detail) in
   parse_durable_proposal preparation output |> Result.map_error (fun error -> Proposal_invalid error)
+
+type durable_step_proposal = {proposal : durable_proposal;working_state : string}
+let validate_durable_step_proposal (step : durable_step_preparation) output =
+  let open Result.Syntax in
+  let invalid error=Proposal_invalid error in
+  let input=step.preparation.source_input in
+  let* ()=validate_durable_step_preparation step |> Result.map_error (fun detail -> Preparation_invalid detail) in
+  let* accepted=validate_selection ~now:step.preparation.parsing_now input output |> Result.map_error invalid in
+  let+ working_state=Keeper_librarian.continuity_working_state_of_json_result output |> Result.map_error invalid in
+  {proposal={accepted;absorption=absorption_input input accepted.selection};working_state}
+
+(* The gated decision a durable floor step stands for, built from what the
+   host retained: the validated answer and the gate's judgment of it. This is
+   the same record the Runtime floor builds after its own gate, so the ordered
+   Memory plan and program take it unchanged. A failed judgment is no decision. *)
+let durable_memory_step ~run_id (step : durable_step_preparation) (proposal : durable_step_proposal)
+    ~absorb_gate =
+  let selection=proposal.proposal.accepted.selection in
+  if String.trim run_id="" then Error "Original history floor step needs a run identity"
+  else match Keeper_librarian_absorb_gate.failure_detail ~absorbed:selection.absorbed absorb_gate with
+    | Some reason -> Error reason
+    | None ->
+      Ok {run_id;source_input=step.preparation.source_input;prompt_variables=step.preparation.variables;
+        rendered_prompt=step.preparation.rendered_prompt;absorb_gate;
+        new_claims=Keeper_librarian_absorb_gate.without_copies absorb_gate selection.new_claims;
+        dropped=selection.dropped;absorbed=Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate;
+        revisions=selection.revisions;working_state=proposal.working_state}
 
 (* The accepted answer of each pass. A context-only answer carries no
    selection, so nothing downstream can reach a Memory field it never asked

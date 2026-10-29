@@ -6911,3 +6911,4 @@
 (include stanzas/test_endpoint_job_launch.inc)
 
 (include stanzas/test_endpoint_job_owner.inc)
+(include stanzas/test_endpoint_job_peer.inc)

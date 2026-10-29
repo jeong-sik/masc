@@ -318,6 +318,45 @@ let test_multiple_hooks_all_fire () =
     Alcotest.(check bool) "after fired" true !after_fired)
 ;;
 
+(* A response enters history before [after_turn]: when its media cannot be
+   kept, the turn fails with the typed media error and no hook sees a
+   response that history could not hold. *)
+let test_after_turn_skips_a_response_history_cannot_hold () =
+  let undecodable_image _conn _req body =
+    let _ = Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) in
+    Cohttp_eio.Server.respond_string ~status:`OK
+      ~body:{|{"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"image/png","data":"abc"}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}|}
+      ()
+  in
+  with_mock_server ~port:18853 undecodable_image (fun ~sw ~net ~base_url ->
+    let after_fired = ref false in
+    let options =
+      { Agent.default_options with
+        provider_config =
+          Some
+            (Llm_provider.Provider_config.make ~kind:Llm_provider.Provider_config.Gemini
+               ~model_id:"gemini-test" ~base_url ~api_key:"test-key" ~request_path:"" ())
+      ; hooks =
+          { Hooks.empty with
+            after_turn =
+              Some
+                (fun _ ->
+                  after_fired := true;
+                  Hooks.Continue)
+          }
+      }
+    in
+    let agent =
+      Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
+        ~config:(default_config ~model:"gemini-test") ~net ~options ()
+    in
+    (match Agent.run ~sw agent "draw" with
+     | Error (Error.Media (Agent_core.History.Invalid_base64 _)) -> ()
+     | Error error -> Alcotest.failf "expected the media error, got %s" (Error.to_string error)
+     | Ok _ -> Alcotest.fail "a response history cannot hold must fail the turn");
+    Alcotest.(check bool) "after_turn did not see the response" false !after_fired)
+;;
+
 (* ── context_injector tests ──────────────────────────── *)
 
 let test_context_injector_adds_data () =
@@ -373,7 +412,10 @@ let () =
       , [ test_case "receives tool output" `Quick test_post_tool_receives_output ] )
     ; "on_stop", [ test_case "fires on completion" `Quick test_on_stop_fires ]
     ; ( "chaining"
-      , [ test_case "multiple hooks all fire" `Quick test_multiple_hooks_all_fire ] )
+      , [ test_case "multiple hooks all fire" `Quick test_multiple_hooks_all_fire
+        ; test_case "after_turn skips a response history cannot hold" `Quick
+            test_after_turn_skips_a_response_history_cannot_hold
+        ] )
     ; ( "context_injector"
       , [ test_case "adds data after tool use" `Quick test_context_injector_adds_data ] )
     ]

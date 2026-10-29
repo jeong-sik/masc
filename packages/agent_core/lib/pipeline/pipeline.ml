@@ -267,6 +267,19 @@ let stage_collect
            ~response_model:(Some response.model)
            ~response_usage:response.usage
        in
+       (* The response enters history here, before [after_turn]: its media go
+          to the store, so a hook only sees a response that history can hold. *)
+       let* assistant_message =
+         match Types.assistant_message_of_response response with
+         | Ok message ->
+           History.of_wire_message agent.media_store message
+           |> Result.map_error (fun error -> Error.Media error)
+         | Error error ->
+           Error
+             (Error.Internal
+                ("assistant response has invalid reasoning provenance: "
+                 ^ Types.show_assistant_message_error error))
+       in
        let after_decision =
          invoke_hook_with_trace
            agent
@@ -296,18 +309,6 @@ let stage_collect
                 ~hook_name:"after_turn"
                 ~stage:Hooks.After_turn
                 ~decision)
-       in
-       let* assistant_message =
-         match Types.assistant_message_of_response response with
-         | Ok message ->
-           (* The response enters history here: its media goes to the store. *)
-           History.of_wire_message agent.media_store message
-           |> Result.map_error (fun error -> Error.Media error)
-         | Error error ->
-           Error
-             (Error.Internal
-                ("assistant response has invalid reasoning provenance: "
-                 ^ Types.show_assistant_message_error error))
        in
        let binds_context =
          List.exists (fun (block : Llm_provider.Types.content_block) ->

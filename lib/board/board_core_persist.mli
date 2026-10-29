@@ -108,7 +108,7 @@ val create_post :
   (post, board_error) result
 
 type create_post_once_result =
-  | Post_created of post
+  | Post_created of post_creation
   | Post_already_present of post
 
 val create_post_once_by_fusion_run_id :
@@ -154,8 +154,15 @@ val create_post_with_audience :
     create and the existing [meta_json] is preserved independently, so editing
     cannot silently drop metadata.
     [post_kind]/[visibility]/[hearth] are preserved. *)
-(** Returns the persisted post and whether its normalized title, body or author
-    changed, compared under the store lock. *)
+(** What an edit stored: the post as saved, the audience recorded with the saved
+    text, and whether the normalized title, body or author changed, compared
+    under the store lock. *)
+type post_edit =
+  { edited : post
+  ; recorded_audience : audience
+  ; content_changed : bool
+  }
+
 val update_post_with_outcome :
   store ->
   post_id:string ->
@@ -165,7 +172,7 @@ val update_post_with_outcome :
   ?body:string ->
   ?new_author:string ->
   unit ->
-  (post * bool, board_error) result
+  (post_edit, board_error) result
 
 (** RFC-0233 §7: maintain the [posts_by_turn_ref] / [posts_by_run_id]
     secondary indexes from a post's [origin].  Idempotent; a [None] origin is

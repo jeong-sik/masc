@@ -29,6 +29,9 @@ let with_workspace f =
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = Filename.temp_dir "keeper-board-recorded" "" in
+  (* A variable cannot be unset from OCaml, so one that was unset is put back
+     empty, which the base path reader takes as unset. *)
+  let previous_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
   Unix.putenv "MASC_BASE_PATH" base_path;
   let config = Workspace.default_config base_path in
   Fun.protect
@@ -36,7 +39,9 @@ let with_workspace f =
       Keeper_registry.For_testing.clear ();
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
-      remove_tree base_path)
+      Unix.putenv "MASC_BASE_PATH" (Option.value previous_base_path ~default:"");
+      (* A removal that fails must not hide the failure of the test. *)
+      try remove_tree base_path with Sys_error _ | Unix.Unix_error _ -> ())
     (fun () ->
        ignore (Workspace.init config ~agent_name:None : string);
        Board_dispatch.reset_for_test ();
@@ -206,6 +211,109 @@ let test_scan_follows_the_recorded_audience () =
     (board_event_failures () -. failures_before)
 ;;
 
+(* A post written before the audience was recorded. The scan reaches it only
+   through a signal that is newer than its cursor. A new comment or vote moves
+   the post's [updated_at] and lists it again, but the post's own signal needs
+   a content time past the cursor, so the missing audience is never read and
+   nothing is counted as a failure. *)
+let test_an_old_post_without_an_audience_costs_nothing () =
+  with_workspace
+  @@ fun config ->
+  let meta = register_keeper config "scanreader" in
+  let name = meta.Keeper_meta_contract.name in
+  let base_path = config.Workspace.base_path in
+  let old_post =
+    get
+      (Board_dispatch.create_post
+         ~author:"external-author"
+         ~content:"@scanreader older row"
+         ~title:"note"
+         ~body:"@scanreader older row"
+         ~visibility:Board.Internal
+         ~post_kind:Board.Human_post
+         ())
+  in
+  record_audiences [ post_id old_post, None ];
+  let scan () = Keeper_world_observation.collect_board_events ~base_path ~meta in
+  let _events, listed, _mentions = scan () in
+  check int "the first scan only starts the cursor" 0 listed;
+  Unix.sleepf 0.01;
+  let failures_before = board_event_failures () in
+  ignore
+    (get
+       (Board_dispatch.add_comment
+          ~post_id:(post_id old_post)
+          ~author:"external-author"
+          ~content:"@scanreader please look"
+          ()));
+  let _events, listed, mentions = scan () in
+  check int "a new comment lists the old post again" 1 listed;
+  check int "the comment is delivered from its own audience" 1 mentions;
+  check (list string) "the delivery belongs to the old post" [ post_id old_post ]
+    (queued_post_ids config name);
+  Unix.sleepf 0.01;
+  ignore
+    (get
+       (Board_dispatch.vote
+          ~voter:"someone"
+          ~post_id:(post_id old_post)
+          ~direction:Board.Up));
+  let _events, listed, mentions = scan () in
+  check int "a vote lists the old post again" 1 listed;
+  check int "a vote delivers nothing" 0 mentions;
+  check
+    (float 0.)
+    "neither scan counted the missing audience as a failure"
+    0.0
+    (board_event_failures () -. failures_before)
+;;
+
+(* When the missing audience is read, it is the post's own signal that is
+   refused. The comments on the same post are separate signals and still go
+   through. *)
+let test_a_post_without_an_audience_does_not_stop_its_comments () =
+  with_workspace
+  @@ fun config ->
+  let meta = register_keeper config "scanreader" in
+  let post =
+    get
+      (Board_dispatch.create_post
+         ~author:"external-author"
+         ~content:"plain note"
+         ~title:"note"
+         ~body:"plain note"
+         ~visibility:Board.Internal
+         ~post_kind:Board.Human_post
+         ())
+  in
+  ignore
+    (get
+       (Board_dispatch.add_comment
+          ~post_id:(post_id post)
+          ~author:"external-author"
+          ~content:"@scanreader please look"
+          ()));
+  record_audiences [ post_id post, None ];
+  Keeper_registry.set_board_cursor
+    ~base_path:config.Workspace.base_path
+    meta.Keeper_meta_contract.name
+    1.0
+    None;
+  let failures_before = board_event_failures () in
+  let _events, listed, mentions =
+    Keeper_world_observation.collect_board_events
+      ~base_path:config.Workspace.base_path
+      ~meta
+  in
+  check int "the post is replayed once" 1 listed;
+  check int "its comment is delivered" 1 mentions;
+  check
+    (float 0.)
+    "the post's own signal is counted as a failure"
+    1.0
+    (board_event_failures () -. failures_before)
+;;
+
 let () =
   run
     "keeper Board recorded audience"
@@ -214,6 +322,14 @@ let () =
             "follows the recorded audience, not the text"
             `Quick
             test_scan_follows_the_recorded_audience
+        ; test_case
+            "an old post without an audience costs nothing"
+            `Quick
+            test_an_old_post_without_an_audience_costs_nothing
+        ; test_case
+            "a post without an audience does not stop its comments"
+            `Quick
+            test_a_post_without_an_audience_does_not_stop_its_comments
         ] )
     ]
 ;;

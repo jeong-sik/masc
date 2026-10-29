@@ -2372,6 +2372,43 @@ let test_system_post_with_address_text_is_written_unaddressed () =
       "discoverable"
       (audience_label addressed.Board_dispatch.audience)
 
+(* The Fusion sink creates its post once per run, as an unlisted system post
+   whose text names a Keeper. The signal carries the audience that creation
+   recorded, and an exact replay emits nothing. *)
+let test_fusion_creation_emits_the_recorded_audience () =
+  let seen = ref [] in
+  Board_dispatch.set_board_signal_hook (fun addressed -> seen := addressed :: !seen);
+  let origin : Board.post_origin =
+    { turn_ref = None
+    ; source = Some "fusion"
+    ; fusion_run_id = Some "run-audience"
+    ; fusion_producer = Some "fusion-keeper"
+    }
+  in
+  let create () =
+    Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-audience"
+      ~author:"fusion-keeper" ~content:"fusion result headline @first-reader"
+      ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:1 ~origin ()
+  in
+  let created =
+    match create () with
+    | Ok (Board.Post_created creation) -> creation
+    | Ok (Board.Post_already_present _) -> Alcotest.fail "the first creation was a replay"
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  Alcotest.(check (list string))
+    "the first creation emits one signal, scoped to thread participants"
+    [ "thread_participants" ]
+    (List.map (fun (a : Board_dispatch.addressed_board_signal) ->
+         audience_label a.Board_dispatch.audience) !seen);
+  Alcotest.(check bool) "the signal carries the audience the post recorded" true
+    (created.post.audience = Some created.audience);
+  (match create () with
+   | Ok (Board.Post_already_present _) -> ()
+   | Ok (Board.Post_created _) -> Alcotest.fail "an exact replay created a second post"
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check int) "an exact replay emits nothing" 1 (List.length !seen)
+
 let test_post_audience_survives_edit_and_restart () =
   let get = function
     | Ok post -> post
@@ -2920,6 +2957,8 @@ let () =
         (with_eio test_system_post_text_is_not_an_address);
       Alcotest.test_case "system post with address text is written unaddressed" `Quick
         (with_eio test_system_post_with_address_text_is_written_unaddressed);
+      Alcotest.test_case "fusion creation emits the recorded audience" `Quick
+        (with_eio test_fusion_creation_emits_the_recorded_audience);
       Alcotest.test_case "post audience survives edit and restart" `Quick
         (with_eio test_post_audience_survives_edit_and_restart);
       Alcotest.test_case "target case is identity-level" `Quick

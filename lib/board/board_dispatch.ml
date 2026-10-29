@@ -395,15 +395,8 @@ let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
        Board.create_post_once_by_fusion_run_id store ~fusion_run_id ~author
          ~content ~post_kind ?meta_json ~visibility ~ttl_hours ~origin ()
      with
-     | Ok (Board.Post_created post as outcome) ->
-       (match post.audience with
-        | Some audience -> emit_post_created ~audience post
-        | None ->
-          (* Unreachable: [create_post_once_by_fusion_run_id] commits through
-             [create_post], which records the audience it validated. *)
-          Log.BoardLog.error
-            "post-created signal not emitted: post %s records no audience"
-            (Board.Post_id.to_string post.id));
+     | Ok (Board.Post_created creation as outcome) ->
+       emit_post_created ~audience:creation.audience creation.post;
        Ok outcome
      | Ok (Board.Post_already_present _ as outcome) -> Ok outcome
      | Error _ as error -> error)
@@ -414,32 +407,23 @@ let update_post ~post_id ~editor ~content ?title ?body ?new_author () =
       match Board.update_post_with_outcome store ~post_id ~editor ~content ?title
         ?body ?new_author () with
       | Error _ as error -> error
-      | Ok (post, false) ->
+      | Ok { edited = post; content_changed = false; recorded_audience = _ } ->
         emit_board_write ();
         Ok post
-      | Ok (post, true) ->
+      | Ok { edited = post; content_changed = true; recorded_audience = audience } ->
         emit_board_write ();
-        (match post.audience with
-         | Some audience ->
-           emit_board_signal
-             { signal =
-                 { kind = Board_post_updated { content_updated_at = post.content_updated_at }
-                 ; post_id = Board.Post_id.to_string post.id
-                 ; author = Board.Agent_id.to_string post.author
-                 ; title = post.title
-                 ; content = post.body
-                 ; hearth = post.hearth
-                 ; updated_at = Some post.updated_at
-                 }
-             ; audience
-             }
-         | None ->
-           (* Unreachable: [update_post_with_outcome] records the audience of
-              the text it stored. The edit is committed either way, so the
-              caller gets the post. *)
-           Log.BoardLog.error
-             "post-updated signal not emitted: post %s records no audience"
-             (Board.Post_id.to_string post.id));
+        emit_board_signal
+          { signal =
+              { kind = Board_post_updated { content_updated_at = post.content_updated_at }
+              ; post_id = Board.Post_id.to_string post.id
+              ; author = Board.Agent_id.to_string post.author
+              ; title = post.title
+              ; content = post.body
+              ; hearth = post.hearth
+              ; updated_at = Some post.updated_at
+              }
+          ; audience
+          };
         Ok post
 
 let read_post ~post_id =

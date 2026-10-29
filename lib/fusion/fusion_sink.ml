@@ -675,7 +675,7 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
       with
       | Error (Board.Already_exists detail) ->
         Error (Printf.sprintf "Fusion Board projection identity conflict: %s" detail)
-      | Ok (Board.Post_created post | Board.Post_already_present post) ->
+      | Ok (Board.Post_created { post; _ } | Board.Post_already_present post) ->
         Ok (Ok post)
       | Error
           (( Board.Invalid_id _

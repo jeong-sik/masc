@@ -11670,6 +11670,10 @@ let take_keeper_log_read state request result =
         clear_keeper_logs state;
         None
 
+(* The Keeper detail view on its Terminal tab. *)
+let keeper_terminal_on_screen state =
+  state.view = Keepers Keeper_detail && state.detail_tab = Detail_terminal
+
 let keeper_execute_target state =
   match state.view with
   | Keepers Keeper_logs -> List.nth_opt state.keepers state.keeper_cursor
@@ -11741,14 +11745,16 @@ let keeper_terminal_live state =
     Some { ktf_key = key; ktf_reading = reading; ktf_observed_at = observed_at }
   | (Some _ | None), (Masc_tui_fetched.Absent | Loading | Failed _ | Ready _ | Stale _) -> None
 
-(* The Terminal tab's view, if it belongs to the Keeper on screen. A hold kept
-   for another Keeper, or after the workspace stopped being confirmed, reads as
-   following: what it froze is not this Keeper's output. *)
+(* The Terminal tab's view, if the tab is on screen for the Keeper it was held
+   for. A hold kept for another Keeper, kept while another view was open (the
+   logs view reads the same output), or kept after the workspace stopped being
+   confirmed, reads as following: what it froze is not what is on screen. *)
 let keeper_terminal_hold state =
   match state.keeper_terminal, state.workspace_identity, keeper_execute_target state with
   | Masc_tui_execute_terminal.Paused { frozen; _ }, Workspace_identity_match, Some keeper
-    when keeper_log_equal_key frozen.ktf_key
-        (keeper_log_key state ~limit:frozen.ktf_key.klk_limit keeper) ->
+    when keeper_terminal_on_screen state
+         && keeper_log_equal_key frozen.ktf_key
+              (keeper_log_key state ~limit:frozen.ktf_key.klk_limit keeper) ->
     state.keeper_terminal
   | (Masc_tui_execute_terminal.Paused _ | Masc_tui_execute_terminal.Following),
     (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _

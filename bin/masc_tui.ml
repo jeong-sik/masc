@@ -15353,9 +15353,6 @@ let keeper_log_window = 200
    build means seeing where it began, and a build prints more than 200 rows. *)
 let keeper_terminal_window = 500
 
-let keeper_terminal_on_screen state =
-  state.view = Keepers Keeper_detail && state.detail_tab = Detail_terminal
-
 (* The Execute output both views read is one reading with one key, and the
    key holds its row limit: the view on screen says which limit it asks for. *)
 let keeper_execute_window state =

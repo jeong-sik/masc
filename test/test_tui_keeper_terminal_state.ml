@@ -135,6 +135,17 @@ let test_leaving_the_tab_ends_the_hold () =
   state.detail_tab <- Tui_types.Detail_info;
   check following "another tab" Terminal.Following (hold state)
 
+(* The logs view reads the same Execute output for the same Keeper, so it is
+   the one place a hold could survive the tab by keeping its key. *)
+let test_the_logs_view_does_not_keep_the_hold_either () =
+  let state = state_with_reading () in
+  Tui_types.move_keeper_terminal state ~by:3;
+  state.view <- Tui_types.Keepers Keeper_logs;
+  check following "the logs view is not the Terminal" Terminal.Following (hold state);
+  Tui_types.reconcile_keeper_terminal state;
+  state.view <- Tui_types.Keepers Keeper_detail;
+  check following "coming back opens at the bottom" Terminal.Following (hold state)
+
 let test_a_hold_does_not_outlive_the_workspace_it_was_read_from () =
   let state = state_with_reading () in
   Tui_types.move_keeper_terminal state ~by:3;
@@ -165,6 +176,8 @@ let () =
             test_a_hold_is_for_the_keeper_it_was_taken_for
         ; Alcotest.test_case "leaving the tab ends the hold" `Quick
             test_leaving_the_tab_ends_the_hold
+        ; Alcotest.test_case "the logs view does not keep the hold either" `Quick
+            test_the_logs_view_does_not_keep_the_hold_either
         ; Alcotest.test_case "a hold does not outlive the workspace it was read from" `Quick
             test_a_hold_does_not_outlive_the_workspace_it_was_read_from
         ; Alcotest.test_case "scrolling before anything was read holds nothing" `Quick

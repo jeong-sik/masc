@@ -1116,9 +1116,11 @@ command, not a quoted shell line to paste.
 
 While the tab is open the TUI reads the newest 500 rows once a second, and the
 view follows them. The row under the output says `following`, how many
-commands are active (`closed` when none is), and when it was read. When
-commands overlap their rows interleave, and each row then starts with its
-stream number as `[3] `.
+commands are active (`closed` when none is and the last one ended,
+`state unknown` when none is active and the server has not recorded an end),
+and when it was read. When commands overlap their rows interleave, and each
+row then starts with its stream number as `[3] `, or `[?] ` for a row the
+server did not attribute to a stream.
 
 `k`, `PgUp`, `Home`, or the mouse wheel stops following and holds the screen as
 it was, so output that arrives meanwhile does not move the rows you are

@@ -1428,9 +1428,16 @@ let test_purge_keeps_the_librarian_position_and_every_message () =
    | Ok _ -> fail "an apply over an unread atom was allowed");
   check string "a refused apply leaves the checkpoint" original (Fs_compat.load_file canonical);
   write_position ~end_atom:count;
+  (* The fixture's save archived the source head; it names the content the
+     purge removes, so the apply deletes it. *)
+  check (list string) "the source head is archived"
+    [ Store.agent_core_history_snapshot_id_of_checkpoint checkpoint ]
+    (Store.list_agent_core_history_files ~session_dir);
   (match Checkpoints.purge_current config ~keeper_name ~apply:true with
    | Ok result ->
      check bool "applied" true result.applied;
+     check (list string) "the apply leaves no history archive entry" []
+       (Store.list_agent_core_history_files ~session_dir);
      (* The backup is the source head with its objects, at the session's
         paths, so a copy over the session dir puts the source back. *)
      (match result.backup_path with

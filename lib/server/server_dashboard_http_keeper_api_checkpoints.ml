@@ -587,6 +587,15 @@ let purge_current_unlocked config ~keeper_name ~apply =
                           (Purge_install_failed
                              (checkpoint_cas_error_to_string cause))
                       | Installed installed ->
+                        (* The archive entries are heads of the checkpoint
+                           before the purge; while one is there, the object
+                           sweep keeps what the purge removed (RFC-0476 §3.3). *)
+                        let history_warnings =
+                          match Keeper_checkpoint_store.delete_all_agent_core_history_files ~session_dir with
+                          | Error detail -> [ "the history archive was not removed: " ^ detail ]
+                          | Ok { removed = _; left } ->
+                            List.map (fun entry -> "history archive entry kept: " ^ entry) left
+                        in
                         (* The checkpoint is on disk; the position follows it
                            (RFC librarian-lifecycle §10-2). A sound purge keeps
                            the history's end, so this writes back the position
@@ -636,6 +645,7 @@ let purge_current_unlocked config ~keeper_name ~apply =
                                  List.map
                                    checkpoint_installation_auxiliary_to_string
                                    installed.auxiliary
+                                 @ history_warnings
                              }))))))
 ;;
 

@@ -854,7 +854,19 @@ let test_cli_workspace ?(linked_worktree = false) () =
         "a refused apply writes nothing"
         before_refused (workspace_contents owner_root);
       write_progress ~end_atom:atoms;
+      (* An archive entry of the checkpoint before the purge names the
+         content the purge removes; the apply deletes it. *)
+      let archived =
+        Masc.Keeper_checkpoint_store.agent_core_history_snapshot_id_of_checkpoint
+          { checkpoint with created_at = checkpoint.created_at -. 60. }
+      in
+      Out_channel.with_open_bin (Filename.concat session_dir archived) (fun channel ->
+        output_string channel original);
+      Alcotest.(check (list string)) "the archive entry is there before the apply" [ archived ]
+        (Masc.Keeper_checkpoint_store.list_agent_core_history_files ~session_dir);
       run_cli [ "--base"; base_path; "--apply" ];
+      Alcotest.(check (list string)) "the apply leaves no history archive entry" []
+        (Masc.Keeper_checkpoint_store.list_agent_core_history_files ~session_dir);
       let backup_dirs =
         Sys.readdir runtime_root |> Array.to_list
         |> List.filter (String.starts_with

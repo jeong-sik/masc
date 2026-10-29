@@ -30,7 +30,7 @@
 # The script vendors ONLY the shim's own sources (lib/exec_ssh_protocol,
 # lib/exec_shim, bin/masc_exec_shim.ml) into a scratch dune project, so the
 # container never needs the full masc dependency set: dune + yojson +
-# base64 only, pinned to the repo switch's versions.  The committed dune
+# base64 and uuidm only, pinned to the repo switch's versions. The committed dune
 # files are never modified; the static link flag (-ccopt -static) exists
 # only in the scratch project's dune file.
 #
@@ -84,6 +84,7 @@ image="${SHIM_BUILD_IMAGE:-ocaml/opam:alpine-3.24-ocaml-5.5}"
 dune_version=3.24.1
 yojson_version=3.0.0
 base64_version=3.5.2
+uuidm_version=0.9.10
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "build-shim-static: docker is not installed or not on PATH" >&2
@@ -139,7 +140,7 @@ cat > "$stage/src/dune" <<'EOF'
 (library
  (name exec_ssh_protocol)
  (modules exec_ssh_protocol)
- (libraries yojson base64))
+ (libraries yojson base64 uuidm))
 
 (include shim_libraries.inc)
 
@@ -162,7 +163,7 @@ docker run --rm ${platform_args[@]+"${platform_args[@]}"} \
   -v "$stage/out:/out" \
   "$image" sh -euxc "
     command -v gcc >/dev/null 2>&1 || apk add --no-cache build-base
-    opam install -y dune.$dune_version yojson.$yojson_version base64.$base64_version
+    opam install -y dune.$dune_version yojson.$yojson_version base64.$base64_version uuidm.$uuidm_version
     eval \$(opam env)
     # The image runs as the unprivileged opam user; / is not writable.
     cp -r /src \"\$HOME/work\"

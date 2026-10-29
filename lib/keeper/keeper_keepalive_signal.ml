@@ -117,36 +117,36 @@ let record_execute_output ~keeper_name ~task_id ~stdout ~stderr ~status ~streame
 let register_record_execute_output f = Atomic.set record_execute_output_callback f
 
 let record_execute_stream_chunk_callback
-    : (keeper_name:string -> stream:[ `Stdout | `Stderr ] -> string -> unit) Atomic.t
+    : (keeper_name:string -> stream_id:int -> stream:[ `Stdout | `Stderr ] -> string -> unit) Atomic.t
   =
-  Atomic.make (fun ~keeper_name:_ ~stream:_ _chunk -> ())
+  Atomic.make (fun ~keeper_name:_ ~stream_id:_ ~stream:_ _chunk -> ())
 
-let record_execute_stream_chunk ~keeper_name ~stream chunk =
-  (Atomic.get record_execute_stream_chunk_callback) ~keeper_name ~stream chunk
+let record_execute_stream_chunk ~keeper_name ~stream_id ~stream chunk =
+  (Atomic.get record_execute_stream_chunk_callback) ~keeper_name ~stream_id ~stream chunk
 ;;
 
 let register_record_execute_stream_chunk f =
   Atomic.set record_execute_stream_chunk_callback f
 
 let record_execute_stream_start_callback
-    : (keeper_name:string -> task_id:string option -> unit) Atomic.t
+    : (keeper_name:string -> stream_id:int -> task_id:string option -> command:string -> unit) Atomic.t
   =
-  Atomic.make (fun ~keeper_name:_ ~task_id:_ -> ())
+  Atomic.make (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~command:_ -> ())
 
-let record_execute_stream_start ~keeper_name ~task_id =
-  (Atomic.get record_execute_stream_start_callback) ~keeper_name ~task_id
+let record_execute_stream_start ~keeper_name ~stream_id ~task_id ~command =
+  (Atomic.get record_execute_stream_start_callback) ~keeper_name ~stream_id ~task_id ~command
 ;;
 
 let register_record_execute_stream_start f =
   Atomic.set record_execute_stream_start_callback f
 
 let record_execute_stream_end_callback
-    : (keeper_name:string -> task_id:string option -> status:Yojson.Safe.t -> unit) Atomic.t
+    : (keeper_name:string -> stream_id:int -> task_id:string option -> status:Yojson.Safe.t -> unit) Atomic.t
   =
-  Atomic.make (fun ~keeper_name:_ ~task_id:_ ~status:_ -> ())
+  Atomic.make (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~status:_ -> ())
 
-let record_execute_stream_end ~keeper_name ~task_id ~status =
-  (Atomic.get record_execute_stream_end_callback) ~keeper_name ~task_id ~status
+let record_execute_stream_end ~keeper_name ~stream_id ~task_id ~status =
+  (Atomic.get record_execute_stream_end_callback) ~keeper_name ~stream_id ~task_id ~status
 ;;
 
 let register_record_execute_stream_end f = Atomic.set record_execute_stream_end_callback f

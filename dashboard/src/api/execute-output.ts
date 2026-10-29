@@ -3,10 +3,19 @@ import { authHeaders, fetchControlPlane } from './core'
 export interface ExecuteOutputLine {
   /** This line's number in the keeper's output log. */
   seq?: number
+  stream_id?: number | null
+  task_id?: string | null
   ts_ms?: number
   stream: 'stdout' | 'stderr' | 'cmd' | 'system' | string
   text: string
   ansi?: boolean
+}
+
+export interface ExecuteOutputActiveStream {
+  stream_id: number
+  task_id: string | null
+  command: string
+  started_at: number
 }
 
 export interface ExecuteOutputStreamEvent {
@@ -17,11 +26,18 @@ export interface ExecuteOutputStreamEvent {
   task_id?: string | null
   task_count?: number
   lines?: ExecuteOutputLine[]
+  /** Retained lines omitted from this snapshot by the view's line limit. */
+  lines_omitted?: number
   line?: ExecuteOutputLine
   /** Log number of a `line`, `task_opened` or `task_closed` event. */
   seq?: number
   /** `snapshot`: newest log number the snapshot covers; live events continue after it. */
   last_seq?: number
+  /** Earlier events have already left the bounded server log when this exceeds 1. */
+  first_retained_seq?: number
+  active_count?: number
+  active_streams?: ExecuteOutputActiveStream[]
+  stream_id?: number | null
   /** `gap`: log numbers this viewer missed because the server no longer keeps them. */
   missing_from_seq?: number
   missing_to_seq?: number

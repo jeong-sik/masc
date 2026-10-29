@@ -36,7 +36,7 @@ let stub_main () =
       { name = "masc-exec-shim"
       ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
       ; capabilities = [Exec_ssh_protocol.observe_capability]
-      ; release = None });
+      ; release = None; boot_id = None });
     exit 0);
   let header = read_exact Unix.stdin 8 in
   let length = Bytes.get_int64_be (Bytes.unsafe_of_string header) 0 |> Int64.to_int in
@@ -55,14 +55,31 @@ let stub_main () =
       ["mode", `String (Exec_ssh_protocol.mode_to_string request.mode)
       ; "argv", `List (List.map (fun arg -> `String arg) request.argv)] in
   save request_log (String.concat "\n" (previous @ [Yojson.Safe.to_string row]) ^ "\n");
+  if String.equal response_kind "transport-lost" then (
+    print_string (String.make 100_000 'x');
+    flush stdout;
+    exit 255);
+  let shim_refused = List.mem response_kind
+      ["shim-refused-missing"; "shim-refused-invalid"; "shim-refused-recorded"] in
   let trailer : Exec_ssh_protocol.trailer =
-    { v = request.v; exit = Some exit_code; signal = None
-    ; timed_out = false; shim_error = None; observed_syscalls = [] } in
+    { v = request.v; exit = (if shim_refused then None else Some exit_code); signal = None
+    ; timed_out = false
+    ; shim_error = (if shim_refused then Some "fixture shim refusal" else None)
+    ; observed_syscalls = [] } in
   let serialized = match response_kind with
     | "recorded" ->
         Exec_ssh_protocol.render_trailer
           ~execution_receipt:{ mode = request.mode; boundary = Sandbox_applied } trailer
     | "missing" -> Exec_ssh_protocol.render_trailer trailer
+    | "shim-refused-missing" -> Exec_ssh_protocol.render_trailer trailer
+    | "shim-refused-recorded" ->
+        Exec_ssh_protocol.render_trailer
+          ~execution_receipt:{ mode = request.mode; boundary = Refused } trailer
+    | "shim-refused-invalid" ->
+        "\x1e" ^ Yojson.Safe.to_string (`Assoc ["masc_exec_result", `Assoc
+          ["v", `Int (Exec_ssh_protocol.int_of_major request.v)
+          ; "exit", `Null; "signal", `Null; "timed_out", `Bool false
+          ; "shim_error", `String "fixture shim refusal"; "execution_receipt", `Null]]) ^ "\x1e"
     | "invalid" ->
         "\x1e" ^ Yojson.Safe.to_string (`Assoc ["masc_exec_result", `Assoc
           ["v", `Int (Exec_ssh_protocol.int_of_major request.v)
@@ -71,7 +88,7 @@ let stub_main () =
     | _ -> failwith "unknown response fixture" in
   Printf.printf "fixture-call-%d\n" ordinal;
   Printf.eprintf "fixture-stderr-%d\n%s" ordinal serialized;
-  exit 0
+  exit (if shim_refused then 1 else 0)
 
 let with_env key value f =
   let previous = Sys.getenv_opt key in
@@ -133,12 +150,14 @@ let with_workspace ~response_kind f =
   Unix.chmod ssh 0o700;
   with_env "PATH" (bin_dir ^ ":" ^ Option.value (Sys.getenv_opt "PATH") ~default:"") @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
-  let execute ~always_allow argv =
-    let execution = Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~result_projection:Tool_output.default_model_projection
-      ~shell_ir_rewrite:Keeper_shell_tool_command.refuse_reserved_command
+  let run ?(rewrite = Keeper_shell_tool_command.refuse_reserved_command) ~always_allow argv =
+    Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:rewrite
       ~turn_sandbox_factory:None ~config ~meta:{ meta with always_allow = Some always_allow }
       ~args:(`Assoc ["argv", `List (List.map (fun arg -> `String arg) argv)
                    ; "cwd", `String cwd]) () in
+  let execute ~always_allow argv =
+    let execution = run ~always_allow argv in
     (match execution.disposition with
      | Tool_result.Completed () -> ()
      | Failed _ | Deferred _ -> fail ("Execute did not complete: " ^ execution.raw_output));
@@ -148,7 +167,7 @@ let with_workspace ~response_kind f =
       | None -> fail ("completed Execute carried no execution evidence: " ^ execution.raw_output)
     in
     (Yojson.Safe.from_string execution.raw_output, evidence) in
-  f execute (fun () -> List.map Yojson.Safe.from_string (lines request_log))
+  f execute (fun () -> List.map Yojson.Safe.from_string (lines request_log)) run base_path
 
 let field name value = Yojson.Safe.Util.member name value
 let text name value = field name value |> Yojson.Safe.Util.to_string
@@ -192,7 +211,7 @@ let assert_payload ~ordinal ~exit_code (payload, evidence) =
     ["requested_sandbox"; "via"; "sandbox_profile"]
 
 let test_each_owner_call_retains_only_its_own_receipt () =
-  with_workspace ~response_kind:"recorded" @@ fun execute requests ->
+  with_workspace ~response_kind:"recorded" @@ fun execute requests _run _base_path ->
   let first = execute ~always_allow:true ["echo"; "first"] in
   let second = execute ~always_allow:true ["echo"; "second"] in
   List.iter (fun (ordinal, exit_code, ((payload, evidence) as result)) ->
@@ -209,7 +228,7 @@ let test_each_owner_call_retains_only_its_own_receipt () =
     (List.map (text "mode") (requests ()))
 
 let test_observe_result_is_reused_by_actual_owner () =
-  with_workspace ~response_kind:"recorded" @@ fun execute requests ->
+  with_workspace ~response_kind:"recorded" @@ fun execute requests _run _base_path ->
   let (payload, evidence) as result = execute ~always_allow:false ["git"; "status"] in
   assert_payload ~ordinal:1 ~exit_code:0 result;
   let receipt = single_receipt evidence |> field "receipt" in
@@ -224,7 +243,7 @@ let test_observe_result_is_reused_by_actual_owner () =
 
 let test_unavailable_receipt_does_not_erase_process_result () =
   List.iter (fun (response_kind, reason) ->
-    with_workspace ~response_kind @@ fun execute requests ->
+    with_workspace ~response_kind @@ fun execute requests _run _base_path ->
     let (payload, evidence) as result = execute ~always_allow:true ["echo"; "first"] in
     assert_payload ~ordinal:1 ~exit_code:3 result;
     let receipt = single_receipt evidence in
@@ -238,6 +257,173 @@ let test_unavailable_receipt_does_not_erase_process_result () =
     check int "receipt absence never causes another dispatch" 1 (List.length (requests ())))
     ["missing", "peer_receipt_missing"; "invalid", "invalid_receipt"]
 
+let with_stream_end f =
+  let recorded = ref [] in
+  Keeper_keepalive_signal.register_record_execute_stream_end
+    (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~status -> recorded := status :: !recorded);
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive_signal.register_record_execute_stream_end
+        (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~status:_ -> ()))
+    (fun () -> f recorded)
+
+let test_box_observation_stream_hides_unapproved_content () =
+  with_workspace ~response_kind:"recorded" @@ fun execute _requests _run _base_path ->
+  let events = ref [] in
+  Keeper_keepalive_signal.register_record_execute_stream_start
+    (fun ~keeper_name:_ ~stream_id ~task_id:_ ~command ->
+      events := `Opened (stream_id, command) :: !events);
+  Keeper_keepalive_signal.register_record_execute_stream_end
+    (fun ~keeper_name:_ ~stream_id ~task_id:_ ~status ->
+      events := `Closed (stream_id, status) :: !events);
+  Keeper_keepalive_signal.register_record_execute_stream_chunk
+    (fun ~keeper_name:_ ~stream_id ~stream:_ chunk ->
+      events := `Chunk (stream_id, chunk) :: !events);
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive_signal.register_record_execute_stream_start
+        (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~command:_ -> ());
+      Keeper_keepalive_signal.register_record_execute_stream_end
+        (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~status:_ -> ());
+      Keeper_keepalive_signal.register_record_execute_stream_chunk
+        (fun ~keeper_name:_ ~stream_id:_ ~stream:_ _ -> ()))
+    (fun () ->
+      ignore (execute ~always_allow:false ["git"; "status"]);
+      match List.rev !events with
+      | `Opened (gate_id, "[gate observation]") :: `Closed (closed_id, status)
+        :: `Opened (effect_id, command) :: rest ->
+        check int "the observation stream closes its own id" gate_id closed_id;
+        check bool "the authorized stream has its own identity" true (gate_id <> effect_id);
+        check bool "the authorized command is visible only after the gate" true
+          (String_util.contains_substring command "git");
+        check string "only the observation phase ended" "gate_observation" (text "phase" status);
+        check string "the close does not claim effect completion" "observation_ended" (text "outcome" status);
+        check bool "the observation stream did not publish output" false
+          (List.exists (function `Chunk (id, _) -> id = gate_id | `Opened _ | `Closed _ -> false) rest);
+        check bool "authorized output is eventually visible" true
+          (List.exists (function `Chunk (id, _) -> id = effect_id | `Opened _ | `Closed _ -> false) rest)
+      | _ -> fail "observation did not open and close separately before authorization")
+
+let test_cancelled_box_observation_closes_unknown () =
+  with_workspace ~response_kind:"recorded" @@ fun _execute _requests run _base_path ->
+  with_stream_end @@ fun recorded ->
+  let command = ref None in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive_signal.register_record_execute_stream_start
+        (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~command:_ -> ()))
+    (fun () ->
+      let cancelled =
+        try
+          Eio.Cancel.sub (fun context ->
+            Keeper_keepalive_signal.register_record_execute_stream_start
+              (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~command:label ->
+                command := Some label;
+                Eio.Cancel.cancel context Exit;
+                Eio.Fiber.check ());
+            ignore (run ~always_allow:false ["git"; "status"]));
+          false
+        with Eio.Cancel.Cancelled _ -> true
+      in
+      check bool "cancellation propagates" true cancelled;
+      check (option string) "only a fixed label was published" (Some "[gate observation]") !command;
+      check (list string) "cancellation closes the observation as unknown" ["unknown"]
+        (List.map (text "outcome") !recorded);
+      check (list string) "the closed phase is explicit" ["gate_observation"]
+        (List.map (text "phase") !recorded))
+
+let test_non_eio_rejection_closes_stream () =
+  with_workspace ~response_kind:"recorded" @@ fun _execute _requests run _base_path ->
+  with_stream_end @@ fun recorded ->
+  Keeper_tool_execute_runtime.For_testing.dispatch_override := Some (fun () ->
+    Error (Keeper_tooling.Execute_shell_ir.Gate_reject "fixture rejection"));
+  Fun.protect
+    ~finally:(fun () -> Keeper_tool_execute_runtime.For_testing.dispatch_override := None)
+    (fun () ->
+      let result = Eio_unix.run_in_systhread (fun () ->
+        check bool "the handler is outside an Eio fiber" true
+          (Fs_compat.execution_context () = Fs_compat.Non_eio);
+        run ~always_allow:true ["echo"; "first"]) in
+      check bool "the original rejection remains visible" true
+        (match result.disposition with
+         | Tool_result.Failed Tool_result.Runtime_failure -> true
+         | Completed _ | Deferred _ | Failed _ -> false);
+      check (list string) "the rejected stream closes exactly once" ["gate_reject"]
+        (List.map (text "rejected") !recorded))
+
+let test_unsent_request_is_proven_pre_effect () =
+  with_workspace ~response_kind:"recorded" @@ fun _execute requests run _base_path ->
+  with_stream_end @@ fun recorded ->
+  let rewrite = function
+    | Masc_exec.Shell_ir.Simple stage ->
+      let literal = Masc_exec.Shell_ir.Lit ("value", Masc_exec.Shell_ir.default_meta) in
+      Ok (Masc_exec.Shell_ir.Simple { stage with env = ["NOT_ALLOWLISTED", literal] })
+    | Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _ ->
+      Error "fixture expected a single stage"
+  in
+  let result = run ~rewrite ~always_allow:true ["echo"; "first"] in
+  check bool "unsent request has a pre-effect failure" true
+    (match result.disposition, result.failure_effect_disposition with
+     | Tool_result.Failed Tool_result.Dependency_unavailable, Tool_result.Proven_pre_effect -> true
+     | (Tool_result.Completed _ | Deferred _ | Failed _), _ -> false);
+  check int "no request was dispatched" 0 (List.length (requests ()));
+  let payload = match result.data with Some data -> data | None -> fail "missing typed data" in
+  check string "result does not invent a child exit" "request_not_sent"
+    (field "status" payload |> text "outcome");
+  check (list string) "stream reports the same observation" ["request_not_sent"]
+    (List.map (text "outcome") !recorded)
+
+let test_unknown_effect_survives_output_persistence_failure () =
+  with_workspace ~response_kind:"transport-lost" @@ fun _execute requests run base_path ->
+  with_stream_end @@ fun recorded ->
+  let store = Tool_blob_store.create ~base_path in
+  save (Tool_blob_store.root_dir store) "not a directory";
+  let result = run ~always_allow:true ["echo"; "first"] in
+  check int "one request reached the transport" 1 (List.length (requests ()));
+  check bool "failed persistence cannot prove the remote effect" true
+    (match result.disposition, result.failure_effect_disposition with
+     | Tool_result.Failed Tool_result.Runtime_failure, Tool_result.Effect_outcome_unknown -> true
+     | (Tool_result.Completed _ | Deferred _ | Failed _), _ -> false);
+  let payload = Yojson.Safe.from_string result.raw_output in
+  check string "output persistence failed" "execute_output_externalization_failed" (text "code" payload);
+  check string "synthetic exit is not a process outcome" "unknown" (field "status" payload |> text "outcome");
+  check bool "the error names the uncertainty" true
+    (String_util.contains_substring (text "error" payload) "unconfirmed");
+  check (list string) "stream reports the same observation" ["unknown"]
+    (List.map (text "outcome") !recorded)
+
+let test_transport_loss_is_unknown_without_replay () =
+  with_workspace ~response_kind:"transport-lost" @@ fun _execute requests run _base_path ->
+  with_stream_end @@ fun recorded ->
+  let result = run ~always_allow:true ["echo"; "first"] in
+  check int "one request reached the transport" 1 (List.length (requests ()));
+  check bool "transport loss is not a process exit" true
+    (match result.disposition, result.failure_effect_disposition with
+     | Tool_result.Failed Tool_result.Dependency_unavailable, Tool_result.Effect_outcome_unknown -> true
+     | (Tool_result.Completed _ | Deferred _ | Failed _), _ -> false);
+  let payload = match result.data with Some data -> data | None -> fail "missing typed data" in
+  check string "no exit status is invented" "unknown" (field "status" payload |> text "outcome");
+  check bool "message warns the remote effect may have happened" true
+    (String_util.contains_substring result.raw_output "may have happened");
+  check (list string) "stream reports the same observation" ["unknown"]
+    (List.map (text "outcome") !recorded)
+
+let test_shim_refusal_is_not_a_child_exit () =
+  List.iter (fun response_kind ->
+    with_workspace ~response_kind @@ fun _execute requests run _base_path ->
+    with_stream_end @@ fun recorded ->
+    let result = run ~always_allow:true ["echo"; "first"] in
+    check int "one request reached the shim" 1 (List.length (requests ()));
+    check bool "shim refusal does not invent a child exit" true
+      (match result.disposition, result.failure_effect_disposition with
+       | Tool_result.Failed Tool_result.Dependency_unavailable, Tool_result.Effect_outcome_unknown -> true
+       | (Tool_result.Completed _ | Deferred _ | Failed _), _ -> false);
+    let payload = match result.data with Some data -> data | None -> fail "missing typed data" in
+    check string "the result reports uncertainty" "unknown" (field "status" payload |> text "outcome");
+    check (list string) "the stream reports the same observation" ["unknown"]
+      (List.map (text "outcome") !recorded))
+    ["shim-refused-missing"; "shim-refused-invalid"; "shim-refused-recorded"]
+
 let () =
   if Array.length Sys.argv > 1 && String.equal Sys.argv.(1) "--ssh-receipt-stub"
   then stub_main ()
@@ -245,4 +431,11 @@ let () =
     ["actual-owner", [
       test_case "each call keeps its own receipt and nonzero exit" `Quick test_each_owner_call_retains_only_its_own_receipt;
       test_case "Observe result is reused without Effect redispatch" `Quick test_observe_result_is_reused_by_actual_owner;
-      test_case "missing and malformed receipts preserve exit and streams" `Quick test_unavailable_receipt_does_not_erase_process_result]]
+      test_case "missing and malformed receipts preserve exit and streams" `Quick test_unavailable_receipt_does_not_erase_process_result;
+      test_case "boxed observation publishes no unapproved content" `Quick test_box_observation_stream_hides_unapproved_content;
+      test_case "cancelled boxed observation closes unknown" `Quick test_cancelled_box_observation_closes_unknown;
+      test_case "non-Eio rejection closes stream" `Quick test_non_eio_rejection_closes_stream;
+      test_case "unsent request is pre-effect" `Quick test_unsent_request_is_proven_pre_effect;
+      test_case "transport loss remains unknown without replay" `Quick test_transport_loss_is_unknown_without_replay;
+      test_case "shim refusal never becomes a child exit" `Quick test_shim_refusal_is_not_a_child_exit;
+      test_case "lost transport and output persistence retain uncertainty" `Quick test_unknown_effect_survives_output_persistence_failure]]

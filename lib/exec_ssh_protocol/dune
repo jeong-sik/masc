@@ -4,4 +4,4 @@
  (name exec_ssh_protocol)
  (public_name masc.exec_ssh_protocol)
  (modules exec_ssh_protocol)
- (libraries yojson base64))
+ (libraries yojson base64 uuidm))

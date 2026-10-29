@@ -9,10 +9,19 @@
 
 type output_line = {
   seq : int;  (** This line's number in the keeper's output log. *)
+  stream_id : int option;
+  task_id : string option;
   ts_ms : int;
   stream : string;
   text : string;
   ansi : bool;
+}
+
+type active_stream = {
+  stream_id : int;
+  task_id : string option;
+  command : string;
+  started_at : float;
 }
 
 type snapshot = {
@@ -20,6 +29,8 @@ type snapshot = {
   task_id : string option;
   task_count : int;
   lines : output_line list;
+  active_streams : active_stream list;
+  first_retained_seq : int;
   last_seq : int;
       (** Newest log number at the time [lines] was read; [0] when the
           keeper has logged nothing. *)
@@ -60,27 +71,34 @@ val record_completed :
     the implementation because this path is observational. *)
 
 val record_stream_start :
-  keeper_name:string -> task_id:string option -> unit
-(** Log a [task_opened] marker and bind subsequent chunks to [task_id] until
-    [record_stream_end] is called. *)
+  keeper_name:string -> stream_id:int -> task_id:string option -> command:string -> unit
+(** Log a [task_opened] marker and the already-redacted command. Each stream
+    is identified independently even when several belong to one task. *)
 
 val append_stream_chunk :
-  keeper_name:string -> stream:[ `Stdout | `Stderr ] -> string -> unit
+  keeper_name:string -> stream_id:int -> stream:[ `Stdout | `Stderr ] -> string -> unit
 (** Split a live output chunk into lines and log each one. A line longer
     than one row's byte limit continues in the next rows, cut between UTF-8
     characters. Never waits for a subscriber. Empty chunks are ignored. *)
 
 val record_stream_end :
-  keeper_name:string -> task_id:string option -> status:Yojson.Safe.t -> unit
+  keeper_name:string -> stream_id:int -> task_id:string option -> status:Yojson.Safe.t -> unit
 (** Log a [task_closed] marker and release the open stream binding. *)
 
 val snapshot : keeper_name:string -> snapshot option
-(** Latest retained Execute output for [keeper_name], if any. *)
+(** Retained Execute lines, retained close statuses, and the latest observed stream state. A running
+    invocation is visible even before any Execute has completed. The
+    [stdout_since]/[stderr_since] byte fields summarize completed captures;
+    [lines] also includes output from the currently open stream. *)
 
 val event_json : keeper_name:string -> Yojson.Safe.t
 (** Build the SSE payload. Returns a [no_task] event when the keeper has no
     retained Execute output. Malformed stdout/stderr sequences are displayed
     as U+FFFD; retained bytes and byte counters remain the process output. *)
+
+val event_json_limited : keeper_name:string -> line_limit:int -> Yojson.Safe.t
+(** A bounded snapshot projection for polling clients. It omits completed
+    byte strings and reports how many retained rows were not requested. *)
 
 val stream_event_json : stream_event -> Yojson.Safe.t
 (** Build an SSE payload for a live tail event: [line], [task_opened] and

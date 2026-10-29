@@ -571,6 +571,7 @@ type async_msg =
           needs the chat request this path does not have. *)
   | Keeper_chat_dispatch_blocked of Masc_tui_keeper_chat_projection.request * string
   | Keeper_logs_loaded of keeper_log_request * (Masc_tui_metrics_tail.snapshot, string) result
+  | Keeper_execute_loaded of keeper_execute_request * (keeper_execute_reading * float, string) result
   | Keeper_settings_save_changed of keeper_settings_save_request * keeper_settings_save_status * int64
   | Runtime_form_save_changed of runtime_form_save_request * runtime_form_save_status * int64
   | Keeper_creation_changed of keeper_creation_request * keeper_creation_status

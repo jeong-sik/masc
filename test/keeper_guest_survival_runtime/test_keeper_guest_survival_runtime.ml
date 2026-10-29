@@ -49,7 +49,7 @@ let inspect_from_run root arguments =
   let add key v = Hashtbl.replace repeated key (v :: Option.value ~default:[] (Hashtbl.find_opt repeated key)) in
   let rec flags = function
     | ("-d" | "--read-only" | "--rm" | "--no-dns") as key :: rest -> Hashtbl.replace one key "true"; flags rest
-    | ("--name" | "--user" | "--memory" | "--cpus" | "--workdir" | "--network" | "--dns") as key :: v :: rest ->
+    | ("--name" | "--user" | "--memory" | "--cpus" | "--workdir" | "--network" | "--dns" | "--entrypoint") as key :: v :: rest ->
       Hashtbl.replace one key v; flags rest
     | ("--label" | "--env" | "-e" | "-v" | "--volume" | "--tmpfs" | "--cap-drop" | "--cap-add") as key :: v :: rest ->
       add key v; flags rest
@@ -57,9 +57,13 @@ let inspect_from_run root arguments =
     | [] -> fail "provider did not receive an image"
   in
   let image, explicit_command = flags arguments in
-  (* This is the provider's OCI execution behavior, independently observed
-     from its own image config, rather than the product's expected command. *)
-  let command = image_entrypoint root @ explicit_command in
+  (* Apple's entrypoint option replaces the image entrypoint; the arguments
+     after the image replace its Cmd. Without an override, use the image's
+     entrypoint as the prefix. *)
+  let command =
+    match Hashtbl.find_opt one "--entrypoint" with
+    | Some executable -> executable :: explicit_command
+    | None -> image_entrypoint root @ explicit_command in
   let all key = Option.value ~default:[] (Hashtbl.find_opt repeated key) |> List.rev in
   let get key = Hashtbl.find one key in
   let mount kind source destination options = `Assoc
@@ -103,6 +107,40 @@ let read_exact fd length =
       let count = Unix.read fd buffer offset (length - offset) in
       if count = 0 then fail "truncated actual shim frame" else loop (offset + count) in
   loop 0; Bytes.to_string buffer
+
+(* The provider fixture models the guest's mount observation from the mounts
+   its own run parser recorded. It can also simulate an absent mount or an
+   incomplete observation without claiming either is a successful mount. *)
+let fixture_work_mount_response ~root guest =
+  let marker name = Sys.file_exists (Filename.concat root name) in
+  if marker "work-mount-unverified" then ""
+  else if marker "work-mount-absent" then "not_mounted\n"
+  else
+    let mounts = match field "configuration" guest |> field "mounts" with
+      | `List mounts -> mounts
+      | _ -> fail "fixture guest mounts are not an array" in
+    let work_mounts = List.filter (fun mount ->
+      field "destination" mount = `String Microvm.work_volume_guest_root) mounts in
+    match work_mounts with
+    | [] -> "not_mounted\n"
+    | [mount] ->
+      let expected = value (Microvm.work_volume_name ~keeper_name:keeper) in
+      let volume_name = match field "type" mount with
+        | `Assoc ["volume", `Assoc volume] ->
+          (match List.assoc_opt "name" volume with
+           | Some (`String name) -> Some name
+           | Some _ | None -> None)
+        | _ -> None in
+      let volume_exists name =
+        match Unix.lstat (Filename.concat root (name ^ ".img")) with
+        | { Unix.st_kind = Unix.S_REG; _ } -> true
+        | { Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK); _ }
+        | exception Unix.Unix_error _ -> false in
+      (match volume_name with
+       | Some name when name = expected && volume_exists name ->
+         "mounted\n"
+       | Some _ | None -> "")
+    | _ :: _ :: _ -> fail "fixture has duplicate work mount destinations"
 
 let provider root args =
   let file name = Filename.concat root name in
@@ -149,8 +187,19 @@ let provider root args =
      | [row] when List.mem (text (field "id" row)) rest -> Unix.unlink (file "guest.json")
      | [] | [_] -> () | _ -> fail "provider invalid rows")
   | "exec" :: rest ->
-    if List.mem "--probe" rest then (
-      print_string (Exec_ssh_protocol.render_probe {name="masc-exec-shim"; version="3.0.0"; capabilities=[]; release=None});
+    let work_mount_probe = match guest_rows () with
+      | [guest] ->
+        let name = text (field "id" guest) in
+        if "container" :: args = Microvm.work_volume_mounted_probe_argv_for backend ~container_name:name
+        then Some guest else None
+      | [] -> None
+      | _ :: _ :: _ -> fail "provider invalid rows" in
+    (match work_mount_probe with
+    | Some guest ->
+      print_string (fixture_work_mount_response ~root guest);
+      flush stdout
+    | None -> if List.mem "--probe" rest then (
+      print_string (Exec_ssh_protocol.render_probe {name="masc-exec-shim"; version="3.0.0"; capabilities=[]; release=None; boot_id=None});
       flush stdout)
     else if List.mem Microvm.shim_guest_path rest then (
       let header = read_exact Unix.stdin 8 in
@@ -161,7 +210,7 @@ let provider root args =
       let execution_receipt : Exec_ssh_protocol.execution_receipt = {mode=request.mode; boundary=Sandbox_applied} in
       output_string stderr (Exec_ssh_protocol.render_trailer ~execution_receipt
         {v=request.v; exit=Some 0; signal=None; timed_out=false; shim_error=None; observed_syscalls=[]});
-      flush stderr)
+      flush stderr))
   | _ -> fail ("unsupported provider command " ^ String.concat " " args)
 
 let meta () =
@@ -190,7 +239,7 @@ let process_step root operation =
     | "turn" | "override" -> Turn.microvm_remote_endpoint ~timeout_sec:10. runtime
     | _ -> fail "unknown fixture step" in
   (match endpoint with
-   | Error detail -> prerr_endline detail; exit 2
+   | Error detail -> write (Filename.concat root "step-error") detail; prerr_endline detail; exit 2
    | Ok endpoint ->
      if operation = "attached" then (
        let runner = Keeper_sandbox_remote.runner ~timeout_sec:10. endpoint in
@@ -262,9 +311,9 @@ let test_wrapped_image_adopts_without_relabelling_or_boot_effects () = with_fixt
   boot root;
   let original = read (Filename.concat root "guest.json") in
   let init = field "configuration" (Yojson.Safe.from_string original) |> field "initProcess" in
-  check string "provider applies its actual image entrypoint" "opam" (text (field "executable" init));
-  check (list string) "image Cmd is replaced by explicit Keeper argv"
-    ["exec"; "--"; "tail"; "-f"; "/dev/null"]
+  check string "explicit entrypoint replaces the image entrypoint" "tail" (text (field "executable" init));
+  check (list string) "explicit Keeper arguments replace image Cmd"
+    ["-f"; "/dev/null"]
     (match field "arguments" init with `List values -> List.map text values | _ -> fail "missing init argv");
   let inode = (Unix.lstat (snapshot_path root)).st_ino in
   let before = List.length (calls root) in
@@ -310,9 +359,9 @@ let test_image_prefix_does_not_permit_command_tampering () =
     save_json (Filename.concat root "inspect-override") (`List [modified]);
     let inode = (Unix.lstat (snapshot_path root)).st_ino in
     assert_wrapped_refusals_preserve_guest root original inode (List.length (calls root))))
-    [(fun init -> replace "arguments" (strings ["exec"; "--"; "tail"; "-f"; "/foreign/file"]) init)
-    ; (fun init -> replace "executable" (`String "tail")
-        (replace "arguments" (strings ["-f"; "/dev/null"]) init))]
+    [(fun init -> replace "arguments" (strings ["-f"; "/foreign/file"]) init)
+    ; (fun init -> replace "executable" (`String "opam")
+        (replace "arguments" (strings ["exec"; "--"; "tail"; "-f"; "/dev/null"]) init))]
 
 let test_unavailable_image_metadata_preserves_wrapped_guest () =
   List.iter (fun unavailable -> with_fixture (fun root ->
@@ -440,6 +489,39 @@ let test_unreadable_inventory_never_authorizes_a_boot () = with_fixture @@ fun r
   check int "no delete" 0 (count "delete" root);
   check bool "no credential publication" false (Sys.file_exists (snapshot_path root))
 
+let test_unverified_work_mount_blocks_handoff () =
+  List.iter (fun (marker, error) -> List.iter (fun warm -> with_fixture (fun root ->
+    let request_count () =
+      if Sys.file_exists (Filename.concat root "requests")
+      then List.length (entries root "requests") else 0 in
+    let original_guest =
+      if warm then (boot root; Some (read (Filename.concat root "guest.json"))) else None in
+    let before_calls = List.length (calls root) in
+    let before_requests = request_count () in
+    write (Filename.concat root marker) "";
+    check bool "unconfirmed work mount refuses adoption" true (step root "turn" = Unix.WEXITED 2);
+    check bool "the refusal identifies the mount observation" true
+      (String.starts_with ~prefix:("microvm_start_failed: " ^ error) (read (Filename.concat root "step-error")));
+    let config = Workspace.default_config root in
+    let guest = Turn.For_testing_microvm.microvm_container_name ~config ~keeper_name:keeper ~network_mode in
+    let without_cli = function
+      | "container" :: arguments -> arguments
+      | [] | _ :: _ -> fail "expected Apple Container argv" in
+    let probe = Microvm.work_volume_mounted_probe_argv_for backend ~container_name:guest |> without_cli in
+    let mkdir = Microvm.keeper_work_root_mkdir_argv_for backend ~container_name:guest ~keeper_name:keeper |> without_cli in
+    let operations = calls root |> List.drop before_calls in
+    check bool "the exact work mount probe ran" true (List.mem probe operations);
+    check bool "no keeper root is created after refusal" false (List.mem mkdir operations);
+    check int "no new framed shim request is sent" before_requests (request_count ());
+    check bool "the refused guest remains available" true (Sys.file_exists (Filename.concat root "guest.json"));
+    Option.iter (fun original -> check string "the existing guest is preserved" original
+      (read (Filename.concat root "guest.json"))) original_guest;
+    check int "one boot total" 1 (count "run" root);
+    check bool "no stop or delete after refusal" true
+      (List.for_all (function ("stop" | "delete") :: _ -> false | [] | _ :: _ -> true) operations))) [false; true])
+    ["work-mount-absent", "microvm_work_volume_not_mounted:"
+    ; "work-mount-unverified", "microvm_work_volume_probe_unverified:"]
+
 let () =
   match Array.to_list Sys.argv with
   | _ :: "--provider" :: root :: arguments -> provider root arguments
@@ -448,6 +530,7 @@ let () =
       ["process boundaries", [
         test_case "uncertain postboot recovers without replay" `Quick test_uncertain_postboot_retains_guest_and_recovers_without_replay;
         test_case "unreadable inventory refuses boot" `Quick test_unreadable_inventory_never_authorizes_a_boot;
+        test_case "unverified work mount blocks cold and warm handoff" `Quick test_unverified_work_mount_blocks_handoff;
         test_case "effective network override selects its mounted identity" `Quick test_endpoint_uses_effective_network_override;
         test_case "attached reader never rereads central identity" `Quick test_attached_reader_does_not_reread_central_identity;
         test_case "identity refresh follows actual guest absence" `Quick test_identity_refresh_replaces_after_actual_absence;

@@ -200,12 +200,12 @@ let test_rejected_branch_finalizes_stream (name, expected_class, dispatch) () =
   let stream_end_status = ref None in
   let dispatch_count = ref 0 in
   Keeper_keepalive_signal.register_record_execute_stream_end
-    (fun ~keeper_name:_ ~task_id:_ ~status -> stream_end_status := Some status);
+    (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~status -> stream_end_status := Some status);
   Fun.protect
     ~finally:(fun () ->
       Keeper_tool_execute_runtime.For_testing.dispatch_override := None;
       Keeper_keepalive_signal.register_record_execute_stream_end
-        (fun ~keeper_name:_ ~task_id:_ ~status:_ -> ()))
+        (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~status:_ -> ()))
     (fun () ->
       Keeper_tool_execute_runtime.For_testing.dispatch_override := Some (fun () ->
         incr dispatch_count;
@@ -240,6 +240,48 @@ let test_rejected_branch_finalizes_stream (name, expected_class, dispatch) () =
           | _ -> Alcotest.failf "%s: stream end status missing rejected" name
         in
         check string (name ^ ": stream end status rejected tag") name rejected)
+
+let test_interrupted_stream_and_command_redaction () =
+  setup @@ fun ~config ~meta ~factory ~playground ->
+  let secret = "fixture-private-value-43019" in
+  let secret_file = Filename.concat config.base_path
+      ".masc/secrets/stream-close-keeper/env/TOKEN" in
+  ensure_dir (Filename.dirname secret_file);
+  write_file secret_file (secret ^ "\n");
+  let previous_secret_dir = Sys.getenv_opt "MASC_SECRET_DIR" in
+  Unix.putenv "MASC_SECRET_DIR" "";
+  let observed_command = ref None and ends = ref [] in
+  Keeper_keepalive_signal.register_record_execute_stream_start
+    (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~command -> observed_command := Some command);
+  Keeper_keepalive_signal.register_record_execute_stream_end
+    (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~status -> ends := status :: !ends);
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "MASC_SECRET_DIR" (Option.value previous_secret_dir ~default:"");
+      Keeper_tool_execute_runtime.For_testing.dispatch_override := None;
+      Keeper_keepalive_signal.register_record_execute_stream_start
+        (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~command:_ -> ());
+      Keeper_keepalive_signal.register_record_execute_stream_end
+        (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~status:_ -> ()))
+    (fun () ->
+      Keeper_tool_execute_runtime.For_testing.dispatch_override := Some (fun () -> raise Exit);
+      let args = `Assoc [ "argv", `List [ `String "echo"; `String secret ];
+                          "cwd", `String playground; "timeout_sec", `Float 5.0 ] in
+      let raised =
+        try
+          ignore (Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
+            ~result_projection:Tool_output.default_model_projection
+            ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+            ~turn_sandbox_factory:(Some factory) ~config ~meta ~args ());
+          false
+        with Exit -> true
+      in
+      check bool "original exception propagated" true raised;
+      let command = match !observed_command with Some command -> command | None -> fail "stream was not opened" in
+      check bool "known secret omitted from command" false (String_util.contains_substring command secret);
+      check bool "redaction visible" true (String_util.contains_substring command "[REDACTED]");
+      check (list string) "exactly one unknown close" [ "unknown" ]
+        (List.map (fun status -> status |> Json.member "outcome" |> Json.to_string) !ends))
 
 (* ── Lane ceiling on a completed dispatch ─────────────────────────── *)
 
@@ -419,6 +461,9 @@ let () =
               `Quick
               (test_rejected_branch_finalizes_stream case))
           rejected_cases )
+    ; ( "interrupted-observation"
+      , [ test_case "exception closes observation without exposing command secret" `Quick
+            test_interrupted_stream_and_command_redaction ] )
     ; ( "lane-ceiling"
       , [ test_case "manifest preserves Execute answer identity" `Quick test_manifest_preserves_execute_answer_identity
         ; test_case "Claude Code lane returns 20,000 bytes inline" `Quick

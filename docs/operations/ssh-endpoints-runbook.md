@@ -385,3 +385,50 @@ Four things this costs, none of them obvious from the CLI's help:
 - **The session belongs to the host process that started it.** When that process
   exits the guest goes with it. Decide who owns the session before running
   anything durable on it.
+
+## Watching Keeper commands and output
+
+In the MASC TUI, select a Keeper and press `l` for its logs. The Execute
+section shows the most recently observed, redacted command summaries and stdout/stderr;
+it refreshes with the TUI's normal cadence. Each row carries the stream and
+Task identifiers. A failed read is shown as unavailable, and a missing earlier
+sequence means the in-memory server history has already been truncated.
+The command summary omits shell operators and environment assignments; it is
+an audit aid, not an exact command to copy and rerun.
+
+For a terminal tail of several Keepers, from a MASC checkout use:
+
+```sh
+MASC_TOKEN="$(cat /path/to/operator-token)" python3 scripts/masc-keeper-output.py \
+  --server http://127.0.0.1:8935 --agent masc-tui \
+  --jsonl ./keeper-output.jsonl wkbl-data wkbl-front
+```
+
+Use an agent name matching the credential. `MASC_TOKEN` is optional when the
+server accepts an unauthenticated read. `--jsonl` is optional; it appends the
+server's redacted events to a private 0600 file. The live event ring is held
+in the MASC server process and is bounded; it is not a durable transcript. A
+reconnect reads a new snapshot and may show retained lines again. A disconnect
+or an unknown result is not proof that a remote command did or did not run;
+inspect its effects before deciding whether to execute it again.
+The current output routes use HTTP/1.1; the separate HTTP/2 gateway does not
+serve them. The TUI and terminal client use HTTP/1.1 for these reads.
+
+## Endpoint observations
+
+`keeper_lane_status` and the operator's `/api/v1/gate/keeper-shims` report the
+last probe and dispatch seen by this server process for the logical endpoint.
+An answered probe is evidence that its pinned transport and shim answered at
+that time; a failed probe does not distinguish a powered-off machine from a
+network, authentication, or protocol failure. The report does not initiate a
+probe. Preflight and normal dispatch acquire observations when they need them.
+
+A newer Linux shim can report its kernel boot UUID. The report compares it to
+the last comparable value for the same endpoint declaration during this MASC
+server process. A changed UUID can mean a reboot or a different endpoint; a
+matching UUID means the same observed kernel boot and may be shared by
+containers. Neither proves workspace continuity. The last change time is held
+in memory, so the first observation after a MASC restart is a new baseline.
+Older shims and systems without a kernel boot UUID report it as unavailable.
+This status neither starts the machine nor proves that any container was
+started automatically.

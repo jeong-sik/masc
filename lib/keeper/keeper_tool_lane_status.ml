@@ -19,23 +19,28 @@ let action_of_failure = function
   | Keeper_sandbox_remote.Local_timeout ->
     "The host timed out without a completed shim reply. Whether the payload \
      started or produced effects is unknown; an earlier probe does not prove \
-     the lane is currently healthy. Inspect the endpoint and reconcile any \
-     effects before retrying."
+     the lane is currently healthy or establish the endpoint's power state. \
+     Inspect the endpoint and reconcile any effects before retrying."
   | Keeper_sandbox_remote.Remote_timeout ->
     "The shim reported that the payload timed out. Partial effects may have \
      occurred; reconcile them before retrying."
   | Keeper_sandbox_remote.Transport_failed ->
-    "The lane could not read the shim's answer. If the detail names \
-     remote_ssh_version_error, the server and the endpoint's shim disagree on the \
-     protocol and an operator has to replace the shim. Otherwise the endpoint or \
-     its transport is down, also the operator's. Retrying changes neither."
+    "The lane could not read the shim's answer. The endpoint, authentication, \
+     transport, or protocol may be unavailable; this does not establish that \
+     the machine is powered off. The operator must inspect the endpoint; if \
+     the detail names remote_ssh_version_error, the operator has to replace the \
+     shim. A \
+     dispatched effect may have happened; inspect it before running it again."
   | Keeper_sandbox_remote.Shim_refused ->
-    "The shim refused the request itself: a cwd outside its jail, a config it \
-     will not read, or a box it cannot build. A path error is yours to fix; a \
-     config or box error is the operator's."
+    "The shim reported an error instead of a payload result. It can name a \
+     cwd outside its jail, a config it cannot read, a box it could not build, \
+     or an unavailable child acknowledgement. This report alone does not establish the command's effects; \
+     inspect them before retrying. A path error is yours to fix; a config or \
+     box error is the operator's."
   | Keeper_sandbox_remote.Trailer_disagreement ->
     "The transport's exit and the shim's trailer contradict each other. Give the \
-     operator the detail; do not retry in a loop."
+     operator the detail; the effects are unknown and must be inspected before \
+     another attempt."
 ;;
 
 let probe_failed_action =
@@ -68,7 +73,7 @@ let json_of_report (r : Keeper_sandbox_remote.lane_report) : Yojson.Safe.t =
     match r.probe with
     | Keeper_sandbox_remote.Probe_not_asked ->
       `Assoc [ "state", `String "not_asked" ], None
-    | Keeper_sandbox_remote.Probe_answered { major; capabilities; release; observed_at } ->
+    | Keeper_sandbox_remote.Probe_answered { major; capabilities; release; observed_at; boot } ->
       ( `Assoc
           [ "state", `String "answered"
           ; "protocol_major", `Int (Exec_ssh_protocol.int_of_major major)
@@ -79,6 +84,17 @@ let json_of_report (r : Keeper_sandbox_remote.lane_report) : Yojson.Safe.t =
               | None -> `Null )
           ; "server_release", `String Build_version.current
           ; "observed_at_unix", `Float observed_at
+          ; ( "kernel_boot"
+            , `Assoc
+                [ "id", (match boot.boot_id with Some id -> `String id | None -> `Null)
+                ; "comparison", `String (match boot.change with
+                    | Boot_unreported -> "unreported" | Boot_first -> "first_observation"
+                    | Boot_unchanged -> "unchanged" | Boot_changed -> "changed")
+                ; "last_changed_at_unix", (match boot.last_changed_at with
+                    | Some at -> `Float at | None -> `Null)
+                ; "comparison_scope", `String "same_endpoint_this_server_process"
+                ] )
+          ; "workspace_continuity", `String "unknown"
           ]
       , (match release with
          | Some release when String.equal release Build_version.current -> None
@@ -108,12 +124,22 @@ let json_of_report (r : Keeper_sandbox_remote.lane_report) : Yojson.Safe.t =
           ]
       , Some (action_of_failure failure) )
   in
-  (* The dispatch is the fresher fact when both exist: a probe that failed
-     before a dispatch that finished is history. *)
+  (* A later successful probe does not settle an earlier dispatch's effects.
+     An older failed probe, however, no longer describes connectivity if a
+     later dispatch finished. Keep the remaining observations independent. *)
   let operator_action =
-    match dispatch_action, probe_action with
-    | Some action, _ | None, Some action -> `String action
-    | None, None -> `Null
+    let probe_action = match r.probe with
+      | Keeper_sandbox_remote.Probe_not_asked | Probe_answered _ -> probe_action
+      | Probe_failed { at = probe_at; _ } ->
+        (match r.last_dispatch with
+         | Some (Keeper_sandbox_remote.Payload_finished { at = dispatch_at; _ })
+           when dispatch_at > probe_at -> None
+         | Some (Payload_finished _) | Some (Dispatch_failed _) | None -> probe_action) in
+    let action = match dispatch_action, probe_action with
+      | Some dispatch, Some probe -> Some (dispatch ^ " " ^ probe)
+      | Some action, None | None, Some action -> Some action
+      | None, None -> None in
+    match action with Some action -> `String action | None -> `Null
   in
   `Assoc
     [ "lane", `String r.lane

@@ -3204,6 +3204,52 @@ let keeper_log_snapshot_fixture ?(partial=false) name count =
       [Dated_jsonl.Malformed_json {path="fixture.jsonl"; line_number=Some 2; detail="broken row"}]
       else []))
 
+let test_keeper_execute_reads_are_independent_and_scoped () =
+  let open Masc_tui_types in
+  let state, first = keeper_log_fixture () in
+  let second = { first with k_name = "beta" } in
+  state.keepers <- [first; second];
+  let metrics = keeper_log_request state first Snapshot_read.Poll in
+  let start keeper intent = match begin_keeper_execute_read state ~intent ~limit:4 keeper with
+    | Some request -> request | None -> Alcotest.fail "Execute read not admitted" in
+  let initial = start first Snapshot_read.Poll in
+  Alcotest.(check bool) "Execute settles while metrics is still pending" true
+    (take_keeper_execute_read state initial (Ok (Keeper_execute_none, 100.0)));
+  Alcotest.(check bool) "metrics request remains independent" true
+    (Masc_tui_fetched.is_current ~equal:keeper_log_equal_key state.keeper_logs metrics.klr_request);
+  let refresh = start first Snapshot_read.Poll in
+  Alcotest.(check bool) "failed reread settles" true
+    (take_keeper_execute_read state refresh (Error "offline"));
+  (match keeper_execute_view state with
+   | Masc_tui_fetched.Stale ((Keeper_execute_none, 100.0), "offline") -> ()
+   | _ -> Alcotest.fail "last observation and failure were not retained");
+  let stale = start first Snapshot_read.Poll in
+  state.keeper_cursor <- 1;
+  let successor = start second Snapshot_read.Poll in
+  Alcotest.(check bool) "late output from former Keeper is rejected" false
+    (take_keeper_execute_read state stale (Ok (Keeper_execute_none, 101.0)));
+  Alcotest.(check bool) "selected Keeper owns its response" true
+    (take_keeper_execute_read state successor (Ok (Keeper_execute_none, 102.0)));
+  (match keeper_execute_view state with
+   | Masc_tui_fetched.Ready (Keeper_execute_none, 102.0) -> ()
+   | _ -> Alcotest.fail "selected Keeper did not retain its observation")
+
+let test_keeper_execute_decoder_preserves_active_command_and_limits () =
+  let open Masc_tui_types in
+  let json = Yojson.Safe.from_string
+    {|{"type":"snapshot","keeper":"alpha","lines":[{"seq":8,"stream_id":4,"task_id":"task-a","stream":"stdout","text":"hello"}],"active_streams":[{"stream_id":4,"task_id":"task-a","command":"echo hello"}],"lines_omitted":3,"first_retained_seq":2,"active_count":1,"closed":false,"status":null,"generated_at":1.0}|} in
+  (match decode_keeper_execute_output ~keeper:"alpha" json with
+   | Ok (Keeper_execute_snapshot { kes_lines = [line]; kes_active = [active];
+                                  kes_lines_omitted = 3; kes_first_seq = 2; _ }) ->
+     Alcotest.(check string) "active command" "echo hello" active.kes_command;
+     Alcotest.(check (option int)) "output stream identity" (Some 4) line.kel_stream_id
+   | _ -> Alcotest.fail "valid output observation was not retained");
+  Alcotest.(check bool) "another Keeper is rejected" true
+    (Result.is_error (decode_keeper_execute_output ~keeper:"beta" json));
+  Alcotest.(check bool) "incomplete snapshot is unavailable" true
+    (Result.is_error (decode_keeper_execute_output ~keeper:"alpha"
+      (`Assoc ["type", `String "snapshot"; "keeper", `String "alpha"])))
+
 let test_keeper_log_selection_and_late_cleanup_keep_original_owner () =
   let open Masc_tui_types in
   let state, first = keeper_log_fixture () in
@@ -4876,6 +4922,10 @@ let () =
             test_settings_preparation_retires_focus_and_workspace_owners
         ; Alcotest.test_case "metrics selection and cleanup preserve request ownership" `Quick
             test_keeper_log_selection_and_late_cleanup_keep_original_owner
+        ; Alcotest.test_case "Execute and metrics reads have independent scoped owners" `Quick
+            test_keeper_execute_reads_are_independent_and_scoped
+        ; Alcotest.test_case "Execute output retains active command and bounded history" `Quick
+            test_keeper_execute_decoder_preserves_active_command_and_limits
         ; Alcotest.test_case "metrics refresh shares work and retains partial observations on failure" `Quick
             test_keeper_log_refresh_coalesces_and_failed_revalidation_keeps_partial_rows
         ; Alcotest.test_case "metrics suspension retains data without old authority" `Quick

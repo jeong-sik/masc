@@ -1300,6 +1300,17 @@ let run () =
 
 (* Capabilities are what this host can do, read when asked, so a probe on a
    kernel without Landlock says so and the runner never sends it a box. *)
+let kernel_boot_id () =
+  try
+    let channel = open_in "/proc/sys/kernel/random/boot_id" in
+    Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+      let raw = input_line channel |> String.trim in
+      match Uuidm.of_string raw with
+      | Some uuid when String.equal (String.lowercase_ascii raw) (Uuidm.to_string uuid) ->
+        Some (Uuidm.to_string uuid)
+      | Some _ | None -> None)
+  with Sys_error _ | End_of_file -> None
+
 let probe () =
   Exec_ssh_protocol.
     { name = "masc-exec-shim"
@@ -1309,6 +1320,7 @@ let probe () =
       (if observe_supported () then [ observe_capability ] else [])
       @ (if user_notif_supported () then [ user_notif_capability ] else [])
     ; release = (if Shim_build_id.release = "" then None else Some Shim_build_id.release)
+    ; boot_id = kernel_boot_id ()
     }
 
 let main () =

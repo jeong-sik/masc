@@ -118,17 +118,48 @@ let respond_official_client_probe_result request reqd = function
 
 let execute_output_heartbeat_s = 15.0
 
+let execute_output_keeper ~prefix path =
+  match Server_utils.extract_path_param ~prefix path with
+  | None -> None
+  | Some encoded ->
+    let keeper = Uri.pct_decode encoded |> String.trim in
+    if String.equal keeper "" then None else Some keeper
+;;
+
+let handle_execute_output_snapshot _state req inner_reqd =
+  match execute_output_keeper
+          ~prefix:"/api/v1/dashboard/execute-output-snapshot/"
+          (Http.Request.path req) with
+  | None ->
+    respond_dashboard_error ~status:`Bad_request ~request:req inner_reqd
+      "keeper path parameter is required"
+  | Some keeper_name ->
+    let limit = match Server_utils.query_param req "limit" with
+      | None -> Some Dashboard_execute_output.event_log_capacity
+      | Some raw -> int_of_string_opt raw in
+    (match limit with
+     | Some limit when limit > 0 && limit <= Dashboard_execute_output.event_log_capacity ->
+       Http.Response.json_value ~request:req
+         ~extra_headers:([ "cache-control", "private, no-store" ]
+                         @ public_read_cors_headers req)
+         (Dashboard_execute_output.event_json_limited ~keeper_name ~line_limit:limit)
+         inner_reqd
+     | Some _ | None ->
+       respond_dashboard_error ~status:`Bad_request ~request:req inner_reqd
+         "limit must be between 1 and the output event capacity")
+;;
+
 let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
        let path = Http.Request.path req in
        let keeper =
          match
-           Server_utils.extract_path_param
+           execute_output_keeper
              ~prefix:"/api/dashboard/execute-output/"
              path
          with
          | Some value -> Some value
          | None ->
-           Server_utils.extract_path_param
+           execute_output_keeper
              ~prefix:"/api/v1/dashboard/execute-output/"
              path
        in
@@ -139,17 +170,16 @@ let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
            ~request:req
            inner_reqd
            "keeper path parameter is required"
-       | Some keeper ->
-         let keeper_name = Uri.pct_decode keeper |> String.trim in
-         let origin = get_origin req in
+       | Some keeper_name ->
          let headers =
            Httpun.Headers.of_list
              ([ "content-type", "text/event-stream"
-              ; "cache-control", "no-cache"
+              ; "cache-control", "private, no-store"
               ; "connection", "keep-alive"
               ; "x-accel-buffering", "no"
               ]
-              @ cors_headers origin)
+              @ Http.Response.scoped_headers ()
+              @ public_read_cors_headers req)
          in
          let response = Httpun.Response.create ~headers `OK in
          let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
@@ -165,12 +195,20 @@ let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
                  (Printexc.to_string exn))
          in
          let write_string data =
-           if !closed
-           then false
+           if !closed || Httpun.Body.Writer.is_closed writer
+           then (close_stream (); false)
            else (
              try
                Httpun.Body.Writer.write_string writer data;
-               true
+               (* Flush completes when the HTTP transport accepts the frame,
+                  or reports that it closed first. Awaiting it bounds queued
+                  output for a slow client and observes a disconnected one. *)
+               let flushed, resolve = Eio.Promise.create () in
+               Httpun.Body.Writer.flush writer (fun outcome ->
+                 Eio.Promise.resolve resolve outcome);
+               (match Eio.Promise.await flushed with
+                | `Written -> true
+                | `Closed -> close_stream (); false)
              with
              | Eio.Cancel.Cancelled _ as e -> raise e
              | exn ->
@@ -183,55 +221,61 @@ let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
          let write_json json =
            write_string (Dashboard_execute_output.sse_frame json)
          in
-         match Dashboard_execute_output.subscribe ~keeper_name with
-         | None ->
-           (* fire-and-forget: best-effort terminal event before closing stream. *)
-           ignore (write_json (Dashboard_execute_output.event_json ~keeper_name));
+         let subscriber = Dashboard_execute_output.subscribe ~keeper_name in
+         let cleanup () =
+           Option.iter Dashboard_execute_output.unsubscribe subscriber;
            close_stream ()
-         | Some subscriber ->
-           let wrote_initial =
-             write_string
-               (Printf.sprintf "retry: %d\n\n" sse_dashboard_retry_backoff_ms)
-             && write_json (Dashboard_execute_output.initial_event_json subscriber)
-           in
-           if not wrote_initial
-           then Dashboard_execute_output.unsubscribe subscriber
-           else
-             Eio.Fiber.fork ~sw (fun () ->
-               Eio.Switch.run (fun stream_sw ->
-                 Server_bootstrap_http.with_cleanups_on_release ~sw:stream_sw
-                   [
-                     (fun () -> Dashboard_execute_output.unsubscribe subscriber);
-                     close_stream;
-                   ];
-                 let rec loop () =
-                   if not !closed
-                   then (
-                     (* An event taken as the heartbeat came due is that
-                        event: it has left the subscriber, and a heartbeat
-                        written in its place would drop it from the stream. *)
-                     match
-                       Watched_work.run
-                         ~watcher:(fun () ->
-                           Eio.Time.sleep clock execute_output_heartbeat_s;
-                           Error `Timeout)
-                         (fun () -> Ok (Dashboard_execute_output.take_event subscriber))
-                     with
-                     | Ok event ->
-                       if
-                         write_json
-                           (Dashboard_execute_output.stream_event_json event)
-                       then loop ()
-                     | Error `Timeout ->
-                       if write_string ": heartbeat\n\n" then loop ())
-                 in
-                 try loop () with
+         in
+         (* The handler must return to the HTTP driver before awaiting a
+            flush. The subscriber is installed first so that events arriving
+            while the first frame is in flight remain observable. *)
+         (try
+            Eio.Fiber.fork ~sw (fun () ->
+              Eio.Switch.run (fun stream_sw ->
+                Server_bootstrap_http.with_cleanups_on_release ~sw:stream_sw
+                  [ cleanup ];
+                try
+                  match subscriber with
+                  | None ->
+                    ignore (write_json (Dashboard_execute_output.event_json ~keeper_name))
+                  | Some subscriber ->
+                    let wrote_initial =
+                      write_string
+                        (Printf.sprintf "retry: %d\n\n" sse_dashboard_retry_backoff_ms)
+                      && write_json (Dashboard_execute_output.initial_event_json subscriber)
+                    in
+                    if wrote_initial then (
+                      let rec loop () =
+                        if not !closed
+                        then (
+                          (* An event taken as the heartbeat came due is that
+                             event: it has left the subscriber, and a heartbeat
+                             written in its place would drop it from the stream. *)
+                          match
+                            Watched_work.run
+                              ~watcher:(fun () ->
+                                Eio.Time.sleep clock execute_output_heartbeat_s;
+                                Error `Timeout)
+                              (fun () -> Ok (Dashboard_execute_output.take_event subscriber))
+                          with
+                          | Ok event ->
+                            if
+                              write_json
+                                (Dashboard_execute_output.stream_event_json event)
+                            then loop ()
+                          | Error `Timeout ->
+                            if write_string ": heartbeat\n\n" then loop ())
+                      in
+                      loop ())
+                with
                  | Eio.Cancel.Cancelled _ as e -> raise e
                  | exn ->
                    Log.Dashboard.warn
                      "execute output stream loop failed: %s"
-                     (Printexc.to_string exn);
-                   close_stream ()))
+                     (Printexc.to_string exn)))
+          with exn ->
+            cleanup ();
+            raise exn)
 
 let runtime_editor_protocol_json (protocol : Runtime_toml.editor_protocol) =
   let transport =
@@ -1693,6 +1737,9 @@ let add_routes ~sw ~clock router =
   |> Server_route.prefix_get Server_route.Public_read
        "/api/v1/dashboard/execute-output/"
        (handle_execute_output_stream ~sw ~clock)
+  |> Server_route.prefix_get Server_route.Public_read
+       "/api/v1/dashboard/execute-output-snapshot/"
+       handle_execute_output_snapshot
 
   (* Batch dashboard endpoint: single request replaces 4 separate API calls *)
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard" (fun _state req reqd ->

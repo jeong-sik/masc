@@ -8312,6 +8312,7 @@ type keeper_recall_walk = {
 
 type keeper_composer_draft = {
   kcd_text : string;
+  kcd_spill : Masc_tui_paste_spill.t option;
   kcd_attachments : Masc_tui_keeper_chat_projection.attachment list;
   kcd_references : Masc_tui_keeper_chat_projection.image_reference list;
   kcd_since : image_observation option;
@@ -10899,6 +10900,19 @@ let clear_current_recall_edit (state : state) =
 
 (* The draft and the line set aside while walking recall are one workspace
    owned value. Saving either without the other loses the operator's text. *)
+let message_spill_in_text (state : state) text =
+  match state.msg_spill with
+  | Some spill when Option.is_some
+      (Masc_tui_paste_spill.substituted spill ~replacement:"" text) -> Some spill
+  | Some _ | None -> None
+
+let expand_message_draft_spill spill text =
+  match spill with
+  | None -> text
+  | Some spill ->
+      Option.value ~default:text
+        (Masc_tui_paste_spill.substituted spill ~replacement:spill.text text)
+
 let save_message_draft_snapshot ?workspace (state : state) ~text =
   match state.msg_target_keeper_name with
   | None -> ()
@@ -10909,6 +10923,7 @@ let save_message_draft_snapshot ?workspace (state : state) ~text =
       let key = workspace, keeper_name in
       let others = List.remove_assoc key state.msg_drafts in
       let draft = { kcd_text = text;
+        kcd_spill = message_spill_in_text state text;
         kcd_attachments = state.msg_attachments;
         kcd_references = state.msg_references;
         kcd_since = state.msg_attachments_since;
@@ -10924,6 +10939,7 @@ let save_message_draft ?workspace (state : state) =
 
 let restore_message_draft (state : state) keeper_name =
   Masc_tui_message_input.clear state.msg_input;
+  state.msg_spill <- None;
   (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- []);
   (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- []);
   state.msg_attachments_since <- None;
@@ -10931,7 +10947,10 @@ let restore_message_draft (state : state) keeper_name =
   match List.assoc_opt (chat_input_workspace state, keeper_name) state.msg_drafts with
   | None -> ()
   | Some draft ->
-      Masc_tui_message_input.insert state.msg_input draft.kcd_text;
+      (* Restore editable text as before: changing a placeholder in the
+         composer must not silently discard its saved original. *)
+      Masc_tui_message_input.insert state.msg_input
+        (expand_message_draft_spill draft.kcd_spill draft.kcd_text);
       (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- draft.kcd_attachments);
       (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- draft.kcd_references);
       state.msg_attachments_since <- draft.kcd_since;

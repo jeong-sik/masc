@@ -1612,7 +1612,11 @@ let test_recall_edits_and_drafts_follow_workspace_and_keeper () =
   let a_workspace = Tui_types.chat_input_workspace state in
   (* Identity changes before withdrawal saves A's composer. *)
   state.server_identity <- Some (identity "/workspace/b-root");
-  Tui_types.save_message_draft_snapshot ~workspace:a_workspace state ~text:snapshot;
+  Tui_types.save_message_draft_snapshot ~workspace:a_workspace state ~text:placeholder;
+  check bool "the saved draft owns the compact text and exact spill" true
+    (Option.exists (fun draft -> draft.Tui_types.kcd_text = placeholder
+      && Option.exists (fun saved -> saved == spill) draft.kcd_spill)
+      (List.assoc_opt (a_workspace, "alpha") state.msg_drafts));
   check string "saving the captured text does not replace the live composer"
     placeholder (Masc_tui_message_input.contents state.msg_input);
   check bool "saving alone does not consume the spill" true (state.msg_spill = Some spill);
@@ -1624,6 +1628,7 @@ let test_recall_edits_and_drafts_follow_workspace_and_keeper () =
     (Option.is_none (Tui_types.current_recall_edit state));
   check string "B does not receive A's draft" ""
     (Masc_tui_message_input.contents state.msg_input);
+  check bool "B does not receive A's spill" true (Option.is_none state.msg_spill);
   check bool "A's edit does not hold B's queue" false
     (Tui_types.recalling_for_keeper state "alpha");
   check bool "B's queued input is independently selectable" true
@@ -1637,8 +1642,15 @@ let test_recall_edits_and_drafts_follow_workspace_and_keeper () =
   check bool "A's exact edit returns with its queue" true
     (Tui_types.current_recall_edit state = Some a
      && Tui_types.recalling_for_keeper state "alpha");
-  check string "A's captured text returns" snapshot
+  check string "A's editable original returns" snapshot
     (Masc_tui_message_input.contents state.msg_input);
+  check bool "the restored editable text no longer needs a spill" true
+    (Option.is_none state.msg_spill);
+  Masc_tui_message_input.backspace state.msg_input;
+  check string "editing the restored paste keeps the rest of its original bytes"
+    (String.sub snapshot 0 (String.length snapshot - 1))
+    (Masc_tui_message_input.contents state.msg_input);
+  Tui_types.restore_message_draft state "alpha";
   check bool "A's staged payload and source recency return" true
     (state.msg_attachments = a.request.attachments
      && state.msg_references = a.request.references
@@ -1669,11 +1681,14 @@ let test_recall_edits_and_drafts_follow_workspace_and_keeper () =
   check string "B's own draft returns" "editing B"
     (Masc_tui_message_input.contents state.msg_input);
   Masc_tui_message_input.clear state.msg_input;
+  state.msg_spill <- Some spill;
   state.msg_attachments <- [];
   state.msg_references <- [];
   state.msg_recall_walk <- None;
   Tui_types.save_message_draft state;
   Tui_types.restore_message_draft state "alpha";
+  check bool "a deleted placeholder does not retain an old spill" true
+    (Option.is_none state.msg_spill);
   check bool "an empty editor still owns and holds its queued input" true
     (Tui_types.current_recall_edit state = Some b
      && Tui_types.recalling_for_keeper state "alpha"

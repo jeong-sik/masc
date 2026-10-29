@@ -9,26 +9,37 @@ val direct_targets_of_text : string -> Agent_id.t list
     and unsupported double-at selectors are not direct targets. *)
 
 val audience_for_post
-  :  post_kind:post_kind
+  :  lookup:Recipient_lookup.t
+  -> post_kind:post_kind
   -> visibility:visibility
   -> title:string
   -> content:string
-  -> (audience, board_error) result
-(** Parse the immutable audience of a new post. A [System_post] reads no
-    address from its text: platform code decides whom it reaches, so its
-    audience follows its visibility alone. A [Direct] post requires exact
-    targets; a targetless or broadcast Direct post is rejected before
-    persistence. A target candidate {!Agent_id.of_string} rejects is read as
-    prose, not as a failed address, so it neither becomes a target nor rejects
-    the post.
+  -> (audience * string list, board_error) result
+(** Decide the immutable audience of a new post, and the names in its text
+    that look like addresses but no Keeper declares ([unresolved], as the
+    author wrote them, each once).
+
+    A name after [@] is a target only when [lookup] declares it, and then the
+    target is the Keeper it stands for. An undeclared name is prose: it is not
+    a target and does not reject the post. When [lookup] cannot answer the
+    post is refused with {!Recipient_lookup_failed} and nothing is written.
+
+    A [System_post] reads no address from its text and never asks [lookup]:
+    platform code decides whom it reaches, so its audience follows its
+    visibility alone. A [Direct] post requires at least one declared target;
+    a targetless or broadcast Direct post is rejected before persistence.
 
     An unaddressed [Public] or [Internal] post is [Discoverable]. An
     unaddressed [Unlisted] post is [Thread_participants]: it is not in any
     keeper's feed, so no attention judgment is spent on it, and a keeper
     reaches it by explicit address or by joining its thread. *)
 
-val audience_for_comment : content:string -> (audience, board_error) result
-(** An unaddressed comment belongs to [Thread_participants]. *)
+val audience_for_comment
+  :  lookup:Recipient_lookup.t
+  -> content:string
+  -> (audience * string list, board_error) result
+(** As {!audience_for_post}, for a comment. An unaddressed comment belongs to
+    [Thread_participants]. *)
 
 val audience_for_reaction : audience
 (** Reactions are structural thread activity and carry no textual address. *)

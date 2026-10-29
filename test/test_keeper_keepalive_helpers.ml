@@ -16,6 +16,15 @@ let rec rm_rf path =
       Unix.rmdir path)
     else Sys.remove path
 
+(* These tests check how the Board routes a text, not who is declared: every
+   name with the shape of a Keeper name stands for itself. *)
+let every_name_declared =
+  Recipient_lookup.make (fun candidate ->
+    Ok
+      (Result.to_option
+         (Board.Agent_id.parse (Recipient_lookup.Candidate.to_string candidate))))
+;;
+
 let with_temp_workspace f =
   let base_path = Filename.temp_dir "keeper-heartbeat-current-task" "" in
   let config = Workspace.default_config base_path in
@@ -29,6 +38,13 @@ let with_temp_workspace f =
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
       f config)
+
+(* The Board tests below write through the dispatcher inside an Eio run, so the
+   backend gets its recipient lookup before the first write. *)
+let with_board_workspace f =
+  with_temp_workspace (fun config ->
+    Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+    f config)
 
 let make_keepalive_meta ~name =
   let json =
@@ -462,12 +478,15 @@ let write_boundary_audience ~post_kind ~visibility (signal : Board_dispatch.boar
     match signal.kind with
     | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ ->
       Board.audience_for_post
+        ~lookup:every_name_declared
         ~post_kind
         ~visibility
         ~title:signal.title
         ~content:signal.content
+      |> Result.map fst
     | Board_dispatch.Board_comment_added _ ->
-      Board.audience_for_comment ~content:signal.content
+      Board.audience_for_comment ~lookup:every_name_declared ~content:signal.content
+      |> Result.map fst
     | Board_dispatch.Board_reaction_changed _ -> Ok Board.audience_for_reaction
     | Board_dispatch.Board_vote_cast _ -> Ok Board.audience_for_vote
   in
@@ -735,12 +754,13 @@ let persist_board_signal (signal : Board_dispatch.board_signal) =
     let audience =
       match
         Board.audience_for_post
+          ~lookup:every_name_declared
           ~post_kind:post.post_kind
           ~visibility:post.visibility
           ~title:post.title
           ~content:post.body
       with
-      | Ok audience -> audience
+      | Ok (audience, _unresolved) -> audience
       | Error error -> fail (Board.show_board_error error)
     in
     { Board_dispatch.signal; audience }
@@ -755,7 +775,7 @@ let overwrite_file path contents =
 
 let test_exact_mentions_deliver_and_wake_each_lane_independently () =
   Eio_main.run @@ fun _env ->
-  with_temp_workspace @@ fun config ->
+  with_board_workspace @@ fun config ->
   Fun.protect
     ~finally:Keeper_registry.For_testing.clear
     (fun () ->
@@ -794,7 +814,7 @@ let test_exact_mentions_deliver_and_wake_each_lane_independently () =
 
 let test_mixed_address_signal_is_dropped_at_routing () =
   Eio_main.run @@ fun _env ->
-  with_temp_workspace @@ fun config ->
+  with_board_workspace @@ fun config ->
   Fun.protect
     ~finally:Keeper_registry.For_testing.clear
     (fun () ->
@@ -832,7 +852,7 @@ let test_mixed_address_signal_is_dropped_at_routing () =
 
 let test_paused_exact_mention_is_durable_without_wake () =
   Eio_main.run @@ fun _env ->
-  with_temp_workspace @@ fun config ->
+  with_board_workspace @@ fun config ->
   Fun.protect
     ~finally:Keeper_registry.For_testing.clear
     (fun () ->
@@ -868,7 +888,7 @@ let test_paused_exact_mention_is_durable_without_wake () =
 
 let test_restarting_exact_mention_is_durable_with_deferred_wake () =
   Eio_main.run @@ fun _env ->
-  with_temp_workspace @@ fun config ->
+  with_board_workspace @@ fun config ->
   Fun.protect
     ~finally:Keeper_registry.For_testing.clear
     (fun () ->
@@ -908,7 +928,7 @@ let test_restarting_exact_mention_is_durable_with_deferred_wake () =
 
 let test_lane_meta_failure_does_not_block_next_durable_delivery () =
   Eio_main.run @@ fun _env ->
-  with_temp_workspace @@ fun config ->
+  with_board_workspace @@ fun config ->
   Fun.protect
     ~finally:Keeper_registry.For_testing.clear
     (fun () ->
@@ -991,7 +1011,7 @@ let create_thread_fixture config ~keeper_name =
    wake the lane. *)
 let test_thread_signal_for_a_swept_post_delivers_nothing () =
   Eio_main.run @@ fun _env ->
-  with_temp_workspace @@ fun config ->
+  with_board_workspace @@ fun config ->
   Fun.protect
     ~finally:(fun () -> Keeper_registry.For_testing.clear ())
     (fun () ->
@@ -1062,7 +1082,7 @@ let create_self_post_fixture config ~keeper_name =
 
 let test_comment_on_own_post_wakes_the_author () =
   Eio_main.run @@ fun _env ->
-  with_temp_workspace @@ fun config ->
+  with_board_workspace @@ fun config ->
   Fun.protect
     ~finally:(fun () -> Keeper_registry.For_testing.clear ())
     (fun () ->
@@ -1115,7 +1135,7 @@ let create_post_exn ~author ~title ~content =
 
 let test_vote_on_own_post_wakes_the_author_once () =
   Eio_main.run @@ fun _env ->
-  with_temp_workspace @@ fun config ->
+  with_board_workspace @@ fun config ->
   Fun.protect
     ~finally:(fun () ->
       Board_dispatch.set_board_signal_hook (fun _ -> ());
@@ -1173,7 +1193,7 @@ let test_vote_on_own_post_wakes_the_author_once () =
 (* A comment vote addresses the comment's author, not the post's. *)
 let test_vote_on_own_comment_wakes_the_commenter_not_the_poster () =
   Eio_main.run @@ fun _env ->
-  with_temp_workspace @@ fun config ->
+  with_board_workspace @@ fun config ->
   Fun.protect
     ~finally:(fun () ->
       Board_dispatch.set_board_signal_hook (fun _ -> ());
@@ -1240,7 +1260,7 @@ let test_vote_on_own_comment_wakes_the_commenter_not_the_poster () =
    delivery. *)
 let test_comment_routes_bystander_lane_to_attention_judgment () =
   Eio_main.run @@ fun _env ->
-  with_temp_workspace @@ fun config ->
+  with_board_workspace @@ fun config ->
   Fun.protect
     ~finally:(fun () ->
       Board_dispatch.set_board_signal_hook (fun _ -> ());
@@ -1388,7 +1408,7 @@ let test_owner_inventory_stopping_refreshes_work_heartbeat () =
 
 let test_comments_address_post_and_direct_parent_only () =
   Eio_main.run @@ fun _env ->
-  with_temp_workspace @@ fun config ->
+  with_board_workspace @@ fun config ->
   Fun.protect
     ~finally:(fun () -> Board_dispatch.set_board_signal_hook (fun _ -> ()); Keeper_registry.For_testing.clear ())
     (fun () ->

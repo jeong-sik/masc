@@ -42,7 +42,7 @@ let with_workspace f =
   Unix.putenv "MASC_BASE_PATH" dir;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   let config = Workspace.default_config dir in
   ignore (Workspace.init config ~agent_name:(Some "test"));
   (match

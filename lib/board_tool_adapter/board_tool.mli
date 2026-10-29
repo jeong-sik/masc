@@ -69,6 +69,11 @@ val format_timestamp_absolute : float -> string
 
 (** {1 Board error rendering} *)
 
+val post_of_write_data : Yojson.Safe.t -> Board.post option
+(** The post a [masc_board_post] or [masc_board_post_edit] result carries in its
+    data, or [None] when the data is not a post.  Those results are the post's
+    JSON plus an [unresolved] list, which {!Board.post_of_yojson} rejects. *)
+
 val board_error_to_string : Board.board_error -> string
 (** Renders a {!Board.board_error} with a leading prefix
     (["Invalid ID:"] / ["Post not found:"] / ...).  Used

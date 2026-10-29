@@ -619,6 +619,7 @@ let validate_sub_board_post_policy_unlocked store ~author_id ~hearth =
 (** {1 Post Operations} *)
 let create_post_with_audience
       store
+      ~lookup
       ~author
       ~content
       ?title
@@ -669,13 +670,14 @@ let create_post_with_audience
     else
       match
         Board_audience.audience_for_post
+          ~lookup
           ~post_kind:normalized_kind
           ~visibility
           ~title:normalized_title
           ~content:normalized_body
       with
       | Error _ as error -> error
-      | Ok audience ->
+      | Ok (audience, unresolved) ->
       (* Write-ahead (PR #28934 class, #28952): validate under
          [with_lock] with no mutation, then hold the persistence lock across the durable
          append and the in-memory commit under [with_lock]. The previous shape mutated
@@ -736,7 +738,7 @@ let create_post_with_audience
          | Error _ as e -> e
          | Ok committed ->
            (match committed with
-            | Ok () -> Ok { post; audience }
+            | Ok () -> Ok { post; audience; unresolved }
             | Error e ->
               (* The appended row is an orphan on disk (the policy
                  flipped mid-append; the post never reached memory).
@@ -750,11 +752,12 @@ let create_post_with_audience
               Error e))
 ;;
 
-let create_post store ~author ~content ?title ?body ~post_kind ?meta_json
+let create_post store ~lookup ~author ~content ?title ?body ~post_kind ?meta_json
       ?visibility ?ttl_hours ?hearth ?thread_id ?origin ()
   =
   create_post_with_audience
     store
+    ~lookup
     ~author
     ~content
     ?title
@@ -777,11 +780,13 @@ type create_post_once_result =
 type post_edit =
   { edited : post
   ; recorded_audience : audience
+  ; unresolved : string list
   ; content_changed : bool
   }
 
 let create_post_once_by_fusion_run_id
       store
+      ~lookup
       ~fusion_run_id
       ~author
       ~content
@@ -877,8 +882,8 @@ let create_post_once_by_fusion_run_id
                          "conflicting Fusion Board projection for run_id=%S"
                          fusion_run_id))
              | None ->
-               create_post_with_audience store ~author ~content ~post_kind ?meta_json
-                 ~visibility ~ttl_hours ~origin ()
+               create_post_with_audience store ~lookup ~author ~content ~post_kind
+                 ?meta_json ~visibility ~ttl_hours ~origin ()
                |> Result.map (fun creation -> Post_created creation)))
     | Some origin_run_id ->
       Error
@@ -904,6 +909,7 @@ let create_post_once_by_fusion_run_id
    lock. *)
 let update_post_with_outcome
       store
+      ~lookup
       ~post_id
       ~editor
       ~content
@@ -970,11 +976,12 @@ let update_post_with_outcome
             | Ok (normalized_title, normalized_body, _kind, normalized_meta) ->
               if String.length normalized_body = 0
               then Error (Validation_error "Content cannot be empty")
-              else match Board_audience.audience_for_post ~post_kind:existing.post_kind
+              else match Board_audience.audience_for_post ~lookup
+                  ~post_kind:existing.post_kind
                   ~visibility:existing.visibility
                   ~title:normalized_title ~content:normalized_body with
               | Error error -> Error error
-              | Ok audience -> (
+              | Ok (audience, unresolved) -> (
                 let content_changed =
                   not (String.equal existing.title normalized_title
                        && String.equal existing.body normalized_body
@@ -1001,5 +1008,10 @@ let update_post_with_outcome
                   Hashtbl.replace store.posts key updated;
                   mark_dirty_post store key;
                   invalidate_post_caches store;
-                  Ok { edited = updated; recorded_audience = audience; content_changed }))))
+                  Ok
+                    { edited = updated
+                    ; recorded_audience = audience
+                    ; unresolved
+                    ; content_changed
+                    }))))
 ;;

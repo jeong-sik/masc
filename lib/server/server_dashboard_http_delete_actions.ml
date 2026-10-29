@@ -1033,7 +1033,8 @@ let handle_board_close_post ~agent_name req reqd body_str =
            | Board.Validation_error _ -> `Bad_request
            | Board_types.Invalid_id _ | Board_types.Post_not_found _
            | Board_types.Comment_not_found _ | Board_types.Io_error _ | Board_types.Already_voted _
-           | Board_types.Already_exists _ | Board_types.Unauthorized _ -> `Not_found
+           | Board_types.Already_exists _ | Board_types.Unauthorized _
+           | Board_types.Recipient_lookup_failed _ -> `Not_found
          in
          respond_error ~status ~request:req reqd
            (Board_tool.board_error_to_string err))
@@ -1300,7 +1301,7 @@ let add_delete_action_routes router =
                    match err with
                    | Board.Invalid_id _ | Board.Validation_error _ -> `Bad_request
                    | Board.Post_not_found _ | Board.Comment_not_found _ -> `Not_found
-                   | Board.Io_error _ -> `Service_unavailable
+                   | Board.Io_error _ | Board.Recipient_lookup_failed _ -> `Service_unavailable
                    | Board.Already_voted _ | Board.Already_exists _ -> `Conflict
                    | Board.Unauthorized _ -> `Forbidden
                  in

@@ -14,6 +14,9 @@
 open Masc
 
 let () = Mirage_crypto_rng_unix.use_default ()
+
+(* The store-level writers ask a recipient lookup; no name is declared here. *)
+let nobody_declared = Recipient_lookup.none_declared
 let () = Random.self_init ()
 
 let set_temp_base () =
@@ -42,7 +45,7 @@ let make_origin ?turn_ref ?source ?fusion_run_id ?fusion_producer () : Board.pos
 
 let create store ~origin ~content =
   match
-    Board_core.create_post store ~author:"origin-test" ~content
+    Board_core.create_post store ~lookup:nobody_declared ~author:"origin-test" ~content
       ~post_kind:Board.Human_post ~origin ()
   with
   | Ok post -> post
@@ -51,7 +54,7 @@ let create store ~origin ~content =
 
 let create_no_origin store ~content =
   match
-    Board_core.create_post store ~author:"origin-test" ~content
+    Board_core.create_post store ~lookup:nobody_declared ~author:"origin-test" ~content
       ~post_kind:Board.Human_post ()
   with
   | Ok post -> post
@@ -196,6 +199,7 @@ let test_current_comment_schema_is_exact () =
     match
       Board_core.add_comment
         store
+        ~lookup:nobody_declared
         ~post_id:(Board.Post_id.to_string post.id)
         ~author:"commenter"
         ~content:"current comment"

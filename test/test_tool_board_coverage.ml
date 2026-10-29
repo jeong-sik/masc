@@ -40,7 +40,7 @@ let cleanup () =
   Fs_compat.reset_fd_cache_for_testing ();
   Fs_compat.reset_mkdir_memo_for_testing ();
   remove_path (Filename.concat _test_base_path Common.masc_dirname);
-  Board_dispatch.init_jsonl ()
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ()
 
 (* The MCP route: MASC hands the result over whole. *)
 let dispatch name args =
@@ -3554,11 +3554,19 @@ let test_post_update_schema_exposes_new_author () =
    path all fail that shape -- and used to take the whole post down with them.
    Each case below is a shape the live board log carried while the post was
    refused. *)
+let every_name_declared =
+  Masc.Recipient_lookup.make (fun candidate ->
+    Ok (Result.to_option (Masc.Board.Agent_id.parse
+      (Masc.Recipient_lookup.Candidate.to_string candidate))))
+
 let comment_audience content =
-  Masc.Board.audience_for_comment ~content
+  Masc.Board.audience_for_comment ~lookup:every_name_declared ~content
+  |> Result.map fst
 
 let post_audience content =
-  Masc.Board.audience_for_post ~post_kind:Masc.Board.Human_post ~visibility:Masc.Board.Public ~title:"t" ~content
+  Masc.Board.audience_for_post ~lookup:every_name_declared ~post_kind:Masc.Board.Human_post
+    ~visibility:Masc.Board.Public ~title:"t" ~content
+  |> Result.map fst
 
 let label_of = function
   | Ok audience -> Masc.Board.audience_label audience
@@ -3581,7 +3589,9 @@ let test_a_named_broadcast_selector_is_still_refused () =
 let test_a_well_shaped_name_is_still_a_target () =
   Alcotest.(check string) "plain name" "targets"
     (label_of (comment_audience "@delta please look"));
-  Alcotest.(check string) "namespaced name" "targets"
+  (* A colon cannot be in a name that becomes a file name, so a namespaced name
+     is prose. *)
+  Alcotest.(check string) "namespaced name is prose" "thread_participants"
     (label_of (comment_audience "@keeper:delta please look"))
 
 let () =

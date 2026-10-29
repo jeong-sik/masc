@@ -566,7 +566,7 @@ pointer = "/profile"
       Keeper_tool_call_log.init ~base_path:dir ();
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
-      Board_dispatch.init_jsonl ();
+      Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
       match Board_dispatch.create_post ~author:"fixture" ~content:(Keeper_types_profile_sandbox.sandbox_profile_to_string (make_meta ()).sandbox_profile ^ " joined evidence")
         ~post_kind:Board.Human_post () with
       | Ok post -> seeded_id := Board.Post_id.to_string post.Board.id

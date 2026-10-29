@@ -1035,7 +1035,9 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
           Workspace_hooks.get_verifier_exact_lane_slots_fn
           Runtime.verifier_exact_lane_slots;
         Atomic.set Task.Handlers.push_event_to_sessions_fn Subscriptions.push_event_to_sessions;
-        Board_dispatch.init_jsonl ())
+        Board_dispatch.init_jsonl
+          ~recipient_lookup:(Keeper_board_recipient_lookup.make ~base_path)
+          ())
       base_path
   in
   (* Settle the shared mounted shim configuration before this state can be

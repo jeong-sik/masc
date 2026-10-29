@@ -28,6 +28,10 @@ type board_error =
     (** Actor attempted an owner-gated mutation (e.g. editing a post they
         do not own). Distinct from [Validation_error] so callers can map it
         to a 403-class rejection rather than a generic input error. *)
+  | Recipient_lookup_failed of string
+    (** The declared-recipient lookup could not answer for a name in the
+        text: a Keeper's settings could not be read, or two Keepers claim one
+        alias. The write is refused and nothing is stored. *)
 [@@deriving show]
 
 (** What a Board read answers when it has no row to give: the id did not
@@ -207,15 +211,21 @@ type comment = {
 type post_creation = {
   post : post;
   audience : audience;
+  unresolved : string list;
 }
 (** Successful post write together with the audience fixed at the same write
-    boundary. Consumers must not re-derive routing from mutable projections. *)
+    boundary. Consumers must not re-derive routing from mutable projections.
+    [unresolved] holds the names in the text that looked like addresses but
+    no Keeper declares, as the author wrote them. It is for the write
+    response only and is never stored. *)
 
 type comment_creation = {
   comment : comment;
   audience : audience;
+  unresolved : string list;
 }
-(** Successful comment write and its write-boundary routing authority. *)
+(** Successful comment write and its write-boundary routing authority.
+    [unresolved] is as in {!post_creation}. *)
 
 type reaction_target_type =
   | Reaction_post

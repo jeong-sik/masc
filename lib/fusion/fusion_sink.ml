@@ -684,7 +684,8 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
            | Board.Io_error _
            | Board.Validation_error _
            | Board.Already_voted _
-           | Board.Unauthorized _ ) as error) -> Ok (Error error)
+           | Board.Unauthorized _
+           | Board.Recipient_lookup_failed _ ) as error) -> Ok (Error error)
     in
     (* 키퍼 메인 흐름 통합 ("결과를 키퍼 흐름에 녹이기", RFC-0252 §8 개정).
        상세 트랜스크립트(패널 답변 N개)는 위 board post 증거로만 남기고, 키퍼 chat

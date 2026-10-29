@@ -3293,6 +3293,8 @@
 (include stanzas/test_keeper_keepalive_helpers.inc)
 
 (include stanzas/test_keeper_board_recorded_audience.inc)
+(include stanzas/test_board_recipient_resolution.inc)
+(include stanzas/test_keeper_board_recipient_lookup.inc)
 
 (test
  (name test_keeper_board_discoverable_cursor)

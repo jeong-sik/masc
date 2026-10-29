@@ -580,7 +580,7 @@ let with_board_store ~base_path f =
   @@ fun () ->
   Masc.Board.reset_global_for_test ();
   Masc.Board_dispatch.reset_for_test ();
-  Masc.Board_dispatch.init_jsonl ();
+  Masc.Board_dispatch.init_jsonl ~recipient_lookup:Masc.Recipient_lookup.none_declared ();
   f ()
 ;;
 
@@ -1441,7 +1441,7 @@ let test_board_reaction_batch_answers_every_id_asked_about () =
        (Filename.get_temp_dir_name ())
        (Printf.sprintf "masc-test-reaction-batch-%06x" (Random.bits ())));
   Masc.Board_dispatch.reset_for_test ();
-  Masc.Board_dispatch.init_jsonl ();
+  Masc.Board_dispatch.init_jsonl ~recipient_lookup:Masc.Recipient_lookup.none_declared ();
   let json =
     Server_board_reaction_http.list_batch_json
       ~actor:"tester"

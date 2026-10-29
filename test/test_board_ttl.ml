@@ -2,6 +2,11 @@
 
 open Masc.Board
 
+(* The store-level writers ask a recipient lookup; no name is declared here. *)
+let nobody_declared = Masc.Recipient_lookup.none_declared
+let create_post store = create_post store ~lookup:nobody_declared
+let add_comment store = add_comment store ~lookup:nobody_declared
+
 (* #9903 test isolation: [create_post] now persists through
    [Env_config_core.base_path ()], which raises [Config_error] in test
    executables when the resolved path falls under HOME (PR #12584 moved

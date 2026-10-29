@@ -5,6 +5,15 @@
    are outside this test. No sandbox tools are invoked. *)
 open Masc
 
+(* These tests check how the Board routes a text, not who is declared: every
+   name with the shape of a Keeper name stands for itself. *)
+let every_name_declared =
+  Recipient_lookup.make (fun candidate ->
+    Ok
+      (Result.to_option
+         (Board.Agent_id.parse (Recipient_lookup.Candidate.to_string candidate))))
+;;
+
 let require condition detail = if not condition then failwith detail
 let get render = function Ok value -> value | Error error -> failwith (render error)
 let save path text = Fs_compat.mkdir_p (Filename.dirname path); Fs_compat.save_file path text
@@ -182,7 +191,7 @@ data: [DONE]
     ; publication_recovery_provider = Masc_test_deps.publication_recovery_provider publication_registry } in
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
   (* Initialize at an existing head, then deliberately miss the live hook. *)
   ignore (Board_dispatch.create_post ~author:"synthetic-user" ~content:"cursor baseline"
     ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.show_board_error);

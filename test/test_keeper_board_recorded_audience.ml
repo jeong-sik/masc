@@ -46,7 +46,7 @@ let with_workspace f =
        ignore (Workspace.init config ~agent_name:None : string);
        Board_dispatch.reset_for_test ();
        Board.reset_global_for_test ();
-       Board_dispatch.init_jsonl ();
+       Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
        f config)
 ;;
 
@@ -97,7 +97,7 @@ let post_id (post : Board.post) = Board.Post_id.to_string post.id
 let reload_board () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ()
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ()
 ;;
 
 (* Rewrites the stored row of each listed id in the file at [path] so that it

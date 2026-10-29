@@ -2,6 +2,16 @@
 
 open Masc
 
+(* These tests pin how the Board routes a text, not who is declared: every name
+   with the shape of a Board identity stands for itself.  Which names are
+   declared, and what the author is told about the others, is pinned in
+   test_board_recipient_resolution. *)
+let every_name_declared =
+  Recipient_lookup.make (fun candidate ->
+    Ok
+      (Result.to_option
+         (Board.Agent_id.parse (Recipient_lookup.Candidate.to_string candidate))))
+
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Random.self_init ()
 
@@ -21,7 +31,7 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
   f ()
 
 let block_board_masc_dir_with_file () =
@@ -65,7 +75,7 @@ let seed_post_without_kind () =
   Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n");
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
   post_id
 
 let keeper_meta name =
@@ -141,7 +151,7 @@ let test_content_update_time_survives_activity_and_reload () =
   Board_dispatch.flush ();
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
   same transferred.content_updated_at;
   let fields = match Board.post_to_yojson (read ()) with
     | `Assoc fields -> fields | _ -> Alcotest.fail "post encoder did not emit an object" in
@@ -543,7 +553,7 @@ let test_structured_post_roundtrip () =
       Alcotest.(check bool) "metadata stored" true (meta_has_source post.meta_json);
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
-      Board_dispatch.init_jsonl ();
+      Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
       match Board_dispatch.get_post ~post_id:pid with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok fetched ->
@@ -1074,7 +1084,7 @@ let test_comment_persists_post_reply_count () =
     persisted_reply_count;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
   match Board_dispatch.get_post ~post_id with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok fetched ->
@@ -1293,7 +1303,8 @@ let test_failed_flusher_start_clears_the_flag () =
         (* The flusher forks on whatever switch the context names; a finished
            one makes the fork raise, which is the failure under test. *)
         let finished = Eio.Switch.run (fun inner -> inner) in
-        Eio_context.with_turn_switch finished Board_dispatch.init_jsonl;
+        Eio_context.with_turn_switch finished (fun () ->
+          Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ());
         Alcotest.(check bool) "a failed start leaves no started flag" false
           (Board_dispatch.flusher_started_for_test ());
         Eio.Switch.fail sw Exit)
@@ -1314,7 +1325,7 @@ let test_vote_persisted_by_flusher_actor () =
         ignore (fresh_test_base_path ());
         Board.reset_global_for_test ();
         Board_dispatch.reset_for_test ();
-        Board_dispatch.init_jsonl ();
+        Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
         let post_id =
           match
             Board_dispatch.create_post ~author:"persist-test" ~content:"persist my vote"
@@ -1337,7 +1348,7 @@ let test_vote_persisted_by_flusher_actor () =
         Eio.Time.sleep clock 0.1;
         Board.reset_global_for_test ();
         Board_dispatch.reset_for_test ();
-        Board_dispatch.init_jsonl ();
+        Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
         (match Board_dispatch.get_post ~post_id with
          | Error e -> Alcotest.fail (Board.show_board_error e)
          | Ok post ->
@@ -1459,7 +1470,7 @@ let test_comment_reaction_survives_restart () =
        | Ok _ -> ());
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
-      Board_dispatch.init_jsonl ();
+      Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
       match
         Board_dispatch.list_reactions ~target_type:Board.Reaction_comment
           ~target_id:comment_id ~user_id:"reactor" ()
@@ -1975,7 +1986,7 @@ let test_set_pinned () =
          (unlike set_thread_id which is in-memory only). *)
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
-      Board_dispatch.init_jsonl ();
+      Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
       (match Board_dispatch.get_post ~post_id:pid with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok p -> Alcotest.(check bool) "pinned survives restart" true p.pinned);
@@ -2110,7 +2121,7 @@ let test_set_closed_and_reopen_round_trip () =
          a restart the same way set_pinned does. *)
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
-      Board_dispatch.init_jsonl ();
+      Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
       (match Board_dispatch.get_post ~post_id:pid with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok p ->
@@ -2207,12 +2218,13 @@ let test_malformed_target_is_read_as_prose () =
     "discoverable"
     (match
        Board.audience_for_post
+         ~lookup:every_name_declared
          ~post_kind:Board.Human_post
          ~visibility:Board.Public
          ~title:""
          ~content:"please inspect @!"
      with
-     | Ok audience -> audience_label audience
+     | Ok (audience, _unresolved) -> audience_label audience
      | Error error -> Board.show_board_error error)
 ;;
 
@@ -2223,23 +2235,28 @@ let test_prose_mentions_do_not_record_validation_rejections () =
   let before = Validation.get_rejection_stats () in
   List.iter
     (fun _ ->
-       (match Board.audience_for_comment ~content with
-        | Ok Board.Thread_participants -> ()
+       (match Board.audience_for_comment ~lookup:every_name_declared ~content with
+        | Ok (Board.Thread_participants, _unresolved) -> ()
         | Ok _ -> Alcotest.fail "prose unexpectedly addressed a keeper"
         | Error error -> Alcotest.fail (Board.show_board_error error));
        Alcotest.(check (pair int (float 0.0)))
          "repeated prose reads preserve rejection count and timestamp"
          before (Validation.get_rejection_stats ()))
     [ (); (); () ];
+  (* A name with a dot or a colon cannot be a candidate (it could leave a
+     Keeper's directory once it became a file name), so it is prose beside the
+     rejected tokens; only the plain name is a target. *)
   (match
      Board.audience_for_comment
-       ~content:"@check·lint @edgar.a.poe @keeper:MiXeD.Agent"
+       ~lookup:every_name_declared
+       ~content:"@check·lint @edgar.a.poe @keeper:MiXeD.Agent @alice-bot"
    with
-   | Ok (Board.Targets targets) ->
-     Alcotest.(check (list string)) "valid identities survive rejected prose"
-       [ "edgar.a.poe"; "keeper:MiXeD.Agent" ]
-       (List.map Board.Agent_id.to_string targets)
-   | Ok _ -> Alcotest.fail "valid mentions lost their target audience"
+   | Ok (Board.Targets targets, unresolved) ->
+     Alcotest.(check (list string)) "only the plain name is a target"
+       [ "alice-bot" ]
+       (List.map Board.Agent_id.to_string targets);
+     Alcotest.(check (list string)) "prose is not reported as unresolved" [] unresolved
+   | Ok _ -> Alcotest.fail "the plain name lost its target audience"
    | Error error -> Alcotest.fail (Board.show_board_error error));
   Alcotest.(check (pair int (float 0.0)))
     "mixed mentions preserve rejection statistics"
@@ -2261,8 +2278,15 @@ let test_prose_mentions_do_not_record_validation_rejections () =
    Internal post stays discoverable. *)
 let test_unlisted_post_is_not_discoverable () =
   let label ~visibility ~content =
-    match Board.audience_for_post ~post_kind:Board.Human_post ~visibility ~title:"" ~content with
-    | Ok audience -> audience_label audience
+    match
+      Board.audience_for_post
+        ~lookup:every_name_declared
+        ~post_kind:Board.Human_post
+        ~visibility
+        ~title:""
+        ~content
+    with
+    | Ok (audience, _unresolved) -> audience_label audience
     | Error error -> Board.show_board_error error
   in
   Alcotest.(check string)
@@ -2316,7 +2340,9 @@ let test_write_boundary_emits_typed_audience () =
    human post still counts as an address. *)
 let test_system_post_text_is_not_an_address () =
   let audience ~post_kind ~visibility content =
-    Board.audience_for_post ~post_kind ~visibility ~title:content ~content
+    Board.audience_for_post
+      ~lookup:every_name_declared ~post_kind ~visibility ~title:content ~content
+    |> Result.map fst
   in
   let expected_for = function
     | Board.Public | Board.Internal -> "discoverable"
@@ -2431,7 +2457,7 @@ let test_post_audience_survives_edit_and_restart () =
     (targets edited);
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
   let reloaded = get (Board_dispatch.get_post ~post_id) in
   Alcotest.(check (list string)) "restart keeps exact edited audience" ["second-reader"]
     (targets reloaded);
@@ -2480,7 +2506,7 @@ let test_comment_audience_survives_restart () =
     (plain.audience = Some Board.Thread_participants);
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
   let reloaded id =
     match List.find_opt (fun (c : Board.comment) ->
             String.equal (Board.Comment_id.to_string c.id) (Board.Comment_id.to_string id))
@@ -2515,25 +2541,6 @@ let test_comment_audience_survives_restart () =
     ; `Assoc ["kind", `String "targets"; "targets", `List [`String "bad/id"]]
     ; `Assoc ["kind", `String "broadcast"; "kind", `String "discoverable"]
     ; `Null ]
-;;
-
-let test_target_case_is_identity_level () =
-  (* #25601: the shared grammar (Board_addressing) preserves target case;
-     case normalization is an identity-level concern.  Board agent ids are
-     case-sensitive, so differently-cased targets stay DISTINCT here —
-     while the Keeper boundary folds them into one canonical id (pinned in
-     test_keeper_lane_mentions). *)
-  match
-    Board.audience_for_post ~post_kind:Board.Human_post ~visibility:Board.Public ~title:""
-      ~content:"@MiXeD-Agent and @mixed-agent"
-  with
-  | Ok (Board.Targets targets) ->
-    Alcotest.(check (list string))
-      "Board targets keep distinct casings"
-      [ "MiXeD-Agent"; "mixed-agent" ]
-      (List.map Board.Agent_id.to_string targets)
-  | Ok _ -> Alcotest.fail "expected exact targets"
-  | Error error -> Alcotest.fail (Board.show_board_error error)
 ;;
 
 (** {1 SubBoard CRUD} *)
@@ -2823,7 +2830,7 @@ let test_sub_board_delete_clears_orphan_hearth () =
   Board_dispatch.flush ();
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
   (match Board_dispatch.get_post ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok post ->
@@ -3023,8 +3030,6 @@ let () =
         (with_eio test_post_audience_survives_edit_and_restart);
       Alcotest.test_case "comment audience survives restart" `Quick
         (with_eio test_comment_audience_survives_restart);
-      Alcotest.test_case "target case is identity-level" `Quick
-        (with_eio test_target_case_is_identity_level);
     ];
     "sub_boards", [
       Alcotest.test_case "create and get" `Quick (with_eio test_sub_board_create_and_get);

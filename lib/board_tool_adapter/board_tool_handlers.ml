@@ -279,7 +279,8 @@ let handle_vote ~tool_name ~start_time args =
              | Board.Io_error _
              | Board.Validation_error _
              | Board.Already_exists _
-             | Board.Unauthorized _ ) as e) ->
+             | Board.Unauthorized _
+             | Board.Recipient_lookup_failed _ ) as e) ->
           Board_tool_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
@@ -379,7 +380,8 @@ let handle_comment_vote ~tool_name ~start_time args : Tool_result.result =
            | Board.Io_error _
            | Board.Validation_error _
            | Board.Already_exists _
-           | Board.Unauthorized _ ) as e) ->
+           | Board.Unauthorized _
+           | Board.Recipient_lookup_failed _ ) as e) ->
         Board_tool_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 

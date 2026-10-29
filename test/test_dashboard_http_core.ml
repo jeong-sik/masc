@@ -3763,9 +3763,14 @@ let test_board_address_overlay_follows_effective_config_after_cache () =
       { kind = Masc.Board_dispatch.Board_post_created; post_id = "post-effective-address"
       ; author = "external-author"; title = "address fixture"; content = "@" ^ target
       ; hearth = None; updated_at = Some 123. } in
-    let board_audience = match Masc.Board.audience_for_post ~post_kind:Masc.Board.Human_post ~visibility:Masc.Board.Internal
+    (* This test pins which keeper a written name reaches, so the name must
+       stand for itself in the audience. *)
+    let lookup = Masc.Recipient_lookup.make (fun candidate ->
+      Ok (Result.to_option (Masc.Board.Agent_id.parse
+        (Masc.Recipient_lookup.Candidate.to_string candidate)))) in
+    let board_audience = match Masc.Board.audience_for_post ~lookup ~post_kind:Masc.Board.Human_post ~visibility:Masc.Board.Internal
         ~title:signal.Masc.Board_dispatch.title ~content:signal.Masc.Board_dispatch.content with
-      | Ok board_audience -> board_audience | Error error -> fail (Masc.Board.show_board_error error) in
+      | Ok (board_audience, _unresolved) -> board_audience | Error error -> fail (Masc.Board.show_board_error error) in
     let audience = match Masc.Keeper_board_audience.of_board_audience board_audience with
       | Ok audience -> audience | Error error -> fail (Masc.Keeper_board_audience.classification_error_to_string error) in
     let effective = match Masc.Keeper_meta_store.read_effective_meta config name with
@@ -6785,7 +6790,7 @@ let test_board_close_route_rejects_wrong_typed_decisions_without_closing () =
   with_env "MASC_BASE_PATH" config.base_path @@ fun () ->
   Lib.Board.reset_global_for_test ();
   Lib.Board_dispatch.reset_for_test ();
-  Lib.Board_dispatch.init_jsonl ();
+  Lib.Board_dispatch.init_jsonl ~recipient_lookup:Lib.Recipient_lookup.none_declared ();
   Fun.protect
     ~finally:(fun () ->
       Lib.Board.reset_global_for_test ();

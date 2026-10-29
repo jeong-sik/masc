@@ -48,7 +48,7 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   f ()
 
 let create ~slug =
@@ -92,7 +92,7 @@ let test_create_is_durable_across_restart () =
      across a restart. *)
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   match find_by_slug "wa-durable" with
   | Some sb ->
     Alcotest.(check string) "slug survives restart" "wa-durable" sb.Board.slug

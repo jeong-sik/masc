@@ -151,8 +151,15 @@ val backend : unit -> board_backend
     first call (defaulting to {!Jsonl}). Exposed so the dispatch
     test suite can reach into the underlying [Board.store] directly. *)
 
-val init_jsonl : unit -> unit
-(** Initialise the JSONL backend (idempotent). *)
+val init_jsonl : recipient_lookup:Recipient_lookup.t -> unit -> unit
+(** Initialise the JSONL backend and hand it the lookup that decides which
+    names written after [@] are recipients (idempotent).  The lookup is
+    required: the Board libraries cannot read Keeper settings, so whoever
+    starts the backend supplies the answer.
+
+    A read can start the backend before this runs.  That backend has no lookup
+    and its writes refuse every address; this call then installs [recipient_lookup]
+    into it.  A backend that already has a lookup keeps it. *)
 
 val reset_for_test : unit -> unit
 (** Drop the in-memory backend. Test-only. *)
@@ -180,6 +187,24 @@ val create_post :
   ?origin:Board.post_origin ->
   unit ->
   (Board.post, Board.board_error) Result.t
+
+val create_post_with_unresolved :
+  author:string ->
+  content:string ->
+  ?title:string ->
+  ?body:string ->
+  post_kind:Board.post_kind ->
+  ?meta_json:Yojson.Safe.t ->
+  ?visibility:Board.visibility ->
+  ?ttl_hours:int ->
+  ?hearth:string ->
+  ?thread_id:string ->
+  ?origin:Board.post_origin ->
+  unit ->
+  (Board.post * string list, Board.board_error) Result.t
+(** {!create_post} that also returns the names in the text that look like
+    addresses but no Keeper declares, as the author wrote them.  They are for
+    the write response only; nothing stores them. *)
 
 val create_post_once_by_fusion_run_id :
   fusion_run_id:string ->
@@ -210,6 +235,18 @@ val update_post :
   ?new_author:string ->
   unit ->
   (Board.post, Board.board_error) Result.t
+
+val update_post_with_unresolved :
+  post_id:string ->
+  editor:string ->
+  content:string ->
+  ?title:string ->
+  ?body:string ->
+  ?new_author:string ->
+  unit ->
+  (Board.post * string list, Board.board_error) Result.t
+(** {!update_post} that also returns the undeclared names, as
+    {!create_post_with_unresolved} does. *)
 
 val read_post : post_id:string -> (Board.post, Board.board_read_error) Result.t
 (** The post with [post_id], from the in-memory store. A read answers no I/O
@@ -303,6 +340,17 @@ val add_comment :
   ?ttl_hours:int ->
   unit ->
   (Board.comment, Board.board_error) Result.t
+
+val add_comment_with_unresolved :
+  post_id:string ->
+  author:string ->
+  content:string ->
+  ?parent_id:string ->
+  ?ttl_hours:int ->
+  unit ->
+  (Board.comment * string list, Board.board_error) Result.t
+(** {!add_comment} that also returns the undeclared names, as
+    {!create_post_with_unresolved} does. *)
 
 val read_comments :
   post_id:string ->

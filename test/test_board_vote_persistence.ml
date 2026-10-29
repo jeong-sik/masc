@@ -40,7 +40,7 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   f ()
 
 let read_ts_rows path =
@@ -240,7 +240,7 @@ let test_restart_loads_only_current_vote_rows () =
           (canonical :: rejected_rows)));
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   let store =
     match Board_dispatch.backend () with
     | Board_dispatch.Jsonl store -> store
@@ -280,7 +280,7 @@ let test_namespaced_voter_survives_snapshot_and_restart () =
     (Option.is_some (find_row ~target ~voter rows));
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   (match Board_dispatch.current_vote_for_post ~voter ~post_id with
    | Ok (Some Board.Up) -> ()
    | Ok (Some Board.Down) -> Alcotest.fail "snapshot changed vote direction"
@@ -330,7 +330,7 @@ let test_restart_uses_last_vote_row_and_rebuilds_counts () =
        (List.map (fun json -> Yojson.Safe.to_string json ^ "\n") rows));
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   (match
      Board_dispatch.current_vote_for_post
        ~voter:"flip-voter"
@@ -377,7 +377,7 @@ let test_missing_ledger_resets_persisted_vote_counts () =
   Unix.unlink (Board_votes.vote_log_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   match Board_dispatch.get_post ~post_id with
   | Error error -> Alcotest.fail (Board.show_board_error error)
   | Ok loaded ->
@@ -605,7 +605,7 @@ let test_flush_writes_only_changed_primary_table () =
     Yojson.Safe.Util.(persisted_post |> member "reply_count" |> to_int);
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   (match Board_dispatch.get_post ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok p ->
@@ -671,7 +671,7 @@ let test_restart_keeps_a_vote_whose_post_is_absent () =
      ^ "\n");
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   let store =
     match Board_dispatch.backend () with
     | Board_dispatch.Jsonl store -> store
@@ -718,7 +718,7 @@ let test_unreadable_snapshots_reject_mutation_and_survive_flush () =
     [ vote_path; reaction_path; sub_board_path ];
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   let store =
     match Board_dispatch.backend () with
     | Board_dispatch.Jsonl store -> store
@@ -826,7 +826,7 @@ let test_snapshot_waiting_after_edit_keeps_edited_post
     [ "edit"; "snapshot" ] (List.rev !completed);
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   match Board_dispatch.get_post ~post_id with
   | Error error -> Alcotest.fail (Board.show_board_error error)
   | Ok loaded ->

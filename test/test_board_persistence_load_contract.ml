@@ -16,6 +16,9 @@ open Masc
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
+(* The store-level writers ask a recipient lookup; no name is declared here. *)
+let nobody_declared = Recipient_lookup.none_declared
+
 let fresh_test_base_path () =
   let dir =
     Filename.concat
@@ -85,6 +88,7 @@ let test_loader_keeps_only_current_rows () =
     match
       Board_core.create_post
         source_store
+        ~lookup:nobody_declared
         ~author:"current-writer"
         ~content:"current persisted row"
         ~post_kind:Board.Human_post
@@ -120,7 +124,7 @@ let test_loader_keeps_only_current_rows () =
     (Masc_board_handlers.Board_votes_json.load_persisted_posts loaded_store = Ok 0);
   Alcotest.(check int) "old post is not trusted after empty reload" 0 (Hashtbl.length loaded_store.posts);
   Alcotest.(check int) "old post count is cleared" 0 !(loaded_store.post_count);
-  let comment = match Board_core.add_comment source_store
+  let comment = match Board_core.add_comment source_store ~lookup:nobody_declared
       ~post_id:(Board.Post_id.to_string post.id) ~author:"fixture-author"
       ~content:"retained partial comment" ~ttl_hours:0 () with
     | Ok comment -> Board_core.comment_to_yojson comment
@@ -208,7 +212,7 @@ let test_partial_load_never_rewrites_the_file () =
   let source_store = Board_core.create_store () in
   let make_post content =
     match
-      Board_core.create_post source_store ~author:"partial-writer" ~content
+      Board_core.create_post source_store ~lookup:nobody_declared ~author:"partial-writer" ~content
         ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
@@ -216,7 +220,7 @@ let test_partial_load_never_rewrites_the_file () =
   in
   let make_comment ~post_id content =
     match
-      Board_core.add_comment source_store ~post_id ~author:"partial-writer" ~content
+      Board_core.add_comment source_store ~lookup:nobody_declared ~post_id ~author:"partial-writer" ~content
         ~ttl_hours:0 ()
     with
     | Ok comment -> comment

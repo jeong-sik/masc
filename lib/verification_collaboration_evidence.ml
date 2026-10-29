@@ -97,7 +97,8 @@ let board_error = function
   | (Board.Invalid_id _ | Board.Validation_error _) as error ->
     Invalid_request (Board_tool.board_error_to_string error)
   | Board.Unauthorized _ as error -> Access_denied (Board_tool.board_error_to_string error)
-  | Board.Io_error _ as error -> Storage_failed (Board_tool.board_error_to_string error)
+  | (Board.Io_error _ | Board.Recipient_lookup_failed _) as error ->
+    Storage_failed (Board_tool.board_error_to_string error)
   | (Board.Comment_not_found _ | Board.Already_exists _ | Board.Already_voted _) as error ->
     Source_unavailable (Board_tool.board_error_to_string error)
 

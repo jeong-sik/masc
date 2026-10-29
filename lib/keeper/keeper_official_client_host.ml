@@ -2194,7 +2194,8 @@ let persist_pre_tool_rejects ~keeper_name ~session_dir ~session_id rejects =
           | Keeper_checkpoint_store.Newer_version _
           | Keeper_checkpoint_store.Io_error _
           | Keeper_checkpoint_store.Read_failed _
-          | Keeper_checkpoint_store.Agent_core_error _ ) as error) ->
+          | Keeper_checkpoint_store.Agent_core_error _
+          | Keeper_checkpoint_store.Objects_invalid _ ) as error) ->
        Error
          (Printf.sprintf
             "reject round-trip persistence could not load the checkpoint: %s"
@@ -2202,8 +2203,9 @@ let persist_pre_tool_rejects ~keeper_name ~session_dir ~session_id rejects =
              | Keeper_checkpoint_store.Not_found -> "not found"
              | Keeper_checkpoint_store.Superseded_version { expected; got } ->
                Printf.sprintf "version %d superseded by %d" got expected
-             | Keeper_checkpoint_store.Newer_version _ as newer ->
-               Keeper_checkpoint_store.checkpoint_load_error_to_string newer
+             | (Keeper_checkpoint_store.Newer_version _ | Keeper_checkpoint_store.Objects_invalid _)
+               as error ->
+               Keeper_checkpoint_store.checkpoint_load_error_to_string error
              | Keeper_checkpoint_store.Store_error detail
              | Keeper_checkpoint_store.Parse_error detail
              | Keeper_checkpoint_store.Io_error detail
@@ -2248,6 +2250,7 @@ let persist_pre_tool_rejects ~keeper_name ~session_dir ~session_id rejects =
           Keeper_checkpoint_store.save_agent_core_for_keeper ~keeper_name ~session_dir
             ~history_retained:
               (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
+            ~boundary:Agent_core.Checkpoint_objects.Turn_continues
             checkpoint
         with
         | Ok _ -> Ok (List.length rejects)

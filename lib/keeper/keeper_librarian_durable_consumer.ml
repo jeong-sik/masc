@@ -1012,7 +1012,8 @@ let unread_turns ~config ~keeper_name =
       | Error
           (( History.Not_found | History.Store_error _ | History.Parse_error _
             | History.Newer_version _ | History.Io_error _
-            | History.Read_failed _ | History.Agent_core_error _ ) as error) ->
+            | History.Read_failed _ | History.Agent_core_error _
+            | History.Objects_invalid _ ) as error) ->
         Error (Checkpoint_unreadable { trace_id = current_trace_id; error })
       | Ok (History.Read checkpoint) ->
         Ok

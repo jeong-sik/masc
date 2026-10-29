@@ -52,11 +52,10 @@ let list_agent_core_history_files ~(session_dir : string) : string list =
       |> List.filter (is_agent_core_history_file ~session_dir)
       |> List.sort (fun a b -> compare b a))
 
-(* Each entry is a whole checkpoint of the session, and a live keeper's runs
-   111 MB: twelve of them held 1.4 GB per trace directory and 8.4 GB across
-   traces/ (2026-09-16). The only reader is the dashboard checkpoint list,
-   which decodes every retained entry to describe it, so the count is also
-   what that request costs.
+(* Each entry is a copy of the head the canonical held (RFC-0476 §3.2), so it
+   costs the head's bytes; the objects are shared. The only reader is the
+   dashboard checkpoint list, which decodes every retained entry to describe
+   it, so the count is also what that request costs.
 
    Disk and how far back an operator can look pull against each other, and
    which way to lean is theirs to say, so the window is the runtime setting
@@ -104,13 +103,21 @@ let leaf_is_real_segment leaf =
 let offload_checkpoint_cpu (f : unit -> 'a) : 'a =
   Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ f
 
-let decode_checkpoint_off_scheduler (content : string) :
-    (Agent_core.Checkpoint.t, Agent_core.Error.t) result =
-  offload_checkpoint_cpu (fun () -> Agent_core.Checkpoint.of_string content)
+module Objects = Agent_core.Checkpoint_objects
 
-let encode_checkpoint_string_off_scheduler (ckpt : Agent_core.Checkpoint.t) :
-    string =
-  offload_checkpoint_cpu (fun () -> Agent_core.Checkpoint.to_string ckpt)
+let head_of_bytes_off_scheduler (content : string) =
+  offload_checkpoint_cpu (fun () -> Objects.head_of_string content)
+
+(* The objects a head names are read and decoded in the same pool job as the
+   head (RFC-0476 §3.5). [memo] then holds the loaded messages. *)
+let decode_head_off_scheduler ~session_dir ~memo (content : string) :
+    (Objects.head * Agent_core.Checkpoint.t, Objects.load_error) result =
+  offload_checkpoint_cpu (fun () ->
+    match Objects.head_of_string content with
+    | Error _ as error -> error
+    | Ok head ->
+      Objects.load memo ~read_object:(Keeper_checkpoint_object_store.read ~session_dir) head
+      |> Result.map (fun checkpoint -> head, checkpoint))
 
 let agent_core_history_snapshot_id_of_checkpoint (ckpt : Agent_core.Checkpoint.t) : string =
   let created_ms = max 0 (int_of_float (ckpt.created_at *. 1000.0)) in
@@ -197,18 +204,18 @@ module Checkpoint_payload_writer = struct
     result
 end
 
-(* A window of zero keeps nothing, so this writes nothing: the hardlink below
-   is cheap but its fallback encodes the whole checkpoint, and the prune would
-   delete either one again on the way out. *)
+(* A window of zero keeps nothing, so this writes nothing: the prune would
+   delete the entry again on the way out. When the hardlink fails, the head
+   bytes are written as the entry instead. *)
 let save_agent_core_history
-    ~payload_writer ~(session_dir : string) ~(retained : int) (ckpt : Agent_core.Checkpoint.t) : unit =
+    ~payload_writer ~(session_dir : string) ~(retained : int) ~head_bytes
+    (ckpt : Agent_core.Checkpoint.t) : unit =
   if retained <= 0 then prune_agent_core_history ~session_dir ~retained
   else begin
   let snapshot_id = agent_core_history_snapshot_id_of_checkpoint ckpt in
   let save_snapshot_file () =
-    let bytes = encode_checkpoint_string_off_scheduler ckpt in
     Checkpoint_payload_writer.archive payload_writer
-      (agent_core_history_path ~session_dir ~snapshot_id) bytes
+      (agent_core_history_path ~session_dir ~snapshot_id) head_bytes
   in
   let save_result =
     match
@@ -293,6 +300,9 @@ type checkpoint_load_error =
       checkpoint-store I/O failure apart from an agent-core failure that
       surfaced during a load. (#8605 family) *)
   | Agent_core_error of string
+  | Objects_invalid of Objects.load_error
+  (** The head names a message object or bundle that is missing, unreadable
+      or not what the head says it is. *)
 
 (* A missing checkpoint never reaches here: [read_checkpoint_bytes]'s typed
    owned-file read decides absence before agent core runs. Every
@@ -324,6 +334,16 @@ let classify_core_error (e : Agent_core.Error.t) : checkpoint_load_error =
   | Api _ | Provider _ | Agent _ | Mcp _ | Config _
   | Orchestration _ | Media _ | Internal _ | Internal_carried { message = _; _ } ->
       Agent_core_error (Agent_core.Error.to_string e)
+
+let classify_objects_error : Objects.load_error -> checkpoint_load_error = function
+  | Objects.Head_invalid detail -> Parse_error detail
+  | Objects.Checkpoint_invalid error -> classify_core_error error
+  | ( Objects.Object_missing _
+    | Objects.Object_unreadable _
+    | Objects.Object_digest_mismatch _
+    | Objects.Bundle_invalid _
+    | Objects.Turn_mismatch _
+    | Objects.Message_invalid _ ) as error -> Objects_invalid error
 
 (* Both checkpoint reads take their bytes through
    [Fs_compat.load_owned_regular_file]: the read runs on a system thread when
@@ -369,9 +389,9 @@ let load_agent_core_history_file ~(session_dir : string) ~(snapshot_id : string)
         match read_checkpoint_bytes ~session_dir path with
         | Error e -> Error e
         | Ok bytes ->
-          (match decode_checkpoint_off_scheduler bytes with
-           | Ok ckpt -> Ok ckpt
-           | Error e -> Error (classify_core_error e))
+          (match decode_head_off_scheduler ~session_dir ~memo:(Objects.create_memo ()) bytes with
+           | Ok (_head, ckpt) -> Ok ckpt
+           | Error e -> Error (classify_objects_error e))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> Error (Io_error (Printexc.to_string exn))
@@ -406,6 +426,8 @@ type canonical_summary =
   ; summary_session_id : string
   ; summary_turn_count : int
   ; summary_message_count : int
+  ; summary_history : Objects.history
+  ; summary_content : Objects.digest
   }
 
 let canonical_summaries : (string, canonical_summary) Hashtbl.t = Hashtbl.create 16
@@ -502,11 +524,13 @@ let cached_summary ~canonical_path =
            Some summary
          | Some _ | None -> None))
 
-let summary_of_checkpoint ~identity (checkpoint : Agent_core.Checkpoint.t) =
+let summary_of_head ~identity (head : Objects.head) =
   { identity
-  ; summary_session_id = checkpoint.session_id
-  ; summary_turn_count = checkpoint.turn_count
-  ; summary_message_count = List.length checkpoint.messages
+  ; summary_session_id = head.checkpoint.session_id
+  ; summary_turn_count = head.checkpoint.turn_count
+  ; summary_message_count = Objects.message_count head.history
+  ; summary_history = head.history
+  ; summary_content = Objects.head_content_digest head
   }
 
 let publish_summary ~canonical_path summary =
@@ -519,18 +543,18 @@ let publish_summary ~canonical_path summary =
 (* After a parse: the summary describes the bytes parsed only if the file
    identity is the same before and after the read. Otherwise a rename landed
    during the read and nothing is published; the next access reads again. *)
-let publish_summary_after_parse ~canonical_path ~identity_before checkpoint =
+let publish_summary_after_parse ~canonical_path ~identity_before head =
   match identity_before, canonical_identity_opt canonical_path with
   | Some before, Some after when canonical_identity_equal before after ->
-    publish_summary ~canonical_path (summary_of_checkpoint ~identity:before checkpoint)
+    publish_summary ~canonical_path (summary_of_head ~identity:before head)
   | Some _, (Some _ | None) | None, (Some _ | None) -> ()
 
 (* After a durable atomic write under the session lock: the file at the path
    is the one just installed. *)
-let publish_summary_after_write ~canonical_path checkpoint =
+let publish_summary_after_write ~canonical_path head =
   match canonical_identity_opt canonical_path with
   | Some identity ->
-    publish_summary ~canonical_path (summary_of_checkpoint ~identity checkpoint);
+    publish_summary ~canonical_path (summary_of_head ~identity head);
     Some identity
   | None -> None
 
@@ -541,14 +565,14 @@ let publish_summary_after_write ~canonical_path checkpoint =
    took 0.9 s and 439 MB of allocation to decode.
 
    Per canonical file this process keeps a lineage: the encoding memo of its
-   saves and the value of the bytes the file holds, which is what [of_string]
-   gives for them -- the decode of the file, not a second truth, so the disk
+   saves and the value the head and its objects hold, which is what a load
+   gives for them -- the decode of the files, not a second truth, so the disk
    stays the only watermark (RFC-0225 §3.2). A save keeps what it wrote, under
-   the identity of the file it wrote, taken from that file's descriptor
+   the identity of the head it wrote, taken from that file's descriptor
    ([Keeper_fs.save_encoded_durable_atomic_from]).
-   [load_agent_core_for_save] keeps what it read, with a memo the read filled
-   ([Agent_core.Checkpoint.of_string_with_encoding_memo]), so the first save
-   after a restart or after another writer encodes only the new messages. A
+   [load_agent_core_for_save] keeps what it read, with the memo the load
+   filled ([Agent_core.Checkpoint_objects.load]), so the first save after a
+   restart or after another writer encodes only the new messages. A
    load answers from the value while the file still has its identity; another
    writer, a removal or a restart leaves a mismatch, and the load reads the
    file.
@@ -575,7 +599,7 @@ type lineage_owner =
 
 type written_lineage =
   { lineage_owner : lineage_owner
-  ; lineage_memo : Agent_core.Checkpoint.encoding_memo
+  ; lineage_memo : Objects.memo
   ; lineage_written : written_value option
   }
 
@@ -596,16 +620,15 @@ let lineage_owner_of_key ~key ~keeper_name =
    not written. *)
 let lineage_memo ~canonical_path =
   match summary_key canonical_path with
-  | None -> Agent_core.Checkpoint.create_encoding_memo ()
+  | None -> Objects.create_memo ()
   | Some key ->
     Stdlib.Mutex.protect written_lineages_mutex (fun () ->
       match Hashtbl.find_opt written_lineages key with
       | Some lineage -> lineage.lineage_memo
-      | None -> Agent_core.Checkpoint.create_encoding_memo ())
+      | None -> Objects.create_memo ())
 
-(* [written] is [None] when the save fell back to encoding the whole document:
-   the file then holds bytes no value here describes, and the memo is kept for
-   the next save. *)
+(* [written] is the value the files now hold, [None] when no value here
+   describes them. *)
 let keep_lineage ~canonical_path ~identity ~memo ~keeper_name written =
   match summary_key canonical_path with
   | None -> ()
@@ -714,23 +737,16 @@ let load_agent_core_as ~read_use ~(session_dir : string) ~(session_id : string) 
       match read_checkpoint_bytes ~session_dir path with
       | Error e -> Error e
       | Ok bytes ->
-        (match read_use with
-         | Read_only ->
-           (match decode_checkpoint_off_scheduler bytes with
-            | Ok ckpt ->
-              publish_summary_after_parse ~canonical_path:path ~identity_before ckpt;
-              Ok ckpt
-            | Error e -> Error (classify_core_error e))
-         | Read_for_save keeper_name ->
-           (match
-              offload_checkpoint_cpu (fun () ->
-                Agent_core.Checkpoint.of_string_with_encoding_memo bytes)
-            with
-            | Ok (ckpt, memo) ->
-              publish_summary_after_parse ~canonical_path:path ~identity_before ckpt;
+        let memo = Objects.create_memo () in
+        (match decode_head_off_scheduler ~session_dir ~memo bytes with
+         | Error e -> Error (classify_objects_error e)
+         | Ok (head, ckpt) ->
+           publish_summary_after_parse ~canonical_path:path ~identity_before head;
+           (match read_use with
+            | Read_only -> Ok ckpt
+            | Read_for_save keeper_name ->
               keep_read_lineage ~canonical_path:path ~identity_before ~memo ~keeper_name ckpt;
-              Ok (handed_out ckpt)
-            | Error e -> Error (classify_core_error e)))
+              Ok (handed_out ckpt)))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Unix.Unix_error (errno, _, _) as exn ->
@@ -753,7 +769,8 @@ let turn_history_of_load = function
         | Newer_version _
         | Io_error _
         | Read_failed _
-        | Agent_core_error _ ) as error ) -> Error error
+        | Agent_core_error _
+        | Objects_invalid _ ) as error ) -> Error error
 ;;
 
 let load_agent_core ~session_dir ~session_id =
@@ -785,7 +802,8 @@ let canonical_message_count ~(session_dir : string) ~(session_id : string)
             | Newer_version _
             | Io_error _
             | Read_failed _
-            | Agent_core_error _ ) as error) -> Error error)
+            | Agent_core_error _
+            | Objects_invalid _ ) as error) -> Error error)
 
 let canonical_byte_count ~(session_dir : string) ~(session_id : string)
   : (int option, checkpoint_load_error) result =
@@ -845,6 +863,10 @@ type save_agent_core_error =
   | Invalid_session_id of string
   | Session_directory_unavailable of directory_failure
   | Existing_checkpoint_unreadable of checkpoint_load_error
+  | Checkpoint_unencodable of Agent_core.Error.t
+      (** The checkpoint codec refused the messages or the fields around them,
+          and dropping unencodable json did not give a copy it accepts. *)
+  | Objects_write_failed of Keeper_checkpoint_object_store.write_error
   | Canonical_write_failed of Keeper_fs.durable_write_error
   | Transaction_lock_failed of File_lock_eio.durable_lock_error
   | Structurally_invalid of Keeper_transcript_unit.structural_error
@@ -869,6 +891,7 @@ let checkpoint_load_error_to_string = function
   | Io_error detail
   | Read_failed { detail; _ }
   | Agent_core_error detail -> detail
+  | Objects_invalid error -> Objects.load_error_to_string error
 
 let save_agent_core_error_to_string = function
   | Invalid_session_id reason -> reason
@@ -884,6 +907,9 @@ let save_agent_core_error_to_string = function
       leaf session_dir
   | Existing_checkpoint_unreadable error ->
     "existing checkpoint unreadable: " ^ checkpoint_load_error_to_string error
+  | Checkpoint_unencodable error ->
+    "checkpoint cannot be encoded: " ^ Agent_core.Error.to_string error
+  | Objects_write_failed error -> Keeper_checkpoint_object_store.write_error_to_string error
   | Canonical_write_failed error ->
     "canonical checkpoint write failed: "
     ^ Keeper_fs.durable_write_error_to_string error
@@ -972,8 +998,8 @@ let with_session_lock ~session_dir f =
   with_session_lock_typed ~session_dir (fun session_dir -> Ok (f session_dir))
   |> Result.map_error save_agent_core_error_to_string
 
-let archive_agent_core_history_best_effort ~payload_writer ~session_dir ~retained ckpt =
-  try save_agent_core_history ~payload_writer ~session_dir ~retained ckpt with
+let archive_agent_core_history_best_effort ~payload_writer ~session_dir ~retained ~head_bytes ckpt =
+  try save_agent_core_history ~payload_writer ~session_dir ~retained ~head_bytes ckpt with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Checkpoint_payload_writer.note payload_writer None;
@@ -1055,46 +1081,39 @@ let load_canonical_bytes_strict path =
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn -> Error (Io_error (Printexc.to_string exn))
 
-let load_canonical_bytes_and_checkpoint_strict path =
-  match load_canonical_bytes_strict path with
-  | Error _ as error -> error
-  | Ok None -> Ok None
-  | Ok (Some (identity_before, content)) ->
-    (* This decode runs inside the durable session lock, so the caller now
-       waits on worker-pool capacity while holding it (the submit is a
-       rendezvous at CPU weight). Accepted trade-off: the wait is bounded
-       by pool job runtimes and only delays this one session's
-       transaction, whereas the previous inline parse stalled every fiber
-       on the scheduler domain for the whole conversion. *)
-    (match decode_checkpoint_off_scheduler content with
-     | Ok checkpoint ->
-       publish_summary_after_parse
-         ~canonical_path:path
-         ~identity_before:(Some identity_before)
-         checkpoint;
-       Ok (Some (content, checkpoint))
-     | Error error -> Error (classify_core_error error))
+(* What a save or a source check needs from the canonical: the head alone,
+   no message object. From the summary while it describes the file, otherwise
+   from a parse of the head, which publishes the summary. A head is trusted to
+   name objects that are durable: every writer writes the objects first. *)
+type known_canonical =
+  { known_session_id : string
+  ; known_turn_count : int
+  ; known_history : Objects.history
+  ; known_content : Objects.digest
+  }
 
-let load_canonical_strict path =
-  load_canonical_bytes_and_checkpoint_strict path
-  |> Result.map (Option.map snd)
+let known_of_summary summary =
+  { known_session_id = summary.summary_session_id
+  ; known_turn_count = summary.summary_turn_count
+  ; known_history = summary.summary_history
+  ; known_content = summary.summary_content
+  }
 
-type watermark = { session_id : string; turn_count : int }
-
-let known_watermark ~canonical_path
-  : (watermark option, checkpoint_load_error) result =
+let known_canonical ~canonical_path
+  : (known_canonical option, checkpoint_load_error) result =
   match cached_summary ~canonical_path with
-  | Some summary ->
-    Ok
-      (Some
-         { session_id = summary.summary_session_id
-         ; turn_count = summary.summary_turn_count
-         })
+  | Some summary -> Ok (Some (known_of_summary summary))
   | None ->
-    load_canonical_strict canonical_path
-    |> Result.map
-         (Option.map (fun (existing : Agent_core.Checkpoint.t) ->
-            { session_id = existing.session_id; turn_count = existing.turn_count }))
+    (match load_canonical_bytes_strict canonical_path with
+     | Error _ as error -> error
+     | Ok None -> Ok None
+     | Ok (Some (identity, content)) ->
+       (match head_of_bytes_off_scheduler content with
+        | Error error -> Error (classify_objects_error error)
+        | Ok head ->
+          let summary = summary_of_head ~identity head in
+          publish_summary_after_parse ~canonical_path ~identity_before:(Some identity) head;
+          Ok (Some (known_of_summary summary))))
 
 (* ── Judging and removing an undecodable canonical ([masc_keeper_clear]) ─
    A canonical no turn can decode fails every turn (#37089), and nothing the
@@ -1141,17 +1160,28 @@ let judge_canonical ~(session_dir : string) ~(session_id : string) : canonical_j
          | Newer_version _
          | Io_error _
          | Read_failed _
-         | Agent_core_error _ ) as error) -> Judged_inconclusive error
+         | Agent_core_error _
+         | Objects_invalid _ ) as error) -> Judged_inconclusive error
     | Ok bytes ->
-      (match decode_checkpoint_off_scheduler bytes with
+      (match decode_head_off_scheduler ~session_dir ~memo:(Objects.create_memo ()) bytes with
        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
        | exception exn -> raised Read_raised exn
-       | Ok checkpoint -> Judged_decoded checkpoint
-       | Error core_error ->
-         (match classify_core_error core_error with
+       | Ok (_head, checkpoint) -> Judged_decoded checkpoint
+       (* An object the OS could not read says nothing about what it holds. *)
+       | Error (Objects.Object_unreadable _ as error) -> Judged_inconclusive (Objects_invalid error)
+       | Error
+           (( Objects.Head_invalid _
+            | Objects.Checkpoint_invalid _
+            | Objects.Object_missing _
+            | Objects.Object_digest_mismatch _
+            | Objects.Bundle_invalid _
+            | Objects.Turn_mismatch _
+            | Objects.Message_invalid _ ) as error) ->
+         (match classify_objects_error error with
           | Superseded_version { expected; got } -> Judged_superseded { expected; got }
           | Newer_version { expected; got } -> Judged_newer { expected; got }
-          | (Parse_error _ | Store_error _) as undecodable -> Judged_undecodable undecodable
+          | (Parse_error _ | Store_error _ | Objects_invalid _) as undecodable ->
+            Judged_undecodable undecodable
           (* The decoder failed for a reason that is not the content. *)
           | (Not_found | Io_error _ | Read_failed _ | Agent_core_error _) as error ->
             Judged_inconclusive error))
@@ -1270,6 +1300,7 @@ module Saved_history = struct
     | Io_error of string
     | Read_failed of { cause : checkpoint_read_failure; detail : string }
     | Agent_core_error of string
+    | Objects_invalid of Objects.load_error
 
   type ref_error =
     | Ref_not_found
@@ -1294,6 +1325,7 @@ let saved_history = function
   | Error (Io_error detail) -> Error (Saved_history.Io_error detail)
   | Error (Read_failed { cause; detail }) -> Error (Saved_history.Read_failed { cause; detail })
   | Error (Agent_core_error detail) -> Error (Saved_history.Agent_core_error detail)
+  | Error (Objects_invalid error) -> Error (Saved_history.Objects_invalid error)
 
 let saved_history_of_ref = function
   | Ok value -> Ok (Saved_history.Read value)
@@ -1315,6 +1347,7 @@ let load_error_of_saved_history_error : Saved_history.error -> checkpoint_load_e
   | Saved_history.Io_error detail -> Io_error detail
   | Saved_history.Read_failed { cause; detail } -> Read_failed { cause; detail }
   | Saved_history.Agent_core_error detail -> Agent_core_error detail
+  | Saved_history.Objects_invalid error -> Objects_invalid error
 
 let saved_history_error_to_string error =
   checkpoint_load_error_to_string (load_error_of_saved_history_error error)
@@ -1332,12 +1365,10 @@ let saved_history_ref_error_to_string = function
 type exact_checkpoint_snapshot =
   { checkpoint : Agent_core.Checkpoint.t
   ; reference : Keeper_checkpoint_ref.t
-  ; canonical_bytes : string
   }
 
 let exact_snapshot_checkpoint snapshot = snapshot.checkpoint
 let exact_snapshot_reference snapshot = snapshot.reference
-let exact_snapshot_canonical_bytes snapshot = snapshot.canonical_bytes
 let exact_snapshot_messages snapshot = snapshot.checkpoint.messages
 
 type checkpoint_cas_error =
@@ -1352,6 +1383,12 @@ type checkpoint_cas_error =
        { source_turn : int
        ; candidate_turn : int
        }
+   | Candidate_unencodable of Agent_core.Error.t
+   | Candidate_content_mismatch of
+       { reference : Keeper_checkpoint_ref.t
+       ; content : string
+       }
+   | Objects_not_installed of Keeper_checkpoint_object_store.write_error
    | Commit_not_installed of Keeper_fs.durable_write_error
 
 type checkpoint_installation_auxiliary =
@@ -1404,19 +1441,20 @@ let append_installation_auxiliary installation auxiliary =
       }
 ;;
 
-let checkpoint_ref_of_canonical_bytes canonical_bytes
-    (checkpoint : Agent_core.Checkpoint.t) =
+(* RFC-0476 §3.2: a reference names the checkpoint's content digest, which a
+   value and every head written for it share. *)
+let checkpoint_ref_of_content (content : Objects.digest) (checkpoint : Agent_core.Checkpoint.t) =
   match Keeper_id.Trace_id.of_string checkpoint.Agent_core.Checkpoint.session_id with
   | Error reason -> Error (Session_id_invalid reason)
   | Ok trace_id ->
-    Keeper_checkpoint_ref.create
+    Keeper_checkpoint_ref.of_persisted
       ~trace_id
       ~turn_count:checkpoint.turn_count
-      ~canonical_checkpoint_bytes:canonical_bytes
+      ~sha256:(content :> string)
     |> Result.map_error (fun error -> Ref_create_failed error)
 
-let exact_snapshot_of_checkpoint ~expected_session_id ~canonical_bytes checkpoint =
-  match checkpoint_ref_of_canonical_bytes canonical_bytes checkpoint with
+let exact_snapshot_of_checkpoint ~expected_session_id ~content checkpoint =
+  match checkpoint_ref_of_content content checkpoint with
   | Error error -> Error (Ref_identity_invalid error)
   | Ok reference
     when not
@@ -1425,37 +1463,22 @@ let exact_snapshot_of_checkpoint ~expected_session_id ~canonical_bytes checkpoin
     Error
       (Ref_session_mismatch
          { expected = expected_session_id; actual = reference.trace_id })
-  | Ok reference -> Ok { checkpoint; reference; canonical_bytes }
+  | Ok reference -> Ok { checkpoint; reference }
 ;;
 
 let exact_snapshot_of_value ~expected_session_id checkpoint =
   offload_checkpoint_cpu (fun () ->
-    match Agent_core.Checkpoint.to_json_result checkpoint with
+    match Objects.content_digest (Objects.create_memo ()) checkpoint with
     | Error error -> Error (Ref_read_failed (classify_core_error error))
-    | Ok json -> exact_snapshot_of_checkpoint ~expected_session_id
-        ~canonical_bytes:(Yojson.Safe.to_string json) checkpoint)
+    | Ok content -> exact_snapshot_of_checkpoint ~expected_session_id ~content checkpoint)
 ;;
 
-(* The reference is a SHA-256 over the whole canonical file, 13-109 MB, which
-   costs as much CPU as the decode. Both run in the one pool job: hashed on the
-   calling fiber, every save and every source check stalled the scheduler
-   domain for the length of the file. The job answers the decoded value apart
-   from the snapshot so a caller can still publish the summary of a value that
-   decoded but whose identity failed. *)
-let decode_exact_snapshot_off_scheduler ~expected_session_id canonical_bytes =
-  offload_checkpoint_cpu (fun () ->
-    match Agent_core.Checkpoint.of_string canonical_bytes with
-    | Error error -> Error error
-    | Ok checkpoint ->
-      Ok
-        ( checkpoint
-        , exact_snapshot_of_checkpoint ~expected_session_id ~canonical_bytes checkpoint ))
-;;
-
-let exact_snapshot_of_canonical_bytes ~expected_session_id canonical_bytes =
-  match decode_exact_snapshot_off_scheduler ~expected_session_id canonical_bytes with
-  | Error error -> Error (Ref_read_failed (classify_core_error error))
-  | Ok (_, snapshot) -> snapshot
+let exact_snapshot_of_head_bytes ~session_dir ~expected_session_id head_bytes =
+  match decode_head_off_scheduler ~session_dir ~memo:(Objects.create_memo ()) head_bytes with
+  | Error error -> Error (Ref_read_failed (classify_objects_error error))
+  | Ok (head, checkpoint) ->
+    exact_snapshot_of_checkpoint
+      ~expected_session_id ~content:(Objects.head_content_digest head) checkpoint
 ;;
 
 let load_ref_locked ~session_dir ~expected_session_id =
@@ -1467,26 +1490,21 @@ let load_ref_locked ~session_dir ~expected_session_id =
   match load_canonical_bytes_strict canonical_path with
   | Error error -> Error (Ref_read_failed error)
   | Ok None -> Error Ref_not_found
-  | Ok (Some (identity_before, canonical_bytes)) ->
-    (* A Keeper's lineage holds what [of_string] gives for the bytes of the
-       file it wrote or read, under that file's identity, so bytes read from a
-       file of that identity are not decoded again. The read stays: the
-       snapshot carries the bytes, and the reference is their digest. A
-       Librarian pass reads the snapshot of its Keeper's current trace when it
-       prepares and again when it commits; this decode allocated 44 GB across
-       the server in 17 minutes on 2026-10-20. *)
+  | Ok (Some (identity_before, head_bytes)) ->
+    (* A Keeper's lineage holds what a load gives for the head it wrote or
+       read, under that file's identity, so the objects of a head of that
+       identity are not read again. The head is read: the reference is its
+       content digest. A Librarian pass reads the snapshot of its Keeper's
+       current trace when it prepares and again when it commits. *)
     let decoded =
       match reusable_written_value ~canonical_path ~identity:identity_before with
       | Some checkpoint ->
-        Ok
-          ( checkpoint
-          , offload_checkpoint_cpu (fun () ->
-              exact_snapshot_of_checkpoint ~expected_session_id ~canonical_bytes checkpoint) )
-      | None -> decode_exact_snapshot_off_scheduler ~expected_session_id canonical_bytes
+        Result.map (fun head -> head, checkpoint) (head_of_bytes_off_scheduler head_bytes)
+      | None -> decode_head_off_scheduler ~session_dir ~memo:(Objects.create_memo ()) head_bytes
     in
     (match decoded with
-     | Error error -> Error (Ref_read_failed (classify_core_error error))
-     | Ok (checkpoint, snapshot) ->
+     | Error error -> Error (Ref_read_failed (classify_objects_error error))
+     | Ok (head, checkpoint) ->
        (* Published from the lineage's value too. The save or load that kept
           it published this identity's summary, but an unlocked reader that
           parsed the file before it can have replaced that summary since, and
@@ -1494,8 +1512,9 @@ let load_ref_locked ~session_dir ~expected_session_id =
        publish_summary_after_parse
          ~canonical_path
          ~identity_before:(Some identity_before)
-         checkpoint;
-       snapshot)
+         head;
+       exact_snapshot_of_checkpoint
+         ~expected_session_id ~content:(Objects.head_content_digest head) checkpoint)
 
 (* What the canonical file holds, against the reference a candidate claims to
    advance. *)
@@ -1504,22 +1523,11 @@ type canonical_source =
   | Source_is_expected
   | Source_is_other of Keeper_checkpoint_ref.t
 
-(* RFC-0225 §3.2 admission: the reference is a SHA-256 over exactly the
-   canonical bytes, so hashing the file settles whether it still holds the
-   bytes [expected_source_ref] names. The decode this replaces allocated 26 GB
-   in a fifty-minute window on a live server (2026-09-15) over files of
-   13-109 MB, and a save repeats it every turn.
-
-   Equal bytes are not the whole reference: the session and turn it carries are
-   read from the file too, and a reference restored from a stored record
-   ([Keeper_checkpoint_ref.of_persisted]) carries the record's word for them.
-   The canonical summary holds both for exactly the bytes on disk, so a file
-   the summary describes is admitted on the hash alone; otherwise it is decoded
-   once, which publishes the summary for the next save.
-
-   A file whose hash differs is decoded as well, because the refusal names the
-   reference that file now carries. Bytes this build cannot decode therefore
-   still refuse the write. *)
+(* RFC-0225 §3.2 admission: the reference is the content digest, which the
+   head gives without a message object read (RFC-0476 §3.2), and its session
+   and turn are the head's. The canonical summary holds all three for the head
+   on disk, so a file the summary describes is admitted without a read. A head
+   that does not parse refuses the write. *)
 let canonical_source_locked
       ~session_dir
       ~(expected_source_ref : Keeper_checkpoint_ref.t)
@@ -1530,55 +1538,27 @@ let canonical_source_locked
       ~session_dir
       ~session_id:(Keeper_id.Trace_id.to_string expected_session_id)
   in
-  match load_canonical_bytes_strict canonical_path with
+  match known_canonical ~canonical_path with
   | Error error -> Error (Ref_read_failed error)
   | Ok None -> Ok Source_absent
-  | Ok (Some (identity_before, canonical_bytes)) ->
-    let sha256 =
-      offload_checkpoint_cpu (fun () ->
-        Keeper_checkpoint_ref.sha256_of_canonical_bytes canonical_bytes)
-    in
-    (* The reference the file carries, read from it. The hash above is the one
-       the reference needs, so the decode does not hash the bytes again. *)
-    let decoded_reference () =
-      match decode_checkpoint_off_scheduler canonical_bytes with
-      | Error error -> Error (Ref_read_failed (classify_core_error error))
-      | Ok (checkpoint : Agent_core.Checkpoint.t) ->
-        publish_summary_after_parse
-          ~canonical_path
-          ~identity_before:(Some identity_before)
-          checkpoint;
-        (match Keeper_id.Trace_id.of_string checkpoint.session_id with
-         | Error reason -> Error (Ref_identity_invalid (Session_id_invalid reason))
-         | Ok trace_id
-           when not (Keeper_id.Trace_id.equal trace_id expected_session_id) ->
-           Error (Ref_session_mismatch { expected = expected_session_id; actual = trace_id })
-         | Ok trace_id ->
-           (match
-              Keeper_checkpoint_ref.of_persisted
-                ~trace_id
-                ~turn_count:checkpoint.turn_count
-                ~sha256
-            with
-            | Ok reference -> Ok reference
-            | Error error -> Error (Ref_identity_invalid (Ref_create_failed error))))
-    in
-    let source_of_reference reference =
-      if Keeper_checkpoint_ref.equal reference expected_source_ref
-      then Source_is_expected
-      else Source_is_other reference
-    in
-    if not (String.equal sha256 expected_source_ref.sha256)
-    then Result.map source_of_reference (decoded_reference ())
-    else (
-      match cached_summary ~canonical_path with
-      | Some summary
-        when String.equal
-               summary.summary_session_id
-               (Keeper_id.Trace_id.to_string expected_source_ref.trace_id)
-             && Int.equal summary.summary_turn_count expected_source_ref.turn_count ->
-        Ok Source_is_expected
-      | Some _ | None -> Result.map source_of_reference (decoded_reference ()))
+  | Ok (Some known) ->
+    (match Keeper_id.Trace_id.of_string known.known_session_id with
+     | Error reason -> Error (Ref_identity_invalid (Session_id_invalid reason))
+     | Ok trace_id when not (Keeper_id.Trace_id.equal trace_id expected_session_id) ->
+       Error (Ref_session_mismatch { expected = expected_session_id; actual = trace_id })
+     | Ok trace_id ->
+       (match
+          Keeper_checkpoint_ref.of_persisted
+            ~trace_id
+            ~turn_count:known.known_turn_count
+            ~sha256:(known.known_content :> string)
+        with
+        | Error error -> Error (Ref_identity_invalid (Ref_create_failed error))
+        | Ok reference ->
+          Ok
+            (if Keeper_checkpoint_ref.equal reference expected_source_ref
+             then Source_is_expected
+             else Source_is_other reference)))
 ;;
 
 let with_agent_core_exact_snapshot ~session_dir ~session_id f =
@@ -1597,12 +1577,12 @@ let with_agent_core_exact_snapshot ~session_dir ~session_id f =
 let load_agent_core_exact_snapshot ~session_dir ~session_id =
   with_agent_core_exact_snapshot ~session_dir ~session_id Fun.id
 
-(* Only an exact snapshot names its source. Its digest covers the bytes it
-   read; its value, trace and turn are the decode of those bytes, or a Keeper
-   lineage's value for them under the identity rule [load_ref_locked] uses.
-   Equal digests mean the file still holds those bytes, so the value the
-   caller already holds is still the one a snapshot of the file would hand
-   out. The comparison is the digest alone. *)
+(* Only an exact snapshot names its source. Its digest is the content digest
+   of the head it read; its value, trace and turn are the load of that head,
+   or a Keeper lineage's value for it under the identity rule [load_ref_locked]
+   uses. Equal digests mean the canonical still holds that content, so the
+   value the caller already holds is still the one a snapshot of the file
+   would hand out. The comparison is the digest alone. *)
 type exact_source = Keeper_checkpoint_ref.t
 
 let exact_snapshot_source snapshot = snapshot.reference
@@ -1611,14 +1591,16 @@ type exact_snapshot_since =
   | Unchanged_source
   | Changed_source of exact_checkpoint_snapshot
 
-(* Bytes read under the session lock whose digest differs from a known
-   source, kept with that digest so their decode does not hash them again. *)
+(* A head read under the session lock whose content digest differs from a
+   known source, kept with that digest so its load does not compute it
+   again. *)
 type changed_bytes =
   { changed_path : string
+  ; changed_session_dir : string
   ; changed_identity_before : canonical_identity
   ; changed_session_id : Keeper_id.Trace_id.t
-  ; changed_canonical_bytes : string
-  ; changed_sha256 : string
+  ; changed_head : Objects.head
+  ; changed_content : Objects.digest
   }
 
 type exact_bytes_since =
@@ -1634,27 +1616,30 @@ let read_since_locked ~session_dir ~(known : exact_source) =
   match load_canonical_bytes_strict canonical_path with
   | Error error -> Error (Ref_read_failed error)
   | Ok None -> Error Ref_not_found
-  | Ok (Some (identity_before, canonical_bytes)) ->
-    let sha256 =
-      offload_checkpoint_cpu (fun () ->
-        Keeper_checkpoint_ref.sha256_of_canonical_bytes canonical_bytes)
-    in
-    if String.equal sha256 known.sha256
-    then Ok Unchanged_bytes
-    else
-      Ok
-        (Changed_bytes
-           { changed_path = canonical_path
-           ; changed_identity_before = identity_before
-           ; changed_session_id = known.trace_id
-           ; changed_canonical_bytes = canonical_bytes
-           ; changed_sha256 = sha256
-           })
+  | Ok (Some (identity_before, head_bytes)) ->
+    (match head_of_bytes_off_scheduler head_bytes with
+     | Error error -> Error (Ref_read_failed (classify_objects_error error))
+     | Ok head ->
+       let content = Objects.head_content_digest head in
+       if String.equal (content :> string) known.sha256
+       then Ok Unchanged_bytes
+       else
+         Ok
+           (Changed_bytes
+              { changed_path = canonical_path
+              ; changed_session_dir = session_dir
+              ; changed_identity_before = identity_before
+              ; changed_session_id = known.trace_id
+              ; changed_head = head
+              ; changed_content = content
+              }))
 
-(* As in [load_ref_locked]: bytes read from a file whose identity a Keeper's
-   lineage holds are not decoded again, and the lineage's value is handed out.
-   The identity is the one the bytes were read under, so the answer does not
-   depend on what the file holds when this runs, after the lock was released. *)
+(* As in [load_ref_locked]: the objects of a head whose identity a Keeper's
+   lineage holds are not read again, and the lineage's value is handed out.
+   The identity is the one the head was read under, so the answer does not
+   depend on what the file holds when this runs, after the lock was released.
+   The objects a head names do not change, so reading them now gives what
+   they held then. *)
 let decode_changed_bytes changed =
   let decoded =
     match
@@ -1663,15 +1648,20 @@ let decode_changed_bytes changed =
         ~identity:changed.changed_identity_before
     with
     | Some checkpoint -> Ok checkpoint
-    | None -> decode_checkpoint_off_scheduler changed.changed_canonical_bytes
+    | None ->
+      offload_checkpoint_cpu (fun () ->
+        Objects.load
+          (Objects.create_memo ())
+          ~read_object:(Keeper_checkpoint_object_store.read ~session_dir:changed.changed_session_dir)
+          changed.changed_head)
   in
   match decoded with
-  | Error error -> Error (Ref_read_failed (classify_core_error error))
+  | Error error -> Error (Ref_read_failed (classify_objects_error error))
   | Ok (checkpoint : Agent_core.Checkpoint.t) ->
     publish_summary_after_parse
       ~canonical_path:changed.changed_path
       ~identity_before:(Some changed.changed_identity_before)
-      checkpoint;
+      changed.changed_head;
     (match Keeper_id.Trace_id.of_string checkpoint.session_id with
      | Error reason -> Error (Ref_identity_invalid (Session_id_invalid reason))
      | Ok trace_id when not (Keeper_id.Trace_id.equal trace_id changed.changed_session_id) ->
@@ -1679,11 +1669,11 @@ let decode_changed_bytes changed =
      | Ok trace_id ->
        (match
           Keeper_checkpoint_ref.of_persisted
-            ~trace_id ~turn_count:checkpoint.turn_count ~sha256:changed.changed_sha256
+            ~trace_id ~turn_count:checkpoint.turn_count
+            ~sha256:(changed.changed_content :> string)
         with
         | Error error -> Error (Ref_identity_invalid (Ref_create_failed error))
-        | Ok reference ->
-          Ok { checkpoint; reference; canonical_bytes = changed.changed_canonical_bytes }))
+        | Ok reference -> Ok { checkpoint; reference }))
 
 let read_agent_core_exact_bytes_since ~session_dir ~known =
   match with_session_lock ~session_dir (fun session_dir -> read_since_locked ~session_dir ~known) with
@@ -1734,48 +1724,45 @@ let with_checkpoint_cas_lock ~session_dir f =
       (fun () -> f session_dir)
     |> installation_of_lock_observation
 
-let save_agent_core_if_source_with
-    ?(require_absent = false)
+(* A plan's layout follows the canonical as it is when the plan is made
+   (RFC-0476 §3.3). Every head that was the canonical names durable objects,
+   so the plan stays valid when the canonical moves before a lock is taken;
+   the source check under the lock decides whether it is installed. A
+   canonical that cannot be read gives no layout to follow, and the source
+   check then refuses the install. *)
+let plan_for_session ~session_dir ~boundary (checkpoint : Agent_core.Checkpoint.t) =
+  let previous =
+    if not (leaf_is_real_segment checkpoint.session_id)
+    then None
+    else (
+      match
+        known_canonical
+          ~canonical_path:
+            (agent_core_checkpoint_path ~session_dir ~session_id:checkpoint.session_id)
+      with
+      | Ok (Some known) -> Some known.known_history
+      | Ok None | Error (_ : checkpoint_load_error) -> None)
+  in
+  offload_checkpoint_cpu (fun () ->
+    Objects.plan_save (Objects.create_memo ()) ?previous boundary checkpoint)
+
+let install_plan_if_source
+    ~require_absent
     ~with_checkpoint_cas_lock
     ~write_checkpoint_bytes
     ~(on_checkpoint_commit_observer : Keeper_checkpoint_ref.t -> unit)
     ~session_dir
     ~(expected_source_ref : Keeper_checkpoint_ref.t)
-    (candidate : Agent_core.Checkpoint.t) =
-  let candidate_bytes, candidate_identity =
-    offload_checkpoint_cpu (fun () ->
-      let bytes = Yojson.Safe.to_string (Agent_core.Checkpoint.to_json candidate) in
-      bytes, checkpoint_ref_of_canonical_bytes bytes candidate)
-  in
-  match candidate_identity with
-  | Error error -> not_installed (Candidate_identity_invalid error)
-  | Ok candidate_ref
-    when not
-           (Keeper_id.Trace_id.equal
-              expected_source_ref.trace_id candidate_ref.trace_id) ->
-    not_installed
-      (Candidate_session_mismatch
-         { expected = expected_source_ref.trace_id
-         ; candidate = candidate_ref.trace_id
-         })
-  | Ok candidate_ref
-    when candidate_ref.turn_count < expected_source_ref.turn_count ->
-    not_installed
-      (Candidate_turn_regressed
-         { source_turn = expected_source_ref.turn_count
-         ; candidate_turn = candidate_ref.turn_count
-         })
-  | Ok candidate_ref ->
+    ~(candidate_ref : Keeper_checkpoint_ref.t)
+    (plan : Objects.plan) =
     let expected_session_id = expected_source_ref.trace_id in
     let observed_ref = ref None in
     let committed_installation = ref None in
-    (* Every path through here has installed [candidate_bytes], so the file is
-       the candidate: its summary is the candidate's, without reading the file
-       back. The source check reads the summary to answer the session and turn
-       of bytes whose hash already matched, so a save that leaves none behind
-       makes the next one decode the whole checkpoint. *)
+    (* Every path through here has installed the plan's head, so the file is
+       the candidate: its summary is the plan's head, without reading the
+       file back. *)
     let publish ~canonical_path auxiliary =
-      ignore (publish_summary_after_write ~canonical_path candidate : canonical_identity option);
+      ignore (publish_summary_after_write ~canonical_path plan.head : canonical_identity option);
       let installed = { installed_ref = candidate_ref; auxiliary } in
       committed_installation := Some installed;
       Installed installed
@@ -1808,24 +1795,28 @@ let save_agent_core_if_source_with
                ~session_id:(Keeper_id.Trace_id.to_string expected_session_id)
            in
            let ownership_root = Filename.dirname session_dir in
-           (match
-              write_checkpoint_bytes
-                ~on_durable_commit:observe_commit
-                ~ownership_root
-                ~path:canonical_path
-                ~bytes:candidate_bytes
-            with
-            | Error error when error.Keeper_fs.renamed ->
-              publish ~canonical_path [ Commit_durability_unknown error ]
-            | Error error -> not_installed (Commit_not_installed error)
-            | Ok Keeper_fs.Committed ->
-              (* The durable writer installs [candidate_bytes] verbatim - the
-                 exact bytes [candidate_ref] was derived from - so the
-                 published file and the returned ref agree by construction.
-                 The hint is auxiliary and cannot downgrade that fact. *)
-              publish ~canonical_path []
-            | Ok (Keeper_fs.Committed_but_observer_failed failure) ->
-              publish ~canonical_path [ Commit_observer_failed failure ])))
+           (match Keeper_checkpoint_object_store.write ~session_dir plan.objects with
+            | Error error -> not_installed (Objects_not_installed error)
+            | Ok (_ : int) ->
+              (match
+                 write_checkpoint_bytes
+                   ~on_durable_commit:observe_commit
+                   ~ownership_root
+                   ~path:canonical_path
+                   ~bytes:plan.head_bytes
+               with
+               | Error error when error.Keeper_fs.renamed ->
+                 publish ~canonical_path [ Commit_durability_unknown error ]
+               | Error error -> not_installed (Commit_not_installed error)
+               | Ok Keeper_fs.Committed ->
+                 (* The durable writer installs the plan's head verbatim, and
+                    [candidate_ref] is that plan's content digest, so the
+                    published file and the returned ref agree by
+                    construction. The hint is auxiliary and cannot downgrade
+                    that fact. *)
+                 publish ~canonical_path []
+               | Ok (Keeper_fs.Committed_but_observer_failed failure) ->
+                 publish ~canonical_path [ Commit_observer_failed failure ]))))
       with
       | Eio.Cancel.Cancelled _ as cancelled ->
         Printexc.raise_with_backtrace cancelled (Printexc.get_raw_backtrace ())
@@ -1851,6 +1842,41 @@ let save_agent_core_if_source_with
             (Post_commit_unwind_interrupted (exn, backtrace))
         | None -> Printexc.raise_with_backtrace exn backtrace))
 
+let save_agent_core_if_source_with
+    ?(require_absent = false)
+    ~with_checkpoint_cas_lock
+    ~write_checkpoint_bytes
+    ~(on_checkpoint_commit_observer : Keeper_checkpoint_ref.t -> unit)
+    ~session_dir
+    ~(expected_source_ref : Keeper_checkpoint_ref.t)
+    ~boundary
+    (candidate : Agent_core.Checkpoint.t) =
+  match plan_for_session ~session_dir ~boundary candidate with
+  | Error error -> not_installed (Candidate_unencodable error)
+  | Ok plan ->
+    (match checkpoint_ref_of_content plan.content candidate with
+     | Error error -> not_installed (Candidate_identity_invalid error)
+     | Ok candidate_ref
+       when not
+              (Keeper_id.Trace_id.equal
+                 expected_source_ref.trace_id candidate_ref.trace_id) ->
+       not_installed
+         (Candidate_session_mismatch
+            { expected = expected_source_ref.trace_id
+            ; candidate = candidate_ref.trace_id
+            })
+     | Ok candidate_ref
+       when candidate_ref.turn_count < expected_source_ref.turn_count ->
+       not_installed
+         (Candidate_turn_regressed
+            { source_turn = expected_source_ref.turn_count
+            ; candidate_turn = candidate_ref.turn_count
+            })
+     | Ok candidate_ref ->
+       install_plan_if_source
+         ~require_absent ~with_checkpoint_cas_lock ~write_checkpoint_bytes
+         ~on_checkpoint_commit_observer ~session_dir ~expected_source_ref ~candidate_ref plan)
+
 let write_checkpoint_bytes
     ~on_durable_commit
     ~ownership_root
@@ -1863,27 +1889,28 @@ let write_checkpoint_bytes
     bytes
 ;;
 
-let save_agent_core_if_source ~session_dir ~expected_source_ref candidate =
+let save_agent_core_if_source ~session_dir ~expected_source_ref ~boundary candidate =
   save_agent_core_if_source_with
     ~with_checkpoint_cas_lock
     ~write_checkpoint_bytes
     ~on_checkpoint_commit_observer:(fun _ -> ())
     ~session_dir
     ~expected_source_ref
+    ~boundary
     candidate
 ;;
 
-let save_agent_core_if_absent ~session_dir candidate =
-  let candidate_identity = offload_checkpoint_cpu (fun () ->
-    let bytes = Agent_core.Checkpoint.to_json candidate |> Yojson.Safe.to_string in
-    checkpoint_ref_of_canonical_bytes bytes candidate) in
-  match candidate_identity with
-  | Error error -> not_installed (Candidate_identity_invalid error)
-  | Ok candidate_ref ->
-    save_agent_core_if_source_with
-      ~require_absent:true ~with_checkpoint_cas_lock ~write_checkpoint_bytes
-      ~on_checkpoint_commit_observer:(fun _ -> ())
-      ~session_dir ~expected_source_ref:candidate_ref candidate
+let save_agent_core_if_absent ~session_dir ~boundary candidate =
+  match plan_for_session ~session_dir ~boundary candidate with
+  | Error error -> not_installed (Candidate_unencodable error)
+  | Ok plan ->
+    (match checkpoint_ref_of_content plan.content candidate with
+     | Error error -> not_installed (Candidate_identity_invalid error)
+     | Ok candidate_ref ->
+       install_plan_if_source
+         ~require_absent:true ~with_checkpoint_cas_lock ~write_checkpoint_bytes
+         ~on_checkpoint_commit_observer:(fun _ -> ())
+         ~session_dir ~expected_source_ref:candidate_ref ~candidate_ref plan)
 ;;
 
 (* Accepted continuations are not observational rolling history: nothing
@@ -1906,7 +1933,7 @@ let read_retained_locked ~session_dir ~reference =
         (Store_error (Fs_compat.owned_regular_file_read_error_to_string error))))
   | Ok None -> Ok None
   | Ok (Some bytes) ->
-      (match exact_snapshot_of_canonical_bytes
+      (match exact_snapshot_of_head_bytes ~session_dir
                ~expected_session_id:reference.Keeper_checkpoint_ref.trace_id bytes with
        | Error error -> Error (Source_unavailable error)
        | Ok snapshot when Keeper_checkpoint_ref.equal reference snapshot.reference ->
@@ -2042,7 +2069,8 @@ let read_retained_snapshot_locked ~session_dir ~reference =
   | Ok None -> Error (Source_unavailable Ref_not_found)
   | Ok (Some bytes) ->
     (match
-       exact_snapshot_of_canonical_bytes
+       exact_snapshot_of_head_bytes
+         ~session_dir
          ~expected_session_id:reference.Keeper_checkpoint_ref.trace_id
          bytes
      with
@@ -2059,7 +2087,8 @@ let read_retained_snapshot_locked ~session_dir ~reference =
              | Store_error _
              | Io_error _
              | Read_failed _
-             | Agent_core_error _ )
+             | Agent_core_error _
+             | Objects_invalid _ )
          | Ref_not_found
          | Ref_identity_invalid _
          | Ref_session_mismatch _
@@ -2091,11 +2120,18 @@ let find_exact_snapshot_for_retention ~session_dir ~reference =
              | Error error -> Error (unavailable (Fs_compat.owned_regular_file_read_error_to_string error))
              | Ok None -> find rest
              | Ok (Some bytes) ->
-               if offload_checkpoint_cpu (fun () -> Keeper_checkpoint_ref.sha256_of_canonical_bytes bytes) <> reference.sha256 then find rest
-               else match exact_snapshot_of_canonical_bytes ~expected_session_id:reference.trace_id bytes with
-                 | Error error -> Error (Source_unavailable error)
-                 | Ok snapshot when Keeper_checkpoint_ref.equal reference snapshot.reference -> Ok snapshot
-                 | Ok snapshot -> Error (Source_changed snapshot.reference)) in
+               (* A head names its content digest without an object read, so
+                  only the head that names this reference is loaded. *)
+               (match head_of_bytes_off_scheduler bytes with
+                | Error (_ : Objects.load_error) -> find rest
+                | Ok head
+                  when not (String.equal (Objects.head_content_digest head :> string) reference.sha256) ->
+                  find rest
+                | Ok _ ->
+                  (match exact_snapshot_of_head_bytes ~session_dir ~expected_session_id:reference.trace_id bytes with
+                   | Error error -> Error (Source_unavailable error)
+                   | Ok snapshot when Keeper_checkpoint_ref.equal reference snapshot.reference -> Ok snapshot
+                   | Ok snapshot -> Error (Source_changed snapshot.reference)))) in
         find paths)) with
   | Ok result -> result
   | Error detail -> Error (Source_unavailable (Ref_lock_failed detail))
@@ -2124,11 +2160,23 @@ let retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot =
       match read_retained_locked ~session_dir ~reference:snapshot.reference with
       | Error cause -> not_installed cause
       | Ok (None | Some _) ->
+          (* The retained head shares the canonical's objects; its open
+             messages are written as objects of their own. *)
+          match plan_for_session ~session_dir ~boundary:Objects.Turn_continues snapshot.checkpoint with
+          | Error error -> not_installed (Candidate_unencodable error)
+          | Ok plan when not (String.equal (plan.content :> string) snapshot.reference.sha256) ->
+              not_installed
+                (Candidate_content_mismatch
+                   { reference = snapshot.reference; content = (plan.content :> string) })
+          | Ok plan ->
+          match Keeper_checkpoint_object_store.write ~session_dir plan.objects with
+          | Error error -> not_installed (Objects_not_installed error)
+          | Ok (_ : int) ->
           match write_checkpoint_bytes
                   ~on_durable_commit:observe_commit
                   ~ownership_root:(Filename.dirname session_dir)
                   ~path:(retained_checkpoint_path ~session_dir snapshot.reference)
-                  ~bytes:snapshot.canonical_bytes with
+                  ~bytes:plan.head_bytes with
           | Error error when error.Keeper_fs.renamed ->
               publish [Commit_durability_unknown error]
           | Error error -> not_installed (Commit_not_installed error)
@@ -2142,6 +2190,41 @@ let retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot =
 
 let retain_exact_snapshot ~session_dir snapshot =
   retain_exact_snapshot_with ~write_checkpoint_bytes ~session_dir snapshot
+
+(* A snapshot written as a head another store keeps (a Gate preparation),
+   with the objects it names durable in the session first. *)
+type persist_error =
+  | Persist_session_unavailable of string
+  | Persist_unencodable of Agent_core.Error.t
+  | Persist_content_mismatch of
+      { reference : Keeper_checkpoint_ref.t
+      ; content : string
+      }
+  | Persist_objects_failed of Keeper_checkpoint_object_store.write_error
+
+let persist_error_to_string = function
+  | Persist_session_unavailable detail -> "checkpoint session unavailable: " ^ detail
+  | Persist_unencodable error -> "checkpoint cannot be encoded: " ^ Agent_core.Error.to_string error
+  | Persist_content_mismatch { reference; content } ->
+    Printf.sprintf "checkpoint content %s does not match its reference %s" content reference.sha256
+  | Persist_objects_failed error -> Keeper_checkpoint_object_store.write_error_to_string error
+
+let persist_exact_snapshot ~session_dir snapshot =
+  match
+    with_session_lock ~session_dir (fun session_dir ->
+      match plan_for_session ~session_dir ~boundary:Objects.Turn_continues snapshot.checkpoint with
+      | Error error -> Error (Persist_unencodable error)
+      | Ok plan when not (String.equal (plan.content :> string) snapshot.reference.sha256) ->
+        Error
+          (Persist_content_mismatch
+             { reference = snapshot.reference; content = (plan.content :> string) })
+      | Ok plan ->
+        (match Keeper_checkpoint_object_store.write ~session_dir plan.objects with
+         | Error error -> Error (Persist_objects_failed error)
+         | Ok (_ : int) -> Ok plan.head_bytes))
+  with
+  | Ok result -> result
+  | Error detail -> Error (Persist_session_unavailable detail)
 
 type release_failure =
   | Lock_held_elsewhere
@@ -2195,20 +2278,21 @@ type save_lineage =
   | Save_for_keeper of string
   | Save_without_lineage
 
-(* The summary and the lineage are kept under the identity of the file this
+(* The summary and the lineage are kept under the identity of the head this
    save wrote, from its own descriptor ([written_file]). A stat of the path
    after the rename would name whatever file is there by then. *)
 let save_outcome_after_write
-    ~session_dir ~canonical_path ~save_lineage ~memo ~written ~written_file ~known
-    ~history_retained ~payload_writer ckpt
+    ~session_dir ~canonical_path ~save_lineage ~memo ~written_file ~known
+    ~history_retained ~payload_writer ~(plan : Objects.plan) ckpt
   =
   let identity = canonical_identity_of_stats written_file in
-  publish_summary ~canonical_path (summary_of_checkpoint ~identity ckpt);
+  publish_summary ~canonical_path (summary_of_head ~identity plan.head);
   (match save_lineage with
    | Save_for_keeper keeper_name ->
-     keep_lineage ~canonical_path ~identity ~memo ~keeper_name written
+     keep_lineage ~canonical_path ~identity ~memo ~keeper_name (Some plan.decoded)
    | Save_without_lineage -> ());
-  archive_agent_core_history_best_effort ~payload_writer ~session_dir ~retained:history_retained ckpt;
+  archive_agent_core_history_best_effort
+    ~payload_writer ~session_dir ~retained:history_retained ~head_bytes:plan.head_bytes ckpt;
   Ok
     (Saved
        { relation = save_relation ~known ~incoming:ckpt.turn_count
@@ -2229,6 +2313,7 @@ let save_agent_core_classified_typed
     ~save_lineage ~payload_writer
     ~(session_dir : string)
     ~(history_retained : int)
+    ~boundary
     (ckpt : Agent_core.Checkpoint.t)
   : (save_agent_core_outcome, save_agent_core_error) result =
   match Keeper_transcript_unit.validate ckpt.messages with
@@ -2249,27 +2334,30 @@ let save_agent_core_classified_typed
            because nothing ever replaced the file: a keeper whose workspace
            predates the version bump could not checkpoint again until someone
            deleted it by hand. *)
-        match known_watermark ~canonical_path with
+        match known_canonical ~canonical_path with
         | Error (Superseded_version { expected; got }) ->
           Log.Keeper.warn
             "AGENT_CORE checkpoint %s is version %d, superseded by %d; this \
              turn's checkpoint replaces it"
             canonical_path got expected;
           Ok None
-        | (Error (Not_found | (Store_error _ | (Parse_error _ | (Newer_version _ | (Io_error _ | (Read_failed _ | Agent_core_error _)))))) | Ok _) as answer -> answer
+        | ( Error
+              ( Not_found | Store_error _ | Parse_error _ | Newer_version _ | Io_error _
+              | Read_failed _ | Agent_core_error _ | Objects_invalid _ )
+          | Ok _ ) as answer -> answer
       with
       | Error error -> Error (Existing_checkpoint_unreadable error)
-      | Ok (Some existing) when not (String.equal existing.session_id session_id) ->
+      | Ok (Some existing) when not (String.equal existing.known_session_id session_id) ->
         Error
           (Existing_checkpoint_unreadable
              (Store_error
                 (Printf.sprintf
                    "canonical checkpoint identity mismatch: expected=%s actual=%s"
-                   session_id existing.session_id)))
-      | Ok (Some existing) when ckpt.turn_count < existing.turn_count ->
+                   session_id existing.known_session_id)))
+      | Ok (Some existing) when ckpt.turn_count < existing.known_turn_count ->
         Log.Keeper.warn
           "stale AGENT_CORE checkpoint write skipped for %s: incoming turn_count=%d, last saved=%d"
-          ckpt.session_id ckpt.turn_count existing.turn_count;
+          ckpt.session_id ckpt.turn_count existing.known_turn_count;
         Otel_metric_store.inc_counter
           "masc_keeper_checkpoint_stale_noop_total"
           ~labels:[("site", "store_watermark")]
@@ -2277,85 +2365,75 @@ let save_agent_core_classified_typed
         Ok
           (Stale_noop
              { incoming_turn_count = ckpt.turn_count
-             ; known_turn_count = existing.turn_count
+             ; known_turn_count = existing.known_turn_count
              })
       | Ok existing ->
-        let known = Option.map (fun (w : watermark) -> w.turn_count) existing in
+        let known = Option.map (fun known -> known.known_turn_count) existing in
+        let previous = Option.map (fun known -> known.known_history) existing in
         let ownership_root = Filename.dirname session_dir in
         let memo =
           match save_lineage with
           | Save_for_keeper _ -> lineage_memo ~canonical_path
-          | Save_without_lineage -> Agent_core.Checkpoint.create_encoding_memo ()
+          | Save_without_lineage -> Objects.create_memo ()
         in
-        (* What this save's encode returned, read only by this save. *)
-        let written = ref None in
-        let write payload =
-          written := None;
-          Checkpoint_payload_writer.canonical payload_writer ~write:write_canonical
-            ~ownership_root canonical_path
-            (fun () ->
-               let pieces, decoded =
-                 Agent_core.Checkpoint.to_pieces_with_encoding_memo memo payload
-               in
-               written := decoded;
-               pieces)
+        let plan payload =
+          offload_checkpoint_cpu (fun () -> Objects.plan_save memo ?previous boundary payload)
         in
-        (match write ckpt with
-         | Ok written_file ->
-           save_outcome_after_write
-             ~session_dir ~canonical_path ~save_lineage ~memo ~written:!written ~written_file
-             ~known ~history_retained ~payload_writer ckpt
+        (* The objects first, then the head that names them (RFC-0476 §3.3). *)
+        let install payload (plan : Objects.plan) =
+          match Keeper_checkpoint_object_store.write ~session_dir plan.objects with
+          | Error error -> Error (Objects_write_failed error)
+          | Ok object_bytes ->
+            Checkpoint_payload_writer.note payload_writer (Some object_bytes);
+            (match
+               Checkpoint_payload_writer.canonical payload_writer ~write:write_canonical
+                 ~ownership_root canonical_path
+                 (fun () -> [ plan.head_bytes ])
+             with
+             | Error error -> Error (Canonical_write_failed error)
+             | Ok written_file ->
+               save_outcome_after_write
+                 ~session_dir ~canonical_path ~save_lineage ~memo ~written_file
+                 ~known ~history_retained ~payload_writer ~plan payload)
+        in
+        (match plan ckpt with
+         | Ok planned -> install ckpt planned
          (* #31677: a payload-encode refusal means the in-memory checkpoint
-            carries a json payload the v10 contract cannot encode — a
+            carries a json payload the contract cannot encode -- a
             provider-authored duplicate key or non-finite float. Without
             recovery the write refuses at this stage of every later turn,
             which is what bricked keepers for hours on 2026-08-29. The
             codec still rejects the original; this drop-and-retry-once
             stores the recovered copy, so the keeper survives and the next
-            restart loads a clean checkpoint. Any other stage failure (or a
-            refusal with nothing droppable) keeps the original error. *)
-         | Error ({ stage = Keeper_fs.Payload_encode; _ } as error) -> (
+            restart loads a clean checkpoint. A refusal with nothing
+            droppable keeps the original error. *)
+         | Error error -> (
            match Agent_core.Checkpoint.drop_unencodable_json ckpt with
-           | None -> Error (Canonical_write_failed error)
+           | None -> Error (Checkpoint_unencodable error)
            | Some recovered ->
              Log.Keeper.warn
                "checkpoint payload unencodable (%s); storing the recovery \
                 copy with the offending json dropped for %s"
-               (Keeper_fs.durable_write_error_to_string error)
+               (Agent_core.Error.to_string error)
                ckpt.session_id;
-             (match write recovered with
-              | Error retry_error -> Error (Canonical_write_failed retry_error)
-              | Ok written_file ->
-                save_outcome_after_write
-                  ~session_dir ~canonical_path ~save_lineage ~memo ~written:!written
-                  ~written_file ~known ~history_retained ~payload_writer recovered))
-         | Error
-             ({ stage =
-                  ( Keeper_fs.Directory_prepare
-                  | Keeper_fs.Temp_file_create
-                  | Keeper_fs.Payload_write
-                  | Keeper_fs.Payload_fsync
-                  | Keeper_fs.Temp_file_close
-                  | Keeper_fs.Atomic_rename
-                  | Keeper_fs.Parent_directory_fsync_after_rename
-                  | Keeper_fs.Temp_directory_fsync_after_rename )
-              ; _
-              } as error) -> Error (Canonical_write_failed error)))
+             (match plan recovered with
+              | Error retry_error -> Error (Checkpoint_unencodable retry_error)
+              | Ok planned -> install recovered planned))))
 
 let save_agent_core_classified
-    ~(session_dir : string) ~(history_retained : int) (ckpt : Agent_core.Checkpoint.t)
+    ~(session_dir : string) ~(history_retained : int) ~boundary (ckpt : Agent_core.Checkpoint.t)
   : (save_agent_core_outcome, string) result =
   save_agent_core_classified_typed
     ~write_canonical:write_canonical_durably
-    ~save_lineage:Save_without_lineage ~payload_writer:Checkpoint_payload_writer.Unmeasured ~session_dir ~history_retained ckpt
+    ~save_lineage:Save_without_lineage ~payload_writer:Checkpoint_payload_writer.Unmeasured ~session_dir ~history_retained ~boundary ckpt
   |> Result.map_error save_agent_core_error_to_string
 
 let save_agent_core_for_keeper
-    ~keeper_name ~(session_dir : string) ~(history_retained : int) (ckpt : Agent_core.Checkpoint.t)
+    ~keeper_name ~(session_dir : string) ~(history_retained : int) ~boundary (ckpt : Agent_core.Checkpoint.t)
   : (save_agent_core_outcome, string) result =
   save_agent_core_classified_typed
     ~write_canonical:write_canonical_durably
-    ~save_lineage:(Save_for_keeper keeper_name) ~payload_writer:Checkpoint_payload_writer.Unmeasured ~session_dir ~history_retained ckpt
+    ~save_lineage:(Save_for_keeper keeper_name) ~payload_writer:Checkpoint_payload_writer.Unmeasured ~session_dir ~history_retained ~boundary ckpt
   |> Result.map_error save_agent_core_error_to_string
 
 module For_testing = struct
@@ -2378,7 +2456,7 @@ module For_testing = struct
     in
     count 0 directory
 
-  let save_agent_core_for_keeper_measured ~keeper_name ~session_dir ~history_retained ckpt =
+  let save_agent_core_for_keeper_measured ~keeper_name ~session_dir ~history_retained ~boundary ckpt =
     let bytes = ref (Some 0) in
     let on_payload observation =
       bytes := (match !bytes, observation with
@@ -2387,7 +2465,7 @@ module For_testing = struct
     in
     save_agent_core_classified_typed
       ~write_canonical:write_canonical_durably
-      ~save_lineage:(Save_for_keeper keeper_name) ~payload_writer:(Checkpoint_payload_writer.Measured on_payload) ~session_dir ~history_retained ckpt
+      ~save_lineage:(Save_for_keeper keeper_name) ~payload_writer:(Checkpoint_payload_writer.Measured on_payload) ~session_dir ~history_retained ~boundary ckpt
     |> Result.map (fun outcome -> outcome, !bytes)
     |> Result.map_error save_agent_core_error_to_string
 
@@ -2401,6 +2479,7 @@ module For_testing = struct
       ~on_checkpoint_commit_observer
       ~session_dir
       ~expected_source_ref
+      ~boundary
       candidate =
     save_agent_core_if_source_with
       ~with_checkpoint_cas_lock
@@ -2408,6 +2487,7 @@ module For_testing = struct
       ~on_checkpoint_commit_observer
       ~session_dir
       ~expected_source_ref
+      ~boundary
       candidate
   ;;
 
@@ -2416,6 +2496,7 @@ module For_testing = struct
       ~on_checkpoint_commit_observer
       ~session_dir
       ~expected_source_ref
+      ~boundary
       candidate =
     let with_release_failure ~session_dir f =
       match canonical_session_location session_dir with
@@ -2437,6 +2518,7 @@ module For_testing = struct
       ~on_checkpoint_commit_observer
       ~session_dir
       ~expected_source_ref
+      ~boundary
       candidate
   ;;
 
@@ -2445,6 +2527,7 @@ module For_testing = struct
       ~on_checkpoint_commit_observer
       ~session_dir
       ~expected_source_ref
+      ~boundary
       candidate =
     let with_acquire_failure ~session_dir:_ _f =
       installation_of_lock_observation
@@ -2456,6 +2539,7 @@ module For_testing = struct
       ~on_checkpoint_commit_observer
       ~session_dir
       ~expected_source_ref
+      ~boundary
       candidate
   ;;
 
@@ -2464,6 +2548,7 @@ module For_testing = struct
       ~on_checkpoint_commit_observer
       ~session_dir
       ~expected_source_ref
+      ~boundary
       candidate =
     save_agent_core_if_source_with
       ~with_checkpoint_cas_lock
@@ -2471,6 +2556,7 @@ module For_testing = struct
       ~on_checkpoint_commit_observer
       ~session_dir
       ~expected_source_ref
+      ~boundary
       candidate
   ;;
 
@@ -2479,6 +2565,7 @@ module For_testing = struct
       ~on_checkpoint_commit_observer
       ~session_dir
       ~expected_source_ref
+      ~boundary
       candidate =
     let with_post_commit_unwind ~session_dir f =
       match with_checkpoint_cas_lock ~session_dir f with
@@ -2493,17 +2580,18 @@ module For_testing = struct
       ~on_checkpoint_commit_observer
       ~session_dir
       ~expected_source_ref
+      ~boundary
       candidate
   ;;
 
   let save_agent_core_for_keeper_with_before_stage
-      ~before_stage ~keeper_name ~session_dir ~history_retained ckpt
+      ~before_stage ~keeper_name ~session_dir ~history_retained ~boundary ckpt
     =
     save_agent_core_classified_typed
       ~write_canonical:(fun ~ownership_root path encoded_source ->
         Keeper_fs.For_testing.save_encoded_durable_atomic_from
           ~before_stage ~ownership_root path encoded_source)
-      ~save_lineage:(Save_for_keeper keeper_name) ~payload_writer:Checkpoint_payload_writer.Unmeasured ~session_dir ~history_retained ckpt
+      ~save_lineage:(Save_for_keeper keeper_name) ~payload_writer:Checkpoint_payload_writer.Unmeasured ~session_dir ~history_retained ~boundary ckpt
     |> Result.map_error save_agent_core_error_to_string
   ;;
 end

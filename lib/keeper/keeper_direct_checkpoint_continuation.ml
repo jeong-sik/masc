@@ -74,7 +74,8 @@ let load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
        ownership without appending the original input or replaying tool calls. *)
     let checkpoint = { checkpoint with Agent_core.Checkpoint.context } in
     let* () = match Checkpoint.save_agent_core_if_source ~session_dir
-        ~expected_source_ref:(Checkpoint.exact_snapshot_reference current) checkpoint with
+        ~expected_source_ref:(Checkpoint.exact_snapshot_reference current)
+        ~boundary:Agent_core.Checkpoint_objects.Turn_continues checkpoint with
       | Checkpoint.Installed { auxiliary = []; _ } -> Ok ()
       | Checkpoint.Installed _ | Checkpoint.Not_installed _ ->
         Error "cooperative continuation admission is not durably confirmed" in

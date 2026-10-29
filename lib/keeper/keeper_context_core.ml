@@ -112,6 +112,7 @@ let save_agent_core_checkpoint_classified
          ~session_dir:session.session_dir
          ~history_retained:
            (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
+         ~boundary:Agent_core.Checkpoint_objects.Turn_continues
          checkpoint
      with
      | Ok (Keeper_checkpoint_store.Saved { checkpoint = stored; _ } as outcome) ->
@@ -197,6 +198,13 @@ let classified_load
          ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_store))]
          ();
        Log.Keeper.error "keeper:%s AGENT_CORE checkpoint store error: %s" trace_id detail
+   | Error (Objects_invalid _ as error) ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string CheckpointFailures)
+         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_store))]
+         ();
+       Log.Keeper.error "keeper:%s AGENT_CORE checkpoint store error: %s" trace_id
+         (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
    | Error (Io_error detail | Read_failed { detail; _ }) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CheckpointFailures)

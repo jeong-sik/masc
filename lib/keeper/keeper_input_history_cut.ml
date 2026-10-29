@@ -1,12 +1,15 @@
 module Checkpoint = Keeper_checkpoint_store
 open Result.Syntax
-type t = {source_bytes:string; cut_bytes:string; source_ref:Keeper_checkpoint_ref.t;
-          cut_ref:Keeper_checkpoint_ref.t}
+type t = {source:Agent_core.Checkpoint.t; cut:Agent_core.Checkpoint.t;
+          source_ref:Keeper_checkpoint_ref.t; cut_ref:Keeper_checkpoint_ref.t}
 type binding = {source:Keeper_checkpoint_ref.t; cut:Keeper_checkpoint_ref.t;
                 seed:Keeper_checkpoint_ref.t}
-let decode bytes = Agent_core.Checkpoint.of_string bytes |> Result.map_error Agent_core.Error.to_string
-let source_checkpoint t = decode t.source_bytes
-let cut_checkpoint t = decode t.cut_bytes
+(* Every reader gets its own Context: the table is mutable, so the values
+   kept here never hand theirs out. *)
+let private_copy (checkpoint:Agent_core.Checkpoint.t) =
+  {checkpoint with context=Agent_core.Context.copy checkpoint.context}
+let source_checkpoint (t:t) = Ok (private_copy t.source)
+let cut_checkpoint (t:t) = Ok (private_copy t.cut)
 let rec prefix expected actual = match expected,actual with
   | [],_ -> true
   | x::xs,y::ys -> x=y && prefix xs ys
@@ -18,8 +21,7 @@ let contains_tool_result (message:Agent_core.Types.message) = List.exists (funct
 let json checkpoint = Agent_core.Checkpoint.to_json_result checkpoint
   |> Result.map_error Agent_core.Error.to_string
 let prepare ~source ~candidate =
-  let source_bytes=Checkpoint.exact_snapshot_canonical_bytes source in
-  let* original=decode source_bytes in
+  let original=private_copy (Checkpoint.exact_snapshot_checkpoint source) in
   let* () = match original.pending_input,candidate.Agent_core.Checkpoint.pending_input with
     | None,None -> Ok ()
     | (Some _ | None),(Some _ | None) -> Error "response cut cannot discard or consume pending input" in
@@ -35,17 +37,18 @@ let prepare ~source ~candidate =
   let source_ref=Checkpoint.exact_snapshot_reference source in
   let* cut=Checkpoint.exact_snapshot_of_value ~expected_session_id:source_ref.trace_id candidate
     |> Result.map_error Checkpoint.checkpoint_ref_load_error_to_string in
-  Ok {source_bytes;cut_bytes=Checkpoint.exact_snapshot_canonical_bytes cut;source_ref;
-      cut_ref=Checkpoint.exact_snapshot_reference cut}
-let validate_candidate t = function
+  Ok ({source=original;cut=private_copy (Checkpoint.exact_snapshot_checkpoint cut);source_ref;
+      cut_ref=Checkpoint.exact_snapshot_reference cut} : t)
+let validate_candidate (t:t) = function
   | None -> Error "response cut requires its exact candidate checkpoint"
   | Some candidate ->
     let* actual=json candidate in
-    if Yojson.Safe.equal actual (Yojson.Safe.from_string t.cut_bytes) then Ok ()
+    let* expected=json t.cut in
+    if Yojson.Safe.equal actual expected then Ok ()
     else Error "response cut candidate changed after authorization"
-let bind_seed t ~seed =
+let bind_seed (t:t) ~seed =
   let* cut=cut_checkpoint t in
-  let* actual=decode (Checkpoint.exact_snapshot_canonical_bytes seed) in
+  let actual=Checkpoint.exact_snapshot_checkpoint seed in
   let seed=Checkpoint.exact_snapshot_reference seed in
   let* ()=match actual.pending_input with
     | None when Keeper_id.Trace_id.equal seed.trace_id t.cut_ref.trace_id

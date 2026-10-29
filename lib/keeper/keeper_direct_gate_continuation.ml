@@ -137,8 +137,12 @@ let capture_preparation ~source ~config ~operation_id ~session_dir ~session_id (
       let* () = match Snapshot.active frame with
         | Some scope when Keeper_execution_scope_id.equal scope (Keeper_execution_scope_id.direct_operation operation_id) -> Ok ()
         | Some _ | None -> Error "Gate yield checkpoint belongs to another operation" in
+      (* The preparation keeps a head; the objects it names are durable in
+         the session before the head leaves this call. *)
+      let* canonical_checkpoint_bytes = Checkpoint.persist_exact_snapshot ~session_dir snapshot
+        |> Result.map_error Checkpoint.persist_error_to_string in
       Ok (Semantic.Prepared_agent_core {reference=Checkpoint.exact_snapshot_reference snapshot;
-        canonical_checkpoint_bytes=Checkpoint.exact_snapshot_canonical_bytes snapshot}, Some snapshot) in
+        canonical_checkpoint_bytes}, Some snapshot) in
   Ok (source, snapshot)
 
 let prepare_binding ~config ~keeper_name (binding : Semantic.gate_binding) =
@@ -223,7 +227,7 @@ let reconcile ~config ~(meta : Keeper_meta_contract.keeper_meta) =
             let* bytes = match binding.preparation with
               | Semantic.Prepared_agent_core {canonical_checkpoint_bytes; _} -> Ok canonical_checkpoint_bytes
               | Semantic.Prepared_official_client _ -> Error "Gate preparation changed source owner" in
-            let* snapshot = Checkpoint.exact_snapshot_of_canonical_bytes ~expected_session_id:reference.trace_id bytes
+            let* snapshot = Checkpoint.exact_snapshot_of_head_bytes ~session_dir ~expected_session_id:reference.trace_id bytes
               |> Result.map_error (fun _ -> Printf.sprintf "original Gate source remains unavailable or invalid (trace=%s turn=%d sha256=%s)"
                 (Keeper_id.Trace_id.to_string reference.trace_id) reference.turn_count reference.sha256) in
             let* () = if Keeper_checkpoint_ref.equal reference (Checkpoint.exact_snapshot_reference snapshot) then Ok ()
@@ -295,7 +299,8 @@ let load_ready ~config ~(meta : Keeper_meta_contract.keeper_meta) ~operation_id 
     | Semantic.Agent_core reference ->
     let* source, checkpoint = current_with_original ~config ~operation_id ~session_dir ~session_id waiting in
     let* () = match Checkpoint.save_agent_core_if_source ~session_dir
-        ~expected_source_ref:(Checkpoint.exact_snapshot_reference source) checkpoint with
+        ~expected_source_ref:(Checkpoint.exact_snapshot_reference source)
+        ~boundary:Agent_core.Checkpoint_objects.Turn_continues checkpoint with
       | Checkpoint.Installed {auxiliary=[]; _} -> Ok ()
       | Checkpoint.Installed _ | Checkpoint.Not_installed _ -> Error "current-history Gate admission is not durably confirmed" in
     let* checkpoint = match selected.decision with

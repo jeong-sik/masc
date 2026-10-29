@@ -100,11 +100,7 @@ let load_error_text = function
   | Store.Io_error detail -> "io error: " ^ detail
   | Store.Read_failed { detail; _ } -> "read failed: " ^ detail
   | Store.Agent_core_error detail -> "sdk error: " ^ detail
-
-let read_file_bytes path =
-  match In_channel.with_open_bin path In_channel.input_all with
-  | bytes -> bytes
-  | exception Sys_error detail -> error ("cannot read " ^ path ^ ": " ^ detail)
+  | Store.Objects_invalid _ as error -> Store.checkpoint_load_error_to_string error
 
 let write_file_bytes path bytes =
   match Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc bytes) with
@@ -214,10 +210,13 @@ let () =
   let checkpoint_path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace in
   if not (Sys.file_exists checkpoint_path)
   then error ("no canonical checkpoint at " ^ checkpoint_path);
-  let original_bytes = read_file_bytes checkpoint_path in
   match Store.load_agent_core ~session_dir ~session_id:trace with
   | Error load_error -> error (load_error_text load_error)
   | Ok checkpoint ->
+    (* The canonical is a head whose objects the purge stops naming, so the
+       backup is the whole checkpoint in the value codec's JSON, which reads
+       back on its own. *)
+    let original_bytes = Agent_core.Checkpoint.to_string checkpoint in
     let boundary_lines =
       match
         Masc.Keeper_turn_boundaries.read
@@ -343,6 +342,7 @@ let () =
               ~history_retained:
                 (Runtime_params.get
                    Masc.Runtime_settings.keeper_checkpoint_history_retained)
+              ~boundary:Agent_core.Checkpoint_objects.Turn_closes
               purged
           with
           | Error detail -> error ("save failed (backup retained): " ^ detail)

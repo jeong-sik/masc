@@ -1216,6 +1216,9 @@ let prepare_direct_input_wait t ~trace_id ~operation_id ~request =
       | Candidate_identity_invalid error -> Keeper_checkpoint_store.checkpoint_identity_error_to_string error
       | Candidate_session_mismatch _ -> "owned input retained trace changed"
       | Candidate_turn_regressed _ -> "owned input retained turn changed"
+      | Candidate_unencodable error -> Agent_core.Error.to_string error
+      | Candidate_content_mismatch _ -> "owned input retained content changed"
+      | Objects_not_installed error -> Keeper_checkpoint_object_store.write_error_to_string error
       | Commit_not_installed _ -> "owned input retained installation is unconfirmed")) in
   let checkpoint = Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot in
   let* frame = Keeper_repetition_context.load checkpoint.context

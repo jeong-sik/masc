@@ -21,17 +21,6 @@ let sha256_of_canonical_bytes bytes =
   Agent_core_sha256.(to_hex (digest_string bytes))
 ;;
 
-let create ~trace_id ~turn_count ~canonical_checkpoint_bytes =
-  match validate_coordinates ~turn_count with
-  | Error _ as error -> error
-  | Ok () ->
-    Ok
-      { trace_id
-      ; turn_count
-      ; sha256 = sha256_of_canonical_bytes canonical_checkpoint_bytes
-      }
-;;
-
 let of_persisted ~trace_id ~turn_count ~sha256 =
   match validate_coordinates ~turn_count with
   | Error _ as error -> error

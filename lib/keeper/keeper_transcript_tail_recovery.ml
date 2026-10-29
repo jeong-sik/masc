@@ -66,7 +66,12 @@ let recover_keeper config name =
         | Ok { Unit_.closed_tool_use_ids = []; _ } -> Already_dispatchable
         | Ok { Unit_.messages; closed_tool_use_ids } ->
           let candidate = { checkpoint with Agent_core.Checkpoint.messages } in
-          (match Store.save_agent_core_if_source ~session_dir ~expected_source_ref candidate with
+          (* The closers end the interrupted turn, so its messages become one
+             bundle and the next turn starts with no open message. *)
+          (match
+             Store.save_agent_core_if_source ~session_dir ~expected_source_ref
+               ~boundary:Agent_core.Checkpoint_objects.Turn_closes candidate
+           with
            | Store.Installed _ -> Closed { tool_use_ids = closed_tool_use_ids }
            | Store.Not_installed { cause; _ } -> Commit_rejected cause)))
 ;;

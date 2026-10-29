@@ -66,6 +66,10 @@ let checkpoint_load_error_fields
       "unavailable", "io_error", `String detail
     | Agent_core_error detail ->
       "unavailable", "agent_core_error", `String detail
+    | Objects_invalid _ as error ->
+      ( "unavailable"
+      , "objects_invalid"
+      , `String (Keeper_checkpoint_store.checkpoint_load_error_to_string error) )
   in
   [ "status", `String status
   ; "error_kind", `String kind
@@ -103,6 +107,11 @@ let current_checkpoint_error_json
     `Assoc [ "kind", `String "io_error"; "detail", `String detail ]
   | Agent_core_error detail ->
     `Assoc [ "kind", `String "agent_core_error"; "detail", `String detail ]
+  | Objects_invalid _ as error ->
+    `Assoc
+      [ "kind", `String "objects_invalid"
+      ; "detail", `String (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+      ]
 ;;
 
 let checkpoint_ref_load_error_json
@@ -185,7 +194,7 @@ let inventory_json (config : Workspace.config) (name : string)
           | Keeper_checkpoint_store.Not_found
           | Superseded_version _ -> "missing"
           | Newer_version _ | Store_error _ | Parse_error _ | Io_error _
-          | Read_failed _ | Agent_core_error _ ->
+          | Read_failed _ | Agent_core_error _ | Objects_invalid _ ->
             "unavailable"
         in
         None, "", status, current_checkpoint_error_json error
@@ -339,6 +348,10 @@ let checkpoint_cas_error_to_string = function
       "candidate turn regressed source=%d candidate=%d"
       source_turn
       candidate_turn
+  | Candidate_unencodable error -> "candidate cannot be encoded: " ^ Agent_core.Error.to_string error
+  | Candidate_content_mismatch { reference; content } ->
+    Printf.sprintf "candidate content %s does not match its reference %s" content reference.sha256
+  | Objects_not_installed error -> Keeper_checkpoint_object_store.write_error_to_string error
   | Commit_not_installed error -> Keeper_fs.durable_write_error_to_string error
 ;;
 
@@ -465,17 +478,22 @@ let purge_current_unlocked config ~keeper_name ~apply =
               (checkpoint_ref_load_error_to_string error))
        | Ok progress, Ok boundary_lines, Ok continuity, Ok snapshot ->
          let source_ref = Keeper_checkpoint_store.exact_snapshot_reference snapshot in
-         let source_bytes =
-           Keeper_checkpoint_store.exact_snapshot_canonical_bytes snapshot
-         in
+         let source = Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot in
+         (* The backup and the report use the whole checkpoint in the value
+            codec's JSON: one file that reads back without the session's
+            objects, which the purge stops naming. *)
          let purge_result =
            Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-             match Agent_core.Checkpoint.of_string source_bytes with
+             let checkpoint =
+               { source with Agent_core.Checkpoint.context = Agent_core.Context.copy source.context }
+             in
+             match Agent_core.Checkpoint.to_json_result checkpoint with
              | Error error ->
                Error
                  (Purge_checkpoint_invalid
                     (Agent_core.Error.to_string error))
-             | Ok checkpoint ->
+             | Ok source_json ->
+               let source_bytes = Yojson.Safe.to_string source_json in
                (match
                   Keeper_checkpoint_purge.purge
                     ~config:Keeper_checkpoint_purge.default_config
@@ -498,11 +516,11 @@ let purge_current_unlocked config ~keeper_name ~apply =
                       ~before:checkpoint.messages
                       ~after:purged.messages
                   in
-                  Ok (purged, purged_bytes, purge_report, rebase)))
+                  Ok (purged, source_bytes, purged_bytes, purge_report, rebase)))
          in
          (match purge_result with
           | Error _ as error -> error
-          | Ok (purged, purged_bytes, raw_report, rebase) ->
+          | Ok (purged, source_bytes, purged_bytes, raw_report, rebase) ->
             let report =
               { messages_before = raw_report.messages_before
               ; messages_after = raw_report.messages_after
@@ -567,6 +585,7 @@ let purge_current_unlocked config ~keeper_name ~apply =
                         Keeper_checkpoint_store.save_agent_core_if_source
                           ~session_dir
                           ~expected_source_ref:source_ref
+                          ~boundary:Agent_core.Checkpoint_objects.Turn_closes
                           purged
                       with
                       | Keeper_checkpoint_store.Not_installed
@@ -578,6 +597,9 @@ let purge_current_unlocked config ~keeper_name ~apply =
                               | Keeper_checkpoint_store.Candidate_identity_invalid _
                               | Keeper_checkpoint_store.Candidate_session_mismatch _
                               | Keeper_checkpoint_store.Candidate_turn_regressed _
+                              | Keeper_checkpoint_store.Candidate_unencodable _
+                              | Keeper_checkpoint_store.Candidate_content_mismatch _
+                              | Keeper_checkpoint_store.Objects_not_installed _
                               | Keeper_checkpoint_store.Commit_not_installed _ ) as cause
                           ; _
                           } ->

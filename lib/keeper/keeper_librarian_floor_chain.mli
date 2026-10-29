@@ -10,8 +10,12 @@
     It performs no Memory commit, source lock, position move or settlement: the
     finished machine hands the ordered program to whoever publishes it. A restart
     runs the same function again. Every step the first run retained is restored,
-    not asked again, and every gate judgment replays from the journal. Caller
-    holds the Memory lane and purge fence and serializes this owner. *)
+    not asked again, and every gate judgment replays from the journal. A run
+    reads the owner's gate scope once at its start and answers the judgments of
+    the steps an earlier run finished from that read; only the step it judges
+    for the first time reads the scope again. A run then costs time in
+    proportion to the steps it replays. Caller holds the Memory lane and purge
+    fence and serializes this owner. *)
 type fresh = {
   transaction_id : string;
   current : Keeper_librarian.current_selection option;

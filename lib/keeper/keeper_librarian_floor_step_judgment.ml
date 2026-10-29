@@ -23,14 +23,39 @@ let reload ~store ~previous step =
   let* () = Step.confirm_record step record in
   Ok record
 type preparation = Ready of Owner.retained | Unavailable of string
+(* The gate's root is the one record of this step's judgment, and it never
+   changes, so it names the decision on every replay. *)
+let decide ~step ~(answer : Keeper_librarian_floor_step_owner.answer) ~(root : Owner.retained) gate =
+  match Memory_runtime.durable_memory_step ~run_id:root.request_id (Step.step step) answer.proposal
+          ~absorb_gate:gate with
+  | Ok decision -> Ok (Decided decision)
+  | Error detail -> Error detail
+(* The gate of a step whose journal [inventory] shows complete and successful.
+   An earlier pass wrote that journal and nothing in this pass changes it, so
+   the one read of the scope that built [inventory] answers for every such step.
+   Reading the scope again for each step is what made a pass cost the square of
+   the chain's length. A step in any other state gets [None] and takes the
+   fresh-read path of [judge_by_fresh_reads], which also recovers, retries and
+   dispatches. *)
+let settled ~inventory ~step ~record ~absorbed =
+  match Journal.Inventory.validate inventory ~capture:step ~parent:record with
+  | Error _ -> None
+  | Ok chain ->
+    (match Journal.Inventory.validate_root_preparation chain, Journal.Inventory.root chain,
+           Journal.Inventory.latest chain with
+     | Ok (), Some root, Ok (Some latest) ->
+       (match Journal.Inventory.restore_size_evidence chain ~gate_request_id:latest.Owner.request_id with
+        | Ok gate when Option.is_none (Gate.failure_detail ~absorbed gate) -> Some (root, gate)
+        | Ok _ | Error _ -> None)
+     | Ok (), None, _ | Ok (), Some _, (Ok None | Error _) | Error _, _, _ -> None)
 (* The gate part of [Keeper_librarian_durable_commit.publish], for a record that
    stays at its judgment: prepare the gate's root once, recover what a crash
    left half published, run or replay the journal, and retry a failed
    evaluation with a new attempt. A completed journal replays from its retained
    evaluations; nothing is asked of the model or recomputed from the Memory of
    the moment. *)
-let judge ~store ~step ~(record : Owner.retained) ~(answer : Keeper_librarian_floor_step_owner.answer)
-    ~fresh_authority =
+let judge_by_fresh_reads ~store ~step ~(record : Owner.retained)
+    ~(answer : Keeper_librarian_floor_step_owner.answer) ~fresh_authority =
   let owner = Step.physical_owner step in
   let keeper_id = Durable.keeper_id owner in
   let raw = answer.raw in
@@ -94,10 +119,10 @@ let judge ~store ~step ~(record : Owner.retained) ~(answer : Keeper_librarian_fl
      | Complete (gate, _) ->
        (match Gate.failure_detail ~absorbed gate with
         | Some detail -> pending detail
-        | None ->
-          (* The gate's root is the one record of this step's judgment, and it
-             never changes, so it names the decision on every replay. *)
-          (match Memory_runtime.durable_memory_step ~run_id:root.request_id (Step.step step) answer.proposal
-                   ~absorb_gate:gate with
-           | Ok decision -> Ok (Decided decision)
-           | Error detail -> Error detail)))
+        | None -> decide ~step ~answer ~root gate))
+let judge ~store ~step ~(record : Owner.retained) ~(answer : Keeper_librarian_floor_step_owner.answer)
+    ~fresh_authority ~inventory =
+  let absorbed = answer.proposal.proposal.accepted.selection.absorbed in
+  match io (fun () -> settled ~inventory ~step ~record ~absorbed) with
+  | Some (root, gate) -> decide ~step ~answer ~root gate
+  | None -> judge_by_fresh_reads ~store ~step ~record ~answer ~fresh_authority

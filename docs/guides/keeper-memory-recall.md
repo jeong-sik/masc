@@ -128,13 +128,19 @@ the Keepers added to or dropped from the list, or that nothing changes.
 ## Watch it
 
 - **Standing.** `GET /api/v1/runtime/config/memory-recall` (admin token) says,
-  for every Keeper that has a declaration file, whether the judgment reaches it
-  now (`judged`) or why not (`environment_switch_off`, `memory_recall_disabled`,
-  `keeper_excluded`, `lane_disabled` or `no_armed_destination`), and whether
-  the lane has a key (`lane`: `armed` or the reason). The answer is the one a
-  turn gets: both call `Keeper_memory_recall_standing.of_keeper`. It reads the
-  gate as loaded and the environment as it is, so a runtime.toml edited on disk
-  and not yet loaded does not show.
+  for every Keeper that has a declaration file whose name is a Keeper name,
+  whether the judgment reaches it now (`judged`) or why not
+  (`environment_switch_off`, `memory_recall_disabled`, `keeper_excluded`,
+  `lane_disabled`, `no_armed_destination`, and `another_gate_refused`, which the
+  gate of recall does not give today), and whether the lane has a key (`lane`:
+  `armed`, `lane_disabled`, `no_armed_destination` or `another_gate_refused`).
+  A turn asks the same function first, `Keeper_memory_recall_standing.of_keeper`.
+  `judged` says the gate admits the Keeper: a turn can still make no texts for
+  it, because it has no facts or there is no clock. The reading is not one
+  snapshot, so a policy published during a request can show as a lane that
+  disagrees with the Keepers; the next request is right. It reads the gate as
+  loaded and the environment as it is, so a runtime.toml edited on disk and not
+  yet loaded does not show.
 - **Journal.** `memory-recall-evaluations.jsonl` in the Keeper's runtime
   directory holds every request, every response and the outcome of each
   judgment. It contains private Keeper memory: treat it like the Keeper's other

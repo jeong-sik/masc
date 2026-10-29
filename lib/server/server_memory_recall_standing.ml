@@ -13,8 +13,13 @@ type t =
 let lane () =
   match Typesafeai_config.lane_destinations () with
   | Ok (_ : Typesafeai_config.destinations) -> Ok ()
-  | Error reason -> Error (Standing.reason_of_unavailable reason)
+  | Error reason -> Error (Standing.lane_reason_of_unavailable reason)
 ;;
+
+(* A file name that is not a Keeper name names no Keeper that can start, so it
+   is not listed. A declaration whose [keeper.name] differs from its file name
+   is not told apart here: that takes loading the file. *)
+let is_keeper_name name = Result.is_ok (Keeper_id.Keeper_name.of_string name)
 
 let read ~keepers_dir =
   Result.map
@@ -23,7 +28,7 @@ let read ~keepers_dir =
        ; keepers =
            List.map
              (fun name -> { name; standing = Standing.of_keeper ~keeper_id:name })
-             (List.sort_uniq String.compare names)
+             (List.sort_uniq String.compare (List.filter is_keeper_name names))
        })
     (Server_runtime_startup_maintenance.declared_keeper_names ~keepers_dir)
 ;;

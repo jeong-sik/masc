@@ -6,6 +6,7 @@ module S = Server_memory_recall_standing
 module Standing = Keeper_memory_recall_standing
 
 let environment_switch = "MASC_KEEPER_MEMORY_OS_RECALL"
+let generated_at = "2026-10-29T00:00:00Z"
 
 let fresh_dir prefix =
   let dir = Filename.temp_file prefix "" in
@@ -14,16 +15,27 @@ let fresh_dir prefix =
   Unix.realpath dir
 ;;
 
-(* A keepers directory holding one declaration file per name. *)
-let keepers_dir_with names =
+let rec remove_tree path =
+  if Sys.is_directory path
+  then (
+    Array.iter (fun entry -> remove_tree (Filename.concat path entry)) (Sys.readdir path);
+    Unix.rmdir path)
+  else Sys.remove path
+;;
+
+(* A keepers directory holding one declaration file per file name, removed
+   when [f] is done. *)
+let with_keepers_dir file_names f =
   let dir = fresh_dir "masc_recall_standing" in
   List.iter
-    (fun name ->
-       Out_channel.with_open_text (Filename.concat dir (name ^ ".toml")) (fun channel ->
+    (fun file_name ->
+       Out_channel.with_open_text (Filename.concat dir file_name) (fun channel ->
          output_string channel "# declaration\n"))
-    names;
-  dir
+    file_names;
+  Fun.protect ~finally:(fun () -> remove_tree dir) (fun () -> f dir)
 ;;
+
+let declarations names = List.map (fun name -> name ^ ".toml") names
 
 let policy
       ?(enabled = true)
@@ -67,7 +79,7 @@ let string_exn = function
 
 (* name -> standing word, in the order the response lists them. *)
 let words_of standing =
-  let json = S.to_yojson ~generated_at:"2026-10-29T00:00:00Z" standing in
+  let json = S.to_yojson ~generated_at standing in
   match List.assoc_opt "keepers" (assoc_exn json) with
   | Some (`List rows) ->
     List.map
@@ -80,88 +92,104 @@ let words_of standing =
 ;;
 
 let lane_word standing =
-  string_exn (List.assoc "lane" (assoc_exn (S.to_yojson ~generated_at:"" standing)))
+  string_exn (List.assoc "lane" (assoc_exn (S.to_yojson ~generated_at standing)))
 ;;
 
 let keeper_word = Alcotest.(pair string string)
 
 let test_each_keeper_gets_the_answer_of_a_turn () =
-  let keepers_dir = keepers_dir_with [ "reader"; "other"; "stranger"; "silent" ] in
-  with_environment_switch None (fun () ->
-    with_key (Some "synthetic-jev-key") (fun () ->
-      with_policy
-        (policy ~memory_recall:(listed "reader" [ "other"; "silent" ]) ~excluded_keepers:[ "silent" ] ())
-        (fun () ->
-           let standing = read_exn ~keepers_dir in
-           Alcotest.(check (list keeper_word))
-             "in scope, outside the scope, excluded; sorted by name"
-             [ "other", "judged"
-             ; "reader", "judged"
-             ; "silent", "keeper_excluded"
-             ; "stranger", "memory_recall_disabled"
-             ]
-             (words_of standing);
-           (* The report and a turn ask one function: they cannot differ. *)
-           List.iter
-             (fun (keeper : S.keeper) ->
-                Alcotest.(check bool)
-                  ("is_judged agrees for " ^ keeper.S.name)
-                  (keeper.S.standing = Standing.Judged)
-                  (Standing.is_judged ~keeper_id:keeper.S.name))
-             standing.S.keepers)))
+  with_keepers_dir (declarations [ "reader"; "other"; "stranger"; "silent" ]) (fun keepers_dir ->
+    with_environment_switch None (fun () ->
+      with_key (Some "synthetic-jev-key") (fun () ->
+        with_policy
+          (policy
+             ~memory_recall:(listed "reader" [ "other"; "silent" ])
+             ~excluded_keepers:[ "silent" ]
+             ())
+          (fun () ->
+             let standing = read_exn ~keepers_dir in
+             Alcotest.(check (list keeper_word))
+               "in scope, outside the scope, excluded; sorted by name"
+               [ "other", "judged"
+               ; "reader", "judged"
+               ; "silent", "keeper_excluded"
+               ; "stranger", "memory_recall_disabled"
+               ]
+               (words_of standing);
+             (* The gate itself is the witness: a Keeper is judged exactly when
+                it opens. *)
+             List.iter
+               (fun (keeper : S.keeper) ->
+                  Alcotest.(check bool)
+                    ("judged iff the gate opens for " ^ keeper.S.name)
+                    (Result.is_ok (Typesafeai_config.memory_recall_destinations ~keeper_id:keeper.S.name))
+                    (keeper.S.standing = Standing.Judged))
+               standing.S.keepers))))
 ;;
 
 let test_the_environment_switch_is_asked_before_the_gate () =
-  let keepers_dir = keepers_dir_with [ "reader"; "stranger" ] in
-  with_environment_switch (Some "false") (fun () ->
-    with_key (Some "synthetic-jev-key") (fun () ->
-      with_policy (policy ~memory_recall:(listed "reader" []) ()) (fun () ->
-        Alcotest.(check (list keeper_word))
-          "the switch closes recall for a Keeper the gate would judge, and names itself"
-          [ "reader", "environment_switch_off"; "stranger", "environment_switch_off" ]
-          (words_of (read_exn ~keepers_dir)))))
+  with_keepers_dir (declarations [ "reader"; "stranger" ]) (fun keepers_dir ->
+    with_environment_switch (Some "false") (fun () ->
+      with_key (Some "synthetic-jev-key") (fun () ->
+        with_policy (policy ~memory_recall:(listed "reader" []) ()) (fun () ->
+          Alcotest.(check (list keeper_word))
+            "the switch closes recall for a Keeper the gate would judge, and names itself"
+            [ "reader", "environment_switch_off"; "stranger", "environment_switch_off" ]
+            (words_of (read_exn ~keepers_dir))))))
 ;;
 
 let test_the_lane_is_told_whatever_the_recall_switch_says () =
-  let keepers_dir = keepers_dir_with [ "reader" ] in
-  with_environment_switch None (fun () ->
-    with_key (Some "synthetic-jev-key") (fun () ->
-      with_policy (policy ~memory_recall:Runtime_schema.Memory_recall_off ()) (fun () ->
-        Alcotest.(check string) "armed with recall off" "armed" (lane_word (read_exn ~keepers_dir))));
-    with_key None (fun () ->
-      with_policy (policy ~memory_recall:Runtime_schema.Memory_recall_off ()) (fun () ->
-        let standing = read_exn ~keepers_dir in
-        Alcotest.(check string) "no key, recall off" "no_armed_destination" (lane_word standing);
-        Alcotest.(check (list keeper_word))
-          "a Keeper outside the scope says the switch, not the key"
-          [ "reader", "memory_recall_disabled" ]
-          (words_of standing));
-      with_policy (policy ~memory_recall:all ()) (fun () ->
-        Alcotest.(check (list keeper_word))
-          "a Keeper in scope says the key"
-          [ "reader", "no_armed_destination" ]
-          (words_of (read_exn ~keepers_dir))));
-    with_key (Some "synthetic-jev-key") (fun () ->
-      with_policy (policy ~enabled:false ~memory_recall:all ()) (fun () ->
-        let standing = read_exn ~keepers_dir in
-        Alcotest.(check string) "lane switched off" "lane_disabled" (lane_word standing);
-        Alcotest.(check (list keeper_word))
-          "and the Keeper says so"
-          [ "reader", "lane_disabled" ]
-          (words_of standing))))
+  with_keepers_dir (declarations [ "reader" ]) (fun keepers_dir ->
+    with_environment_switch None (fun () ->
+      with_key (Some "synthetic-jev-key") (fun () ->
+        with_policy (policy ~memory_recall:Runtime_schema.Memory_recall_off ()) (fun () ->
+          Alcotest.(check string) "armed with recall off" "armed" (lane_word (read_exn ~keepers_dir))));
+      with_key None (fun () ->
+        with_policy (policy ~memory_recall:Runtime_schema.Memory_recall_off ()) (fun () ->
+          let standing = read_exn ~keepers_dir in
+          Alcotest.(check string) "no key, recall off" "no_armed_destination" (lane_word standing);
+          Alcotest.(check (list keeper_word))
+            "a Keeper outside the scope says the switch, not the key"
+            [ "reader", "memory_recall_disabled" ]
+            (words_of standing));
+        with_policy (policy ~memory_recall:all ()) (fun () ->
+          Alcotest.(check (list keeper_word))
+            "a Keeper in scope says the key"
+            [ "reader", "no_armed_destination" ]
+            (words_of (read_exn ~keepers_dir))));
+      with_key (Some "synthetic-jev-key") (fun () ->
+        with_policy (policy ~enabled:false ~memory_recall:all ()) (fun () ->
+          let standing = read_exn ~keepers_dir in
+          Alcotest.(check string) "lane switched off" "lane_disabled" (lane_word standing);
+          Alcotest.(check (list keeper_word))
+            "and the Keeper says so"
+            [ "reader", "lane_disabled" ]
+            (words_of standing)))))
 ;;
 
 let test_names_are_listed_once_and_sorted () =
-  let keepers_dir = keepers_dir_with [ "b"; "a"; "c" ] in
-  Out_channel.with_open_text (Filename.concat keepers_dir "notes.txt") (fun channel ->
-    output_string channel "not a declaration\n");
-  with_environment_switch None (fun () ->
-    with_key (Some "synthetic-jev-key") (fun () ->
-      with_policy (policy ~memory_recall:all ()) (fun () ->
-        Alcotest.(check (list string))
-          "only .toml declarations count"
-          [ "a"; "b"; "c" ]
-          (List.map fst (words_of (read_exn ~keepers_dir))))))
+  with_keepers_dir (declarations [ "b"; "a"; "c" ] @ [ "notes.txt" ]) (fun keepers_dir ->
+    with_environment_switch None (fun () ->
+      with_key (Some "synthetic-jev-key") (fun () ->
+        with_policy (policy ~memory_recall:all ()) (fun () ->
+          Alcotest.(check (list string))
+            "only .toml declarations count"
+            [ "a"; "b"; "c" ]
+            (List.map fst (words_of (read_exn ~keepers_dir)))))))
+;;
+
+(* A file name that is no Keeper name names no Keeper that can start. *)
+let test_a_file_name_that_is_no_keeper_name_is_not_listed () =
+  with_keepers_dir
+    [ "reader.toml"; ".toml"; "a b.toml"; "...toml"; "x\ty.toml" ]
+    (fun keepers_dir ->
+       with_environment_switch None (fun () ->
+         with_key (Some "synthetic-jev-key") (fun () ->
+           with_policy (policy ~memory_recall:all ()) (fun () ->
+             Alcotest.(check (list string))
+               "the empty name, a name with a space, \"..\" and a tab are left out"
+               [ "reader" ]
+               (List.map fst (words_of (read_exn ~keepers_dir)))))))
 ;;
 
 (* The words are a wire contract: the TUI reads them back. *)
@@ -174,6 +202,7 @@ let test_the_words_are_distinct_and_read_back () =
     ; "keeper_excluded"
     ; "lane_disabled"
     ; "no_armed_destination"
+    ; "another_gate_refused"
     ]
     words;
   Alcotest.(check int)
@@ -210,13 +239,13 @@ let test_a_refusal_of_the_gate_keeps_its_word () =
     ; Typesafeai_config.Keeper_excluded
     ; Typesafeai_config.Lane_disabled
     ; Typesafeai_config.No_armed_destination
-    ];
-  List.iter
-    (fun refusal ->
-       Alcotest.(check bool)
-         "the reason of another gate is not an answer of recall"
-         true
-         (Standing.reason_of_unavailable refusal = Standing.Recall_not_switched_on))
+    ]
+;;
+
+(* The gate of recall answers with its own reasons. If it ever answered with
+   the reason of another gate, the reading says so and does not borrow a word. *)
+let test_the_reason_of_another_gate_is_named_as_such () =
+  let others =
     [ Typesafeai_config.Absorb_gate_disabled
     ; Typesafeai_config.Board_attention_disabled
     ; Typesafeai_config.Context_review_disabled
@@ -224,6 +253,32 @@ let test_a_refusal_of_the_gate_keeps_its_word () =
     ; Typesafeai_config.Librarian_preflight_disabled
     ; Typesafeai_config.Workspace_memory_selection_disabled
     ]
+  in
+  List.iter
+    (fun refusal ->
+       Alcotest.(check bool)
+         "for the gate of recall"
+         true
+         (Standing.reason_of_unavailable refusal = Standing.Refused_by_another_gate);
+       Alcotest.(check bool)
+         "for the lane"
+         true
+         (Standing.lane_reason_of_unavailable refusal = Standing.Refused_by_another_gate))
+    others;
+  (* The lane is not asked about the recall switch or the exclusion. *)
+  List.iter
+    (fun refusal ->
+       Alcotest.(check bool)
+         "not an answer of the lane"
+         true
+         (Standing.lane_reason_of_unavailable refusal = Standing.Refused_by_another_gate))
+    [ Typesafeai_config.Memory_recall_disabled; Typesafeai_config.Keeper_excluded ];
+  Alcotest.(check (list string))
+    "the reasons a lane can give"
+    [ "lane_disabled"; "no_armed_destination"; "another_gate_refused" ]
+    (List.map
+       Standing.reason_to_string
+       (List.filter Standing.is_lane_reason Standing.all_reasons))
 ;;
 
 module Reading = Tui_decode_memory_recall
@@ -235,29 +290,37 @@ let decode_exn json =
 ;;
 
 let test_the_tui_reads_what_the_server_writes () =
-  let keepers_dir = keepers_dir_with [ "reader"; "other"; "stranger"; "silent" ] in
-  with_environment_switch None (fun () ->
-    with_key (Some "synthetic-jev-key") (fun () ->
-      with_policy
-        (policy ~memory_recall:(listed "reader" [ "other"; "silent" ]) ~excluded_keepers:[ "silent" ] ())
-        (fun () ->
-           let standing = read_exn ~keepers_dir in
-           let reading = decode_exn (S.to_yojson ~generated_at:"2026-10-29T00:00:00Z" standing) in
-           Alcotest.(check bool) "the lane has a key" true (reading.Reading.mrr_lane = Ok ());
-           Alcotest.(check bool)
-             "every Keeper reads back as the server had it"
-             true
-             (reading.Reading.mrr_keepers
-              = List.map (fun (keeper : S.keeper) -> keeper.S.name, keeper.S.standing) standing.S.keepers)));
-    with_key None (fun () ->
-      with_policy (policy ~memory_recall:all ()) (fun () ->
-        let reading =
-          decode_exn (S.to_yojson ~generated_at:"" (read_exn ~keepers_dir))
-        in
-        Alcotest.(check bool)
-          "a lane without a key reads back as the reason"
-          true
-          (reading.Reading.mrr_lane = Error Standing.No_armed_destination))))
+  with_keepers_dir (declarations [ "reader"; "other"; "stranger"; "silent" ]) (fun keepers_dir ->
+    with_environment_switch None (fun () ->
+      with_key (Some "synthetic-jev-key") (fun () ->
+        with_policy
+          (policy
+             ~memory_recall:(listed "reader" [ "other"; "silent" ])
+             ~excluded_keepers:[ "silent" ]
+             ())
+          (fun () ->
+             let standing = read_exn ~keepers_dir in
+             let json = S.to_yojson ~generated_at standing in
+             Alcotest.(check string)
+               "the time of the reading is carried"
+               generated_at
+               (string_exn (List.assoc "generated_at" (assoc_exn json)));
+             let reading = decode_exn json in
+             Alcotest.(check bool) "the lane has a key" true (reading.Reading.mrr_lane = Ok ());
+             Alcotest.(check bool)
+               "every Keeper reads back as the server had it"
+               true
+               (reading.Reading.mrr_keepers
+                = List.map
+                    (fun (keeper : S.keeper) -> keeper.S.name, keeper.S.standing)
+                    standing.S.keepers)));
+      with_key None (fun () ->
+        with_policy (policy ~memory_recall:all ()) (fun () ->
+          let reading = decode_exn (S.to_yojson ~generated_at (read_exn ~keepers_dir)) in
+          Alcotest.(check bool)
+            "a lane without a key reads back as the reason"
+            true
+            (reading.Reading.mrr_lane = Error Standing.No_armed_destination)))))
 ;;
 
 let test_the_tui_refuses_what_it_does_not_know () =
@@ -274,6 +337,16 @@ let test_the_tui_refuses_what_it_does_not_know () =
     (Result.is_ok (Reading.decode_memory_recall_reading (response ())));
   refused "a lane word that is no reason" (response ~lane:(`String "judged") ());
   refused "a lane word that is nothing" (response ~lane:(`String "overheated") ());
+  List.iter
+    (fun word -> refused ("the lane is not told " ^ word) (response ~lane:(`String word) ()))
+    [ "keeper_excluded"; "memory_recall_disabled"; "environment_switch_off" ];
+  List.iter
+    (fun word ->
+       Alcotest.(check bool)
+         ("the lane is told " ^ word)
+         true
+         (Result.is_ok (Reading.decode_memory_recall_reading (response ~lane:(`String word) ()))))
+    [ "lane_disabled"; "no_armed_destination"; "another_gate_refused" ];
   refused "a standing word that is nothing"
     (response ~keepers:(`List [ keeper "a" "quota_exceeded" ]) ());
   refused "armed is a word of the lane, not of a Keeper"
@@ -287,14 +360,40 @@ let test_the_tui_refuses_what_it_does_not_know () =
   refused "no keepers field" (`Assoc [ "lane", `String "armed" ])
 ;;
 
+(* A server that grows a field must not blind a TUI that does not know it. *)
+let test_the_tui_ignores_fields_it_does_not_know () =
+  let json =
+    `Assoc
+      [ "lane", `String "armed"
+      ; "generated_at", `String generated_at
+      ; "something_new", `Int 1
+      ; ( "keepers"
+        , `List
+            [ `Assoc
+                [ "name", `String "a"
+                ; "standing", `String "judged"
+                ; "since", `String "yesterday"
+                ]
+            ] )
+      ]
+  in
+  Alcotest.(check bool)
+    "read as it is"
+    true
+    ((decode_exn json).Reading.mrr_keepers = [ "a", Standing.Judged ])
+;;
+
 let test_an_unreadable_directory_is_an_error_and_not_an_empty_list () =
-  let missing = Filename.concat (fresh_dir "masc_recall_standing_missing") "keepers" in
-  match S.read ~keepers_dir:missing with
-  | Error _ -> ()
-  | Ok standing ->
-    Alcotest.failf
-      "a directory that could not be read answered with %d Keepers"
-      (List.length standing.S.keepers)
+  let parent = fresh_dir "masc_recall_standing_missing" in
+  Fun.protect
+    ~finally:(fun () -> remove_tree parent)
+    (fun () ->
+       match S.read ~keepers_dir:(Filename.concat parent "keepers") with
+       | Error _ -> ()
+       | Ok standing ->
+         Alcotest.failf
+           "a directory that could not be read answered with %d Keepers"
+           (List.length standing.S.keepers))
 ;;
 
 let () =
@@ -309,14 +408,20 @@ let () =
             test_the_lane_is_told_whatever_the_recall_switch_says
         ; Alcotest.test_case "names are listed once and sorted" `Quick
             test_names_are_listed_once_and_sorted
+        ; Alcotest.test_case "a file name that is no Keeper name is not listed" `Quick
+            test_a_file_name_that_is_no_keeper_name_is_not_listed
         ; Alcotest.test_case "the words are distinct and read back" `Quick
             test_the_words_are_distinct_and_read_back
         ; Alcotest.test_case "a refusal of the gate keeps its word" `Quick
             test_a_refusal_of_the_gate_keeps_its_word
+        ; Alcotest.test_case "the reason of another gate is named as such" `Quick
+            test_the_reason_of_another_gate_is_named_as_such
         ; Alcotest.test_case "the TUI reads what the server writes" `Quick
             test_the_tui_reads_what_the_server_writes
         ; Alcotest.test_case "the TUI refuses what it does not know" `Quick
             test_the_tui_refuses_what_it_does_not_know
+        ; Alcotest.test_case "the TUI ignores fields it does not know" `Quick
+            test_the_tui_ignores_fields_it_does_not_know
         ; Alcotest.test_case "an unreadable directory is an error" `Quick
             test_an_unreadable_directory_is_an_error_and_not_an_empty_list
         ] )

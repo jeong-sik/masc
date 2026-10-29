@@ -151,8 +151,9 @@ val find : t -> request_id:string -> item option
 (** Exact pending item, for intent-aware recall/edit behavior. *)
 
 val local_order_editable : item -> bool
-(** Whether the operator may move this item within its Keeper's line. Only a
-    steer waiting for its interrupt holds a fixed place. *)
+(** Whether the operator may move this item within its Keeper's line. A steer
+    waiting for its interrupt and an item holding run-next priority keep their
+    place ahead of the line. *)
 
 val move_to_end : t -> keeper_name:string -> request_id:string -> (t, string) result
 (** Move an ordinary unsent item behind the same Keeper's waiting items,

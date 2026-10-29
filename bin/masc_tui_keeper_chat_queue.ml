@@ -222,11 +222,12 @@ let find queue ~request_id =
 
 type queue_position = Front | End
 
-(* The one answer to "may the operator reorder this item locally". A steer holds
-   its place ahead of the line; every other intent follows the line. *)
+(* The one answer to "may the operator reorder this item locally". A steer and a
+   run-next item hold their place ahead of the line; every other intent follows
+   the line. *)
 let local_order_editable item = match item.intent with
-  | Next | Next_without_auto_priority | Run_next _ | Steer_without_priority -> true
-  | Steer_after_interrupt -> false
+  | Next | Next_without_auto_priority | Steer_without_priority -> true
+  | Run_next _ | Steer_after_interrupt -> false
 ;;
 
 let move queue ~keeper_name ~request_id position =
@@ -235,7 +236,7 @@ let move queue ~keeper_name ~request_id position =
   | Some item when not (String.equal (item_keeper item) keeper_name) ->
     Error "That message belongs to another Keeper"
   | Some item when not (local_order_editable item) ->
-    Error "A steer retains its place ahead of ordinary messages"
+    Error "That message keeps its place ahead of ordinary messages"
   | Some item ->
     let same_keeper = waiting_for_keeper queue ~keeper_name in
     let others = List.filter (fun current ->

@@ -536,7 +536,7 @@ let test_only_a_waiting_steer_is_fixed_in_place () =
   check bool "next" true (editable_after ~name:"next" (base ()));
   let queue = base () in
   let queue = ok_or_fail (Queue.mark_run_next queue ~request_id:(id queue "target")) in
-  check bool "run next" true (editable_after ~name:"run next" queue);
+  check bool "run next" false (editable_after ~name:"run next" queue);
   let cleared = Queue.clear_run_next_for_keeper queue ~keeper_name:"alpha" in
   check bool "next without auto priority" true (editable_after ~name:"cleared" cleared);
   let steer = request ~keeper_name:"alpha" "target" in
@@ -557,10 +557,12 @@ let test_a_line_does_not_join_ahead_of_run_next () =
   let id text =
     (List.find (fun (item : Queue.item) -> String.equal item.request.Chat.message text)
        (Queue.waiting queue)).request.Chat.request_id in
-  let queue = match Queue.mark_run_next queue ~request_id:(id "first") with
-    | Ok queue -> queue | Error detail -> fail detail in
   let queue = match Queue.move_to_end queue ~keeper_name:"alpha" ~request_id:(id "first") with
     | Ok queue -> queue | Error detail -> fail detail in
+  let queue = match Queue.mark_run_next queue ~request_id:(id "first") with
+    | Ok queue -> queue | Error detail -> fail detail in
+  check bool "a run-next item cannot be moved" true
+    (Result.is_error (Queue.move_to_front queue ~keeper_name:"alpha" ~request_id:(id "first")));
   check (list string) "the run-next line now waits last" [ "second"; "first" ] (messages queue);
   check bool "no line to join: the run-next line waits behind it" true
     (Queue.join_target queue ~keeper_name:"alpha" = None)

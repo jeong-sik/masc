@@ -210,10 +210,12 @@ let test_resolve_merges_duplicates () =
     ~unresolved:[] [ "alice"; "bob"; "al" ];
   check_resolve "an unknown name written again after another one" ~recipients:[]
     ~unresolved:[ "check"; "lint" ] [ "check"; "lint"; "check" ];
-  check_resolve "a recipient written again after two others" ~recipients:[ "alice"; "bob"; "carol" ]
-    ~unresolved:[] [ "alice"; "bob"; "carol"; "bob" ];
-  check_resolve "a recipient written again right after itself" ~recipients:[ "alice"; "bob" ]
-    ~unresolved:[] [ "alice"; "bob"; "bob" ]
+  (* The same spelling twice never reaches the merge, because each spelling is
+     asked once. A second spelling of the middle recipient does. *)
+  check_resolve "a second spelling of a recipient in the middle"
+    ~recipients:[ "alice"; "bob"; "carol" ] ~unresolved:[] [ "alice"; "bob"; "carol"; "BOB" ];
+  check_resolve "a second spelling of the recipient just before"
+    ~recipients:[ "alice"; "bob" ] ~unresolved:[] [ "alice"; "bob"; "Bob" ]
 
 let test_resolve_case () =
   check_resolve "the declaration folds case, so two spellings are one recipient"

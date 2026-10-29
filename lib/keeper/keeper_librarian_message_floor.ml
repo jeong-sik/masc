@@ -193,6 +193,8 @@ module Machine = struct
     | [], _ :: _ | _ :: _, [] -> Error "message floor differs from its original source manifest"
 end
 
+let fresh_transaction_id () = Random_id.prefixed ~prefix:"librarian-floor-" ~bytes:16
+
 let infer ?cli_runner ~base_path ~keepers_dir ~keeper_name ~sources ~unread_message
     ~previous_state ~unread_messages (input : Keeper_librarian.input) =
   let* read = Machine.read ~keeper_name ~sources ~unread_messages ~previous_state input |> lift in
@@ -201,8 +203,7 @@ let infer ?cli_runner ~base_path ~keepers_dir ~keeper_name ~sources ~unread_mess
   let initial = Current.program_anchor_snapshot anchor in
   let* plan = Plan.create ~keeper_id:input.keeper_id ~turn_ref:input.turn_ref ~snapshot:initial
     |> Result.map_error Plan.error_to_string |> lift in
-  let* machine = Machine.start
-    ~transaction_id:(Random_id.prefixed ~prefix:"librarian-floor-" ~bytes:16) ~plan read |> lift in
+  let* machine = Machine.start ~transaction_id:(fresh_transaction_id ()) ~plan read |> lift in
   let rec drive machine reports_rev =
     let* next = Machine.next machine |> lift in
     match next with

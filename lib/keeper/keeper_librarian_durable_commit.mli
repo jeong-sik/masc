@@ -40,6 +40,12 @@ val validate_inventory : inventory:Keeper_librarian_durable_gate.Inventory.t ->
     inventory acquired for this consume pass and the already restored original
     record. The observation is never accepted by publication or dispatch APIs. *)
 
+val receipt_state : Keeper_librarian_durable_request.t -> (bool, string) result
+(** Whether Memory holds the receipts of every range this original names. [true]
+    when all of them are there, [false] when none is. A partial set, and an
+    original that names no range, are errors. Blocking read; offload it in an
+    Eio caller. *)
+
 val is_superseded : request:Keeper_librarian_durable_request.t ->
   record:Lane_addon_tool_request_owner.retained -> (bool, string) result
 (** Pure strict check of this domain's immutable typed-basis conflict evidence.

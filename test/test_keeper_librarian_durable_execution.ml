@@ -118,6 +118,7 @@ type fixture = {
   base_path:string; config:Workspace.config; keepers_dir:string; store:Store.t;
   source:string; declaration:bool -> string; server:F.test_server;
   set_response:(Capture.t -> Cohttp.Code.status_code * string) -> unit;
+  set_step_response:(string -> Cohttp.Code.status_code * string) -> unit;
   delivery_loss:bool ref; deliveries:int ref; delivery_changed:Eio.Condition.t;
   clock:float Eio.Time.clock_ty Eio.Resource.t;
 }
@@ -302,6 +303,9 @@ let with_fixture ?(history_kind=Atoms) f =
         enabled (Yojson.Safe.to_string (`String (Filename.concat package.directory "lane.toml"))) in
       io (fun () -> write source (declaration true));
       let response=ref (fun capture -> `OK,F.openai_response (answer capture)) in
+      (* A request that is no history original is a floor step. Tests that run
+         steps say how the provider answers them; any other test fails on it. *)
+      let step_response=ref (fun _ -> fail "actual provider request has no unique fully restored original capture") in
       let original_for body=
         let body=Yojson.Safe.from_string body in
         let messages=member "messages" body in
@@ -333,10 +337,13 @@ let with_fixture ?(history_kind=Atoms) f =
            | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
            | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> true)
           && Yojson.Safe.equal (`List sent) messages) captures in
-        match matches with [_,capture] -> capture
-        | [] | _::_::_ -> fail "actual provider request has no unique fully restored original capture" in
+        match matches with [_,capture] -> Some capture
+        | [] -> None
+        | _::_::_ -> fail "actual provider request has no unique fully restored original capture" in
       let start_server respond=F.start_server ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
-        (F.Reply_with (fun _ body -> respond (original_for body))) in
+        (F.Reply_with (fun _ body -> match original_for body with
+          | Some capture -> respond capture
+          | None -> !step_response body)) in
       let server=start_server (fun capture -> !response capture) in
       publish_routes base_path [server.base_url];
       Runtime.register_exact_runner ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path)
@@ -344,7 +351,8 @@ let with_fixture ?(history_kind=Atoms) f =
       let deliveries=ref 0 and delivery_changed=Eio.Condition.create () and delivery_loss=ref false in
       let delivery_observed ()=incr deliveries;Eio.Condition.broadcast delivery_changed in
       let fixture={base_path;config;keepers_dir;store;source;declaration;server;
-        set_response=(fun callback -> response:=callback);delivery_loss;deliveries;delivery_changed;
+        set_response=(fun callback -> response:=callback);
+        set_step_response=(fun callback -> step_response:=callback);delivery_loss;deliveries;delivery_changed;
         clock=Eio.Stdenv.clock env} in
       Runtime.For_testing.with_backend
         (backend env base_path delivery_loss delivery_observed) (fun () ->
@@ -1257,6 +1265,273 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
       (List.for_all (settled_on fixture ~date:root_day) gates);
     check int "no gate record stays for validation" 0 (List.length (gate_records fixture child)))))
 
+(* The durable message floor's way down: which refused originals descend, and
+   what the chain reads from them. *)
+module Descent = Keeper_librarian_floor_descent
+module Chain = Keeper_librarian_floor_chain
+module Step_owner = Keeper_librarian_floor_step_owner
+module Program = Keeper_memory_os_program
+let contains haystack needle = Astring.String.is_infix ~affix:needle haystack
+let size_refusal = `Request_entity_too_large, {|{"error":{"message":"fixture body too large","type":"invalid_request_error"}}|}
+let reply text = Agent_core.Types.make_message ~role:Agent_core.Types.Assistant [Agent_core.Types.Text text]
+let filler tag bytes = tag ^ " " ^ String.init bytes (fun index -> Char.chr (97 + index mod 26))
+let candidate_of fixture =
+  let record,request = only_original fixture in
+  memory_action fixture (fun () -> Descent.candidate ~store:fixture.store ~record ~request) |> get
+(* A read that fails leaves the consumer's mark that narrows its next fresh
+   read to one turn. *)
+let narrow_next_read fixture =
+  match memory_action fixture (fun () ->
+    Consumer.consume_one ~config:fixture.config ~keeper_name ~commit:(fun _ -> Consumer.Memory_refused [])) with
+  | Ok (Consumer.Memory_not_committed _) -> ()
+  | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Pending) ->
+    fail "the failed read did not stop at the unread turn"
+  | Error error -> fail (Consumer.error_to_string error)
+let ended_by_one_refusal = function
+  | Ok (Consumer.Memory_not_committed [_]) -> ()
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok (Consumer.Memory_not_committed ([] | _::_::_) | Nothing_to_read | Pending | Baseline_advanced _
+        | Progress_advanced _ | Official_advanced _) -> fail "the pass must end in one refusal report"
+(* The provider refuses the one-turn read, and the host keeps the refusal. *)
+let provider_refuses_one_turn fixture response =
+  fixture.set_response (fun _ -> response);
+  narrow_next_read fixture;
+  let before= !(fixture.deliveries) in
+  assert_pending (run_worker fixture);
+  await_delivery fixture ~after:before;
+  ended_by_one_refusal (run_worker fixture)
+(* Turn 2 is consumed first, so the turn added here is the whole backlog. *)
+let add_unread_turn fixture turn =
+  drive_advanced fixture;
+  let all=selected_messages @ turn in
+  save_checkpoint fixture.config ~trace_id all 3;
+  io (fun () -> append_boundary fixture.config ~turn:3 ~time:(Time_compat.now ())
+    ~history_at_start:(Boundary.history_at_start_of_messages selected_messages) all)
+(* The worker's frame refuses the whole backlog, then the one turn the next
+   read narrows to. *)
+let frame_refuses_the_turn_twice fixture =
+  ended_by_one_refusal (run_worker fixture);
+  ended_by_one_refusal (run_worker fixture)
+let step_claim n = `Assoc ["claim",`String (Printf.sprintf "claim number %d" n);"category",`String "fact";
+  "board_post_id",`Null;"board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []]
+let step_answer n = `Assoc ["new_claims",`List [step_claim n];"dropped",`List [];"working_contexts",`List [];
+  "working_state",`String (Printf.sprintf "working state %d" n)]
+(* The provider numbers its answer by the first of [tags] the request carries.
+   No claim or state repeats a tag, so a later request names only its own. *)
+let answering_steps tags body =
+  match List.find_opt (fun (_,tag) -> contains body tag) (List.mapi (fun index tag -> index+1,tag) tags) with
+  | Some (n,_) -> `OK,F.openai_response (step_answer n)
+  | None -> fail "a floor step carries none of the messages of the turn"
+(* Run the descent as the consumer's wakes do: a chain that waits on a worker
+   runs again after the worker's delivery, never earlier. *)
+let descend fixture candidate =
+  let rec go attempts =
+    let before= !(fixture.deliveries) in
+    let result=Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
+      memory_action fixture (fun () ->
+        Descent.descend ~store:fixture.store ~config:fixture.config
+          ~reserved:(Keeper_librarian_durable_edge.reserved ()) candidate)) in
+    match result with
+    | Ok (Chain.Pending _) when attempts>0 -> await_delivery fixture ~after:before;go (attempts-1)
+    | result -> result in
+  go 12
+let finished = function
+  | Ok (Chain.Finished finished) -> finished
+  | Ok (Chain.Pending detail) -> failf "the chain was still pending: %s" detail
+  | Ok (Chain.Stopped {position;report}) -> failf "the chain stopped at %d: %s" position report.detail
+  | Error detail -> failf "the chain refused: %s" detail
+let program_claims (program:Program.t) =
+  List.concat_map (fun (stage:Program.stage) ->
+    List.map (fun (fact:Types.fact) -> fact.claim) stage.decision.new_claims) program.stages
+let steps_of fixture request =
+  Step_owner.discover ~store:fixture.store ~owner:(Capture.physical_owner request)
+  |> Result.map_error Step_owner.error_to_string |> get
+(* The claims of the facts the chain's first step was asked from. *)
+let first_step_facts fixture request =
+  match List.find_opt (fun (_,(header:Keeper_librarian_floor_step_request.header)) -> header.position=0)
+    (steps_of fixture request) with
+  | None -> fail "the chain has no first step"
+  | Some (record,_) ->
+    let step=Keeper_librarian_floor_step_request.restore ~owner:(Capture.physical_owner request) record |> get in
+    (match (Keeper_librarian_floor_step_request.step step).preparation.source_input.current with
+     | Some current -> List.sort String.compare (List.map (fun (fact:Types.fact) -> fact.claim) current.facts)
+     | None -> [])
+let candidate_and_request fixture =
+  let _,request=only_original fixture in
+  match candidate_of fixture with
+  | Some candidate -> candidate,request
+  | None -> fail "the refused original must be a floor candidate"
+let test_a_kept_size_refusal_of_one_turn_is_a_candidate () = with_fixture (fun ~sw:_ fixture ->
+  fixture.set_response (fun _ -> size_refusal);
+  narrow_next_read fixture;
+  let before= !(fixture.deliveries) in
+  assert_pending (run_worker fixture);
+  check bool "an original the host has not refused is no candidate" true (Option.is_none (candidate_of fixture));
+  await_delivery fixture ~after:before;
+  ended_by_one_refusal (run_worker fixture);
+  let record,_=only_original fixture in
+  match candidate_of fixture with
+  | Some candidate ->
+    check string "the candidate is the refused original" record.Owner.request_id (Descent.record candidate).Owner.request_id;
+    check string "and the range its steps name" record.request_id
+      (Descent.range candidate).Keeper_librarian_floor_step_request.request_id;
+    check string "by the digest of its request" record.request_digest
+      (Descent.range candidate).Keeper_librarian_floor_step_request.request_digest
+  | None -> fail "a size refusal the host kept for one turn must be a candidate")
+(* A record that is not the request's own is an error, never a dropped candidate. *)
+let test_a_record_that_is_not_the_requests_own_is_an_error () = with_fixture (fun ~sw:_ fixture ->
+  provider_refuses_one_turn fixture size_refusal;
+  let refused,_=only_original fixture in
+  (* The next pass settles the refused original and reads the turn again. *)
+  assert_pending (run_worker fixture);
+  let _,request=only_original fixture in
+  check bool "the pass read the turn again as an original of its own" true
+    (refused.Owner.request_id<>Capture.request_id request);
+  match memory_action fixture (fun () -> Descent.candidate ~store:fixture.store ~record:refused ~request) with
+  | Error _ -> ()
+  | Ok _ -> fail "a record that is not the request's own was taken for it")
+let test_a_refusal_that_shows_nothing_about_reading_less_is_no_candidate () = with_fixture (fun ~sw:_ fixture ->
+  provider_refuses_one_turn fixture (`Bad_request,{|{"error":{"message":"fixture refusal","type":"invalid_request_error"}}|});
+  let record,_=only_original fixture in
+  check bool "the original is refused" true
+    (match Progress.phase record.Owner.progress with Rejected _ -> true
+     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+     | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> false);
+  check bool "but nothing in it shows that reading less may help" true (Option.is_none (candidate_of fixture)))
+(* The first read takes everything unread. Whatever it holds, it is not the
+   narrowed read of one turn, so a refusal of it does not descend. *)
+let a_refused_first_read ?(second_turn=false) () = with_fixture (fun ~sw:_ fixture ->
+  if second_turn then (
+    let both=selected_messages @ [message "A second unread turn";reply "Its answer"] in
+    save_checkpoint fixture.config ~trace_id both 3;
+    io (fun () -> append_boundary fixture.config ~turn:3 ~time:(Time_compat.now ())
+      ~history_at_start:(Boundary.history_at_start_of_messages selected_messages) both));
+  fixture.set_response (fun _ -> size_refusal);
+  let before= !(fixture.deliveries) in
+  assert_pending (run_worker fixture);
+  await_delivery fixture ~after:before;
+  ended_by_one_refusal (run_worker fixture);
+  let _,request=only_original fixture in
+  check bool "the first read takes everything unread" true
+    (Source.extent (Capture.source request)=Keeper_librarian_range.All_unread);
+  check bool "of one turn or of two" second_turn
+    (List.length (Source.input (Capture.source request)).Keeper_librarian.messages>2);
+  check bool "a size refusal of that read does not descend" true (Option.is_none (candidate_of fixture)))
+let test_a_read_the_consumer_did_not_narrow_is_no_candidate () = a_refused_first_read ()
+let test_a_read_of_two_turns_is_no_candidate () = a_refused_first_read ~second_turn:true ()
+let test_the_floor_reads_a_turn_the_provider_refuses_one_message_at_a_time () = with_fixture (fun ~sw:_ fixture ->
+  provider_refuses_one_turn fixture size_refusal;
+  let candidate,request=candidate_and_request fixture in
+  let memory_before=io (fun () -> claims fixture.keepers_dir) and position=progress fixture in
+  let posts=F.post_count fixture.server in
+  fixture.set_step_response (answering_steps ["Original question to retain";"Original completed answer"]);
+  let first=finished (descend fixture candidate) in
+  check (list string) "every message has a decision, in order"
+    ["claim number 1";"claim number 2"] (program_claims first.program);
+  check int "no message is unread" 0 (List.length first.program.unread);
+  check int "each message asked the provider once" 2 (F.post_count fixture.server-posts);
+  check int "and retained one step" 2 (List.length (steps_of fixture request));
+  check (list string) "nothing reached Memory" memory_before (io (fun () -> claims fixture.keepers_dir));
+  check bool "and the position did not move" true (progress fixture=position);
+  let again=finished (descend fixture candidate) in
+  check json "a restart makes the same program" (Program.to_json first.program) (Program.to_json again.program);
+  check int "and asks the provider nothing" 2 (F.post_count fixture.server-posts);
+  check int "and retains no more steps" 2 (List.length (steps_of fixture request)))
+let test_a_message_the_frame_refuses_alone_stays_unread () = with_fixture (fun ~sw:_ fixture ->
+  let huge=message (filler "huge-message" oversized_turn_bytes) in
+  add_unread_turn fixture [huge;reply "Oversized answer"];
+  frame_refuses_the_turn_twice fixture;
+  let candidate,request=candidate_and_request fixture in
+  let posts=F.post_count fixture.server in
+  fixture.set_step_response (answering_steps ["huge-message";"Oversized answer"]);
+  let first=finished (descend fixture candidate) in
+  check (list string) "only the readable message has a decision" ["claim number 2"] (program_claims first.program);
+  (match first.program.unread with
+   | [hole] ->
+     let digest=match hole.source with
+       | Keeper_librarian_unread.Atom {message_sha256;_} | Official_turn {message_sha256;_} -> message_sha256 in
+     check string "the hole is the message the frame refused" (Keeper_librarian_unread.message_digest huge) digest;
+     check bool "with the cause the host named" true
+       (hole.reasons=[Keeper_librarian_input_refusal.Request_body_refused])
+   | [] | _::_::_ -> fail "the refused message is the one unread hole");
+  check int "the refused message never reached the provider" 1 (F.post_count fixture.server-posts);
+  check int "both messages have a step" 2 (List.length (steps_of fixture request));
+  check (list string) "the chain starts from the Memory of the moment" ["Knowledge from original completed history"]
+    (first_step_facts fixture request);
+  let again=finished (descend fixture candidate) in
+  check json "a restart keeps the hole and the decision" (Program.to_json first.program) (Program.to_json again.program);
+  check int "and asks the provider nothing" 1 (F.post_count fixture.server-posts))
+let test_the_floor_reads_an_official_turn_from_its_retained_messages () = with_fixture ~history_kind:Official (fun ~sw:_ fixture ->
+  provider_refuses_one_turn fixture size_refusal;
+  let candidate,request=candidate_and_request fixture in
+  let posts=F.post_count fixture.server in
+  fixture.set_step_response (answering_steps ["Original official-client question";"Original official-client answer"]);
+  let first=finished (descend fixture candidate) in
+  check (list string) "both messages of the turn have a decision, in order"
+    ["claim number 1";"claim number 2"] (program_claims first.program);
+  check int "each asked the provider once" 2 (F.post_count fixture.server-posts);
+  check int "and retained one step" 2 (List.length (steps_of fixture request));
+  no_memory fixture)
+(* The turn's own messages are the same, so only the source lock can tell that
+   the checkpoint is no longer the one the original read. *)
+let test_a_checkpoint_whose_read_prefix_changed_stops_the_descent_before_any_step () = with_fixture (fun ~sw:_ fixture ->
+  provider_refuses_one_turn fixture size_refusal;
+  let candidate,request=candidate_and_request fixture in
+  let posts=F.post_count fixture.server in
+  save_checkpoint fixture.config ~trace_id (message "The already-read first turn, rewritten"
+    :: List.drop (List.length first_messages) selected_messages) 3;
+  fixture.set_step_response (fun _ -> fail "a changed source reached the provider");
+  (match descend fixture candidate with
+   | Error _ -> ()
+   | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Stopped _) ->
+     fail "the floor read a checkpoint the original did not read");
+  check int "no step was retained" 0 (List.length (steps_of fixture request));
+  check int "and the provider was not asked" 0 (F.post_count fixture.server-posts))
+(* The source lock allows history appended after the original, which is why
+   the chain numbers the original's messages against the checkpoint as it is
+   now. The appended turn is not asked about. *)
+let test_history_appended_after_the_original_does_not_stop_the_descent () = with_fixture (fun ~sw:_ fixture ->
+  provider_refuses_one_turn fixture size_refusal;
+  let candidate,request=candidate_and_request fixture in
+  let later=selected_messages @ [message "A turn after the refused one";reply "Its answer"] in
+  save_checkpoint fixture.config ~trace_id later 3;
+  io (fun () -> append_boundary fixture.config ~turn:3 ~time:(Time_compat.now ())
+    ~history_at_start:(Boundary.history_at_start_of_messages selected_messages) later);
+  fixture.set_step_response (answering_steps ["Original question to retain";"Original completed answer"]);
+  check (list string) "the chain reads the turn the original read" ["claim number 1";"claim number 2"]
+    (program_claims (finished (descend fixture candidate)).program);
+  check int "and no step asks about the appended turn" 2 (List.length (steps_of fixture request)))
+let test_a_refused_original_whose_read_position_moved_is_no_longer_a_candidate () =
+  with_fixture ~history_kind:Official (fun ~sw:_ fixture ->
+    provider_refuses_one_turn fixture size_refusal;
+    check bool "the refused original is a candidate" true (Option.is_some (candidate_of fixture));
+    (* A publication elsewhere moved the official position past the turn. *)
+    io (fun () -> Keeper_librarian_official_progress.write ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config)
+      ~keeper_id:keeper_name {Keeper_librarian_official_progress.boundary_line=2}
+      |> Result.map_error Keeper_librarian_official_progress.write_error_to_string |> get);
+    check bool "the range the next pass selects is not the original's, so it is no candidate" true
+      (Option.is_none (candidate_of fixture)))
+(* Every pass that selects the range prepares the external cursor again, so by
+   the time a chain finishes it is not as the original captured it. *)
+let test_the_descent_reads_on_while_the_external_cursor_moves () = with_fixture ~history_kind:Official (fun ~sw:_ fixture ->
+  provider_refuses_one_turn fixture size_refusal;
+  let candidate,request=candidate_and_request fixture in
+  let runtime_keepers_dir=Workspace.keepers_runtime_dir fixture.config in
+  let cursor_json () =
+    io (fun () -> Keeper_external_read_cursor.observe ~runtime_keepers_dir ~keeper_name |> get)
+    |> Keeper_external_read_cursor.observation_to_json in
+  let captured=cursor_json () in
+  io (fun () ->
+    let token=Keeper_external_read_cursor.read ~memory_keepers_dir:fixture.keepers_dir ~runtime_keepers_dir
+      ~keeper_name |> get in
+    Keeper_external_read_cursor.prepare ~memory_keepers_dir:fixture.keepers_dir ~runtime_keepers_dir ~keeper_name token
+      ~through:(Keeper_external_read_cursor.offset token+5) ~atom:None
+      ~official:(Source.official_range_id (Capture.source request)) |> get);
+  check bool "the cursor is no longer as it was" false (Yojson.Safe.equal captured (cursor_json ()));
+  fixture.set_step_response (answering_steps ["Original official-client question";"Original official-client answer"]);
+  check (list string) "the chain still reads the turn" ["claim number 1";"claim number 2"]
+    (program_claims (finished (descend fixture candidate)).program))
+
 let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured completed-history",[
   test_case "missing attachment is reported without consuming source" `Quick test_unattached_reports_without_consuming;
   test_case "terminal refusal preserves reason and allows a fresh original" `Quick test_terminal_refusal_allows_fresh_original;
@@ -1300,4 +1575,26 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     (test_changed_memory_rebases_original_source_without_unknown_retry ~interrupt_settle:true);
   test_case "a chain across two UTC days settles and finishes under its root's day" `Quick
     (test_changed_memory_rebases_original_source_without_unknown_retry ~recover_unacked_child:true ~interrupt_settle:true);
+  test_case "a size refusal the host kept for one turn is a floor candidate" `Quick
+    test_a_kept_size_refusal_of_one_turn_is_a_candidate;
+  test_case "a record that is not the request's own is an error" `Quick
+    test_a_record_that_is_not_the_requests_own_is_an_error;
+  test_case "a refusal that shows nothing about reading less is no floor candidate" `Quick
+    test_a_refusal_that_shows_nothing_about_reading_less_is_no_candidate;
+  test_case "a read the consumer did not narrow is no floor candidate" `Quick
+    test_a_read_the_consumer_did_not_narrow_is_no_candidate;
+  test_case "a read of two turns is no floor candidate" `Quick test_a_read_of_two_turns_is_no_candidate;
+  test_case "the floor reads a turn the provider refuses one message at a time" `Quick
+    test_the_floor_reads_a_turn_the_provider_refuses_one_message_at_a_time;
+  test_case "a message the frame refuses alone stays unread" `Quick test_a_message_the_frame_refuses_alone_stays_unread;
+  test_case "the floor reads an official turn from its retained messages" `Quick
+    test_the_floor_reads_an_official_turn_from_its_retained_messages;
+  test_case "a checkpoint whose read prefix changed stops the descent before any step" `Quick
+    test_a_checkpoint_whose_read_prefix_changed_stops_the_descent_before_any_step;
+  test_case "history appended after the original does not stop the descent" `Quick
+    test_history_appended_after_the_original_does_not_stop_the_descent;
+  test_case "a refused original whose read position moved is no longer a candidate" `Quick
+    test_a_refused_original_whose_read_position_moved_is_no_longer_a_candidate;
+  test_case "the descent reads on while the external cursor moves" `Quick
+    test_the_descent_reads_on_while_the_external_cursor_moves;
 ]]

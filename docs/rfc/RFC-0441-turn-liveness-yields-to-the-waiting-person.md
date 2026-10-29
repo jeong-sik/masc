@@ -3,7 +3,7 @@ rfc: "0441"
 title: "A running turn must not misread or outrank the person waiting on it"
 status: Draft
 created: 2026-09-10
-updated: 2026-09-27
+updated: 2026-10-29
 author: goo-yang-bong
 related: ["0345"]
 ---
@@ -34,11 +34,11 @@ The cluster was filed before three layers landed; a reviewer must know what is a
 
 ### 2.1 Gap A — ambient connector conversations had no mid-turn preemption
 
-The owner-operation probe covers a person's *direct* address. The HITL probe covers approved resolutions. But an **ambient** connector conversation (Slack/Discord channel the keeper follows, no mention, no DM) lands as a `Connector_attention` stimulus — and a running `Woken` turn never looked at those: its probe chain (`chat_yield_request` → `hitl_replay_yield_request`) ended there. A multi-hour autonomous run could hold an ambient conversation's turn behind it — the same inversion #20849 measured, one class over.
+The owner-operation probe covers a person's *direct* address. The HITL probe covers approved resolutions. But an **ambient** connector conversation (Slack/Discord channel the keeper follows, no mention, no DM) lands as a `Connector_attention` stimulus — and a probe chain that ended at those two would let a multi-hour autonomous run hold an ambient conversation's turn behind it, the same inversion #20849 measured, one class over.
 
-Empty wakes (`Proactive_tick`, `Woken []`) already yield to *any* pending stimulus (`autonomous_yield_request`), so the gap is specific to the nonempty `Woken` turn, which deliberately does not yield to the payloads it was itself woken by.
+Every wake kind (`Proactive_tick`, `Woken []` and a nonempty `Woken`) uses one probe chain. None of them yields to a row that intake already read, the payloads the turn was itself woken by included, except an approved Gate resolution whose grant is still unspent.
 
-**Fix (this RFC, implemented for AGENT_CORE):** extend the nonempty-`Woken` probe chain with a third, narrow probe: `connector_attention_waiting` — yields only when a `Connector_attention` payload is pending, and does not yield to the turn's own wake payloads (all other payload kinds are matched `false`). The AGENT_CORE source turn checkpoints at the post-tool boundary and resumes after the conversation turn settles — the same cooperative yield `Runtime_agent.Yielded_to_durable_stimulus` models for #28809. This does not establish a replayable tool-result handoff for official clients.
+**Fix (this RFC, implemented for AGENT_CORE):** the probe chain ends with a third, narrow probe. It yields when a row of a kind that may preempt, a `Connector_attention` among them, reached the queue after the turn's intake read it, and never to a row intake already saw, the turn's own wake payloads included. The AGENT_CORE source turn checkpoints at the post-tool boundary and resumes after the conversation turn settles — the same cooperative yield `Runtime_agent.Yielded_to_durable_stimulus` models for #28809. This does not establish a replayable tool-result handoff for official clients.
 
 **Re-entry and liveness:** `Runtime_agent` passes `cooperative_yield_probe` to `Agent_core.Agent.Advanced.continue` when resuming with a probe, so the resumed source can reach this probe again. Each yield must be justified by a currently pending stimulus. A one-shot latch would suppress a later, genuinely new conversation. The callback shape alone does not prove the absence of livelock; queue ordering and repeated-yield behavior need verification.
 
@@ -66,7 +66,7 @@ RFC-0373 lets the autonomous lane take one slot after repeated chat-lane deferra
 
 A running turn owes the person waiting on it at each proven resumable boundary:
 
-1. **Yield order** (highest first): claimed owner operations → approved HITL resolutions → pending `Connector_attention`. A nonempty-`Woken` turn yields to none of its own wake payloads.
+1. **Yield order** (highest first): claimed owner operations → approved HITL resolutions → a `Connector_attention`, or another kind that may preempt, that reached the queue after the turn's intake. A turn yields to none of the rows its intake already read, its own wake payloads included, except an approved HITL resolution whose grant is still unspent.
    If the provider has not reached a proven resumable boundary, the admitted turn keeps
    running. #39309 removes queue-triggered cancellation before its first response
    event. AGENT_CORE can yield at its checkpointed post-tool boundary. A

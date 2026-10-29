@@ -1,8 +1,7 @@
 (** An autonomous turn yields to any claimable person-chat operation. A
     direct turn passes its claimed operation ID and yields only to an original
-    chat admitted later, never to an older queued continuation. At an owned
-    post-tool boundary a pending scheduled input first reserves its source turn;
-    a typed durable-stimulus yield then preserves this direct continuation. *)
+    chat admitted later, never to an older queued continuation. It reads chat
+    operations only, never the durable event queue. *)
 
 type turn = Autonomous | Direct of Keeper_chat_operation.Operation_id.t
 

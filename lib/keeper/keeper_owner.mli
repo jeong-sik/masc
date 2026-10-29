@@ -318,17 +318,10 @@ val end_scheduled_turn_consumer : t -> consumer:scheduled_turn_consumer -> (unit
     affect its replacement. *)
 val observe_scheduled_turn : t -> Keeper_event_queue_state.pending_selection list ->
   (scheduled_turn_handoff option, error) result
-(** Reserve a freshly observed pending cohort behind a busy Direct child,
-    including one that completes without tools. The command does not interrupt
-    the child and returns its scoped handoff before caller cancellation. *)
+(** Reserve a freshly observed pending cohort behind a busy Direct child. The
+    command does not interrupt the child and returns its scoped handoff before
+    caller cancellation. *)
 val scheduled_turn_handoff : t -> (scheduled_turn_handoff option, error) result
-val request_scheduled_turn :
-  t -> observed:Keeper_interrupt_token.t ->
-  Keeper_event_queue_state.pending_selection list -> (bool, error) result
-(** Request the next autonomous slot for exact scheduled sources from the
-    current child's settled tool boundary. False means that child no longer
-    owns the slot, or admission is paused/shutting down. No source is consumed. *)
-
 val release_scheduled_turn : t -> handoff:scheduled_turn_handoff -> (unit, error) result
 (** Release only this captured child's exact source selections and reconsider
     queued chat input. A late release cannot erase a later child's handoff or

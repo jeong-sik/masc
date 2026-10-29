@@ -365,10 +365,6 @@ type _ command =
   | Wake_operation_drain : (unit, error) result command
   | Begin_scheduled_turn_consumer : (scheduled_turn_consumer, error) result command
   | End_scheduled_turn_consumer : scheduled_turn_consumer -> (unit, error) result command
-  | Request_scheduled_turn :
-      { observed : Keeper_interrupt_token.t
-      ; sources : Keeper_event_queue_state.pending_selection list }
-      -> (bool, error) result command
   | Observe_scheduled_turn : Keeper_event_queue_state.pending_selection list
       -> (scheduled_turn_handoff option, error) result command
   | Scheduled_turn_handoff : (scheduled_turn_handoff option, error) result command
@@ -744,8 +740,8 @@ let answer : type response. response command -> answer = function
   | Succeed_running_operation _ -> In_its_drain_step
   | Observe_runtime_retry_waits | Wake_operation_drain -> In_its_drain_step
   | Begin_scheduled_turn_consumer | End_scheduled_turn_consumer _
-  | Request_scheduled_turn _ | Release_scheduled_turn _
-  | Observe_scheduled_turn _ | Scheduled_turn_handoff -> In_its_drain_step
+  | Release_scheduled_turn _ | Observe_scheduled_turn _
+  | Scheduled_turn_handoff -> In_its_drain_step
   | Run_if_idle _ -> Possibly_when_the_child_finishes
   | Begin_shutdown _ -> In_its_drain_step
   | Rollback_shutdown _ -> In_its_drain_step
@@ -1663,9 +1659,9 @@ let start
             fail_running_operation ~operation_id ~kind ~detail ~outcome_ref)
     in
     let request_scheduled_handoff state shutdown_operation_id ~observed sources =
-      match !(t.scheduled_consumer), Atomic.get t.turn_in_flight with
-      | Some consumer, Some current when Keeper_interrupt_token.equal current.interrupt_token observed
-          && turn_admission_open state && Option.is_none shutdown_operation_id
+      match !(t.scheduled_consumer) with
+      | Some consumer
+        when turn_admission_open state && Option.is_none shutdown_operation_id
           && not (Keeper_owner_reducer.projection state).stopping
           && Option.is_some t.on_turn_slot_released ->
         let sources = List.filter (fun (source : Keeper_event_queue_state.pending_selection) ->
@@ -1687,7 +1683,7 @@ let start
           t.scheduled_handoff := Some { consumer; observed_turn = observed; sources };
           t.autonomous_lost_slot := true;
           true)
-      | (Some _ | None), (Some _ | None) -> false
+      | Some _ | None -> false
     in
     let rec start_child_if_needed state shutdown_operation_id =
       match operation_runner with
@@ -2682,15 +2678,11 @@ let start
           Eio.Promise.resolve resolve (Ok ());
           start_child_if_needed state shutdown_operation_id;
           loop state shutdown_operation_id
-        | Command (Request_scheduled_turn { observed; sources }, resolve) ->
-          let accepted = request_scheduled_handoff state shutdown_operation_id ~observed sources in
-          Eio.Promise.resolve resolve (Ok accepted);
-          loop state shutdown_operation_id
         | Command (Observe_scheduled_turn sources, resolve) ->
-          (* A text-only Direct child also releases a safe slot at its natural
-             terminal. Observe while it is busy so queued chat cannot take that
-             next slot before the heartbeat. Autonomous sources already own
-             their input; only their post-tool probe may request a successor. *)
+          (* A Direct child releases a safe slot at its natural terminal.
+             Observe while it is busy so queued chat cannot take that next slot
+             before the heartbeat. Autonomous sources already own their input
+             and reserve nothing. *)
           (match Atomic.get t.turn_in_flight with
            | Some { lane = Chat_operation; interrupt_token; _ } ->
              ignore (request_scheduled_handoff state shutdown_operation_id
@@ -3110,9 +3102,6 @@ let succeed_running_operation t ~operation_id ~outcome_ref =
 
 let begin_scheduled_turn_consumer t = request t Begin_scheduled_turn_consumer
 let end_scheduled_turn_consumer t ~consumer = request t (End_scheduled_turn_consumer consumer)
-
-let request_scheduled_turn t ~observed sources =
-  request t (Request_scheduled_turn { observed; sources })
 
 let observe_scheduled_turn t sources = request t (Observe_scheduled_turn sources)
 let scheduled_turn_handoff t = request t Scheduled_turn_handoff

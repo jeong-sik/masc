@@ -577,12 +577,6 @@ let end_scheduled_turn_consumer ~base_path ~keeper_name ~consumer =
   | Ok owner -> Keeper_owner.end_scheduled_turn_consumer owner ~consumer
       |> Result.map_error (fun error -> Command_rejected error)
 
-let request_scheduled_turn ~base_path ~keeper_name ~observed sources =
-  match get ~base_path ~keeper_name with
-  | Error error -> Error (Command_lookup_failed error)
-  | Ok owner -> Keeper_owner.request_scheduled_turn owner ~observed sources
-      |> Result.map_error (fun error -> Command_rejected error)
-
 let observe_scheduled_turn ~base_path ~keeper_name sources =
   match get ~base_path ~keeper_name with
   | Error error -> Error (Command_lookup_failed error)

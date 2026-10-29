@@ -68,9 +68,6 @@ val observe_scheduled_turn : base_path:string -> keeper_name:string ->
   (Keeper_owner.scheduled_turn_handoff option, command_error) result
 val scheduled_turn_handoff : base_path:string -> keeper_name:string ->
   (Keeper_owner.scheduled_turn_handoff option, command_error) result
-val request_scheduled_turn :
-  base_path:string -> keeper_name:string -> observed:Keeper_interrupt_token.t ->
-  Keeper_event_queue_state.pending_selection list -> (bool, command_error) result
 val release_scheduled_turn :
   base_path:string -> keeper_name:string -> handoff:Keeper_owner.scheduled_turn_handoff ->
   (unit, command_error) result

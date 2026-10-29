@@ -284,81 +284,6 @@ let test_distinct_connector_events_are_not_collapsed () =
       check (list string) "each producer event has one durable row"
         [ "event-1"; "event-2" ] event_ids)
 
-(* #41157: a retained Connector pointer whose attention row is unreadable
-   was classified missing by the heartbeat intake but stayed pending, and
-   the yield paths treated every pending Connector as actionable -- so the
-   same unreadable pointer re-yielded at each tool boundary and the source
-   never completed. The yield paths now drop pointers the attention store
-   does not know, asking the same batched question the intake asks. A
-   pointer whose row exists still preempts; a store that cannot be read
-   keeps every pointer rather than silencing newly arrived readable
-   messages. *)
-let test_missing_connector_pointer_does_not_preempt () =
-  let base_path = Filename.temp_dir "connector-attention-missing" "" in
-  let keeper_name = "conn-keeper" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-      let item =
-        { (external_attention_item ()) with
-          A.event_id = "evt-present"
-        ; keeper_name
-        }
-      in
-      (match A.record ~base_path item with
-      | `Recorded -> ()
-      | `Duplicate _ -> Alcotest.fail "fixture attention row duplicated"
-      | `Error detail -> Alcotest.failf "fixture attention row failed: %s" detail);
-      let enqueue stimuli keeper =
-        List.iter
-          (fun stimulus ->
-             match
-               Masc.Keeper_registry_event_queue.enqueue_stimulus_durable_result
-                 ~base_path keeper stimulus
-             with
-             | Masc.Keeper_registry_event_queue.Stimulus_enqueued -> ()
-             | other ->
-               Alcotest.failf "durable Connector delivery failed: %s"
-                 (match other with
-                  | Masc.Keeper_registry_event_queue.Stimulus_storage_error detail ->
-                    detail
-                  | _ -> "unexpected result"))
-          stimuli
-      in
-      (* A keeper whose only pending pointer is unreadable: no preemption. *)
-      enqueue [ connector_stimulus ~event_id:"evt-missing" ~arrived_at:1.0 ]
-        "conn-missing-only";
-      check bool
-        "a missing pointer alone does not preempt the source"
-        true
-        (Option.is_none
-           (Masc.Keeper_unified_turn.connector_attention_waiting
-              ~base_path ~keeper_name:"conn-missing-only"
-            |> Result.get_ok));
-      (* The readable pointer's queue lives under the recorded row's keeper. *)
-      enqueue
-        [ connector_stimulus ~event_id:"evt-missing" ~arrived_at:1.0
-        ; connector_stimulus ~event_id:"evt-present" ~arrived_at:2.0
-        ]
-        keeper_name;
-      (match
-         Masc.Keeper_unified_turn.connector_attention_waiting
-           ~base_path ~keeper_name
-         |> Result.get_ok
-       with
-      | Some
-          { Masc.Keeper_agent_run.reason =
-              Masc.Keeper_agent_run.Durable_stimulus_waiting summary } ->
-        (match summary.head with
-         | Some selected ->
-           check string "the readable pointer preempts" "evt-present"
-             selected.Keeper_event_queue.post_id
-         | None -> Alcotest.fail "readable connector lost its preemption head")
-      | Some { Masc.Keeper_agent_run.reason = Masc.Keeper_agent_run.Operation_queued } ->
-        Alcotest.fail "connector preemption was mislabeled as chat"
-      | None -> Alcotest.fail "readable connector did not preempt"));
-;;
-
 let record_attention ~base_path ~keeper_name event_id =
   (match Masc.Keeper_registry.get ~base_path keeper_name with
    | Some _ -> ()
@@ -379,6 +304,11 @@ let enqueue_attention ~base_path ~keeper_name event_id =
           ~base_path keeper_name (connector_stimulus ~event_id ~arrived_at:1.0) with
   | Masc.Keeper_registry_event_queue.Stimulus_enqueued -> ()
   | _ -> fail "fixture stimulus was not durably enqueued"
+
+(* A turn that was admitted no source: every pending row is a later arrival. *)
+let proactive_turn =
+  Masc.Keeper_heartbeat_source_batch.for_turn ~reactive:false
+    Masc.Keeper_heartbeat_source_batch.empty
 
 let probe_head probe =
   match probe () with
@@ -413,14 +343,19 @@ let with_attention_workspace f =
            | Error error -> fail (Masc.Keeper_owner_registry.install_error_to_string error));
           f base_path)))
 
-let test_late_enqueue_invalidates_subset wake () =
+(* #41157: a retained Connector pointer whose attention row is unreadable stays
+   pending after intake. The probe drops pointers the attention store does not
+   know, asking the same batched question the intake asks. A pointer whose row
+   exists still preempts; a store that cannot be read keeps every pointer
+   rather than silencing newly arrived readable messages. *)
+let test_late_enqueue_invalidates_subset () =
   with_attention_workspace (fun base_path ->
     let keeper_name = "late-enqueue" in
     (* Ingress has recorded the new body but has not enqueued its pointer. *)
     record_attention ~base_path ~keeper_name "present";
     enqueue_attention ~base_path ~keeper_name "missing";
     let probe, reads = Masc.Keeper_unified_turn.For_testing.autonomous_yield_probe
-        ~wake ~sources:Masc.Keeper_heartbeat_source_batch.empty ~base_path ~keeper_name in
+        ~turn_input:proactive_turn ~base_path ~keeper_name in
     check (option string) "missing does not preempt" None (probe_head probe);
     check (option string) "unchanged negative result is reusable" None (probe_head probe);
     check int "one history scan" 1 (reads ());
@@ -443,8 +378,7 @@ let test_interleaved_turn_caches () =
       record_attention ~base_path ~keeper_name "seed-not-queued";
       enqueue_attention ~base_path ~keeper_name "missing";
       Masc.Keeper_unified_turn.For_testing.autonomous_yield_probe
-        ~wake:(Masc.Keeper_registry.Woken [Keeper_event_queue.Bootstrap])
-        ~sources:Masc.Keeper_heartbeat_source_batch.empty
+        ~turn_input:proactive_turn
         ~base_path ~keeper_name
     in
     let a, reads_a = make "keeper-a" in
@@ -463,20 +397,19 @@ let test_interleaved_turn_caches () =
     check (list string) "restoration probe does not ACK" ["missing"]
       (pending_ids ~base_path ~keeper_name:"keeper-a");
     let a_next, reads_next = Masc.Keeper_unified_turn.For_testing.autonomous_yield_probe
-        ~wake:(Masc.Keeper_registry.Woken [Keeper_event_queue.Bootstrap])
-        ~sources:Masc.Keeper_heartbeat_source_batch.empty
+        ~turn_input:proactive_turn
         ~base_path ~keeper_name:"keeper-a" in
     check (option string) "next turn sees the same restored body"
       (Some "missing") (probe_head a_next);
     check int "next turn of A owns a fresh memo" 1 (reads_next ()))
 
-let test_attention_read_failure_stays_open wake () =
+let test_attention_read_failure_stays_open () =
   with_attention_workspace (fun base_path ->
     let keeper_name = "read-failure" in
     record_attention ~base_path ~keeper_name "seed-not-queued";
     enqueue_attention ~base_path ~keeper_name "missing";
     let probe, reads = Masc.Keeper_unified_turn.For_testing.autonomous_yield_probe
-        ~wake ~sources:Masc.Keeper_heartbeat_source_batch.empty ~base_path ~keeper_name in
+        ~turn_input:proactive_turn ~base_path ~keeper_name in
     check (option string) "initial readable store excludes missing" None (probe_head probe);
     let path = A.attention_path ~base_path ~keeper_name in
     let size = (Unix.stat path).st_size in
@@ -557,22 +490,14 @@ let () =
             test_connector_attention_codec_roundtrips
         ; test_case "distinct events are durable without channel debounce" `Quick
             test_distinct_connector_events_are_not_collapsed
-        ; test_case "missing pointer does not preempt; readable still does"
-            `Quick test_missing_connector_pointer_does_not_preempt
         ] )
     ; ( "source-turn cache",
-        [ test_case "late enqueue during proactive turn" `Quick
-            (test_late_enqueue_invalidates_subset Masc.Keeper_registry.Proactive_tick)
-        ; test_case "late enqueue during selected-source turn" `Quick
-            (test_late_enqueue_invalidates_subset
-               (Masc.Keeper_registry.Woken [Keeper_event_queue.Bootstrap]))
+        [ test_case "late enqueue during a running turn" `Quick
+            test_late_enqueue_invalidates_subset
         ; test_case "interleaved Keepers retain independent caches" `Quick
             test_interleaved_turn_caches
-        ; test_case "proactive read failure and recovery" `Quick
-            (test_attention_read_failure_stays_open Masc.Keeper_registry.Proactive_tick)
-        ; test_case "selected-source read failure and recovery" `Quick
-            (test_attention_read_failure_stays_open
-               (Masc.Keeper_registry.Woken [Keeper_event_queue.Bootstrap]))
+        ; test_case "read failure and recovery" `Quick
+            test_attention_read_failure_stays_open
         ] )
     ; ( "projection",
         [ test_case "external attention becomes prompt event" `Quick

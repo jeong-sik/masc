@@ -2,6 +2,616 @@
 
 ## [Unreleased]
 
+## [0.66.0] - 2026-10-29
+
+### Upgrade notes
+
+- Update the browser worker, host/server and TUI together: client identity
+  messages require Space context for Ego and explicit null for other transports
+  (#46192).
+- The `dos-machine` package is published as `0.2.2` with the image `masc-lane-dos-machine:0.2.2`, because the resume runs in the worker binary and a `0.2.1` image keeps starting unloaded. Run the `lane-addon-images.yml` workflow at the merged commit and load the image before restarting the server. A machine running under `0.2.1` has no `autosave.current`, so the first restart onto `0.2.2` starts with no machine; restore `autosave` by hand once (#46306).
+- A pending MCP tool approval created before this change does not authorize a call. The replay host retires it after the rejection, and the Keeper needs a new approval (#46349).
+
+### Fresh state required
+
+- Librarian gate requests are now version 2 and name their parent request by ID and body digest instead of carrying a copy of it. Version 1 gate records, and history or admission records whose gate publication intent holds one, are refused as not version 2. Deploy after #46244 has settled finished history. With the server stopped, and no record in these scopes left with `commit_intended` but neither `commit_observed` nor `commit_conflicted`, move the scope directories of `keeper-librarian-history-execution-*`, `keeper-librarian-durable-gate/*`, `keeper-librarian-execution-*`, `keeper-librarian-admission-gate/*`, `keeper-librarian-parts/*` and `keeper-librarian-partitions/*` out of both `<base>/.masc/lane-addons/tool-request-owners/` and `<base>/.masc/lane-addons/tool-request-bodies/`. A directory is named by the sha256 of its scope; read one record's `scope` field to find it. Admission parts and partitions name admission executions by ID, so they move together; the next admission pass acknowledges committed candidates from Memory receipts and starts a fresh root from the pending queue (#46247).
+
+### Known issues
+
+- The approval does not bind the account principal, so reconnecting an OAuth identity under an unchanged declaration can change the account the call runs as (#46349).
+
+### Added
+
+- Ego native workflows can execute browser Page expressions with JSON arguments,
+  wait for application state, and issue browser-context fetches with validated
+  options. Possible effects remain uncertain after failed calls; caller source
+  never executes in the Node or host process. Document all installed SDK entries
+  and remaining integration gaps (#46105).
+- Preserve native Ego workflow options and selection forms, add native mouse and
+  drag steps, and retain unconfirmed button/key release across failed or lost
+  results. Preserve JSON header keys in the execution envelope. Align Keeper
+  instructions with the actual method schema (#46118).
+- Report a missing press selector before sending keys while retaining uncertainty after actual input entry or an unconfirmed dialog release. (#46118)
+- Expose native Ego Page URL, title, info, snapshot options, explicit waits and
+  event-buffer drains in browser workflows. Validate observation receipts and
+  preserve uncertainty when reading and clearing events fails (#46150).
+- Official-client tool results can observe their exact completed transport
+  response write, preserving the observer through Codex buffering and refusing
+  to count substituted content as original delivery. (#46178)
+- `masc_browser_read` / `BrowserRead` `mode = "html"` returns the top document's source for an explicit `tabId` on a live extension or BiDi connection or automation Firefox; ego and Stagehand refuse it before dispatch. The source is never cut: when the JSON reply would pass 1 MiB it comes back as `html: null` with `htmlComplete: false`. (#46183)
+- `masc_browser_read` `mode = "screenshot"` answers a caller without a Keeper workspace with the observation as JSON text and the PNG as an image block. (#46183)
+- Carry the SDK-observed Ego Space ID and attachment name through browser
+  inventory, tool receipts, stored screenshots and TUI connection selection.
+  Preserve Space identity across renames and refuse UUID reuse for another
+  Space. See `docs/guides/tui-browser-lanes.md` (#46192).
+- Add Compact, Detailed, and Grouped Keeper list views with sort cycling, typed activity and waiting badges, and optional selected-Keeper portraits. (#46209)
+- Preserve SDK Page labels, target IDs and observed origins in Ego tab
+  inventories, document reads and TUI tab details, including unavailable tabs.
+  Report unmanaged status without assigning an unknown origin to the user
+  (#46212).
+- Expose Ego's native Space control wait with SDK-owned polling and positive
+  millisecond options. Preserve exact browser ownership and uncertain input
+  state without reclaiming user control (#46232).
+- Define the endpoint-owned async job control protocol with original-operation, route, owner, launch-input and isolated-preparation binding; strict decoding, exact output ranges, result seals, monotonic observations and explicit holds. The protected supervisor and runtime adapters are separate work and this protocol alone does not advertise async support. (#46238)
+- Expose explicit native Ego Page adoption and release with exact tab binding,
+  preserved origin and operator-control admission; retain agent-origin mutation
+  restrictions and uncertain input state (#46239).
+- Allow exact numeric Ego Space references in configuration and worker startup;
+  preserve numeric pins through setup and refuse ID mismatch without creating
+  or claiming a replacement Space (#46246).
+- Preserve endpoint async admission and exact original launch data in a protected controller registry; recover interrupted preparation under the same admission, refuse missing or replaced ready records, and commit a single-use launch intent before the bounded supervisor callback. Actual process supervision, credential separation and backend integration remain separate work. (#46249)
+- Bind initial Keeper browser discovery to a shared Goal's observed Ego Space
+  by numeric ID, preserving the assignment across client reconnections without
+  taking control or creating a replacement Space (#46251).
+  Usage: `masc_browser_session` with
+  `{"action":"bind_goal","goalId":"<existing-goal-id>","lane":"live","clientId":"<observed-client-uuid>"}`
+  stores the binding idempotently; changing the assignment, assigning the same
+  Space to a different Goal, or a missing connection is refused before browser
+  dispatch. `{"action":"goal_status","goalId":"<existing-goal-id>"}` reads the
+  stored binding only and does not establish that the Space is connected.
+  See [Goal-bound Space](https://github.com/jeong-sik/masc/blob/main/docs/guides/ego-native-workflow.md#goal-bound-space).
+- Preserve cancellation intent for the confirmed original endpoint admission and frozen job/launch identity, prevent cancelled Starts and unused launch permits from resuming, and reconcile duplicate cancellation without publishing a replacement. This registry primitive does not signal processes or claim termination; protected supervisor integration remains follow-up work. (#46254)
+- Resume an Ego peer after an explicit operator input-check/reset assertion,
+  bound to the original connection and pending generation through private
+  Add-on controls; retain operator provenance and never replay the original
+  gesture. See [operator input recovery](https://github.com/jeong-sik/masc/blob/main/addons/browser/README.md) and the [Ego Keeper guidance](https://github.com/jeong-sik/masc/blob/main/addons/browser/ego/skills/browser-ego/SKILL.md) (#46255).
+- Show browser callers, Ego Space identities, pending requests and the last
+  recorded result per caller in Dashboard Lane Add-on observations, retaining
+  observation time and unknown outcomes (#46259).
+- Add a Linux endpoint process primitive that atomically captures the original pidfd, drops explicit payload credentials before waiting on a private activation gate, and keeps waiter cancellation separate from original-main-process cleanup. This primitive does not advertise an async backend or process-tree containment. (#46262)
+- Represent endpoint cancellation before activation and authoritative launch rejection as terminal non-starts, preserving cancellation intent and exact empty-output/result-seal requirements without inventing payload exit codes. This codec addition does not certify a live supervisor or backend. (#46264)
+- Read the bound Ego Space's native name and ownership without taking control
+  or constructing Page handles; show the dated observation in private operator
+  controls and invalidate it on control changes or failed refresh. See [Space metadata](https://github.com/jeong-sik/masc/blob/main/docs/guides/ego-native-workflow.md#dated-space-metadata-in-masc) (#46265).
+- Add an original, private cgroup v2 boundary for gated endpoint processes, atomic child placement, explicit tree-kill admission retirement and recursive-empty observation. Durable supervisor restart authority, sandbox/backend adapters and full output/result settlement remain separate work. (#46266)
+- Separate endpoint registration receipts from activation and bind every later control/result to the confirmed original admission ID, rejecting substituted registration/status replies and replaced-admission output or release receipts. This protocol boundary does not implement an authenticated supervisor or claim runtime replay proof. (#46269)
+- Show each Ego connection's last SDK Space control observation and its own timestamp in Dashboard connection lists and selected events. Bind metadata to the original numeric Space, preserve unknown values, and keep missing observations explicitly unknown without taking control (#46270).
+- Endpoint launch owners receive the verified original job storage capability under an explicit per-job resource lifetime, preserving one-use launch semantics across storage replacement and cancellation. (#46273)
+- Document the Keeper scale inventory-tail fault probe and its optional regression inputs in the [scale session guide](https://github.com/jeong-sik/masc/blob/main/scripts/harness/perf/README-keeper-scale-session.md) (#46276).
+- Connect protected endpoint launch permits, original kernel process trees and durable activation intent; retain paused owners on startup failure and record cancellation in the original registry before requesting tree termination. (#46277)
+- Retain complete original endpoint output through actual source EOF and durable digest sealing, with independent observer cancellation, bounded range transfers, explicit teardown failure and canonical spool attachment validation. (#46279)
+- Show the original Ego Space's last SDK name, raw ownership and observation time in TUI Browser Lane selection and connection details. Validate metadata against the numeric Space, keep null explicitly unobserved, and preserve pending page requests during metadata refresh. See [Space metadata](https://github.com/jeong-sik/masc/blob/main/docs/guides/ego-native-workflow.md#dated-space-metadata-in-masc) (#46280).
+- Supervise the same original endpoint spawn's stdin and both output pipes, preserving input write prefixes, early-exit handling, independent failure observation and original cancellation controls across observer cancellation and job teardown. (#46282)
+- Forward Ego screenshot fullPage, clip, scale and raw options through BrowserRead while keeping output paths and image limits with the existing image broker. Native option captures retain their requested options and measured image dimensions without becoming viewport pointer frames. See the [native Ego workflow guide](https://github.com/jeong-sik/masc/blob/main/docs/guides/ego-native-workflow.md) (#46284).
+- Support explicit Ego tab activation through the native TaskSpace API, restoring the same target's window only when minimized. Revalidate Page and window identity before effects, preserve uncertain outcomes without replay, and report native active/window observations separately from visible UI or OS focus. See the [native Ego workflow guide](https://github.com/jeong-sik/masc/blob/main/docs/guides/ego-native-workflow.md) (#46285).
+- Read the exact original endpoint job storage across boot changes without recreating launch authority, while preserving cancellation progress and rejecting replaced jobs or known launches. (#46286)
+- Reopen complete original endpoint output across owner and boot changes only after strict seal and full-byte verification, using atomic no-follow, nonblocking file ownership to reject replacement FIFOs and symlinks without waiting. (#46288)
+- Preserve original physical process/tree termination as a typed observation with uncertain payload execution, retaining raw gate/input/output evidence and pending result publication. (#46289)
+- Bind the GPT-6.1 Terra codex subscription profiles (low..ultra) and raise
+  the GPT-6.1 family context window to 500000, read from the Codex CLI
+  models cache on 2026-10-27. (#46304)
+- Ego native workflow Fetch can save binary responses through the existing download artifact broker. A requested filename maps to a private UUID path; receipts identify the saved response, and completed saves remain retrievable after a later workflow failure while the same SDK session survives. Usage: `masc_browser_interact` `{"options":{"saveAs":"<name>"}}`. See the [native Ego workflow guide](https://github.com/jeong-sik/masc/blob/main/docs/guides/ego-native-workflow.md) (#46307).
+- Observe five disjoint stages before TUI surface assembly when frame timing is enabled, preserving Home evaluation and drawing order (#46322).
+- The built-in OAuth server names its issuer in every authorization response
+  it redirects to the client, approvals and denials alike, and advertises
+  `authorization_response_iss_parameter_supported` (RFC 9207, MCP 2026-07-28)
+  (#46336). 가이드 없음(문서 없음)
+- MCP clients can sign in to the built-in OAuth server with an OAuth Client
+  ID Metadata Document: an https `client_id` is fetched, checked, and its
+  loopback redirect URIs match whatever the port. The server advertises
+  `client_id_metadata_document_supported` (MCP 2026-07-28) (#46343).
+  가이드 없음(문서 없음)
+- `/health` `scheduler.pool_wait` reports, for HTTP reads and for all other work, how long pool submissions waited for a worker, how long they then ran, and how long submissions waited before their caller gave up with no worker taking them. The histograms are cumulative since the server started. GET and HEAD handlers mark their fibers as reads until the handler returns; a submission takes the lane its fiber has when it submits. Where work runs is unchanged. (#46351)
+- `masc start --wait-for-previous-owner` waits on the workspace lease until the current owner exits instead of refusing, signals nothing, and lets only one process wait per workspace. `/health/ready` reports the answering `pid`. See the "Replacing the running server" chapter of docs/guides/server-startup-ownership.md. (#46366)
+- `masc restart` asks this workspace's running server to stop gracefully, starts the installed build in the background with a log file, and waits until it answers ready. Another workspace, a non-MASC listener, or a `--host` that is not an IP address or that loopback cannot reach is refused untouched. See the "Replacing the running server" chapter of docs/guides/server-startup-ownership.md. (#46367)
+- `masc oauth-client list` shows the clients Dynamic Client Registration
+  stored and the count against `MASC_OAUTH_MAX_CLIENTS`, and
+  `masc oauth-client revoke <client_id>` revokes one with its tokens and frees
+  its slot (#46379). 가이드: docs-site/src/content/docs/guides/mcp-clients.md
+  §Managing the tokens
+- A browser Lane Add-on package may name the one browser source its worker serves with `browser_backend = "automation" | "stagehand" | "owned_firefox" | "ego" | "external_host"`; a package without it serves every source, as before. The host sends each source's commands, snapshots and document reads to the one attached browser Add-on serving it. A source no Add-on serves, or two serve, is refused alone while the others keep working, and when two Add-ons serve one live source, the connections they list are not used. (#46380)
+- The invite-link agent guide (`GET /play/agent.md`) now lists the game guides the attached shared DOS machine publishes as Skills, each with its description and URL. `GET /play/skills/<name>/SKILL.md` serves a guide's text, the same text a Keeper's `keeper_skill` reads, with its reference files' URLs appended, and `GET /play/skills/<name>/references/<file>` serves one of those files. Both need an invitation bearer (`CanPlayMachine`). The machine is the installation that serves `masc_dos_screen`, whatever its declaration is called; a workspace Skill of the same name wins, as it does for Keepers. When no guide can be read now, the guide says why and the routes answer 503 with a code per reason (#46393).
+- Changing a Keeper's runtime in the TUI now shows the assignment it replaced,
+  as "A -> B" in the progress notice and the completion report, and stars the
+  Keeper's own assignment in the runtime picker. The previous assignment comes
+  from the revision the write is already fenced on. (#46453)
+- Remove a Goal's Ego Space binding so a wrong one can be bound again (#46468).
+  Usage: `masc_browser_session` with
+  `{"action":"unbind_goal","goalId":"<existing-goal-id>"}` removes the stored
+  binding under the Goal lock and names the removed binding and its `actor`; a
+  Goal without a binding is left unchanged. Goal Space binding is experimental.
+  See [Goal-bound Space](https://github.com/jeong-sik/masc/blob/main/docs/guides/ego-native-workflow.md#goal-bound-space).
+- `/health` `scheduler.pool_wait` counts each lane's pool waits by how many workers' worth of weight the lane's running jobs held when the job was submitted (`wait_by_in_flight_workers`: 0, 1, 2, 3 or more), and its run times by the weight the job declared (`run_declared_io` below 0.5, `run_declared_cpu` at 0.5 and above). `in_flight_workers` shows the weight running now. Eio's executor stops admitting work once a worker's jobs reach a weight of 1.0 whether they use the CPU or wait, and this tells waits caused by full workers from other waits before any default weight changes (RFC-0474 L4a, #46483).
+- A published artifact can be shared outside the workspace through an opt-in, capability-addressed link: the Dashboard has an external-sharing toggle, the TUI Resources detail turns sharing on with the `P` key, `POST /api/v1/published-artifact-shares` creates the share and `GET /api/v1/published-artifacts/artifact-<32hex>` reads it without a token (#46490). 가이드 없음(대상 문서: docs/design/report-artifacts.md)
+- After loopback endpoint admission, a valid MCP `tools/call` for an available public tool
+  made with an OAuth access token whose role lacks the tool's permission is
+  refused with HTTP 403, an `insufficient_scope` challenge naming the needed
+  scope, and JSON-RPC code `-32007`, over HTTP/1.1 and HTTP/2 (#46517).
+- The goal confirmation screen lists the submitted originals it was already
+  answered with: artifact rows show reference, size and truncation, binaries
+  add format and a sha256 prefix, collaborations show their reference and
+  hash (#46518). An unknown kind stays visible as `unknown kind <name>`, a
+  present-but-broken item fails the read, and the list ends the block when
+  present so the presented-frame receipt that arms [a] still covers
+  everything shown.
+- `/health` `scheduler.pool_wait.<lane>.by_name` lists the 20 kinds of pool work with the longest run time in all, each with its entered count, wait and run sum and maximum, and abandoned submissions. Every pool submit names its work (the call site's `__FUNCTION__`; a `Dated_jsonl` read is named by its store, such as `dated_jsonl:keeper/metrics`), and the job runs inside an Eio trace span of that name, so the runtime-events fiber trace labels it too (RFC-0474 L4c, #46579). 가이드 없음(docs/rfc/RFC-0474-gc-stop-budget.md)
+- The Keeper roster can show recorded Keeper senders for the selected Keeper's first page of queued requests (#46620).
+- `masc_keeper_status` carries a `next_request` section: per candidate runtime the carried range (first atom, kept atoms, transmitted bytes, origin), so a Keeper whose request keeps being refused shows how large that request is. 가이드 없음(문서 없음) (#46652).
+- `GET /api/v1/stream/fleet` streams the keeper fleet reading as Server-Sent Events: a `snapshot` event on connect (an `unavailable_snapshot` event when the first scan has failed), then `changed` and `degraded` events whose frame id is the revision number, and a `: keepalive` comment after 30 s without an event. A connection is closed when its queue of 64 events fills up or when it accepts no frame for 90 s, and the client reconnects for a new snapshot. The server publishes an event only when the `keeper_fleet_safety` section of `/health?full=1` differs between two scans, and it adds no scan
+  (#46659). 가이드 없음(docs/rfc/RFC-0477-keepers-screen-reads-typed-changes-not-polls.md)
+- Add agent history content types that hold media as stored references, with a caller-supplied media store and a strict JSON codec. (#46728)
+
+### Changed
+
+- Record owned Ego SDK option receipts, Space lifetime guidance and unresolved
+  operator UI visibility separately from installed Keeper evidence (#46131).
+- Browser Add-on exports such as `browser_command` are no longer Keeper tools or MCP `tools/list` entries; only the host calls them, and several browser installations may export one name without failing the public tool reading. The host browser tools are the one browser tool surface: `Browser*` in a Keeper, and `masc_browser_*` over MCP, which now appear in an ordinary MCP `tools/list` with the same permissions as before. (#46183)
+- The `masc_browser_read` schema no longer declares a `maxChars` default, so a client that fills schema defaults, such as the dashboard Tool Executor, can ask for html. An omitted cap is still 50000 for text, scene, regions and snapshot. (#46183)
+- Extend the manually selected browser-lane proof to twelve suites covering
+  private DTOs, Ego worker ownership, Space binding, exported inventory and
+  screenshot persistence. Record exact test arguments so the focused screenshot
+  check is distinct from the full vision suite. See
+  `docs/guides/NATIVE-TUI-PROOF.md` (#46201).
+- Reuse Keeper declaration parses for the same path and complete content across captured-profile discovery and directory snapshot invalidation, while continuing to reread declarations before reuse (#46231).
+- A Librarian gate request no longer copies its parent request, so neither the gate body nor the parent's gate publication intent repeats the parent's history or admission body (#46247).
+- Retain source-bound Keeper profile parse reuse measurements at 2/30 owners and in a 300-owner ABBA comparison, including GC snapshot differences, failed status reads and remaining proof limits (#46250).
+- Reuse already normalized lexical paths after the existing trim and home-prefix expansion, while preserving special-component reduction and MASC base-path handling (#46256).
+- Index Keeper owner handles by their canonical key for routine projection reads, retaining live Owner snapshots and exact-handle removal (#46260).
+- Record isolated real Keeper to native Ego metadata evidence, dated caller publication, exact candidate binaries, and the failed controller's limits. Keep visible Dashboard/browser, login, later source execution, and full SDK acceptance unverified. See the [metadata evidence](https://github.com/jeong-sik/masc/blob/main/docs/evidence/ego-keeper-native-metadata/README.md) (#46275).
+- Retain source-bound native Keeper path reuse observations, reproduction inputs, and measured GC and latency limits (#46278).
+- Strengthen Ego dialog recovery coverage with a new holding-input command after an exact operator reset, including the actual attached worker's private form. Verify same connection/Page, stale-token rejection, settled new input, and no replay of the original click (#46287).
+- Keep a source-scoped provider retry observation visible after a Keeper turn fails, while distinguishing it from the failure's cause. (#46327)
+- Retain the six-cell native incremental surface-digest comparison, including the observed 0.587% higher GC snapshot mean, independent audits and negative latency/readiness evidence. (#46329)
+- The default ego task space name `masc-keepers` replaces `masc`, a name an operator is likely to give a space of their own. A table that is already there keeps its name. (#46333)
+- The MCP server classifies each request as legacy or stateless from that request's own `_meta`, instead of assuming that an earlier request selected an era. Required metadata fields must occur once with the specified JSON type, and `initialize` negotiates only legacy versions (#46344).
+- `subscriptions/listen` rejects a request whose `notifications` filter is missing or malformed, and a subscription is registered only after its acknowledgement is sent, so no event is lost in between (#46344).
+- HTTP/1 and HTTP/2 validate MCP routing headers with one validator. The `Mcp-Name` Base64 sentinel is decoded, and malformed values and duplicate routing headers are rejected. A request whose protocol-version header is stateless or unknown takes the per-request path and does not inherit a legacy session (#46345).
+- A rejected POST answers with the request's own JSON-RPC id (no id for a notification, null for an unreadable body), and modern protocol-level errors carry the HTTP status the revision requires (#46345).
+- On stdio, `tools/call`, `resources/read` and `prompts/get` run in their own fibers, so a later `ping` or `notifications/cancelled` is read while a long call runs. A cancelled request sends no response, and a request id that is already in use is rejected (#46347).
+- Closing stdin cancels calls whose responses have not committed and lets a committed response finish before exit. An unread stdout can delay a graceful exit; the client can terminate the process. Piped input may therefore cancel calls that have not answered yet (#46347).
+- The stdio endpoint verifies `MASC_TOKEN` from the environment through the same authorization gate as HTTP and requires `CanReadState` (#46347).
+- Stateless requests on stdio, HTTP/1 and HTTP/2 no longer inherit a legacy session identity, and unissued `requestState` and `inputResponses` are rejected before a tool, resource or prompt runs (#46347).
+- `Mcp_client` probes `server/discover` and speaks the 2026-07-28 protocol, with per-request metadata and routing headers, and falls back to the legacy handshake when the server does not recognize the probe. A result that carries both `result` and `error`, or a modern result without `resultType`, is rejected (#46348).
+- An `input_required` answer is a typed incomplete result and not a successful tool call. The client does not answer the server's input requests (#46348).
+- A 401 and a 403 stay distinct, and a 403 keeps its Bearer challenge (#46348).
+- `Mcp_client.list_tools` stops after 1000 pages and returns `Malformed`, where it used to follow `nextCursor` for as long as the server returned one (#46348).
+- A Keeper approval for an external MCP tool binds the offered input schema, the read-only hint, and a versioned fingerprint of the provider endpoint and credential declaration. The Gate compares them with the live catalog before the tool request is sent (#46349).
+- The provider's `readOnlyHint` no longer bypasses the external-service Gate for any attached MCP tool (#46349).
+- The built-in OAuth server is always served on loopback authorities;
+  `MASC_OAUTH_ENABLED` is gone (#46356).
+- HTTP reads get their own executor pool. Work that a GET or HEAD handler puts on a pool runs there instead of waiting in the shared pool's queue behind background jobs; all other work keeps the shared pool. The read pool is a line of the server's domain budget (RFC-0474 L1): 2 domains, taken from the shared pool, so a 16-core host runs 8 shared, 2 read and 2 execution codec workers and still 15 domains in all. Short of room the codec runtime drops to 1 first, then the read pool, so the shared pool keeps 2 workers while it can. The largest `MASC_EXECUTOR_DOMAIN_COUNT` the server accepts drops by the read pool's size: 8 on a 16-core host, where #46462 alone accepted 10, so a value of 9 or 10 now stops the boot with the reason. `/health` `scheduler.read_pool_domains` reports the read pool. (#46374)
+- A native browser host's first poll binds only to the browser Add-on serving `external_host`, and the deploy preflight counts only those declarations. (#46380)
+- The Lanes inventory and the browser lane check read each browser lane from the Add-ons the host uses for it: an Add-on of a source another Add-on also serves, or one that withholds its observation, leaves out only its own connections, and the lane is unreadable only when no other Add-on of it published. An Add-on that is detaching gives way to a replacement serving one of its sources. (#46380)
+- Summarize the five primary waiting reasons and actual background async work in the Keepers WAITING group header, with distinct glyphs and Theme colors. (#46383)
+- Hide the long runtime column in the Grouped Keepers view so waiting reasons and task details have more space, while preserving Compact and Detailed layouts. (#46383)
+- Keep every nonzero waiting reason and async count readable at narrow widths, and retain the existing failure activity, cause, and age in Grouped detail. (#46383)
+- Background refreshes that an HTTP read starts but does not wait for now run as background work: the `Dashboard_cache` and operator snapshot cache stale-while-revalidate refreshes, the namespace-truth shell refresh, the runtime git and probe refreshes, the briefing sections refresh and the provider usage read. Before, they inherited the read's lane, so `/health` `scheduler.pool_wait` counted them as reads, and a read pool (RFC-0204 L3, not yet merged) would have given them a read domain for their whole compute budget. A compute the read waits for (empty cache, or a refresh run inline because no root switch exists) still runs as a read. `Pool_lane.with_background` marks such work. (#46385)
+- The Keeper waiting inventory now carries `queue_residence` on each Keeper's entry: how long the oldest queue entry has waited since its first durable admission, `empty`, or `unknown` when no admission time was recorded. A row's `since` is unchanged (#46388).
+- Each Keeper list row now carries `runtime_path_rest`: `serving`, or `resting` when the Keeper's next dispatch waits on a runtime path held by a quota window or rate limit. `status` is unchanged and no release time is published (#46391).
+- Fresh state required: each browser source now has its own Lane Add-on package and worker: `browser-automation`, `browser-stagehand`, `browser-firefox`, `browser-ego` and `browser-external`. A failure of one source ends only its own worker. The `browser` package that served every source in one worker is removed, and `browser_backend` is required in a browser package's `lane.toml`. Before deploying, detach the old `browser` instance and confirm `released`, remove `browser.toml` and `.masc/packages/browser`, and move `[runtime.addon_exact_lanes.browser.locate]` to `browser-automation.locate` and `[runtime.addon_exact_lanes.browser.stagehand]` to `browser-stagehand.stagehand`; a table left under the old id is read but serves nothing, so locate and Stagehand wait for a model and the `browser-automation` and `browser-stagehand` package rows show that output with no table. Old native cleanup descriptors are not read. (#46395)
+- `masc browser-lane-setup` declares one browser Add-on per source the workspace runs: automation, the owned Firefox and ego when runtime.toml has their table or the run writes it, Stagehand when `[browser.stagehand]` is present, and external hosts when the run installs a native host or one is installed. A source whose table the run writes is declared once that table is written; a refused table leaves out only that source. Under `--mode addon` a runtime.toml that does not parse is refused; other modes report it and go on. The server starts a source from its runtime.toml table, and the package row of a source with no table says so. (#46395)
+- The deployment preflight refuses a workspace where two enabled declarations serve the same browser source, since the host uses neither. (#46395)
+- Fresh state required: a browser source is switched on or off only by its Lane Add-on declaration's `enabled`. runtime.toml's `[browser.live]`, `[browser.automation]` and `[browser.stagehand]` tables no longer take `enabled`, and a runtime.toml that still has one is refused; so is an empty `[browser.automation]`. Before deploying, remove those keys and the tables that held nothing else, and set `enabled = false` in `browser-<source>.toml` for each source to keep off. The TUI and the web dashboard no longer edit browser activity; a source is turned on or off from its `browser-<source>` package row. Browser rows of `/api/v1/lanes` drop `activity` and are read from `addon` alone, so a workspace with no browser Add-on shows "not set up" again. `masc doctor` and the TUI say the Browser Addon owns the Keeper Firefox only while an enabled declaration runs `browser-firefox`; with `[browser.live.bidi]` set and no such declaration, the BiDi host report's keeper is the new `addon_off` and says so. (#46404)
+- SHA-256, MD5 and SHA-1 now go through `masc.agent_core.digest` (`Agent_core_sha256`, `Agent_core_md5`, `Agent_core_sha1`), which feeds strings and bytes to digestif in 64 KiB slices. Digestif's string update hashes its whole argument in one C call that keeps the runtime, so a large body held every other domain at the next stop-the-world barrier; a 109 MB checkpoint took about 390 ms at the 280 MB/s measured on 2026-10-27, now at most one 0.24 ms slice. Digests are unchanged. No other library lists `digestif`, so code outside this library cannot call it (RFC-0474 L2, #46460).
+- The server divides `Domain.recommended_domain_count () - 1` among all its domains. The main domain, the systhread host, the Keeper snapshot codec and the optional serving domain are fixed; Agent Core's execution codec runtime gets 2 workers and the shared masc pool gets the rest (10 on a 16-core host, 15 domains in all). Before, the codec runtime received the shared pool's size, so a 16-core host ran 31 domains and its idle codec domains reached most stop-the-world barriers last. `MASC_EXECUTOR_DOMAIN_COUNT` still sets the shared pool and is refused at boot when the total would exceed the limit (RFC-0474 L1, #46462).
+- The goal confirmation screen reads in layers instead of one warn-coloured
+  list: the instruction, the goal's promise, the binding ids as fine print,
+  then the evidence as the final group, so the presented-frame receipt that
+  arms [a] still means the whole proof was scrolled through (#46508). While a
+  proof waits, the related-activity timeline moves behind the goal's own
+  summary, the measurement provenance row is labelled `Measured:` so it no
+  longer shares the `Evidence:` name with the proof itself, and the
+  instruction and header follow `tui.language`.
+- Every Ego result that is a JSON object now carries `inputReadiness` (`command_settled`, `operator_asserted` or `release_uncertain`), not only after an operator reset. A tab list that comes back as a plain array carries nothing. (#46511)
+- A size-refused completed-history Librarian original now reports what the host saw about reading less. A worker frame refusal reports it from its final alone. A refusal the host retained reports it from the latest execution receipt, only for a named input refusal with no independent failure mixed in. Any other refusal, such as a provider bad request, still reports none. Nothing reads less yet: the message floor that uses this report is the next layer of the durable message floor RFC (#46568).
+- System settings put preset restore scope, comparison and exceptions ahead of long inventories, make better use of prompt detail space, and show Korean or English guidance for presets, prompts, parameters, themes and voice settings (#46604).
+- The Keeper roster offers clearer activity groups, more ordering choices, and a shortcut to the selected Keeper's schedules (#46609).
+- The compact Keeper roster gives more space to current work, and the Activity pane shows observed context for the selected Keeper (#46628).
+- Keep shared-account reviewers' pending lens work discoverable after a submitted review removes the GitHub request, and distinguish submitted COMMENT reviews from issue comments (#46644).
+- Keep streamed media carrier types explicit and collect payload fragments without repeated concatenation. (#46651)
+- The Keepers screen follows the fleet stream (`GET /api/v1/stream/fleet`) instead of reading `/health?full=1` on every refresh. A change of the fleet reading reaches the screen when the server stores it, not at the next 2-second refresh. The header badge no longer carries the fleet reading progress text, and the `fleet reading: stale` line appears only while the server's scan is failing or the connection is down. When the first scan fails before any reading exists, the stream sends an `unavailable_snapshot` event and the screen shows `fleet: not observed` with the reason. When the connection is lost before any reading arrives, the screen shows `fleet: not observed · stream lost <age> ago` until a connection delivers a snapshot. A server without the stream route answers 404, and the screen shows one `fleet:` line and retries every 2 seconds. A transport failure of the stream is named in the TUI log. A workspace change or a failed read of the server removes the fleet line, and the next confirmed workspace starts a new stream. There is no fallback to polling (#46661).
+- Agent history and Keeper checkpoints hold media as stored references; the bytes live once in the BasePath blob store and are turned back into base64 only for the provider request. Checkpoints move to format 16, and format 15 is not read. (#46729)
+- A tool result whose media does not decode as padded standard base64 fails as a non-retryable tool error instead of reaching the provider. (#46729)
+
+### Removed
+
+- `Mcp_client` no longer retries a tool call after the request was sent. A 401 that is known to precede the request may still refresh credentials (#46348).
+- Remove `scripts/deploy.sh`, `scripts/stop-prod.sh` and the `lease-handoff --prepared-file` option they alone used; replace a running server with `scripts/install-local-build.sh` and `masc restart`. (#46368)
+- Remove `scripts/masc-supervisor-control.sh`, `scripts/start-masc-supervised.sh` and `scripts/start-loopback.sh`, which ran a source build of the checkout, together with the last-known-good fallback in `start-masc.sh`. (#46369)
+- `context-high-water-tokens` and `context-low-water-tokens` are removed from `runtime.toml` bindings. They evicted nothing since #45641 and only appeared in the next-request forecast; a file that still declares them fails to load as an unknown key. The forecast schema is `masc.keeper.next-request-forecast.v6` and its candidates no longer carry `marks` (#46605).
+- The TUI's `/health?full=1` fleet read (`fetch_fleet_safety` with its dataset, read-source and need flag) and the fleet types and decoders in `Tui_decode` are removed. `Fleet_stream_health_section` reads the same section on the server side (#46661).
+- Remove the `Http_server_eio.Router` registration functions that record no authentication kind (`add`, `get`, `post`, `any`, `ws_get`, `prefix_get`, `prefix_post`, `prefix_put`, `prefix_delete`) and `Route_access.Unclassified`. A route can only be registered through `Server_route`, so a registration without an authentication kind no longer compiles. The fleet stream route, the one registration still made with the old functions, is now `Public_read` with the same `with_public_read` wrapper. Answers do not change (#46734).
+
+### Fixed
+
+- Browser Lane records live reads and navigation alongside input, retains each
+  caller's last result, and refreshes activity independently during page cadence
+  without replacing the selected browser, tab, pending read or draft (#46098).
+- Delegation and Fusion completion notifications enter the same immediate queue
+  class as composition and owned-job results, ahead of unrelated ambient Board
+  activity. Existing urgent-source arrival order and result identity are preserved. (#46109)
+- Checkpointed Keeper turns retain original async results, messages and decision
+  outcomes until a turn completes. Retained outcomes rotate within their urgency
+  lane in one confirmed batch transaction so new ready work remains admissible.
+  Codex checkpoints also retain original tool-result receipts until consumer
+  completion, including across replacement vendor sessions. (#46115)
+- Native Ego workflows retain paste modifier uncertainty and stop treating a
+  pointer cleanup's void return as confirmed release. Document the SDK information
+  still missing for automatic continuation after interrupted input (#46118).
+- Keep Browser activity responses exhaustive over pending operations, fixing the
+  warning-as-error failure that stopped the native TUI candidate build (#46119).
+- Running Keeper source turns can yield at a settled Agent Core tool boundary
+  for newly arrived async results and messages, using the intake frontier to
+  avoid yielding to their own input or an existing bounded backlog. Checkpoint
+  rotation preserves each Connector conversation's FIFO while admitting other
+  waiting conversations. (#46125)
+- Encode native Ego duration bounds as TOML floats so the strict tool-definition
+  loader can initialize BrowserInteract and its dependent tools (#46128).
+- Keep Task verification admission independent of recursive checkout inventory. Retain native reviewer execution ownership before provider effects, observe the original journal after interruption, and distinguish pending original results from cases requiring operator reconciliation in TUI and Dashboard. (#46132)
+- Initialize the verifier journal fixture's owned workspace anchor before retaining originals, and expose typed retain/load failures in test diagnostics. (#46132)
+- Claude Code, Antigravity and Muse can consume original retained tool results
+  after an official-client route change. Result data has a separate durable
+  context identity, survives history projection and session replacement, and is
+  acknowledged only after the consumer completes. (#46138)
+- Require confirmed removal of previous Keeper VM guests before recreating or trimming their shared volumes, and avoid sibling cleanup during warm adoption (#46139).
+- Identify Ego handoffs by their Space name and ID, and guide Keepers to request
+  human login completion with `masc_ask` before resuming the same browser (#46140).
+- Check Ego and BiDi drag admission and request ownership in the TUI browser
+  proof, replacing stale footer wording assertions with capability decisions (#46141).
+- Agent Core can receive original retained tool results after a runtime change,
+  including fallback from an official client. Result context survives the final
+  history projection; unfinished, failed and unsaved consumption retains the
+  original receipt. (#46145)
+- Reject press preflight receipts for every native Page observation method,
+  keeping the decoder exhaustive when stacked with the selector preflight repair
+  (#46150).
+- Official-client host stops retain original tool results before ending the
+  provider turn, so a later consumer can recover returned data after session
+  replacement or a runtime change. (#46154)
+- Keep TUI evidence exports recoverable with current capability publication and a stable local registry isolated from shared temporary directories. (#46169)
+- Serialize concurrent evidence exports across fibers and OS processes so a later export cannot reconcile another writer's active recovery record. (#46169)
+- Preserve confirmed evidence saves across lane/lock release failures and propagate lock-admitted cancellation instead of returning a successful export. (#46169)
+- End failed exports and non-cancellation exceptions in an explicit `Aborted` state that retains the intended destination without claiming a confirmed save or ongoing write. (#46169)
+- Restore defaultless `ollama:auto` with authenticated, endpoint-scoped native discovery and fresh protocol-matched cache entries. (#46170)
+- Prevent keyed Ollama auto selection from reusing a model discovered without credentials or under another credential. (#46170)
+- Require a declared full-body deadline for defaultless Ollama discovery, and reuse only positive observations scoped to the exact URL, native protocol and header fingerprint. (#46170)
+- Cover DNS resolution and client creation within the declared HTTP deadline, and preserve Ollama Cloud auto selection with its explicit cloud deadline. (#46170)
+- Preserve endpoint-declared discovery deadlines through registry activation and global cache refreshes, without inventing a fallback for undeclared endpoints. (#46170)
+- Avoid false artifact app conflicts on identical idle reads while retaining unsent-input and frozen-request conflict handling. (#46171)
+- Preserve imported unsent recovery copies during GET and save reconciliation until each copy's own data and, when present, its request are confirmed on the server. (#46171)
+- Isolate valid Goal verification originals from foreign malformed metadata and require the retained canonical successor for staged replay. (#46172)
+- Limit noncanonical metadata refusal to the exact Goal/request frontier so unrelated new reviews can proceed without weakening unknown-dispatch protection. (#46172)
+- Refuse a matching noncanonical successor even when a canonical parent exists, preventing duplicate automatic or explicit retries. (#46172)
+- Board persistence loaders now warn on partial loads with kept-row counts instead of logging a clean load, and vote/reaction failure levels plus board-signal-skip lines are unified behind single owners. (#46186)
+- Log levels and wording now match actual outcomes: validation faults split by owner, completion obligations say queued, shutdown counts failed hooks, and machine/board error lines carry context. (#46187)
+- DOS/MSX checkpoint timestamps are named mtime/mtime_unix to match the file mtimes they read, unreadable autosaves warn once, and DOS boot faults post a board follow-up. (#46188)
+- Lifecycle observability publishes only FSM-held states (no Started for rejected forks, gated Stopped/Crashed, audit-ring routing) and task no-ops log once; persist failures are Error per the severity taxonomy. (#46189)
+- The owned live Firefox connection no longer ends when a command's result arrives after its caller stopped waiting (the read or navigation window passed, time queued behind another command included). The result is logged as undelivered, as the ego connection already did; before, the browser worker ended and took Gecko, Chrome and ego down with it. (#46197)
+- A live connection the browser worker runs itself (owned Firefox, ego) is no longer retired after about two minutes without a poll. That window counted macOS system sleep, so after the laptop slept the connection retired itself on wake and the worker ended with every browser it ran. The window still applies to native hosts, which can stop polling without a word. (#46198)
+- Cancelling a Lane Add-on tool call that had not yet been written to its worker, such as a call waiting behind another call to the same worker, no longer stops the installation. Before, a Keeper turn cancelled while its browser read waited behind a long ego workflow stopped every browser that worker ran. A call cancelled after it reached the worker still stops it, because its effect is unknown. (#46199)
+- Keep unfinished scheduled Keeper work pending when a turn checkpoints for
+  another request. Each scheduled occurrence has its own intake scope. A
+  schedule that intake already saw, including suspended work, cannot preempt
+  its successor; only a schedule that reached the queue after that intake read
+  hands off. (#46202)
+- Check in the scheduled-handoff Owner fixture that the deferred direct
+  checkpoint stays with the original operation while the scheduled source and
+  the fresh chat run, and that resuming consumes exactly that checkpoint with
+  the same operation id and digest. (#46202)
+- Keep active official-client result producers excluded from wake and result
+  consumption until their runtime scope and protected workers finish draining;
+  retain exact originals for recovery after process exit. (#46205)
+- `masc_browser_tabs` and `masc_browser_session` accept every browser operation in `requiredActions`. Before, the two enums listed 53 of the 62 operations, so input validation refused `read_snapshot`, the four snapshot-target inputs, `native_workflow`, `hand_off`, `take_over` and `emulate_environment` before the host could pick a browser that serves them. A test now compares both enums with the capability table's operation list. (#46207)
+- Preserve selected Keeper identity across roster and observation reordering, share canonical waiting in public turn reads, and retain independent async observations. (#46209)
+- Keep live turn observations available when a fleet waiting source reports a read error or the schedule ledger uses its recovery mirror, without counting a shared read failure as each Keeper's wait. (#46209)
+- Preserve a fleet waiting warning when an older response does not report fleet errors. (#46209)
+- Keep explicit Apple executable comparison exact while preserving image descriptor/platform validation. The boot-plan identity changes from v1 to v2, so existing Apple guests enter replacement on their next turn; concurrent replacement load remains unverified. (#46214)
+- Pin Apple guest executables through the explicit image-entrypoint option and bind the corrected boot semantics to plan identity. (#46214)
+- Preserve the distinct image-command-unavailable refusal and its diagnostic when integrating current main's image metadata validation. (#46215)
+- Include differing guest-plan field names in microVM refusal diagnostics without exposing requested or observed credential values. (#46215)
+- Explain archived tool-argument references separately from the schema for fresh Keeper calls. (#46216)
+- Preserve original official-client tool results before post-execution hooks,
+  and consume only exact responses sent before a naturally completed turn
+  whose acceptance and durable session settlement succeed. (#46218)
+- Preserve original Keeper scale DB/WAL/log evidence after success or failure, and verify original source, input, admission and batch digests in versioned v3 packets (#46219).
+- Update browser worker test fixtures with Page provenance, input release and
+  activity history fields, and acknowledge fixture retirement so screenshot
+  integration checks can settle their worker (#46222).
+- Preserve uncertain input release after an Ego selector drag fails, without
+  sending an extra mouseup or treating its void return as a release receipt.
+  Keep the SDK error and avoid duplicate gesture cleanup (#46224).
+- Let independent official-client HTTP tools run concurrently while preserving
+  Serial ordering; close new tool admission and drain previously admitted work
+  before host stops, without retaining completed scheduling history. (#46225)
+- Validate both the JavaScript dialog and native Page provenance in the Ego
+  dialog inventory integration scenario (#46228).
+- Preserve committed schedule ledger results when the Memory backend's local filesystem mirror fails. (#46233)
+- Decode browser actions through their authoritative closed parser so native
+  control options and Page labels cross the worker transport, while refusing
+  nested routing overrides (#46239).
+- Bind schedule dispatch and settlement to persisted attempt identities, reject stale candidates, and preserve exact typed settlement receipts on replay. (#46240)
+- Cover both native Page origin variants explicitly when validating adoption
+  and release receipts, retaining strict compiler exhaustiveness (#46246).
+- Retain failed schedule settlement decisions and retry their exact attempts on later runner ticks, preserving recurrence anchors and exposing pending settlement health without redispatching consumers. (#46248)
+- Format named and numeric Space references in CLI guidance and declare the
+  Peer test's configuration dependency after the typed reference change (#46251).
+- Stop native Ego workflows on receipt-less holding input instead of inferring
+  release from an absent dialog; preserve the completed prefix and require
+  explicit operator recovery for void-returning typing (#46261).
+- Preserve Ego TaskSpaces and browser-backed files when the Add-on worker retires or errors. Complete successful tasks explicitly with `finish_space` and optional `keepPages`; retain native receipts, refuse former Page work after completion, and never replay an uncertain finish (#46268).
+- Preserve admitted scheduled requests in durable Keeper input so tool discovery cannot discard the exact work message and occurrence identity. (#46272)
+- Report incomplete inventory coverage and keep derived audits outside original Keeper scale packets (#46276).
+- `BrowserSession action=goal_status` and a Keeper's initial Goal discovery read the stored Goal binding from the workspace, so the binding stays readable after its browser worker retires. (#46291)
+- Browser connection discovery lists validated clients across visible workers without dispatching browser commands; reach it with `masc_browser_tabs` `{"mode":"connections"}`. Partial observations and duplicate identities remain explicit, and the TUI preserves the selected Page while refusing automatic fallback on incomplete inventory. (#46296)
+  Usage: `BrowserTabs {"mode":"connections"}` alone lists visible clients; omit
+  `mode` for ordinary tab discovery. An incomplete inventory refuses automatic
+  fallback. See the [Browser Lane guide](https://github.com/jeong-sik/masc/blob/main/docs/guides/tui-browser-lanes.md).
+- The native worker test fixture publishes the required activity and Space observation fields, matching the strict snapshot decoder. (#46296)
+- Report an absent imp sandbox declaration as unconfigured in `masc sandbox-catalog`, while preserving errors for unreadable or invalid declarations (#46299).
+- The browser inventory TUI decision match now keeps Result exhaustiveness checks active under strict compiler warnings. (#46303)
+- A machine consumer refused as "refreshing" during a call that the host then refuses is woken again when that call ends, instead of staying unavailable until the producer's next observation (#46305).
+- A DOS worker that starts, after a server restart or an image upgrade, restores the `autosave` slot before its first call when that autosave holds the machine that was running, instead of leaving guests a `no_machine` refusal that only a controller holder could answer. The controller starts free and goes to whoever moves next. The fact is recorded in `checkpoints/autosave.current`, written after a successful autosave and removed on a load, a restore of another slot, a program exit, a failed autosave, a fault and an eject, so an ejected, exited or faulted machine is not brought back and an exited program's stale file cannot overwrite a newer game save. A start that cannot restore the autosave comes up with no machine, never falls back to `autosave-prev`, and names the reason on the lane activity feed and in every no-machine answer (`restore_failed_at_start`) instead of offering the same restore again (#46306).
+- `masc_dos_restore slot=autosave` no longer asks for `discard_previous_autosave`. The restored machine carries on the autosave's history: it replaces only `autosave` and leaves `autosave-prev` as uninterrupted play does, so nothing is discarded. Restoring a named slot still asks when both autosave files exist (#46306).
+- Ego download rows distinguish native download events from Fetch saves and reject unknown provenance before publication. (#46307)
+- Carry exact scheduled admission observations for each Keeper turn, including empty and unknown admissions, through existing tool and official-session context delivery. (#46311)
+- Librarian configuration and export wake discovery now completes its original-request scan before same-process settlement moves those records into the archive. Settlement waits without holding an original-scope lock across the wake's nested reads, and cancellation before admission does not move the record (#46252, #46312).
+- The installer no longer executes an existing `masc` to authorize replacement: an existing executable requires `--force` unless its managed release pointer matches the requested release checksum. No-force bundle publication also refuses destinations that appear during installation (#34843, #46314).
+- The browser worker regression checks that a worker whose snapshot keeps failing stays an inventory issue, its sibling's connections stay listed, and automatic selection is refused while the inventory is incomplete. (#46315)
+- Ego login takeover preserves the original Space and its managed or unmanaged user-boundary Page identity. It uses the native execution wait and requires explicit adoption before reading an unmanaged Page. (#46316)
+- Workspace initialization preserves a missing-primary backlog recovery instead of silently seeding an empty authority, and a cold Memory backend refuses unrelated local workspace documents. Memory reinitialization now checks its existing mirrors before use; malformed message counters are left for recovery (#30470, #46317).
+- Ego Pages explicitly adopted after a login handoff can receive native input, navigation and activation while retaining their original provenance. Unknown-origin tabs return through release without closing; unmanaged tabs, delegated Space control and uncertain-input admission retain their existing boundaries. (#46319)
+- Keep the browser host's local connection independent of the advertised `MASC_HTTP_BASE_URL`, while preserving explicit server and port overrides. (#46321)
+- Keep Memory workspace initialization and backlog reads separate from filesystem caches, preventing one backend's snapshot from being used by another. (#46323)
+- Keep the browser worker's other connections serving when the configured Ego task-space name is already user-owned, and report the unavailable Ego connection and recovery path (#46324).
+- Run browser guard scripts through named targeted and full test aliases and
+  keep interrupted drag release unconfirmed without extra input (#46325).
+- The saved Ego Fetch integration check now identifies pinned files through typed descriptors, preserving the before-retirement and after-abandon assertions on macOS where `/dev/fd` path metadata describes a different device. (#46326)
+- At HTTP and stdio startup, collect Lane Add-on original request bodies that no active record, successor intent or settled record can name. The sweep validates complete inventories before deleting and preserves bodies needed to retry interrupted archive settlement (#45320) (#46331). 사용 가이드 없음
+- Keep the Keeper scale guide link valid after changelog assembly (#46332).
+- `masc browser-lane-setup --mode ego` refuses a `[browser.live.ego]` table whose task space name a space the operator made in ego lite already has, whether the table is new, changed or kept as it is, and writes nothing when ego lite does not list its spaces. ego refuses such a space to the browser worker, whose start then failed and took every browser connection down with it. (#46333)
+- Clarify scheduled request scope across autonomous Keeper continuation while preserving explicit cross-target work and historical entry boundaries. (#46334)
+- Wake dependent machine captures when a potentially changing Add-on call is cancelled before dispatch, and negotiate observation effects only for workers that explicitly opt in. Existing action and export names retain their declared roles, and invalid private effect declarations no longer expose tool names in errors (#46339).
+- The dashboard link preview refuses to start a fetch at an IPv4-mapped IPv6
+  literal such as `https://[::ffff:10.0.0.1]/`; the address check now judges
+  it as the IPv4 address it carries. Redirect targets are still not checked
+  (#46361) (#46340).
+- Run the system-thread calls the Workspace Curator makes itself (ledger loads, workspace observation, its record writes) on a dedicated host domain instead of the main domain. The parsing and hashing inside no longer hold the main domain's runtime lock, which HTTP accept and every main-domain request handler wait on. The work still runs outside Eio, is handed over at once and runs to completion, as before. New `Systhread_host.run` starts the thread; pool work keeps its own domain. If the host fails, the failure is logged and callers fall back to their own domain. The server gains one domain. (#46342)
+- Run the Librarian's original-request reads and gate steps on the system-thread host instead of the main domain: `Lane_addon_store` reads and sweeps called from an Eio fiber, and the system-thread calls in the durable Librarian owner, the original gate (restore, dispatch intent, gate publication) and Librarian add-on validation. The Librarian runs on main-domain fibers, and decoding, hashing and re-serializing its retained records there held the main domain's runtime lock. Callers already running as pool work keep their own domain. Lane add-on runtime work offloaded through its own helper is unchanged. (#46357)
+- `masc start` exits 1 before creating the workspace or taking its lease when `--host` (or `MASC_HOST`) is not an IP address. It used to bind 127.0.0.1 and then refuse every request, because it named itself by the unread text. `--host localhost` is refused for the same reason. (#46376)
+- 변환 프로세스 호출에 30초 실행 상한을 두었습니다. 멈춘 변환기가 커서 공유와 원고 조회를 영구히 막지 않고, 상한 초과는 문서 오류가 아닌 Unavailable로 되돌아옵니다. (#46377)
+- Browser selection ambiguity now returns structured recovery guidance and explains that no command was dispatched. Workflow-rejection guidance distinguishes correcting arguments from waiting for state changes, and browser lane documentation no longer treats Stagehand startup or Keeper sandbox status as live-browser recovery (#46381).
+- A pool job that looks up a `Dashboard_cache` key whose compute is still queued no longer holds its worker polling for it. The first job to start the compute claims it: the waiting job runs its own compute on the worker it holds and publishes it, and the owner's queued job then returns without computing. The owner returns as soon as the compute is settled, even while its own job is still queued. Before, when every worker was held by such waiting jobs, the compute queued behind them could not start until the waits timed out. A compute that fails clears the key so later lookups recompute, and the owner gets that failure; if the claiming job is cancelled or its window closes, the owner looks the key up again within its own remaining window instead of failing. An owner that gives up leaves a claimed compute to its claimant, so the key is not computed twice. A compute window is now one deadline per lookup. (#46389)
+- The keeper scale packet audit exits 3 after writing every derived record when the last inventory coverage group is incomplete, so exit 0 again means every observed group was complete; `post-run-audit.json` carries `inventory_final_segment_complete`. Derived records and the audit-failure receipt name the packet by its directory name and its receipts by their names inside it instead of host paths (#46403).
+- A completed-history Librarian original ends as a refusal when the Exact worker refuses a request no host listing reply can carry (`input_refused`/`request_body_refused`, before the host retains it). It used to need a host-retained terminal for every final, so publication was blocked, the original stayed at dispatch and every later pass resumed and blocked it again; a Keeper whose read range rendered past the 4 MiB worker frame never moved on. The admission path took the same final as an error because its host check had no such exception; both paths now ask one function, `Lane_addon_exact.refused_before_host`. Every other final still needs the matching host terminal (#46408).
+- `Workspace.default_config` now makes a second caller on the same domain wait
+  for the first config build instead of raising
+  `Sys_error "Mutex.lock: Resource deadlock avoided"`. The cache lock was a
+  `Stdlib.Mutex` held across an Eio filesystem stat, and at one boot it failed
+  all 41 unread tool result recoveries (#46426).
+- A lane add-on observation is published only when its binding write lands. An observation file renamed into place is held, never rewritten, and committed by the instance's next binding write, so a failed binding write no longer leaves a published observation the binding does not name. A binding write that fails after its rename counts as the commit and leaves the lane failed for unconfirmed durability. See `docs/rfc/RFC-lane-addon-observation-commits-at-the-binding.md` (#46430).
+- The activity graph cache lock now makes a second reader of the same
+  workspace, including the 30 s cache gauge, wait for a read that is
+  suspended in file I/O instead of raising
+  `Sys_error "Mutex.lock: Resource deadlock avoided"` (#46435).
+- The Keepers list shows a Keeper that submitted a task and waits for its verdict as `verify` in WAITING instead of `idle` in INACTIVE, because it now finds that task by assignee and no longer by the Keeper's current task, which submission clears (#46438).
+- Keepers can require `space_status`, `finish_space`, `wait_for_control`, `adopt_tab` and `release_tab` in the `requiredActions` of `masc_browser_tabs` and `masc_browser_session`. (#46439)
+- The connector name store now makes a caller wait for a write or a first file
+  load in another fiber instead of raising
+  `Sys_error "Mutex.lock: Resource deadlock avoided"` (#46440).
+- The tool approval mode registry no longer raises
+  `Sys_error "Mutex.lock: Resource deadlock avoided"` for a caller that arrives
+  while an operator change is writing the store. `resolve`, `overrides` and
+  `last_restore_error` read an immutable snapshot without a lock, and `set` and
+  `bind` serialize on a cooperative lock (#46441).
+- `Trajectory.next_round` no longer holds the round counter lock while it reads
+  the trajectory file of a key it has not seen. A second caller, for the same
+  key or another one, used to raise
+  `Sys_error "Mutex.lock: Resource deadlock avoided"`, and the runtime MCP call
+  lost its trajectory entry and the SSE broadcast that follows it (#46446).
+- The tool metrics store now makes a second caller wait for a store open or a
+  base path switch in another fiber instead of raising
+  `Sys_error "Mutex.lock: Resource deadlock avoided"` (#46447).
+- `Keeper_tool_call_log.file_change_tally` now makes a second caller wait for a
+  fold that is suspended in file I/O instead of raising
+  `Sys_error "Mutex.lock: Resource deadlock avoided"` (#46448).
+- Reprioritizing or deferring a running Keeper source no longer makes it look
+  like a new independent arrival, so the turn does not yield to itself. Each
+  pending queue entry now carries an immutable `arrival` number, and the queue
+  state counts the next one in `next_arrival`. The queue state schema is
+  `keeper.event_queue.state.v20`; older state files are not read, so deploy
+  with fresh queue state. (#46450)
+- The play seat reads the controller and saves name from the DOS worker's last completed observation instead of asking the worker by RPC. The RPC waited behind the worker's other calls, such as a long press, on every guest's poll, and a pending seat read disables moves. The seat now trails the worker by at most the observation that follows a controller change (#46451).
+- A browser allocation that still holds files the browser left for the Keeper (downloads, their snapshots, uploads) no longer stops its source until an operator retains it. Once the worker has settled and the allocation is the one it acquired, the host moves those folders by rename into `<lane-addon store>/kept-files/<instance id>` and releases the allocation, so the declaration starts the next instance. The moving pass names the folder in the server log, or in its unconfirmed cleanup when a later step fails. The host never removes or reads the moved files again. A link or multiply linked file in those folders, a destination that already holds them, or a `kept-files` on another device still leaves the release unconfirmed. (#46454)
+- Settle Ego input only from answers the SDK declares. A native workflow step
+  and a selector `drag_to` now judge release from the receipt the SDK returned
+  (`Browser_ego_release`), and only an object receipt without `dialog` releases.
+  A void answer, a non-object receipt, a caught failure or a malformed `dialog`
+  leaves the input unconfirmed. A coordinate-path `page.drag` declares no
+  answer, so it always ends unknown and blocks input until the operator's reset
+  (#46463).
+- `wait_for_control` refuses a `controlOptions.timeout` longer than the
+  action's reply window before the wait starts, and an omitted timeout waits
+  for that window instead of an undeclared SDK default (#46468).
+- Ego tab activation reads a CDP window without the optional `windowState` as
+  a normal window instead of refusing it (#46468).
+- CI: fix the `dune build @check` failures on main in four tests (#46478). `test_keeper_host_result_retention`, `test_keeper_codex_current_context` and `test_keeper_muse_runtime` now pass `~tool_name:_` to the tool-boundary callbacks, whose type gained a labelled `tool_name` argument in #46134. `test_keeper_wake_turn_context` gives each queue entry its own `arrival` number, a field that became required in #46450.
+- 설치 픽스처가 5번째 companion 자산 `masc-exec-ssh-bootstrap-<suffix>`을 누락해 `#46474`의 companion 이름 정합을 설치 스위트가 잡지 못하던 것. 릴리스 미러와 companion 인자에 5번째 자산을 추가하고, 게스트 shim과는 별개 자산임을 주석으로 남겼습니다. (#46488)
+- Muse 호스트가 턴 도중 죽으면 만드는 실패 종료(`error` 없이 `reason` 만 싣는 `turn/completed`)를 프로토콜 위반으로 거절하지 않고 `Terminal_host_died` 로 읽어요. 이전에는 `failed terminal carries no error` 로 실패하면서 호스트가 알려 준 이유가 사라졌어요. `error` 도 `reason` 도 없는 실패 종료는 그대로 거절해요 (#46504).
+- Startup no longer parses every settled original request record before the server starts. The startup body sweep reads the settled archive only when a live request body is not protected by a live record, since settled records only add protection; the startup log now reports `archive=not_needed` or `archive=read`. On the live workspace the archive held 3,327 records (2.9 GB) that were parsed on every restart. (#46542)
+- The provider metrics cache refreshes a stale entry as background work, so the refresh no longer holds a read-pool worker while GET requests wait (#46543).
+- Startup no longer reads a Keeper's whole chat transcript once for every retained failed operation it re-projects. All of a Keeper's failures are now checked against one read and index of its transcript, and the missing rows are appended in one durable write; each failure still gets its own answer and journal. On the live workspace this was 489 failures over 109 MB of transcripts, about 5.3 GB parsed before the Keeper owners were installed on every restart. (#46548)
+- 검증이 거절로 끝나면 task 에 거절이 반영돼도 검증 run 이 `Commit_failed` 로 멈추고, 재시작 뒤 같은 거절이 producer 에게 다시 전달되던 문제를 고쳤어요. 거절 commit 은 producer 가 바꿀 수 있는 handoff 가 아니라 backlog 의 거절 기록으로 확인해요 (#46552).
+- Settled failure rows written together at startup each take their own time, as a single append does. With one shared time, a Keeper paging its history by time could skip the rest of the group at a page boundary. (#46554)
+- A tool result that reads back different from the bytes written no longer leaves a receipt file behind, so one such file cannot make every later request of a Keeper fail with `tool outbox digest mismatch` (#46565).
+- A tool result that came back cut inside a multi-byte character is repaired to valid UTF-8 where the tool returns, so the hook, the client response and the durable receipt all see the same text (#46566).
+- The goals tree read that follows a goal write answers with the tree of the highest generation filled for its workspace. Two computes that finished out of order used to leave the older generation as the one carried forward, and one record was shared by every workspace (RFC-0474 L4d follow-up, #46591).
+- Preset save responses that do not confirm an outcome now advise checking the preset list before retrying, and the voice setup footer distinguishes closing the screen from cancelling a save (#46604).
+- Preset save notices remain available during the TUI session, and retrying an unconfirmed name requires a visible confirmation; unsent chat save commands can be recovered from the preset pane (#46604).
+- A late settings read no longer moves the scroll position of a different System tab (#46604).
+- Keeper roster ordering and view choices persist across TUI restarts, with unconfirmed saves reported (#46609).
+- Show and copy fixed-revision public artifact links in the TUI, with sharing state and uncertain outcomes kept explicit. (#46626)
+- Honor refused published artifact reads and prevent the Dashboard's static snapshot namespace from bypassing the live sharing decision. (#46634)
+- Open shared artifacts without stale browser credentials and keep Dashboard share changes tied to the observed document and workspace. (#46635)
+- Keep microVM work-volume state unverified when its probe fails or times out, and preserve the execution failure detail for recovery (#46638).
+- Distinguish historical diagnostics from current state, and a Keeper's actions from shared-account GitHub review history (#46640).
+- Settle a Codex Keeper's successfully delivered tool results only after the matching client completion, so confirmed results do not accumulate for reinjection into later turns (#46643).
+- Preserve every retained tool result while sharing repeated context data, reducing redundant recovery input (#46649).
+- Avoid retaining repeated empty media fragments while preserving their carrier. (#46651)
+- Repair the main-red `Unbound module Client_registry_eio` in `test/test_h2_listener_response_resources.ml` (#46664): qualify the two `total_count` call sites as `Masc.Client_registry_eio`, matching how sibling tests (e.g. `test_lane_addon.ml`) resolve the wrapped masc library module. Coordinate registration for the 3번째 main-red 원장 (p-0663958f, fixes #46664).
+- Preserve endpoint and keeper-tree diagnostics in raw sandbox reads, and make remote and microVM fixtures satisfy their real probe, identity, and mount contracts (#46665).
+- Bound Apple microVM policy-network names to runtime rules while preserving distinct Keeper identities (#46666).
+- Align Keeper review roles, verdict formatting, and scheduled review scope (#46669).
+- Record the final Keeper model-input projection, including retained tool results and unread evidence, alongside the matching serialized request and runtime (#46680).
+- A completed-history Librarian pass reads a turn the host refused as too large message by message and commits the result to Memory once, instead of sending the same turn again every pass and leaving that Keeper's Memory behind it. A refused original that read one turn, and whose refusal shows that reading less may help, is kept instead of archived. The pass that selects its range runs the message floor over it. A message no slot accepts as too large stays unread and is recorded in the receipt. A step the host refuses for another reason is asked again under a new ID on the next pass, and a Memory that changed under the chain drops the chain so the next pass starts it again. A refusal the host returns after the pass that sent the request ended now narrows the next read to one turn, as a failed commit does (#46690).
+- Refuse approval bodies with guard-owned scope or footer lines before posting, and verify the posted review's scope and identity before reporting success (#46696).
+- Fix the fragile-match build error in TUI resource sharing updates (#46697).
+- Pass `~name` to the CPU pool submit in the endpoint job launch and output modules so main type-checks again (#46727).
+- Alias `Mcp_error_code` to `Masc.Mcp_error_code` in the H2 request body admission test so main type-checks again (#46732).
+- Keep history images named only by a provider input snapshot alive through blob retention. (#46738)
+- Store history media whose media type carries a parameter, such as `text/plain; charset=utf-8`, instead of failing the turn. (#46738)
+- Keep a stored image in the checkpoint when the media store cannot read it during a save, instead of replacing it with a placeholder. (#46738)
+- Record the request input after the dialect's reasoning projection, as it is sent. (#46738)
+
+### Performance
+
+- Reduce allocations when rereading large retained Lane records after fsync by comparing reusable chunks with the original bytes; preserve EOF, ownership and file identity checks (#46175).
+- Stream the canonical deferred-tool surface into SHA-256 while preserving persisted receipt hashes. Retain the standalone byte/error checks and all warm allocation/timing regressions; typed integration and native service results remain separate. (#46295)
+- An Add-on worker can declare, on its private `lane_tool_effects` port, which exports leave its observation as it was. A successful call to a declared `reads_only` export no longer schedules a fresh observation for a worker without a host port (a worker with `exact_outputs` or `asks` still observes after each reply), and such a call does not mark the cached observation refreshing while it runs. MCP `readOnlyHint` does not decide this. The DOS worker declares `masc_dos_screen`, `masc_dos_meta`, `masc_dos_inventory` and `masc_dos_peek`, so a guest seat polling the screen no longer copies and retains a frame per poll (#46305).
+- Validate large observation-effect declarations with indexed tool names instead of repeatedly scanning the full worker tool list (#46339).
+- A Librarian history original is re-checked during publication by the digest its record names instead of re-reading, parsing and restoring its whole body: `Lane_addon_tool_request_owner.reload` reads only the record and keeps the body the first load verified, and `Keeper_librarian_durable_request.confirm_record` checks source root, host binding and digest. One pass that reads a 210 B turn allocated 0.97/3.88/15.20 GB instead of 1.51/6.16/24.28 GB for 1/5/21 MB checkpoints (#46394).
+- A Librarian history original holds the range it read once, in its input, and each source it read whole as the number of elements it saw and one SHA-256 over them; restoring reads no source, and the publication source lock checks those digests against the current sources and runs the original selection, cuts and projection on the prefix they name. The preparation keeps the rendered prompt's SHA-256 and renders it again on restore. One pass that reads a 210 B turn stores 166 KB and allocates 0.12/0.18/0.38 GB for 1/5/21 MB checkpoints instead of 2.3/10.8/42.7 MB and 0.97/3.88/15.20 GB. Hard cut: capture and request schema 2; history-execution and durable-gate scopes are moved aside at deploy (#46397).
+- Lane add-on binding reads stop at each binding's committed sequence instead of listing every observation directory to recover a renamed observation, so one read of the retained bindings costs one file per binding. History queries read only through the binding's sequence, and evidence selection refuses a row above it. See `docs/rfc/RFC-lane-addon-observation-commits-at-the-binding.md` (#46434).
+- A request for one lane add-on instance's retained binding, such as a Lane evidence read or a browser service status check, opens only that instance's binding file instead of reading every retained binding. The file is classified by the same rules, the recovery state of a cleanup in progress still applies, and a binding directory that is not a directory still fails the read (#46442).
+- Machine screen blobs, about 1.2 MB for a DOS screen, are verified, parsed and re-encoded on the system-thread host instead of on the calling domain. This covers a live screen read that misses the frame cache and a dependent's machine screen capture, which held the domain serving HTTP for about 10 ms and 15 ms per frame on an idle machine (#46449).
+- A Keeper shell command's path checks run on the system-thread host instead of on the calling fiber: classifying the cwd when the command is lowered, classifying the script's redirect targets, and the gate and path boundary before it runs. They stat and realpath each path, a missing one ancestor by ancestor, and on the calling fiber each call held the domain serving HTTP until the kernel answered; a 10-second production sample on 2026-10-27 spent 5.4 s there. The command itself still runs on the calling fiber (#46467).
+- The server's JSONL log file is written by one OS thread instead of by each producer. A log record used to append and flush the file on the calling fiber, so a slow write() stopped the main domain; after #46467 it was the main thread's largest blocking call in a 2026-10-28 production sample. A producer now queues the serialized line and returns. The queue holds 8,192 lines, counting the batch being written; when it is full the producer waits and no record is dropped. Lines still queued when the process ends without `at_exit` (SIGKILL, a crash) are lost; a normal exit writes them first. CLI and TUI processes keep writing synchronously (#46494).
+- Startup no longer reads every settled failed operation's journal in full to find the terminal it already wrote. When the journal's last row is that settlement's terminal, a 64 KiB tail answers it; every other case still reads the whole journal. On the live state of 2026-10-28 (505 such journals, 483 MB, each read twice) this skips about 965 MB of journal parsing per boot. (#46563)
+- `/api/v1/dashboard/goals` no longer computes the goals tree inside the read after a goal or measurement write. Its cache key names the goal projection generation, so that read used to find an empty key and compute the tree before answering (9.3 s once on 2026-10-28, against the TUI's 10 s budget). The read now answers with the tree last filled for the workspace and the new generation is computed in the background; the HTTP/2 gateway serves the same cached tree instead of computing it on the request fiber (RFC-0474 L4d, #46583).
+- The goals tree (`/api/v1/dashboard/goals`) computes a Keeper's runtime trust snapshot only when a goal's task is assigned to that Keeper, once per build. It used to compute every Keeper's snapshot first and read three values of it for the assigned ones; on 2026-10-28 that was 7.3 s of a 7.5 s tree, and under load the tree hit its 30 s compute budget, so the served tree stopped refreshing. On the same data the tree now takes 2.55 s at the minimum of three interleaved runs, against 7.65 s before (RFC-0474 L4e, #46650).
+- A Keeper's recent approval audit rows (`Keeper_approval.Audit.read_recent`) are answered from an in-process index that decodes each row of the store once. A read re-reads only the day files written since an earlier read, from their first byte: the bytes decoded before are compared with their digests and only the lines after them are decoded, so a file rewritten in place starts the index over. Removing the oldest day files, as retention does, drops their rows without starting over. Reads that arrive together share one update and wait for it on a promise; each read runs as one domain-pool job, so the read running an update always holds a worker. The read used to scan the store backwards, decoding every row, until it held that Keeper's rows; a Keeper with no rows in the newest day files read the whole 131 MB store. On 2026-10-28 that read was 6.7 s of the 6.9 s the runtime trust snapshots of 40 Keepers took. On a copy of the live store an unchanged read takes 0.2 ms and a read after one appended row 7-18 ms, after a one-time build per process of 3.1 s at load 26 (10-12 s at load 75-90). Results and refusals are those of the backward scan; `n` above 128 is refused (RFC-0474 L4f, #46672).
+- `Keeper_fs.ensure_dir` no longer holds a process-wide mutex while it checks that a directory exists. The check is a stat on a system thread, and `keeper_meta_path` ensures `.masc/keepers` on every Keeper meta read, so one slow stat queued every caller on every domain behind it: a fiber trace on 2026-10-28 found 1,020-2,972 s of waiting on that mutex in 180 s, and `/api/v1/gate/keepers` spending 95% of its time waiting. `ensure_dir` now takes no lock and keeps no cache, since a cached path was stat'ed on every call anyway; a directory removed outside is still made again. 16,000 calls from 8 domains took 0.17-0.28 s instead of 0.97-1.60 s (RFC-0474 L4g, #46681).
+
+### Documentation
+
+- Define the full Keeper asynchronous fleet continuity contract, including
+  endpoint-owned job/process authority, durable result handoff before checkpoint
+  acknowledgement, mixed-sandbox delegation and fixed 10/100/300-Keeper evidence. (#46108)
+- Retain exact-head schedule recovery and attempt-authority Test results, preserve later compile failures, retain bounded candidate-native cancellation and scheduled Lane export observations, and update the 59-row behavior audit with explicit evidence boundaries. (#46253)
+- The ego SDK coverage guide describes Goal binding and operator input recovery. (#46258)
+- Retain a controlled native scheduled Job bootstrap failure and same-process recovery observation, preserving exact attempts, original capture identities and execution limits. (#46267)
+- Retain actual scheduled continuation evidence and the post-tool request-loss finding, including both model anomalies and observation limits. (#46271)
+- Retain durable scheduled-request validation, actual same-process settlement recovery, and distinct GLM/DeepSeek behavior findings without promoting the full feature to PASS. (#46283)
+- Retain eight focused TUI state checks, an actual scheduled MicroVM file write/read result, and failed or incomplete trials with their evidence limits. (#46293)
+- Explain how to run the Keeper scale inventory-tail fault probe and its optional regression inputs (#46298).
+- Retain actual TUI schedule-target, refresh and queued-input observations with readiness evidence and explicit visual/causal limits. (#46301)
+- Link browser feature notes to their usage guides and document Goal Space
+  binding and connection inventory usage (#46325).
+- RFC-0204 now explains why read requests wait: they share one FIFO executor pool with background work, and since the Librarian fix the main domain also waits on its runtime lock while systhreads run OCaml work. It orders the work as pool-wait measurement first, then a read pool, and keeps the measurements under `docs/evidence/2026-10-27-read-pool-contention/` (#46335).
+- `docs/research/2026-10-27-mcp-2026-07-28-parity.md` records the MCP 2026-07-28 source audit and the remaining gaps (#46344).
+- `docs/rfc/RFC-mcp-mrtr-client-continuation.md` proposes how MASC handles MCP 2026-07-28 multi round-trip requests: no server-side producer, and the client continues rounds that carry only `requestState` inside one approved Keeper tool call (#46355).
+- The `masc restart` RFC describes replacing the running workspace server with one command, and RFC-0447 now keeps plain `masc start` refusing at once while another process holds the workspace. (#46365)
+- The invite-link agent guide (`GET /play/agent.md`) now says what to do when `machine` is false: invitations cannot load or restore a program, Keepers and the operator can, so ask in the public room and read the seat again later. Refusals that name `masc_dos_load` or `masc_dos_restore` name other callers' tools (#46373).
+- RFC `librarian-history-original-holds-what-it-read`: a completed-history Librarian original keeps the read range verbatim once and points at everything the capture saw in each source (checkpoint messages, official trace rows, turn boundaries, with line numbers and unreadable lines) by `{count, digest}`, which the commit-time source lock recomputes from the live source; a format-preserving layer first restores each original once per pass. Today one pass that reads a 210 B turn allocates about 1,150 times the checkpoint size because the original holds four whole-history copies (#46390).
+- The Librarian history original RFC records the L3 design as built: the read range is held once in the input, each source as a count and digest, the checkpoint reference as its trace only, and the source lock re-runs selection and projection on the live prefix; it adds the L3 measurements and answers its check list (#46400).
+- The browser install guides, the TUI browser guide and the browser design docs describe one Lane Add-on package per browser source, each switched on or off by its own declaration's `enabled`; runtime.toml browser tables only say how a source starts. (#46414)
+- RFC `librarian-durable-message-floor`: the durable Librarian path reads a turn that exceeds the 4 MiB worker frame message by message as a chain of step originals, records a message refused alone with a typed size refusal as an unread hole, and publishes one Memory program, carrying the lifecycle RFC message floor to the Add-on path (#46417).
+- A new RFC makes the binding replace the single commit point for a lane add-on observation. An observation file that becomes visible is held, never rewritten, and published only when the instance's next binding write names it, so readers stop at the binding's sequence and binding reads no longer rescan every observation directory. Single-instance reads open only that instance's binding file. See `docs/rfc/RFC-lane-addon-observation-commits-at-the-binding.md` (#46421).
+- Add the multi-account OIDC runtime authorization design for review. The document approves no implementation (#46428).
+- RFC `keeper-guests-stay-inside-a-host-memory-budget`: Keeper microVM guests
+  boot only inside a per-host memory budget (this Mac and each SSH endpoint),
+  take their size per Keeper from measurement, and are taken down when idle and
+  booted again on the next use. Apple's Virtualization.framework does not take
+  freed guest memory back, so 23 guests hold 84.9 GiB of a 128 GiB host, and 50
+  Keepers at 2 GiB each would reach 100 GiB (#46456).
+- RFC-0474 explains why server domains spend 16 to 26 times longer waiting at stop-the-world barriers than collecting: 31 domains on 16 cores with an idle agent_core execution pool that arrives last at most barriers, digestif string hashing that holds the runtime, and Librarian re-validating the same original request bodies on every read. It plans four measured layers: one domain budget of `Domain.recommended_domain_count () - 1`, one runtime-releasing sha256 module with a check against direct `Digestif.SHA256` calls, originals validated once, and Executor weights after a blocking-call audit (#46458).
+- Add the implementation plan that splits the multi-account OIDC runtime authorization design into 27 layers. The document approves no implementation (#46469).
+- Added a Keeper memory recall usage baseline measured on the live runtime and a prior-art comparison of other agent products and papers (#46497).
+- Proposed RFC-keeper-recall-reaches-the-turn: the host asks Jev which Keeper memories fit the turn and carries them in two new per-turn blocks (#46498).
+- Decided in the RFC that each candidate is judged by a two-label question (possibly_needed or not_needed): in ten identical runs it changed 3 of 56 labels and missed no candidate whose probability of being selected was above one half. The RFC also limits re-judging by a second model to a random sample, because judging every turn would cost 40 to 80 times the Jev spend (#46498).
+- Added the record of what 17 Keepers answered about that design (#46498).
+- Added a second prior-art note on memory write strategy, whole history against retrieval, and the LambdaDB report (#46498).
+- Updated the Keeper recall baseline with how retrieved memory ids disappear, how facts leave the store and what Jev has already been sent (#46498).
+- State what a failed drag does in the `native_workflow` row: it does not
+  synthesize a release, only the coordinate path (`page.drag`) resumes after
+  `mouse.down`, and an unconfirmed release still blocks further input. The row
+  had claimed a release, which the guide and `lib/browser_ego_workflow.ml`
+  both deny (#46502).
+- The Ego input release interface and guide name the SDK commit and source lines the release rule rests on, the guide says that `keyboard.press` and `keyboard.paste` return receipts, and one workflow error text now reads "an input-holding effect". (#46503)
+- Amend the multi-account OIDC design so a domain policy (`oidc.admission_request_domains`) gates only the admission requests of unregistered users by `hd` and `email_verified`, and define the lifecycle and storage of those requests. Admission stays an admin-approved `(iss, sub)` binding, never an email, and users the admin registers or invites are not subject to the policy. The document approves no implementation (#46539).
+- Amend the multi-account OIDC runtime authorization plan and design. `account_mode` is an optional field, and the mode is determined at boot from the setting, the authorization log, and the external high-water mark (A2). The authorization log store is split into the line format and the file store (B1). The location of the external store is read from an install record in the user's config directory (B2). This change approves no implementation. (#46545)
+- The Ego native workflow guide says `keyboard.insertText`, `keyboard.down` and `keyboard.up` also return void at the pinned SDK commit, and the release interface comment says its SDK line numbers hold only at that commit. (#46551)
+- Add an RFC that types the auth kind of every HTTP route at registration, so a route table can be printed from the router and the public-read allowlist in `server_auth.ml` goes away. The RFC changes no code (#46561).
+- Fix the admission request rules so that no append spans the request store and `authz.jsonl`: the request store keeps only `Pending` and `Rejected`, and `Approved`, `Superseded` and `Expired` are read from the stored value, `authz.jsonl` and the clock (#46562).
+- Say in the auth route baseline README that only one run of the baseline is kept in the repository, and that the comparison of two runs was made by the author (#46574).
+- RFC `librarian-durable-message-floor`: §3.8 records how the L3 layer is split into L3a to L3d, and what the first four layers settled (message-floor state machine, Runtime step entry, step request, step gate journal with its driver, the served slot, the starting current Memory, and how the host recognizes a step). §3.9 records how a size-refused original descends, publishes in one Memory commit and is cleaned up. §3.10 records how the L5 layer connects the chain to the consume pass, what the connection taught, and the cost of a long turn that the bench measured (step 134 of about 330 in 7,200 seconds on a loaded machine). The starting current Memory of a first chain is the Memory captured when the chain starts, not the `current` of the original's input. Three points stay open: what to do when Memory changed between the descent and the publication, inventory validation of the step gate journals, and the model call of an enabled gate. The RFC status is Implemented because L2 to L5 are on main (#46581).
+- Added the write-reach measurement on 40 Keepers: of 735 settled candidates 486 (66.1%) got a target fact and 249 (33.9%) were closed without one. Of the 486, 12 (2.5%) kept the Keeper's own sentence and 357 (73.5%) are a current fact now or lead to one through revised and absorbed records. Only 214 of the 735 candidates have a write call in the retained raw traces. One Keeper's admission queue held 7 rows, all written after its last Librarian commit, which was 15.2 hours before the read. The RFC records it in sections 2.6, 5 and 10 (#46582).
+- Moved the two prompt block ids of the Keeper recall design into the layer that renders them, because `prompt_block_id.mli` leaves out constructors without a producer (#46582).
+- Add the route auth typing layers A4a to A4d (tool-first conversion) to the multi-account plan, make C4 depend on A4d, and change the layer count and the Goal target from 27 to 31 (#46586).
+- Wrote the candidate line, the piece rule, the halving rule for every half of a refused request, the status reasons of a judgment and the answer decoder's label check into the Keeper recall RFC (#46608).
+- RFC-0477 describes how the Keepers screen reads typed fleet changes instead of polling `/health?full=1`, with the SSE and gRPC propagation-time measurements (#46659).
+- Document Sandbox backend maturity, open safety limits, real-time terminal streaming, and focused verification evidence (#46667).
+- Wrote into the Keeper recall RFC what a lone candidate refused for size comes to when question (b) was taken, refused for size or failed another way, how a refused piece is cut, how question (c) is sent, and the call count and worst-case time of a judgment (#46723).
+
+### Internal
+
+- Consolidate duplicate loggers and aliases (Log.Candle, warning/log_mcp_exn removal, vision/audit/config owners), preserve literal Keeper names in ring decoding, and fix tests and logging docs. (#46190)
+- `Auth_oauth_client_metadata` reads OAuth Client ID Metadata Documents:
+  which client ids are document URLs, what a fetched document must contain,
+  and loopback redirect matching that ignores the port (RFC 8252 7.3)
+  (#46337).
+- The resolved-address check moves to `Server_outbound_address`, and
+  `Server_oauth_client_metadata_fetch` fetches OAuth client metadata
+  documents through it (#46340).
+- `test/bench_keeper_librarian_pass.exe` measures one completed-history Librarian pass on the durable-execution test fixture, keeping the unread range at one small turn and growing the already-read history, and prints the pass's allocation, stored bytes and wall time. `scripts/harness/perf/server_memory_sampler.py` records resident size, live heap and allocation rate from `/health` once per interval. On `fbf2f55ae0a` one pass allocated 2.0, 8.3 and 32.9 GB and stored 6.8, 32 and 128 MB for 1, 5 and 21 MB checkpoints (#46371).
+- The four Goal stall-notice matches in `test_goal_verification_agent.ml` now name `Original_observation_scheduled` and `Original_repair_required` as failures, so `dune build @check` compiles again after #46132 added them (#46425).
+- Add the closed authorization types for the multi-account design: opaque ids, the Empty/All/Only scope algebra, Principal, Effect, Channel, grants, delegate policies, and the execution context (A3a of #46477). Nothing calls them yet, so behavior does not change. (#46479)
+- Add `Authz_decision.allowed`, the pure decision formula of the multi-account design (A3b of #46477). It denies as uncertain when the store cannot answer, denies with its own reason for a missing, inactive, or expired fact, and asks dependency clearance per chain. Nothing calls it yet, so behavior does not change. (#46480)
+- Add the jose 0.11 dependency and `Oidc_id_token_signature.verify_signature_and_expiry`, which checks the RS256 signature, the key size, and the `exp` claim of an OIDC ID token against a JWKS document (C1 of #46477). Nothing calls it yet, so behavior does not change. (#46484)
+- Add `Authz_record`, one line of the authorization log `authz.jsonl` as a hash chain with the check of which kind of author may write which kind of record, and `Authz_body`, the plain JSON a record holds with the single printer of its text (B1a of #46477). Nothing calls them yet, so behavior does not change. (#46491)
+- Added `scripts/keeper-recall-baseline.py`, a read-only report of how often Keepers search memory per runtime (#46497).
+- Added `scripts/keeper-recall-store.py`, a read-only report of the memory store, how facts leave it, Jev memory judgment requests and exact-output lane latency (#46498).
+- `scripts/keeper-recall-baseline.py` now separates Skill use from Skill authoring, traces retrieved ids through the journal and counts turns per day (#46498).
+- Added `scripts/keeper-recall-jev-probe.py`, which builds a recall-sized judgment request from one Keeper's facts and reports the size, acceptance, latency and, over repeated runs, how the labels, probabilities and selected sets differ when run with `--send`; `--shape two` asks only whether a memory is possibly needed and `--detail` lists every candidate's mean probabilities (#46498).
+- Added unit tests for the probe's request splitting, capacity-refusal halving, send guard and repeat report (#46498).
+- Added Jev judgment request measurements on two Keepers: a 104 KB request answered in about 0.4 s, the labels of 7, 7 and 8 of 56 candidates (12.5 to 14.3%) changed in three sets of ten identical runs, 4 (7.1%) when the same candidates were split into two requests and 3 (5.4%) when only whether to select was asked, and a 198 KB request was refused while its 97 KB and 101 KB halves were accepted (#46498).
+- The Ego input release judgement counts a step once when it is given two answers for the same step. It keeps the first answer that releases nothing, so a clean answer after a dialog cannot release the input and the list of released steps never repeats a step. No current caller got a wrong result from the repeat. (#46511)
+- 730 modules that defined `let ( let* ) = Result.bind` on their own now use `open Result.Syntax` from the OCaml 5.4 Stdlib; the operator's type and behavior are unchanged (#46536, stack #46522 to #46536).
+- Record which HTTP routes answer without a credential on the default and the strict auth settings, with a tool that dumps the router table and a script that probes an isolated server. The server is unchanged (#46546).
+- 65 hand-written string-to-variant lookups now search the `[@@deriving enumerate]` list with the forward function, so the two tables cannot drift apart; types and behavior are unchanged (#46549).
+- Add `Authz_log`, the file of the authorization log `authz.jsonl`: it replays the file once at process start through a fold function the caller passes, cuts a last line that never ended, and appends records one zone at a time, with one sync per append (B1b of #46477). Nothing calls it yet, so behavior does not change. (#46558)
+- Correct comments, interface docs, and three test names in `Authz_decision`, `Authz_body`, `Authz_record`, and `Authz_log` that the reviews of the merged authorization stack asked for (#46477), and name the regeneration command in the header of the OIDC test vectors. No code path changes. (#46572)
+- Dashboard cache computes declare their kind of work once, as a `Pool_work.t` built with `Pool_work.cpu` or `Pool_work.io`, and `Dashboard_cache`, `respond_cached_read` and `Dashboard_projection_cache` submit it with that kind's weight instead of choosing one. The `submit_io_or_inline` calls written inside cache compute bodies are gone: inside the cache's pool job they ran in place and their weight had no effect. Only the git blame, log and diff routes, which wait on a git subprocess, are `io`; every compute that reads a file through a Stdlib channel or parses what it read is `cpu` (RFC-0474 L4b, #46573).
+- Correct the comment of `Authz_log.append` about which exceptions stop the authorization log: only an exception of the call that runs the write on a system thread does, one raised while the records are checked does not. No code path changes. (#46576)
+- The Runtime message floor's rules (which message a question carries, where host observations ride, when a message becomes unread, how the program is assembled) moved from `Floor.infer` into `Keeper_librarian_message_floor.Machine`, which does no I/O and can be rebuilt from its recorded outcomes. No behavior changes: the cases written first against the old fold pass unchanged (#46577).
+- Add `Authz_install_record`, the small file in the config directory of the user that names the external high-water store of a base path: it is written by an atomic replacement, read with an owner-checked no-follow read, and named by the hash of the canonical base path (B2b of #46477). Nothing calls it yet, so behavior does not change. (#46578)
+- `Keeper_librarian_runtime` can prepare, restore and validate one durable message-floor step, validate its answer (a nonblank working state is required), and mint the gated `memory_step` from a retained answer and its gate judgment. A step asks the question the Runtime floor asks: same prompt, with the working state so far and the unread messages in the continuity slot. Nothing calls it yet, so no behavior changes (#46580).
+- Added `scripts/keeper-recall-write-reach.py`, a read-only report of what becomes of the claims Keepers write with `keeper_memory_write`: the write calls and their receipts, the candidates the Librarian settled with or without a target fact, whether the target was added before the write, where the target stands now after following revised and absorbed records, which commit removed the id where the records end, the same two shares over removed ids of the same kind, the range of time from the write to the journal stamp of the settling pass, how much of the call table the retained raw traces cover, and the rows each admission queue still holds with the age of its oldest row and the last Librarian commit of its Keeper (#46582).
+- Added unit tests for the write-reach report (#46582).
+- `Keeper_librarian_floor_step_request` is the original request of one durable message-floor question: its own scope, request ID format and record kind. A step carries its own input and context, so it restores from its record alone and the host can validate a model's answer to it; `matches_question` says whether it is the question the floor's machine asks now. It names its range original and previous step by request ID and digest. The host proof of a final moved from the history request into `Keeper_librarian_original_final`, and the frozen question codec into `Keeper_librarian_durable_question`, so both requests share them. Nothing calls the step request yet, so no behavior changes (#46587).
+- Add `Route_access`, `Router.Make_typed` and `Server_route`, so that a route can be registered with the kind of authentication it needs and the route table records it. The router exports no function that takes the kind and the handler separately. The router's list of registrations and its method index are one shared state, and `Router.effective_routes` lists the routes dispatch can reach. No route uses the typed registration yet and no behaviour changes. The route inventory tool prints the access of every route dispatch can reach (#46590).
+- `Keeper_librarian_floor_step_owner` retains one durable message-floor question before dispatch, runs it through the shared submit-once journal at most once, and ends it at its answer or its refusal. The host's Exact authorization and the wake discovery now recognize a step: one classifier, `Keeper_librarian_request_namespace`, replaces the copy each kept, so a new kind of original is a compile error in both. `confirm_destination` moved into `Keeper_librarian_durable_edge`. Nothing calls the step owner yet, so no behavior changes (#46596).
+- Add `tools/route_auth_codemod`, which rewrites route registrations that wrap their handler in a `Server_auth` wrapper to the typed form of `Server_route`. The tool changes no server code; the registrations are converted in a later layer (#46598).
+- `Keeper_librarian_floor_chain.run` drives the durable message floor's machine with a chain of retained steps: each question runs at most once, its answer is judged by the absorb gate's journal (`Keeper_librarian_floor_step_judgment`), a message every slot refuses as too large becomes an unread hole, and any other refusal stops the chain. A restart is the same call: it takes the transaction, starting facts and carried state from the first step and replays every step and judgment without asking the provider again. `Memory_plan.create_over` starts a plan from facts, the served slot of `Machine.answered` is optional, and every step carries its chain's transaction. Nothing calls the chain yet, so no behavior changes (#46607).
+- Added `keeper_memory_recall_judgment`, `keeper_memory_recall_candidates` and `keeper_memory_recall_jev_codec`: the closed vocabulary and the status reduction of Keeper memory recall judgment, the candidate line of a current fact and its cut into pieces, and the Jev request and answer codec. Nothing calls them yet and no switch exists, so behavior does not change (#46608).
+- `Fleet_stream` defines the fleet events (`Snapshot`, `Changed`, `Degraded`) and a strict codec that the server and the TUI share. `Fleet_stream_hub` numbers the events and fans them out, and `Masc_tui_fleet_stream` turns the bytes of one connection into the state the Keepers screen draws. The TUI does not read the stream yet (#46659).
+- `test_fleet_stream_loopback` follows the stream over a real loopback socket, and `bench_fleet_stream` measures the time from a hub change to the reader seeing it, over SSE and over gRPC (#46659).
+- Register every route in `lib/server` with `Server_route.*`, so each of the 386 routes in the route table has an authentication kind. 383 `Http.Router.get/post/add/prefix_*/ws_get` calls were converted (306 by `tools/route_auth_codemod`, 75 by hand, 2 `ws_get`). `Route_access` gains the reasons `Browser_lane`, `Loopback_dev_token` and `Subpath_dispatch`, and `Server_route` gains `Public_read_on_canonical_host`, which keeps the canonical-host redirect of the three `/dashboard` pages ahead of the public read. Answers do not change. `scripts/auth-route-baseline` can send Worker and Admin tokens and compare two runs, response headers and bodies included (#46671).
+- `Keeper_librarian_floor_descent.candidate` decides whether a refused history original may be read again message by message: the host kept a typed size refusal for the one turn it read, no Memory receipt covers the turn, and the read position has not moved. `descend` runs the floor's chain over that turn, reading an official turn from its retained messages and an atom range from the checkpoint as the source lock sees it now, with a source lock variant (`with_original_snapshot`) that does not require the external cursor to be as the original captured it. Nothing calls the descent yet, so no behavior changes (#46674).
+- `Keeper_librarian_floor_publish.publish` commits the program of a finished message-floor chain to Memory as one commit over the range the refused original read, with the messages the chain could not read in the receipt and the external cursor prepared for that receipt. A Memory that changed since the chain began supersedes the program and nothing is written. When the lock or the commit reports an error, the receipt of the range in the store decides whether it was published. The receipt check, the cursor acknowledgement and the move of the read positions stay with the consumer's own tail. `Commit.receipt_state` no longer counts unread messages in the range identity, so a range published with holes reads as published. Nothing calls the publication yet, so no behavior changes for a pass that does not descend (#46677).
+- `tools/rtev_trace/rtev_fibers` sums, for each pool job (the sections RFC-0474 L4c names with `Eio.Private.Trace.with_span`), the time its fibers ran and the time they waited, by suspend reason, and reports for the most waited-on Eio locks who waited, who held them, what holders waited on while holding, and what they did just before and after. A section counts the time spent in the sections inside it, including when a fiber suspends and resumes inside the inner section. The run and wait numbers are sums over the section's fibers and can exceed the wall time when fibers run at the same time (#46682).
+- Add the record kind `Mode_event`, written by the local operator, and `Authz_mode_event`, the module that writes and reads its body: the event (`fresh_bootstrap`, `off` or `reactivate`) and the workspace id, in this order. Nothing calls them yet, so behavior does not change. (#46686)
+- Added `keeper_memory_recall_flow`, the Keeper memory recall judgment flow. The requests of question (a) for every piece of candidates and question (b) go out together. A piece refused for size is cut again at half its line bytes and the new pieces are sent in order. A request holding one candidate waits for (b) to tell a too-large candidate from a too-large purpose. Question (c) follows for the carried candidates. The client is passed in as a function. Nothing calls it yet and no switch exists, so behavior does not change (#46723).
+
 ## [0.65.0] - 2026-10-27
 
 ### Upgrade notes

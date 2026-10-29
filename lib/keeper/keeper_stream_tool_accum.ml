@@ -59,7 +59,6 @@ type t = {
       * string )
       list;
   mutable current_stream_scope : int;
-  mutable next_stream_scope : int;
   mutable current_message_id : string option;
   mutable current_message_start :
     (string * string * Agent_core.Types.api_usage option) option;
@@ -86,7 +85,6 @@ let create () =
   ; quarantined = []
   ; protocol_errors = []
   ; current_stream_scope = 0
-  ; next_stream_scope = 1
   ; current_message_id = None
   ; current_message_start = None
   ; message_open = false
@@ -144,8 +142,7 @@ let current_scope_is_invalid t =
 
 let advance_to_empty_scope t =
   discard_open_scope t t.current_stream_scope;
-  t.current_stream_scope <- t.next_stream_scope;
-  t.next_stream_scope <- t.next_stream_scope + 1;
+  t.current_stream_scope <- t.current_stream_scope + 1;
   t.current_message_id <- None;
   t.current_message_start <- None;
   t.message_open <- false;

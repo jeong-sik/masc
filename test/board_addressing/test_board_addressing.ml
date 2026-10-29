@@ -133,7 +133,9 @@ let test_routing_target () =
   check_routing "bare marker" None "@";
   check_routing "embedded marker" None "prefix@agent";
   check_routing "a particle after the name is not part of it" (Some "alpha")
-    "@alpha에게 부탁해요"
+    "@alpha에게 부탁해요";
+  check_routing "the author's casing is kept" (Some "MiXeD-Agent")
+    "@MiXeD-Agent inspect this"
 
 let test_routing_target_selectors () =
   check_routing "fleet selector" (Some "all") "release note @@all";
@@ -143,12 +145,27 @@ let test_routing_target_selectors () =
   check_routing "selector lowercased" (Some "delta") "release note @@Delta";
   check_routing "selector wins over a direct mention" (Some "gemini")
     "@ollama please notify @@gemini";
-  (* The [@@] that opens a diff hunk header names nobody. *)
+  (* The first selector written wins, not the first in sort order. *)
+  check_routing "first selector written" (Some "zeta") "@@zeta then @@alpha";
+  check_routing "a named selector written before the fleet one wins"
+    (Some "gemini") "@@gemini @@all";
+  (* The removed extractor took no ['-'] in a selector, so such a token was
+     prose to it and the direct target after it was found. *)
+  check_routing "a hyphenated selector is prose" None "@@all-agents";
+  check_routing "a hyphenated selector does not hide a direct target"
+    (Some "alpha") "@@canary-feature-2026 @alpha";
+  (* The [@@] that opens a diff hunk header names nobody, and it must hide
+     neither a selector nor a direct target written beside it. *)
   check_routing "hunk header names nobody" None
     "moved the hunk '@@ -1435,6 +1435,7 @@' by hand";
-  (* An empty selector must not hide a real one written beside it. *)
   check_routing "an empty selector does not hide a real one" (Some "delta")
-    "the hunk '@@ -1,2 +1,2 @@' then @@delta"
+    "the hunk '@@ -1,2 +1,2 @@' then @@delta";
+  check_routing "a hunk header before a direct target" (Some "alpha")
+    "see '@@ -1,3 +1,4 @@' @alpha please look";
+  check_routing "a hunk header after a direct target" (Some "alpha")
+    "@alpha see '@@ -1 +1 @@'";
+  check_routing "a bare selector token beside a direct target" (Some "alpha")
+    "@@ @alpha"
 
 (* A dune alias in a code span is not a recipient, and it must not hide the
    recipient written after it. *)
@@ -158,20 +175,97 @@ let test_routing_target_code_spans () =
   check_routing "alias in a fence names nobody" None
     "```\ndune build @runtest\n```";
   check_routing "a mention after a code span is still found" (Some "alpha")
-    "main fails `dune build @check` today\n\n@alpha @beta look"
+    "main fails `dune build @check` today\n\n@alpha @beta look";
+  (* An opening backtick with no closer addresses nobody after it. That is the
+     grammar's fail-closed direction, shared with the Board: a stray backtick
+     in prose silences the mentions behind it. *)
+  check_routing "a stray backtick silences what follows" None "don`t @alpha";
+  check_routing "an unterminated span silences what follows" None
+    "the `foo option is gone, ask @alpha";
+  check_routing "a mention before the stray backtick still counts"
+    (Some "alpha") "@alpha don`t wait"
 
 (* The name reaches code that builds a file name from it, such as a Keeper's
-   metadata path, so a path separator or a dot must never pass. The first
-   name written decides: a later valid name is not put in its place. *)
+   metadata path, so a path separator or a dot must never pass. A token that is
+   not a name is prose and is skipped, as the Board skips it, so it never hides
+   a name written beside it. *)
 let test_routing_target_names () =
   check_routing "a parent path is not a name" None "@../../etc/passwd please";
   check_routing "an absolute path is not a name" None "@/etc/passwd please";
   check_routing "a path with a separator is not a name" None "see @bin/all now";
   check_routing "a dotted name is not a name" None "ping @team.alpha now";
+  check_routing "a scoped Board id is not a Keeper name" None "@keeper:delta please";
   check_routing "a possessive is not a name" None "@alpha's note";
   check_routing "a selector with a separator is not a name" None "see @@bin/all";
-  check_routing "a later valid name does not replace the first" None
-    "@bin/all then @alpha"
+  check_routing "an npm scope is prose and does not hide a name" (Some "alpha")
+    "see @types/node, cc @alpha";
+  check_routing "a path before a name does not hide it" (Some "alpha")
+    "@bin/all then @alpha";
+  check_routing "a possessive before a name does not hide it" (Some "bob")
+    "@alice's @bob";
+  check_routing "a mention glued to the word before it is prose" None
+    "to:@alpha";
+  check_routing "a mention glued to non-ASCII text is prose" None "foo안녕@alpha"
+
+(* The quadratic algorithm [blank_code_regions] replaced. It tried every
+   position of a run of backticks on its own. Kept here to pin that the
+   linear one blanks exactly the same bytes. *)
+let reference_blank_code_regions text =
+  let length = String.length text in
+  let buffer = Bytes.of_string text in
+  let blank_range start stop =
+    for index = start to min stop (length - 1) do
+      Bytes.set buffer index ' '
+    done
+  in
+  let run_length_at index =
+    let rec count offset =
+      if index + offset < length && text.[index + offset] = '`' then count (offset + 1)
+      else offset
+    in
+    count 0
+  in
+  let rec scan index =
+    if index >= length then ()
+    else if text.[index] = '`' then (
+      let opener = run_length_at index in
+      let rec find_close cursor =
+        if cursor >= length then None
+        else if text.[cursor] = '`' && run_length_at cursor = opener then Some cursor
+        else find_close (cursor + 1)
+      in
+      match find_close (index + opener) with
+      | Some closer ->
+        blank_range index (closer + opener - 1);
+        scan (closer + opener)
+      | None -> blank_range index (length - 1))
+    else scan (index + 1)
+  in
+  scan 0;
+  Bytes.to_string buffer
+
+(* Every text over three characters up to length 10, which holds every
+   arrangement of runs of backticks that matter: a run shorter than, equal to
+   and longer than the opener, before, between and after other characters. *)
+let test_blank_code_regions_matches_reference () =
+  let alphabet = [ '`'; 'a'; ' ' ] in
+  let checked = ref 0 in
+  let rec extend reversed remaining =
+    let text = String.of_seq (List.to_seq (List.rev reversed)) in
+    let expected = reference_blank_code_regions text in
+    let actual = Board_addressing.blank_code_regions text in
+    incr checked;
+    if not (String.equal expected actual) then
+      failf "blank_code_regions differs for %S: reference %S, got %S" text expected
+        actual;
+    if remaining > 0 then
+      List.iter (fun character -> extend (character :: reversed) (remaining - 1)) alphabet
+  in
+  extend [] 10;
+  check bool "every text was compared" true (!checked > 80_000);
+  (* A longer run closes a shorter opener with its last backticks. *)
+  check string "a longer run closes a shorter opener" "    y"
+    (Board_addressing.blank_code_regions "`x``y")
 
 let () =
   run "board_addressing"
@@ -186,4 +280,7 @@ let () =
         [ test_case "direct targets" `Quick test_routing_target;
           test_case "selectors" `Quick test_routing_target_selectors;
           test_case "code spans" `Quick test_routing_target_code_spans;
-          test_case "names" `Quick test_routing_target_names ] ) ]
+          test_case "names" `Quick test_routing_target_names ] );
+      ( "blank_code_regions",
+        [ test_case "matches the quadratic reference" `Quick
+            test_blank_code_regions_matches_reference ] ) ]

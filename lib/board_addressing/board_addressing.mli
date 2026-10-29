@@ -57,16 +57,24 @@ val parse : string -> raw_address
     silently reinterpret the author's intent. *)
 
 val routing_target : string -> string option
-(** The one name a single-recipient consumer routes on, from the same
-    tokens as {!parse}, so a code span or fence carries no address.
-    A [@@] selector wins over direct targets: [@@all] gives ["all"] and any
-    other selector gives that selector, lowercased, for the caller to reject
-    as an unknown target.  A selector with nothing after it, as in the
-    [@@] of a diff hunk header, gives [None].  Otherwise the first direct
-    target, case preserved; no address gives [None].
+(** The one name a single-recipient consumer routes on, found in the same
+    tokens as {!parse}, so a code span or fence carries no address.  It is the
+    first name written.  A [@@] selector wins over direct targets, as in
+    {!parse}: [@@all] gives ["all"] and any other selector gives that selector,
+    lowercased, for the caller to reject as an unknown target.  Otherwise the
+    first direct target, case preserved.  No name gives [None].
 
-    The name holds only letters, digits, ['_'] and ['-'], the characters the
-    removed regex extractor accepted, because the callers' sinks build file
-    names from it.  A first name with any other character, such as ["a/b"],
-    ["a.b"] or ["alice's"], gives [None]; a later name is never substituted
-    for it. *)
+    A token that is not a name is prose and is skipped, so it never hides a
+    name written beside it.  A selector holds letters, digits and ['_'], a
+    direct target also ['-']: the characters the removed regex extractor
+    accepted, because the callers' sinks build file names from the name.  A
+    token with any other character, such as ["a/b"], ["a.b"], ["a:b"] or
+    ["alice's"], or with nothing after the [@] or [@@], is skipped.  Unlike
+    {!parse} this never refuses a text: a stray [@@], as in a diff hunk
+    header, does not hide a direct target. *)
+
+val blank_code_regions : string -> string
+(** Replace Markdown code spans and fences with spaces, keeping every
+    offset and word boundary.  An unterminated backtick blanks to the end of
+    the text, so an author who opened a span and did not close it addressed
+    nobody after it.  The cost is linear in the length of the text. *)

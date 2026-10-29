@@ -347,15 +347,26 @@ let test_a_step_the_inventory_does_not_show_is_judged_from_the_store () = with_f
   check (list string) "the store answers where the inventory does not" (run_ids_of first.program)
     (List.map (fun step -> (decision_of (judge_from fixture ~owner ~inventory:before step)).run_id) steps))
 
-(* The pass reads the gate scope once, at its start, and the steps it replays
-   are judged from that read. A restart replays the refusal of the first
-   message, which asks for the hole after that read and before the second
-   message is judged; with the gate scope taken away there, the second message
-   can only be judged from the pass's own read. *)
-let test_a_chain_judges_the_steps_it_replays_from_the_read_it_made_at_its_start () = with_fixture (fun fixture ->
-  fixture.respond := answering ~refuse:[ first_text ] ();
+let middle_text = "the middle message of the floor turn"
+let third_text = "the third message of the floor turn"
+let three_messages = [ first_message; message middle_text; message third_text ]
+
+(* The third message is answered, the middle one refused as too large, and the
+   first is answered. *)
+let answering_three () body =
+  if contains body third_text then `OK, F.openai_response (answer ~claim:"claim 3" ~state:"state 3")
+  else if contains body middle_text then size_refusal
+  else `OK, F.openai_response (answer ~claim:"claim 1" ~state:"state 1")
+
+(* The pass reads the gate scope once, when its first answered step needs
+   judging, and the steps it replays are judged from that read. A restart
+   replays the refusal of the middle message, which asks for the hole after the
+   first message was judged and before the third is; with the gate scope taken
+   away there, the third message can only be judged from the pass's own read. *)
+let test_a_chain_judges_the_steps_it_replays_from_one_read_of_the_gate_scope () = with_fixture (fun fixture ->
+  fixture.respond := answering_three ();
   let owner = owner fixture and range = range_link (owner fixture) in
-  let first = finished (drive fixture ~owner ~range ()) in
+  let first = finished (drive fixture ~owner ~range ~messages:three_messages ()) in
   let directory = scope_directory fixture ~scope:(Gate.scope owner) in
   let aside = directory ^ ".aside" in
   let hidden = ref false in
@@ -364,15 +375,41 @@ let test_a_chain_judges_the_steps_it_replays_from_the_read_it_made_at_its_start 
       hidden := true;
       Sys.rename directory aside
     end;
-    unread_message messages source ~reasons in
+    unread_message three_messages source ~reasons in
   let restart =
     Fun.protect ~finally:(fun () -> if !hidden then Sys.rename aside directory) (fun () ->
       Chain.run ~store:fixture.store ~config:fixture.config ~reserved:(Edge.reserved ()) ~owner ~range
-        ~input:(input_over messages) ~sources:(sources_of messages) ~fresh:(fun () -> Ok fresh)
+        ~input:(input_over three_messages) ~sources:(sources_of three_messages) ~fresh:(fun () -> Ok fresh)
         ~unread_message:unread_message_hiding_the_scope) in
-  check bool "the restart replayed a refusal after its read" true !hidden;
-  check bool "and judged the second message without the scope" true
+  check bool "the restart replayed a refusal between two judgments" true !hidden;
+  check bool "and judged the third message without the scope" true
     (Yojson.Safe.equal (Program.to_json (finished restart).program) (Program.to_json first.program)))
+
+(* A gate scope that cannot be read: a record filed under a name that is not
+   its request ID. *)
+let spoil_gate_scope fixture ~owner =
+  write (Filename.concat (scope_directory fixture ~scope:(Gate.scope owner)) "not-its-id.json")
+    {|{"request_id":"another"}|}
+
+(* A pass in which no step has been answered has nothing to judge, so it does
+   not read the gate scope. The pass that finds the first step answered does. *)
+let test_a_pass_with_no_answered_step_does_not_read_the_gate_scope () = with_fixture (fun fixture ->
+  fixture.respond := answering ();
+  let owner = owner fixture and range = range_link (owner fixture) in
+  spoil_gate_scope fixture ~owner;
+  (match Gate.Inventory.read ~store:fixture.store ~owner with
+   | Error _ -> ()
+   | Ok _ -> fail "the spoiled gate scope still reads");
+  let before = !(fixture.deliveries) in
+  (match run_once fixture ~owner ~range () with
+   | Ok (Chain.Pending detail) ->
+     check bool "the first step waits on its worker" true (contains detail "waiting on its worker")
+   | Ok (Chain.Finished _ | Chain.Stopped _) -> fail "the chain went past a step nothing had answered"
+   | Error detail -> failf "a pass with no answered step read the gate scope: %s" detail);
+  await_delivery fixture ~after:before;
+  match run_once fixture ~owner ~range () with
+  | Error _ -> ()
+  | Ok (Chain.Pending _ | Chain.Finished _ | Chain.Stopped _) -> fail "an answered step was judged without the gate scope")
 
 let absorbing_answer = `Assoc
   [ "new_claims", `List [ `Assoc [ "claim", `String "a claim that absorbs the stale fact"; "category", `String "fact";
@@ -446,8 +483,10 @@ let () =
             test_a_finished_step_is_judged_from_the_inventory_and_not_from_the_store
         ; test_case "a step the inventory does not show is judged from the store" `Slow
             test_a_step_the_inventory_does_not_show_is_judged_from_the_store
-        ; test_case "a chain judges the steps it replays from the read it made at its start" `Slow
-            test_a_chain_judges_the_steps_it_replays_from_the_read_it_made_at_its_start
+        ; test_case "a chain judges the steps it replays from one read of the gate scope" `Slow
+            test_a_chain_judges_the_steps_it_replays_from_one_read_of_the_gate_scope
+        ; test_case "a pass with no answered step does not read the gate scope" `Slow
+            test_a_pass_with_no_answered_step_does_not_read_the_gate_scope
         ; test_case "a failed gate is not a decision and a retried one is judged from the inventory" `Slow
             test_a_failed_gate_is_not_a_decision_and_a_retried_one_is_judged_from_the_inventory
         ] )

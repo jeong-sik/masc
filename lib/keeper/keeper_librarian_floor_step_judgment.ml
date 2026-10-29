@@ -36,7 +36,8 @@ let decide ~step ~(answer : Keeper_librarian_floor_step_owner.answer) ~(root : O
    Reading the scope again for each step is what made a pass cost the square of
    the chain's length. A step in any other state gets [None] and takes the
    fresh-read path of [judge_by_fresh_reads], which also recovers, retries and
-   dispatches. *)
+   dispatches. This only reads: nothing is created or sent, so it asks for no
+   authority. *)
 let settled ~inventory ~step ~record ~absorbed =
   match Journal.Inventory.validate inventory ~capture:step ~parent:record with
   | Error _ -> None

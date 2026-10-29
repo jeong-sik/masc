@@ -831,6 +831,9 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                  [Llm_provider.Http_client.pre_header_deadline]. *)
               let config =
                 Runtime_agent.default_config
+                  (* The readiness run keeps no checkpoint, so its history
+                     media live as long as the run. *)
+                  ~media_store:(Agent_core.History.Memory_store.create ())
                   ~name:"runtime-verification"
                   ~provider_cfg
                   ~system_prompt:prompt
@@ -882,6 +885,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                     | Agent_core.Error.Serialization _
                     | Agent_core.Error.Io _
                     | Agent_core.Error.Orchestration _
+                    | Agent_core.Error.Media _
                     | Agent_core.Error.Internal _
                     | Agent_core.Error.Internal_carried _ ) as error) ->
                  Error (failure_of_agent_core_error error)

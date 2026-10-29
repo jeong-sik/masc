@@ -314,7 +314,12 @@ type reasoning_detail =
   }
 [@@deriving show]
 
-type content_block =
+(** A content block over a media source. The provider instantiates it with
+    {!media_source}, which carries payloads; history instantiates it with a
+    source that holds bytes by reference. Constructors are shared, so code
+    that reads only kinds, positions, text or reasoning is written once for
+    both. *)
+type 'source content_block_with =
   | Text of string
   | Thinking of
       { content : string
@@ -338,24 +343,26 @@ type content_block =
       ; content : string
       ; outcome : tool_result_outcome
       ; json : Yojson.Safe.t option (** Structured payload when parseable. *)
-      ; content_blocks : content_block list option
+      ; content_blocks : 'source content_block_with list option
         (** Structured multi-block result (e.g. text + image). When [Some],
             providers that accept an array tool_result content serialize the
             blocks; [content] stays the canonical string fallback. *)
       }
   | Image of
       { media_type : string
-      ; source : media_source
+      ; source : 'source
       }
   | Document of
       { media_type : string
-      ; source : media_source
+      ; source : 'source
       }
   | Audio of
       { media_type : string
-      ; source : media_source
+      ; source : 'source
       }
 [@@deriving show]
+
+type content_block = media_source content_block_with [@@deriving show]
 
 type tool_output =
   { content : string
@@ -528,15 +535,18 @@ type message_origin =
 val message_origin_to_string : message_origin -> string
 val message_origin_of_string : string -> message_origin option
 
-type message =
+(** A message over a media source; see {!content_block_with}. *)
+type 'source message_with =
   { role : role
   ; origin : message_origin
-  ; content : content_block list
+  ; content : 'source content_block_with list
   ; name : string option
   ; tool_call_id : string option
   ; metadata : metadata
   }
 [@@deriving show]
+
+type message = media_source message_with [@@deriving show]
 
 (** Messages as hash-table keys.
 
@@ -557,6 +567,15 @@ module Message_value : sig
 
   val equal : t -> t -> bool
   val hash : t -> int
+end
+
+(** {!Message_value} over any media source: [source_hint] is what a media
+    source contributes to the hash, and {!string_hint} is the sampled string
+    hash every other field uses. *)
+module Message_value_with : sig
+  val equal : 'source message_with -> 'source message_with -> bool
+  val hash : source_hint:('source -> int) -> 'source message_with -> int
+  val string_hint : string -> int
 end
 
 (** {1 Response Types} *)
@@ -650,12 +669,12 @@ module Inline_content_replay : sig
   type t = { raw_content : string; block_indices : int list }
   [@@deriving show, yojson]
   val metadata_key : string
-  val make : content:content_block list -> raw_content:string -> block_indices:int list -> (t, string) result
+  val make : content:'source content_block_with list -> raw_content:string -> block_indices:int list -> (t, string) result
   val metadata : t -> string * Yojson.Safe.t
-  val of_metadata : content:content_block list -> (string * Yojson.Safe.t) list -> (t option, string) result
+  val of_metadata : content:'source content_block_with list -> (string * Yojson.Safe.t) list -> (t option, string) result
   val remove_metadata : (string * Yojson.Safe.t) list -> (string * Yojson.Safe.t) list
-  val retain : original_content:content_block list -> content:content_block list -> retained_indices:int list -> t -> (t option, string) result
-  val retain_metadata : original_content:content_block list -> content:content_block list -> retained_indices:int list -> (string * Yojson.Safe.t) list -> ((string * Yojson.Safe.t) list, string) result
+  val retain : original_content:'source content_block_with list -> content:'source content_block_with list -> retained_indices:int list -> t -> (t option, string) result
+  val retain_metadata : original_content:'source content_block_with list -> content:'source content_block_with list -> retained_indices:int list -> (string * Yojson.Safe.t) list -> ((string * Yojson.Safe.t) list, string) result
 end
 
 (** Payload-free native Responses output-item partition. A message phase
@@ -672,12 +691,12 @@ module Response_replay : sig
   val metadata_key : string
   val phase_of_fields : (string * Yojson.Safe.t) list -> (phase, string) result
   val phase_fields : phase -> (string * Yojson.Safe.t) list
-  val partition : content:content_block list -> t -> ((kind * content_block list) list, string) result
-  val make : content:content_block list -> group list -> (t, string) result
+  val partition : content:'source content_block_with list -> t -> ((kind * 'source content_block_with list) list, string) result
+  val make : content:'source content_block_with list -> group list -> (t, string) result
   val metadata : t -> string * Yojson.Safe.t
-  val of_metadata : content:content_block list -> (string * Yojson.Safe.t) list -> (t option, string) result
-  val retain : original_content:content_block list -> content:content_block list -> retained_indices:int list -> t -> (t, string) result
-  val retain_metadata : original_content:content_block list -> content:content_block list -> retained_indices:int list -> (string * Yojson.Safe.t) list -> ((string * Yojson.Safe.t) list, string) result
+  val of_metadata : content:'source content_block_with list -> (string * Yojson.Safe.t) list -> (t option, string) result
+  val retain : original_content:'source content_block_with list -> content:'source content_block_with list -> retained_indices:int list -> t -> (t, string) result
+  val retain_metadata : original_content:'source content_block_with list -> content:'source content_block_with list -> retained_indices:int list -> (string * Yojson.Safe.t) list -> ((string * Yojson.Safe.t) list, string) result
 end
 
 type reported_model =
@@ -1075,28 +1094,30 @@ type stream_event_resolution =
 
 (** {1 Convenience Constructors} *)
 
+(** These build blocks and messages over any media source. *)
+
 val make_message
   :  ?name:string
   -> ?tool_call_id:string
   -> ?origin:message_origin
   -> ?metadata:(string * Yojson.Safe.t) list
   -> role:role
-  -> content_block list
-  -> message
+  -> 'source content_block_with list
+  -> 'source message_with
 
-val text_block : string -> content_block
+val text_block : string -> 'source content_block_with
 
-val image_block : media_type:string -> source:media_source -> content_block
+val image_block : media_type:string -> source:'source -> 'source content_block_with
 
-val document_block : media_type:string -> source:media_source -> content_block
+val document_block : media_type:string -> source:'source -> 'source content_block_with
 
-val audio_block : media_type:string -> source:media_source -> content_block
+val audio_block : media_type:string -> source:'source -> 'source content_block_with
 
-val text_message : role -> string -> message
-val user_msg_blocks : content_block list -> message
-val system_msg : string -> message
-val user_msg : string -> message
-val assistant_msg : string -> message
+val text_message : role -> string -> 'source message_with
+val user_msg_blocks : 'source content_block_with list -> 'source message_with
+val system_msg : string -> 'source message_with
+val user_msg : string -> 'source message_with
+val assistant_msg : string -> 'source message_with
 val try_parse_json : string -> Yojson.Safe.t option
 
 val tool_result_msg
@@ -1105,7 +1126,7 @@ val tool_result_msg
   -> ?outcome:tool_result_outcome
   -> ?json:Yojson.Safe.t
   -> unit
-  -> message
+  -> 'source message_with
 
 (** {1 Tool Result Validation}
 
@@ -1123,11 +1144,11 @@ type tool_result_validation_error =
 val validate_tool_result_shape
   :  expect_object:bool
   -> expect_array:bool
-  -> content_block
+  -> 'source content_block_with
   -> (unit, tool_result_validation_error) result
 
-val text_of_content : content_block list -> string
-val text_of_message : message -> string
+val text_of_content : 'source content_block_with list -> string
+val text_of_message : 'source message_with -> string
 val text_of_response : api_response -> string
 
 (** End-user-visible assistant text projection.
@@ -1136,7 +1157,7 @@ val text_of_response : api_response -> string
     intentionally exclude [Thinking], [RedactedThinking], [ToolUse],
     [ToolResult], and media blocks so downstream answer surfaces do not leak
     reasoning or execution payloads. *)
-val visible_text_of_content : content_block list -> string
+val visible_text_of_content : 'source content_block_with list -> string
 
 val visible_text_of_response : api_response -> string
 

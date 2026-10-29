@@ -125,7 +125,7 @@ stream_idle_timeout_sec = %g
           ~system_prompt:"Stream idle bound proof."
           ~runtime_id:"stall.sample"
           ~keeper_name:"stream-idle-bound-proof"
-          ~base_path
+          ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
           ~agent_core_tools:[]
           ~goal:"answer, then stop mid-stream"
           ~on_event:(fun _ -> ())

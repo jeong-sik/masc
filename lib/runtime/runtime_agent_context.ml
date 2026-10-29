@@ -108,6 +108,7 @@ type config =
   ; execution_actor : string option
     (** Host-owned tool actor, independent of the synthetic agent name. *)
   ; initial_messages : Agent_core.Types.message list
+  ; media_store : Agent_core.History.media_store
   ; model_input_projection : Agent_core.Agent.model_input_projection option
     (** Caller-owned projection applied only to provider-bound messages.
         Agent state and checkpoints retain their canonical persisted form. *)
@@ -158,6 +159,7 @@ type config =
   }
 
 let default_config
+      ~media_store
       ~name
       ~(provider_cfg : Llm_provider.Provider_config.t)
       ~system_prompt
@@ -185,6 +187,7 @@ let default_config
   ; runtime_id = None
   ; execution_actor = None
   ; initial_messages = []
+  ; media_store
   ; model_input_projection = None
   ; pre_dispatch_serialization_observer = None
   ; serialization_executor = None
@@ -267,7 +270,7 @@ let builder
   : Agent_core.Builder.t
   =
   let builder =
-    Agent_core.Builder.create ~net ~model:config.model_id
+    Agent_core.Builder.create ~net ~media_store:config.media_store ~model:config.model_id
     |> Agent_core.Builder.with_provider_config config.provider_cfg
     |> Agent_core.Builder.with_name config.name
     |> Agent_core.Builder.with_system_prompt config.system_prompt

@@ -82,7 +82,7 @@ let run_refusal ~body_limit () =
   let result = Keeper_turn_driver_wrappers.run_named_with_masc_tools
     ~input_source:Masc.Keeper_request_source.Completion_review
     ~runtime_id:"fixture.sample" ~keeper_name:"completion-evidence"
-    ~walk_owner:Keeper_turn_driver.One_shot_walk ~base_path ~goal
+    ~walk_owner:Keeper_turn_driver.One_shot_walk ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path) ~goal
     ~system_prompt:"Review the original evidence."
     ~raw_trace:None
     ~masc_tools:[{Masc_domain.name=lookup_name;description="Read the original evidence";

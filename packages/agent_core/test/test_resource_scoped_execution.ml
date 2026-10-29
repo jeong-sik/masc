@@ -14,10 +14,10 @@ let scope ?(access = Tool_contract.Resource_scope.Write) ?(ancestors = []) key =
     ~ancestors:(List.map identity ancestors)
 ;;
 
-let call name = ToolUse { id = "occurrence-" ^ name; name; input = `Assoc [] }
+let call name = Llm_provider.Types.ToolUse { id = "occurrence-" ^ name; name; input = `Assoc [] }
 
 let execute env ?(hooks = Hooks.empty) ?(turn_count = 4) ?on_tool_execution_finished tools calls =
-  let agent = Agent.create ~config:(default_config ~model:"fixture")
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(default_config ~model:"fixture")
       ~net:(Eio.Stdenv.net env) ~tools () in
   let options = Agent.options agent in
   Agent_tools.execute_tools ~context:(Agent.context agent)
@@ -159,7 +159,7 @@ let test_fallback_unavailable_validation_and_permission () =
       (fun input ->
         let value = Yojson.Safe.Util.(input |> member "value" |> to_string) in
         effects := value :: !effects; output ("fallback:" ^ value)) in
-  let tool_use id input = ToolUse { id; name = "resolved"; input } in
+  let tool_use id input = Llm_provider.Types.ToolUse { id; name = "resolved"; input } in
   let input value = `Assoc [ "value", `String value ] in
   let hooks = { Hooks.empty with pre_tool_use = Some (function
     | Hooks.PreToolUse { input = `Assoc [ "value", `String "denied" ]; _ } -> Hooks.Block "denied"
@@ -420,7 +420,9 @@ let test_durable_truth_precedes_current_preparation () =
       check int "current resource resolver is not consulted for an attempted original" 0 !current_preparations;
       check int "attempted original is not reauthorized through current hooks" 0 !hook_calls;
       check int "original effect is never dispatched twice" 1 !ran;
-      let changed = ToolUse { id = "changed-occurrence"; name = "durable"; input = `Assoc [] } in
+      let changed =
+        Llm_provider.Types.ToolUse { id = "changed-occurrence"; name = "durable"; input = `Assoc [] }
+      in
       (match in_provider (fun () -> execute env ~turn_count:0 [] [ changed ]) with
        | Error { Agent_tools.cause = Agent_tools.Durability_failure _; _ } -> ()
        | Ok _ | Error _ -> fail "changed occurrence reused original durable authority")) with

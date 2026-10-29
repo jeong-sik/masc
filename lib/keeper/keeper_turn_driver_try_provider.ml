@@ -422,6 +422,7 @@ type try_provider_ctx =
     hold_carried_front : Keeper_carried_front.seed -> unit
   ; restore_carried_front : Keeper_carried_front.seed option -> unit
   ; base_path : string
+  ; media_store : Agent_core.History.media_store
   ; keeper_name : string
   ; name : string
   ; (* Agent config — fields passed through the runtime candidate boundary. *)
@@ -435,7 +436,7 @@ type try_provider_ctx =
   ; initial_messages : Agent_core.Types.message list
   ; argument_demotion_seed : Agent_core.Types.message list option
   ; argument_replay_prefix : Keeper_replay_prefix.projection
-  ; model_input_projection : Agent_core.Agent.model_input_projection option
+  ; model_input_projection : Keeper_history_projection.t option
   ; stream_idle_timeout_s : float
     (* Bound on the silent gap between two streamed lines. It re-arms after
        every line, so it detects a stalled stream, not a long turn. The keeper
@@ -665,7 +666,7 @@ let is_end_turn_empty_completion (error : Agent_core.Error.t) =
   | Agent_core.Error.Config _
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
   | Agent_core.Error.Internal _
   | Agent_core.Error.Internal_carried _ -> false
 
@@ -1393,11 +1394,24 @@ type request_view =
   ; completed_arguments : Keeper_model_input_demotion.completed_arguments option
   ; argument_prefix_protected : bool
   ; carried : Agent_core.Types.message list
+  ; carried_wire : Agent_core.Llm_provider.Types.message list
   ; wire :
-      ( Agent_core.Types.message list
+      ( Agent_core.Llm_provider.Types.message list
         , Agent_core.Llm_provider.Reasoning_history_projection.error )
         result
   }
+
+(* The carried range, and only it, with its media read back from the store. *)
+let resolve_carried ~to_wire carried =
+  let rec resolve acc = function
+    | [] -> Ok (List.rev acc)
+    | message :: rest ->
+      (match to_wire message with
+       | Ok wire -> resolve (wire :: acc) rest
+       | Error _ as error -> error)
+  in
+  resolve [] carried
+;;
 
 let unchecked_request_view
       ~tools
@@ -1414,6 +1428,7 @@ let unchecked_request_view
       ~demote_before
       ~turn_boundary
       ~materialize
+      ~to_wire
       messages
   =
   let composed =
@@ -1435,13 +1450,22 @@ let unchecked_request_view
     | [] -> composed.projection.Runtime_model_input_tail_window.messages
     | pending -> materialize ~pending composed.projection.Runtime_model_input_tail_window.messages
   in
-  let wire =
-    offload_model_input_cpu (fun () ->
-      Agent_core.Llm_provider.Complete_common.transmitted_history
-        ~tools ~config:provider_config
-        carried)
-  in
-  { composed; carried; wire; completed_arguments; argument_prefix_protected = false }
+  Result.map
+    (fun carried_wire ->
+       let wire =
+         offload_model_input_cpu (fun () ->
+           Agent_core.Llm_provider.Complete_common.transmitted_history
+             ~tools ~config:provider_config
+             carried_wire)
+       in
+       { composed
+       ; carried
+       ; carried_wire
+       ; wire
+       ; completed_arguments
+       ; argument_prefix_protected = false
+       })
+    (resolve_carried ~to_wire carried)
 ;;
 
 module Message_indices = Set.Make (Int)
@@ -1470,21 +1494,22 @@ let request_view
       ?(input_policy = Keeper_input_policy.Wide) ?continuity ?completed_arguments
       ?(tools = []) ~provider_config ~measure_message_bytes ~front ~accepted
       ~history_digest_at ~current_turn_results ~base_path ~demote_before
-      ~turn_boundary ~materialize messages =
+      ~turn_boundary ~materialize ~to_wire messages =
+  let open Result.Syntax in
   let build ?(materialize = materialize) completed_arguments =
     unchecked_request_view ~tools ~input_policy ?continuity ?completed_arguments
       ~provider_config ~measure_message_bytes ~front ~accepted ~history_digest_at
-      ~current_turn_results ~base_path ~demote_before ~turn_boundary ~materialize messages
+      ~current_turn_results ~base_path ~demote_before ~turn_boundary ~materialize
+      ~to_wire messages
   in
-  let candidate = build completed_arguments in
+  let* candidate = build completed_arguments in
   match completed_arguments with
-  | None -> candidate
+  | None -> Ok candidate
   | Some arguments ->
     let retained_reasoning view =
-      let open Result.Syntax in
       let* retained =
         Agent_core.Llm_provider.Complete_common.retained_prefix_reasoning_indices
-          ~config:provider_config ~tools view.carried
+          ~config:provider_config ~tools view.carried_wire
         |> Result.map_error (fun _ -> ())
       in
       match retained with
@@ -1505,7 +1530,7 @@ let request_view
     in
     let candidate_reasoning = offload_model_input_cpu (fun () -> retained_reasoning candidate) in
     match candidate_reasoning with
-    | Ok None -> candidate
+    | Ok None -> Ok candidate
     | Ok (Some _) | Error () ->
       let captured = offload_model_input_cpu (fun () -> Keeper_model_input_demotion.capture_materialized
           ~pending:candidate.composed.planned.pending
@@ -1515,28 +1540,29 @@ let request_view
          (* A custom materializer broke slot correspondence. Return the
             Result-only path outright; its new outcome is never an oracle
             for re-enabling arguments. *)
-         { (build None) with argument_prefix_protected = true }
+         let+ view = build None in
+         { view with argument_prefix_protected = true }
        | Some _ ->
       let replay ~pending messages = offload_model_input_cpu (fun () ->
         Keeper_model_input_demotion.replay_materialized captured ~pending messages) in
-      let baseline = build ~materialize:replay None in
+      let* baseline = build ~materialize:replay None in
       let baseline_reasoning = offload_model_input_cpu (fun () -> retained_reasoning baseline) in
-      let baseline_fallback () = { baseline with argument_prefix_protected = true } in
+      let baseline_fallback () = Ok { baseline with argument_prefix_protected = true } in
       (match baseline_reasoning, candidate_reasoning with
        | Ok (Some baseline_sources), Ok (Some candidate_sources) ->
          let missing = Message_indices.diff baseline_sources candidate_sources in
-         if Message_indices.is_empty missing then candidate
+         if Message_indices.is_empty missing then Ok candidate
          else
            let protected_arguments =
              Keeper_model_input_demotion.protect_argument_prefix
                ~through_message:(Message_indices.max_elt missing) arguments
            in
-           let final = build ~materialize:replay (Some protected_arguments) in
+           let* final = build ~materialize:replay (Some protected_arguments) in
            (* Restoring an earlier argument changes the chain again. Verify
               the actual final materialization, including failed blob writes. *)
            (match offload_model_input_cpu (fun () -> retained_reasoning final) with
             | Ok (Some final_sources) when Message_indices.subset baseline_sources final_sources ->
-              { final with argument_prefix_protected = true }
+              Ok { final with argument_prefix_protected = true }
             | Ok None | Ok (Some _) | Error () -> baseline_fallback ())
        | (Ok None | Error ()), (Ok None | Ok (Some _) | Error ()) -> baseline_fallback ()
        | Ok (Some _), (Ok None | Error ()) -> baseline_fallback ()))
@@ -1623,18 +1649,43 @@ let argument_binding_error_to_string = function
   | Argument_occurrence_mismatch -> "completed ToolUse sequence differs from the dispatch request"
 ;;
 
+(* One conversion per message per attempt: the requests of an attempt carry
+   mostly the same history, and resolving a [Stored] block reads and checks
+   its blob. Keyed like [Message_measurement_cache]. *)
+let memoize_wire_message media_store =
+  let cache = Message_measurement_cache.create 128 in
+  fun message ->
+    match Message_measurement_cache.find_opt cache message with
+    | Some wire -> Ok wire
+    | None ->
+      Result.map
+        (fun wire ->
+           Message_measurement_cache.add cache message wire;
+           wire)
+        (Agent_core.History.to_wire_message media_store message)
+;;
+
 let bounded_model_input_projection
       (ctx : try_provider_ctx)
       ~(state : attempt_state)
       ~agent_cell
+      ~media_store
+      ~on_resolved
       ~(provider_config : Llm_provider.Provider_config.t)
   : Agent_core.Agent.model_input_projection
   =
   match ctx.request_input with
   | Completion_review ->
-    (fun messages -> match ctx.model_input_projection with
-       | None -> Ok messages
-       | Some project -> project messages)
+    (fun messages ->
+       let open Result.Syntax in
+       let* messages =
+         match ctx.model_input_projection with
+         | None -> Ok messages
+         | Some project -> project messages
+       in
+       on_resolved messages;
+       Agent_core.History.to_wire_messages media_store messages
+       |> Result.map_error (fun error -> Agent_core.Error.Media error))
   | Keeper_history _ ->
   let reserved_bytes, prefix_digest =
     offload_model_input_cpu (fun () ->
@@ -1746,6 +1797,7 @@ let bounded_model_input_projection
   (* The cold-start seed is read once per attempt and only when no ledger
      answers; every response updates the working ledger even without usage. *)
   let cold_seed = lazy (ctx.carried_front_seed ()) in
+  let to_wire = memoize_wire_message media_store in
   fun messages ->
     state.request_range := None;
     (* Discovery may widen the Agent's tools between provider rounds. The
@@ -1844,7 +1896,7 @@ let bounded_model_input_projection
            | Keeper_carried_front.Turn_boundary { end_atom } -> end_atom
            | Keeper_carried_front.Turn_boundary_unknown _ -> 0)
     in
-    let view =
+    let* view =
       request_view
         ~input_policy:ctx.input_policy ?continuity:(input_continuity ctx.request_input) ?completed_arguments
         ~tools:prefix_tools
@@ -1882,7 +1934,9 @@ let bounded_model_input_projection
               "input policy kept original tool bodies after externalization failure: count=%d"
               outcome.reverted);
           outcome.Keeper_model_input_demotion.messages)
+        ~to_wire
         messages
+      |> Result.map_error (fun error -> Agent_core.Error.Media error)
     in
     (* A failed store can change the actual prefix a newly produced reasoning
        block binds to. Recheck each request and only narrow the frozen set. *)
@@ -1916,9 +1970,9 @@ let bounded_model_input_projection
                  messages
              in
              current_turn_demotion ~refused:composed ~demoted));
-    let windowed =
+    let windowed_count =
       match view.wire with
-      | Ok transmitted -> transmitted
+      | Ok transmitted -> List.length transmitted
       | Error error ->
         (* The backend runs this same projection over this same list and
            refuses the request with its typed error, which the turn's failure
@@ -1936,7 +1990,7 @@ let bounded_model_input_projection
             (Agent_core.Llm_provider.Reasoning_history_projection
              .error_to_string
                error));
-        view.carried
+        List.length view.carried
     in
     if not !front_reported
     then (
@@ -1946,7 +2000,7 @@ let bounded_model_input_projection
           List.fold_left
             (fun sum message -> sum + measure_message_bytes message)
             0
-            windowed)
+            view.carried)
       in
       emit_runtime_manifest ctx
         ~status:(match view.wire with
@@ -1955,7 +2009,7 @@ let bounded_model_input_projection
         ~decision:(`Assoc
           [ "scope", `String "first_request_projection_in_provider_attempt_not_delivery"
           ; "source_message_count", `Int (List.length messages)
-          ; "projected_message_count", `Int (List.length windowed)
+          ; "projected_message_count", `Int windowed_count
           ; "history_atom_count", `Int history_atom_count
           ; "first_atom", `Int composed.projection.Runtime_model_input_tail_window.dropped_atoms
           ; "origin", `String (Keeper_carried_front.origin_to_string composed.origin)
@@ -2084,9 +2138,11 @@ let bounded_model_input_projection
           ; digest_at = history_digest_at
           ; origin = view.composed.origin
           });
+    (* The masc projections rewrite the carried history; only their output
+       is resolved for the request. *)
     let result = match ctx.model_input_projection with
-      | None -> Ok windowed
-      | Some inner -> inner windowed in
+      | None -> Ok view.carried
+      | Some inner -> inner view.carried in
     let result=Result.map (Keeper_librarian_request_unread.attach ~role:Agent_core.Types.User
       (Option.fold ~none:Keeper_librarian_request_unread.empty ~some:request_unread (input_continuity ctx.request_input))) result in
     (match view.wire, result with
@@ -2094,7 +2150,7 @@ let bounded_model_input_projection
        let changed = match ctx.model_input_projection with
          | None -> false
          | Some _ -> offload_model_input_cpu (fun () ->
-             not (List.equal Agent_core.Types.Message_value.equal windowed projected)) in
+             not (List.equal Agent_core.Types.Message_value.equal view.carried projected)) in
        state.request_range := Some
          { Keeper_continuity_request.origin = composed.origin
          ; first_atom = composed.projection.Runtime_model_input_tail_window.dropped_atoms
@@ -2102,7 +2158,30 @@ let bounded_model_input_projection
          ; custom_projection_changed = changed
          }
      | Error _, (Ok _ | Error _) | Ok _, Error _ -> ());
-    result
+    let* projected = result in
+    on_resolved projected;
+    if projected == view.carried
+    then
+      (* Unchanged by the masc projections: [view] already resolved and
+         projected this list for the wire. *)
+      Ok (match view.wire with
+          | Ok transmitted -> transmitted
+          | Error _ -> view.carried_wire)
+    else
+      let* projected_wire =
+        resolve_carried ~to_wire projected
+        |> Result.map_error (fun error -> Agent_core.Error.Media error)
+      in
+      (* A declined projection hands the resolved list over as it is: the
+         backend runs the same projection and refuses the request. *)
+      Ok
+        (match
+           offload_model_input_cpu (fun () ->
+             Agent_core.Llm_provider.Complete_common.transmitted_history
+               ~tools:prefix_tools ~config:provider_config projected_wire)
+         with
+         | Ok transmitted -> transmitted
+         | Error _ -> projected_wire)
 ;;
 
 let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (ctx : try_provider_ctx) candidate =
@@ -2169,6 +2248,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
   let config_result =
     let base_config =
       Runtime_candidate.default_config
+        ~media_store:ctx.media_store
         ~name:ctx.name
         ~system_prompt:ctx.system_prompt
         ~tools:ctx.tools
@@ -2445,8 +2525,12 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
        needs the provider config that record is still producing: it measures
        the history that config's serializer will carry, and asking a config
        that does not exist yet would mean measuring something else. *)
+    let media_store = config.Runtime_agent.media_store in
+    let resolved_history = ref None in
     let project = bounded_model_input_projection ctx ~state
-        ~agent_cell:attempt_agent_ref ~provider_config:config.Runtime_agent.provider_cfg in
+        ~on_resolved:(fun history -> resolved_history := Some history)
+        ~agent_cell:attempt_agent_ref ~media_store
+        ~provider_config:config.Runtime_agent.provider_cfg in
     let retained_message = Option.bind retained_results Keeper_client_tool_outbox.context_message in
     let retained_bytes = match retained_message with
       | None -> 0
@@ -2458,9 +2542,19 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
         model_input_projection =
           Some
             (fun messages ->
-              final_projected_messages := None;
-              Result.map (fun messages ->
-               let messages = match retained_message with
+               final_projected_messages := None;
+               resolved_history := None;
+               let open Result.Syntax in
+               let* retained_wire =
+                 match retained_message with
+                 | None -> Ok None
+                 | Some message ->
+                   Agent_core.History.to_wire_message media_store message
+                   |> Result.map Option.some
+                   |> Result.map_error (fun error -> Agent_core.Error.Media error)
+               in
+               Result.map (fun messages ->
+               let messages = match retained_wire with
                | None -> messages
                | Some message ->
                  retained_results_projected := true;
@@ -2473,9 +2567,17 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                      tail_bytes=request.request.tail_bytes + retained_bytes}}) !(state.last_request);
                  state.request_range := Option.map (fun range ->
                    {range with Keeper_continuity_request.custom_projection_changed=true}) !(state.request_range);
-                 List.filter (fun message -> not (Keeper_client_tool_outbox.is_context_message message))
+                 List.filter (fun message -> not (Keeper_client_tool_outbox.is_wire_context_message message))
                    messages @ [message] in
-               final_projected_messages := Some messages;
+               (* The recorded input is the history this request was resolved
+                  from, with the retained-result carrier where the wire puts
+                  it, so its media stay [Stored] references. *)
+               final_projected_messages := Option.map (fun history ->
+                 match retained_message with
+                 | None -> history
+                 | Some retained ->
+                   List.filter (fun message -> not (Keeper_client_tool_outbox.is_context_message message))
+                     history @ [retained]) !resolved_history;
                messages) (project messages))
       }
     in
@@ -2834,6 +2936,7 @@ let is_size_refusal = function
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
   | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Media _
   | Agent_core.Error.Internal _
   | Agent_core.Error.Internal_carried _ -> false
 ;;
@@ -2972,6 +3075,7 @@ let boundary_resend_on = function
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
   | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Media _
   | Agent_core.Error.Internal _
   | Agent_core.Error.Internal_carried _ -> false
 ;;

@@ -154,6 +154,7 @@ let nonempty_trimmed_option = function
 ;;
 
 let direct_message
+      ~media_store
       ~keeper_name
       ~prompt
       ~direct_reply
@@ -172,7 +173,7 @@ let direct_message
     | Some _ -> invalid_wire_value ~field:"surface_context" ~expected:"object"
   in
   let* user_agent_core_blocks =
-    Keeper_multimodal_input.to_agent_core_blocks ~attachments user_blocks
+    Keeper_multimodal_input.to_agent_core_blocks ~media_store ~attachments user_blocks
     |> Result.map
          (function
            | [] -> None
@@ -191,17 +192,12 @@ let direct_message
     }
 ;;
 
+(* Only the request names the Keeper; the converted blocks, whose media are
+   already stored, are kept. *)
 let direct_message_with_keeper_name message keeper_name =
-  direct_message
-    ~keeper_name
-    ~prompt:message.request.prompt
-    ~direct_reply:message.direct_reply
-    ?turn_instructions:message.turn_instructions
-    ?surface_context:message.surface_context
-    ~channel:message.channel
-    ~user_blocks:message.user_blocks
-    ~attachments:message.attachments
-    ()
+  Result.map
+    (fun request -> { message with request })
+    (request ~keeper_name ~prompt:message.request.prompt)
 ;;
 
 let direct_message_request message = message.request

@@ -1,5 +1,20 @@
 open Alcotest
 module Driver = Masc.Keeper_turn_driver_try_provider
+
+(* [Driver.For_testing.request_view] over a store that holds no media: these
+   histories carry text and tool blocks only. *)
+let request_view ?input_policy ?continuity ?completed_arguments ?tools ~provider_config
+    ~measure_message_bytes ~front ~accepted ~history_digest_at ~current_turn_results
+    ~base_path ~demote_before ~turn_boundary ~materialize messages =
+  match
+    Driver.For_testing.request_view ?input_policy ?continuity ?completed_arguments ?tools
+      ~provider_config ~measure_message_bytes ~front ~accepted ~history_digest_at
+      ~current_turn_results ~base_path ~demote_before ~turn_boundary ~materialize
+      ~to_wire:(Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ())) messages
+  with
+  | Ok view -> view
+  | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error))
+
 module Snapshot = Masc.Librarian_continuity_snapshot
 module Boundary = Masc.Keeper_turn_boundaries
 module Front = Masc.Keeper_carried_front
@@ -35,7 +50,7 @@ let view ?front snapshot messages =
   let _, lines = capture_source source in
   let continuity = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
     | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
-  Driver.For_testing.request_view ~continuity ~provider_config
+  request_view ~continuity ~provider_config
     ~measure_message_bytes:measure ~accepted:None ~front
     ~history_digest_at:(Window.atom_opening_digest messages)
     ~current_turn_results:Driver.Current_turn_verbatim
@@ -44,8 +59,15 @@ let view ?front snapshot messages =
     ~materialize:(fun ~pending:_ _ -> fail "unsummarized history entered tool demotion") messages
 ;;
 
+(* The wire messages, read back as history so they compare with the history
+   these tests write. They carry no media. *)
 let wire (view : Driver.request_view) = match view.wire with
-  | Ok messages -> messages
+  | Ok messages ->
+    List.map (fun message ->
+      match Agent_core.History.of_wire_message (Agent_core.History.Memory_store.create ()) message with
+      | Ok message -> message
+      | Error error -> fail (Agent_core.Error.to_string (Agent_core.Error.Media error)))
+      messages
   | Error error -> fail (Agent_core.Llm_provider.Reasoning_history_projection.error_to_string error)
 ;;
 
@@ -100,7 +122,7 @@ let test_without_snapshot_seed_demotes_earlier_tool_bodies () =
   let front : Front.seed = {first_atom = 0; front = Model_input_front.At_atom front_digest; source = Front.Ledger} in
   let planned = ref 0 in
   let seeded =
-    Driver.For_testing.request_view ~continuity:Driver.without_snapshot
+    request_view ~continuity:Driver.without_snapshot
       ~provider_config ~measure_message_bytes:measure ~accepted:None ~front:(Some front)
       ~history_digest_at ~current_turn_results:Driver.Current_turn_verbatim
       ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:completed_end
@@ -191,7 +213,7 @@ let test_without_snapshot_starts_at_the_turn_start () =
   let messages = source @ this_turn in
   let completed_end = snd (Window.annotate source) in
   let project ?front ~turn_boundary () =
-    Driver.For_testing.request_view ~continuity:Driver.without_snapshot
+    request_view ~continuity:Driver.without_snapshot
       ~provider_config ~measure_message_bytes:measure ~accepted:None ~front
       ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
       ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:completed_end ~turn_boundary
@@ -334,7 +356,7 @@ let progress ~trace_id ~end_atom ~last_atom_digest : Progress.t =
 ;;
 
 let absorbed_view continuity messages =
-  Driver.For_testing.request_view ~continuity ~provider_config ~measure_message_bytes:measure
+  request_view ~continuity ~provider_config ~measure_message_bytes:measure
     ~accepted:None ~front:None ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
     ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:max_int
     (* Unread under a position: the range starts at the position itself. *)
@@ -442,7 +464,7 @@ let test_the_forecast_takes_the_drivers_start () =
   in
   List.iter (fun (name, continuity, front, accepted, turn_boundary, expected) ->
     let driver =
-      Driver.For_testing.request_view ~continuity ~provider_config
+      request_view ~continuity ~provider_config
         ~measure_message_bytes:measure ~accepted ~front ~history_digest_at:digest_at
         ~current_turn_results:Driver.Current_turn_verbatim
         ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:0 ~turn_boundary
@@ -477,7 +499,7 @@ let test_a_start_past_the_snapshot_keeps_the_working_state () =
   let accepted : Front.seed =
     {first_atom = 3; front = Model_input_front.At_atom (Option.get (digest_at 3)); source = Front.Turn_record { turn = 5 }} in
   let projected =
-    Driver.For_testing.request_view ~continuity:summarized ~provider_config
+    request_view ~continuity:summarized ~provider_config
       ~measure_message_bytes:measure ~accepted:(Some accepted) ~front:None
       ~history_digest_at:digest_at ~current_turn_results:Driver.Current_turn_verbatim
       ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:0
@@ -545,7 +567,7 @@ let test_small_externalizes_only_completed_bodies () =
     | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
   let carried = pinned :: (older @ current) in
   let project ?(base_path = base_path) ?(continuity = Some behind) policy =
-    Driver.For_testing.request_view ~input_policy:policy ?continuity
+    request_view ~input_policy:policy ?continuity
       ~provider_config ~measure_message_bytes:measure ~accepted:None ~front:None
       ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
       ~base_path ~demote_before:completed_end ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })
@@ -603,7 +625,7 @@ let test_failed_externalization_keeps_raw_body () =
     match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
     | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
   let reverted = ref 0 in
-  let projected = Driver.For_testing.request_view ~input_policy:Small
+  let projected = request_view ~input_policy:Small
     ~continuity:behind ~provider_config ~measure_message_bytes:measure
     ~accepted:None ~front:None ~history_digest_at:(Window.atom_opening_digest messages)
     ~current_turn_results:Driver.Current_turn_verbatim ~base_path ~demote_before:completed_end ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })

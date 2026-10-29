@@ -129,6 +129,9 @@ type config = Runtime_agent_context.config = {
       (** Host-owned actor of tool invocations, independent of [name].
           Missing actor evidence stays unobserved. *)
   initial_messages : Agent_core.Types.message list;
+  media_store : Agent_core.History.media_store;
+      (** Holds the media of the agent's history; passed to every agent this
+          config creates or resumes. Built by {!Tool_blob_media_store}. *)
   model_input_projection : Agent_core.Agent.model_input_projection option;
   serialization_executor : Agent_core.Agent.serialization_executor option;
   pre_dispatch_serialization_observer :
@@ -159,6 +162,7 @@ type config = Runtime_agent_context.config = {
 }
 
 val default_config :
+  media_store:Agent_core.History.media_store ->
   name:string ->
   provider_cfg:Llm_provider.Provider_config.t ->
   system_prompt:string ->

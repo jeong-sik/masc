@@ -22,7 +22,7 @@ let repetition result = Result.map_error (fun error -> Repetition_error error) r
 
 let observation ?base_path (settled : Projection.settled_tool_invocation) =
   match settled.result with
-  | Agent_core.Types.ToolResult {tool_use_id; content; outcome; _} ->
+  | Llm_provider.Types.ToolResult {tool_use_id; content; outcome; _} ->
     let* () = if String.equal tool_use_id
         (Agent_core.Tool_contract.Invocation.tool_use_id settled.invocation)
       then Ok () else Error Invalid_settled_result in

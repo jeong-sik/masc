@@ -5,6 +5,15 @@ module C = Keeper_librarian_context
 module T = Agent_core.Types
 module Capture = Keeper_librarian_input_capture
 
+(* History in these fixtures holds media by reference; every agent, runtime
+   config and projector here reads the bytes back from this store. *)
+let test_media_store = Agent_core.History.Memory_store.create ()
+
+let stored_source ~media_type raw =
+  match test_media_store.put ~media_type ~raw with
+  | Ok stored -> Agent_core.Types.Stored stored
+  | Error error -> failwith (Agent_core.Error.to_string (Agent_core.Error.Media error))
+
 let get = function Ok value -> value | Error detail -> fail detail
 let reference = Ids.Turn_ref.make ~trace_id:"original-input" ~absolute_turn:7
 let criterion = Goal_store.Criterion {revision="original-criterion";title="Retain every input";
@@ -33,7 +42,7 @@ let input () : L.input =
       json=Some (`Assoc ["z",`String "structured";"a",`List [`Int 1;`Null]]);
       content_blocks=Some [nested;T.ToolResult {tool_use_id="without-json";content="null";
         outcome=T.Tool_succeeded;json=None;content_blocks=None}]};
-    T.Image {media_type="image/png";source=T.Base64 "original-image"};
+    T.Image {media_type="image/png";source=(stored_source ~media_type:"image/png" "original-image")};
     T.Document {media_type="application/pdf";source=T.File_id "original-file"};
     T.Audio {media_type="audio/wav";source=T.Url "https://example.test/audio"}] in
   let metadata = [T.Input_speaker.key,`Assoc ["actor",`String "first"];

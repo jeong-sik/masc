@@ -130,6 +130,7 @@ val extend_tools : ?order:string list -> t -> Tool.t list -> unit
 val context : t -> Context.t
 val options : t -> options
 val provider_config : t -> Llm_provider.Provider_config.t option
+val media_store : t -> History.media_store
 val net : t -> [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
 val description : t -> string option
 
@@ -165,9 +166,15 @@ val agent_core_version : string
 
     [serialization_executor] runs the serialisation of each admitted provider
     body, which walks every message in the request. Supply one that runs on
-    another domain to keep the caller's scheduler free of that walk. *)
+    another domain to keep the caller's scheduler free of that walk.
+
+    [media_store] holds the bytes of the media in this agent's history: tool
+    result media is put there when the result enters history, and requests
+    read it back. It has no default, because a store that does not outlive
+    the process leaves a restored history naming bytes nobody holds. *)
 val create
   :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> media_store:History.media_store
   -> config:Types.agent_config
   -> ?tools:Tool.t list
   -> ?context:Context.t
@@ -236,7 +243,8 @@ type execution_terminal_disposition =
 type execution_terminal_evidence =
   { disposition : execution_terminal_disposition
   ; has_tool_attempts : bool
-  ; settled_tool_results : Types.content_block list
+  ; settled_tool_results : Llm_provider.Types.content_block list
+    (** As the execution journal records them, before history conversion. *)
   }
 
 val execution_locator_to_yojson : execution_locator -> Yojson.Safe.t
@@ -664,6 +672,7 @@ val run_with_handoffs_blocks
     non-dispatch restoration remains supported. *)
 val resume
   :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> media_store:History.media_store
   -> checkpoint:Checkpoint.t
   -> ?tools:Tool.t list
   -> ?context:Context.t

@@ -1075,7 +1075,7 @@ let test_media_mcp_cannot_carry_is_named () =
       call_with_result ~env ~sw state
         (result_with_blocks ~message:raw_message
            [ Llm_provider.Types.image_block ~media_type:"image/png"
-               ~source:(Url "https://example.invalid/frame.png")
+               ~source:(Llm_provider.Types.Url "https://example.invalid/frame.png")
            ])
     in
     check (list string) "what was not sent, then the message" [ "text"; "text" ]

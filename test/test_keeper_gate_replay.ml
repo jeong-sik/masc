@@ -565,7 +565,7 @@ let test_multimodal_goal_projects_replay_reference () =
        let image =
          Agent_core.Types.Image
            { media_type = "image/png"
-           ; source = Agent_core.Types.Base64 "aW1hZ2U="
+           ; source = Agent_core.Types.Stored (Agent_core.History.stored_of_raw "image")
            }
        in
        let canonical_blocks =

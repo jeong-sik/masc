@@ -117,7 +117,7 @@ let test_before_turn_continue_proceeds () =
       }
     in
     let agent =
-      Agent.create ~config:(default_config ~model:"test-model") ~net ~options ()
+      Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(default_config ~model:"test-model") ~net ~options ()
     in
     match Agent.run ~sw agent "test" with
     | Ok resp ->
@@ -125,7 +125,7 @@ let test_before_turn_continue_proceeds () =
       let text =
         List.filter_map
           (function
-            | Text s -> Some s
+            | Llm_provider.Types.Text s -> Some s
             | _ -> None)
           resp.content
         |> String.concat ""
@@ -153,7 +153,7 @@ let test_before_turn_receives_turn_number () =
       }
     in
     let agent =
-      Agent.create ~config:(default_config ~model:"test-model") ~net ~options ()
+      Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(default_config ~model:"test-model") ~net ~options ()
     in
     (match Agent.run ~sw agent "test" with
      | Ok _ -> ()
@@ -178,7 +178,7 @@ let test_before_turn_nudge_injected_into_request () =
          }
        in
        let agent =
-         Agent.create ~config:(default_config ~model:"test-model") ~net ~options ()
+         Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(default_config ~model:"test-model") ~net ~options ()
        in
        (match Agent.run ~sw agent "first prompt" with
         | Ok _ -> ()
@@ -222,7 +222,7 @@ let test_pre_tool_block_blocks_execution () =
       }
     in
     let config = default_config ~model:"mock-model" in
-    let agent = Agent.create ~net ~config ~options ~tools:[ tool ] () in
+    let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ~options ~tools:[ tool ] () in
     (match Agent.run ~sw agent "test" with
      | Ok _ | Error _ -> ());
     Alcotest.(check int) "tool handler not called" 0 !tool_calls)
@@ -251,7 +251,7 @@ let test_post_tool_receives_output () =
       }
     in
     let config = default_config ~model:"mock-model" in
-    let agent = Agent.create ~net ~config ~options ~tools:[ tool ] () in
+    let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ~options ~tools:[ tool ] () in
     (match Agent.run ~sw agent "test" with
      | Ok _ | Error _ -> ());
     Alcotest.(check string) "received tool output" "echoed" !received_content)
@@ -278,7 +278,7 @@ let test_on_stop_fires () =
       }
     in
     let agent =
-      Agent.create ~config:(default_config ~model:"test-model") ~net ~options ()
+      Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(default_config ~model:"test-model") ~net ~options ()
     in
     (match Agent.run ~sw agent "test" with
      | Ok _ | Error _ -> ());
@@ -310,7 +310,7 @@ let test_multiple_hooks_all_fire () =
       }
     in
     let agent =
-      Agent.create ~config:(default_config ~model:"test-model") ~net ~options ()
+      Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(default_config ~model:"test-model") ~net ~options ()
     in
     (match Agent.run ~sw agent "test" with
      | Ok _ | Error _ -> ());
@@ -339,7 +339,7 @@ let test_context_injector_adds_data () =
       }
     in
     let config = default_config ~model:"mock-model" in
-    let agent = Agent.create ~net ~config ~options ~context:ctx ~tools:[ tool ] () in
+    let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ~options ~context:ctx ~tools:[ tool ] () in
     (match Agent.run ~sw agent "test" with
      | Ok _ | Error _ -> ());
     let value = Context.get ctx "injected_key" in

@@ -65,11 +65,6 @@ let outcome_of_json json = let* kind=tag json in match kind with
     let* failure_kind=failure_kind_of_json (value "failure_kind" f) in
     let+ error_class=option error_class_of_json (value "error_class" f) in A.Tool_failed {failure_kind;error_class}
   | _ -> Error "Unknown captured tool result outcome"
-(* Encoding shares the wire tag; decoding stays exact (no trim or case folding),
-   as this capture format always read it. *)
-let media_of_json json data = let* kind=text json in match kind with
-  | "base64" -> Ok (A.Base64 data) | "url" -> Ok (A.Url data) | "file_id" -> Ok (A.File_id data)
-  | _ -> Error "Unknown captured media source"
 let detail_json (detail:A.reasoning_detail) = `Assoc ["raw",detail.raw;"text",optional (fun s -> `String s) detail.text]
 let detail_of_json json = let* f=fields ["raw";"text"] json in
   let+ text=option text (value "text" f) in ({A.raw=value "raw" f;text}:A.reasoning_detail)
@@ -84,12 +79,12 @@ let rec content_json : A.content_block -> Yojson.Safe.t = function
   | ToolResult {tool_use_id;content;outcome;json;content_blocks} -> `Assoc ["kind",`String "tool_result";
       "tool_use_id",`String tool_use_id;"content",`String content;"outcome",outcome_json outcome;
       "json",json_option json;"content_blocks",optional (fun blocks -> `List (List.map content_json blocks)) content_blocks]
-  | Image {media_type;source} -> media_content_json "image" media_type source
-  | Document {media_type;source} -> media_content_json "document" media_type source
-  | Audio {media_type;source} -> media_content_json "audio" media_type source
-and media_content_json kind media_type source = `Assoc ["kind",`String kind;
-  "media_type",`String media_type;"data",`String (A.media_source_payload source);
-  "source_type",`String (A.media_source_wire_tag source)]
+  | (Image _ | Document _ | Audio _) as block -> media_content_json block
+(* Media are captured by reference, in the history codec's source shape. *)
+and media_content_json block = match Agent_core.History.content_block_to_json block with
+  | `Assoc fields -> `Assoc (("kind", Option.value (List.assoc_opt "type" fields) ~default:`Null)
+      :: List.filter (fun (key, _) -> not (String.equal key "type")) fields)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as json -> json
 let rec content_of_json json : (A.content_block,string) result =
   let* kind=tag json in match kind with
   | "text" -> let* f=fields ["kind";"text"] json in let+ s=text (value "text" f) in A.Text s
@@ -107,13 +102,11 @@ let rec content_of_json json : (A.content_block,string) result =
     let* outcome=outcome_of_json (value "outcome" f) in let* json=json_option_of_json (value "json" f) in
     let+ content_blocks=option (list content_of_json) (value "content_blocks" f) in
     A.ToolResult {tool_use_id;content;outcome;json;content_blocks}
-  | "image" -> let+ media_type,source=media_content_of_json json in A.Image {media_type;source}
-  | "document" -> let+ media_type,source=media_content_of_json json in A.Document {media_type;source}
-  | "audio" -> let+ media_type,source=media_content_of_json json in A.Audio {media_type;source}
+  | "image" | "document" | "audio" -> media_content_of_json kind json
   | _ -> Error "Unknown captured content block"
-and media_content_of_json json = let* f=fields ["kind";"media_type";"data";"source_type"] json in
-  let* media_type=text (value "media_type" f) in let* data=text (value "data" f) in
-  let+ source=media_of_json (value "source_type" f) data in media_type,source
+and media_content_of_json kind json = let* f=fields ["kind";"source"] json in
+  Agent_core.History.content_block_of_json (`Assoc ["type",`String kind;"source",value "source" f])
+  |> Result.map_error Agent_core.History.decode_error_to_string
 let role_json : A.role -> Yojson.Safe.t = function
   | System -> `String "system" | User -> `String "user" | Assistant -> `String "assistant" | Tool -> `String "tool"
 let role_of_json json = let* s=text json in match s with

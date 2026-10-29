@@ -1963,7 +1963,7 @@ let test_dashboard_runtime_probe_groups_models_by_provider () =
 
 let test_runtime_agent_terminal_observation_uses_runtime_identity () =
   let config =
-    Runtime_agent.default_config
+    Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
       ~name:"agent_core-runpod_mtp.qwen"
       ~provider_cfg:(provider_cfg ())
       ~system_prompt:""
@@ -1987,7 +1987,7 @@ let test_runtime_agent_terminal_observation_uses_runtime_identity () =
 
 let test_runtime_agent_terminal_error_preserves_uncaptured_failure () =
   let config =
-    Runtime_agent.default_config
+    Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
       ~name:"agent_core-runpod_mtp.qwen"
       ~provider_cfg:(provider_cfg ())
       ~system_prompt:""
@@ -2032,7 +2032,7 @@ let test_runtime_agent_context_preserves_max_tokens_intent () =
     Eio.Switch.run (fun sw ->
       let check_builder_max_tokens expected max_tokens =
         let config =
-          Runtime_agent.default_config
+          Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
             ~name:"agent_core-runpod_mtp.qwen"
             ~provider_cfg:(provider_cfg ())
             ~system_prompt:""
@@ -2064,7 +2064,7 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
     }
   in
   let config =
-    Runtime_agent.default_config
+    Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
       ~name:"agent_core-runpod_mtp.qwen"
       ~provider_cfg
       ~system_prompt:""
@@ -2141,7 +2141,7 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
     }
   in
   let config =
-    Runtime_agent.default_config
+    Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
       ~name:"agent_core-runpod_mtp.qwen"
       ~provider_cfg:provider_cfg_with_response_format
       ~system_prompt:""
@@ -2191,7 +2191,7 @@ let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
       (fun _input -> Ok { content = "ok"; content_blocks = None; _meta = None })
   in
   let config =
-    Runtime_agent.default_config
+    Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
       ~name:"agent_core-runpod_mtp.qwen"
       ~provider_cfg:(provider_cfg ())
       ~system_prompt:""
@@ -2571,7 +2571,7 @@ let context_fit_provider_config base_url =
     ()
 
 let context_fit_runtime_config base_url =
-  Runtime_agent.default_config
+  Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
     ~name:"context-fit-fixture"
     ~provider_cfg:(context_fit_provider_config base_url)
     ~system_prompt:"Count the exact provider request before dispatch."
@@ -2782,7 +2782,7 @@ let test_runtime_source_change_preserves_history () =
                 incr effects;
                 Ok { Types.content = "fresh-result"; content_blocks = None; _meta = None }) in
           let config =
-            { (Runtime_agent.default_config ~name:"source-change" ~provider_cfg:target
+            { (Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:"source-change" ~provider_cfg:target
                  ~system_prompt:"continue" ~tools:[ tool ]) with
               initial_messages = checkpoint.messages } in
           let agent = match
@@ -2921,14 +2921,17 @@ let test_runtime_trimmed_reasoning_boundary () =
               (List.exists (fun (message : Types.message) ->
                 message.role = Types.User && message.origin = Types.Conversation)
                 projection.messages);
-            Ok projection.messages in
+            (* The window cuts history; the request carries its wire form. *)
+            Agent_core.History.to_wire_messages (Agent_core.History.Memory_store.create ())
+              projection.messages
+            |> Result.map_error (fun error -> Agent_core.Error.Media error) in
           let effects = ref 0 in
           let tool = Agent_core.Tool.create ~name:"inspect" ~description:"Inspect"
               ~parameters:[] (fun _ ->
                 incr effects;
                 Ok { Types.content = "fresh-result"; content_blocks = None; _meta = None }) in
           let config =
-            { (Runtime_agent.default_config ~name:"trimmed-source-change" ~provider_cfg:target
+            { (Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:"trimmed-source-change" ~provider_cfg:target
                  ~system_prompt:"continue" ~tools:[tool]) with
               initial_messages = checkpoint.messages; model_input_projection = Some project } in
           let agent = match
@@ -3002,7 +3005,9 @@ let run_projection_case ~resume =
           Some
             (fun messages ->
                incr projection_calls;
-               Ok (projection_messages projected_marker messages))
+               Agent_core.History.to_wire_messages (Agent_core.History.Memory_store.create ())
+                 (projection_messages projected_marker messages)
+               |> Result.map_error (fun error -> Agent_core.Error.Media error))
       }
     in
     let agent =
@@ -3249,7 +3254,7 @@ let test_parallel_policy_survives_fresh_resume_and_wire_serialization () =
       (match Llm_provider.Provider_config.capabilities_for_config_model provider_cfg with
        | None -> fail "parallel policy test requires a real catalog row or provider base"
        | Some caps -> check bool "catalog capability remains true" true caps.supports_parallel_tool_calls);
-      let config = Runtime_agent.default_config
+      let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
           ~name:"parallel-policy" ~provider_cfg ~system_prompt:"inspect" ~tools:[] in
       let builder = Runtime_agent_context.builder ~net:(Eio.Stdenv.net env) ~config () in
       let agent = match Agent_core.Builder.build_safe builder with

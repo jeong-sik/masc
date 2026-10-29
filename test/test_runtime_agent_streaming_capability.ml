@@ -100,7 +100,7 @@ let run_case ?(callbacks = Persist_callbacks) ?(observer_failure = false)
     supports_native_streaming
     (Runtime_agent.provider_caps_of_config provider_cfg).supports_native_streaming;
   let config =
-    Runtime_agent.default_config ~name:"stream-dispatch-test"
+    Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:"stream-dispatch-test"
       ~provider_cfg ~system_prompt ~tools:[]
   in
   check bool "ordinary dispatch has no execution store by default" true
@@ -205,7 +205,7 @@ let run_case ?(callbacks = Persist_callbacks) ?(observer_failure = false)
       | Runtime_agent.Completed _ -> ()
       | _ -> fail "provider answer must complete the run");
      check string "provider answer survives dispatch" answer
-       (Agent_core.Types.text_of_content completed.response.content)
+       (Llm_provider.Types.text_of_content completed.response.content)
    | Fail_scope_sink -> fail "unreachable provider effect after scope refusal");
   check (list string) "completed progress precedes existing collection hook"
     [if observe then answer else ""] !progress_at_collection;
@@ -311,7 +311,7 @@ let completed_media_and_tools ?(execution_actor = Some "actual-keeper")
       check bool "the submitting invocation retains its original identity" true
         (Runtime_response_identity_scope.current () = !submitting_response);
       Ok {Agent_core.Types.content="fixture effect"; content_blocks=None; _meta=None}) in
-  let config = Runtime_agent.default_config ~name:"agent_core-fixture-runtime"
+  let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:"agent_core-fixture-runtime"
       ~provider_cfg ~system_prompt ~tools:[tool] in
   let config = {config with hooks=Some hooks; execution_actor} in
   let result = Eio.Time.with_timeout_exn env#clock
@@ -355,7 +355,7 @@ let completed_media_and_tools ?(execution_actor = Some "actual-keeper")
   check int "both provider responses reach collection" 2 !collections;
   check int "tool loop completes with two provider responses" 2 !replies;
   check string "terminal response survives" answer
-    (Agent_core.Types.text_of_content completed.response.content);
+    (Llm_provider.Types.text_of_content completed.response.content);
   (match !media with
    | [media_ref] ->
      let token = Filename.basename media_ref in
@@ -378,7 +378,7 @@ let failed_completion_has_no_progress () =
     ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"fixture" ~model_id
     ~base_url:server.base_url ~request_path:"/v1/chat/completions" () in
   let events = ref [] in
-  let config = Runtime_agent.default_config ~name:"failed-progress"
+  let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:"failed-progress"
     ~provider_cfg ~system_prompt ~tools:[] in
   let result = Eio.Time.with_timeout_exn env#clock
     Exact_output_fixture.fixture_wait_seconds (fun () ->

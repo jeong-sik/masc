@@ -360,6 +360,9 @@ type try_provider_ctx =
         (** Puts back the front held before a boundary resend that the
             provider refused for a reason other than size. *)
   ; base_path : string
+  ; media_store : Agent_core.History.media_store
+      (** The media of this Keeper's history; the attempt's agent and its
+          request projection read and write it. *)
   ; keeper_name : string
   ; name : string
   ; goal : string
@@ -370,7 +373,7 @@ type try_provider_ctx =
   ; initial_messages : Agent_core.Types.message list
   ; argument_demotion_seed : Agent_core.Types.message list option
   ; argument_replay_prefix : Keeper_replay_prefix.projection
-  ; model_input_projection : Agent_core.Agent.model_input_projection option
+  ; model_input_projection : Keeper_history_projection.t option
   ; stream_idle_timeout_s : float
   ; first_event_timeout_s : float
   ; body_timeout_s : float option
@@ -770,14 +773,17 @@ type request_view =
         (** The composed messages with their demotions materialized: what the
             ledger and the turn record count, in atoms of the checkpoint
             history. *)
+  ; carried_wire : Agent_core.Llm_provider.Types.message list
+        (** [carried] with its media read back from the store, and nothing
+            else of the history. *)
   ; wire :
-      ( Agent_core.Types.message list
+      ( Agent_core.Llm_provider.Types.message list
         , Agent_core.Llm_provider.Reasoning_history_projection.error )
         result
-        (** The dialect's reasoning projection over [carried] alone, or why
-            it declined; [carried] itself is then handed over, and the
-            backend, running the same projection, refuses the request with
-            its typed error. *)
+        (** The dialect's reasoning projection over [carried_wire] alone, or
+            why it declined; [carried_wire] itself is then handed over, and
+            the backend, running the same projection, refuses the request
+            with its typed error. *)
   }
 (** One request as {!For_testing.request_view} views it: composed in the
     durable vocabulary first, projected for the wire afterwards. The order
@@ -879,8 +885,11 @@ module For_testing : sig
       (pending:Keeper_model_input_demotion.pending list ->
        Agent_core.Types.message list ->
        Agent_core.Types.message list) ->
+    to_wire:
+      (Agent_core.Types.message ->
+       (Agent_core.Llm_provider.Types.message, Agent_core.History.media_error) result) ->
     Agent_core.Types.message list ->
-    request_view
+    (request_view, Agent_core.History.media_error) result
 
   val current_turn_demotion : refused:composed -> demoted:composed -> int option
   (** Whether [demoted], the refused range composed under

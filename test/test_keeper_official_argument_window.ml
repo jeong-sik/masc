@@ -4,6 +4,15 @@ module T = Agent_core.Types
 module Host = Keeper_official_client_host
 module Choice = Keeper_turn_driver_try_provider
 
+(* History in these fixtures holds media by reference; every agent, runtime
+   config and projector here reads the bytes back from this store. *)
+let test_media_store = Agent_core.History.Memory_store.create ()
+
+let stored_source ~media_type raw =
+  match test_media_store.put ~media_type ~raw with
+  | Ok stored -> Agent_core.Types.Stored stored
+  | Error error -> failwith (Agent_core.Error.to_string (Agent_core.Error.Media error))
+
 let require = function Ok value -> value | Error detail -> fail detail
 let rec remove path = match Unix.lstat path with
   | {Unix.st_kind=Unix.S_DIR;_} ->
@@ -136,7 +145,7 @@ let test_seed_witness_uses_raw_source_and_dropped_arguments_are_not_written () =
   | Ok None -> () | Ok (Some _) -> fail "discarded argument was written" | Error error -> fail (Tool_blob_store.fetch_error_to_string error)
 
 let test_declared_pinned_prefix_and_media_replay_keep_occurrence_coordinates () = with_base @@ fun base ->
-  let image = T.Image {media_type="image/png";source=T.Base64 "fixture"} in
+  let image = T.Image {media_type="image/png";source=(stored_source ~media_type:"image/png" "fixture")} in
   let canonical = T.make_message ~role:T.User [T.Text "The Librarian read this.";image] :: List.tl raw_seed in
   let replay_prefix = Keeper_replay_prefix.media_degraded ~canonical_prefix:canonical ~dispatch_prefix:raw_seed in
   let prefix = [text T.System "Caller-owned task reference."] in
@@ -238,7 +247,7 @@ let test_completion_review_preserves_the_full_evidence_without_history_reads () 
   with_base @@ fun base ->
   let attachment = T.make_message ~role:T.User
       [T.Text "Review the attached original evidence."
-      ; T.Image { media_type = "image/png"; source = T.Base64 "original-image-bytes" }]
+      ; T.Image { media_type = "image/png"; source = (stored_source ~media_type:"image/png" "original-image-bytes") }]
   in
   let evidence = raw_history @ [attachment] in
   let original = List.map Agent_core.Checkpoint.message_to_json evidence in

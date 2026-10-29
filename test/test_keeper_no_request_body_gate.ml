@@ -112,7 +112,7 @@ streaming = false
   let run ?(runtime_id = "fixture.sample") goal =
     Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "no-body-gate-proof" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
       ~system_prompt:"No body gate fixture."
-      ~runtime_id ~keeper_name:"no-body-gate-proof" ~base_path
+      ~runtime_id ~keeper_name:"no-body-gate-proof" ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
       ~agent_core_tools:[] ~goal ~sw ~net:env#net
       ~model_input_projection:(fun messages ->
         incr projection_count;
@@ -398,7 +398,7 @@ streaming = false
       ~system_prompt
       ~runtime_id:"fixture.sample"
       ~keeper_name:"demote-proof"
-      ~base_path
+      ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
       ~tools
       ~agent_core_tools:tools
       ~goal:"execute tool"

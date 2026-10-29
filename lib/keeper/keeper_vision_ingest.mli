@@ -46,14 +46,16 @@ val delegates_media : runtime_id:string -> bool
 
 val evict_blocks
   :  ?base_path:string
+  -> media_store:Agent_core.History.media_store
   -> mode:mode
   -> delegate:bool
   -> keeper_name:string
   -> Agent_core.Types.content_block list
   -> Agent_core.Types.content_block list
 (** Site 1. Evict every [Image] in the list when [delegate]; return the list
-    unchanged otherwise. Images are fail-closed before store on
-    base64 payload, size, and media type. An [Image] whose source is a
+    unchanged otherwise. A [Stored] image is read from [media_store]; images
+    are fail-closed before the kept store on unavailable bytes, size, and
+    media type. An [Image] whose source is a
     {!Agent_core.Types.media_source} [Url] or [File_id] is a reference,
     not a payload: it passes through unchanged (counted [ok] under reason
     [reference_passthrough]), because the serializers put the reference on the
@@ -64,6 +66,7 @@ val evict_blocks
 
 val evict_message
   :  ?base_path:string
+  -> media_store:Agent_core.History.media_store
   -> mode:mode
   -> delegate:bool
   -> keeper_name:string
@@ -81,6 +84,7 @@ type image_projection =
 val fallback_projector
   : ?base_path:string
   -> ?exclude_runtime_ids:string list
+  -> media_store:Agent_core.History.media_store
   -> keeper_name:string
   -> unit
   -> mode:mode
@@ -109,6 +113,7 @@ val error_reasons : string list
 module For_testing : sig
   val fallback_projector :
     ?base_path:string -> ?exclude_runtime_ids:string list ->
+    media_store:Agent_core.History.media_store ->
     read:
       (exclude_runtime_ids:string list ->
        media_type:string -> bytes:string -> (string, string) result option) ->

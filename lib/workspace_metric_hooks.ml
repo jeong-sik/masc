@@ -294,7 +294,7 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
 
-  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path:_ ?sw ?execution_owner ~evaluator_runtime ~candidate_kind ~prompt ?system_prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~attempt_continuation ~on_runtime_attempt_error () ->
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path ?sw ?execution_owner ~evaluator_runtime ~candidate_kind ~prompt ?system_prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~attempt_continuation ~on_runtime_attempt_error () ->
     let verdict_call = ref Task.Anti_rationalization.empty_verdict_call in
     let evaluator_execution = ref None in
     let { Task.Anti_rationalization.schemas = lookup_schemas
@@ -392,6 +392,9 @@ let install () =
             ?on_request_execution_ready:(Option.map
               (fun owner -> owner.Task.Anti_rationalization.on_execution_ready) execution_owner)
             ~base_path:review_root
+            (* The goal media were put in the workspace store; the review root
+               is only the reviewer's scratch directory. *)
+            ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
             ~goal:prompt
             ?goal_blocks
             ~keeper_name

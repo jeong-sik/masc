@@ -66,12 +66,14 @@ val fallback_message :
     Raw media data is never included. *)
 
 val to_agent_core_blocks :
+  media_store:Agent_core.History.media_store ->
   attachments:Keeper_chat_store.attachment list ->
   user_input_block list ->
   (Agent_core.Types.content_block list, string) result
-(** Convert semantic MASC input blocks to AGENT_CORE provider input blocks.  Media
-    blocks resolve their payload through [attachments] by [attachment_id].
-    Data URLs are normalized to raw base64 payloads before crossing into AGENT_CORE,
+(** Convert semantic MASC input blocks to AGENT_CORE history blocks.  Media
+    blocks resolve their payload through [attachments] by [attachment_id] and
+    are put in [media_store]; the block holds the [Stored] reference.
+    Data URLs are normalized to raw base64 payloads before they are decoded,
     and declared MIME types must match any MIME embedded in a data URL.
     An image reference crosses as the native carrier form (a [Url] or
     [File_id] source holding the URL or file id) so the serializers emit it

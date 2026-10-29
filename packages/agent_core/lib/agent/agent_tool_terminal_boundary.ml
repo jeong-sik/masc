@@ -1,4 +1,8 @@
 open Types
+
+(* Tool calls and their recovered results are provider blocks, as in
+   [Agent_tools]. *)
+open Llm_provider.Types
 open Agent_tool_execution_types
 open Result_syntax
 

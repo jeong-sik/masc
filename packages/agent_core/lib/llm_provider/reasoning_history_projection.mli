@@ -92,7 +92,7 @@ val validate_replay_continuity_for_provider_config
   :  ?source_change_policy:source_change_policy
   -> boundary:continuity_boundary
   -> Provider_config.t
-  -> Types.message list
+  -> 'source Types.message_with list
   -> (replay_continuity_admission, error) result
 (** Validate canonical history and admit its stored reasoning producers before
     restoring a provider-bound Agent and again before dispatch after hooks and
@@ -115,7 +115,9 @@ val validate_replay_continuity_for_provider_config
     that knob cannot pretend to exclude replay. This decision is independent of
     temporary tool-array suppression. Structure is validated in either case.
     Returns the resolved capability and the boundary-specific admission disposition.
-    Never projects or mutates the history. *)
+    Never projects or mutates the history. It reads block kinds, roles and
+    metadata only, so it takes history and provider messages alike and never
+    reads media. *)
 
 (** [assistant_has_payload] states whether an Assistant message still has a
     representable wire payload after projection. [reasoning_block_supported]

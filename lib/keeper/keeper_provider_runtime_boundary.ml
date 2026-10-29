@@ -289,7 +289,7 @@ let classify_core_error (err : Agent_core.Error.t) : t =
      | Agent_core.Error.Config _
      | Agent_core.Error.Serialization _
      | Agent_core.Error.Io _
-     | Agent_core.Error.Orchestration _
+     | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
      | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
        No_timeout_observed)
 ;;

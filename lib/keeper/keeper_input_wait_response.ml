@@ -19,7 +19,11 @@ let prepare ~net ~expected_source_ref ~source ~pending ~response =
   else
     let checkpoint = Keeper_checkpoint_store.exact_snapshot_checkpoint source in
     let open Result.Syntax in
-    let* agent = Agent_core.Agent.resume ~net ~checkpoint ()
+    (* No provider and no tools: this agent neither resolves nor stores
+       media, so it is given a store of its own. *)
+    let* agent =
+      Agent_core.Agent.resume ~net ~media_store:(Agent_core.History.Memory_store.create ())
+        ~checkpoint ()
       |> Result.map_error (fun error -> Resume_refused error) in
     Fun.protect ~finally:(fun () -> Agent_core.Agent.close agent) (fun () ->
       match Agent_core.Agent.provide_input agent pending response with

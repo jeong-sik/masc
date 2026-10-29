@@ -62,7 +62,7 @@ let test_before_turn_block_returns_error () =
   let config =
     { (Types.default_config ~model:"test-model") with name = "illegal-hook-test" }
   in
-  let agent = Agent.create ~net ~config ~options () in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ~options () in
   let result = Agent.run ~sw agent "hello" in
   Alcotest.(check bool)
     "before_turn Block returns illegal-hook error"

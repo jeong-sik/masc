@@ -69,5 +69,5 @@ val persist_error_to_string : persist_error -> string
 val persist_media_source_result :
   base_dir:string ->
   media_type:string ->
-  source:Agent_core.Types.media_source ->
+  source:Llm_provider.Types.media_source ->
   (string * string, persist_error) result

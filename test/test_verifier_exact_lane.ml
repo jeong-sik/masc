@@ -503,12 +503,13 @@ let test_recorded_images_ride_to_the_reviewer_as_blocks () =
        (match !received with
         | Some
             [ Agent_core.Types.Text prompt
-            ; Agent_core.Types.Image { media_type; source = Agent_core.Types.Base64 data } ] ->
+            ; Agent_core.Types.Image { media_type; source = Agent_core.Types.Stored stored } ] ->
           Alcotest.(check string)
             "the image block carries the recorded media type" "image/png"
             media_type;
-          Alcotest.(check string)
-            "the image block carries the base64 body" "aGk=" data;
+          Alcotest.(check bool)
+            "the image block names the recorded body" true
+            (stored = Agent_core.History.stored_of_raw "hi");
           Alcotest.(check bool) "the prompt text rides as the first block" true
             (String.length prompt > 0)
         | blocks ->

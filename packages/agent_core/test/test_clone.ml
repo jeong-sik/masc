@@ -6,7 +6,7 @@ open Agent_core
 (* ── Helpers ──────────────────────────────────────────────────────── *)
 
 let make_agent env =
-  Agent.create
+  Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
     ~net:env#net
     ~config:{ (Types.default_config ~model:"test-model") with name = "original" }
     ()
@@ -16,7 +16,7 @@ let make_agent_with_context env =
   let ctx = Context.create_sync () in
   Context.set ctx "key1" (`String "val1");
   Context.set ctx "key2" (`Int 42);
-  Agent.create
+  Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
     ~net:env#net
     ~config:{ (Types.default_config ~model:"test-model") with name = "ctx-agent" }
     ~context:ctx
@@ -145,7 +145,7 @@ let test_clone_shares_tools () =
       Ok { Types.content = "ok"; content_blocks = None; _meta = None })
   in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net:env#net
       ~config:(Types.default_config ~model:"test-model")
       ~tools:[ tool ]
@@ -218,7 +218,7 @@ let test_clone_from_resumed_agent () =
     };
   (* Simulate resume by creating checkpoint and restoring *)
   let cp = Agent.checkpoint ~session_id:"s1" agent in
-  let resumed = (Agent.resume ~net:env#net ~checkpoint:cp () |> Result.get_ok) in
+  let resumed = (Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~checkpoint:cp () |> Result.get_ok) in
   let clone = Agent.clone ~copy_context:true resumed in
   check int "clone turn_count from resumed" 3 (Agent.state clone).turn_count;
   check int "clone messages from resumed" 2 (List.length (Agent.state clone).messages);

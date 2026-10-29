@@ -212,7 +212,7 @@ let test_agent_elicit_input_without_callback_pauses () =
   let config =
     { (Types.default_config ~model:"test-model") with name = "human-reviewer" }
   in
-  let agent = Agent.create ~net:env#net ~config ~options () in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~options () in
   (match Agent.run ~sw agent "deploy" with
   | Error (Error.Agent (Error.InputRequired input)) ->
     (match input.participant_name with
@@ -229,7 +229,7 @@ let test_agent_elicit_input_without_callback_pauses () =
     Alcotest.(check string) "owned request identity" input.request_id pending.request.request_id;
     let persisted = Checkpoint.to_string (Agent.checkpoint agent) in
     Agent.close agent;
-    let restored = (Agent.resume ~net:env#net
+    let restored = (Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net
       ~checkpoint:(Result.get_ok (Checkpoint.of_string persisted))
       ~options () |> Result.get_ok) in
     Alcotest.(check bool) "pending survives checkpoint and Agent cleanup" true
@@ -279,7 +279,7 @@ let test_current_wait_survives_rejection_and_replacement () =
   let options = {Agent.default_options with
     hooks={Hooks.empty with before_turn=Some before_turn}} in
   let config = {(Types.default_config ~model:"input-only") with name="same-name"} in
-  let agent = Agent.create ~net:env#net ~config ~options () in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~options () in
   let paused = function
     | Error (Error.Agent (Error.InputRequired _)) -> Option.get (Agent.pending_input agent)
     | Ok _ -> Alcotest.fail "expected pause before provider"
@@ -319,8 +319,8 @@ let test_checkpoint_delta_retains_current_wait () =
   let before_turn = function Hooks.BeforeTurn _ -> Hooks.ElicitInput request | _ -> Hooks.Continue in
   let options = {Agent.default_options with hooks={Hooks.empty with before_turn=Some before_turn}} in
   let config = {(Types.default_config ~model:"input-only") with name="same-name"} in
-  let a = Agent.create ~net:env#net ~config ~options () in
-  let b = Agent.create ~net:env#net ~config ~options () in
+  let a = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~options () in
+  let b = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~options () in
   ignore (Agent.run ~sw a "first"); ignore (Agent.run ~sw b "second");
   let pa = Option.get (Agent.pending_input a) and pb = Option.get (Agent.pending_input b) in
   Alcotest.(check bool) "same-name agents have independent originating runs" true
@@ -348,7 +348,7 @@ let test_accepted_resume_failure_consumes_old_wait () =
   let before_turn_params _ = Hooks.HookFailed {stage=Hooks.Before_turn_params;detail="fixture failure after accepted input"} in
   let options = {Agent.default_options with
     hooks={Hooks.empty with before_turn=Some before_turn;before_turn_params=Some before_turn_params}} in
-  let agent = Agent.create ~net:env#net ~config:(Types.default_config ~model:"input-only") ~options () in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config:(Types.default_config ~model:"input-only") ~options () in
   ignore (Agent.run ~sw agent "original");
   let pending = Option.get (Agent.pending_input agent) in
   waiting := false;
@@ -392,7 +392,7 @@ let test_pause_survives_cleanup_and_answer_is_saved () =
   let question : Hooks.elicitation_request = {question="canonical question";schema=None;timeout_s=None} in
   let options = {Agent.default_options with hooks={Hooks.empty with
     before_turn=Some (fun _ -> Hooks.ElicitInput question)}} in
-  let agent = Agent.create ~net:env#net ~checkpoint_sink:(save_input_checkpoint path)
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~checkpoint_sink:(save_input_checkpoint path)
       ~config:(Types.default_config ~model:"input-only") ~options () in
   ignore (Agent.run ~sw agent "original");
   let pending = Option.get (Agent.pending_input agent) in
@@ -400,7 +400,7 @@ let test_pause_survives_cleanup_and_answer_is_saved () =
   let checkpoint = read_input_checkpoint path in
   Alcotest.(check bool) "first pause is durable without an AfterTurn" true
     (checkpoint.pending_input = Some pending);
-  let restored = (Agent.resume ~net:env#net ~checkpoint
+  let restored = (Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~checkpoint
       ~checkpoint_sink:(save_input_checkpoint path) () |> Result.get_ok) in
   let forged = {pending with request={pending.request with question="forged question"}} in
   Alcotest.(check bool) "response committed" true
@@ -423,7 +423,7 @@ let test_callback_and_restored_response_prepare_same_model_input () =
     let config=Types.default_config ~model:"input-only" in
     let capture_input seen = function
       | Hooks.BeforeTurnParams {messages;current_params;_} ->
-        let prepared=Result.get_ok (Agent_turn.prepare_turn ~tools:Tool_set.empty
+        let prepared=Result.get_ok (Agent_turn.prepare_turn ~media_store:(Agent_core.History.Memory_store.create ()) ~tools:Tool_set.empty
             ~messages ~turn_params:current_params ()) in
         seen:=Some prepared.effective_messages;
         Hooks.HookFailed {stage=Hooks.Before_turn_params;detail="captured model input before dispatch"}
@@ -437,12 +437,12 @@ let test_callback_and_restored_response_prepare_same_model_input () =
     let options={Agent.default_options with elicitation=Some (fun _ -> response);
       hooks={Hooks.empty with before_turn=Some (fun _ -> Hooks.ElicitInput question);
         before_turn_params=Some (capture_input callback_input)}} in
-    let live=Agent.create ~net:env#net ~config ~options () in
+    let live=Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~options () in
     check_stopped (Agent.run ~sw live "original");
     Agent.close live;
     let options={Agent.default_options with hooks={Hooks.empty with
       before_turn=Some (fun _ -> Hooks.ElicitInput question)}} in
-    let waiting=Agent.create ~net:env#net ~config ~options
+    let waiting=Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~options
         ~checkpoint_sink:(save_input_checkpoint path) () in
     (match Agent.run ~sw waiting "original" with
      | Error (Error.Agent (Error.InputRequired _)) -> ()
@@ -450,7 +450,7 @@ let test_callback_and_restored_response_prepare_same_model_input () =
      | Ok _ -> Alcotest.fail "expected original input wait");
     let pending=Option.get (Agent.pending_input waiting) in
     Agent.close waiting;
-    let restored=(Agent.resume ~net:env#net ~checkpoint:(read_input_checkpoint path)
+    let restored=(Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~checkpoint:(read_input_checkpoint path)
         ~checkpoint_sink:(save_input_checkpoint path) () |> Result.get_ok) in
     let forged={pending with request={pending.request with question="foreign question"}} in
     Alcotest.(check bool) "typed response is durably accepted for the owned question" true
@@ -463,11 +463,13 @@ let test_callback_and_restored_response_prepare_same_model_input () =
     let restored_input=ref None in
     let options={Agent.default_options with hooks={Hooks.empty with
       before_turn_params=Some (capture_input restored_input)}} in
-    let continued=(Agent.resume ~net:env#net ~checkpoint:committed ~options () |> Result.get_ok) in
+    let continued=(Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~checkpoint:committed ~options () |> Result.get_ok) in
     check_stopped (Agent.run_turn_stream ~sw ~on_event:ignore continued);
     Agent.close continued;
+    let expected_input=Result.get_ok
+        (Agent_core.History.to_wire_messages (Agent_core.History.Memory_store.create ()) expected) in
     Alcotest.(check bool) "callback and reopened continuation prepare identical model input" true
-      (!callback_input=Some expected && !restored_input=Some expected))
+      (!callback_input=Some expected_input && !restored_input=Some expected_input))
     [Hooks.Answer (`String "yes"),Types.user_msg "[User input] canonical question: \"yes\"";
      Hooks.Declined,Types.user_msg "[Input declined] canonical question";
      Hooks.Timeout,{ (Types.user_msg "[Input timed out] canonical question") with origin=Types.Recovery_instruction }]
@@ -484,14 +486,14 @@ let test_accepted_resume_persists_before_parameter_failure () =
       Alcotest.(check bool) "settlement already stored before parameters" true
         ((read_input_checkpoint path).pending_input = None);
       Hooks.HookFailed {stage=Hooks.Before_turn_params;detail="after input acceptance"})}} in
-  let agent = Agent.create ~net:env#net ~checkpoint_sink:(save_input_checkpoint path)
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~checkpoint_sink:(save_input_checkpoint path)
       ~config:(Types.default_config ~model:"input-only") ~options () in
   ignore (Agent.run ~sw agent "original");
   waiting := false;
   let result = Agent.run_turn_stream ~sw ~on_event:ignore agent in
   Alcotest.(check bool) "parameter failure remains a failure" true (Result.is_error result);
   Agent.close agent;
-  let restored = (Agent.resume ~net:env#net ~checkpoint:(read_input_checkpoint path) () |> Result.get_ok) in
+  let restored = (Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~checkpoint:(read_input_checkpoint path) () |> Result.get_ok) in
   Alcotest.(check bool) "cleanup and restore cannot resurrect the old wait" true
     (Agent.pending_input restored = None);
   Agent.close restored
@@ -505,7 +507,7 @@ let test_input_sink_failure_preserves_owned_state () =
   let options = {Agent.default_options with hooks={Hooks.empty with
     before_turn=Some (fun _ -> Hooks.ElicitInput question)}} in
   let sink snapshot = if !refuse then Error "write refused" else save_input_checkpoint path snapshot in
-  let agent = Agent.create ~net:env#net ~checkpoint_sink:sink
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~checkpoint_sink:sink
       ~config:(Types.default_config ~model:"input-only") ~options () in
   ignore (Agent.run ~sw agent "original");
   let pending = Option.get (Agent.pending_input agent) in
@@ -537,7 +539,7 @@ let test_uncertain_input_commit_is_not_a_stale_response () =
   let sink snapshot =
     let result = save_input_checkpoint path snapshot in
     if !uncertain then Error "write outcome requires host reconciliation" else result in
-  let agent = Agent.create ~net:env#net ~checkpoint_sink:sink
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~checkpoint_sink:sink
       ~config:(Types.default_config ~model:"input-only") ~options () in
   ignore (Agent.run ~sw agent "original");
   let pending = Option.get (Agent.pending_input agent) in

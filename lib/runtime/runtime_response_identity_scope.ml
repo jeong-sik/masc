@@ -11,7 +11,7 @@ let source_ordinal ~tool_name ~(response : Agent_core.Types.api_response)
   if planned_index < 0 then None else
   let tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation in
   let admitted = List.filter_map (function
-    | Agent_core.Types.ToolUse {id;name;_} -> Some (id,name)
+    | Llm_provider.Types.ToolUse {id;name;_} -> Some (id,name)
     | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
     | ToolResult _ | Image _ | Document _ | Audio _ -> None) response.content in
   let selected_sources = List.filter (fun (source : Agent_core.Hooks.admitted_tool_use_source) ->

@@ -376,8 +376,9 @@ let test_resolve_params_with_tool_results () =
   in
   Alcotest.(check int) "1 tool result captured" 1 (List.length !captured_results);
   match List.hd !captured_results with
-  | Ok { content; _ } -> Alcotest.(check string) "content" "found it" content
-  | Error _ -> Alcotest.fail "expected Ok result"
+  | { Hooks.content; outcome = Tool_succeeded; _ } ->
+    Alcotest.(check string) "content" "found it" content
+  | { outcome = Tool_failed _; _ } -> Alcotest.fail "expected a successful result"
 ;;
 
 (** resolve_turn_params with error tool results. *)
@@ -439,11 +440,11 @@ let test_resolve_params_error_tool_results () =
   in
   Alcotest.(check int) "1 error result" 1 (List.length !captured_results);
   match List.hd !captured_results with
-  | Error { message; recoverable; error_class } ->
-    Alcotest.(check string) "error message" "permission denied" message;
-    Alcotest.(check bool) "recoverable" true recoverable;
+  | { Hooks.content; outcome = Tool_failed { failure_kind; error_class }; _ } ->
+    Alcotest.(check string) "error message" "permission denied" content;
+    Alcotest.(check bool) "recoverable" true (failure_kind = Types.Recoverable_tool_error);
     Alcotest.(check bool) "error class" true (error_class = Some Types.Deterministic)
-  | Ok _ -> Alcotest.fail "expected Error result"
+  | { outcome = Tool_succeeded; _ } -> Alcotest.fail "expected a failed result"
 ;;
 
 (* ── Agent_turn.apply_context_injection ───────────────────── *)
@@ -466,7 +467,7 @@ let test_context_injection_sets_values () =
       ; extra_messages = []
       }
   in
-  let tool_uses = [ Types.ToolUse { id = "tu_1"; name = "search"; input = `Assoc [] } ] in
+  let tool_uses = [ Llm_provider.Types.ToolUse { id = "tu_1"; name = "search"; input = `Assoc [] } ] in
   let results =
     [ { Agent_tools.invocation = invocation "tu_1"
       ; tool_name = "search"
@@ -508,7 +509,7 @@ let test_context_injection_none () =
     ]
   in
   let injector ~tool_name:_ ~input:_ ~output:_ = None in
-  let tool_uses = [ Types.ToolUse { id = "tu_n"; name = "tool"; input = `Assoc [] } ] in
+  let tool_uses = [ Llm_provider.Types.ToolUse { id = "tu_n"; name = "tool"; input = `Assoc [] } ] in
   let results =
     [ { Agent_tools.invocation = invocation "tu_n"
       ; tool_name = "tool"
@@ -558,7 +559,7 @@ let test_context_injection_extra_messages () =
           ]
       }
   in
-  let tool_uses = [ Types.ToolUse { id = "tu_m"; name = "tool"; input = `Assoc [] } ] in
+  let tool_uses = [ Llm_provider.Types.ToolUse { id = "tu_m"; name = "tool"; input = `Assoc [] } ] in
   let results =
     [ { Agent_tools.invocation = invocation "tu_m"
       ; tool_name = "tool"
@@ -594,7 +595,7 @@ let test_context_injection_error_result () =
     received_output := Some output;
     None
   in
-  let tool_uses = [ Types.ToolUse { id = "tu_err"; name = "tool"; input = `Assoc [] } ] in
+  let tool_uses = [ Llm_provider.Types.ToolUse { id = "tu_err"; name = "tool"; input = `Assoc [] } ] in
   let results =
     [ { Agent_tools.invocation = invocation "tu_err"
       ; tool_name = "tool"
@@ -632,7 +633,7 @@ let test_context_injection_raises () =
     ]
   in
   let injector ~tool_name:_ ~input:_ ~output:_ = failwith "injector crash" in
-  let tool_uses = [ Types.ToolUse { id = "tu_ex"; name = "tool"; input = `Assoc [] } ] in
+  let tool_uses = [ Llm_provider.Types.ToolUse { id = "tu_ex"; name = "tool"; input = `Assoc [] } ] in
   let results =
     [ { Agent_tools.invocation = invocation "tu_ex"
       ; tool_name = "tool"

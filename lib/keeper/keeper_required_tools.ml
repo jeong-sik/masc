@@ -38,7 +38,7 @@ let of_core_error = function
   | Agent_core.Error.Config _
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
   | Agent_core.Error.Internal _
   | Agent_core.Error.Internal_carried _ -> None
 

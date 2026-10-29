@@ -23,7 +23,7 @@ let observe_failure ~runtime_id ~attempt ~dispatch error =
     | Agent_core.Error.Api api -> Some (Llm_provider.Candidate_fault.of_api_error api)
     | Agent_core.Error.Provider _ | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _
     | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
-    | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _
+    | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ | Agent_core.Error.Internal _
     | Agent_core.Error.Internal_carried _ -> None in
   {attempt;runtime_id;dispatch;failure=Keeper_request_failure.of_core_error error;
    api_candidate_fault}

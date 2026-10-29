@@ -26,7 +26,7 @@ let test_builder_chain () =
   Eio_main.run
   @@ fun env ->
   let b =
-    Builder.create ~net:env#net ~model:(Types.default_config ~model:"test-model").model
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:(Types.default_config ~model:"test-model").model
     |> Builder.with_name "test-chain"
     |> Builder.with_system_prompt "You are a test agent"
     |> Builder.with_max_tokens 200
@@ -51,7 +51,7 @@ let test_builder_thinking () =
   Eio_main.run
   @@ fun env ->
   let b =
-    Builder.create ~net:env#net ~model:(Types.default_config ~model:"test-model").model
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:(Types.default_config ~model:"test-model").model
     |> Builder.with_enable_thinking true
     |> Builder.with_reasoning_effort Llm_provider.Reasoning_effort.Max
   in
@@ -69,7 +69,7 @@ let test_builder_response_format () =
   Eio_main.run
   @@ fun env ->
   let b =
-    Builder.create ~net:env#net ~model:(Types.default_config ~model:"test-model").model
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:(Types.default_config ~model:"test-model").model
     |> Builder.with_response_format Types.JsonMode
     |> Builder.with_cache_system_prompt true
     |> Builder.with_disable_parallel_tool_use true
@@ -87,7 +87,7 @@ let test_builder_tool_choice () =
   Eio_main.run
   @@ fun env ->
   let b =
-    Builder.create ~net:env#net ~model:(Types.default_config ~model:"test-model").model
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:(Types.default_config ~model:"test-model").model
     |> Builder.with_tool_choice Types.Auto
   in
   match Builder.build_safe b with
@@ -100,7 +100,7 @@ let test_builder_initial_messages () =
   @@ fun env ->
   let msgs = [ Types.user_msg "initial context" ] in
   let b =
-    Builder.create ~net:env#net ~model:(Types.default_config ~model:"test-model").model
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:(Types.default_config ~model:"test-model").model
     |> Builder.with_initial_messages msgs
   in
   match Builder.build_safe b with
@@ -114,7 +114,7 @@ let test_build_safe_invalid_max_tokens () =
   Eio_main.run
   @@ fun env ->
   let b =
-    Builder.create ~net:env#net ~model:(Types.default_config ~model:"test-model").model
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:(Types.default_config ~model:"test-model").model
     |> Builder.with_max_tokens 0
   in
   match Builder.build_safe b with
@@ -136,7 +136,7 @@ let test_agent_accessors () =
   let ctx = Context.create_sync () in
   Context.set ctx "key" (`String "value");
   let b =
-    Builder.create ~net:env#net ~model:(Types.default_config ~model:"test-model").model
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:(Types.default_config ~model:"test-model").model
     |> Builder.with_name "accessor-test"
     |> Builder.with_tools [ tool ]
     |> Builder.with_context ctx
@@ -180,7 +180,7 @@ let test_agent_clone () =
   Eio_main.run
   @@ fun env ->
   let b =
-    Builder.create ~net:env#net ~model:(Types.default_config ~model:"test-model").model
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:(Types.default_config ~model:"test-model").model
     |> Builder.with_name "original"
     |> Builder.with_description "orig desc"
   in
@@ -202,7 +202,7 @@ let test_agent_clone_copy_context () =
   let ctx = Context.create_sync () in
   Context.set ctx "test_key" (`String "test_val");
   let b =
-    Builder.create ~net:env#net ~model:(Types.default_config ~model:"test-model").model
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:(Types.default_config ~model:"test-model").model
     |> Builder.with_context ctx
   in
   match Builder.build_safe b with
@@ -229,7 +229,7 @@ let test_agent_card () =
   Eio_main.run
   @@ fun env ->
   let b =
-    Builder.create ~net:env#net ~model:(Types.default_config ~model:"test-model").model
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:(Types.default_config ~model:"test-model").model
     |> Builder.with_name "card-test"
     |> Builder.with_description "Card desc"
   in
@@ -247,7 +247,7 @@ let test_builder_with_event_bus () =
   @@ fun env ->
   let bus = Event_bus.create () in
   let b =
-    Builder.create ~net:env#net ~model:(Types.default_config ~model:"test-model").model
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:(Types.default_config ~model:"test-model").model
     |> Builder.with_event_bus bus
   in
   match Builder.build_safe b with

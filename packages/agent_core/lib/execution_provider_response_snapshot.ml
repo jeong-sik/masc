@@ -2,7 +2,7 @@ module Types = Llm_provider.Types
 
 let ( let* ) = Result.bind
 let ( let+ ) value f = Result.map f value
-let content_to_yojson block = Checkpoint_codec.checkpoint_content_block_to_json block
+let content_to_yojson block = Checkpoint_codec.wire_content_block_to_json block
 
 let validate_json ~context json =
   Execution_json.validate ~context json
@@ -12,7 +12,7 @@ let validate_json ~context json =
 let content_of_yojson json =
   let decoded =
     try
-      Checkpoint_codec.content_block_of_json_strict json
+      Checkpoint_codec.wire_content_block_of_json_strict json
       |> Result.map_error Error.to_string
     with
     | exn ->

@@ -777,6 +777,7 @@ let register_delivery ~sw ~clock =
             publication_recovery_provider = Mcp_server.publication_recovery_availability_provider state;
           } in
           let* message = Keeper_invocation_contract.direct_message
+            ~media_store:(Tool_blob_media_store.of_base_path ~base_path:config.Workspace.base_path)
             ~keeper_name ~prompt ~direct_reply:true
             ~surface_context:(`Assoc ["kind", `String "lane_addon_evidence"; "optional", `Bool true])
             ~channel:"" ~user_blocks:[] ~attachments:[] ()

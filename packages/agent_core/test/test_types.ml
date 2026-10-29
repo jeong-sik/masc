@@ -306,9 +306,9 @@ let test_show_content_block_variants () =
         ; json = None
         ; content_blocks = None
         }
-    ; Types.Image { media_type = "image/png"; source = Types.Base64 "abc" }
+    ; Types.Image { media_type = "image/png"; source = Types.Stored (Agent_core.History.stored_of_raw "abc") }
     ; Types.Document
-        { media_type = "application/pdf"; source = Types.Base64 "pdf" }
+        { media_type = "application/pdf"; source = Types.Stored (Agent_core.History.stored_of_raw "pdf") }
     ]
   in
   List.iter
@@ -353,7 +353,7 @@ let test_show_api_response () =
     { id = "msg-1"
     ; model = "test"
     ; stop_reason = Types.EndTurn
-    ; content = [ Types.Text "hi" ]
+    ; content = [ Llm_provider.Types.Text "hi" ]
     ; usage = None
     ; telemetry = None
     }
@@ -773,11 +773,11 @@ let test_visible_text_of_content_excludes_non_answer_blocks () =
         ; json = Some (`Assoc [ "ok", `Bool true ])
         ; content_blocks = Some [ Types.Text "structured tool payload" ]
         }
-    ; Types.Image { media_type = "image/png"; source = Types.Base64 "bytes" }
+    ; Types.Image { media_type = "image/png"; source = Types.Stored (Agent_core.History.stored_of_raw "bytes") }
     ; Types.Document
-        { media_type = "application/pdf"; source = Types.Base64 "doc" }
+        { media_type = "application/pdf"; source = Types.Stored (Agent_core.History.stored_of_raw "doc") }
     ; Types.Audio
-        { media_type = "audio/mpeg"; source = Types.Base64 "audio" }
+        { media_type = "audio/mpeg"; source = Types.Stored (Agent_core.History.stored_of_raw "audio") }
     ; Types.Text "tail"
     ]
   in
@@ -856,15 +856,15 @@ let test_text_of_response_and_usage_helpers () =
     ; model = "model"
     ; stop_reason = Types.EndTurn
     ; content =
-        [ Types.Text "hello"
-        ; Types.ToolResult
+        [ Llm_provider.Types.Text "hello"
+        ; Llm_provider.Types.ToolResult
             { tool_use_id = "tu"
             ; content = "tool text"
             ; outcome = Tool_succeeded
             ; json = None
             ; content_blocks = None
             }
-        ; Types.Thinking { signature = Some "sig"; content = "hidden" }
+        ; Llm_provider.Types.Thinking { signature = Some "sig"; content = "hidden" }
         ]
     ; usage = Some usage
     ; telemetry = None
@@ -887,7 +887,7 @@ let test_text_of_response_and_usage_helpers () =
 
 let test_validate_tool_result_shape () =
   let object_result =
-    Types.ToolResult
+    Llm_provider.Types.ToolResult
       { tool_use_id = "obj"
       ; content = {|{"ok":true}|}
       ; outcome = Tool_succeeded
@@ -896,7 +896,7 @@ let test_validate_tool_result_shape () =
       }
   in
   let array_result =
-    Types.ToolResult
+    Llm_provider.Types.ToolResult
       { tool_use_id = "arr"
       ; content = "[1,2]"
       ; outcome = Tool_succeeded
@@ -905,7 +905,7 @@ let test_validate_tool_result_shape () =
       }
   in
   let invalid_json_result =
-    Types.ToolResult
+    Llm_provider.Types.ToolResult
       { tool_use_id = "bad"
       ; content = "not-json"
       ; outcome = Tool_succeeded
@@ -914,7 +914,7 @@ let test_validate_tool_result_shape () =
       }
   in
   let empty_result =
-    Types.ToolResult
+    Llm_provider.Types.ToolResult
       { tool_use_id = "empty"
       ; content = " "
       ; outcome = Tool_succeeded
@@ -985,14 +985,14 @@ let test_validate_tool_result_shape () =
        (Types.validate_tool_result_shape
           ~expect_object:true
           ~expect_array:false
-          (Types.Text "plain")))
+          (Llm_provider.Types.Text "plain")))
 ;;
 
 (* ── Audio content block show ──────────────────────────── *)
 
 let test_show_audio_block () =
   let block =
-    Types.Audio { media_type = "audio/wav"; source = Types.Base64 "data" }
+    Types.Audio { media_type = "audio/wav"; source = Types.Stored (Agent_core.History.stored_of_raw "data") }
   in
   let s = Types.show_content_block block in
   Alcotest.(check bool) "show non-empty" true (String.length s > 0)
@@ -1030,7 +1030,7 @@ let summary_contains ~needle response =
 
 let test_response_shape_thinking_only_is_not_deliverable () =
   let response =
-    response ~content:[ Types.Thinking { signature = None; content = "hidden" } ] ()
+    response ~content:[ Llm_provider.Types.Thinking { signature = None; content = "hidden" } ] ()
   in
   let shape = Response_shape.summarize response in
   Alcotest.(check bool)
@@ -1109,8 +1109,8 @@ let test_response_shape_thinking_plus_text_is_deliverable () =
   let response =
     response
       ~content:
-        [ Types.Thinking { signature = None; content = "hidden" }
-        ; Types.Text " final answer "
+        [ Llm_provider.Types.Thinking { signature = None; content = "hidden" }
+        ; Llm_provider.Types.Text " final answer "
         ]
       ()
   in
@@ -1134,24 +1134,24 @@ let test_response_shape_media_only_is_deliverable () =
     [ ( "image"
       , response
           ~content:
-            [ Types.Image
-                { media_type = "image/png"; source = Types.Base64 "AAAA" }
+            [ Llm_provider.Types.Image
+                { media_type = "image/png"; source = Llm_provider.Types.Base64 "AAAA" }
             ]
           () )
     ; ( "document"
       , response
           ~content:
-            [ Types.Document
+            [ Llm_provider.Types.Document
                 { media_type = "application/pdf"
-                ; source = Types.Base64 "AAAA"
+                ; source = Llm_provider.Types.Base64 "AAAA"
                 }
             ]
           () )
     ; ( "audio"
       , response
           ~content:
-            [ Types.Audio
-                { media_type = "audio/wav"; source = Types.Base64 "AAAA" }
+            [ Llm_provider.Types.Audio
+                { media_type = "audio/wav"; source = Llm_provider.Types.Base64 "AAAA" }
             ]
           () )
     ]
@@ -1179,8 +1179,8 @@ let test_response_shape_thinking_plus_tool_use_is_deliverable () =
   let response =
     response
       ~content:
-        [ Types.Thinking { signature = None; content = "hidden" }
-        ; Types.ToolUse { id = "tool-1"; name = "search"; input = `Assoc [] }
+        [ Llm_provider.Types.Thinking { signature = None; content = "hidden" }
+        ; Llm_provider.Types.ToolUse { id = "tool-1"; name = "search"; input = `Assoc [] }
         ]
       ()
   in

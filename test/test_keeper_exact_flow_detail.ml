@@ -247,7 +247,7 @@ let test_rejection_cause_reaches_terminal_and_intermediate_detail () =
     Exact_output.snapshot_flow
       ~first:(candidate "missing-first")
       ~rest:[ candidate "missing-last" ]
-      ~messages:[ Agent_core.Types.user_msg "Return one JSON object." ]
+      ~messages:[ Llm_provider.Types.user_msg "Return one JSON object." ]
       requirement
     |> require_ok "snapshot rejection flow"
     |> Exact_output.start_flow ~admission_class:Llm_provider.Admission_class.Standard

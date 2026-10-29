@@ -1211,13 +1211,21 @@ let extra_tool_schema =
 
 (* A restart reads the history back from its stored form. *)
 let reload_through_checkpoint (stored : message) =
-  let json = Agent_core.Checkpoint.message_to_json stored in
-  match
-    Agent_core.Checkpoint.message_of_json
-      (Yojson.Safe.from_string (Yojson.Safe.to_string json))
-  with
-  | Ok reloaded -> reloaded
-  | Error _ -> Alcotest.fail "the checkpoint round trip failed"
+  let media_store = Agent_core.History.Memory_store.create () in
+  let media_failed error = Alcotest.fail (Agent_core.History.show_media_error error) in
+  match Agent_core.History.of_wire_message media_store stored with
+  | Error error -> media_failed error
+  | Ok history ->
+    let json = Agent_core.Checkpoint.message_to_json history in
+    (match
+       Agent_core.Checkpoint.message_of_json
+         (Yojson.Safe.from_string (Yojson.Safe.to_string json))
+     with
+     | Error _ -> Alcotest.fail "the checkpoint round trip failed"
+     | Ok reloaded ->
+       (match Agent_core.History.to_wire_message media_store reloaded with
+        | Ok reloaded -> reloaded
+        | Error error -> media_failed error))
 ;;
 
 (* The second request keeps the creating request's tools and system prompt

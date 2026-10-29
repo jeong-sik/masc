@@ -15,6 +15,15 @@ module Window = Runtime_model_input_tail_window
 (* The production encoder, not a test-local one: the bound is only meaningful
    against the encoder the window will use, and a simplified stand-in would
    hide exactly the JSON escaping that makes a marker larger than it looks. *)
+(* History in these fixtures holds media by reference; every agent, runtime
+   config and projector here reads the bytes back from this store. *)
+let test_media_store = Agent_core.History.Memory_store.create ()
+
+let stored_source ~media_type raw =
+  match test_media_store.put ~media_type ~raw with
+  | Ok stored -> Agent_core.Types.Stored stored
+  | Error error -> failwith (Agent_core.Error.to_string (Agent_core.Error.Media error))
+
 let measure_message_bytes (m : Types.message) =
   String.length
     (Yojson.Safe.to_string (Masc.Keeper_context_core.message_to_json m))
@@ -622,17 +631,11 @@ let media_projection_binds_actual_argument_positions () =
   let input = long_arguments "media" in
   let canonical = match argument_cycle ~id:"media" input with
     | first :: rest -> {first with content =
-        Types.Image {media_type = "image/png"; source = Types.Base64 "aW1hZ2U="}
+        Types.Image {media_type = "image/png"; source = (stored_source ~media_type:"image/png" "aW1hZ2U=")}
         :: first.content} :: rest
     | [] -> Alcotest.fail "nonempty fixture" in
-  let dispatch, dropped = Agent_core.Llm_provider.Api_common.degrade_image_messages
-      ~supports_image_input:false canonical in
-  Alcotest.(check int) "production media projection changes one block" 1 dropped;
-  let replay_prefix = Masc.Keeper_replay_prefix.media_degraded
-      ~canonical_prefix:canonical ~dispatch_prefix:dispatch in
-  let completed_arguments = bind_arguments ~replay_prefix ~completed_before:1 ~seed:canonical dispatch in
-  let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 dispatch in
-  Alcotest.(check int) "verified media projection still demotes arguments" 1 (List.length planned.pending);
+  (* The Keeper's dispatch prefix is the history the text-only strip leaves;
+     a provider's own image degrade runs on the wire form, after this. *)
   let caps = {Agent_core.Llm_provider.Capabilities.default_capabilities with supports_image_input = false} in
   let stripped, _ = Runtime_agent.strip_unsupported_modality_messages caps canonical in
   let replay_prefix = Masc.Keeper_replay_prefix.media_degraded
@@ -680,7 +683,10 @@ let arguments_obey_each_provider_wire_bound () = with_demotion_store @@ fun stor
   let codec kind build =
     let config = Provider_config.make ~kind ~model_id:"argument-projection-fixture"
         ~base_url:"http://localhost" ~max_tokens:4096 () in
-    let encode messages = build ~config ~messages () in
+    let encode messages =
+      match Agent_core.History.to_wire_messages test_media_store messages with
+      | Ok messages -> build ~config ~messages ()
+      | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error)) in
     let measure_message_bytes message = String.length (encode [message]) in
     let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 seed in
     Alcotest.(check int) "actual wire selects argument demotion" 1 (List.length planned.pending);
@@ -722,8 +728,12 @@ let stamp_signed_call ~config ~prefix ~id input =
   let content =
     [Types.Thinking {content = "signed argument reasoning"; signature = Some "sig-argument"};
      Types.ToolUse {id; name = "execute"; input}] in
+  let media_ok = function
+    | Ok value -> value
+    | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error)) in
   let reasoning_prefix = Backend_anthropic.transmitted_reasoning_prefix
-      ~config ~messages:prefix ~tools:signed_argument_tools ~response_content:content () in
+      ~config ~messages:(media_ok (Agent_core.History.to_wire_messages test_media_store prefix))
+      ~tools:signed_argument_tools ~response_content:content () in
   Alcotest.(check bool) "actual producer minted prefix provenance" true
     (Option.is_some reasoning_prefix);
   let capability = match Reasoning_dialect.replay_capability_for_provider_config config with
@@ -735,7 +745,7 @@ let stamp_signed_call ~config ~prefix ~id input =
     ; telemetry = Some { Types.default_inference_telemetry with
         reasoning_source = Some capability.target; reasoning_prefix } } in
   match Types.assistant_message_of_response response with
-  | Ok message -> message
+  | Ok message -> media_ok (Agent_core.History.of_wire_message test_media_store message)
   | Error _ -> Alcotest.fail "actual sourced response could not be recorded"
 ;;
 
@@ -758,7 +768,8 @@ let signed_argument_view ?frozen_arguments ?materialize ~base_path ~store ~confi
     | Some materialize -> materialize
     | None -> fun ~pending projected ->
       (Demotion.materialize ~store ~addresses ~pending projected).messages in
-  Signed_provider.For_testing.request_view
+  match Signed_provider.For_testing.request_view
+    ~to_wire:(Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ()))
     ~input_policy:Masc.Keeper_input_policy.Small ?completed_arguments
     ~tools:signed_argument_tools ~provider_config:config ~measure_message_bytes
     ~front:(Some { Masc.Keeper_carried_front.first_atom = 0
@@ -770,9 +781,16 @@ let signed_argument_view ?frozen_arguments ?materialize ~base_path ~store ~confi
     ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary {end_atom = atom_count})
     ~materialize
     messages
+  with
+  | Ok view -> view
+  | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error))
 ;;
 
 let assert_signed_argument_wire ~config ~reasoning_index messages =
+  let messages =
+    match Agent_core.History.to_wire_messages test_media_store messages with
+    | Ok messages -> messages
+    | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error)) in
   let open Agent_core.Llm_provider in
   (match Backend_anthropic.retained_prefix_reasoning_indices
       ~config ~tools:signed_argument_tools messages with
@@ -879,14 +897,17 @@ let signed_prefix_tracks_replay_projection_and_tool_user_merge () =
   let signed = stamp_signed_call ~config ~prefix ~id:"signed" (`Assoc []) in
   let source = prefix @ [signed; tool_message ~id:"signed" "done"]
     @ argument_cycle ~id:"later" later_input in
-  let projection = match Agent_core.Llm_provider.Backend_anthropic.project_history config source with
+  let wire_source = match Agent_core.History.to_wire_messages test_media_store source with
+    | Ok messages -> messages
+    | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error)) in
+  let projection = match Agent_core.Llm_provider.Backend_anthropic.project_history config wire_source with
     | Ok projection -> projection
     | Error _ -> Alcotest.fail "signed fixture projection failed" in
   Alcotest.(check (list int)) "the actual replay projection removes the empty Assistant" [1]
     projection.removed_empty_assistant_indices;
   ignore (assert_signed_argument_wire ~config ~reasoning_index:5 source : Yojson.Safe.t list);
   let wire_messages = Agent_core.Llm_provider.Backend_anthropic.build_request
-      ~config ~messages:source ~tools:signed_argument_tools ()
+      ~config ~messages:wire_source ~tools:signed_argument_tools ()
     |> Yojson.Safe.from_string |> Yojson.Safe.Util.member "messages" |> Yojson.Safe.Util.to_list in
   Alcotest.(check bool) "actual wire merges ToolResult and following User text" true
     (List.exists (fun message ->

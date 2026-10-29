@@ -447,14 +447,14 @@ let rec text_only = function
 let agent_core_message { role; content } =
   let role =
     match role with
-    | User -> Agent_core.Types.User
-    | Assistant -> Agent_core.Types.Assistant
+    | User -> Llm_provider.Types.User
+    | Assistant -> Llm_provider.Types.Assistant
   in
-  Agent_core.Types.make_message
+  Llm_provider.Types.make_message
     ~role
     (List.filter_map
        (function
-         | Text text -> Some (Agent_core.Types.Text text)
+         | Text text -> Some (Llm_provider.Types.Text text)
          | Unserved _ -> None)
        content)
 ;;
@@ -464,8 +464,8 @@ let exact_messages request =
   match request.system_prompt with
   | None -> conversation
   | Some system_prompt ->
-    Agent_core.Types.make_message ~role:Agent_core.Types.System
-      [ Agent_core.Types.Text system_prompt ]
+    Llm_provider.Types.make_message ~role:Llm_provider.Types.System
+      [ Llm_provider.Types.Text system_prompt ]
     :: conversation
 ;;
 

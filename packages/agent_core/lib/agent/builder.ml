@@ -5,6 +5,7 @@ open Types
 
 type t =
   { net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  ; media_store : History.media_store
   ; model : model
   ; name : string
   ; system_prompt : string option
@@ -53,9 +54,10 @@ type t =
   ; transport : Llm_provider.Llm_transport.t option
   }
 
-let create ~net ~model =
+let create ~net ~media_store ~model =
   let defaults = default_config ~model in
   { net
+  ; media_store
   ; model
   ; name = defaults.name
   ; system_prompt = defaults.system_prompt
@@ -258,6 +260,7 @@ let build b =
   in
   Agent.create
     ~net:b.net
+    ~media_store:b.media_store
     ~config
     ~tools:(Tool_set.to_list tools)
     ?context

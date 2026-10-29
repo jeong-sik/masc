@@ -168,7 +168,7 @@ let recording_transport ~clock ~dispatched ~stream_first_event_s : Llm_transport
 
 let build_agent ~net ~provider_config ~transport ~bounds =
   let builder =
-    Agent_core.Builder.create ~net ~model:provider_config.Provider_config.model_id
+    Agent_core.Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:provider_config.Provider_config.model_id
     |> Agent_core.Builder.with_provider_config provider_config
     |> Agent_core.Builder.with_context_fit_admission Agent_core.Agent.Require_exact_fit
     |> Agent_core.Builder.without_event_bus

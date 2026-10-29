@@ -101,28 +101,36 @@ let to_string = Checkpoint_codec.to_string
 
 let content_block_to_json_result ~scope block =
   let open Result.Syntax in
-  let json = Checkpoint_codec.checkpoint_content_block_to_json block in
-  let* () = Checkpoint_codec.validate_checkpoint_json ~context:scope json in
-  let* _ = Checkpoint_contract.validate_content_block
-      ~scope:(Checkpoint_contract.Root scope) json in
-  Ok json
+  let json = History.content_block_to_json block in
+  let+ () = Checkpoint_codec.validate_checkpoint_json ~context:scope json in
+  json
 
 let content_block_of_json json =
   let open Result.Syntax in
   let* () = Checkpoint_codec.validate_checkpoint_json ~context:"Checkpoint content block" json in
-  let* _ = Checkpoint_contract.validate_content_block
-      ~scope:(Checkpoint_contract.Root "Checkpoint content block") json in
-  Checkpoint_codec.content_block_of_json_strict json
+  History.content_block_of_json json
+  |> Result.map_error (fun error ->
+    Error.Serialization
+      (JsonParseError
+         { detail = "Checkpoint content block: " ^ History.decode_error_to_string error }))
+
+let wire_content_block_to_json_result ~scope block =
+  let open Result.Syntax in
+  let json = Checkpoint_codec.wire_content_block_to_json block in
+  let+ () = Checkpoint_codec.validate_checkpoint_json ~context:scope json in
+  json
+
+let wire_content_block_of_json json =
+  let open Result.Syntax in
+  let* () = Checkpoint_codec.validate_checkpoint_json ~context:"Wire content block" json in
+  Checkpoint_codec.wire_content_block_of_json_strict json
 
 let message_to_json = Checkpoint_codec.message_to_json
 
 let message_of_json json =
   let open Result.Syntax in
   let* () = Checkpoint_codec.validate_checkpoint_json ~context:"Checkpoint message" json in
-  let* _ = Checkpoint_contract.validate_message 0 json in
-  try Checkpoint_codec.message_of_json json with
-  | Yojson.Safe.Util.Type_error (detail, _) | Yojson.Json_error detail | Failure detail ->
-    Error (Error.Serialization (JsonParseError { detail = "Checkpoint.message_of_json: " ^ detail }))
+  Checkpoint_codec.message_of_json json
 
 type encoding_memo = Checkpoint_codec.encoding_memo
 

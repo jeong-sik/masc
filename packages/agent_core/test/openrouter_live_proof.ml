@@ -44,22 +44,22 @@ let config api_key =
 let classify_blocks blocks =
   List.fold_left
     (fun (text, thinking, details) block ->
-       match (block : Agent_core.Types.content_block) with
-       | Agent_core.Types.Text s -> text ^ s, thinking, details
-       | Agent_core.Types.Thinking { content; _ } -> text, thinking ^ content, details
-       | Agent_core.Types.ReasoningDetails { details = d; _ } ->
+       match (block : Llm_provider.Types.content_block) with
+       | Llm_provider.Types.Text s -> text ^ s, thinking, details
+       | Llm_provider.Types.Thinking { content; _ } -> text, thinking ^ content, details
+       | Llm_provider.Types.ReasoningDetails { details = d; _ } ->
          text, thinking, details @ d
-       | Agent_core.Types.RedactedThinking _
-       | Agent_core.Types.ToolUse _
-       | Agent_core.Types.ToolResult _
-       | Agent_core.Types.Image _
-       | Agent_core.Types.Document _
-       | Agent_core.Types.Audio _ -> text, thinking, details)
+       | Llm_provider.Types.RedactedThinking _
+       | Llm_provider.Types.ToolUse _
+       | Llm_provider.Types.ToolResult _
+       | Llm_provider.Types.Image _
+       | Llm_provider.Types.Document _
+       | Llm_provider.Types.Audio _ -> text, thinking, details)
     ("", "", [])
     blocks
 ;;
 
-let detail_type (d : Agent_core.Types.reasoning_detail) =
+let detail_type (d : Llm_provider.Types.reasoning_detail) =
   match Yojson.Safe.Util.member "type" d.raw with
   | `String s -> s
   | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> "<untyped>"
@@ -111,7 +111,7 @@ let () =
       ~body_timeout_s:180.0
       ~config:(config api_key)
       ~messages:
-        [ Agent_core.Types.user_msg
+        [ Llm_provider.Types.user_msg
             "Work out 4177 * 3391 step by step, then state the product."
         ]
       ~on_event:(fun _ -> incr deltas)

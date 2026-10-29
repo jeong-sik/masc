@@ -49,7 +49,7 @@ let test_original_preparation () = with_prompts (fun () ->
     (prepared.variables=(R.librarian_prompt_variables original |> get));
   let sent=R.messages_for_librarian original |> get in
   check bool "the ordinary public Memory message uses these exact rendered bytes" true
-    (sent=[T.user_msg prepared.rendered_prompt]);
+    (sent=[Llm_provider.Types.user_msg prepared.rendered_prompt]);
   let saved=prepared.rendered_prompt in
   Prompt_registry.set_override Prompt_names.librarian "Changed current prompt" |> get;
   Prompt_registry.set_override Prompt_names.librarian_working_contexts_rule "Changed current rule" |> get;

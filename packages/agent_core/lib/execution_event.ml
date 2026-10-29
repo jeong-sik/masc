@@ -277,7 +277,7 @@ type t =
 let durable_content_of_yojson json =
   let decoded =
     try
-      Checkpoint_codec.content_block_of_json_strict json
+      Checkpoint_codec.wire_content_block_of_json_strict json
       |> Result.map_error Error.to_string
     with
     | exn ->
@@ -285,7 +285,7 @@ let durable_content_of_yojson json =
       Error ("durable content snapshot decoding failed: " ^ Printexc.to_string exn)
   in
   let* block = decoded in
-  let canonical = Checkpoint_codec.checkpoint_content_block_to_json block in
+  let canonical = Checkpoint_codec.wire_content_block_to_json block in
   if Yojson.Safe.equal json canonical
   then Ok block
   else Error "durable content snapshot is not in canonical closed form"
@@ -293,7 +293,7 @@ let durable_content_of_yojson json =
 
 let validate_content_block block =
   let open Llm_provider.Types in
-  let json = Checkpoint_codec.checkpoint_content_block_to_json block in
+  let json = Checkpoint_codec.wire_content_block_to_json block in
   let* () = validate_json ~context:"canonical content snapshot" json in
   (* Losslessness is a property of the durable form, and
      [durable_content_of_yojson] already requires the block it decodes to
@@ -700,17 +700,17 @@ let node_update_to_yojson_unchecked update =
   | Output_snapshot value ->
     node_update_json
       "output_snapshot"
-      (Checkpoint_codec.checkpoint_content_block_to_json value)
+      (Checkpoint_codec.wire_content_block_to_json value)
   | Tool_input_delta value -> node_update_json "tool_input_delta" value
   | Tool_input_snapshot value ->
     node_update_json
       "tool_input_snapshot"
-      (Checkpoint_codec.checkpoint_content_block_to_json value)
+      (Checkpoint_codec.wire_content_block_to_json value)
   | Tool_progress value -> node_update_json "tool_progress" value
   | Tool_result value ->
     node_update_json
       "tool_result"
-      (Checkpoint_codec.checkpoint_content_block_to_json value)
+      (Checkpoint_codec.wire_content_block_to_json value)
 ;;
 
 let node_update_to_yojson update =

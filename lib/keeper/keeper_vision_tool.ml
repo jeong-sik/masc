@@ -45,13 +45,15 @@ let prompt_of_request (req : Va.request) =
   Printf.sprintf "Analyze the attached image for this request:\n%s\n\n%s"
     req.Va.query vision_output_instruction
 
-let message_of_request (req : Va.request) : Agent_core.Types.message =
-  Agent_core.Types.make_message
-    ~role:Agent_core.Types.User
-    [ Agent_core.Types.text_block (prompt_of_request req)
-    ; Agent_core.Types.image_block
+(* A vision sub-call is a provider request, not history: the image rides
+   inline. *)
+let message_of_request (req : Va.request) : Llm_provider.Types.message =
+  Llm_provider.Types.make_message
+    ~role:Llm_provider.Types.User
+    [ Llm_provider.Types.text_block (prompt_of_request req)
+    ; Llm_provider.Types.image_block
         ~media_type:req.Va.image_media_type
-        ~source:(Agent_core.Types.Base64 (Base64.encode_string req.Va.image_bytes))
+        ~source:(Llm_provider.Types.Base64 (Base64.encode_string req.Va.image_bytes))
     ]
 
 type vision_backend =

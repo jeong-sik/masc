@@ -137,7 +137,7 @@ let run_call ~scenario root =
      | (Replace_then_settle | Suspend_then_resume | Removal_fails), _ -> ());
     Ok () in
   let native_call ~turn_sw ~binding ~checkpoint ~input =
-    let config = Runtime_agent.default_config ~name:keeper_name ~provider_cfg
+    let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:keeper_name ~provider_cfg
         ~system_prompt:"Record every round." ~tools:[tool] in
     let config = {config with context=Some (match checkpoint with
         | Some (checkpoint : Agent_core.Checkpoint.t) -> Agent_core.Context.copy ~eio:true checkpoint.context
@@ -158,7 +158,7 @@ let run_call ~scenario root =
     (match result with
      | Ok result ->
        check string "the call completes" "rounds recorded"
-         (Agent_core.Types.text_of_content result.response.content)
+         (Llm_provider.Types.text_of_content result.response.content)
      | Error error -> fail (Agent_core.Error.to_string error));
     match read_call () with
     | Keeper_native_call.Terminal_unacknowledged (call, _) ->

@@ -361,6 +361,9 @@ let build_agent
      | Ok provider_cfg ->
        let base_config =
          Runtime_agent.default_config
+           (* A panelist keeps no checkpoint, so its history media live as
+              long as its run. *)
+           ~media_store:(Agent_core.History.Memory_store.create ())
            ~name:card_name
            ~provider_cfg
            ~system_prompt

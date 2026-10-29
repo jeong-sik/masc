@@ -12,13 +12,18 @@ let remove_once expected blocks =
   in
   loop [] blocks
 
-let retains ~seed ~messages ~results =
+let retains ~media_store ~seed ~messages ~results =
   match results, after_seed seed messages with
   | [], _ -> true
   | _ :: _, None -> false
   | _ :: _, Some suffix ->
     let blocks = List.concat_map
         (fun (message : Agent_core.Types.message) -> message.content) suffix in
+    (* The journal records provider blocks; the transcript is compared in that
+       form. A transcript whose media cannot be read back proves nothing. *)
+    match Agent_core.History.to_wire_blocks media_store blocks with
+    | Error _ -> false
+    | Ok blocks ->
     let rec consume remaining = function
       | [] -> true
       | result :: rest ->

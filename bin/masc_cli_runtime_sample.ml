@@ -49,8 +49,12 @@ let sample ~sw ~net ~scenario ~run_id ~sample_index ~runtime_id =
           match Runtime_agent_core_runner.resolve_runtime_providers_for_turn ~runtime_id () with
           | Error detail -> failure "runtime_resolution" detail
           | Ok [ provider_cfg ] ->
+              (* A sampler run with no tools and no checkpoint. *)
+              let media_store = Agent_core.History.Memory_store.create () in
               let config =
-                { (Runtime_agent.default_config ~name:"runtime-token-sample"
+                { (Runtime_agent.default_config
+                     ~media_store
+                     ~name:"runtime-token-sample"
                      ~provider_cfg ~system_prompt:scenario.system_prompt ~tools:[]) with
                   runtime_id = Some runtime_id;
                   (* Match production keeper turns (keeper_agent_run.ml turns
@@ -84,7 +88,12 @@ let sample ~sw ~net ~scenario ~run_id ~sample_index ~runtime_id =
                                   failure "history_provenance_missing"
                                     "Cannot replay reasoning without provider provenance"
                               | Ok assistant ->
-                                  turns (index + 1) (history @ [ T.user_msg prompt; assistant ]) rest)
+                                  (match Agent_core.History.of_wire_message media_store assistant with
+                                   | Error error ->
+                                       failure "history_media"
+                                         (Agent_core.Error.to_string (Agent_core.Error.Media error))
+                                   | Ok assistant ->
+                                       turns (index + 1) (history @ [ T.user_msg prompt; assistant ]) rest))
                          | (Runtime_agent.Completed _, (T.StopToolUse | (T.MaxTokens | (T.Refusal | (T.ContentFilter | (T.RepetitionTruncation | (T.PauseTurn | (T.Compaction | (T.ContextWindowExceeded | (T.UnmatchedToolCalls | T.Unknown _))))))))))
                          | ((Runtime_agent_context.Yielded_to_operation_queued _ | (Runtime_agent_context.Yielded_to_durable_stimulus _ | (Runtime_agent_context.Yielded_after_repeated_tool_call _ | (Runtime_agent_context.Yielded_after_repeated_assistant_text _ | Runtime_agent_context.InputRequired _)))), _) -> failure "incomplete_turn"
                                   "Execution did not finish a complete assistant turn")

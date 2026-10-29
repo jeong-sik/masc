@@ -1405,7 +1405,7 @@ let run_keeper_cycle
                       | Agent_core.Error.Provider _ | Agent_core.Error.Agent _
                       | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
                       | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
-                      | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _
+                      | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ | Agent_core.Error.Internal _
                       | Agent_core.Error.Internal_carried _ -> ());
                   let is_server_parse_rejection = EC.is_server_rejected_parse_error err in
                   let is_provider_wire_error = EC.is_provider_wire_error err in

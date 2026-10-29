@@ -117,7 +117,7 @@ let observe_call ~base_path ~original reference =
        match terminal.disposition.outcome, reports with
        | Terminal_succeeded, [report] ->
          let successful = report.attempt_admitted && (match report.result with
-           | Agent_core.Types.ToolResult {outcome=Tool_succeeded;_} -> true
+           | Llm_provider.Types.ToolResult {outcome=Tool_succeeded;_} -> true
            | ToolResult {outcome=Tool_failed _;_} | Text _ | Thinking _ | ReasoningDetails _
            | RedactedThinking _ | ToolUse _ | Image _ | Document _ | Audio _ -> false) in
          if successful then

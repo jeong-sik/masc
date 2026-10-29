@@ -1428,7 +1428,7 @@ let test_flow_bookkeeping_failures_are_not_provider_exhaustion () =
       Exact_output.snapshot_flow
         ~first:flow_candidate
         ~rest:[]
-        ~messages:[ Agent_core.Types.user_msg "classify bookkeeping failure" ]
+        ~messages:[ Llm_provider.Types.user_msg "classify bookkeeping failure" ]
         requirement
       |> Result.get_ok
       |> Exact_output.start_flow ~admission_class:Llm_provider.Admission_class.Standard

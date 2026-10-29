@@ -85,6 +85,8 @@ let build_resume ~(checkpoint : Checkpoint.t)
     | Some provider ->
       let provider = Agent_turn.provider_config_with_agent_config ~config:restored_config provider
         |> Llm_provider.Provider_config.freeze_for_request in
+      (* The validator reads block kinds, roles and metadata, so restore
+         checks the history as it is and reads no media. *)
       let* admission = Llm_provider.Reasoning_history_projection.validate_replay_continuity_for_provider_config
         ~source_change_policy ~boundary:Checkpoint_restore provider checkpoint.messages
         |> Result.map_error (fun error -> Replay_rejected error) in

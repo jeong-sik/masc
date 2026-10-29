@@ -756,7 +756,7 @@ let test_terminal_media_delivery_failure_keeps_applied_effect () =
           (Masc.Keeper_tool_execution.Surface_post_completed
             (Masc.Keeper_surface_post.To_discord {channel_id="fixture-destination"}));
         Ok { Agent_core.Types.content="already-applied receipt"
-           ; content_blocks=Some [Agent_core.Types.Document
+           ; content_blocks=Some [Llm_provider.Types.Document
                {media_type="application/pdf";source=Base64 "Zml4dHVyZQ=="}]
            ; _meta=None }) in
     let result = tool.call ~call_id:"terminal-media" (`Assoc []) in
@@ -780,7 +780,7 @@ let test_terminal_media_delivery_failure_keeps_applied_effect () =
 let image_result ~receipt ~media_type ~data _ =
   Ok { Agent_core.Types.content = receipt
      ; content_blocks =
-         Some [ Agent_core.Types.Image { media_type; source = Base64 data } ]
+         Some [ Llm_provider.Types.Image { media_type; source = Base64 data } ]
      ; _meta = None }
 ;;
 
@@ -892,7 +892,7 @@ let test_identical_structured_results_remain_deliverable () =
     let tool, _terminal_error = one_dynamic_tool ~active (fun _ ->
       incr calls;
       Ok { Agent_core.Types.content = Printf.sprintf "elapsed %dms" !calls
-         ; content_blocks = Some [ Agent_core.Types.Text "the same structured answer" ]
+         ; content_blocks = Some [ Llm_provider.Types.Text "the same structured answer" ]
          ; _meta = None })
     in
     let call index = tool.call ~call_id:(Printf.sprintf "repeat-%d" index) (`Assoc []) in
@@ -903,7 +903,7 @@ let test_identical_structured_results_remain_deliverable () =
     let third = call 3 in
     check bool "identical structured answer remains deliverable" true (Option.is_none third.abort_turn);
     check bool "structured answer is preserved" true
-      (third.content_blocks = Some [Agent_core.Types.Text "the same structured answer"]))
+      (third.content_blocks = Some [Llm_provider.Types.Text "the same structured answer"]))
 ;;
 
 let test_text_only_results_remain_deliverable () =
@@ -1379,7 +1379,7 @@ let test_reasoning_and_media_blocks_are_strictly_preserved () =
           { media_type = "image/png"; source = Url "image-data" }
       ; Document
           { media_type = "application/pdf"
-          ; source = Base64 "document-data"
+          ; source = Stored (Agent_core.History.stored_of_raw "document-data")
           }
       ; Audio
           { media_type = "audio/wav"; source = File_id "audio-data" }

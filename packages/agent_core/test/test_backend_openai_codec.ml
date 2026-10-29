@@ -362,14 +362,14 @@ let test_parse_reasoning_content_and_tool_calls_coexist () =
   let has_thinking =
     List.exists
       (function
-        | Thinking { content; _ } -> content = "think step by step"
+        | Llm_provider.Types.Thinking { content; _ } -> content = "think step by step"
         | _ -> false)
       response.content
   in
   let has_tool =
     List.exists
       (function
-        | ToolUse { name; _ } -> name = "search"
+        | Llm_provider.Types.ToolUse { name; _ } -> name = "search"
         | _ -> false)
       response.content
   in
@@ -424,27 +424,27 @@ let test_parse_reasoning_details_and_tool_calls_coexist () =
   let has_visible_text =
     List.exists
       (function
-        | Text s -> not (Api_common.string_is_blank s)
+        | Llm_provider.Types.Text s -> not (Api_common.string_is_blank s)
         | _ -> false)
       response.content
   in
   let has_flat_thinking =
     List.exists
       (function
-        | Thinking _ -> true
+        | Llm_provider.Types.Thinking _ -> true
         | _ -> false)
       response.content
   in
   let reasoning_content, details =
     match response.content with
-    | ReasoningDetails { reasoning_content; details } :: ToolUse { name; _ } :: _
+    | Llm_provider.Types.ReasoningDetails { reasoning_content; details } :: ToolUse { name; _ } :: _
       when name = "get_weather" -> reasoning_content, details
     | _ -> Alcotest.fail "expected [ReasoningDetails; ToolUse]"
   in
   let has_tool =
     List.exists
       (function
-        | ToolUse { name; _ } -> name = "get_weather"
+        | Llm_provider.Types.ToolUse { name; _ } -> name = "get_weather"
         | _ -> false)
       response.content
   in
@@ -765,11 +765,17 @@ let test_minimax_native_catalog_replay_for_model model_id =
   List.iter (fun (mode, parse) ->
     List.iter (fun raw ->
       let first = parse (`String raw) [] in
+      let media_store = Agent_core.History.Memory_store.create () in
+      let media_failed error = Alcotest.fail (Agent_core.History.show_media_error error) in
+      let first = match Agent_core.History.of_wire_message media_store first with
+        | Ok message -> message | Error error -> media_failed error in
       let saved = Agent_core.Checkpoint.message_to_json first
           |> Yojson.Safe.to_string |> Yojson.Safe.from_string in
       let restored = match Agent_core.Checkpoint.message_of_json saved with
-        | Ok message -> message
-        | Error _ -> Alcotest.fail "tool-free MiniMax checkpoint round-trip failed" in
+        | Error _ -> Alcotest.fail "tool-free MiniMax checkpoint round-trip failed"
+        | Ok message ->
+          (match Agent_core.History.to_wire_message media_store message with
+           | Ok message -> message | Error error -> media_failed error) in
       let history = [msg User [Text "First"]; restored; msg User [Text "Next"]] in
       let wire config = Backend_openai_request.build_request ~config ~messages:history ()
           |> Yojson.Safe.from_string |> member "messages" |> to_list in
@@ -945,14 +951,14 @@ let test_reasoning_only_stays_thinking_and_never_reinjected_on_replay () =
   let has_text =
     List.exists
       (function
-        | Text _ -> true
+        | Llm_provider.Types.Text _ -> true
         | _ -> false)
       response.content
   in
   let has_thinking =
     List.exists
       (function
-        | Thinking { content; _ } -> String.trim content = reasoning_text
+        | Llm_provider.Types.Thinking { content; _ } -> String.trim content = reasoning_text
         | _ -> false)
       response.content
   in
@@ -1007,7 +1013,7 @@ let test_parse_think_tags_split_into_thinking_and_text () =
   let visible_text =
     response.content
     |> List.filter_map (function
-         | Text text -> Some text
+         | Llm_provider.Types.Text text -> Some text
          | _ -> None)
     |> String.concat ""
   in
@@ -2361,7 +2367,7 @@ let test_responses_incomplete_status_wins_over_function_call () =
       false
       (List.exists
          (function
-           | ToolUse _ -> true
+           | Llm_provider.Types.ToolUse _ -> true
            | _ -> false)
          response.content)
 ;;

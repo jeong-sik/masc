@@ -16,9 +16,9 @@ let content_block (content : Mcp_protocol.Mcp_types.tool_content) =
   match content with
   | TextContent { text; _ } -> Llm_provider.Types.Text text
   | ImageContent { data; mime_type; _ } ->
-      Llm_provider.Types.Image { source = Base64 data; media_type = mime_type }
+      Llm_provider.Types.Image { source = Llm_provider.Types.Base64 data; media_type = mime_type }
   | AudioContent { data; mime_type; _ } ->
-      Llm_provider.Types.Audio { source = Base64 data; media_type = mime_type }
+      Llm_provider.Types.Audio { source = Llm_provider.Types.Base64 data; media_type = mime_type }
   | ResourceContent _ | ResourceLinkContent _ ->
       Llm_provider.Types.Text
         (Yojson.Safe.to_string (Mcp_protocol.Mcp_types.tool_content_to_yojson content))

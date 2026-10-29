@@ -1,6 +1,5 @@
 (** Tool_local_runtime_verify -- runtime contract verification. *)
 
-module Agent_core_types = Agent_core.Types
 
 
 (* http_error_message moved to Provider_http_error.to_message (SSOT,
@@ -107,7 +106,7 @@ let probe_chat_completion_compatible
           ~request_path:Masc_network_defaults.openai_chat_completions_path
           ~max_tokens:1 ()
       in
-      let messages : Agent_core_types.message list = [ Agent_core_types.user_msg "hi" ] in
+      let messages : Llm_provider.Types.message list = [ Llm_provider.Types.user_msg "hi" ] in
       let run_completion () =
         (Llm_provider.Complete.complete ~sw:env.sw ~net:env.net
           ~config:provider_config ~messages ()).Llm_provider.Completion_outcome.result

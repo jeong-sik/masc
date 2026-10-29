@@ -1612,7 +1612,7 @@ let test_checkpoint_segments_replay_until_actual_answer () =
 let test_interactive_admission_wire_roundtrip () =
   let module Stream = Server_routes_http_keeper_stream in
   let body intent = Chat.request_body ~admission_intent:intent ~since_seq:Position.Whole_turn request in
-  let parse intent = match Stream.parse_keeper_chat_stream_request (body intent) with
+  let parse intent = match Stream.parse_keeper_chat_stream_request ~media_store:(Agent_core.History.Memory_store.create ()) (body intent) with
     | Ok request -> request.Stream.admission_intent | Error detail -> fail detail in
   (* The server side parses the token with Keeper_interrupt_token.of_string,
      which rejects non-UUID text, so the roundtrip needs a real token's wire
@@ -1628,7 +1628,7 @@ let test_interactive_admission_wire_roundtrip () =
   let fields = Yojson.Safe.Util.to_assoc malformed in
   let both = `Assoc (("admission_intent", `Assoc ["kind", `String "interactive"; "control_token", `String "owner-control";
     "interrupt_token", `String "turn-token"; "operation_id", `String "another-operation"]) :: List.remove_assoc "admission_intent" fields) in
-  (match Stream.parse_keeper_chat_stream_request (Yojson.Safe.to_string both) with
+  (match Stream.parse_keeper_chat_stream_request ~media_store:(Agent_core.History.Memory_store.create ()) (Yojson.Safe.to_string both) with
    | Error _ -> () | Ok _ -> fail "two independent cancellation targets were accepted")
 
 let test_text_scope_validation () =

@@ -10,10 +10,10 @@
     @stability Evolving
     @since 0.93.1 *)
 
-(** Input validator: checks messages before the LLM call. *)
+(** Input validator: checks the request messages before the LLM call. *)
 type input_validator =
   { name : string
-  ; validate : Types.message list -> (unit, string) Result.t
+  ; validate : Llm_provider.Types.message list -> (unit, string) Result.t
   }
 
 (** Output validator: checks the response after the LLM call. *)
@@ -37,7 +37,7 @@ type t =
 val empty : t
 
 (** Run input validators concurrently. Returns first failure or [Pass]. *)
-val run_input : input_validator list -> Types.message list -> validation_result
+val run_input : input_validator list -> Llm_provider.Types.message list -> validation_result
 
 (** Run output validators concurrently. Returns first failure or [Pass]. *)
 val run_output : output_validator list -> Types.api_response -> validation_result
@@ -46,7 +46,7 @@ val run_output : output_validator list -> Types.api_response -> validation_resul
     Input failure skips the action. *)
 val guarded
   :  config:t
-  -> messages:Types.message list
+  -> messages:Llm_provider.Types.message list
   -> action:(unit -> (Types.api_response, 'e) Result.t)
   -> unit
   -> (Types.api_response, [ `Validation of validation_result | `Action of 'e ]) Result.t

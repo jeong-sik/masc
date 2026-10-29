@@ -68,7 +68,7 @@ let core_termination_semantics err =
   | Agent_core.Error.Config _ -> Core_error_failure
   | Agent_core.Error.Serialization _ -> Core_error_failure
   | Agent_core.Error.Io _ -> Core_error_failure
-  | Agent_core.Error.Orchestration _ -> Core_error_failure
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ -> Core_error_failure
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> Core_error_failure
 ;;
 
@@ -218,6 +218,7 @@ let terminal_reason_code_of_core_error = function
   | Agent_core.Error.Serialization _ -> "serialization_error"
   | Agent_core.Error.Io _ -> "io_error"
   | Agent_core.Error.Orchestration _ -> "orchestration_error"
+  | Agent_core.Error.Media _ -> "media_error"
   | (Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _) as err -> (
     (* Typed carrier first; the string parse survives inside
        classify_masc_internal_error for pre-carrier producers
@@ -298,7 +299,7 @@ let agent_core_timeout_observation :
       | Llm_provider.Retry.InputCapacity _
       | Llm_provider.Retry.NetworkError _ )
   | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
-  | Agent_core.Error.Serialization _ | Agent_core.Error.Io _ | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Serialization _ | Agent_core.Error.Io _ | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _ -> None
 ;;
 

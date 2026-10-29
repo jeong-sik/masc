@@ -640,6 +640,7 @@ let%test "a refusal this stage makes before dispatch is Attempt_rejected" =
      | Error.Serialization _
      | Error.Io _
      | Error.Orchestration _
+     | Error.Media _
      | Error.Internal _
      | Error.Internal_carried _ -> false)
 ;;

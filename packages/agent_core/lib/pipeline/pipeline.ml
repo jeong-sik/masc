@@ -202,7 +202,15 @@ let admission_refusal_message names : Types.message =
 
 (** Accumulate usage, invoke AfterTurn hook, emit events, append
     assistant message, and increment turn_count. *)
-let stage_collect ?raw_trace_run ?clock ~turn ~provider_config ~context_message agent response =
+let stage_collect
+      ?raw_trace_run
+      ?clock
+      ~turn
+      ~provider_config
+      ~context_message
+      agent
+      (response : Llm_provider.Types.api_response)
+  =
   Tracing.with_span
     agent.options.tracer
     { kind = Hook_invoke
@@ -291,7 +299,10 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config ~context_message 
        in
        let* assistant_message =
          match Types.assistant_message_of_response response with
-         | Ok message -> Ok message
+         | Ok message ->
+           (* The response enters history here: its media goes to the store. *)
+           History.of_wire_message agent.media_store message
+           |> Result.map_error (fun error -> Error.Media error)
          | Error error ->
            Error
              (Error.Internal
@@ -299,7 +310,8 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config ~context_message 
                  ^ Types.show_assistant_message_error error))
        in
        let binds_context =
-         List.exists (function
+         List.exists (fun (block : Llm_provider.Types.content_block) ->
+           match block with
            | Thinking { signature = Some _; _ } | RedactedThinking _ -> true
            | Thinking { signature = None; _ } | ReasoningDetails _ | Text _
            | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
@@ -321,16 +333,17 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config ~context_message 
        let admission_note =
          let admitted_any_call =
            List.exists
-             (function
-               | Types.ToolUse _ -> true
-               | Types.Text _
-               | Types.Thinking _
-               | Types.ReasoningDetails _
-               | Types.RedactedThinking _
-               | Types.ToolResult _
-               | Types.Image _
-               | Types.Document _
-               | Types.Audio _ -> false)
+             (fun (block : Llm_provider.Types.content_block) ->
+               match block with
+               | ToolUse _ -> true
+               | Text _
+               | Thinking _
+               | ReasoningDetails _
+               | RedactedThinking _
+               | ToolResult _
+               | Image _
+               | Document _
+               | Audio _ -> false)
              response.content
          in
          match admission.Agent_tools.rejected_names with
@@ -474,7 +487,7 @@ let stage_execute
            tool_uses
          |> Pipeline_terminal_tool.unpack_execution_result
        in
-       let tool_results = Agent_turn.make_tool_results results in
+       let* tool_results = Agent_turn.make_tool_results ~media_store:agent.media_store results in
        let* () =
          match tool_results with
          | [] -> Ok ()
@@ -576,7 +589,7 @@ let stage_output ?raw_trace_run ?before_tool_execution ~turn ~rejected_tool_call
        | StopToolUse ->
          let tool_uses =
            List.filter
-             (fun (block : content_block) ->
+             (fun (block : Llm_provider.Types.content_block) ->
                 match block with
                 | ToolUse _ -> true
                 | Text _
@@ -913,11 +926,10 @@ let%test "last_tool_results_from finds tool results in last tool message" =
       }
     ]
   in
-  match Agent_turn.last_tool_results_from msgs with
-  | [ Ok { content = "result1"; _ }
-    ; Error { message = "error msg"; recoverable = false; error_class = None }
-    ] -> true
-  | [] | [ (Ok _ | Error _) ] | _ :: _ :: _ -> false
+  List.map
+    (fun (result : Hooks.history_tool_result) -> result.tool_use_id, result.content)
+    (Agent_turn.last_tool_results_from msgs)
+  = [ "t1", "result1"; "t2", "error msg" ]
 ;;
 
 let%test "last_tool_results_from ignores tool results outside tool role" =
@@ -1024,9 +1036,10 @@ let%test "last_tool_results_from picks last tool-result message" =
       }
     ]
   in
-  match Agent_turn.last_tool_results_from msgs with
-  | [ Ok { content = "second"; _ } ] -> true
-  | [] | [ (Ok _ | Error _) ] | _ :: _ :: _ -> false
+  List.map
+    (fun (result : Hooks.history_tool_result) -> result.content)
+    (Agent_turn.last_tool_results_from msgs)
+  = [ "second" ]
 ;;
 
 let%test "last_tool_results_from ignores mixed content outside tool role" =
@@ -1071,9 +1084,13 @@ let%test "last_tool_results_from error tool result" =
       }
     ]
   in
-  match Agent_turn.last_tool_results_from msgs with
-  | [ Error { message = "fail msg"; recoverable = false; error_class = None } ] -> true
-  | [] | [ (Ok _ | Error _) ] | _ :: _ :: _ -> false
+  Agent_turn.last_tool_results_from msgs
+  = [ { Hooks.tool_use_id = "t1"
+      ; content = "fail msg"
+      ; outcome = Tool_failed { failure_kind = Reported_tool_error; error_class = None }
+      ; content_blocks = None
+      }
+    ]
 ;;
 
 (* --- Additional pipeline tests --- *)

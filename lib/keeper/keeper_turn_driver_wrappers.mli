@@ -19,6 +19,7 @@ val run_named_with_masc_tools :
   goal:string ->
   ?goal_blocks:Agent_core.Types.content_block list ->
   base_path:string ->
+  media_store:Agent_core.History.media_store ->
   system_prompt:string ->
   ?native_tools:Agent_core.Tool.t list ->
   ?tool_requirement:Keeper_required_tools.t ->

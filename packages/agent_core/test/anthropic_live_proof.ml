@@ -19,7 +19,7 @@ module Provider_config = Llm_provider.Provider_config
 module Model_catalog = Llm_provider.Model_catalog
 module Reasoning_effort = Llm_provider.Reasoning_effort
 module Http_client = Llm_provider.Http_client
-module Types = Agent_core.Types
+module Types = Llm_provider.Types
 
 let default_model_id = "claude-haiku-5-5"
 

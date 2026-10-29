@@ -87,18 +87,18 @@ let test_visible_text_excludes_non_answer_blocks () =
     ; model = "model"
     ; stop_reason = Agent_core.Types.EndTurn
     ; content =
-        [ Agent_core.Types.Text "visible"
-        ; Agent_core.Types.Thinking { signature = None; content = "private reasoning" }
-        ; Agent_core.Types.ToolResult
+        [ Llm_provider.Types.Text "visible"
+        ; Llm_provider.Types.Thinking { signature = None; content = "private reasoning" }
+        ; Llm_provider.Types.ToolResult
             { tool_use_id = "tool-1"
             ; content = "tool payload"
             ; outcome = Agent_core.Types.Tool_succeeded
             ; json = None
-            ; content_blocks = Some [ Agent_core.Types.Text "structured tool payload" ]
+            ; content_blocks = Some [ Llm_provider.Types.Text "structured tool payload" ]
             }
-        ; Agent_core.Types.Image
-            { media_type = "image/png"; source = Agent_core.Types.Base64 "bytes" }
-        ; Agent_core.Types.Text "tail"
+        ; Llm_provider.Types.Image
+            { media_type = "image/png"; source = Llm_provider.Types.Base64 "bytes" }
+        ; Llm_provider.Types.Text "tail"
         ]
     ; usage = None
     ; telemetry = None

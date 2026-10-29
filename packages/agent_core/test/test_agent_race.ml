@@ -13,7 +13,7 @@ let make_agent env =
         Ok { Types.content = Yojson.Safe.to_string input; content_blocks = None; _meta = None })
     ]
   in
-  Agent.create
+  Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
     ~config:(Types.default_config ~model:"test-model")
     ~net:(Eio.Stdenv.net env)
     ~tools

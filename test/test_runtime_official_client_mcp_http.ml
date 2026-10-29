@@ -155,8 +155,8 @@ let test_turn_scoped_capability_and_protocol () =
           { Runtime_official_client_mcp.success = true
           ; content = "MASC_TOOL_OK"
           ; content_blocks = Some
-              [ Agent_core.Types.Text "MASC_TOOL_OK"
-              ; Agent_core.Types.Image { media_type="image/png"; source = Base64 image_data } ]
+              [ Llm_provider.Types.Text "MASC_TOOL_OK"
+              ; Llm_provider.Types.Image { media_type="image/png"; source = Llm_provider.Types.Base64 image_data } ]
           }
       ; stop = None; after_response_sent =
           (fun () -> responses_sent := call_id :: !responses_sent)
@@ -416,9 +416,9 @@ let test_physical_response_observer_with_reused_string_id () =
   Eio.Switch.run @@ fun sw ->
   let cases = [|
     "first original", None, true;
-    "invalid\255", Some [Agent_core.Types.Text "invalid\255"], false;
-    "image fallback", Some [Agent_core.Types.Image
-      {media_type="image/tiff"; source = Base64 "AAAA"}], false;
+    "invalid\255", Some [Llm_provider.Types.Text "invalid\255"], false;
+    "image fallback", Some [Llm_provider.Types.Image
+      {media_type="image/tiff"; source = Llm_provider.Types.Base64 "AAAA"}], false;
     "second original", None, true |] in
   let completions = Array.init (Array.length cases) (fun _ -> Eio.Promise.create ()) in
   let next = ref 0 in
@@ -620,8 +620,8 @@ let test_unsupported_media_is_a_delivery_error () =
       { Runtime_official_client_mcp_http.outcome =
           { Runtime_official_client_mcp.success = true
           ; content = "persisted artifact receipt"
-          ; content_blocks = Some [Agent_core.Types.Document
-              {media_type="application/pdf"; source = Base64 "Zml4dHVyZQ=="}]
+          ; content_blocks = Some [Llm_provider.Types.Document
+              {media_type="application/pdf"; source = Llm_provider.Types.Base64 "Zml4dHVyZQ=="}]
           }
       ; stop = None; after_response_sent = (fun () -> ()) }) () in
   let endpoint, authorization = config_fields bridge in
@@ -708,8 +708,8 @@ let test_image_media_type_outside_the_shared_set_is_refused ?(media_type="image/
       { Runtime_official_client_mcp_http.outcome =
           { Runtime_official_client_mcp.success = true
           ; content = receipt
-          ; content_blocks = Some [Agent_core.Types.Image
-              {media_type; source = Base64 data}]
+          ; content_blocks = Some [Llm_provider.Types.Image
+              {media_type; source = Llm_provider.Types.Base64 data}]
           }
       ; stop = None; after_response_sent = (fun () -> ()) }) () in
   let endpoint, authorization = config_fields bridge in
@@ -746,7 +746,7 @@ let test_structured_text_is_sanitized_before_it_reaches_the_client () =
       { Runtime_official_client_mcp_http.outcome =
           { Runtime_official_client_mcp.success = true
           ; content = "note receipt"
-          ; content_blocks = Some [Agent_core.Types.Text raw]
+          ; content_blocks = Some [Llm_provider.Types.Text raw]
           }
       ; stop = None; after_response_sent = (fun () -> ()) }) () in
   let endpoint, authorization = config_fields bridge in

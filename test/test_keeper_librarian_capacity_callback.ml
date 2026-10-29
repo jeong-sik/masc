@@ -322,7 +322,7 @@ let test_prefit_real_continuity ~base_path () =
       Ok (Yojson.Safe.to_string answer) in
     match Runtime.For_testing.execute_exact_output_classified ~continuity:None
       ~cli_runner:ordinary_runner ~clock:env#clock ~net:env#net ~base_path ~keeper_id
-      ~selected_input:{(input half) with working_context=Context.empty} ~messages:[Agent_core.Types.user_msg "ordinary Memory"] () with
+      ~selected_input:{(input half) with working_context=Context.empty} ~messages:[Llm_provider.Types.user_msg "ordinary Memory"] () with
     | Ok (({ Runtime.continuity_answer; _ }, _), _) ->
       Alcotest.(check bool)
         ("ordinary Memory accepts a " ^ label ^ " working state and carries no continuity answer")
@@ -344,7 +344,7 @@ let test_prefit_real_continuity ~base_path () =
        {Fixture.id="valid-state";base_url=valid_api.base_url}]));
   (match Runtime.For_testing.execute_exact_output_classified ~continuity:(Some half)
      ~clock:env#clock ~net:env#net ~base_path ~keeper_id ~selected_input:{(input half) with working_context=Context.empty}
-     ~messages:[Agent_core.Types.user_msg "synthesize completed source"] () with
+     ~messages:[Llm_provider.Types.user_msg "synthesize completed source"] () with
    | Ok (({ Runtime.continuity_answer; _ }, _), slot) ->
      Alcotest.check served_slot "API validation advances to declared successor"
        (Runtime.Api_slot "valid-state") slot;
@@ -436,21 +436,27 @@ let test_prefit_real_continuity ~base_path () =
   let completed_end =
     Driver.completed_history_end ~trace_id ~lines ~messages:canonical
     |> Result.map_error Librarian_continuity_snapshot.error_to_string |> get in
-  let view = Driver.For_testing.request_view
+  let view = match Driver.For_testing.request_view
+    ~to_wire:(Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ()))
     ~input_policy:Keeper_input_policy.Small ~continuity ~provider_config
     ~measure_message_bytes:(fun message -> String.length
       (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)))
     ~accepted:None ~front:None ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest canonical)
     ~current_turn_results:Driver.Current_turn_verbatim ~base_path
     ~demote_before:completed_end ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = completed_end })
-    ~materialize:(fun ~pending:_ _ -> Alcotest.fail "unfinished work was demoted") canonical in
+    ~materialize:(fun ~pending:_ _ -> Alcotest.fail "unfinished work was demoted") canonical with
+    | Ok view -> view
+    | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error)) in
   let wire = view.wire
     |> Result.map_error Agent_core.Llm_provider.Reasoning_history_projection.error_to_string |> get in
-  let summaries, suffix = List.partition (fun (message : Agent_core.Types.message) ->
+  let summaries, suffix = List.partition (fun (message : Llm_provider.Types.message) ->
     message.metadata = Runtime_model_input_tail_window.working_state_metadata) wire in
   Alcotest.(check int) "next request contains exactly one saved working state" 1 (List.length summaries);
   Alcotest.(check bool) "next request preserves unfinished user and tool exchange exactly" true
-    (List.equal Agent_core.Types.Message_value.equal pending suffix);
+    (List.equal Llm_provider.Types.Message_value.equal
+       (Agent_core.History.to_wire_messages (Agent_core.History.Memory_store.create ()) pending
+        |> Result.get_ok)
+       suffix);
   let after = match C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id with
     | Ok value -> C.exact_snapshot_messages value
     | Error _ -> Alcotest.fail "source checkpoint disappeared" in

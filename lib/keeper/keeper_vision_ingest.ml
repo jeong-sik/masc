@@ -64,7 +64,7 @@ let record_eviction ~keeper_name ~mode ~result ~reason =
      errors by walking this list, so a reason added here appears there
      without a second edit. *)
 let error_reasons =
-  [ "bad_base64"
+  [ "media_unavailable"
   ; "image_too_large"
   ; "invalid_media_type"
   ; "store_failed"
@@ -108,15 +108,6 @@ let extraction_query =
 ;;
 
 
-(* An [Image] block's [Base64] source payload is the base64 wire payload
-   ([Keeper_multimodal_input.normalize_media_payload] guarantees base64); decode
-   to the raw bytes the content-addressed store hashes. *)
-let raw_bytes_of_image_data data =
-  match Base64.decode data with
-  | Ok bytes -> Ok bytes
-  | Error (`Msg m) -> Error m
-;;
-
 (* Eager extraction through the shared vision core, only when an Eio context is
    present (prod turn). Absent (tests / pre-bootstrap) -> [None]; the caller then
    emits an unread placeholder. Provider cancellation, when configured, is
@@ -155,7 +146,7 @@ let eager_read ~base_path ~exclude_runtime_ids ~media_type ~bytes
    else — including an already-evicted [Text] placeholder — passes through
    unchanged, so re-running on a rehydrated message is a no-op (idempotent: no
    double-store, no double-extract). *)
-let evict_block ?base_path ~read ~mode ~keeper_name ~eager_budget (block : Agent_core.Types.content_block) =
+let evict_block ?base_path ~media_store ~read ~mode ~keeper_name ~eager_budget (block : Agent_core.Types.content_block) =
   match block with
   | Agent_core.Types.Image { media_type; source } ->
     (match source with
@@ -169,12 +160,12 @@ let evict_block ?base_path ~read ~mode ~keeper_name ~eager_budget (block : Agent
           placeholder the reader cannot act on. *)
        record_eviction ~keeper_name ~mode ~result:"ok" ~reason:"reference_passthrough";
        block
-     | Agent_core.Types.Base64 data ->
-       match raw_bytes_of_image_data data with
+     | Agent_core.Types.Stored stored ->
+       match media_store.Agent_core.History.get stored with
       | Error _ ->
-        record_eviction ~keeper_name ~mode ~result:"error" ~reason:"bad_base64";
+        record_eviction ~keeper_name ~mode ~result:"error" ~reason:"media_unavailable";
         Agent_core.Types.Text
-          (image_store_failed_placeholder ~reason:"invalid image payload")
+          (image_store_failed_placeholder ~reason:"image bytes unavailable")
       | Ok bytes ->
         (match Keeper_vision_tool.validate_image_size bytes with
          | Error _ ->
@@ -232,7 +223,7 @@ let evict_block ?base_path ~read ~mode ~keeper_name ~eager_budget (block : Agent
                          ~handle
                          ~media_type
                          ~reason:"not read"))))))
-  | (Llm_provider.Types.Text _ | Llm_provider.Types.Thinking _ | Llm_provider.Types.ReasoningDetails _ | Llm_provider.Types.RedactedThinking _ | Llm_provider.Types.ToolUse _ | Llm_provider.Types.ToolResult _ | Llm_provider.Types.Document _ | Llm_provider.Types.Audio _) as other -> other
+  | (Agent_core.Types.Text _ | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _) as other -> other
 ;;
 
 (* Routing and delegation share the transport-plus-model capability view. *)
@@ -264,7 +255,7 @@ let delegates_media ~runtime_id =
          (Runtime_lane.ordered_candidates lane))
 ;;
 
-let evict_blocks ?base_path ~mode ~delegate ~keeper_name blocks =
+let evict_blocks ?base_path ~media_store ~mode ~delegate ~keeper_name blocks =
   if delegate
   then (
     let eager_budget =
@@ -275,19 +266,19 @@ let evict_blocks ?base_path ~mode ~delegate ~keeper_name blocks =
     in
     (* This path has no lane walk behind it, so nothing is spent yet. *)
     List.map
-      (evict_block ?base_path
+      (evict_block ?base_path ~media_store
          ~read:(eager_read ~base_path ~exclude_runtime_ids:[])
          ~mode ~keeper_name ~eager_budget)
       blocks)
   else blocks
 ;;
 
-let evict_message ?base_path ~mode ~delegate ~keeper_name (message : Agent_core.Types.message) =
+let evict_message ?base_path ~media_store ~mode ~delegate ~keeper_name (message : Agent_core.Types.message) =
   if delegate
   then
     { message with
       Agent_core.Types.content =
-        evict_blocks ?base_path ~mode ~delegate ~keeper_name message.Agent_core.Types.content
+        evict_blocks ?base_path ~media_store ~mode ~delegate ~keeper_name message.Agent_core.Types.content
     }
   else message
 ;;
@@ -297,7 +288,7 @@ type image_projection =
   ; delegated_images : int
   }
 
-let fallback_projector_with_read ?base_path ?(exclude_runtime_ids = []) ~read ~keeper_name () =
+let fallback_projector_with_read ?base_path ?(exclude_runtime_ids = []) ~media_store ~read ~keeper_name () =
   let cached = Hashtbl.create 8 in
   let eager_budget = ref max_eager_reads_per_turn in
   let project_image ~mode block =
@@ -314,11 +305,11 @@ let fallback_projector_with_read ?base_path ?(exclude_runtime_ids = []) ~read ~k
           Agent_core.Types.Text
             (Printf.sprintf
                "[unread image file ID: %s; this runtime cannot view the image]" data)
-        | Llm_provider.Types.Image { source = Llm_provider.Types.Base64 _;_}
-        | Llm_provider.Types.Text _ | Llm_provider.Types.Thinking _
-        | Llm_provider.Types.ReasoningDetails _ | Llm_provider.Types.RedactedThinking _
-        | Llm_provider.Types.ToolUse _ | Llm_provider.Types.ToolResult _
-        | Llm_provider.Types.Document _ | Llm_provider.Types.Audio _ -> evict_block ?base_path
+        | Agent_core.Types.Image { source = Agent_core.Types.Stored _;_}
+        | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+        | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+        | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _
+        | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> evict_block ?base_path ~media_store
             ~read:(read ~exclude_runtime_ids)
             ~mode ~keeper_name ~eager_budget block
       in
@@ -355,8 +346,8 @@ let fallback_projector_with_read ?base_path ?(exclude_runtime_ids = []) ~read ~k
   project
 ;;
 
-let fallback_projector ?base_path ?exclude_runtime_ids ~keeper_name () =
-  fallback_projector_with_read ?base_path ?exclude_runtime_ids ~read:(eager_read ~base_path) ~keeper_name ()
+let fallback_projector ?base_path ?exclude_runtime_ids ~media_store ~keeper_name () =
+  fallback_projector_with_read ?base_path ?exclude_runtime_ids ~media_store ~read:(eager_read ~base_path) ~keeper_name ()
 
 module For_testing = struct
   let fallback_projector = fallback_projector_with_read

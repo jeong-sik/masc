@@ -40,7 +40,7 @@ let test_anthropic_parse_response () =
    | Types.EndTurn -> ()
    | _ -> fail "expected EndTurn");
   match resp.content with
-  | [ Types.Text "Hello back" ] -> ()
+  | [ Llm_provider.Types.Text "Hello back" ] -> ()
   | _ -> fail "expected single text block"
 ;;
 
@@ -74,7 +74,7 @@ let test_openai_parse_response () =
    | Types.EndTurn -> ()
    | _ -> fail "expected EndTurn from stop");
   match resp.content with
-  | [ Types.Text "Openai response" ] -> ()
+  | [ Llm_provider.Types.Text "Openai response" ] -> ()
   | _ -> fail "expected single text block"
 ;;
 

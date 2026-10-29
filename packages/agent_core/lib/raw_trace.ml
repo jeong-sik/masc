@@ -715,7 +715,7 @@ let withheld_reasoning_json ~block_kind ~char_count ~redacted =
   |> snd
 ;;
 
-let rec raw_trace_content_block_to_json block =
+let rec raw_trace_content_block_to_json (block : Llm_provider.Types.content_block) =
   match block with
   | Thinking { content; _ } ->
     withheld_reasoning_json
@@ -748,7 +748,7 @@ let rec raw_trace_content_block_to_json block =
     Llm_provider.Api_common.content_block_to_json block
 ;;
 
-let observe_assistant_block block =
+let observe_assistant_block (block : Llm_provider.Types.content_block) =
   match block with
   | Thinking { content; _ } ->
     Withheld_reasoning

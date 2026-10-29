@@ -76,6 +76,6 @@ let record_failure ~base_path ~(attempt : attempt) error =
        else detail ^ " [structured_evidence_unavailable: write_failed]")
   | Serialization (JsonParseError _ | StructuredOutputStateError _
       | VersionMismatch _ | UnknownVariant _)
-  | Api _ | Provider _ | Agent _ | Mcp _ | Config _ | Io _ | Orchestration _
+  | Api _ | Provider _ | Agent _ | Mcp _ | Config _ | Io _ | Orchestration _ | Media _
   | Internal _ | Internal_carried _ -> detail
 ;;

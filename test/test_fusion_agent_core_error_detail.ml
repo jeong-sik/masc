@@ -81,7 +81,7 @@ let test_empty_response_detail_summarizes_shape () =
     ; model = "m"
     ; stop_reason = Agent_core.Types.MaxTokens
     ; content =
-        [ Agent_core.Types.Thinking { signature = None; content = "secret chain" } ]
+        [ Llm_provider.Types.Thinking { signature = None; content = "secret chain" } ]
     ; usage =
         Some
           { input_tokens = 21
@@ -133,7 +133,7 @@ let test_empty_response_detail_counts_via_canonical_projection () =
     { id = "r"
     ; model = "m"
     ; stop_reason = Agent_core.Types.MaxTokens
-    ; content = [ Agent_core.Types.Text "  hi  "; Agent_core.Types.Text "yo" ]
+    ; content = [ Llm_provider.Types.Text "  hi  "; Llm_provider.Types.Text "yo" ]
     ; usage = None
     ; telemetry = None
     }

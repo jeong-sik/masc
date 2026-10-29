@@ -102,7 +102,7 @@ let run_phase ~child root =
     let checkpoint_sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
       if child && snapshot.stage = Agent_core.Agent.After_assistant_collected
       then Unix._exit crash_exit else Ok () in
-    let config = Runtime_agent.default_config ~name:keeper_name ~provider_cfg
+    let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:keeper_name ~provider_cfg
         ~system_prompt:"Persist the shared context." ~tools:[tool] in
     let config = {config with context=Some context; hooks=Some hooks;
       context_injector=Some context_injector; checkpoint_sink=Some checkpoint_sink} in
@@ -122,7 +122,7 @@ let run_phase ~child root =
       | Ok result -> result
       | Error error -> fail (Agent_core.Error.to_string error) in
     check string "resumed provider completes" "context saved"
-      (Agent_core.Types.text_of_content result.response.content);
+      (Llm_provider.Types.text_of_content result.response.content);
     let call = match Registry.direct_native_call ~base_path:root ~keeper_name ~operation_id
         |> require "read terminal native call" with
       | Keeper_native_call.Terminal_unacknowledged (call,
@@ -244,7 +244,7 @@ let test_native_input_checkpoint_order ?(fail_before_canonical=false) ~uncertain
       | Ok (Keeper_checkpoint_store.Stale_noop _) -> Error "fixture source changed"
       | Ok (Keeper_checkpoint_store.Saved _) ->
         if !resume then Error "canonical write committed; acknowledgement uncertain" else Ok () in
-    let config = Runtime_agent.default_config ~name:keeper_name ~provider_cfg
+    let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:keeper_name ~provider_cfg
         ~system_prompt:"Ask before proceeding." ~tools:[] in
     let config = {config with context=Some context;hooks=Some hooks;checkpoint_sink=Some sink;
       session_id=Some session_id} in
@@ -375,7 +375,7 @@ let test_retired_input_history_cut () =
           ~execution_digest:operation.execution_digest ~call_id:call.call_id ~observed:call.checkpoint checkpoint
           |> require "publish observed input history" |> ignore);
       Ok () in
-    let config=Runtime_agent.default_config ~name:keeper_name ~provider_cfg
+    let config=Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:keeper_name ~provider_cfg
         ~system_prompt:"Complete the response." ~tools:[] in
     let config={config with context=Some context;session_id=Some session_id;checkpoint_sink=Some sink} in
     let agent_ref=ref None in

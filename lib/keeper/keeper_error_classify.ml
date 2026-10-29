@@ -108,7 +108,7 @@ let is_transient_network_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Config _
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> false
 
 (** Detect typed server-side request body parse errors.  The LLM API never
@@ -151,7 +151,7 @@ let is_provider_rejected_parse_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Config _ -> false
   | Agent_core.Error.Serialization _ -> false
   | Agent_core.Error.Io _ -> false
-  | Agent_core.Error.Orchestration _ -> false
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ -> false
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> false
 
 let is_provider_wire_error (err : Agent_core.Error.t) : bool =
@@ -175,7 +175,7 @@ let is_provider_wire_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Config _
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> false
 
 (** 0-byte empty completion: the provider ended the turn with a modeled,
@@ -225,7 +225,7 @@ let is_empty_completion_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Config _ -> false
   | Agent_core.Error.Serialization _ -> false
   | Agent_core.Error.Io _ -> false
-  | Agent_core.Error.Orchestration _ -> false
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ -> false
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> false
 
 let is_model_rejected_parse_error (err : Agent_core.Error.t) : bool =
@@ -241,7 +241,7 @@ let is_model_rejected_parse_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Config _ -> false
   | Agent_core.Error.Serialization _ -> false
   | Agent_core.Error.Io _ -> false
-  | Agent_core.Error.Orchestration _ -> false
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ -> false
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> false
 
 let is_server_rejected_parse_error (err : Agent_core.Error.t) : bool =
@@ -514,7 +514,7 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
          | Agent_core.Error.Config _
          | Agent_core.Error.Serialization _
          | Agent_core.Error.Io _
-         | Agent_core.Error.Orchestration _
+         | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
          | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> None)
 
 (** The labelled retry a deferred lane stands for: the runtime the lane names
@@ -542,7 +542,7 @@ let is_invalid_request_error : Agent_core.Error.t -> bool = function
   | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _ | (Llm_provider.Retry.Overloaded _ | (Llm_provider.Retry.ServerError _ | (Llm_provider.Retry.AuthError _ | (Llm_provider.Retry.AuthorizationError _ | (Llm_provider.Retry.PaymentRequired _ | (Llm_provider.Retry.NotFound _ | (Llm_provider.Retry.ContextOverflow _ | (Llm_provider.Retry.InputCapacity _ | (Llm_provider.Retry.NetworkError _ | Llm_provider.Retry.Timeout _))))))))))
   | Agent_core.Error.Provider _ | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _
   | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ | Agent_core.Error.Internal _
   | Agent_core.Error.Internal_carried _ -> false
 
 (** [true] when a structured error indicates context overflow.
@@ -567,7 +567,7 @@ let is_context_overflow (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _ | (Llm_provider.Retry.Overloaded _ | (Llm_provider.Retry.ServerError _ | (Llm_provider.Retry.AuthError _ | (Llm_provider.Retry.AuthorizationError _ | (Llm_provider.Retry.PaymentRequired _ | (Llm_provider.Retry.InvalidRequest _ | (Llm_provider.Retry.NotFound _ | (Llm_provider.Retry.NetworkError _ | Llm_provider.Retry.Timeout _)))))))))
   | Agent_core.Error.Provider _ | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _
   | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ | Agent_core.Error.Internal _
   | Agent_core.Error.Internal_carried _ -> false
 
 (* Classification-only predicate: does this failure class describe a
@@ -637,7 +637,7 @@ let extract_input_required (err : Agent_core.Error.t)
   | Agent_core.Error.Agent (Agent_core.Error.UnrecognizedStopReason _ | (Agent_core.Error.ToolRoundLimitExceeded _ | (Agent_core.Error.HookExecutionFailed _ | (Agent_core.Error.TerminalToolEffectFailed _ | (Agent_core.Error.TerminalToolDurabilityFailed _ | (Agent_core.Error.GuardrailViolation _ | Agent_core.Error.TripwireViolation _))))))
   | Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Mcp _
   | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ | Agent_core.Error.Internal _
   | Agent_core.Error.Internal_carried _ -> None
 ;;
 
@@ -659,7 +659,7 @@ let is_input_required_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Config _
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> false
 
 (** [true] when an error represents terminal runtime exhaustion. Accept

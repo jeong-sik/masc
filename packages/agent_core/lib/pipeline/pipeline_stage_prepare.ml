@@ -107,19 +107,10 @@ let stage_input ?raw_trace_run ?clock ~turn agent =
 ;;
 
 
-(* Agent Core contract WP8 Inc1. [Agent_turn.last_tool_results_from] routes
-   [ToolResult] blocks through [Canonical_tool.tool_result_of_block] and lowers
-   the projection back to [Types.tool_result]. A result carrying a [json] (WP4
-   structured) payload must still lower to [Ok { content; content_blocks = None; _meta = None }] — the
-   projection surfaces [structured_content] without disturbing the existing
-   string contract.
-
-   This file used to re-export the function so the test below could name it
-   unqualified, and pipeline.ml re-exported that in turn. Neither rung had a
-   caller outside these tests, and the wording here ("the consumed path")
-   claimed a wiring this stage does not have: the consumer is Agent_turn
-   itself (agent_turn.ml:221). The test now names the function it pins. *)
-let%test "last_tool_results_from routes through canonical projection (with json)" =
+(* [Agent_turn.last_tool_results_from] reads history blocks as they are: the
+   outcome stays typed and the media, if any, stay by reference. *)
+let%test "last_tool_results_from keeps each result's id, content and outcome" =
+  let failed = Tool_failed { failure_kind = Reported_tool_error; error_class = None } in
   let msgs =
     [ { origin = Llm_provider.Types.Conversation;  role = Tool
       ; content =
@@ -133,8 +124,7 @@ let%test "last_tool_results_from routes through canonical projection (with json)
           ; ToolResult
               { tool_use_id = "t2"
               ; content = "boom"
-              ; outcome =
-                  Tool_failed { failure_kind = Reported_tool_error; error_class = None }
+              ; outcome = failed
               ; json = None
               ; content_blocks = None
               }
@@ -145,15 +135,19 @@ let%test "last_tool_results_from routes through canonical projection (with json)
       }
     ]
   in
-  match Agent_turn.last_tool_results_from msgs with
-  | [ Ok { content = "ok payload"; _ }
-    ; Error { message = "boom"; recoverable = false; error_class = None }
-    ] -> true
-  | [] | [ (Ok _ | Error _) ] | _ :: _ :: _ -> false
+  Agent_turn.last_tool_results_from msgs
+  = [ { Hooks.tool_use_id = "t1"
+      ; content = "ok payload"
+      ; outcome = Tool_succeeded
+      ; content_blocks = None
+      }
+    ; { tool_use_id = "t2"; content = "boom"; outcome = failed; content_blocks = None }
+    ]
 ;;
 
 let prepare_turn_for_agent agent ~turn_params =
   Agent_turn.prepare_turn
+    ~media_store:agent.media_store
     ~tools:agent.tools
     ~messages:agent.state.messages
     ~turn_params

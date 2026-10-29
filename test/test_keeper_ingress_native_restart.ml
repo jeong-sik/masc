@@ -91,6 +91,11 @@ let target_result = function
   | Agent_core.Types.ToolResult {tool_use_id; _} -> String.equal tool_use_id target_id
   | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
   | Image _ | Document _ | Audio _ -> false
+(* The execution journal records provider blocks. *)
+let target_wire_result = function
+  | Llm_provider.Types.ToolResult {tool_use_id; _} -> String.equal tool_use_id target_id
+  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+  | Image _ | Document _ | Audio _ -> false
 let target_results (checkpoint : Agent_core.Checkpoint.t) =
   checkpoint.messages |> List.concat_map (fun (m : Agent_core.Types.message) -> m.content)
   |> List.filter target_result
@@ -173,7 +178,7 @@ let check_resume_authority ~env ~root binding =
     (Agent_core.Agent.read_execution_terminal projection |> require "read Core terminal" |> Option.is_none);
   let results = projection_events projection |> List.filter_map (fun (event : Projection.event) ->
     match event.payload with
-    | Projection.Node_updated {update=Tool_result result; _} when target_result result -> Some result
+    | Projection.Node_updated {update=Tool_result result; _} when target_wire_result result -> Some result
     | Node_opened _ | Node_closed _ | Node_updated _ -> None) in
   check int "Core has one committed target ToolResult before checkpoint" 1 (List.length results);
   let before = native_state binding in
@@ -182,7 +187,10 @@ let check_resume_authority ~env ~root binding =
   check bool "refused digest does not alter receipt" true
     (Keeper_native_call.equal_state before (native_state binding));
   check_effect_counts root;
-  {original_call=call; canonical_result=List.hd results}
+  let canonical_result =
+    Agent_core.History.of_wire_block (Agent_core.History.Memory_store.create ()) (List.hd results)
+    |> Result.get_ok in
+  {original_call=call; canonical_result}
 
 let run_phase ?(empty_terminal = false) ~child ~cut root =
   let fresh = child || empty_terminal in
@@ -322,7 +330,7 @@ is-default = true
         if child && cut = Settled_result then Unix._exit (exit_code cut)) in
     let ctx : _ Keeper_types_profile.context = {config;agent_name="original-owner";sw=turn_sw;
       clock=env#clock;proc_mgr=Some env#process_mgr;net=Some env#net;publication_recovery_provider} in
-    let message = Keeper_invocation_contract.direct_message ~keeper_name ~prompt:goal ~direct_reply:false
+    let message = Keeper_invocation_contract.direct_message ~media_store:(Agent_core.History.Memory_store.create ()) ~keeper_name ~prompt:goal ~direct_reply:false
         ~turn_instructions:"Preserve this original task." ~channel:"fixture" ~user_blocks:[] ~attachments:[] ()
       |> require "direct message" in
     let dispatched = Keeper_turn_dispatch_authority.run (fun admission_token ->

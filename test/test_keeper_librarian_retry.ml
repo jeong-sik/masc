@@ -1401,32 +1401,32 @@ let test_conversation_headers_carry_the_stamped_speaker () =
   | Ok messages ->
     check bool "the pass request carries the whole conversation" true
       (List.exists
-         (fun (message : Agent_core.Types.message) ->
+         (fun (message : Llm_provider.Types.message) ->
             List.exists
               (function
-                | Agent_core.Types.Text text ->
+                | Llm_provider.Types.Text text ->
                   String_util.contains_substring text "speaker=duplicate] repeated"
-                | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
-                | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
-                | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
-                | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> false)
+                | Llm_provider.Types.Thinking _ | Llm_provider.Types.ReasoningDetails _
+                | Llm_provider.Types.RedactedThinking _ | Llm_provider.Types.ToolUse _
+                | Llm_provider.Types.ToolResult _ | Llm_provider.Types.Image _
+                | Llm_provider.Types.Document _ | Llm_provider.Types.Audio _ -> false)
               message.content)
          messages)
 ;;
 
 let user_text_of_messages messages =
   messages
-  |> List.filter_map (fun (m : Agent_core.Types.message) ->
+  |> List.filter_map (fun (m : Llm_provider.Types.message) ->
     if m.role = Agent_core.Types.User
     then
       Some
         (m.content
          |> List.filter_map (function
-           | Agent_core.Types.Text s -> Some s
-           | Agent_core.Types.ToolResult _ | Agent_core.Types.ToolUse _
-           | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
-           | Agent_core.Types.RedactedThinking _ | Agent_core.Types.Image _
-           | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
+           | Llm_provider.Types.Text s -> Some s
+           | Llm_provider.Types.ToolResult _ | Llm_provider.Types.ToolUse _
+           | Llm_provider.Types.Thinking _ | Llm_provider.Types.ReasoningDetails _
+           | Llm_provider.Types.RedactedThinking _ | Llm_provider.Types.Image _
+           | Llm_provider.Types.Document _ | Llm_provider.Types.Audio _ -> None)
          |> String.concat "\n")
     else None)
   |> String.concat "\n"

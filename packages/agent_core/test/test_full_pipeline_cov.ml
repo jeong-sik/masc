@@ -181,13 +181,13 @@ let make_agent ~net ?(tools = []) ?hooks ?provider_config base_url =
          | None -> Hooks.empty)
     }
   in
-  Agent.create ~net ~config ~tools ~options ()
+  Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ~tools ~options ()
 ;;
 
 let extract_text (resp : Types.api_response) =
   List.filter_map
     (function
-      | Types.Text s -> Some s
+      | Llm_provider.Types.Text s -> Some s
       | _ -> None)
     resp.content
   |> String.concat ""
@@ -475,7 +475,7 @@ let test_openai_compat () =
       { (Types.default_config ~model:"test-model") with name = "openai-agent" }
     in
     let options = { Agent.default_options with provider_config = Some provider_config } in
-    let a = Agent.create ~net:env#net ~config ~options () in
+    let a = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~options () in
     match Agent.run ~sw a "hello" with
     | Ok resp ->
       check string "text" "openai hello" (extract_text resp);

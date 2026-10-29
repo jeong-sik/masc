@@ -164,7 +164,7 @@ let run_direct_attempt ~system_prompt ~base_path ~cli_path ~on_transmitted_model
                   ~keeper_name:"codex-blank-prompt"
                   ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                   ~pre_tool_rejects:(ref [])
-                  ~base_path
+                  ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
                   ~goal:"Return the fixture marker"
                   ~goal_blocks:None
                   ~system_prompt

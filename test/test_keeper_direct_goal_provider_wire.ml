@@ -124,7 +124,7 @@ let run_case source () =
       ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"fixture"
       ~model_id ~base_url:server.base_url ~request_path:"/v1/chat/completions"
       ~tool_stream:false () in
-  let runtime = Runtime_agent.default_config ~name:"direct-goal-wire"
+  let runtime = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:"direct-goal-wire"
       ~provider_cfg ~system_prompt:base_system_prompt
       ~tools:[] in
   let runtime = {runtime with hooks = Some hooks} in
@@ -285,7 +285,7 @@ let test_goal_survives_read_then_task_creation () =
   let provider_cfg = Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"fixture" ~model_id
       ~base_url:server.base_url ~request_path:"/v1/chat/completions" ~tool_stream:false () in
-  let runtime = Runtime_agent.default_config ~name:"goal-loop-wire" ~provider_cfg
+  let runtime = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:"goal-loop-wire" ~provider_cfg
       ~system_prompt:"Read the metric, then record the remaining work as a Task."
       ~tools:[read_tool;create_tool] in
   let result = match Runtime_agent.run ~sw ~net:env#net ~config:{runtime with hooks=Some hooks}
@@ -460,7 +460,7 @@ let test_completion_observation_survives_tool_reply approved () =
   let read_tool = Agent_core.Tool.create ~name:"Read" ~description:"Fixture artifact read"
       ~parameters:[] (fun _ -> Ok {Agent_core.Types.content="artifact read after verdict";
                                   content_blocks=None;_meta=None}) in
-  let runtime = Runtime_agent.default_config ~name:meta.name ~provider_cfg
+  let runtime = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:meta.name ~provider_cfg
       ~system_prompt:"BASE_AUTHORITY_WIRE" ~tools:[read_tool] in
   let result = match Runtime_agent.run ~sw ~net:env#net ~config:{runtime with hooks=Some hooks}
       "Inspect the next artifact." with

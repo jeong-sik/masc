@@ -986,9 +986,9 @@ let test_public_draft_run_preserves_one_execution_identity ?(observe = true) ?(s
         ~completion:Agent_core.Tool_contract.Continue_after_success in
     let output = match Agent_core.Tool.execute ~invocation (find name) input with
       | Ok output -> output | Error error -> fail error.Agent_core.Types.message in
-    let message : T.message =
+    let message : Llm_provider.Types.message =
       { origin = Llm_provider.Types.Conversation;  role = T.Tool
-      ; content = [ T.ToolResult { tool_use_id = id; content = output.content
+      ; content = [ Llm_provider.Types.ToolResult { tool_use_id = id; content = output.content
                                 ; outcome = T.Tool_succeeded; json = None; content_blocks = None } ]
       ; name = None; tool_call_id = Some id; metadata = [] } in
     let content = match Llm_provider.Backend_openai_serialize.openai_messages_of_message message with

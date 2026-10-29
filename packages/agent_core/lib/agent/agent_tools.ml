@@ -5,6 +5,10 @@
 
 open Types
 
+(* Tool calls come from the provider response and tool outputs are provider
+   blocks; they enter history only through [Agent_turn.make_tool_results]. *)
+open Llm_provider.Types
+
 let _log = Log.create ~module_name:"agent_tools" ()
 
 type tool_failure_kind = Types.tool_failure_kind =
@@ -243,7 +247,7 @@ let resolve_tool_call tool_index name input =
    stored not at all. The wire text stays intact in the raw trace, which is the
    evidence authority for what the provider actually sent. *)
 type tool_use_admission =
-  { admitted : Types.content_block list
+  { admitted : Llm_provider.Types.content_block list
   ; retained_content_indices : int list
   ; rejected_names : string list
   ; tool_source_map : Hooks.admitted_tool_source_map
@@ -257,12 +261,12 @@ let admit_tool_use_names tool_index blocks =
   let admitted_tool_sources = ref [] in
   let admitted =
     List.filter_map
-      (fun (content_index, (block : Types.content_block)) ->
+      (fun (content_index, (block : Llm_provider.Types.content_block)) ->
          let retain block =
            retained_content_indices := content_index :: !retained_content_indices;
            Some block in
          match block with
-         | Types.ToolUse { id; name; input } ->
+         | ToolUse { id; name; input } ->
            let source_tool_use_ordinal = !next_source_tool_use_ordinal in
            incr next_source_tool_use_ordinal;
            (match resolve_tool_call tool_index name input with
@@ -277,18 +281,18 @@ let admit_tool_use_names tool_index blocks =
               admitted_tool_sources :=
                 { Hooks.planned_index; source_tool_use_ordinal; name_resolution }
                 :: !admitted_tool_sources;
-              retain (Types.ToolUse { id; name = resolved; input = resolved_input })
+              retain (ToolUse { id; name = resolved; input = resolved_input })
             | _, _, None ->
               rejected_names := name :: !rejected_names;
               None)
-         | Types.Text _
-         | Types.Thinking _
-         | Types.ReasoningDetails _
-         | Types.RedactedThinking _
-         | Types.ToolResult _
-         | Types.Image _
-         | Types.Document _
-         | Types.Audio _ -> retain block)
+         | Text _
+         | Thinking _
+         | ReasoningDetails _
+         | RedactedThinking _
+         | ToolResult _
+         | Image _
+         | Document _
+         | Audio _ -> retain block)
       (List.mapi (fun index block -> index, block) blocks)
   in
   { admitted

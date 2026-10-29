@@ -21,7 +21,7 @@ type t =
 let message_of_core_error = function
   | Agent_core.Error.Internal message
   | Agent_core.Error.Internal_carried { message; _ } -> message
-  | (Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _ | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _ | Agent_core.Error.Orchestration _) as error -> Agent_core.Error.to_string error
+  | (Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _ | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _ | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _) as error -> Agent_core.Error.to_string error
 ;;
 
 let of_core_error error =
@@ -43,6 +43,7 @@ let category_to_string : Agent_core.Error.category -> string = function
   | Agent_core.Error.Serialization_category -> "serialization"
   | Agent_core.Error.Io_category -> "io"
   | Agent_core.Error.Orchestration_category -> "orchestration"
+  | Agent_core.Error.Media_category -> "media"
   | Agent_core.Error.Internal_category -> "internal"
 ;;
 
@@ -55,6 +56,7 @@ let category_of_string = function
   | "serialization" -> Some Agent_core.Error.Serialization_category
   | "io" -> Some Agent_core.Error.Io_category
   | "orchestration" -> Some Agent_core.Error.Orchestration_category
+  | "media" -> Some Agent_core.Error.Media_category
   | "internal" -> Some Agent_core.Error.Internal_category
   | _ -> None
 ;;

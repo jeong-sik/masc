@@ -128,7 +128,7 @@ streaming = false
       (* A range/caller projection cannot silently discard mandatory results. *)
       Ok (List.filter (fun message -> not (Outbox.is_context_message message)) messages) in
   let run ?checkpoint ?probe () =
-    Keeper_turn_driver.run_named ~runtime_id:"fixture.consumer" ~keeper_name ~base_path
+    Keeper_turn_driver.run_named ~runtime_id:"fixture.consumer" ~keeper_name ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
       ~goal:"Continue from the original result and complete independent work."
       ~input_source:(match scenario with Review -> Keeper_request_source.Completion_review
         | Completed | Deferred | Projection_failed | Provider_failed | Rejected | Save_failed

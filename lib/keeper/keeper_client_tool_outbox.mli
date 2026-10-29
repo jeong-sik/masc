@@ -87,6 +87,9 @@ val context_message : snapshot -> Agent_core.Types.message option
     It cannot collide with the ordinary composed-context or Librarian carrier. *)
 val is_context_message : Agent_core.Types.message -> bool
 
+(** {!is_context_message} for a request message. *)
+val is_wire_context_message : Llm_provider.Types.message -> bool
+
 val acknowledge : snapshot -> (unit, string) result
 (** Remove only the exact loaded receipts after the consumer completes.
     Newer receipts remain pending. Runtime callers use [settle_after_turn] so

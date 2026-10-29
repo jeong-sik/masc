@@ -31,6 +31,12 @@ let stored ~sha256 ~bytes =
   else Ok { sha256; bytes }
 ;;
 
+let stored_error_to_string = function
+  | Sha256_not_lowercase_hex sha256 ->
+    Printf.sprintf "sha256 %S is not 64 lowercase hex characters" sha256
+  | Negative_byte_count bytes -> Printf.sprintf "byte count %d is negative" bytes
+;;
+
 let stored_of_raw raw =
   { sha256 = Agent_core_sha256.to_hex (Agent_core_sha256.digest_string raw)
   ; bytes = String.length raw
@@ -51,52 +57,9 @@ type media_source =
   | File_id of string
 [@@deriving show]
 
-type content_block =
-  | Text of string
-  | Thinking of
-      { content : string
-      ; signature : string option
-      }
-  | ReasoningDetails of
-      { reasoning_content : string option
-      ; details : P.reasoning_detail list
-      }
-  | RedactedThinking of string
-  | ToolUse of
-      { id : string
-      ; name : string
-      ; input : Yojson.Safe.t
-      }
-  | ToolResult of
-      { tool_use_id : string
-      ; content : string
-      ; outcome : P.tool_result_outcome
-      ; json : Yojson.Safe.t option
-      ; content_blocks : content_block list option
-      }
-  | Image of
-      { media_type : string
-      ; source : media_source
-      }
-  | Document of
-      { media_type : string
-      ; source : media_source
-      }
-  | Audio of
-      { media_type : string
-      ; source : media_source
-      }
-[@@deriving show]
-
-type message =
-  { role : P.role
-  ; origin : P.message_origin
-  ; content : content_block list
-  ; name : string option
-  ; tool_call_id : string option
-  ; metadata : P.metadata
-  }
-[@@deriving show]
+(* The provider's block and message over this source: one constructor set. *)
+type content_block = media_source P.content_block_with [@@deriving show]
+type message = media_source P.message_with [@@deriving show]
 
 (* ================================================================ *)
 (* Media store                                                      *)
@@ -157,65 +120,49 @@ let source_to_wire store = function
   | File_id file_id -> Ok (P.File_id file_id)
 ;;
 
-let rec of_wire_block store (block : P.content_block) =
+(* [block] with each media source replaced by [f ~media_type source], ToolResult
+   [content_blocks] included, left to right, stopping at the first error. The
+   two conversions below are this traversal with the two source maps. *)
+let rec map_block_sources f (block : _ P.content_block_with) =
   let open Result_syntax in
   match block with
-  | P.Text text -> Ok (Text text)
-  | P.Thinking { content; signature } -> Ok (Thinking { content; signature })
+  | P.Text text -> Ok (P.Text text)
+  | P.Thinking { content; signature } -> Ok (P.Thinking { content; signature })
   | P.ReasoningDetails { reasoning_content; details } ->
-    Ok (ReasoningDetails { reasoning_content; details })
-  | P.RedactedThinking data -> Ok (RedactedThinking data)
-  | P.ToolUse { id; name; input } -> Ok (ToolUse { id; name; input })
-  | P.ToolResult { tool_use_id; content; outcome; json; content_blocks } ->
-    let+ content_blocks = map_option (map_list (of_wire_block store)) content_blocks in
-    ToolResult { tool_use_id; content; outcome; json; content_blocks }
-  | P.Image { media_type; source } ->
-    let+ source = source_of_wire store ~media_type source in
-    Image { media_type; source }
-  | P.Document { media_type; source } ->
-    let+ source = source_of_wire store ~media_type source in
-    Document { media_type; source }
-  | P.Audio { media_type; source } ->
-    let+ source = source_of_wire store ~media_type source in
-    Audio { media_type; source }
-;;
-
-let rec to_wire_block store block =
-  let open Result_syntax in
-  match block with
-  | Text text -> Ok (P.Text text)
-  | Thinking { content; signature } -> Ok (P.Thinking { content; signature })
-  | ReasoningDetails { reasoning_content; details } ->
     Ok (P.ReasoningDetails { reasoning_content; details })
-  | RedactedThinking data -> Ok (P.RedactedThinking data)
-  | ToolUse { id; name; input } -> Ok (P.ToolUse { id; name; input })
-  | ToolResult { tool_use_id; content; outcome; json; content_blocks } ->
-    let+ content_blocks = map_option (map_list (to_wire_block store)) content_blocks in
+  | P.RedactedThinking data -> Ok (P.RedactedThinking data)
+  | P.ToolUse { id; name; input } -> Ok (P.ToolUse { id; name; input })
+  | P.ToolResult { tool_use_id; content; outcome; json; content_blocks } ->
+    let+ content_blocks = map_option (map_list (map_block_sources f)) content_blocks in
     P.ToolResult { tool_use_id; content; outcome; json; content_blocks }
-  | Image { media_type; source } ->
-    let+ source = source_to_wire store source in
+  | P.Image { media_type; source } ->
+    let+ source = f ~media_type source in
     P.Image { media_type; source }
-  | Document { media_type; source } ->
-    let+ source = source_to_wire store source in
+  | P.Document { media_type; source } ->
+    let+ source = f ~media_type source in
     P.Document { media_type; source }
-  | Audio { media_type; source } ->
-    let+ source = source_to_wire store source in
+  | P.Audio { media_type; source } ->
+    let+ source = f ~media_type source in
     P.Audio { media_type; source }
 ;;
 
-let of_wire_message store (message : P.message) =
-  let { P.role; origin; content; name; tool_call_id; metadata } = message in
+let map_message_sources f (message : _ P.message_with) =
   Result.map
-    (fun content -> { role; origin; content; name; tool_call_id; metadata })
-    (map_list (of_wire_block store) content)
+    (fun content -> { message with P.content })
+    (map_list (map_block_sources f) message.content)
 ;;
 
+let of_wire_block store block = map_block_sources (source_of_wire store) block
+let to_wire_block store block = map_block_sources (fun ~media_type:_ -> source_to_wire store) block
+let of_wire_message store message = map_message_sources (source_of_wire store) message
+
 let to_wire_message store message =
-  let { role; origin; content; name; tool_call_id; metadata } = message in
-  Result.map
-    (fun content -> { P.role; origin; content; name; tool_call_id; metadata })
-    (map_list (to_wire_block store) content)
+  map_message_sources (fun ~media_type:_ -> source_to_wire store) message
 ;;
+
+let of_wire_blocks store blocks = map_list (of_wire_block store) blocks
+let to_wire_blocks store blocks = map_list (to_wire_block store) blocks
+let to_wire_messages store messages = map_list (to_wire_message store) messages
 
 (* ================================================================ *)
 (* Byte accounting                                                  *)
@@ -226,17 +173,35 @@ let media_source_bytes = function
   | Url payload | File_id payload -> String.length payload
 ;;
 
+let media_source_wire_length = function
+  | Stored { bytes; _ } -> 4 * ((bytes + 2) / 3)
+  | Url payload | File_id payload -> String.length payload
+;;
+
 let rec media_bytes = function
-  | Image { source; _ } | Document { source; _ } | Audio { source; _ } ->
+  | P.Image { source; _ } | P.Document { source; _ } | P.Audio { source; _ } ->
     media_source_bytes source
-  | ToolResult { content_blocks = Some blocks; _ } ->
+  | P.ToolResult { content_blocks = Some blocks; _ } ->
     List.fold_left (fun total block -> total + media_bytes block) 0 blocks
-  | ToolResult { content_blocks = None; _ }
-  | Text _
-  | Thinking _
-  | ReasoningDetails _
-  | RedactedThinking _
-  | ToolUse _ -> 0
+  | P.ToolResult { content_blocks = None; _ }
+  | P.Text _
+  | P.Thinking _
+  | P.ReasoningDetails _
+  | P.RedactedThinking _
+  | P.ToolUse _ -> 0
+;;
+
+let rec media_wire_length = function
+  | P.Image { source; _ } | P.Document { source; _ } | P.Audio { source; _ } ->
+    media_source_wire_length source
+  | P.ToolResult { content_blocks = Some blocks; _ } ->
+    List.fold_left (fun total block -> total + media_wire_length block) 0 blocks
+  | P.ToolResult { content_blocks = None; _ }
+  | P.Text _
+  | P.Thinking _
+  | P.ReasoningDetails _
+  | P.RedactedThinking _
+  | P.ToolUse _ -> 0
 ;;
 
 (* ================================================================ *)
@@ -280,14 +245,14 @@ let tool_result_provenance_fields = function
 let rec content_block_to_json block =
   let wire = Llm_provider.Api_common.content_block_to_json in
   match block with
-  | Text text -> wire (P.Text text)
-  | Thinking { content; signature } -> wire (P.Thinking { content; signature })
-  | ReasoningDetails { reasoning_content; details } ->
+  | P.Text text -> wire (P.Text text)
+  | P.Thinking { content; signature } -> wire (P.Thinking { content; signature })
+  | P.ReasoningDetails { reasoning_content; details } ->
     wire (P.ReasoningDetails { reasoning_content; details })
-  | RedactedThinking data -> wire (P.RedactedThinking data)
-  | ToolUse { id; name; input } -> wire (P.ToolUse { id; name; input })
-  | ToolResult { tool_use_id; content; outcome; json = _; content_blocks } ->
-    (* Field order of the current checkpoint ToolResult: the provider fields,
+  | P.RedactedThinking data -> wire (P.RedactedThinking data)
+  | P.ToolUse { id; name; input } -> wire (P.ToolUse { id; name; input })
+  | P.ToolResult { tool_use_id; content; outcome; json = _; content_blocks } ->
+    (* Field order of the journal codec's ToolResult: the provider fields,
        then provenance, then [text_content] when [content] is an array. *)
     let wire_fields =
       Llm_provider.Api_common.tool_result_wire_fields ~tool_use_id ~content ~outcome
@@ -304,19 +269,19 @@ let rec content_block_to_json block =
         , [ "text_content", `String content ] )
     in
     `Assoc (fields @ tool_result_provenance_fields outcome @ text_content_fields)
-  | Image { media_type; source } ->
+  | P.Image { media_type; source } ->
     media_json ~block_type:"image" ~media_type source ~wire_block:(fun source ->
       P.Image { media_type; source })
-  | Document { media_type; source } ->
+  | P.Document { media_type; source } ->
     media_json ~block_type:"document" ~media_type source ~wire_block:(fun source ->
       P.Document { media_type; source })
-  | Audio { media_type; source } ->
+  | P.Audio { media_type; source } ->
     media_json ~block_type:"audio" ~media_type source ~wire_block:(fun source ->
       P.Audio { media_type; source })
 ;;
 
 let message_to_json message =
-  let { role; origin; content; name; tool_call_id; metadata } = message in
+  let { P.role; origin; content; name; tool_call_id; metadata } = message in
   let optional_fields =
     (match name with
      | Some name -> [ "name", `String name ]
@@ -404,6 +369,44 @@ type decode_error =
       }
   | Empty_metadata of { at : string }
 [@@deriving show]
+
+let json_expectation_to_string = function
+  | Json_object -> "an object"
+  | Json_array -> "an array"
+  | Json_string -> "a string"
+  | Json_string_or_array -> "a string or an array"
+  | Json_bool -> "a boolean"
+  | Json_int -> "an integer"
+  | Json_non_blank_string -> "a non-blank string"
+;;
+
+let tool_result_problem_to_string = function
+  | Failure_without_kind -> "is_error is true without failure_kind"
+  | Error_class_without_kind -> "error_class without failure_kind"
+  | Success_with_provenance -> "failure provenance on a successful result"
+  | Text_content_with_string_content -> "text_content with string content"
+;;
+
+let decode_error_to_string = function
+  | Wrong_json_kind { at; expected } ->
+    Printf.sprintf "%s must be %s" at (json_expectation_to_string expected)
+  | Missing_field { at; field } -> Printf.sprintf "%s has no field %s" at field
+  | Unknown_field { at; field } -> Printf.sprintf "%s has unknown field %s" at field
+  | Duplicate_field { at; field } -> Printf.sprintf "%s has field %s twice" at field
+  | Unknown_block_type { at; block_type } ->
+    Printf.sprintf "%s has unknown block type %S" at block_type
+  | Base64_source { at } -> Printf.sprintf "%s is a base64 source; history holds media by reference" at
+  | Unknown_source_type { at; source_type } ->
+    Printf.sprintf "%s has unknown source type %S" at source_type
+  | Invalid_stored { at; error } -> Printf.sprintf "%s: %s" at (stored_error_to_string error)
+  | Unknown_failure_kind { at } -> Printf.sprintf "%s has an unknown failure_kind" at
+  | Unknown_error_class { at } -> Printf.sprintf "%s has an unknown error_class" at
+  | Unknown_role { at; role } -> Printf.sprintf "%s has unknown role %S" at role
+  | Unknown_origin { at; origin } -> Printf.sprintf "%s has unknown origin %S" at origin
+  | Inconsistent_tool_result { at; problem } ->
+    Printf.sprintf "%s: %s" at (tool_result_problem_to_string problem)
+  | Empty_metadata { at } -> Printf.sprintf "%s has empty metadata" at
+;;
 
 let root_path = "$"
 let field_path at field = at ^ "." ^ field
@@ -537,25 +540,31 @@ let reference_source_of_fields ~at ~make fields =
   media_type, make data
 ;;
 
+let stored_source_of_fields ~at fields =
+  let open Result_syntax in
+  let* () =
+    exact_fields
+      ~at
+      ~required:[ "type"; "media_type"; "sha256"; "bytes" ]
+      ~optional:[]
+      fields
+  in
+  let* media_type = required_string ~at "media_type" fields in
+  let* sha256 = required_string ~at "sha256" fields in
+  let* bytes = required_int ~at "bytes" fields in
+  match stored ~sha256 ~bytes with
+  | Ok stored -> Ok (media_type, stored)
+  | Error error -> Error (Invalid_stored { at; error })
+;;
+
 let media_source_of_json ~at json =
   let open Result_syntax in
   let* fields = unique_object ~at json in
   let* source_type = required_string ~at "type" fields in
   match source_type with
   | "stored" ->
-    let* () =
-      exact_fields
-        ~at
-        ~required:[ "type"; "media_type"; "sha256"; "bytes" ]
-        ~optional:[]
-        fields
-    in
-    let* media_type = required_string ~at "media_type" fields in
-    let* sha256 = required_string ~at "sha256" fields in
-    let* bytes = required_int ~at "bytes" fields in
-    (match stored ~sha256 ~bytes with
-     | Ok stored -> Ok (media_type, Stored stored)
-     | Error error -> Error (Invalid_stored { at; error }))
+    let+ media_type, stored = stored_source_of_fields ~at fields in
+    media_type, Stored stored
   | "url" -> reference_source_of_fields ~at ~make:(fun url -> Url url) fields
   | "file_id" ->
     reference_source_of_fields ~at ~make:(fun file_id -> File_id file_id) fields
@@ -621,12 +630,12 @@ let rec content_block_of_json_at ~at json =
   | "text" ->
     let* () = exact ~required:[ "type"; "text" ] ~optional:[] in
     let+ text = required_string ~at "text" fields in
-    Text text
+    P.Text text
   | "thinking" ->
     let* () = exact ~required:[ "type"; "thinking" ] ~optional:[ "signature" ] in
     let* content = required_string ~at "thinking" fields in
     let+ signature = optional_string ~at "signature" fields in
-    Thinking { content; signature }
+    P.Thinking { content; signature }
   | "reasoning_details" ->
     let* () = exact ~required:[ "type"; "details" ] ~optional:[ "reasoning_content" ] in
     let* details = required_array ~at "details" fields in
@@ -634,17 +643,17 @@ let rec content_block_of_json_at ~at json =
       map_indexed ~at:(field_path at "details") reasoning_detail_of_json details
     in
     let+ reasoning_content = optional_string ~at "reasoning_content" fields in
-    ReasoningDetails { reasoning_content; details }
+    P.ReasoningDetails { reasoning_content; details }
   | "redacted_thinking" ->
     let* () = exact ~required:[ "type"; "data" ] ~optional:[] in
     let+ data = required_string ~at "data" fields in
-    RedactedThinking data
+    P.RedactedThinking data
   | "tool_use" ->
     let* () = exact ~required:[ "type"; "id"; "name"; "input" ] ~optional:[] in
     let* id = required_identifier ~at "id" fields in
     let* name = required_identifier ~at "name" fields in
     let+ input = required ~at "input" fields in
-    ToolUse { id; name; input }
+    P.ToolUse { id; name; input }
   | "tool_result" ->
     let* () =
       exact
@@ -670,20 +679,49 @@ let rec content_block_of_json_at ~at json =
       | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _), (Some _ | None) ->
         wrong_kind ~at:(field_path at "content") Json_string_or_array
     in
-    ToolResult { tool_use_id; content; outcome; json = None; content_blocks }
+    P.ToolResult { tool_use_id; content; outcome; json = None; content_blocks }
   | "image" ->
     media_block_of_fields ~at fields ~make:(fun ~media_type ~source ->
-      Image { media_type; source })
+      P.Image { media_type; source })
   | "document" ->
     media_block_of_fields ~at fields ~make:(fun ~media_type ~source ->
-      Document { media_type; source })
+      P.Document { media_type; source })
   | "audio" ->
     media_block_of_fields ~at fields ~make:(fun ~media_type ~source ->
-      Audio { media_type; source })
+      P.Audio { media_type; source })
   | block_type -> Error (Unknown_block_type { at; block_type })
 ;;
 
 let content_block_of_json json = content_block_of_json_at ~at:root_path json
+
+type stored_source_decode =
+  | Not_stored_source
+  | Invalid_stored_source of decode_error
+  | Decoded_stored_source of
+      { media_type : string
+      ; stored : stored
+      }
+
+let stored_source_of_json (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+    let tagged_stored =
+      match List.assoc_opt "type" fields with
+      | Some (`String tag) -> String.equal tag stored_source_tag
+      | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _)
+      | None -> false
+    in
+    if tagged_stored && List.mem_assoc "sha256" fields
+    then (
+      match
+        Result.bind (unique_object ~at:root_path json) (stored_source_of_fields ~at:root_path)
+      with
+      | Ok (media_type, stored) -> Decoded_stored_source { media_type; stored }
+      | Error error -> Invalid_stored_source error)
+    else Not_stored_source
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    Not_stored_source
+;;
 
 let metadata_of_json ~at fields =
   match List.assoc_opt "metadata" fields with
@@ -723,7 +761,7 @@ let message_of_json json =
   let* name = optional_string ~at "name" fields in
   let* tool_call_id = optional_string ~at "tool_call_id" fields in
   let+ metadata = metadata_of_json ~at fields in
-  { role; origin; content; name; tool_call_id; metadata }
+  { P.role; origin; content; name; tool_call_id; metadata }
 ;;
 
 (* ================================================================ *)

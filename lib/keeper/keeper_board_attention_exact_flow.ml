@@ -95,7 +95,7 @@ type prepared =
   }
 
 let message role text =
-  Agent_core.Types.make_message ~role [ Agent_core.Types.Text text ]
+  Llm_provider.Types.make_message ~role [ Llm_provider.Types.Text text ]
 ;;
 
 let judge_prompt candidate =

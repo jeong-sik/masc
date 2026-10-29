@@ -12,22 +12,26 @@ type image_block =
 (* Split a goal into the text the CLI receives and the images that ride with it.
    [text_of_blocks] rejects every non-text block; this admits [Image] for the
    transports that carry one, and keeps rejecting the rest so a block nobody
-   projects cannot slip through as silence. Only [Base64] images are carried:
-   a [Url] or [File_id] source names bytes this process never read, and the CLI
-   has no way to fetch them. *)
-let text_and_images_of_blocks ~runtime_label ~field blocks =
+   projects cannot slip through as silence. Only [Stored] images are carried,
+   read back from the store here, at the CLI boundary: a [Url] or [File_id]
+   source names bytes this process never read, and the CLI has no way to fetch
+   them. *)
+let text_and_images_of_blocks ~media_store ~runtime_label ~field blocks =
   let rec loop texts images = function
     | [] -> Ok (String.concat "\n" (List.rev texts), List.rev images)
     | Agent_core.Types.Text text :: rest -> loop (text :: texts) images rest
     | Agent_core.Types.Image { media_type; source } :: rest ->
       (match source with
-       | Agent_core.Types.Base64 data ->
-         loop texts ({ media_type; base64_data = data } :: images) rest
+       | Agent_core.Types.Stored stored ->
+         (match media_store.Agent_core.History.get stored with
+          | Ok raw ->
+            loop texts ({ media_type; base64_data = Base64.encode_string raw } :: images) rest
+          | Error error -> Error (Agent_core.Error.Media error))
        | Agent_core.Types.Url _ | Agent_core.Types.File_id _ ->
          Error
            (config_error
               ~field
-              (runtime_label ^ " image projection admits base64 sources only")))
+              (runtime_label ^ " image projection admits stored sources only")))
     | Agent_core.Types.(
         Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
         | ToolResult _ | Document _ | Audio _)
@@ -803,8 +807,8 @@ let last_tool_results messages =
       Some
         (List.filter_map
            (function
-             | Agent_core.Types.ToolResult { content; content_blocks; outcome; _ } ->
-               Some (Agent_core.Types.tool_result_of_outcome ?content_blocks ~content outcome)
+             | Agent_core.Types.ToolResult { tool_use_id; content; content_blocks; outcome; json = _ } ->
+               Some { Agent_core.Hooks.tool_use_id; content; outcome; content_blocks }
              | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
              | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
              | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _ | Agent_core.Types.Document _

@@ -16,7 +16,7 @@ let schema_to_json_schema (s : _ schema) : Yojson.Safe.t =
   Types.params_to_input_schema s.params
 ;;
 
-let text_block = function
+let text_block : Llm_provider.Types.content_block -> string option = function
   | Text s -> Some s
   | Thinking _
   | ReasoningDetails _
@@ -87,7 +87,8 @@ let parse_response_json ?(shape = Any_json) ~raw ()
 
 let response_has_tool_calls (response : api_response) =
   List.exists
-    (function
+    (fun (block : Llm_provider.Types.content_block) ->
+      match block with
       | ToolUse _ -> true
       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
       | Image _ | Document _ | Audio _ | ToolResult _ -> false)
@@ -193,7 +194,7 @@ let provider_config_for_schema ~provider_config ~config ~(schema : _ schema) =
 let extract ~sw ~net ~provider_config ~config ~(schema : 'a schema) prompt
   : ('a, Error.t) result
   =
-  let messages =
+  let messages : Llm_provider.Types.message list =
     [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text prompt ]
       ; name = None
@@ -276,7 +277,7 @@ let extract_stream
       prompt
   : ('a * api_response, Error.t) result
   =
-  let messages =
+  let messages : Llm_provider.Types.message list =
     [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text prompt ]
       ; name = None

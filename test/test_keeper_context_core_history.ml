@@ -280,10 +280,12 @@ let test_persisted_message_preserves_reasoning_provenance () =
       (match Provider.Reasoning_history_projection.project
           ~assistant_has_payload:(fun content -> content <> [])
           ~reasoning_block_supported:(function
-            | Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _ -> true
-            | Types.Text _ | Types.ToolUse _ | Types.ToolResult _ | Types.Image _
-            | Types.Document _ | Types.Audio _ -> false)
-          ~replay_capability [ restored ] with
+            | Llm_provider.Types.Thinking _ | Llm_provider.Types.ReasoningDetails _ | Llm_provider.Types.RedactedThinking _ -> true
+            | Llm_provider.Types.Text _ | Llm_provider.Types.ToolUse _ | Llm_provider.Types.ToolResult _ | Llm_provider.Types.Image _
+            | Llm_provider.Types.Document _ | Llm_provider.Types.Audio _ -> false)
+          ~replay_capability
+          [ Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ()) restored
+            |> Result.get_ok ] with
        | Error error -> fail (Provider.Reasoning_history_projection.error_to_string error)
        | Ok projected ->
            match projected.reasoning_replay_drops with

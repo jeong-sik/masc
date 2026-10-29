@@ -144,7 +144,8 @@ let test_frozen_prompt_media_and_lookup () = with_workspace (fun config store ->
       Alcotest.(check (option string)) "exact original system instructions reach reviewer"
         (Some (V.system_instructions first)) system_prompt;
       let expected = Agent_core.Types.image_block ~media_type:image.image_media_type
-        ~source:(Agent_core.Types.Base64 image.image_body_base64) in
+        ~source:(Agent_core.Types.Stored
+          (Agent_core.History.stored_of_raw (Base64.decode_exn image.image_body_base64))) in
       Alcotest.(check bool) "original media reaches reviewer" true (goal_blocks=Some [Agent_core.Types.text_block prompt;expected]);
       (match lookup.AR.dispatch ~name:"tool_read_file" ~args:(`Assoc ["file_path",`String "receipt.txt"]) with
        | Tool_result.Completed payload ->

@@ -5,8 +5,12 @@
     tool-call logs, traces, messages, Keeper chat, Board posts, bounded wire captures,
     Skill composition evidence, and durable asynchronous Keeper requests.
     A marker whose media type is {!Tool_output.artifact_manifest_mime} adds the
-    manifest's strictly decoded normalized children transitively. No other
-    blob content is parsed or treated as an ownership edge.
+    manifest's strictly decoded normalized children transitively. A JSON
+    object that decodes as an agent history [Stored] media source
+    ({!Agent_core_base.History.stored_source_of_json}) in the same registry is
+    live as history media; it names a blob but is not a manifest, so it adds
+    no children. No other blob content is parsed or treated as an ownership
+    edge.
     Trajectory previews, repository mirrors, build products, operator config,
     and unrelated observational logs are not blob consumers and are never
     traversed. A new durable consumer must be added to this registry in the
@@ -99,3 +103,18 @@ val run :
     workspace. Production passes [Board_paths.file_path ~workspace_masc_dir
     Posts] ([Masc_board_handlers.Board_paths.posts_file]); this library sits
     below Board, so it takes the name instead of repeating it. *)
+
+type live_references
+(** What one complete scan of the durable-consumer registry holds live: tool
+    artifact references, with the children of the manifests they name, and
+    history [Stored] media sources, kept as two kinds. *)
+
+val live_references :
+  base_path:string ->
+  board_posts_file:(workspace_masc_dir:string -> string) ->
+  (live_references, error) result
+(** The scan {!run} deletes against, with the same arguments and failures. *)
+
+val holds_history_media : live_references -> sha256:string -> bool
+(** Whether a durable consumer holds a history [Stored] source with this
+    digest. A tool artifact reference to the same bytes does not count. *)

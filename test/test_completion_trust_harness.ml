@@ -452,7 +452,7 @@ let test_rendered_image_reaches_verifier_http_request () =
       Eio.Fiber.fork_daemon ~sw (fun () ->
         Cohttp_eio.Server.run socket server ~on_error:raise);
       let previous = Atomic.get AR.run_llm_reviewer_fn in
-      let http_reviewer ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
+      let http_reviewer ~base_path ?sw:_ ?execution_owner:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
           ?system_prompt:_ ?goal_blocks ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
           ~attempt_continuation:_ ~on_runtime_attempt_error:_ () =
         match goal_blocks with
@@ -469,10 +469,15 @@ let test_rendered_image_reaches_verifier_http_request () =
                 { Llm_provider.Capabilities.openai_compat_chat_capabilities with
                   supports_image_input = true }
               () in
-          (match (Llm_provider.Complete.complete ~sw ~net ~config:provider
-                   ~messages:[Agent_core.Types.user_msg_blocks blocks] ()).Llm_provider.Completion_outcome.result with
-           | Ok _ -> Ok {AR.selected_runtime_id=evaluator_runtime;evaluator_execution=None;verdict=Some (AR.Approve "synthetic image delivery receipt only")}
-           | Error _ -> Error (Agent_core.Error.Internal "fixture HTTP request failed"))
+          (* The reviewer reads the rendering from the BasePath media store,
+             as a reviewer agent does at its provider boundary. *)
+          (match Agent_core.History.to_wire_blocks (Tool_blob_media_store.of_base_path ~base_path) blocks with
+           | Error error -> Error (Agent_core.Error.Media error)
+           | Ok blocks ->
+             (match (Llm_provider.Complete.complete ~sw ~net ~config:provider
+                      ~messages:[Llm_provider.Types.user_msg_blocks blocks] ()).Llm_provider.Completion_outcome.result with
+              | Ok _ -> Ok {AR.selected_runtime_id=evaluator_runtime;evaluator_execution=None;verdict=Some (AR.Approve "synthetic image delivery receipt only")}
+              | Error _ -> Error (Agent_core.Error.Internal "fixture HTTP request failed")))
       in
       Fun.protect ~finally:(fun () -> Atomic.set AR.run_llm_reviewer_fn previous)
         (fun () ->

@@ -484,6 +484,22 @@ let test_second_call_after_a_verdict_is_a_violation () =
   | Some (AR.Approve "ok") -> ()
   | _ -> Alcotest.fail "the first recorded verdict stands"
 
+(* A tool's lookup media is a provider block; once a review holds it, it is
+   a history block naming the same bytes. *)
+let wire_image data =
+  Llm_provider.Types.Image
+    { media_type = "image/png"; source = Llm_provider.Types.Base64 (Base64.encode_string data) }
+
+let history_image data =
+  Agent_core.Types.Image
+    { media_type = "image/png"
+    ; source = Agent_core.Types.Stored (Agent_core.History.stored_of_raw data) }
+
+let history_of_wire block =
+  match Agent_core.History.of_wire_block (Agent_core.History.Memory_store.create ()) block with
+  | Ok block -> block
+  | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error))
+
 let actual_inline_review_view ~base_path result =
   let refusal = ref None in
   let projected = Masc.Tool_bridge.to_agent_core_typed_result ~base_path
@@ -516,12 +532,11 @@ let test_lookup_evidence_survives_slot_failover_but_not_a_new_review () =
       Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
         (fun () -> Ok (List.map (fun slot -> slot, Types_core.Catalog_slot) slots));
       let prompt = "Review the original submission without discarding evidence." in
-      let image data = T.Image { media_type = "image/png"; source = T.Base64 data } in
-      let attachment = image "submitted-original-image" in
+      let attachment = history_image "submitted-original-image" in
       let original = [T.Text prompt; attachment] in
       let args = `Assoc ["path", `String "repo/evidence.json"; "include_image", `Bool true] in
       let old_body = String.make 32768 'a' and new_body = String.make 32768 'b' in
-      let block_image index = image (if index = 0 then "lookup-first-image" else "lookup-changed-image") in
+      let block_image index = if index = 0 then "lookup-first-image" else "lookup-changed-image" in
       let json_entry = function
         | T.Text text ->
           (try
@@ -543,7 +558,7 @@ let test_lookup_evidence_survives_slot_failover_but_not_a_new_review () =
               let body = if index = 0 then old_body else new_body in
               let result = Tool_result.make_ok ~tool_name:name ~start_time:(Tool_timing.start ())
                   ~data:(`Assoc ["original_body", `String body])
-                  ~content_blocks:[T.Text body; block_image index] () in
+                  ~content_blocks:[Llm_provider.Types.Text body; wire_image (block_image index)] () in
               results := !results @ [result];
               views := !views @ [actual_inline_review_view ~base_path:(Filename.get_temp_dir_name ()) result];
               result) }
@@ -576,9 +591,9 @@ let test_lookup_evidence_survives_slot_failover_but_not_a_new_review () =
               Alcotest.(check bool) "only the original actual bridge model view is retained" true
                 (member "result" entry = model_result);
               Alcotest.(check bool) "every actual bridge media block remains native" true
-                (List.for_all (fun block -> List.mem block blocks) media);
+                (List.for_all (fun block -> List.mem (history_of_wire block) blocks) media);
               Alcotest.(check bool) "original lookup media remains a native media block" true
-                (List.mem (block_image prior) blocks)) entries;
+                (List.mem (history_image (block_image prior)) blocks)) entries;
             if index < 2 then begin
               let fresh = offered_lookup.dispatch ~name:"keeper_read_file" ~args in
               Alcotest.(check bool) "a new slot performs its own lookup, retaining its changed result" true
@@ -621,13 +636,12 @@ let test_oversized_lookup_handoff_preserves_the_inline_refusal () =
       Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
         (fun () -> Ok ["refused-source", Types_core.Catalog_slot; "next-reviewer", Types_core.Catalog_slot]);
       let prompt = "Review the submitted evidence without bypassing its explicit inline guard." in
-      let image data = T.Image { media_type = "image/png"; source = T.Base64 data } in
-      let attachment = image "submitted-original-image" in
-      let rejected_media = image "oversized-lookup-image" in
+      let attachment = history_image "submitted-original-image" in
+      let rejected_media = wire_image "oversized-lookup-image" in
       let body = String.make (Tool_shard_limits.verification_evidence_max_bytes + 1) 'z' in
       let arguments = `Assoc ["path", `String "repo/oversized-evidence.json"] in
       let raw = Tool_result.make_ok ~tool_name:"keeper_read_file" ~start_time:(Tool_timing.start ())
-          ~data:(`String body) ~content_blocks:[T.Text body; rejected_media] () in
+          ~data:(`String body) ~content_blocks:[Llm_provider.Types.Text body; rejected_media] () in
       let _, _, actual_refusal = actual_inline_review_view
           ~base_path:(Filename.get_temp_dir_name ()) raw in
       let refusal_message = match actual_refusal with
@@ -678,7 +692,8 @@ let test_oversized_lookup_handoff_preserves_the_inline_refusal () =
               (member "kind" refusal = `String "inline_budget_exceeded");
             Alcotest.(check bool) "the actual shared guard message survives failover" true
               (member "message" refusal = `String refusal_message);
-            Alcotest.(check bool) "rejected lookup media is absent" false (List.mem rejected_media blocks);
+            Alcotest.(check bool) "rejected lookup media is absent" false
+              (List.mem (history_image "oversized-lookup-image") blocks);
             Alcotest.(check bool) "rejected raw bytes are absent from every text block" false
               (List.exists (function T.Text text -> String_util.contains_substring text body
                 | T.Thinking _ | T.RedactedThinking _ | T.ReasoningDetails _
@@ -724,7 +739,7 @@ let test_failed_lookup_handoff_uses_the_full_bridge_envelope () =
         Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
           (fun () -> Ok ["failed-lookup-source", Types_core.Catalog_slot; "failed-lookup-next", Types_core.Catalog_slot]);
         let prompt = "Review this source while retaining its tool failure accurately." in
-        let attachment = T.Image { media_type = "image/png"; source = T.Base64 "submitted-original-image" } in
+        let attachment = history_image "submitted-original-image" in
         let args = `Assoc ["path", `String "repo/failing-evidence.json"] in
         let reads = ref 0 and calls = ref [] in
         let source_lookup : AR.lookup_surface = { lookup with dispatch = (fun ~name ~args:actual ->

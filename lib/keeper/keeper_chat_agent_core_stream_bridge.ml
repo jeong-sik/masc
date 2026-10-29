@@ -589,7 +589,7 @@ let finalize_media_block ~response ~max_wire_bytes ~redact_text ~base_dir ~index
   | Ok (_token, media_ref) ->
       [ Keeper_chat_events.Agent_core_media_delta
           { index; media_type
-          ; source_type = Agent_core.Types.media_source_kind_of_source source
+          ; source_type = Llm_provider.Types.media_source_kind_of_source source
           ; media_ref; response }
       ]
   | Error err ->

@@ -134,7 +134,10 @@ let generate ~sw ~net ~runtime_id ~provider_cfg (prompt : R.prompt) =
     Ok ()
   in
   let config =
-    { (Runtime_agent.default_config ~name:"librarian-continuity"
+    { (Runtime_agent.default_config
+         (* One run with no tools and no checkpoint: no media outlives it. *)
+         ~media_store:(Agent_core.History.Memory_store.create ())
+         ~name:"librarian-continuity"
          ~provider_cfg ~system_prompt:prompt.system ~tools:[]) with
       runtime_id = Some runtime_id
     ; initial_messages = []

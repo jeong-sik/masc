@@ -270,7 +270,7 @@ let registry_failure_reason_of_terminal_reason
          | Agent_core.Error.Mcp _
          | Agent_core.Error.Serialization _
          | Agent_core.Error.Io _
-         | Agent_core.Error.Orchestration _
+         | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
          | Agent_core.Error.Internal _
          | Agent_core.Error.Internal_carried _ ) as error) ->
       (* A fence's raw error is a JSON envelope whose cause comes last, so a
@@ -336,7 +336,7 @@ let registry_failure_reason_of_terminal_reason
     | Some (Agent_core.Error.Agent _) | Some (Agent_core.Error.Mcp _)
     | Some (Agent_core.Error.Config (Agent_core.Error.InvalidConfig _))
     | Some (Agent_core.Error.Serialization _)
-    | Some (Agent_core.Error.Io _) | Some (Agent_core.Error.Orchestration _)
+    | Some (Agent_core.Error.Io _) | Some (Agent_core.Error.Orchestration _ | Agent_core.Error.Media _)
     | Some (Agent_core.Error.Internal _) | Some (Agent_core.Error.Internal_carried _) -> None
   in
   match configuration_failure with

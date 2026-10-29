@@ -742,13 +742,13 @@ let test_buffered_response_observer_interrupt_keeps_typed_cause () =
 ;;
 
 let test_response_observer_requires_original_projection () =
-  let image = Agent_core.Types.Image
-    {media_type = "image/tiff"; source = Base64 "AAAA"} in
+  let image = Llm_provider.Types.Image
+    {media_type = "image/tiff"; source = Llm_provider.Types.Base64 "AAAA"} in
   List.iter (fun (content, content_blocks, expected_writes) ->
     test_dynamic_tool_callback ~content ~content_blocks ~expected_writes ())
-    ["invalid\255", [Agent_core.Types.Text "invalid\255"], 0;
+    ["invalid\255", [Llm_provider.Types.Text "invalid\255"], 0;
      "unsupported image fallback", [image], 0;
-     "unused fallback\255", [Agent_core.Types.Text "authoritative original"], 1]
+     "unused fallback\255", [Llm_provider.Types.Text "authoritative original"], 1]
 ;;
 
 
@@ -4058,7 +4058,7 @@ let with_runtime_config ~model cli_path f =
 
 let keeper_response_text (result : Runtime_agent.run_result) =
   result.response.content
-  |> List.filter_map (function Agent_core.Types.Text text -> Some text | _ -> None)
+  |> List.filter_map (function Llm_provider.Types.Text text -> Some text | _ -> None)
   |> String.concat ""
 ;;
 
@@ -5237,7 +5237,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                     Keeper_turn_driver.run_named ~input_source ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"codex.codex"
                       ~keeper_name
-                      ~base_path
+                      ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
                       ~goal
                       ~system_prompt
                       ~tools

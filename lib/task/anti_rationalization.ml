@@ -304,7 +304,7 @@ let lookup_with_evidence_observation { schemas; dispatch } =
         ; content_blocks =
             Option.map
               (fun blocks ->
-                 Agent_core.Types.Text
+                 Llm_provider.Types.Text
                    (Yojson.Safe.to_string success_observation)
                  :: blocks)
               payload.content_blocks
@@ -621,7 +621,7 @@ let failure_certainty ~dispatch error =
         | UnknownVariant _ | ProviderUnavailable _ | NetworkError _ | Timeout _
         | ProviderTerminal _ | ProviderReportedError _ | ProviderWireError _)
     | Agent_core.Error.Agent _ | Mcp _ | Config _ | Serialization _ | Io _
-    | Orchestration _ | Internal _ | Internal_carried _ -> Outcome_unknown
+    | Orchestration _ | Media _ | Internal _ | Internal_carried _ -> Outcome_unknown
 
 type execution_policy = Ordinary_review | Retained_original
 
@@ -778,6 +778,19 @@ let run_with_execution_policy ~execution_policy
                         | None -> `Null
                         | Some class_ -> Agent_core.Types.tool_error_class_to_yojson class_) ] ], [])
          in
+         (* The evidence joins the reviewer's input, which is history: its
+            media go to the store first. *)
+         let fields, media =
+           match
+             Agent_core.History.of_wire_blocks
+               (Tool_blob_media_store.of_base_path ~base_path) media
+           with
+           | Ok media -> fields, media
+           | Error error ->
+             ( fields
+               @ [ "media_unavailable", `String (Agent_core.Error.to_string (Agent_core.Error.Media error)) ]
+             , [] )
+         in
          let data = `Assoc
            [ "prior_review_lookup", `Assoc
                ([ "evaluator_slot", `String evaluator_slot
@@ -916,7 +929,7 @@ let run_with_execution_policy ~execution_policy
              let dispatch = match error with
                | Agent_core.Error.Config _ -> Runtime_attempt_dispatch.Rejected_before_dispatch
                | Agent_core.Error.Api _ | Provider _ | Agent _ | Mcp _ | Serialization _
-               | Io _ | Orchestration _ | Internal _ | Internal_carried _ -> Runtime_attempt_dispatch.Dispatched in
+               | Io _ | Orchestration _ | Media _ | Internal _ | Internal_carried _ -> Runtime_attempt_dispatch.Dispatched in
              observe_failure ~runtime_id:slot ~dispatch error);
            let remaining = if must_preserve_original () then [] else remaining in
            let nested_retryable_runtimes = if must_preserve_original () then [] else nested_retryable_runtimes in
@@ -1012,12 +1025,24 @@ let run_review
      body was read at assembly time, so a missing or unreadable body never
      reaches this list — the artifact stays in the prompt as its reference and
      hash line only, which is the §4.4 posture for it. *)
+  let media_store = Tool_blob_media_store.of_base_path ~base_path in
   let image_blocks =
     req.evidence_images
-    |> List.map (fun img ->
-           Agent_core.Types.image_block
-             ~media_type:img.image_media_type
-             ~source:(Agent_core.Types.Base64 img.image_body_base64))
+    |> List.filter_map (fun img ->
+           (* A body the store cannot keep stays out, like one that could not
+              be read: the prompt still carries its reference and hash line. *)
+           match
+             Agent_core.History.of_wire_block media_store
+               (Llm_provider.Types.image_block
+                  ~media_type:img.image_media_type
+                  ~source:(Llm_provider.Types.Base64 img.image_body_base64))
+           with
+           | Ok block -> Some block
+           | Error error ->
+             Log.Task.warn "task_id=%s [task-completion-review] image evidence %s kept as reference only: %s" req.task_id
+               img.image_media_type
+               (Agent_core.Error.to_string (Agent_core.Error.Media error));
+             None)
   in
   let lookup_for_judge = lookup_with_evidence_observation lookup in
   run_with_execution_policy ~execution_policy

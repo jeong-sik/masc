@@ -67,7 +67,7 @@ let test_original_presentation () =
        Alcotest.(check bool) "table text is included" true
          (String_util.contains_substring second "Leave" && String_util.contains_substring second "Take");
        let images = List.filter_map (function
-         | Llm_provider.Types.Image {media_type="image/png";source=Base64 data} -> Some (Base64.decode_exn data)
+         | Llm_provider.Types.Image {media_type="image/png";source=Llm_provider.Types.Base64 data} -> Some (Base64.decode_exn data)
          | _ -> None) blocks in
        let pages = member "rendered_slides" data |> to_list in
        Alcotest.(check int) "every slide becomes visual input" 2 (List.length images);
@@ -80,7 +80,7 @@ let test_original_presentation () =
        let bridged = Tool_bridge.to_agent_core_typed_result result |> Result.get_ok in
        Alcotest.(check bool) "typed model bridge retains visual blocks" true
          (match bridged.content_blocks with Some blocks ->
-           List.length (List.filter (function Agent_core.Types.Image _ -> true | _ -> false) blocks) = 2
+           List.length (List.filter (function Llm_provider.Types.Image _ -> true | _ -> false) blocks) = 2
           | None -> false)
      | _ -> Alcotest.fail (Tool_result.message result));
     Alcotest.(check bool) "malformed PPTX is a producer rejection" true

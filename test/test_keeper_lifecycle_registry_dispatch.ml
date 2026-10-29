@@ -398,7 +398,7 @@ let test_message_preflight_rejects_unregistered_keeper () =
       let meta = make_keeper_meta ~name:keeper_name () in
       let message =
         match
-          Invocation.direct_message
+          Invocation.direct_message ~media_store:(Agent_core.History.Memory_store.create ())
             ~keeper_name
             ~prompt:"run the requested turn"
             ~direct_reply:true

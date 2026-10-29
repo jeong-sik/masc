@@ -12,9 +12,14 @@ let replay ~persist_checkpoint agent ~response ~turn ~invocations ~tool_results 
       tool_uses
   in
   let tool_uses_list = Nonempty.to_list tool_uses in
+  (* The journal's settled results enter history here, through the same
+     conversion as a live turn's results. *)
+  let* history_results =
+    Agent_turn.make_tool_results ~media_store:agent.media_store report.completed_results
+  in
   update_state agent (fun state ->
     { state with
-      messages = Util.snoc state.messages (make_message ~role:Tool tool_results)
+      messages = Util.snoc state.messages (make_message ~role:Tool history_results)
     });
   let base_state = agent.state in
   let* () = persist_checkpoint After_tool_results_appended base_state in

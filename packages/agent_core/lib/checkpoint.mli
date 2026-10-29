@@ -137,6 +137,15 @@ val content_block_of_json : Yojson.Safe.t -> (Types.content_block, Error.t) resu
 (** Decode one canonical checkpoint block. Duplicate/invalid JSON values,
     unknown fields, unsupported variants and malformed provenance are errors. *)
 
+(** The provider block codec the execution journal records tool results and
+    responses with, base64 media included. A durable owner of provider blocks
+    that are not history uses it; checkpoint messages never do. *)
+val wire_content_block_to_json_result :
+  scope:string -> Llm_provider.Types.content_block -> (Yojson.Safe.t, Error.t) result
+
+val wire_content_block_of_json :
+  Yojson.Safe.t -> (Llm_provider.Types.content_block, Error.t) result
+
 (** The JSON one message is written as inside a checkpoint's [messages]: the
     same encoder {!to_json} maps over them, for a caller that needs one
     message's durable bytes (a digest of it, say) without a checkpoint

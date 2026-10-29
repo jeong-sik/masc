@@ -10,7 +10,7 @@ open Types
 
 let make_agent ~net ?(initial_messages = []) () =
   let config = { (default_config ~model:"test-model") with initial_messages } in
-  Agent.create ~net ~config ()
+  Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ()
 ;;
 
 let msg role text =
@@ -90,7 +90,7 @@ let test_builder_initial_messages () =
   @@ fun env ->
   let history = [ msg User "hi"; msg Assistant "hello" ] in
   let agent =
-    Builder.create ~net:env#net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:"claude-sonnet-5"
     |> Builder.with_initial_messages history
     |> Builder.build_safe
     |> Result.get_ok

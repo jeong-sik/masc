@@ -136,6 +136,7 @@ let response =
 ;;
 
 let build_admission_agent
+      ?(media_store = Agent_core.History.Memory_store.create ())
       ?model_input_projection
       ?body_timeout_s
       ?pre_dispatch_serialization_observer
@@ -145,7 +146,7 @@ let build_admission_agent
       ()
   =
   let builder =
-    Agent_core.Builder.create ~net ~model:provider_config.Provider_config.model_id
+    Agent_core.Builder.create ~media_store ~net ~model:provider_config.Provider_config.model_id
     |> Agent_core.Builder.with_provider_config provider_config
     |> Agent_core.Builder.with_context_fit_admission Agent_core.Agent.Require_exact_fit
     |> Agent_core.Builder.without_event_bus
@@ -1548,14 +1549,18 @@ let test_agent_projection_is_shared_by_measurement_and_dispatch () =
       })
     in
     let hydrated = msg User [ Text "hydrated artifact payload" ] in
+    let media_store = Agent_core.History.Memory_store.create () in
     let agent =
       build_admission_agent
+        ~media_store
         ~net
         ~provider_config
         ~transport
-        ~model_input_projection:(fun provider_messages ->
+        ~model_input_projection:(fun history ->
           incr projection_calls;
-          Ok (provider_messages @ [ hydrated ]))
+          match Agent_core.History.to_wire_messages media_store history with
+          | Ok provider_messages -> Ok (provider_messages @ [ hydrated ])
+          | Error error -> Error (Agent_core.Error.Media error))
         ()
     in
     let result = Agent_core.Agent.run ~sw agent "canonical input" in

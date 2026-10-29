@@ -24,7 +24,7 @@ let make_mock_transport () : Llm_provider.Llm_transport.t =
     { id = "telemetry-pipeline-mock"
     ; model = "mock-model"
     ; stop_reason = Types.EndTurn
-    ; content = [ Types.Text "ok" ]
+    ; content = [ Llm_provider.Types.Text "ok" ]
     ; usage = None
     ; telemetry = None
     }
@@ -58,7 +58,7 @@ let text_response ?(id = "checkpoint-text") text : Types.api_response =
   { id
   ; model = "mock-model"
   ; stop_reason = Types.EndTurn
-  ; content = [ Types.Text text ]
+  ; content = [ Llm_provider.Types.Text text ]
   ; usage = None
   ; telemetry = None
   }
@@ -69,7 +69,7 @@ let tool_use_response () : Types.api_response =
   ; model = "mock-model"
   ; stop_reason = Types.StopToolUse
   ; content =
-      [ Types.ToolUse
+      [ Llm_provider.Types.ToolUse
           { id = "call_1"
           ; name = "get_time"
           ; input = `Assoc [ "timezone", `String "UTC" ]
@@ -114,7 +114,7 @@ let make_agent ~net ~transport () =
     ; model = "mock-model"
     }
   in
-  let agent = Agent.create ~net ~config ~options () in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ~options () in
   agent, event_bus
 ;;
 
@@ -144,7 +144,7 @@ let make_checkpoint_agent
     ; model = "mock-model"
     }
   in
-  Agent.create ~net ~config ~tools ~options ~checkpoint_sink ()
+  Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ~tools ~options ~checkpoint_sink ()
 ;;
 
 let messages_contain_tool_result ~tool_use_id ~content messages =
@@ -233,7 +233,7 @@ let test_run_stream_without_event_bus_skips_telemetry () =
     }
   in
   let options = { options with transport = Some transport_with_probe } in
-  let agent = Agent.create ~net ~config ~options () in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ~options () in
   (match Agent.run_stream ~sw ~on_event:(fun _ -> ()) agent "trigger streaming turn" with
    | Ok _ -> ()
    | Error err -> Alcotest.fail ("expected stream success: " ^ Error.to_string err));
@@ -612,7 +612,7 @@ let test_post_hook_failure_commits_tool_result_before_surface () =
        true
        (List.exists
           (function
-            | Types.Text "done" -> true
+            | Llm_provider.Types.Text "done" -> true
             | _ -> false)
           response.content)
    | Error error ->

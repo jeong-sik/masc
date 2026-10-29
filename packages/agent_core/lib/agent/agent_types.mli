@@ -50,8 +50,12 @@ type context_fit_admission =
     error is the caller's own typed fact, not a rendered string: a projection
     that refuses because this candidate's declared ceiling cannot carry the
     turn says so with [Error.Api (ContextOverflow _)], which the lane loop
-    already rotates on. *)
-type model_input_projection = Types.message list -> (Types.message list, Error.t) result
+    already rotates on. The projection turns history into the provider
+    request, so it also resolves the request's media through the agent's
+    media store; an agent without a projection converts the whole history
+    with {!History.to_wire_message}. *)
+type model_input_projection =
+  Types.message list -> (Llm_provider.Types.message list, Error.t) result
 
 type pre_dispatch_serialization_observer = Llm_provider.Request_wire_observer.try_observe
 
@@ -240,6 +244,8 @@ type t =
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   ; context : Context.t
   ; options : options
+  ; media_store : History.media_store
+    (** Holds the bytes of every media block in [state.messages]. *)
   ; context_fit_admission : context_fit_admission
   ; model_input_projection : model_input_projection option
   ; pre_dispatch_serialization_observer : pre_dispatch_serialization_observer option
@@ -265,6 +271,7 @@ val extend_tools : ?order:string list -> t -> Tool.t list -> unit
 val context : t -> Context.t
 val options : t -> options
 val provider_config : t -> Llm_provider.Provider_config.t option
+val media_store : t -> History.media_store
 val net : t -> [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
 val set_state : t -> Types.agent_state -> unit
 val update_state : t -> (Types.agent_state -> Types.agent_state) -> unit
@@ -278,6 +285,7 @@ val agent_core_version : string
 
 val create
   :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> media_store:History.media_store
   -> config:Types.agent_config
   -> ?tools:Tool.t list
   -> ?context:Context.t

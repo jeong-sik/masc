@@ -226,9 +226,12 @@ let durable_result (row : Executor.node_result) =
     "content_blocks", (match content_blocks with
       | None -> `Null
       | Some content ->
-        let message : Agent_core.Types.message =
-          { origin = Llm_provider.Types.Conversation; role = Tool; content; name = None; tool_call_id = None; metadata = []} in
-        Agent_core.Checkpoint.message_to_json message);
+        (* Tool output media is a provider block; the journal block codec is
+           the one that writes it. *)
+        `List (List.map (fun block ->
+          match Agent_core.Checkpoint.wire_content_block_to_json_result ~scope:"h2 journal" block with
+          | Ok json -> json
+          | Error error -> Alcotest.fail (Agent_core.Error.to_string error)) content));
     "result_bytes", `Int row.result_bytes;
     "truncated_to", (match row.truncated_to with None -> `Null | Some limit -> `Int limit)]
 let check_retained expected rows =

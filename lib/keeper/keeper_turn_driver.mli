@@ -291,6 +291,7 @@ val run_named :
   walk_owner:walk_owner ->
   ?pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->
+  media_store:Agent_core.History.media_store ->
   goal:string ->
   ?goal_blocks:Agent_core.Types.content_block list ->
   ?goal_metadata:Agent_core.Types.metadata ->
@@ -305,7 +306,7 @@ val run_named :
   ?argument_demotion_seed:Agent_core.Types.message list ->
   (* Raw pre-admission history; native continuations supply their retained
      initial seed. Absence leaves ToolUse inputs verbatim. *)
-  ?model_input_projection:Agent_core.Agent.model_input_projection ->
+  ?model_input_projection:Keeper_history_projection.t ->
   ?temperature:float ->
   ?accept:(Agent_core.Types.api_response -> bool) ->
   ?hooks:Agent_core.Hooks.hooks ->
@@ -589,6 +590,7 @@ module For_testing : sig
       (needs_projection:(Keeper_media_reading.kind -> bool) ->
        Agent_core.Types.content_block list ->
        Agent_core.Types.content_block list * (string * int) list) ->
+    media_store:Agent_core.History.media_store ->
     project_images:
       (mode:Keeper_vision_ingest.mode ->
        Agent_core.Types.content_block list -> Keeper_vision_ingest.image_projection) ->

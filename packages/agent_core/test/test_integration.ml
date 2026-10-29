@@ -94,7 +94,7 @@ let test_simple_conversation () =
     in
     let options = { Agent.default_options with provider_config = Some provider_config } in
     let agent =
-      Agent.create
+      Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
         ~config:(Types.default_config ~model:"test-model")
         ~net:env#net
         ~options
@@ -105,7 +105,7 @@ let test_simple_conversation () =
       let text =
         List.filter_map
           (function
-            | Text s -> Some s
+            | Llm_provider.Types.Text s -> Some s
             | _ -> None)
           response.content
         |> String.concat ""
@@ -152,7 +152,7 @@ let test_tool_use () =
     in
     let options = { Agent.default_options with provider_config = Some provider_config } in
     let agent =
-      Agent.create
+      Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
         ~config:(Types.default_config ~model:"test-model")
         ~net:env#net
         ~tools:[ calc_tool ]
@@ -164,7 +164,7 @@ let test_tool_use () =
       let text =
         List.filter_map
           (function
-            | Text s -> Some s
+            | Llm_provider.Types.Text s -> Some s
             | _ -> None)
           response.content
         |> String.concat ""

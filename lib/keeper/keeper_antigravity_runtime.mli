@@ -35,7 +35,7 @@ val run :
   tools:Agent_core.Tool.t list ->
   ?loading_plan:Keeper_official_client_host.loading_plan ->
   initial_messages:Agent_core.Types.message list ->
-  model_input_projection:Agent_core.Agent.model_input_projection option ->
+  model_input_projection:Keeper_history_projection.t option ->
   on_transmitted_model_input:
     (Keeper_official_client_host.transmitted_model_input -> unit) ->
   hooks:Agent_core.Hooks.hooks option ->

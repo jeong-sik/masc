@@ -193,7 +193,7 @@ let with_bundle
   (match retained_agent with
    | None -> ()
    | Some cell ->
-     cell := Some (Agent_core.Agent.create ~net:env#net ~context
+     cell := Some (Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~context
        ~config:(Agent_core.Types.default_config ~model:"test-model")
        ~tools:bundle.Keeper_tools_agent_core.agent_core_tools ()));
   Fun.protect ~finally:bundle.Keeper_tools_agent_core.cleanup (fun () -> f bundle)

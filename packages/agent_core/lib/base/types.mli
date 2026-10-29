@@ -14,6 +14,48 @@ include module type of struct
 end
 
 (* ================================================================ *)
+(* History content (RFC-0476 D5)                                    *)
+(* ================================================================ *)
+
+(** Agent history holds media by reference. [media_source] here is
+    {!History.media_source}, and [content_block] and [message] are the
+    provider's {!content_block_with} and {!message_with} over it, so the
+    constructors are the provider's and the helpers over any source
+    ([make_message], [user_msg], [text_of_content], ...) take history blocks.
+    Included provider items fixed to the provider source
+    ([api_response.content], [tool_output.content_blocks], [sse_event], ...)
+    keep it: history and provider content meet only through
+    {!History.of_wire_block} and {!History.to_wire_block}. *)
+
+type media_source = History.media_source =
+  | Stored of History.stored
+  | Url of string
+  | File_id of string
+
+val pp_media_source : Format.formatter -> media_source -> unit
+val show_media_source : media_source -> string
+
+type content_block = media_source content_block_with
+
+val pp_content_block : Format.formatter -> content_block -> unit
+val show_content_block : content_block -> string
+
+type message = media_source message_with
+
+val pp_message : Format.formatter -> message -> unit
+val show_message : message -> string
+
+(** History messages as hash-table keys, with the contract of
+    {!Llm_provider.Types.Message_value}. A [Stored] source contributes its
+    digest. *)
+module Message_value : sig
+  type t = message
+
+  val equal : t -> t -> bool
+  val hash : t -> int
+end
+
+(* ================================================================ *)
 (* AGENT_CORE-specific additions                                            *)
 (* ================================================================ *)
 

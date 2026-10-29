@@ -76,7 +76,7 @@ candidates = ["native.no_tools", "binding.sample"]
   let errors = ref [] in
   let run ?provider_config_transform ?output_contract ~tool_requirement ~tools runtime_id =
     Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "required-tools-proof" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk ~runtime_id ~keeper_name:"required-tools-proof"
-      ~base_path:root ~system_prompt:"Tool requirement dispatch fixture."
+      ~base_path:root ~media_store:(Tool_blob_media_store.of_base_path ~base_path:root) ~system_prompt:"Tool requirement dispatch fixture."
       ~goal:"Answer the request." ~tools ~agent_core_tools:tools ~tool_requirement
       ?provider_config_transform ?output_contract
       ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ ~dispatch error -> errors := (runtime_id,dispatch,error) :: !errors)
@@ -141,7 +141,7 @@ candidates = ["native.no_tools", "binding.sample"]
   ignore
     (Keeper_turn_driver_wrappers.run_named_with_masc_tools ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "required-tools-wrapper" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
        ~runtime_id:"native.no_tools" ~keeper_name:"required-tools-wrapper"
-       ~base_path:root ~system_prompt:"Wrapper requirement fixture."
+       ~base_path:root ~media_store:(Tool_blob_media_store.of_base_path ~base_path:root) ~system_prompt:"Wrapper requirement fixture."
        ~goal:"Answer the request."
        ~masc_tools:
          [ { Masc_domain.name = "fixture_tool"

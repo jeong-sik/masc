@@ -3,6 +3,15 @@ open Alcotest
 module WT = Masc.Keeper_wake_telemetry
 module Types = Agent_core.Types
 
+(* History in these fixtures holds media by reference; every agent, runtime
+   config and projector here reads the bytes back from this store. *)
+let test_media_store = Agent_core.History.Memory_store.create ()
+
+let stored_source ~media_type raw =
+  match test_media_store.put ~media_type ~raw with
+  | Ok stored -> Agent_core.Types.Stored stored
+  | Error error -> failwith (Agent_core.Error.to_string (Agent_core.Error.Media error))
+
 let text_msg role s : Types.message =
   { origin = Llm_provider.Types.Conversation;  role; content = [ Types.Text s ]; name = None; tool_call_id = None; metadata = [] }
 
@@ -151,7 +160,7 @@ let test_compute_sizes_bytes_breakdown () =
 let test_compute_sizes_uses_structured_pending_user_blocks () =
   let user_blocks =
     [ Types.Image
-        { media_type = "image/png"; source = Types.Base64 "abc123" }
+        { media_type = "image/png"; source = (stored_source ~media_type:"image/png" "abc123") }
     ; Types.Text "describe"
     ]
   in
@@ -164,9 +173,11 @@ let test_compute_sizes_uses_structured_pending_user_blocks () =
       ~user_message:"display-only fallback must not be counted"
       ()
   in
+  (* An image counts as the base64 the provider receives: "abc123" is sent
+     as "YWJjMTIz". *)
   check int
     "structured blocks replace the display-only fallback"
-    (String.length "abc123" + String.length "describe")
+    (String.length "YWJjMTIz" + String.length "describe")
     sizes.message_content_bytes;
   check int "pending structured input is one User message" 1 sizes.message_count
 

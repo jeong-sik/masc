@@ -777,7 +777,7 @@ let attempt_runtime_candidates
          | Agent_core.Error.Agent _
          | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
          | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
-         | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _
+         | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ | Agent_core.Error.Internal _
          | Agent_core.Error.Internal_carried _ -> false
        in
        let note_failed_attempt failure =
@@ -1224,6 +1224,7 @@ type attempt_input =
    picture. Other unsupported media retain the explicit degrade contract. *)
 let project_input_for_attempt
     ?project_media
+    ~media_store
     ~project_images
     ~keeper_name
     ~(emit_runtime_manifest :
@@ -1327,6 +1328,7 @@ let project_input_for_attempt
            whole walk. *)
         let projector =
           Keeper_media_reading.projector
+            ~media_store
             ~keeper_name
             ~start_deadline:media_reading_deadline
             ~read:(fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ -> Error "no_reader")
@@ -1471,7 +1473,7 @@ let project_input_for_attempt
                   (function
                     | Agent_core.Types.Text text ->
                       Agent_core.Types.Text (Llm_provider.Utf8_sanitize.sanitize text)
-                    | (Llm_provider.Types.Thinking _ | Llm_provider.Types.ReasoningDetails _ | Llm_provider.Types.RedactedThinking _ | Llm_provider.Types.ToolUse _ | Llm_provider.Types.ToolResult _ | Llm_provider.Types.Image _ | Llm_provider.Types.Document _ | Llm_provider.Types.Audio _) as block -> block)
+                    | (Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _) as block -> block)
                   blocks)
            in
            Keeper_replay_prefix.media_degraded_with_current_input
@@ -1647,6 +1649,7 @@ let provider_attempt_dispatch ~request_serialized result =
   | ((true | false), Error (Agent_core.Error.Serialization _))
   | ((true | false), Error (Agent_core.Error.Io _))
   | ((true | false), Error (Agent_core.Error.Orchestration _))
+  | ((true | false), Error (Agent_core.Error.Media _))
   | ((true | false), Error (Agent_core.Error.Internal _))
   | ((true | false), Error (Agent_core.Error.Internal_carried _)) -> Keeper_attempt_dispatch.Dispatched
 
@@ -1699,6 +1702,7 @@ let run_named
     ~walk_owner
     ?pre_tool_rejects
     ~base_path
+    ~media_store
     ~goal
     ?goal_blocks
     ?(goal_metadata = [])
@@ -2181,6 +2185,7 @@ let run_named
   let project_images =
     let project = Keeper_vision_ingest.fallback_projector
       ~base_path
+      ~media_store
       ~exclude_runtime_ids:lane_candidate_ids
       ~keeper_name
       () in
@@ -2198,6 +2203,7 @@ let run_named
   let media_projector =
     Keeper_media_reading.projector
       ~base_path
+      ~media_store
       ~keeper_name
       ~start_deadline:media_reading_deadline
       ~read:
@@ -2393,6 +2399,7 @@ let run_named
            attempt_replay_prefix_projection=Keeper_replay_prefix.unchanged}
         | None -> project_input_for_attempt
           ~project_media:(Keeper_media_reading.project media_projector)
+          ~media_store
           ~project_images
           ~keeper_name
           ~emit_runtime_manifest
@@ -2556,7 +2563,7 @@ let run_named
                  observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
               on_request_attribution
           in
-          Keeper_codex_runtime.run ~input_source ?on_native_tool_completion ?on_native_tool_progress
+          Keeper_codex_runtime.run ~input_source ~media_store ?on_native_tool_completion ?on_native_tool_progress
             ?argument_source:official_argument_source
             ?on_memory_capacity_refusal
             ?on_tool_execution
@@ -2665,7 +2672,7 @@ let run_named
                  run_result.Runtime_agent.stop_reason,
                  run_result.response.content
                with
-               | Runtime_agent.Completed _, [ Agent_core.Types.Text text ]
+               | Runtime_agent.Completed _, [ Llm_provider.Types.Text text ]
                  when String.trim text = "" ->
                  Ok run_result
                | ( Runtime_agent.Completed _
@@ -2675,15 +2682,15 @@ let run_named
                  | Runtime_agent.Yielded_after_repeated_assistant_text _
                  | Runtime_agent.InputRequired _ ),
                  ([]
-                 | Agent_core.Types.Text _ :: _
-                 | ( Agent_core.Types.Thinking _
-                   | Agent_core.Types.ReasoningDetails _
-                   | Agent_core.Types.RedactedThinking _
-                   | Agent_core.Types.ToolUse _
-                   | Agent_core.Types.ToolResult _
-                   | Agent_core.Types.Image _
-                   | Agent_core.Types.Document _
-                   | Agent_core.Types.Audio _ )
+                 | Llm_provider.Types.Text _ :: _
+                 | ( Llm_provider.Types.Thinking _
+                   | Llm_provider.Types.ReasoningDetails _
+                   | Llm_provider.Types.RedactedThinking _
+                   | Llm_provider.Types.ToolUse _
+                   | Llm_provider.Types.ToolResult _
+                   | Llm_provider.Types.Image _
+                   | Llm_provider.Types.Document _
+                   | Llm_provider.Types.Audio _ )
                    :: _) ->
                  apply_official_client_accept
                    ~runtime_id:attempt_runtime_id
@@ -2854,7 +2861,7 @@ let run_named
             ; settled_session = None
             ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed }
           | Ok (workspace_root, native_context) ->
-          Keeper_muse_runtime.run ~input_source
+          Keeper_muse_runtime.run ~input_source ~media_store
             ?on_native_tool_completion
             ?argument_source:official_argument_source
             ?on_tool_execution
@@ -2984,7 +2991,7 @@ let run_named
           in
           let native_attempt : Runtime_native_tasks.attempt =
             { routing_run_id; runtime_id = attempt_runtime_id; lane_attempt_index = idx } in
-          Keeper_claude_code_runtime.run ~input_source ?on_native_tool_progress ?on_native_tool_completion
+          Keeper_claude_code_runtime.run ~input_source ~media_store ?on_native_tool_progress ?on_native_tool_completion
             ?argument_source:official_argument_source
             ?on_provider_retry:(Option.map
               (fun observe retry -> observe ~attempt:native_attempt retry)
@@ -3197,6 +3204,7 @@ let run_named
             ; hold_carried_front = (fun seed -> refused_carried_front := Some seed)
             ; restore_carried_front = (fun prior -> refused_carried_front := prior)
             ; base_path
+            ; media_store
             ; keeper_name
             ; name
             ; goal

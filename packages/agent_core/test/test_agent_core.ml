@@ -68,7 +68,7 @@ let test_agent_create () =
   Eio_main.run
   @@ fun env ->
   let agent =
-    Agent.create ~config:(Types.default_config ~model:"test-model") ~net:env#net ()
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(Types.default_config ~model:"test-model") ~net:env#net ()
   in
   let st = Agent.state agent in
   Alcotest.(check int) "initial turn count" 0 st.turn_count;
@@ -79,7 +79,7 @@ let test_agent_accessors () =
   Eio_main.run
   @@ fun env ->
   let agent =
-    Agent.create ~config:(Types.default_config ~model:"test-model") ~net:env#net ()
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(Types.default_config ~model:"test-model") ~net:env#net ()
   in
   Alcotest.(check int) "no tools" 0 (Tool_set.size (Agent.tools agent));
   Alcotest.(check bool) "no lifecycle" true (Option.is_none (Agent.lifecycle agent));
@@ -100,7 +100,7 @@ let test_extend_tools_widens_the_callable_set () =
       Ok { Types.content = name; content_blocks = None; _meta = None })
   in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Types.default_config ~model:"test-model")
       ~tools:[ tool "index" ]
       ~net:env#net
@@ -133,7 +133,7 @@ let test_extend_tools_does_not_rebind_an_existing_name () =
       Ok { Types.content = body; content_blocks = None; _meta = None })
   in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Types.default_config ~model:"test-model")
       ~tools:[ tool "search" "original" ]
       ~net:env#net
@@ -165,7 +165,7 @@ let test_a_widened_tool_reaches_the_next_request () =
       Ok { Types.content = name; content_blocks = None; _meta = None })
   in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Types.default_config ~model:"test-model")
       ~tools:[ tool "index" ]
       ~net:env#net
@@ -173,7 +173,7 @@ let test_a_widened_tool_reaches_the_next_request () =
   in
   let offered_this_round () =
     match
-      Agent_turn.prepare_turn
+      Agent_turn.prepare_turn ~media_store:(Agent_core.History.Memory_store.create ())
         ~tools:(Agent.tools agent)
         ~messages:[]
         ~turn_params:Hooks.default_turn_params
@@ -194,7 +194,7 @@ let test_extend_tools_with_nothing_changes_nothing () =
   Eio_main.run
   @@ fun env ->
   let agent =
-    Agent.create ~config:(Types.default_config ~model:"test-model") ~net:env#net ()
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(Types.default_config ~model:"test-model") ~net:env#net ()
   in
   Agent.extend_tools agent [];
   Alcotest.(check int) "still empty" 0 (Tool_set.size (Agent.tools agent))
@@ -212,7 +212,7 @@ let test_extend_tools_places_by_order () =
       Ok { Types.content = name; content_blocks = None; _meta = None })
   in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Types.default_config ~model:"test-model")
       ~tools:[ tool "always"; tool "search"; tool "second"; tool "mcp" ]
       ~net:env#net
@@ -227,7 +227,7 @@ let test_extend_tools_places_by_order () =
     [ "always"; "search"; "first"; "second"; "third"; "mcp"; "stray" ]
     (Tool_set.names (Agent.tools agent));
   let later =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Types.default_config ~model:"test-model")
       ~tools:[ tool "later" ]
       ~net:env#net
@@ -239,7 +239,7 @@ let test_extend_tools_places_by_order () =
     [ "earlier"; "later" ]
     (Tool_set.names (Agent.tools later));
   let between =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Types.default_config ~model:"test-model")
       ~tools:[ tool "a"; tool "x"; tool "c" ]
       ~net:env#net
@@ -261,7 +261,7 @@ let test_build_safe_valid () =
   Eio_main.run
   @@ fun env ->
   let result =
-    Builder.create ~net:env#net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:"claude-sonnet-5"
     |> Builder.with_system_prompt "test"
     |> Builder.with_max_tokens 1024
     |> Builder.build_safe

@@ -6,8 +6,8 @@ open Agent_core
 let check_block msg expected actual =
   Alcotest.(check string)
     msg
-    (Types.show_content_block expected)
-    (Types.show_content_block actual)
+    (Llm_provider.Types.show_content_block expected)
+    (Llm_provider.Types.show_content_block actual)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -16,9 +16,9 @@ let check_block msg expected actual =
 
 let test_image_round_trip () =
   let img =
-    Types.Image
+    Llm_provider.Types.Image
       { media_type = "image/png"
-      ; source = Types.Base64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+      ; source = Llm_provider.Types.Base64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
       }
   in
   let json = Llm_provider.Api_common.content_block_to_json img in
@@ -33,9 +33,9 @@ let test_image_round_trip () =
 
 let test_document_round_trip () =
   let doc =
-    Types.Document
+    Llm_provider.Types.Document
       { media_type = "application/pdf"
-      ; source = Types.Base64 "JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwo+Pg=="
+      ; source = Llm_provider.Types.Base64 "JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwo+Pg=="
       }
   in
   let json = Llm_provider.Api_common.content_block_to_json doc in
@@ -46,9 +46,9 @@ let test_document_round_trip () =
 
 let test_image_url_round_trip () =
   let img =
-    Types.Image
+    Llm_provider.Types.Image
       { media_type = "image/png"
-      ; source = Types.Url "https://example.invalid/image.png"
+      ; source = Llm_provider.Types.Url "https://example.invalid/image.png"
       }
   in
   let json = Llm_provider.Api_common.content_block_to_json img in
@@ -59,9 +59,9 @@ let test_image_url_round_trip () =
 
 let test_document_file_id_round_trip () =
   let doc =
-    Types.Document
+    Llm_provider.Types.Document
       { media_type = "application/pdf"
-      ; source = Types.File_id "file_abc123"
+      ; source = Llm_provider.Types.File_id "file_abc123"
       }
   in
   let json = Llm_provider.Api_common.content_block_to_json doc in
@@ -87,14 +87,14 @@ let test_image_parse_nested_source () =
       ]
   in
   match Llm_provider.Api_common.content_block_of_json json with
-  | Some (Types.Image { media_type; source }) ->
-    let data = Types.media_source_payload source in
+  | Some (Llm_provider.Types.Image { media_type; source }) ->
+    let data = Llm_provider.Types.media_source_payload source in
     Alcotest.(check string) "media_type" "image/jpeg" media_type;
     Alcotest.(check string) "data" "abc123" data;
     Alcotest.(check string)
       "source_type"
       "base64"
-      (Types.media_source_wire_tag source)
+      (Llm_provider.Types.media_source_wire_tag source)
   | Some _ -> Alcotest.fail "expected Image variant"
   | None -> Alcotest.fail "content_block_of_json returned None"
 ;;
@@ -116,14 +116,14 @@ let test_document_parse_nested_source () =
       ]
   in
   match Llm_provider.Api_common.content_block_of_json json with
-  | Some (Types.Document { media_type; source }) ->
-    let data = Types.media_source_payload source in
+  | Some (Llm_provider.Types.Document { media_type; source }) ->
+    let data = Llm_provider.Types.media_source_payload source in
     Alcotest.(check string) "media_type" "application/pdf" media_type;
     Alcotest.(check string) "data" "pdf_data_here" data;
     Alcotest.(check string)
       "source_type"
       "base64"
-      (Types.media_source_wire_tag source)
+      (Llm_provider.Types.media_source_wire_tag source)
   | Some _ -> Alcotest.fail "expected Document variant"
   | None -> Alcotest.fail "content_block_of_json returned None"
 ;;
@@ -192,11 +192,11 @@ let test_unknown_audio_source_kind_fails_closed () =
 
 let test_mixed_content_serialization () =
   let blocks =
-    [ Types.Text "Here is an image:"
-    ; Types.Image
-        { media_type = "image/png"; source = Types.Base64 "base64data" }
-    ; Types.Document
-        { media_type = "application/pdf"; source = Types.Base64 "pdfdata" }
+    [ Llm_provider.Types.Text "Here is an image:"
+    ; Llm_provider.Types.Image
+        { media_type = "image/png"; source = Llm_provider.Types.Base64 "base64data" }
+    ; Llm_provider.Types.Document
+        { media_type = "application/pdf"; source = Llm_provider.Types.Base64 "pdfdata" }
     ]
   in
   let json_list = List.map Llm_provider.Api_common.content_block_to_json blocks in
@@ -209,18 +209,18 @@ let test_mixed_content_serialization () =
 ;;
 
 let test_multimodal_constructors () =
-  let image = Types.image_block ~media_type:"image/png" ~source:(Types.Base64 "img") in
-  let document = Types.document_block ~media_type:"application/pdf" ~source:(Types.Base64 "pdf") in
-  let audio = Types.audio_block ~media_type:"audio/wav" ~source:(Types.Base64 "wav") in
+  let image = Types.image_block ~media_type:"image/png" ~source:(Types.Stored (History.stored_of_raw "img")) in
+  let document = Types.document_block ~media_type:"application/pdf" ~source:(Types.Stored (History.stored_of_raw "pdf")) in
+  let audio = Types.audio_block ~media_type:"audio/wav" ~source:(Types.Stored (History.stored_of_raw "wav")) in
   let msg =
     Types.user_msg_blocks [ Types.text_block "Describe"; image; document; audio ]
   in
   Alcotest.(check string) "role" "user" (Types.role_to_string msg.role);
   Alcotest.(check int) "blocks" 4 (List.length msg.content);
   match image, document, audio with
-  | ( Types.Image { source = Types.Base64 _; media_type = "image/png"; _ }
-    , Types.Document { source = Types.Base64 _; media_type = "application/pdf"; _ }
-    , Types.Audio { source = Types.Base64 _; media_type = "audio/wav"; _ } ) -> ()
+  | ( Types.Image { source = Types.Stored _; media_type = "image/png"; _ }
+    , Types.Document { source = Types.Stored _; media_type = "application/pdf"; _ }
+    , Types.Audio { source = Types.Stored _; media_type = "audio/wav"; _ } ) -> ()
   | _ -> Alcotest.fail "unexpected multimodal constructor shape"
 ;;
 
@@ -230,7 +230,7 @@ let test_agent_run_blocks_rejects_internal_blocks () =
   Eio.Switch.run
   @@ fun sw ->
   let agent =
-    Agent.create ~config:(Types.default_config ~model:"test-model") ~net:env#net ()
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(Types.default_config ~model:"test-model") ~net:env#net ()
   in
   let blocks = [ Types.ToolUse { id = "call-1"; name = "x"; input = `Null } ] in
   (match Agent.run_blocks ~sw agent blocks with
@@ -246,7 +246,7 @@ let test_agent_run_with_handoffs_blocks_rejects_internal_blocks () =
   Eio.Switch.run
   @@ fun sw ->
   let agent =
-    Agent.create ~config:(Types.default_config ~model:"test-model") ~net:env#net ()
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(Types.default_config ~model:"test-model") ~net:env#net ()
   in
   let blocks =
     [ Types.ToolResult
@@ -271,8 +271,8 @@ let test_agent_run_with_handoffs_blocks_rejects_internal_blocks () =
 
 let test_image_json_structure () =
   let img =
-    Types.Image
-      { media_type = "image/webp"; source = Types.Base64 "webpdata" }
+    Llm_provider.Types.Image
+      { media_type = "image/webp"; source = Llm_provider.Types.Base64 "webpdata" }
   in
   let json = Llm_provider.Api_common.content_block_to_json img in
   let open Yojson.Safe.Util in
@@ -288,8 +288,8 @@ let test_image_json_structure () =
 
 let test_document_json_structure () =
   let doc =
-    Types.Document
-      { media_type = "text/plain"; source = Types.Base64 "textdata" }
+    Llm_provider.Types.Document
+      { media_type = "text/plain"; source = Llm_provider.Types.Base64 "textdata" }
   in
   let json = Llm_provider.Api_common.content_block_to_json doc in
   let open Yojson.Safe.Util in
@@ -310,7 +310,7 @@ let test_tool_result_content_blocks_serialize () =
   let open Yojson.Safe.Util in
   (* content_blocks = None keeps the canonical string content. *)
   let tr_string =
-    Types.ToolResult
+    Llm_provider.Types.ToolResult
       { tool_use_id = "t1"
       ; content = "plain"
       ; outcome = Tool_succeeded
@@ -326,16 +326,16 @@ let test_tool_result_content_blocks_serialize () =
      |> to_string);
   (* content_blocks = Some emits the blocks as the content array. *)
   let tr_blocks =
-    Types.ToolResult
+    Llm_provider.Types.ToolResult
       { tool_use_id = "t2"
       ; content = "fallback"
       ; outcome = Tool_succeeded
       ; json = None
       ; content_blocks =
           Some
-            [ Types.Text "hi"
-            ; Types.Image
-                { media_type = "image/png"; source = Types.Base64 "d" }
+            [ Llm_provider.Types.Text "hi"
+            ; Llm_provider.Types.Image
+                { media_type = "image/png"; source = Llm_provider.Types.Base64 "d" }
             ]
       }
   in

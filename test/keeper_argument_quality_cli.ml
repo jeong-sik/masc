@@ -224,7 +224,7 @@ let run_arm ~sw ~net ~root ~runtime_id ~data ~task arm =
   let argument_demotion_seed = match arm with Verbatim -> None | Projected -> Some data.messages in
   let result = Http.with_observer observer (fun () ->
     Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = trace_id }) ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk
-      ~runtime_id ~keeper_name:"argument-quality" ~base_path
+      ~runtime_id ~keeper_name:"argument-quality" ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
       ~input_policy:Keeper_input_policy.Small ?argument_demotion_seed
       ~system_prompt ~goal:(question task) ~initial_messages:data.messages
       ~tools ~agent_core_tools:tools ~checkpoint_sink ~sw ~net

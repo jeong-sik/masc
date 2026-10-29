@@ -36,7 +36,7 @@ let test_create_sets_model () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-opus-5-5" |> Builder.build_safe |> Result.get_ok
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-opus-5-5" |> Builder.build_safe |> Result.get_ok
   in
   check_model "model" "claude-opus-5-5" (Agent.state agent).config.model
 ;;
@@ -47,7 +47,7 @@ let test_with_system_prompt () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5"
     |> Builder.with_system_prompt "You are helpful."
     |> Builder.build_safe
     |> Result.get_ok
@@ -64,7 +64,7 @@ let test_with_name () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5"
     |> Builder.with_name "test-agent"
     |> Builder.build_safe
     |> Result.get_ok
@@ -78,7 +78,7 @@ let test_with_max_tokens () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5"
     |> Builder.with_max_tokens 8192
     |> Builder.build_safe
     |> Result.get_ok
@@ -95,7 +95,7 @@ let test_with_temperature () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5"
     |> Builder.with_temperature 0.7
     |> Builder.build_safe
     |> Result.get_ok
@@ -110,7 +110,7 @@ let test_with_provider_m_sampling () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"qwen3.5-35b-a3b-ud-q8-xl"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"qwen3.5-35b-a3b-ud-q8-xl"
     |> Builder.with_top_p 0.95
     |> Builder.with_top_k 20
     |> Builder.with_min_p 0.01
@@ -141,7 +141,7 @@ let test_with_tools_replaces () =
   let t1 = make_tool "a" in
   let t2 = make_tool "b" in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5"
     |> Builder.with_tool t1
     |> Builder.with_tools [ t2 ]
     |> Builder.build_safe
@@ -162,7 +162,7 @@ let test_with_tool_appends () =
   let t1 = make_tool "first" in
   let t2 = make_tool "second" in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5"
     |> Builder.with_tool t1
     |> Builder.with_tool t2
     |> Builder.build_safe
@@ -182,7 +182,7 @@ let test_with_hooks () =
   let hook _event = Hooks.Continue in
   let hooks = { Hooks.empty with before_turn = Some hook } in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5"
     |> Builder.with_hooks hooks
     |> Builder.build_safe
     |> Result.get_ok
@@ -199,7 +199,7 @@ let test_with_tracer () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5"
     |> Builder.with_tracer Tracing.fmt
     |> Builder.build_safe
     |> Result.get_ok
@@ -231,7 +231,7 @@ let test_with_transport () =
     })
   in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5"
     |> Builder.with_transport mock_transport
     |> Builder.build_safe
     |> Result.get_ok
@@ -248,7 +248,7 @@ let test_with_context () =
   let ctx = Context.create_sync () in
   Context.set ctx "key" (`String "value");
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5"
     |> Builder.with_context ctx
     |> Builder.build_safe
     |> Result.get_ok
@@ -313,7 +313,7 @@ let test_with_provider_config_reaches_dispatch_losslessly () =
     { id = "builder-exact-response"
     ; model = "builder-exact-model"
     ; stop_reason = Types.EndTurn
-    ; content = [ Types.Text "ok" ]
+    ; content = [ Llm_provider.Types.Text "ok" ]
     ; usage = None
     ; telemetry = None
     }
@@ -328,7 +328,7 @@ let test_with_provider_config_reaches_dispatch_losslessly () =
   in
   let provider_config = exact_provider_config () in
   let agent =
-    Builder.create ~net ~model:"initial-model"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"initial-model"
     |> Builder.with_provider_config provider_config
     |> Builder.with_max_tokens 777
     |> Builder.with_temperature 0.25
@@ -423,7 +423,7 @@ let test_missing_provider_config_is_rejected_at_dispatch () =
     { id = "must-not-dispatch"
     ; model = "must-not-dispatch"
     ; stop_reason = Types.EndTurn
-    ; content = [ Types.Text "must not dispatch" ]
+    ; content = [ Llm_provider.Types.Text "must not dispatch" ]
     ; usage = None
     ; telemetry = None
     }
@@ -440,7 +440,7 @@ let test_missing_provider_config_is_rejected_at_dispatch () =
     })
   in
   let agent =
-    Builder.create ~net ~model:"missing-provider-config"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"missing-provider-config"
     |> Builder.with_transport transport
     |> Builder.build_safe
     |> Result.get_ok
@@ -470,7 +470,7 @@ let test_handoff_inherits_injected_transport () =
       [ response
           ~id:"parent-handoff"
           ~stop_reason:Types.StopToolUse
-          [ Types.ToolUse
+          [ Llm_provider.Types.ToolUse
               { id = "handoff-tool"
               ; name = "researcher"
               ; input = `Assoc [ "prompt", `String "inspect" ]
@@ -479,11 +479,11 @@ let test_handoff_inherits_injected_transport () =
       ; response
           ~id:"subagent-complete"
           ~stop_reason:Types.EndTurn
-          [ Types.Text "sub ok" ]
+          [ Llm_provider.Types.Text "sub ok" ]
       ; response
           ~id:"parent-complete"
           ~stop_reason:Types.EndTurn
-          [ Types.Text "parent done" ]
+          [ Llm_provider.Types.Text "parent done" ]
       ]
   in
   let calls = ref 0 in
@@ -518,7 +518,7 @@ let test_handoff_inherits_injected_transport () =
     }
   in
   let agent =
-    Builder.create ~net ~model:"parent-model"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"parent-model"
     |> Builder.with_provider_config (exact_provider_config ())
     |> Builder.with_transport transport
     |> Builder.build_safe
@@ -552,7 +552,7 @@ let test_with_contract_composes_prompt () =
     |> Contract.add_instruction_layer ~label:"role" "Prefer concise, factual answers."
   in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5"
     |> Builder.with_system_prompt "Base prompt."
     |> Builder.with_contract contract
     |> Builder.build_safe
@@ -602,7 +602,7 @@ let test_with_skill_appends_prompt () =
         (String.concat "; " (List.map Skill_document.diagnostic_to_string diagnostics))
   in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5"
     |> Builder.with_system_prompt "Base prompt."
     |> Builder.with_skill skill
     |> Builder.build_safe
@@ -634,7 +634,7 @@ let test_with_contract_injects_context_metadata () =
     Contract.empty |> Contract.with_runtime_awareness "Aware of explicit grants."
   in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5"
     |> Builder.with_context ctx
     |> Builder.with_contract contract
     |> Builder.build_safe
@@ -660,7 +660,7 @@ let test_with_tool_choice () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5"
     |> Builder.with_tool_choice Types.Any
     |> Builder.build_safe
     |> Result.get_ok
@@ -681,7 +681,7 @@ let test_with_reasoning_effort () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5"
     |> Builder.with_reasoning_effort Llm_provider.Reasoning_effort.Max
     |> Builder.build_safe
     |> Result.get_ok
@@ -700,7 +700,7 @@ let test_build_produces_valid_agent () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-opus-4-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-opus-4-5"
     |> Builder.with_name "full-agent"
     |> Builder.with_system_prompt "Be concise."
     |> Builder.with_max_tokens 2048
@@ -727,7 +727,7 @@ let test_chain_multiple () =
   let t1 = make_tool "t1" in
   let t2 = make_tool "t2" in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-4"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-4"
     |> Builder.with_name "chained"
     |> Builder.with_system_prompt "system"
     |> Builder.with_max_tokens 1024
@@ -751,7 +751,7 @@ let test_chain_multiple () =
 let test_immutability_check () =
   with_net
   @@ fun net ->
-  let original = Builder.create ~net ~model:"claude-sonnet-5" in
+  let original = Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5" in
   let _modified = original |> Builder.with_name "modified" in
   let agent_from_original = Builder.build_safe original |> Result.get_ok in
   Alcotest.(check string)
@@ -766,10 +766,10 @@ let test_defaults_match_agent_create () =
   with_net
   @@ fun net ->
   let builder_agent =
-    Builder.create ~net ~model:"claude-sonnet-5" |> Builder.build_safe |> Result.get_ok
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5" |> Builder.build_safe |> Result.get_ok
   in
   let direct_agent =
-    Agent.create ~config:(Types.default_config ~model:"claude-sonnet-5") ~net ()
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(Types.default_config ~model:"claude-sonnet-5") ~net ()
   in
   let bc = (Agent.state builder_agent).config in
   let dc = (Agent.state direct_agent).config in
@@ -798,7 +798,7 @@ let test_build_with_tools_merges_mcp () =
   @@ fun net ->
   let t1 = make_tool "explicit" in
   let agent =
-    Builder.create ~net ~model:"claude-sonnet-5"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-sonnet-5"
     |> Builder.with_tool t1
     |> Builder.build_safe
     |> Result.get_ok
@@ -816,7 +816,7 @@ let test_build_minimal_required_only () =
   with_net
   @@ fun net ->
   let agent =
-    Builder.create ~net ~model:"claude-3-7-sonnet" |> Builder.build_safe |> Result.get_ok
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"claude-3-7-sonnet" |> Builder.build_safe |> Result.get_ok
   in
   check_model "model" "claude-3-7-sonnet" (Agent.state agent).config.model;
   Alcotest.(check string) "name" "agent" (Agent.state agent).config.name;

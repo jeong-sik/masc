@@ -95,7 +95,7 @@ let write_file path content =
 let test_admitted_continuation_requires_checkpoint () =
   match
     Masc.Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "admitted-continuation" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
-      ~runtime_id:"unused" ~base_path:"." ~goal:"continue"
+      ~runtime_id:"unused" ~base_path:"." ~media_store:(Tool_blob_media_store.of_base_path ~base_path:".") ~goal:"continue"
       ~system_prompt:"" ~agent_core_tools:[] ~continue_from_checkpoint:true ()
   with
   | Error (Agent_core.Error.Config
@@ -286,7 +286,7 @@ let run_tool_then_empty_with_checkpoint_store store_case () =
   let provider_calls = ref 0 in
   let replies = ref
       [ response ~stop_reason:Core.Types.StopToolUse
-          ~content:[Core.Types.ToolUse {id="observed-1"; name="observe"; input=`Assoc []}] ()
+          ~content:[Llm_provider.Types.ToolUse {id="observed-1"; name="observe"; input=`Assoc []}] ()
       ; response ~content:[] () ] in
   let next () =
     incr provider_calls;
@@ -343,7 +343,7 @@ let run_tool_then_empty_with_checkpoint_store store_case () =
     | Error detail -> incr failed_saves; Error detail
   in
   let checkpoint_sink = Attempt.observing_checkpoint_sink progress (Some checkpoint_owner) in
-  let agent = Core.Agent.create ~net:(Eio.Stdenv.net env)
+  let agent = Core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:(Eio.Stdenv.net env)
       ~config:(Core.Types.default_config ~model:"mock-model") ~options ~tools:[tool]
       ~checkpoint_sink () in
   let error = match Core.Agent.run ~sw agent "observe once" with
@@ -509,7 +509,8 @@ let test_replay_projection_failure_rejects_completed_attempt () =
     [ message
         ~role:User
         [ Text "canonical history"
-        ; image_block ~media_type:"image/png" ~source:(Base64 "canonical-image")
+        ; image_block ~media_type:"image/png"
+            ~source:(Stored (Agent_core.History.stored_of_raw "canonical-image"))
         ]
     ]
   in
@@ -970,7 +971,7 @@ let test_reject_reason_describes_thinking_only_response () =
       (run_result
          ~content:
            [
-             Agent_core.Types.Thinking
+             Llm_provider.Types.Thinking
                { signature = None; content = "abcde" };
            ]
          ())
@@ -1063,8 +1064,8 @@ let test_finalization_does_not_surface_hidden_reasoning () =
   let response =
     run_result
       ~content:
-        [ Agent_core.Types.Thinking { signature = None; content = hidden }
-        ; Agent_core.Types.ReasoningDetails
+        [ Llm_provider.Types.Thinking { signature = None; content = hidden }
+        ; Llm_provider.Types.ReasoningDetails
             { reasoning_content = Some "provider-private reasoning"
             ; details = []
             }
@@ -1117,9 +1118,9 @@ let test_thinking_with_text_is_accepted () =
       (run_result
          ~content:
            [
-             Agent_core.Types.Thinking
+             Llm_provider.Types.Thinking
                { signature = None; content = "internal chain" };
-             Agent_core.Types.Text "final answer";
+             Llm_provider.Types.Text "final answer";
            ]
          ())
   in
@@ -1138,9 +1139,9 @@ let test_thinking_with_tool_use_is_accepted () =
       (run_result
          ~content:
            [
-             Agent_core.Types.Thinking
+             Llm_provider.Types.Thinking
                { signature = None; content = "internal chain" };
-             Agent_core.Types.ToolUse
+             Llm_provider.Types.ToolUse
                { id = "tool-1"; name = "masc_board_search"; input = `Assoc [] };
            ]
          ())
@@ -1169,21 +1170,21 @@ let test_accept_contract_delegates_to_agent_core_response_shape () =
   check_accept_matches_agent_core_shape
     "thinking only"
     [
-      Agent_core.Types.Thinking
+      Llm_provider.Types.Thinking
         { signature = None; content = "internal chain" };
     ];
-  check_accept_matches_agent_core_shape "blank text" [ Agent_core.Types.Text " \n\t " ];
-  check_accept_matches_agent_core_shape "text" [ Agent_core.Types.Text "visible answer" ];
+  check_accept_matches_agent_core_shape "blank text" [ Llm_provider.Types.Text " \n\t " ];
+  check_accept_matches_agent_core_shape "text" [ Llm_provider.Types.Text "visible answer" ];
   check_accept_matches_agent_core_shape
     "tool use"
     [
-      Agent_core.Types.ToolUse
+      Llm_provider.Types.ToolUse
         { id = "tool-1"; name = "masc_board_search"; input = `Assoc [] };
     ];
   check_accept_matches_agent_core_shape
     "tool result"
     [
-      Agent_core.Types.ToolResult
+      Llm_provider.Types.ToolResult
         {
           tool_use_id = "tool-1";
           content = "ok";
@@ -1195,9 +1196,9 @@ let test_accept_contract_delegates_to_agent_core_response_shape () =
   check_accept_matches_agent_core_shape
     "media"
     [
-      Agent_core.Types.Image
+      Llm_provider.Types.Image
         { media_type = "image/png"
-        ; source = Agent_core.Types.Base64 "redacted"
+        ; source = Llm_provider.Types.Base64 "redacted"
         };
     ]
 
@@ -1209,7 +1210,7 @@ let test_thinking_only_non_end_turn_response_is_rejected () =
       (run_result
          ~content:
            [
-             Agent_core.Types.Thinking
+             Llm_provider.Types.Thinking
                { signature = None; content = "internal chain" };
            ]
          ~stop_reason:Agent_core.Types.StopSequence
@@ -1237,7 +1238,7 @@ let test_thinking_only_no_tool_can_try_next_candidate () =
       (run_result
          ~content:
            [
-             Agent_core.Types.Thinking
+             Llm_provider.Types.Thinking
                { signature = None; content = "internal chain" };
            ]
          ())
@@ -1326,7 +1327,7 @@ let test_blank_text_non_end_turn_response_is_rejected () =
       ~runtime_id:"runtime.blank-max-tokens"
       ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
-         ~content:[ Agent_core.Types.Text " \n\t " ]
+         ~content:[ Llm_provider.Types.Text " \n\t " ]
          ~stop_reason:Agent_core.Types.MaxTokens
          ())
   in
@@ -1355,7 +1356,7 @@ let test_quiet_final_passes_when_policy_allows () =
       ~accept:
         (Keeper_tooling.Response.accepts_response
            ~policy:Keeper_tooling.Response.Allow_quiet_final)
-      (run_result ~content:[ Agent_core.Types.Text "" ] ())
+      (run_result ~content:[ Llm_provider.Types.Text "" ] ())
   in
   match result with
   | Ok kept ->
@@ -1375,7 +1376,7 @@ let test_quiet_final_rejected_when_policy_requires_progress () =
       ~accept:
         (Keeper_tooling.Response.accepts_response
            ~policy:Keeper_tooling.Response.Require_progress)
-      (run_result ~content:[ Agent_core.Types.Text "" ] ())
+      (run_result ~content:[ Llm_provider.Types.Text "" ] ())
   in
   let _err, reason_kind, _reason = expect_accept_rejected result in
   Alcotest.(check bool)
@@ -1391,7 +1392,7 @@ let test_quiet_final_does_not_extend_past_end_turn () =
         (Keeper_tooling.Response.accepts_response
            ~policy:Keeper_tooling.Response.Allow_quiet_final)
       (run_result
-         ~content:[ Agent_core.Types.Text "" ]
+         ~content:[ Llm_provider.Types.Text "" ]
          ~stop_reason:Agent_core.Types.MaxTokens
          ())
   in
@@ -1440,7 +1441,7 @@ let test_no_content_final_rejected_when_policy_requires_progress () =
    or without an empty text block beside them (#41925). The replay half of
    why this is safe is in test_keeper_replay_checkpoint. *)
 let test_thinking_only_final_follows_the_quiet_policy () =
-  let thinking = Agent_core.Types.Thinking { signature = Some "sig"; content = "hidden" } in
+  let thinking = Llm_provider.Types.Thinking { signature = Some "sig"; content = "hidden" } in
   let accept ~policy content =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.quiet-thinking-only"
@@ -1465,8 +1466,8 @@ let test_thinking_only_final_follows_the_quiet_policy () =
          true
          (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress))
     [ "thinking alone", [ thinking ]
-    ; "thinking with an empty text block", [ thinking; Agent_core.Types.Text "" ]
-    ; "redacted thinking", [ Agent_core.Types.RedactedThinking "opaque" ]
+    ; "thinking with an empty text block", [ thinking; Llm_provider.Types.Text "" ]
+    ; "redacted thinking", [ Llm_provider.Types.RedactedThinking "opaque" ]
     ]
 
 let test_finalization_settles_no_content_quiet_final () =
@@ -1493,7 +1494,7 @@ let test_finalization_settles_no_content_quiet_final () =
        | Ok _ -> Alcotest.failf "%s under Require_progress must not settle" label
        | Error _ -> ())
     [ "no content", []
-    ; "reasoning-only", [ Agent_core.Types.Thinking { signature = None; content = "hidden" } ]
+    ; "reasoning-only", [ Llm_provider.Types.Thinking { signature = None; content = "hidden" } ]
     ]
 
 let test_quiet_final_shape_names_the_settled_form () =
@@ -1505,7 +1506,7 @@ let test_quiet_final_shape_names_the_settled_form () =
   Alcotest.(check bool)
     "blank text"
     true
-    (shape [ Agent_core.Types.Text " " ] = Some Keeper_tooling.Response.Quiet_blank_text);
+    (shape [ Llm_provider.Types.Text " " ] = Some Keeper_tooling.Response.Quiet_blank_text);
   Alcotest.(check bool)
     "no content"
     true
@@ -1513,7 +1514,7 @@ let test_quiet_final_shape_names_the_settled_form () =
   Alcotest.(check bool)
     "reasoning alone"
     true
-    (shape [ Agent_core.Types.Thinking { signature = None; content = "hidden" } ]
+    (shape [ Llm_provider.Types.Thinking { signature = None; content = "hidden" } ]
      = Some Keeper_tooling.Response.Quiet_thinking_only);
   List.iter
     (fun stop_reason ->
@@ -1521,7 +1522,7 @@ let test_quiet_final_shape_names_the_settled_form () =
          "reasoning alone that did not end its turn"
          true
          (shape ~stop_reason
-            [ Agent_core.Types.Thinking { signature = None; content = "hidden" } ]
+            [ Llm_provider.Types.Thinking { signature = None; content = "hidden" } ]
           = None))
     [ Agent_core.Types.MaxTokens; Agent_core.Types.StopToolUse ];
   Alcotest.(check bool)
@@ -1876,7 +1877,7 @@ let test_max_tokens_text_is_rejected_for_checkpoint_continuation () =
       ~runtime_id:"runtime.max-tokens"
       ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
-         ~content:[ Agent_core.Types.Text "partial partial partial" ]
+         ~content:[ Llm_provider.Types.Text "partial partial partial" ]
          ~stop_reason:Agent_core.Types.MaxTokens
          ())
   in
@@ -1945,7 +1946,7 @@ let test_custom_accept_reject_preserves_predicate_reason () =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.custom"
       ~accept:(fun _ -> false)
-      (run_result ~content:[ Agent_core.Types.Text "visible answer" ] ())
+      (run_result ~content:[ Llm_provider.Types.Text "visible answer" ] ())
   in
   let err, reason_kind, _reason = expect_accept_rejected result in
   Alcotest.(check bool)
@@ -1969,7 +1970,7 @@ let test_media_with_tool_result_is_deliverable () =
       (run_result
          ~content:
            [
-             Agent_core.Types.ToolResult
+             Llm_provider.Types.ToolResult
                {
                  tool_use_id = "tool-1";
                  content = "ok";
@@ -1977,10 +1978,10 @@ let test_media_with_tool_result_is_deliverable () =
                  json = None;
                  content_blocks = None;
                };
-             Agent_core.Types.Image
+             Llm_provider.Types.Image
                {
                  media_type = "image/png";
-                 source = Agent_core.Types.Base64 "redacted";
+                 source = Llm_provider.Types.Base64 "redacted";
                };
            ]
          ())

@@ -62,7 +62,7 @@ let is_eio_context_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Mcp _ -> false
   | Agent_core.Error.Serialization _ -> false
   | Agent_core.Error.Io _ -> false
-  | Agent_core.Error.Orchestration _ -> false
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ -> false
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> false
 
 let runtime_catalog_error_to_core_error detail =

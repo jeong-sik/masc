@@ -107,6 +107,7 @@ type config =
   runtime_id : string option;
   execution_actor : string option;
   initial_messages : Agent_core.Types.message list;
+  media_store : Agent_core.History.media_store;
   model_input_projection : Agent_core.Agent.model_input_projection option;
   serialization_executor : Agent_core.Agent.serialization_executor option;
   pre_dispatch_serialization_observer :
@@ -1106,7 +1107,8 @@ let resume_from_checkpoint
         "%s: resume checkpoint_turn_count=%d"
         config.name checkpoint.turn_count;
       let options = { prepared_resume.options with transport } in
-      (Agent_core.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
+      (Agent_core.Agent.resume ~net ~media_store:config.media_store
+           ~checkpoint:prepared_resume.patched_checkpoint
            ~tools:config.tools ?context:config.context
            ~context_fit_admission:prepared_resume.context_fit_admission
            ?model_input_projection:config.model_input_projection
@@ -1496,6 +1498,7 @@ let run_blocks_internal_in_scope
          | Agent_core.Error.Serialization _
          | Agent_core.Error.Io _
          | Agent_core.Error.Orchestration _
+         | Agent_core.Error.Media _
          | Agent_core.Error.Internal _
          | Agent_core.Error.Internal_carried _ ) as err) ->
       let detail = Agent_core.Error.to_string err in

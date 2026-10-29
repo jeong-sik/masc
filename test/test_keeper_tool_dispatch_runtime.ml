@@ -1271,7 +1271,7 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
                 event_bus
             in
             let agent =
-              Agent_core.Agent.create
+              Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
                 ~net
                 ~config:
                   { (Agent_core.Types.default_config ~model:"test-model") with
@@ -1295,7 +1295,7 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
                   ~agent_name:meta.name
                   ~turn_count:0
                   ~usage:(Agent_core.Agent.state agent).usage
-                  [ Agent_core.Types.ToolUse
+                  [ Llm_provider.Types.ToolUse
                       { id = ""
                       ; name = "keeper_surface_read"
                       ; input =
@@ -4720,7 +4720,7 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
              ~turn_count:1
              ~usage:Agent_core.Types.empty_usage
              (List.map
-                (fun (id, name, input) -> Agent_core.Types.ToolUse { id; name; input })
+                (fun (id, name, input) -> Llm_provider.Types.ToolUse { id; name; input })
                 calls)
          with
          | Error _ -> failf "%s: the batch returned an execution failure" label
@@ -5021,7 +5021,7 @@ let test_cooperative_boundary_result ~with_sink ~fail_sink () =
               ~kind:Llm_provider.Provider_config.OpenAI_compat
               ~model_id:"boundary-model" ~base_url ~api_key:"test-key"
               ~request_path:"/chat/completions" ~tool_stream:false () in
-            let config = Runtime_agent.default_config ~name:"boundary-runtime"
+            let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:"boundary-runtime"
               ~provider_cfg ~system_prompt:"Execute the local probe." ~tools:[tool] in
             let sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
               sink_stages := snapshot.stage :: !sink_stages;
@@ -5143,7 +5143,7 @@ let test_deferred_web_search_keeps_the_turn_going () =
              ()
          in
          let runtime_config =
-           Runtime_agent.default_config
+           Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
              ~name:"deferred-effect-runtime"
              ~provider_cfg
              ~system_prompt:"Search for the requested tool."
@@ -5363,7 +5363,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                   ()
               in
               let runtime_config =
-                Runtime_agent.default_config
+                Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
                   ~name:"surface-post-failure-runtime"
                   ~provider_cfg
                   ~system_prompt:"Deliver the requested dashboard reply."
@@ -9861,7 +9861,7 @@ default = "official.primary"
           ~runtime:(Runtime.get_runtime_by_id "official.gate" |> Option.get)) ?official_client_continuation:continuation
         ~runtime_id:"official.gate" ~keeper_name:meta.Masc.Keeper_meta_contract.name
         ~turn_start:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 })
-        ~pre_tool_rejects:(ref []) ~base_path:config.base_path ~goal ~goal_blocks
+        ~pre_tool_rejects:(ref []) ~base_path:config.base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path:config.base_path) ~goal ~goal_blocks
         ~system_prompt:"Inspect the exact Gate result and continue the original operation after its resolution."
         ~tools:[tool] ~initial_messages:[] ~model_input_projection:None
         ~on_transmitted_model_input:on_transmitted ~hooks:None ~context_injector:None
@@ -10530,7 +10530,7 @@ let test_peer_delegate_schema_reaches_model_wires () =
           ~base_url:"https://fixture.invalid"
           ~model_capabilities_override:Llm_provider.Capabilities.openai_compat_chat_capabilities () in
       let request = Llm_provider.Backend_openai.build_request ~config:provider
-          ~messages:[Agent_core.Types.user_msg "Delegate the exported file"]
+          ~messages:[Llm_provider.Types.user_msg "Delegate the exported file"]
           ~tools:[Agent_core.Tool.schema_to_json tool] () |> Yojson.Safe.from_string in
       let api_tool = request |> member "tools" |> Yojson.Safe.Util.to_list |> List.hd in
       check_schema "OpenAI request" (api_tool |> member "function" |> member "parameters");

@@ -46,21 +46,10 @@ val production_reader : base_path:string -> budget_sec:float -> reader
     shared [deadline]; [budget_sec] is only what its budget error reports. Other
     document types answer [Error "no_document_reader"]. *)
 
-val source_sha256 : string -> string
-(** Lowercase hex sha256 of the decoded payload bytes. *)
-
-val source_probe : string -> string
-(** The slice of an attachment's base64 text that its stored reading keeps
-    as [source_probe]: the middle {!source_probe_length} characters, or the
-    whole text when it is shorter. {!Keeper_media_reading_maintenance} keeps a
-    reading while some durable record still contains this slice. *)
-
-val source_probe_length : int
-
 val store_dirname : string
 (** Directory under the MASC dir that holds one sub-directory of stored
     readings per keeper. It is outside the durable-consumer trees
-    {!Multimodal.Vision_artifact_reference} scans. *)
+    {!Tool_blob_maintenance} scans. *)
 
 type projector
 (** The projection state of one lane walk. Every candidate and every message
@@ -71,6 +60,7 @@ type projector
 
 val projector :
   ?base_path:string ->
+  media_store:Agent_core.History.media_store ->
   keeper_name:string ->
   start_deadline:(unit -> Monotonic_deadline.t) ->
   read:reader ->
@@ -95,6 +85,7 @@ val project :
 
 val project_blocks :
   ?base_path:string ->
+  media_store:Agent_core.History.media_store ->
   keeper_name:string ->
   needs_projection:(kind -> bool) ->
   deadline:Monotonic_deadline.t ->

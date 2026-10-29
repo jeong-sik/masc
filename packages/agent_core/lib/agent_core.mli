@@ -18,6 +18,7 @@ module Base = Agent_core_base
 module Llm_provider = Llm_provider
 module Result_syntax = Agent_core_base.Result_syntax
 module Types = Agent_core_base.Types
+module History = Agent_core_base.History
 module Util = Agent_core_base.Util
 module Fs_result = Fs_result
 module Fs_atomic_eio = Fs_atomic_eio

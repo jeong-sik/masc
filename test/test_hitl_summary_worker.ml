@@ -20,9 +20,9 @@ let yojson = testable Yojson.Safe.pretty_print Yojson.Safe.equal
 
 let original_message_texts original =
   Original.messages original
-  |> List.map (fun (message : Agent_core.Types.message) ->
+  |> List.map (fun (message : Llm_provider.Types.message) ->
     match message.content with
-    | [ Agent_core.Types.Text text ] -> text
+    | [ Llm_provider.Types.Text text ] -> text
     | _ -> fail "judge original did not produce its three text messages")
 ;;
 

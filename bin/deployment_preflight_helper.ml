@@ -596,12 +596,23 @@ let run_media_reading_maintenance base_path =
            let masc_dir =
              Common.masc_dir_from_base_path ~base_path:canonical_base_path
            in
-           (match M.keeper_dirs ~masc_dir with
-            | Error error ->
+           (* One scan of the durable consumers serves every keeper directory. *)
+           (match
+              ( M.keeper_dirs ~masc_dir
+              , Tool_blob_maintenance.live_references
+                  ~board_posts_file:Masc_board_handlers.Board_paths.posts_file
+                  ~base_path:canonical_base_path )
+            with
+            | Error error, _ ->
               errorf "media reading store unreadable: %s" (M.error_to_string error)
-            | Ok dirs ->
+            | Ok _, Error error ->
+              errorf
+                "durable reference scan failed base_path=%s: %s"
+                canonical_base_path
+                (Tool_blob_maintenance.error_to_string error)
+            | Ok dirs, Ok live ->
               let reports =
-                List.map (fun dir -> Filename.basename dir, dir, M.run ~masc_dir ~dir) dirs
+                List.map (fun dir -> Filename.basename dir, dir, M.run ~live ~dir) dirs
               in
               let failed =
                 List.filter_map
@@ -632,7 +643,6 @@ let run_media_reading_maintenance base_path =
                                       ; "dir", `String dir
                                       ; "scanned", `Int report.scanned
                                       ; "live", `Int report.live
-                                      ; "unprobed", `Int report.unprobed
                                       ; "candidates_recorded", `Int report.candidates_recorded
                                       ; "deleted", `Int report.deleted
                                       ; ( "reclaimed_bytes"

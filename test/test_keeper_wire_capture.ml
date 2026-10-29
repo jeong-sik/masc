@@ -700,7 +700,7 @@ let thinking_only_response ~stop_reason content : Agent_core.Types.api_response 
   { id = "resp-1"
   ; model = "mock"
   ; stop_reason
-  ; content = [ Agent_core.Types.Thinking { content; signature = None } ]
+  ; content = [ Llm_provider.Types.Thinking { content; signature = None } ]
   ; usage = None
   ; telemetry = None
   }
@@ -753,8 +753,8 @@ let rejected_reasoning_capture_ignores_other_shapes () =
       ; model = "mock"
       ; stop_reason = Agent_core.Types.EndTurn
       ; content =
-          [ Agent_core.Types.Thinking { content = "some thought"; signature = None }
-          ; Agent_core.Types.Text "an answer"
+          [ Llm_provider.Types.Thinking { content = "some thought"; signature = None }
+          ; Llm_provider.Types.Text "an answer"
           ]
       ; usage = None
       ; telemetry = None

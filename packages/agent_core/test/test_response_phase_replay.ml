@@ -90,7 +90,7 @@ let malformed_terminal_calls ()=
  | Ok _->Alcotest.fail"malformed terminal function became executable")malformed
 let unsupported_custom ()=
  let state,acc=start()in terminal state acc[`Assoc["type",`String"custom_tool_call";"call_id",`String"custom";"name",`String"test";"input",`String"plain input"]];
- match Acc.finalize_stream_acc acc with Error _->()|Ok response->Alcotest.(check bool)"unsupported custom terminal is never promoted"false(List.exists(function ToolUse _->true|Text _|Thinking _|ReasoningDetails _|RedactedThinking _|ToolResult _|Image _|Document _|Audio _->false)response.content)
+ match Acc.finalize_stream_acc acc with Error _->()|Ok response->Alcotest.(check bool)"unsupported custom terminal is never promoted"false(List.exists(function ToolUse _->true| Llm_provider.Types.Text _| Llm_provider.Types.Thinking _| Llm_provider.Types.ReasoningDetails _| Llm_provider.Types.RedactedThinking _| Llm_provider.Types.ToolResult _| Llm_provider.Types.Image _| Llm_provider.Types.Document _| Llm_provider.Types.Audio _->false)response.content)
 let incomplete_malformed_tool ()=
  let state,acc=start()in let message=item ~phase:(`String"commentary")["checking"]in
  let partial=`Assoc["type",`String"function_call";"name",`String"test";"arguments",`String"{"]in

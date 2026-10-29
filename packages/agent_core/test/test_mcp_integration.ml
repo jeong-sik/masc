@@ -310,7 +310,7 @@ let test_default_options_mcp_clients () =
 let test_agent_create_with_default_options () =
   with_net
   @@ fun net ->
-  let agent = Agent.create ~config:(Types.default_config ~model:"test-model") ~net () in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(Types.default_config ~model:"test-model") ~net () in
   Alcotest.(check int) "no tools" 0 (Tool_set.size (Agent.tools agent));
   Alcotest.(check int) "no mcp_clients" 0 (List.length (Agent.options agent).mcp_clients)
 ;;
@@ -321,7 +321,7 @@ let test_agent_create_preserves_regular_tools () =
   let t1 = make_test_tool "tool1" in
   let t2 = make_test_tool "tool2" in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Types.default_config ~model:"test-model")
       ~net
       ~tools:[ t1; t2 ]
@@ -337,7 +337,7 @@ let test_agent_create_preserves_regular_tools () =
 let test_agent_close_no_mcp () =
   with_net
   @@ fun net ->
-  let agent = Agent.create ~config:(Types.default_config ~model:"test-model") ~net () in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(Types.default_config ~model:"test-model") ~net () in
   Agent.close agent;
   Alcotest.(check bool) "close succeeds" true true
 ;;
@@ -345,7 +345,7 @@ let test_agent_close_no_mcp () =
 let test_agent_close_idempotent () =
   with_net
   @@ fun net ->
-  let agent = Agent.create ~config:(Types.default_config ~model:"test-model") ~net () in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(Types.default_config ~model:"test-model") ~net () in
   Agent.close agent;
   Agent.close agent;
   Alcotest.(check bool) "double close safe" true true
@@ -360,7 +360,7 @@ let test_agent_checkpoint_with_mcp_options () =
   with_net
   @@ fun net ->
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net
       ~config:{ (Types.default_config ~model:"test-model") with name = "mcp-test-agent" }
       ()

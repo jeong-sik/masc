@@ -27,12 +27,13 @@ let canonical_output_contract () =
     schema_json
 ;;
 
-let message role text = Agent_core.Types.text_message role text
+(* Exact-output requests go straight to a provider: no history, no media. *)
+let message role text = Llm_provider.Types.text_message role text
 
 let messages_of ~system_prompt ~output_contract ~context_bundle =
-  [ message Agent_core.Types.System system_prompt
-  ; message Agent_core.Types.User output_contract
-  ; message Agent_core.Types.User (Yojson.Safe.to_string context_bundle)
+  [ message Llm_provider.Types.System system_prompt
+  ; message Llm_provider.Types.User output_contract
+  ; message Llm_provider.Types.User (Yojson.Safe.to_string context_bundle)
   ]
 ;;
 

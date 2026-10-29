@@ -6,7 +6,7 @@ type t
 type finalized = {
   index : int;
   media_type : string;
-  source : Agent_core.Types.media_source;
+  source : Llm_provider.Types.media_source;
 }
 
 type wire_drop = {

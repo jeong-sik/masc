@@ -41,7 +41,7 @@ let project ?result_scope ?hooks ?effect_state ?on_result_handoff
 let stop = Host.Terminal_tool_boundary {tool_name="CompleteEffect";outcome=Durable_stimulus_deferred}
 let load base_path = get (Outbox.load ~base_path ~keeper_name)
 let returned () = Ok {Agent_core.Types.content=marker;
-  content_blocks=Some [Agent_core.Types.Text "original-block-bytes"];_meta=None}
+  content_blocks=Some [Llm_provider.Types.Text "original-block-bytes"];_meta=None}
 
 let test_stop_retains_before_transport_return () = with_workspace (fun base_path ->
   let terminal_error = ref None and effects = ref 0 in
@@ -113,7 +113,7 @@ let test_cut_multibyte_result_is_retained_and_sendable () = with_workspace (fun 
     let tool, _ = project_with_producer ~result_scope:(Some result_scope)
       ~base_path ~stop:None ~terminal_error (fun _ ->
         Ok {Agent_core.Types.content=marker ^ cut;
-            content_blocks=Some [Agent_core.Types.Text cut];_meta=None}) in
+            content_blocks=Some [Llm_provider.Types.Text cut];_meta=None}) in
     let sent = tool.call ~call_id:"cut-read" (`Assoc []) in
     check bool "the string sent to the client is valid UTF-8" true
       (String.is_valid_utf_8 sent.content);

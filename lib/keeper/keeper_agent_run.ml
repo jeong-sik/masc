@@ -1663,6 +1663,7 @@ let run_turn
                         | None -> runtime_id_string
                         | Some _ -> Keeper_meta_contract.runtime_id_of_meta meta)
                       ~base_path:config.base_path
+                      ~media_store:(Tool_blob_media_store.of_base_path ~base_path:config.base_path)
                       ~keeper_name:meta.name
                       ~walk_owner:
                         (Keeper_turn_driver.Fleet_keeper_turn
@@ -1993,7 +1994,7 @@ let run_turn
                 (* RFC-MASC-004: AfterTurn hooks flush incrementally during
           Agent.run. Post-run episode creation requires an explicit
           flush_incremental call since AfterTurn already fired. *)
-                 let text = Agent_core.Types.text_of_content result.response.content in
+                 let text = Llm_provider.Types.text_of_content result.response.content in
                  let manifest_model_label =
                    Boundary_redaction.to_string
                      Boundary_redaction.runtime_model_label
@@ -2318,6 +2319,7 @@ let run_turn
           | Error (Agent_core.Error.Agent _) | Error (Agent_core.Error.Mcp _)
           | Error (Agent_core.Error.Config _) | Error (Agent_core.Error.Serialization _)
           | Error (Agent_core.Error.Io _) | Error (Agent_core.Error.Orchestration _)
+          | Error (Agent_core.Error.Media _)
           | Error (Agent_core.Error.Internal _) | Error (Agent_core.Error.Internal_carried _) -> None
         in
         let request_latency_ms : int option =

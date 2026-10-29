@@ -1407,9 +1407,9 @@ let provider_content ~base_path ?model_projection result =
     | Error error -> error.message, T.Tool_failed
         { T.failure_kind = T.Non_retryable_tool_error; error_class = error.error_class }
   in
-  let message : T.message =
+  let message : Llm_provider.Types.message =
     { origin = Llm_provider.Types.Conversation;  role = T.Tool
-    ; content = [ T.ToolResult { tool_use_id = "export-fixture"; content; outcome
+    ; content = [ Llm_provider.Types.ToolResult { tool_use_id = "export-fixture"; content; outcome
                                 ; json = None; content_blocks = None } ]
     ; name = None; tool_call_id = Some "export-fixture"; metadata = [] }
   in

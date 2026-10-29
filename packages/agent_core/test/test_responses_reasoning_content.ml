@@ -36,19 +36,25 @@ let restored_assistant ?(config=config) response =
     | None -> Alcotest.fail "actual response cache rejected valid evidence" in
   let message = match assistant_message_of_response response with
     | Ok message -> message | Error error -> Alcotest.fail (show_assistant_message_error error) in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let message = match Agent_core.History.of_wire_message media_store message with
+    | Ok message -> message | Error error -> Alcotest.fail (Agent_core.History.show_media_error error) in
   let bytes = Agent_core.Checkpoint.message_to_json message |> Yojson.Safe.to_string in
   let path = Filename.temp_file "responses-reasoning-history-" ".json" in
   let restored = Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
     Out_channel.with_open_bin path (fun channel -> output_string channel bytes);
     In_channel.with_open_bin path In_channel.input_all) in
   match Agent_core.Checkpoint.message_of_json (Yojson.Safe.from_string restored) with
-  | Ok message -> message | Error _ -> Alcotest.fail "actual checkpoint message codec rejected history"
+  | Error _ -> Alcotest.fail "actual checkpoint message codec rejected history"
+  | Ok message ->
+    match Agent_core.History.to_wire_message media_store message with
+    | Ok message -> message | Error error -> Alcotest.fail (Agent_core.History.show_media_error error)
 let input ?(config=config) message trailing = Codec.build_request ~config ~messages:(message :: trailing) ()
   |> Yojson.Safe.from_string |> member "input" |> to_list
 let check_reasoning label expected response =
   let actual = List.filter_map (function Thinking {content;_} -> Some content
-    | Text _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
-    | Image _ | Document _ | Audio _ -> None) response.content in
+    | Llm_provider.Types.Text _ | Llm_provider.Types.ReasoningDetails _ | Llm_provider.Types.RedactedThinking _ | Llm_provider.Types.ToolUse _ | Llm_provider.Types.ToolResult _
+    | Llm_provider.Types.Image _ | Llm_provider.Types.Document _ | Llm_provider.Types.Audio _ -> None) response.content in
   Alcotest.(check (list string)) label expected actual
 let replay_text item = item |> member "summary" |> to_list
   |> List.map (fun part -> member "text" part |> to_string) |> String.concat "\n"

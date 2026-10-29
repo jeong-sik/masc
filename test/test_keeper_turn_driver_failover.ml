@@ -14,6 +14,16 @@ module Deferred_store = Masc.Keeper_deferred_runtime_lane_store
 module Agent_run_receipt = Masc.Keeper_agent_run_receipt.For_testing
 module Run_tools_setup = Masc.Keeper_run_tools_setup
 
+(* History in these fixtures holds media by reference; every projector,
+   runtime config and agent here reads the bytes back from this store. *)
+let test_media_store = Agent_core.History.Memory_store.create ()
+
+let stored_source ~media_type raw =
+  match test_media_store.put ~media_type ~raw with
+  | Ok stored -> Agent_core.Types.Stored stored
+  | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error))
+;;
+
 let contains ~needle haystack =
   let needle_len = String.length needle in
   let haystack_len = String.length haystack in
@@ -897,7 +907,7 @@ let test_lane_media_degrade_uses_first_candidate_runtime_id () =
       let image_block =
         Agent_core.Types.Image
           { media_type = "image/png"
-          ; source = Agent_core.Types.Base64 (Base64.encode_string "image")
+          ; source = (stored_source ~media_type:"image/png" "image")
           }
       in
       (* The decision is produced, not hand-built: [reroute_decision] is private,
@@ -948,7 +958,7 @@ let test_run_named_media_degrade_emits_typed_manifest () =
     let audio =
       Agent_core.Types.audio_block
         ~media_type:"audio/wav"
-        ~source:(Agent_core.Types.Base64 (Base64.encode_string "synthetic-audio"))
+        ~source:((stored_source ~media_type:"audio/wav" "synthetic-audio"))
     in
     ignore
       (Driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "media-degrade-keeper" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
@@ -1064,7 +1074,7 @@ let h5_text_of_blocks blocks =
 (* One projector is one lane walk; a test that wants two walks builds two. *)
 let h5_projector ?base_path ~read () =
   Masc.Keeper_media_reading.project
-    (Masc.Keeper_media_reading.projector
+    (Masc.Keeper_media_reading.projector ~media_store:test_media_store
        ?base_path
        ~keeper_name:"h5-media-fallback"
        ~start_deadline:(fun () -> Monotonic_deadline.after ~seconds:30.)
@@ -1079,10 +1089,10 @@ let h5_project_for_text_only ?project_media ~goal_blocks () =
       | None -> Alcotest.fail "missing runtime primary.text_model"
     in
     let projected =
-      Driver.For_testing.project_input_for_attempt
+      Driver.For_testing.project_input_for_attempt ~media_store:test_media_store
         ?project_media
         ~project_images:
-          (Masc.Keeper_vision_ingest.fallback_projector
+          (Masc.Keeper_vision_ingest.fallback_projector ~media_store:test_media_store
              ~keeper_name:"h5-media-fallback" ())
         ~keeper_name:"h5-media-fallback"
         ~emit_runtime_manifest:(emit_manifest_collector (ref []))
@@ -1100,12 +1110,12 @@ let h5_project_for_text_only ?project_media ~goal_blocks () =
 let h5_audio_block () =
   Agent_core.Types.audio_block
     ~media_type:"audio/wav"
-    ~source:(Agent_core.Types.Base64 (Base64.encode_string h5_fact_audio))
+    ~source:((stored_source ~media_type:"audio/wav" h5_fact_audio))
 
 let h5_document_block () =
   Agent_core.Types.document_block
     ~media_type:"application/pdf"
-    ~source:(Agent_core.Types.Base64 (Base64.encode_string h5_fact_document))
+    ~source:((stored_source ~media_type:"application/pdf" h5_fact_document))
 
 let h5_fresh_dir () =
   let dir = Filename.temp_file "h5-media-readings-" "" in
@@ -1138,7 +1148,7 @@ let test_h5_s1_audio_fact_reaches_text_only_fallback () =
   Alcotest.(check bool)
     "projection binds the audio by source sha256"
     true
-    (contains ~needle:("sha256:" ^ Masc.Keeper_media_reading.source_sha256 h5_fact_audio) text);
+    (contains ~needle:("sha256:" ^ (Agent_core.History.stored_of_raw h5_fact_audio).sha256) text);
   Alcotest.(check bool) "projection carries the audio-only fact" true
     (contains ~needle:"the vault code is 4172" text);
   Alcotest.(check int) "the reader ran once" 1 !calls;
@@ -1166,7 +1176,7 @@ let test_h5_s2_document_fact_reaches_text_only_fallback () =
   Alcotest.(check bool)
     "projection binds the document by source sha256"
     true
-    (contains ~needle:("sha256:" ^ Masc.Keeper_media_reading.source_sha256 h5_fact_document) text);
+    (contains ~needle:("sha256:" ^ (Agent_core.History.stored_of_raw h5_fact_document).sha256) text);
   Alcotest.(check bool) "projection carries the document-only fact" true
     (contains ~needle:"the ledger year is 1987" text);
   let restarted =
@@ -1196,7 +1206,7 @@ let test_h5_s3_unreadable_attachment_is_marked_unavailable () =
   Alcotest.(check bool) "projection says the original is kept" true
     (contains ~needle:"original is kept" text);
   Alcotest.(check bool) "projection keeps the original identity" true
-    (contains ~needle:("sha256:" ^ Masc.Keeper_media_reading.source_sha256 h5_fact_audio) text);
+    (contains ~needle:("sha256:" ^ (Agent_core.History.stored_of_raw h5_fact_audio).sha256) text);
   Alcotest.(check bool) "projection invents no media-derived content" false
     (contains ~needle:"4172" text);
   let recovered =
@@ -1215,7 +1225,7 @@ let test_h5_s3_unreadable_attachment_is_marked_unavailable () =
    once the shared deadline is spent; and the deadline is one clock for every
    attachment of a projection. *)
 let h5_project_direct ?base_path ~deadline ~read blocks =
-  Masc.Keeper_media_reading.project_blocks
+  Masc.Keeper_media_reading.project_blocks ~media_store:test_media_store
     ?base_path ~keeper_name:"h5-media-fallback"
     ~needs_projection:(fun _ -> true) ~deadline ~read blocks
 
@@ -1277,7 +1287,7 @@ let test_h5_attachments_share_one_deadline () =
 let h5_doc_block ~media_type =
   Agent_core.Types.document_block
     ~media_type
-    ~source:(Agent_core.Types.Base64 (Base64.encode_string h5_fact_document))
+    ~source:((stored_source ~media_type:media_type h5_fact_document))
 
 let h5_reader_only_pdf calls ~deadline:_ ~kind:_ ~media_type ~bytes:_ =
   incr calls;
@@ -1385,7 +1395,7 @@ let test_h5_reading_deadline_starts_at_the_first_read () =
   in
   let starts = ref 0 in
   let walk =
-    Masc.Keeper_media_reading.projector
+    Masc.Keeper_media_reading.projector ~media_store:test_media_store
       ~base_path:dir
       ~keeper_name:"h5-media-fallback"
       ~start_deadline:(fun () ->
@@ -1403,14 +1413,13 @@ let test_h5_reading_deadline_starts_at_the_first_read () =
   project [ h5_doc_block ~media_type:"application/x-other" ];
   Alcotest.(check int) "the walk's reads share one deadline" 1 !starts
 
-let test_h5_stored_record_keeps_the_payload_probe () =
+let test_h5_stored_record_is_named_by_the_attachment_digest () =
   let dir = h5_fresh_dir () in
   let long_payload = String.init 300 (fun index -> Char.chr (Char.code 'a' + (index mod 26))) in
-  let data = Base64.encode_string long_payload in
   let block =
     Agent_core.Types.audio_block
       ~media_type:"audio/wav"
-      ~source:(Agent_core.Types.Base64 data)
+      ~source:(stored_source ~media_type:"audio/wav" long_payload)
   in
   let _ =
     h5_project_direct ~base_path:dir
@@ -1423,20 +1432,16 @@ let test_h5_stored_record_keeps_the_payload_probe () =
       (Filename.concat (Filename.concat dir ".masc") Masc.Keeper_media_reading.store_dirname)
       "h5-media-fallback"
   in
-  let record =
-    match Array.to_list (Sys.readdir keeper_dir) with
-    | [ name ] -> Yojson.Safe.from_file (Filename.concat keeper_dir name)
-    | names -> Alcotest.failf "expected one record, got %d" (List.length names)
-  in
-  let probe = Masc.Keeper_media_reading.source_probe data in
-  Alcotest.(check (option string)) "the record keeps the probe" (Some probe)
-    Yojson.Safe.Util.(record |> member "source_probe" |> to_string_option);
-  Alcotest.(check int) "a long payload keeps a fixed-length slice"
-    Masc.Keeper_media_reading.source_probe_length (String.length probe);
-  Alcotest.(check bool) "the slice is taken from the payload text" true
-    (contains ~needle:probe data);
-  Alcotest.(check string) "a short payload is its own probe" "QUJD"
-    (Masc.Keeper_media_reading.source_probe "QUJD")
+  (* The sweep keeps the record while a durable consumer holds a Stored
+     reference with the digest its name carries. *)
+  match Array.to_list (Sys.readdir keeper_dir) with
+  | [ name ] ->
+    Alcotest.(check bool) "the record is named by the attachment digest" true
+      (Masc.Keeper_media_reading_maintenance.is_record_name name
+       && String.starts_with
+            ~prefix:("audio-" ^ (Agent_core.History.stored_of_raw long_payload).sha256 ^ "-")
+            name)
+  | names -> Alcotest.failf "expected one record, got %d" (List.length names)
 
 let synthetic_image () =
   Agent_core.Types.image_block
@@ -1463,13 +1468,13 @@ let test_attempt_input_is_projected_per_runtime () =
       ]
     in
     let project_images =
-      Masc.Keeper_vision_ingest.fallback_projector
+      Masc.Keeper_vision_ingest.fallback_projector ~media_store:test_media_store
         ~keeper_name:"per-attempt-projection" ()
     in
     let project runtime_id =
       let events = ref [] in
       let projected =
-        Driver.For_testing.project_input_for_attempt
+        Driver.For_testing.project_input_for_attempt ~media_store:test_media_store
           ~project_images
           ~keeper_name:"per-attempt-projection"
           ~emit_runtime_manifest:(emit_manifest_collector events)
@@ -1552,7 +1557,7 @@ let test_media_rows_keep_their_fields_in_the_public_view () =
     let public_row ~status ~project_images =
       let events = ref [] in
       ignore
-        (Driver.For_testing.project_input_for_attempt
+        (Driver.For_testing.project_input_for_attempt ~media_store:test_media_store
            ~project_images
            ~keeper_name:"media-row-public-view"
            ~emit_runtime_manifest:(emit_manifest_collector events)
@@ -1577,7 +1582,7 @@ let test_media_rows_keep_their_fields_in_the_public_view () =
       public_row
         ~status:"delegated"
         ~project_images:
-          (Masc.Keeper_vision_ingest.fallback_projector
+          (Masc.Keeper_vision_ingest.fallback_projector ~media_store:test_media_store
              ~keeper_name:"media-row-public-view"
              ())
     in
@@ -1622,10 +1627,10 @@ let test_image_fallback_checkpoint_keeps_canonical_prefix () =
       { (checkpoint_with_session_id "image-fallback") with messages = history }
     in
     let project_images =
-      Masc.Keeper_vision_ingest.fallback_projector ~keeper_name:"image-checkpoint" ()
+      Masc.Keeper_vision_ingest.fallback_projector ~media_store:test_media_store ~keeper_name:"image-checkpoint" ()
     in
     let project ?(goal_blocks = Some [ image ]) runtime_id =
-      Driver.For_testing.project_input_for_attempt
+      Driver.For_testing.project_input_for_attempt ~media_store:test_media_store
         ~project_images ~keeper_name:"image-checkpoint"
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
         ~goal_blocks ~goal_metadata:[] ~initial_messages:history
@@ -1667,7 +1672,7 @@ let test_current_image_checkpoint_survives_text_fallback () =
       | Some runtime -> runtime
       | None -> Alcotest.failf "missing runtime %s" id in
     let image = Agent_core.Types.image_block ~media_type:"image/png"
-        ~source:(Agent_core.Types.Base64 (Base64.encode_string "original current-goal pixels")) in
+        ~source:((stored_source ~media_type:"image/png" "original current-goal pixels")) in
     let canonical_blocks = [ Agent_core.Types.Text "inspect this"; image ] in
     let history = [ message [ Agent_core.Types.Text "previous turn" ] ] in
     let checkpoint =
@@ -1686,7 +1691,7 @@ let test_current_image_checkpoint_survives_text_fallback () =
     let goal_metadata =
       Masc.Keeper_input_speaker.metadata
         (Masc.Keeper_input_speaker.Person Masc.Keeper_input_speaker.Owner) in
-    let text_view = Driver.For_testing.project_input_for_attempt
+    let text_view = Driver.For_testing.project_input_for_attempt ~media_store:test_media_store
         ~project_images ~keeper_name:"current-image-checkpoint"
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
         ~goal_blocks:(Some canonical_blocks) ~goal_metadata ~initial_messages:history
@@ -1763,7 +1768,7 @@ let test_current_image_checkpoint_survives_text_fallback () =
       match Agent_core.Checkpoint.of_json (Agent_core.Checkpoint.to_json restored) with
       | Ok checkpoint -> checkpoint
       | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
-    let native_view = Driver.For_testing.project_input_for_attempt
+    let native_view = Driver.For_testing.project_input_for_attempt ~media_store:test_media_store
         ~project_images ~keeper_name:"current-image-checkpoint"
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
         ~goal_blocks:(Some [ Agent_core.Types.Text "inspect the earlier picture again" ]) ~goal_metadata:[]
@@ -2075,7 +2080,7 @@ let test_lane_media_reroute_prefers_lane_candidate () =
       let image_block =
         Agent_core.Types.Image
           { media_type = "image/png"
-          ; source = Agent_core.Types.Base64 (Base64.encode_string "image")
+          ; source = (stored_source ~media_type:"image/png" "image")
           }
       in
       match
@@ -2118,7 +2123,7 @@ let test_lane_media_reroute_stays_in_lane () =
     let image_block =
       Agent_core.Types.Image
         { media_type = "image/png"
-        ; source = Agent_core.Types.Base64 (Base64.encode_string "image")
+        ; source = (stored_source ~media_type:"image/png" "image")
         }
     in
     let candidates remaining_runtimes =
@@ -2211,7 +2216,7 @@ let test_lane_media_reroute_walks_past_exhausted_candidate () =
       let image_block =
         Agent_core.Types.Image
           { media_type = "image/png"
-          ; source = Agent_core.Types.Base64 (Base64.encode_string "image")
+          ; source = (stored_source ~media_type:"image/png" "image")
           }
       in
       (match
@@ -2298,7 +2303,7 @@ let test_media_turn_starts_from_the_live_walk_head () =
       let image_block =
         Agent_core.Types.Image
           { media_type = "image/png"
-          ; source = Agent_core.Types.Base64 (Base64.encode_string "image")
+          ; source = (stored_source ~media_type:"image/png" "image")
           }
       in
       let candidates =
@@ -2393,7 +2398,7 @@ let test_image_turn_degrades_while_its_capable_candidate_rests () =
            let image_block =
              Agent_core.Types.Image
                { media_type = "image/png"
-               ; source = Agent_core.Types.Base64 (Base64.encode_string "image")
+               ; source = (stored_source ~media_type:"image/png" "image")
                }
            in
            let walk = Driver.Fresh_walk_by test_recorder in
@@ -5067,7 +5072,7 @@ let test_run_named_reroutes_an_image_to_the_recorders_marked_candidate () =
       [ Agent_core.Types.Text "describe the image"
       ; Agent_core.Types.Image
           { media_type = "image/png"
-          ; source = Agent_core.Types.Base64 (Base64.encode_string "image")
+          ; source = (stored_source ~media_type:"image/png" "image")
           }
       ]
     in
@@ -6031,11 +6036,11 @@ let test_guarded_terminal_and_nonempty_truncation_controls_do_not_resume () =
     [ "refusal", [], Llm_provider.Types.Refusal
     ; "content filter", [], Llm_provider.Types.ContentFilter
     ; "repetition truncation", [], Llm_provider.Types.RepetitionTruncation
-    ; "blank-only truncation", [ Agent_core.Types.Text " \n" ], Llm_provider.Types.MaxTokens
+    ; "blank-only truncation", [ Llm_provider.Types.Text " \n" ], Llm_provider.Types.MaxTokens
     ; "thinking-only truncation",
-        [ Agent_core.Types.Thinking { signature = None; content = "private" } ],
+        [ Llm_provider.Types.Thinking { signature = None; content = "private" } ],
         Llm_provider.Types.MaxTokens
-    ; "partial-content truncation", [ Agent_core.Types.Text "partial" ],
+    ; "partial-content truncation", [ Llm_provider.Types.Text "partial" ],
         Llm_provider.Types.MaxTokens
     ]
 ;;
@@ -6056,7 +6061,8 @@ let test_guarded_empty_truncation_requires_owner_carrier_at_core_boundary () =
     | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _
     | Agent_core.Error.Config _ | Agent_core.Error.Serialization _
     | Agent_core.Error.Io _ | Agent_core.Error.Orchestration _
-    | Agent_core.Error.Internal _ -> Alcotest.fail "producer lost its own typed carrier"
+    | Agent_core.Error.Internal _ | Agent_core.Error.Media _ ->
+      Alcotest.fail "producer lost its own typed carrier"
   in
   List.iter
     (fun (label, error, expected) ->
@@ -6891,9 +6897,9 @@ let () =
             `Quick
             test_h5_reading_deadline_starts_at_the_first_read;
           Alcotest.test_case
-            "H5 stored record keeps the payload probe"
+            "H5 stored record is named by the attachment digest"
             `Quick
-            test_h5_stored_record_keeps_the_payload_probe;
+            test_h5_stored_record_is_named_by_the_attachment_digest;
           Alcotest.test_case
             "media rows keep their fields in the public view"
             `Quick

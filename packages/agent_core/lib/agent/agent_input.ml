@@ -19,15 +19,23 @@ let trace_prompt_of_blocks blocks =
     |> List.filter_map (function
       | Text s -> Some (Llm_provider.Utf8_sanitize.sanitize s)
       | Image { media_type; source } ->
-        let data = Types.media_source_payload source in
-        Some (Printf.sprintf "[image:%s data_chars=%d]" media_type (String.length data))
-      | Document { media_type; source } ->
-        let data = Types.media_source_payload source in
         Some
-          (Printf.sprintf "[document:%s data_chars=%d]" media_type (String.length data))
+          (Printf.sprintf
+             "[image:%s data_chars=%d]"
+             media_type
+             (History.media_source_wire_length source))
+      | Document { media_type; source } ->
+        Some
+          (Printf.sprintf
+             "[document:%s data_chars=%d]"
+             media_type
+             (History.media_source_wire_length source))
       | Audio { media_type; source } ->
-        let data = Types.media_source_payload source in
-        Some (Printf.sprintf "[audio:%s data_chars=%d]" media_type (String.length data))
+        Some
+          (Printf.sprintf
+             "[audio:%s data_chars=%d]"
+             media_type
+             (History.media_source_wire_length source))
       | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ ->
         None)
   in

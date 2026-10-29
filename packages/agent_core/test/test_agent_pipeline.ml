@@ -97,7 +97,7 @@ let make_agent
          | None -> Hooks.empty)
     }
   in
-  Agent.create
+  Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
     ~net
     ~config
     ~tools
@@ -110,7 +110,7 @@ let make_agent
 let extract_text (resp : Types.api_response) =
   List.filter_map
     (function
-      | Types.Text s -> Some s
+      | Llm_provider.Types.Text s -> Some s
       | _ -> None)
     resp.content
   |> String.concat ""
@@ -604,7 +604,7 @@ let test_agent_run_context_like_http_400_is_unknown_invalid_request_without_retr
       { (Types.default_config ~model:"test-model") with name = "context-overflow-owner" }
     in
     let options = { Agent.default_options with provider_config = Some provider_config } in
-    let agent = Agent.create ~net:env#net ~config ~options () in
+    let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~options () in
     let history =
       [ { origin = Llm_provider.Types.Conversation;  Types.role = User
         ; content = [ Text "summarize the large result" ]

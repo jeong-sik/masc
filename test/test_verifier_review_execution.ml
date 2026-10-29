@@ -93,7 +93,7 @@ let run_native ?(refuse_publication=false) ?(after_scope_ready=fun () -> ()) env
     | AR.Verdict_recorded _ -> Ok {Agent_core.Types.content="recorded";content_blocks=None;_meta=None}
     | Verdict_refused {detail} | Verdict_already_recorded {detail} ->
       Error {Agent_core.Types.message=detail;recoverable=false;error_class=None}) in
-  let config = Runtime_agent.default_config ~name:(X.keeper_name original |> get)
+  let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:(X.keeper_name original |> get)
     ~provider_cfg ~system_prompt:"Call the report tool." ~tools:[tool] in
   let journal,config = Keeper_request_execution.prepare ~base_path:(X.session_root ~base_path original |> get)
     ~keeper_name:(X.keeper_name original |> get) ~config

@@ -75,14 +75,14 @@ let take_ready results =
 
 let close results = Atomic.set results Closed
 
-type 'message cancellation = Propagate | Publish_cancelled of 'message
+type 'message cancellation = Propagate | Publish_cancelled of (unit -> 'message)
 let launch_registered ~cancellation ~dispatch ~on_not_run ~results ~boundary_error ~not_started_error ~deliver perform =
   match register results with
   | None -> on_not_run ()
   | Some token ->
     let deliver_result result = publish results token (deliver result) in
     let publish_cancelled () = match cancellation with
-      | Propagate -> () | Publish_cancelled message -> publish results token message in
+      | Propagate -> () | Publish_cancelled message -> publish results token (message ()) in
     let propagate_cancelled exn =
       let backtrace=Printexc.get_raw_backtrace () in
       publish_cancelled ();
@@ -113,9 +113,12 @@ let launch_registered ~cancellation ~dispatch ~on_not_run ~results ~boundary_err
            Printexc.raise_with_backtrace exn backtrace)
        | exception exn -> not_run ~error:boundary_error (Printexc.to_string exn))
 
-let launch ?key ?(observation = false) ?cancelled ?observe_job ?(on_not_run = fun () -> ())
+let launch ?key ?(observation = false) ?cancelled ?cancelled_by ?observe_job ?(on_not_run = fun () -> ())
     state ~results ~boundary_error ~deliver perform =
-  let cancellation = match cancelled with None -> Propagate | Some message -> Publish_cancelled message in
+  let cancellation = match cancelled_by, cancelled with
+    | Some message, (Some _ | None) -> Publish_cancelled message
+    | None, Some message -> Publish_cancelled (fun () -> message)
+    | None, None -> Propagate in
   launch_registered ~cancellation ~results ~on_not_run ~boundary_error ~not_started_error:boundary_error ~deliver
     ~dispatch:(fun ~sw ~on_withdrawn run ->
       Masc_tui_workspace_job.fork ?key ~observation ?observe:observe_job
@@ -128,7 +131,7 @@ let launch_session ~results ~boundary_error ~deliver perform =
 
 let launch_observation ?key ?observe_job ?(on_not_run=fun () -> ())
     state ~results ~boundary_error ~not_started ~cancelled ~progress ~deliver perform =
-  launch_registered ~cancellation:(Publish_cancelled cancelled) ~results ~on_not_run ~boundary_error ~not_started_error:not_started ~deliver
+  launch_registered ~cancellation:(Publish_cancelled (fun () -> cancelled)) ~results ~on_not_run ~boundary_error ~not_started_error:not_started ~deliver
     ~dispatch:(fun ~sw ~on_withdrawn run ->
       Masc_tui_workspace_job.fork ?key ~observation:true ?observe:observe_job
         ~on_withdrawn:(fun () -> Fun.protect ~finally:on_withdrawn on_not_run)

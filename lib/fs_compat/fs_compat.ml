@@ -4707,7 +4707,17 @@ type 'a private_jsonl_recovered =
   | Recovered_prefix of string
   | Recovery_result of 'a
 
-let update_private_file_durable_locked_with_io ?(create=true) ?validate_prefix ?tail_bytes
+type private_file_locking = Wait_for_lock | Try_lock
+
+let with_private_path_lock ~locking ~path mutex f =
+  match locking with
+  | Wait_for_lock -> Stdlib.Mutex.protect mutex f
+  | Try_lock ->
+    if not (Stdlib.Mutex.try_lock mutex) then
+      raise (Sys_error ("private file is busy: " ^ path));
+    Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock mutex) f
+
+let update_private_file_durable_locked_with_io ?(create=true) ?(locking=Wait_for_lock) ?validate_prefix ?tail_bytes
     ?(confirm_existing=(fun () -> false)) ?(verify_content=false)
     ?(append_io=durable_append_unix_io) ~io path decide =
   test_exec_home_guard ~op:"update_private_file_durable_locked" path;
@@ -4718,7 +4728,7 @@ let update_private_file_durable_locked_with_io ?(create=true) ?validate_prefix ?
     ~label:"fs-compat-durable-update"
     ~path
     (fun () ->
-    Stdlib.Mutex.protect path_mu (fun () ->
+    with_private_path_lock ~locking ~path path_mu (fun () ->
       let require_binding = function
         | Ok () -> ()
         | Error (Private_jsonl_operation_failed failure) ->
@@ -4754,12 +4764,19 @@ let update_private_file_durable_locked_with_io ?(create=true) ?validate_prefix ?
              (private_jsonl_validate_open_binding ~operation:Inspect_transaction_path ~path fd) in
            validate_binding ();
            Unix.fchmod fd 0o600;
-           io.before_sync_parent dir;
-           fsync_parent_directory dir;
+           let sync_parent () = io.before_sync_parent dir; fsync_parent_directory dir in
+           (match locking with Wait_for_lock -> sync_parent () | Try_lock -> ());
            (* See Unix.lseek: only the file-position side effect is required. *)
            ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
-           lock_whole_file fd;
+           (match locking with
+            | Wait_for_lock -> lock_whole_file fd
+            | Try_lock ->
+              if not (try_lock_whole_file fd) then
+                raise (Sys_error ("private file is busy: " ^ path)));
            validate_binding ();
+           (* A try-lock caller must be able to reject contention before the
+              parent fsync, while still syncing before touching payload bytes. *)
+           (match locking with Try_lock -> sync_parent () | Wait_for_lock -> ());
            (* See Unix.lseek: only the file-position side effect is required. *)
            ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
            let from =
@@ -4855,9 +4872,9 @@ type 'a private_file_decision =
   | Confirm_existing of 'a
   | Append_confirmed of string * 'a
 
-let reconcile_private_file_durable_locked_with_append_io_for_testing ~append_io path decide =
+let reconcile_private_file_durable_locked_with_append_io ~locking ~append_io path decide =
   let confirmation = ref false in
-  update_private_file_durable_locked_with_io
+  update_private_file_durable_locked_with_io ~locking
     ~verify_content:true ~confirm_existing:(fun () -> !confirmation) ~append_io
     ~io:private_jsonl_transaction_unix_io path (fun existing ->
       match decide existing with
@@ -4866,8 +4883,12 @@ let reconcile_private_file_durable_locked_with_append_io_for_testing ~append_io 
       | Append_confirmed (suffix,result) -> Some suffix,result)
 ;;
 
-let reconcile_private_file_durable_locked_result path decide =
-  reconcile_private_file_durable_locked_with_append_io_for_testing
+let reconcile_private_file_durable_locked_with_append_io_for_testing ~append_io path decide =
+  reconcile_private_file_durable_locked_with_append_io ~locking:Wait_for_lock ~append_io path decide
+;;
+
+let reconcile_private_file_durable_locked_result ?(locking=Wait_for_lock) path decide =
+  reconcile_private_file_durable_locked_with_append_io ~locking
     ~append_io:durable_append_unix_io path decide
 ;;
 
@@ -4891,8 +4912,8 @@ let update_private_file_tail_durable_locked_with_append_io_for_testing
     ~io:private_jsonl_transaction_unix_io path decide
 ;;
 
-let recover_and_update_private_jsonl_durable_locked_result ?(create=true) ~validate_prefix path decide =
-  update_private_file_durable_locked_with_io ~create ~validate_prefix
+let recover_and_update_private_jsonl_durable_locked_result ?(create=true) ?(locking=Wait_for_lock) ~validate_prefix path decide =
+  update_private_file_durable_locked_with_io ~create ~locking ~validate_prefix
     ~io:private_jsonl_transaction_unix_io path decide
 ;;
 

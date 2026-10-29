@@ -260,12 +260,23 @@ configured origin is not proof of external reachability, and terminal support
 for OSC 52 is not confirmed. `o` still opens the local Dashboard, and `y`
 copies the report's source rather than its link.
 Each share change retires the previous observation and any in-flight report
-read. After a confirmed response, a fresh read checks the sharing state; `R`
-rereads the exact open revision. If a change returns an error, the server may
-still apply it: `P` and `Y` stay disabled for that artifact ID for the rest of
-the TUI session, even after a reread. This session-local guard cannot prove the
-request has settled across a restart or another client. A failed body read does
-not prevent revoking a previously observed shared report.
+read. After a confirmed response or conflict, a fresh read checks the sharing
+state; `R` rereads the exact open revision. If a change's result is unconfirmed,
+the server may still apply it, so `P` and `Y` are disabled for that artifact.
+The TUI records the original operation in a local journal tied to the workspace
+and artifact, including across restarts. With the same workspace and report
+open, `U` inspects the pending request. Once its direction and preconditions are
+visible, `!` explicitly retries that same operation: this can apply the original
+change. After a confirmed receipt or conflict is recorded as settled, a fresh
+read is required. If this session already observed the original request but its
+journal record disappears, `U` offers the remembered request for inspection;
+`!` first restores that exact intent durably, provided no different request is
+pending for the artifact. The retry may apply the original change. Preserve the
+journal: after restart, a missing record is indistinguishable from first use.
+An inaccessible, invalid or unstable journal does not confirm the result. Do
+not replay an uncertain request after replacing a workspace store at the same
+paths. A failed body read does not prevent revoking a previously observed
+shared report.
 
 List selection, search, cursor navigation and read requests all use the same
 filtered inventory. Filtering out an open or pending document retires its read

@@ -1921,11 +1921,12 @@ let fork_workspace_job = Masc_tui_workspace_job.fork
 (* Dispatch owns cancellation, error conversion and the original completion
    envelope. Each caller supplies its own admission before doing its work. *)
 let launch_workspace_result ?key ?(operation = false) ?(observation = false)
-    ?cancelled ?observe_job ?(on_not_run = fun () -> ()) state ~mailbox ~boundary_error ~deliver perform =
+    ?cancelled ?cancelled_by ?observe_job ?(on_not_run = fun () -> ()) state ~mailbox ~boundary_error ~deliver perform =
   let envelope = capture_workspace_message state in
   let scoped message = envelope (if operation then Workspace_operation message else message) in
   let cancelled = Option.map scoped cancelled in
-  Masc_tui_workspace_result.launch ?key ~observation ?cancelled ?observe_job ~on_not_run
+  let cancelled_by = Option.map (fun message () -> scoped (message ())) cancelled_by in
+  Masc_tui_workspace_result.launch ?key ~observation ?cancelled ?cancelled_by ?observe_job ~on_not_run
     state ~results:mailbox.workspace_results ~boundary_error
     ~deliver:(fun result ->
       let message = deliver result in
@@ -2056,7 +2057,9 @@ let open_resource_in_dashboard state ~mailbox =
           |> Result.map (fun opener -> "Opened " ^ url ^ " via " ^ opener ^ "; browser authentication may be required"))
 
 let launch_resources_read state ~mailbox ~key =
+  let share_origin = Result.to_option (workspace_change_origin state) in
   Masc_tui_resources_requests.launch_read state ~host:server_peer_host
+    ~share_origin
     ~launch:(launch_workspace_json_read state ~mailbox)
     ~check:(capture_workspace_check state ~mailbox) ~key
 
@@ -2083,42 +2086,177 @@ let launch_artifact_check_change state ~mailbox =
         (fun () -> Masc_tui_http.post_artifact_check ~credential ~expected_workspace
           ~host ~port ~request)
 
-let toggle_resource_external_share state ~mailbox =
-  match Masc_tui_resource_document.external_share_change state, state.server_identity,
-        state.resource_share_version, state.resource_revision_history with
-  | Error detail, _, _, _ -> report_action state "error" detail
-  | Ok _, None, _, _ -> report_action state "error" "Workspace identity is unavailable"
-  | Ok _, Some _, None, _ | Ok _, Some _, Some _, [] ->
-      report_action state "error" "Share version or latest publication is unavailable; refresh this report"
-  | Ok (report, next_shared), Some expected_workspace, Some expected_version, latest :: _
-    when String.equal latest.id report.id ->
-      let operation_id = Random_id.uuid_v7 () in
-      let credential = Masc_tui_http.bind_credential () in
-      let host = server_peer_host and port = state.port in
-      let id = report.id in
-      (match Masc_tui_resources_updates.begin_share_change state ~report ~shared:next_shared with
-       | Error detail -> report_action state "error" detail
-       | Ok request ->
-         report_action state "system"
-           (if next_shared then "Enabling external sharing..." else "Revoking external sharing...");
-         launch_workspace_request ~operation:true state ~mailbox ~boundary_error:Fun.id
-           ~cancelled:(Resource_share_changed (request, Error "External sharing update interrupted"))
-           ~deliver:(fun result -> Resource_share_changed (request, result))
-           (fun () ->
-             Masc_tui_http.post_artifact_share ~credential ~expected_workspace
-               ~host ~port ~id ~shared:next_shared ~operation_id ~expected_version
-               ~expected_artifact_revision:latest.revision.revision
-               ~expected_artifact_sha256:latest.revision.body.sha256
-             |> Result.map (function
+module Artifact_share_pending = Masc_tui_artifact_share_pending
+
+let artifact_share_journal_path origin =
+  Artifact_share_pending.journal_path ~masc_root:origin.wi_masc_root
+
+let open_resource_report state =
+  match Masc_tui_resource_document.current state with
+  | Some {entry = Masc_tui_resource_catalog.Report report; _} -> Ok report
+  | Some {entry = Mcp _; _} | None -> Error "Open a published report in the detail pane"
+
+let launch_resource_share state ~mailbox ~report ~entry ~recovery ~dispatch_allowed =
+  let captured_authority = state.workspace_authority in
+  match state.server_identity, workspace_change_origin state with
+  | Some expected_workspace, Ok origin
+    when entry.Artifact_share_pending.base_path = origin.wi_base_path
+         && entry.masc_root = origin.wi_masc_root && entry.artifact_id = report.Masc_tui_resource_catalog.id ->
+    let operation = entry.request in
+    let path = artifact_share_journal_path origin in
+    let on_observed entries =
+      List.iter (fun (observed : Artifact_share_pending.entry) ->
+        if observed.masc_root = origin.wi_masc_root then record_resource_share_observation state observed) entries in
+    (match Masc_tui_resources_updates.begin_share_change ~recovery state ~report ~entry with
+     | Error detail -> report_action state "error" detail
+     | Ok request ->
+       report_action state "system" (if recovery then
+         "Reconciling the original share operation; it may be applied now..."
+         else if operation.requested then "Enabling external sharing..." else "Revoking external sharing...");
+       let credential = Masc_tui_http.bind_credential () in
+       let host = server_peer_host and port = state.port in
+       let identity = Some expected_workspace in
+       let context detail = Printf.sprintf
+         "operation %s, observed share version %d, publication v%d (%s): %s"
+         operation.operation_id operation.expected_version operation.expected_artifact_revision
+         operation.expected_artifact_sha256 detail in
+       let journal_started = ref false in
+       let attempt = Masc_tui_artifact_share_attempt.create () in
+       let failure detail =
+         if !journal_started || Masc_tui_artifact_share_attempt.dispatched attempt
+         then Resource_share_unknown (context detail) else Resource_share_not_started detail in
+       launch_workspace_result ~operation:true state ~mailbox
+         ~boundary_error:failure
+         ~cancelled_by:(fun () -> Resource_share_changed (request, Error (failure "interrupted")))
+         ~deliver:(fun result -> Resource_share_changed (request, result))
+         (fun () ->
+           (* The filesystem transaction and its lock belong to this worker, not
+              to the input loop. A cancelled system-thread write may finish. *)
+           journal_started := true;
+           let prepared = if recovery then
+               Artifact_share_pending.restore ~on_observed ~path entry |> Result.map (fun () -> Artifact_share_pending.Prepared)
+             else Artifact_share_pending.prepare_checked ~on_observed ~path entry in
+           match prepared with
+           | Error detail -> Error (Resource_share_unknown (context ("Share intent storage could not be confirmed: " ^ detail)))
+           | Ok (Artifact_share_pending.Not_prepared detail) ->
+             Ok (Resource_share_not_prepared ("Share intent was not recorded: " ^ detail))
+           | Ok (Artifact_share_pending.Already_pending _) ->
+             Ok (Resource_share_not_prepared "Another recorded share operation must be resolved first")
+           | Ok (Artifact_share_pending.Already_pending_with_storage_failure (_, detail)) ->
+             Ok (Resource_share_not_prepared ("Another operation was observed; journal storage failed: " ^ detail))
+           | Ok Artifact_share_pending.Prepared ->
+             match Masc_tui_artifact_share_attempt.perform attempt
+               ~preflight:(fun () ->
+                 match check_workspace_request state ~mailbox ~authority:captured_authority ~identity ~host ~port () with
+                 | Error detail -> Error detail
+                 | Ok () ->
+                   (match resource_share_dispatch_refusal state ~origin ~entry ~recovery with
+                    | Some detail -> Error detail
+                    | None when dispatch_allowed () -> Ok ()
+                    | None -> Error "An interrupt or termination is awaiting handling"))
+               ~send:(fun () -> Masc_tui_http.post_artifact_share ~credential ~expected_workspace
+                 ~host ~port ~id:entry.artifact_id ~shared:operation.requested
+                 ~operation_id:operation.operation_id ~expected_version:operation.expected_version
+                 ~expected_artifact_revision:operation.expected_artifact_revision
+                 ~expected_artifact_sha256:operation.expected_artifact_sha256) with
+             | Not_sent detail -> Ok (Resource_share_not_sent detail)
+             | Sent (Error detail) -> Error (Resource_share_unknown (context detail))
+             | Sent (Ok result) ->
+               (match Artifact_share_pending.settle ~on_observed ~path entry with
+                | Error detail -> Error (Resource_share_unknown
+                    (context ("Receipt arrived but recovery storage did not settle: " ^ detail)))
+                | Ok _ -> Ok (match result with
                   | Masc_tui_http.Artifact_share_applied shared -> Resource_share_applied shared
-                  | Artifact_share_conflict shared -> Resource_share_conflict shared)))
-  | Ok _, Some _, Some _, _ :: _ ->
-      report_action state "error" "Latest publication belongs to another artifact; refresh this report"
+                  | Masc_tui_http.Artifact_share_conflict shared -> Resource_share_conflict shared))))
+  | (Some _ | None), (Ok _ | Error _) ->
+    report_action state "error" "The original share operation belongs to a different or unverified workspace"
+
+let toggle_resource_external_share state ~mailbox ~dispatch_allowed =
+  state.resource_share_recovery_prompt <- None;
+  match Masc_tui_resource_document.external_share_change state, workspace_change_origin state with
+  | Error detail, _ | _, Error detail -> report_action state "error" detail
+  | Ok (report, shared), Ok origin ->
+    (match state.resource_share_version, state.resource_revision_history with
+     | Some expected_version, latest :: _ when String.equal latest.id report.id ->
+       let request : Masc.Published_artifact_share.request = {
+         operation_id=Random_id.uuid_v7 (); expected_version; requested=shared;
+         expected_artifact_revision=latest.revision.revision;
+         expected_artifact_sha256=latest.revision.body.sha256 } in
+       let entry : Artifact_share_pending.entry = {base_path=origin.wi_base_path;
+         masc_root=origin.wi_masc_root; artifact_id=report.id; request} in
+       launch_resource_share state ~mailbox ~report ~entry ~recovery:false ~dispatch_allowed
+     | Some _, _ :: _ | Some _, [] | None, ([] | _ :: _) ->
+       report_action state "error" "Share version or latest publication is unavailable; reread this report")
+
+let begin_resource_share_recovery_lookup state ~mailbox =
+  match open_resource_report state, workspace_change_origin state, state.resource_share_recovery_lookup with
+  | Error detail, _, _ | _, Error detail, _ -> report_action state "error" detail
+  | Ok _, Ok _, Some _ -> report_action state "system" "Checking the recorded share operation..."
+  | Ok report, Ok origin, None when List.exists (fun pending ->
+      pending.share_workspace_identity = origin && String.equal pending.share_report.id report.id)
+      state.resource_share_pending ->
+    report_action state "system" "A sharing attempt for this artifact is still running; wait for its result."
+  | Ok report, Ok origin, None ->
+    let request = { recovery_lookup_owner=ref (); recovery_lookup_workspace=state.workspace_authority;
+      recovery_lookup_origin=origin; recovery_lookup_key=Masc_tui_resource_catalog.Report_revision report } in
+    Masc_tui_resources_updates.begin_share_recovery_lookup state ~origin ~report;
+    state.resource_share_recovery_lookup <- Some request;
+    report_action state "system" "Checking the recorded share operation...";
+    let path = artifact_share_journal_path origin in
+    launch_workspace_result ~observation:true state ~mailbox
+      ~boundary_error:Fun.id
+      ~cancelled:(Resource_share_recovery_loaded (request, Error "Recovery lookup interrupted"))
+      ~deliver:(fun result -> Resource_share_recovery_loaded (request, result))
+      (fun () ->
+        let on_observed entries = List.iter (fun (entry : Artifact_share_pending.entry) ->
+          if entry.masc_root = origin.wi_masc_root then record_resource_share_observation state entry) entries in
+        Artifact_share_pending.observe ~on_observed ~path () |> Result.map (fun (_, entries) ->
+          List.find_opt (fun (entry : Artifact_share_pending.entry) ->
+            entry.base_path = origin.wi_base_path && entry.masc_root = origin.wi_masc_root
+            && entry.artifact_id = report.id) entries))
+
+let recover_resource_external_share state ~mailbox ~confirm ~dispatch_allowed =
+  if not confirm then begin_resource_share_recovery_lookup state ~mailbox
+  else match open_resource_report state, workspace_change_origin state, state.resource_share_recovery_prompt with
+  | Ok report, Ok origin, Some held
+    when held.recovery_workspace = state.workspace_authority
+         && held.recovery_entry.base_path = origin.wi_base_path
+         && held.recovery_entry.masc_root = origin.wi_masc_root
+         && Masc_tui_resource_catalog.equal_key held.recovery_key (Report_revision report) ->
+    if Masc_tui_artifact_share_confirmation.ready held.recovery_confirmation then begin
+      state.resource_share_recovery_prompt <- None;
+      launch_resource_share state ~mailbox ~report ~entry:held.recovery_entry ~recovery:true ~dispatch_allowed
+    end else report_action state "system" "Wait for the recovery preview before confirming."
+  | (Ok _ | Error _), (Ok _ | Error _), (Some _ | None) ->
+    state.resource_share_recovery_prompt <- None;
+    report_action state "system" "Press U to inspect the current recovery operation first."
 
 let resource_share_is_owned state request =
-  match state.resource_share_pending with
-  | Some current -> current.share_owner == request.share_owner
-  | None -> false
+  List.exists (fun current -> current.share_owner == request.share_owner) state.resource_share_pending
+
+let resource_public_copy_is_current state copy =
+  state.view = Resources && state.resource_focus = Right_pane
+  && state.workspace_authority = copy.public_copy_workspace
+  && state.workspace_read_authority == copy.public_copy_read_authority
+  && workspace_change_origin state = Ok copy.public_copy_origin
+  && match Masc_tui_resource_document.current state with
+     | Some reading ->
+       Masc_tui_resource_catalog.equal_key (Masc_tui_resource_catalog.key reading.entry) copy.public_copy_key
+       && reading.public_url = Some (Ok copy.public_copy_url)
+     | None -> false
+
+let finish_resource_share state request result =
+  let read_key = Masc_tui_resources_updates.share_changed state request ~result in
+  let key = request.share_workspace_identity, request.share_report.id in
+  match result with
+  | Ok (Resource_share_applied _ | Resource_share_conflict _) -> read_key
+  | Ok (Resource_share_not_prepared _) -> read_key
+  | Error (Resource_share_not_started _) when not request.share_recovery -> read_key
+  | Ok (Resource_share_not_sent _)
+  | Error (Resource_share_unknown _ | Resource_share_not_started _) ->
+    if not (List.mem key state.resource_share_uncertain_ids) then
+      state.resource_share_uncertain_ids <- key :: state.resource_share_uncertain_ids;
+    None
 
 (* A creation keeps its operation receipt even after its workspace withdraws.
    Only the result handler may use current authority to refresh or open chat. *)
@@ -14308,6 +14446,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.resource_content_error <- None;
   state.resource_pending_key <- None;
   state.resource_read_owner <- None;
+  state.resource_copy_pending <- None;
+  state.resource_copy_ready <- None;
   state.resource_revision_history <- [];
   state.resource_shared <- None;
   state.resource_share_version <- None;
@@ -18739,18 +18879,32 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           ignore (Eio.Promise.try_resolve acknowledge ())
         | Workspace_operation (Resource_share_changed (request, result)) ->
           if resource_share_is_owned state request then begin
-            let settled = Result.map (function Resource_share_applied shared | Resource_share_conflict shared -> shared) result in
-            ignore (Masc_tui_resources_updates.share_changed state request ~result:settled);
+            let read_key = finish_resource_share state request result in
             (match result with
              | Ok (Resource_share_applied shared) -> report_action state "system"
-                 ("External sharing request applied in the previous workspace for " ^ request.share_report.id
-                  ^ (if shared then "; enabled at response" else "; disabled at response"))
+                 ("External sharing request to " ^ (if request.share_target then "enable" else "revoke")
+                  ^ " applied in the original workspace for " ^ request.share_report.id
+                  ^ (if shared then "; enabled at response" else "; disabled at response"));
+                 Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
              | Ok (Resource_share_conflict shared) -> report_action state "system"
-                 ("External sharing request conflicted in the previous workspace for " ^ request.share_report.id
-                  ^ (if shared then "; enabled at response" else "; disabled at response"))
-             | Error detail -> report_action state "error"
+                 ("External sharing request to " ^ (if request.share_target then "enable" else "revoke")
+                  ^ " conflicted in the original workspace for " ^ request.share_report.id
+                  ^ (if shared then "; enabled at response" else "; disabled at response"));
+                 Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+             | Ok (Resource_share_not_prepared detail) -> report_action state "system"
+                 ("The share request for " ^ request.share_report.id ^ " was not recorded or sent: " ^ detail);
+                 Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+             | Ok (Resource_share_not_sent detail) -> report_action state "system"
+                 ("The share request for " ^ request.share_report.id ^ " did not send. The recorded operation may still apply; use U to reconcile: " ^ detail);
+                 Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+             | Error (Resource_share_unknown detail) -> report_action state "error"
                  ("Previous workspace external sharing result unconfirmed for " ^ request.share_report.id
-                  ^ "; P and Y are disabled for this artifact during this TUI session: " ^ detail))
+                  ^ "; use U to reconcile the recorded operation: " ^ detail)
+             | Error (Resource_share_not_started detail) -> report_action state "system"
+                 (if request.share_recovery then
+                    "The recovery attempt for " ^ request.share_report.id ^ " did not start; the original operation may still apply: " ^ detail
+                  else "The share request for " ^ request.share_report.id ^ " did not start or send: " ^ detail);
+                 Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key)
           end
         | Play_invite_issued (request, _, Play_answered (Ok invite)) ->
           (match
@@ -18836,7 +18990,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Librarian_input_loaded (_, _) | (Resources_listed _ | Artifact_checks_loaded _) | Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _)
         | Code_file_loaded (_, _, _) | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
         | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _) | Code_lsp_answered (_, _)
-        | Resource_exported _ | Resource_share_changed _ | Resource_read (_, _) | Resource_diagram_ready _ | Github_identity_view_loaded (_, _)
+        | Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _ | Github_identity_view_loaded (_, _)
         | Identity_providers_loaded (_, _, _) | Identity_switch_set (_, _, _, _)
         | Identity_login_started (_, _) | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)
         | Identity_disconnected (_, _, _)
@@ -20190,7 +20344,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
        | Runtime_form_save_changed _, _ | Keeper_settings_save_changed _, _
        | Keeper_queue_action_received _, _ -> ()
        | (Goal_confirmation_submitted _, Goal_confirmation.Inspecting _)
-       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_calibrated _ | Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | ( Keeper_logs_loaded _ | Keeper_execute_loaded _) | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Listen_prepared _ | Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( (Board_vote_done _ | Artifact_check_changed _) | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( (Verification_evidence_loaded (_, _) | Verification_evidence_exported _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( (Resources_listed _ | Artifact_checks_loaded _) | ( Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_exported _ | Resource_share_changed _ | Resource_read (_, _) | Resource_diagram_ready _ | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | ( Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
+       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_calibrated _ | Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | ( Keeper_logs_loaded _ | Keeper_execute_loaded _) | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Listen_prepared _ | Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( (Board_vote_done _ | Artifact_check_changed _) | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( (Verification_evidence_loaded (_, _) | Verification_evidence_exported _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( (Resources_listed _ | Artifact_checks_loaded _) | ( Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_,_, _) | Resource_diagram_ready _ | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | ( Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
       match result with
       | Ok message ->
           state.goal_action_pending <- None;
@@ -21011,27 +21165,138 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
        | Error detail -> report_action state "error" (label ^ ": " ^ detail))
   | Resource_share_changed (request, result) ->
       if resource_share_is_owned state request then begin
-        let settled = Result.map (function Resource_share_applied shared | Resource_share_conflict shared -> shared) result in
-        let read_key = Masc_tui_resources_updates.share_changed state request ~result:settled in
+        let read_key = finish_resource_share state request result in
         (match result with
          | Ok (Resource_share_applied shared) ->
              report_action state "system"
-               ("External sharing request applied for " ^ request.share_report.id
+               ("External sharing request to " ^ (if request.share_target then "enable" else "revoke")
+                ^ " applied for " ^ request.share_report.id
                 ^ (if shared then "; enabled at response" else "; disabled at response"));
              Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
          | Ok (Resource_share_conflict shared) ->
              report_action state "system"
-               ("External sharing request conflicted for " ^ request.share_report.id
+               ("External sharing request to " ^ (if request.share_target then "enable" else "revoke")
+                ^ " conflicted for " ^ request.share_report.id
                 ^ (if shared then "; enabled at response" else "; disabled at response")
                 ^ "; refresh before retrying");
              Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
-         | Error detail ->
+         | Ok (Resource_share_not_prepared detail) ->
+             report_action state "system" ("The share request for " ^ request.share_report.id ^ " was not recorded or sent: " ^ detail);
+             Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+         | Ok (Resource_share_not_sent detail) ->
+             report_action state "error" ("The share request for " ^ request.share_report.id ^ " did not send. The recorded operation may still apply; use U to reconcile: " ^ detail);
+             Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+         | Error (Resource_share_unknown detail) ->
              report_action state "error"
                ("External sharing result unconfirmed for " ^ request.share_report.id
-                ^ "; P and Y are disabled for this artifact during this TUI session: " ^ detail))
+                ^ "; use U to reconcile the recorded operation: " ^ detail)
+         | Error (Resource_share_not_started detail) ->
+             report_action state "error" (if request.share_recovery then
+               "The recovery attempt for " ^ request.share_report.id ^ " did not start; the original operation may still apply: " ^ detail
+               else "The share request for " ^ request.share_report.id ^ " did not start or send: " ^ detail);
+             Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key)
       end
-  | Resource_read (request, result) ->
-      Masc_tui_resources_updates.read_done state ~request result
+  | Resource_share_recovery_loaded (request, result) ->
+      (match state.resource_share_recovery_lookup with
+       | Some current when current.recovery_lookup_owner == request.recovery_lookup_owner ->
+         state.resource_share_recovery_lookup <- None;
+         let selected = match open_resource_report state with
+           | Ok report -> Masc_tui_resource_catalog.equal_key (Report_revision report) request.recovery_lookup_key
+           | Error _ -> false in
+         if selected && state.view = Resources && state.resource_focus = Right_pane
+            && state.workspace_authority = request.recovery_lookup_workspace
+            && workspace_change_origin state = Ok request.recovery_lookup_origin then
+           (match request.recovery_lookup_key with
+            | Masc_tui_resource_catalog.Mcp_uri _ -> ()
+            | Report_revision report ->
+              let key = request.recovery_lookup_origin, report.id in
+              let show_recovery entry ~missing_journal =
+                observe_resource_share state entry;
+                let collision = resource_share_identity_conflict state entry in
+                if collision then begin
+                  state.resource_share_recovery_prompt <- None;
+                  report_action state "error" "Conflicting details were observed for this operation ID. Sharing remains blocked; verify the server receipt before recovery."
+                end else begin
+                  state.resource_share_recovery_prompt <- Some
+                    {recovery_entry=entry;recovery_workspace=state.workspace_authority;
+                     recovery_key=request.recovery_lookup_key;
+                     recovery_confirmation=Masc_tui_artifact_share_confirmation.create ()};
+                  state.resource_scroll <- Masc_tui_scroll.Position.first;
+                  state.resource_search_position <- Masc_tui_resource_reading.first;
+                  let original = entry.request in
+                  report_action state "system" (Printf.sprintf
+                    "%s! confirms %s all revisions (share v%d, publication v%d); may apply. Operation %s; SHA-256 %s"
+                    (if missing_journal then "Original record missing; confirmation will restore it. " else "")
+                    (if original.requested then "ENABLE" else "REVOKE") original.expected_version
+                    original.expected_artifact_revision original.operation_id original.expected_artifact_sha256)
+                end in
+              (match result with
+               | Error detail ->
+                 if not (List.mem key state.resource_share_uncertain_ids) then
+                   state.resource_share_uncertain_ids <- key :: state.resource_share_uncertain_ids;
+                 state.resource_share_recovery_prompt <- None;
+                 report_action state "error" ("Share recovery storage is unavailable: " ^ detail)
+               | Ok None ->
+                 let known =
+                   match known_resource_share_entries state
+                           ~origin:request.recovery_lookup_origin ~artifact_id:report.id with
+                   | [] -> None
+                   | entry :: _ -> Some entry in
+                 (match known with
+                  | Some entry -> show_recovery entry ~missing_journal:true
+                  | None ->
+                    state.resource_share_uncertain_ids <- List.filter ((<>) key) state.resource_share_uncertain_ids;
+                    state.resource_share_recovery_prompt <- None;
+                    report_action state "system" "No recorded share operation; rereading the report";
+                    launch_resources_read state ~mailbox ~key:request.recovery_lookup_key)
+               | Ok (Some entry) ->
+                 if not (List.mem key state.resource_share_uncertain_ids) then
+                   state.resource_share_uncertain_ids <- key :: state.resource_share_uncertain_ids;
+                 show_recovery entry ~missing_journal:false))
+       | Some _ | None -> ())
+  | Resource_read (request, result, journal) ->
+      let admitted = match state.resource_read_owner with
+        | Some owner -> owner == request.Masc_tui_resource_catalog.owner
+        | None -> false in
+      let copy = match state.resource_copy_pending with
+        | Some pending -> pending.owner == request.owner
+            && Masc_tui_resource_catalog.equal_key pending.key request.key
+        | None -> false in
+      (match journal with
+       | Share_journal_checked observation -> List.iter (observe_resource_share state) observation.journal_observed
+       | Share_journal_unavailable (_, observed) -> List.iter (observe_resource_share state) observed
+       | Share_journal_not_needed -> ());
+      if admitted then (match request.key, journal with
+        | Masc_tui_resource_catalog.Report_revision report, Share_journal_checked observation
+          when workspace_input_identity_of_server state.server_identity = Some observation.journal_workspace ->
+          let key = observation.journal_workspace, report.id in
+          state.resource_share_uncertain_ids <- List.filter ((<>) key) state.resource_share_uncertain_ids;
+          if Option.is_some observation.journal_pending then
+            state.resource_share_uncertain_ids <- key :: state.resource_share_uncertain_ids;
+          (match state.resource_share_recovery_prompt with
+           | Some prompt when prompt.recovery_entry.artifact_id = report.id
+               && Some prompt.recovery_entry <> observation.journal_pending ->
+             state.resource_share_recovery_prompt <- None
+           | Some _ | None -> ())
+        | Report_revision report, (Share_journal_unavailable _ | Share_journal_not_needed) ->
+          Option.iter (fun origin -> let key = origin, report.id in
+            if not (List.mem key state.resource_share_uncertain_ids) then
+              state.resource_share_uncertain_ids <- key :: state.resource_share_uncertain_ids)
+            (workspace_input_identity_of_server state.server_identity)
+        | (Report_revision _ | Mcp_uri _), (Share_journal_checked _ | Share_journal_unavailable _ | Share_journal_not_needed) -> ());
+      Masc_tui_resources_updates.read_done state ~request result;
+      if admitted && copy then begin
+        state.resource_copy_pending <- None;
+        match Masc_tui_resource_document.copy_public_url state with
+        | Error detail -> report_action state "error" ("Public link was not copied: " ^ detail)
+        | Ok url ->
+          (match workspace_change_origin state with
+           | Error detail -> report_action state "error" ("Public link was not copied: " ^ detail)
+           | Ok origin -> state.resource_copy_ready <- Some {
+               public_copy_url=url; public_copy_workspace=state.workspace_authority;
+               public_copy_read_authority=state.workspace_read_authority;
+               public_copy_origin=origin; public_copy_key=request.key })
+      end
   | Resource_diagram_ready (request,source,result) ->
       let _,cols = get_terminal_size () in
       let _,height = Masc_tui_render_resources.document_viewport state
@@ -23382,7 +23647,7 @@ let async_drain_budget_ns = 4_000_000L
    spent pass retains its delivery round for the next pass. An item or owned
    collection that starts in budget still runs whole; recheck the deadline
    after collection before applying any of its results. *)
-let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~delivery_round ~base_path ~http_refresh_inflight
+let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share_input_pending = fun () -> false) state ~delivery_round ~deferred_share_messages ~deferred_share_sweep ~resource_copy_sweep ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup
     ~frame_presenter ~render_schedule mailbox =
   let progress_changed = Masc_tui_types.drain_http_progress state in
@@ -23423,6 +23688,25 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~
            | Observed _ -> "observed" | Not_started _ -> "not_started" | Unobserved _ -> "unobserved"));
         true
   in
+  let share_input_sensitive = message_matches_share_input
+    ~resource_read:(fun request ->
+      Option.exists (fun pending -> pending.Masc_tui_resource_catalog.owner == request.Masc_tui_resource_catalog.owner)
+        state.resource_copy_pending)
+    ~recovery_loaded:(fun request ->
+      Option.exists (fun pending -> pending.recovery_lookup_owner == request.recovery_lookup_owner)
+        state.resource_share_recovery_lookup) in
+  let copy_sweep_complete = ref false in
+  let reset_input_sensitive_sweeps () =
+    if share_input_pending () then begin
+      (match !deferred_share_messages with
+       | item :: _ when share_input_sensitive item.message -> deferred_share_sweep := None
+       | _ :: _ | [] -> ());
+      resource_copy_sweep := None
+    end in
+  reset_input_sensitive_sweeps ();
+  let deferred_is_ready () = match !deferred_share_messages with
+    | item :: _ -> not (share_input_sensitive item.message) || not (share_input_pending ())
+    | [] -> false in
   let rec loop changed =
     (* The session retains the round across both drains and later passes.
        Identity changes queued when the round starts stay ahead of owned
@@ -23439,14 +23723,44 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~
           (Masc_tui_workspace_result.take_ready mailbox.workspace_results)) in
     delivery_round := next;
     match ready with
+    | None when not (over_budget ()) && deferred_is_ready ()
+        && (match !deferred_share_messages, !deferred_share_sweep with
+            | item :: _, Some held -> item != held
+            | _ :: _, None -> true | [], _ -> false) ->
+        (* Capture a new finite round before consuming a delayed result so
+           already-queued workspace authority is applied first. *)
+        deferred_share_sweep := (match !deferred_share_messages with item :: _ -> Some item | [] -> None);
+        loop changed
+    | None when not (over_budget ()) && deferred_is_ready () ->
+        deferred_share_sweep := None;
+        (match !deferred_share_messages with
+         | item :: rest -> deferred_share_messages := rest; apply_item changed item
+         | [] -> loop changed)
+    | None when not (over_budget ()) && not (share_input_pending ())
+        && (match state.resource_copy_ready, !resource_copy_sweep with
+            | Some copy, Some held -> copy != held
+            | Some _, None -> true | None, _ -> false) ->
+        (* A fresh finite round also precedes the clipboard side effect. *)
+        resource_copy_sweep := state.resource_copy_ready; loop changed
     | None ->
+        if not (over_budget ()) && not (share_input_pending ())
+           && (match state.resource_copy_ready, !resource_copy_sweep with
+               | Some copy, Some held -> copy == held | None, _ | Some _, None -> false)
+        then copy_sweep_complete := true;
         state.keeper_creation_waits <- List.filter
           (fun wait -> not (keeper_available_for_new_message state wait.kcw_keeper))
           state.keeper_creation_waits;
         Masc_tui_home.reconcile_home_request_detail state;
         let preparation_changed = launch_keeper_preparation_load state ~mailbox in
         changed || preparation_changed
-    | Some { ready_at_ns; message = msg } ->
+    | Some item -> apply_item changed item
+  and apply_item changed = function
+    | ({ message = msg; _ } as item) when share_input_sensitive msg && share_input_pending () ->
+        (* Other workspace observations and operation receipts can progress
+           while the share result waits for the input to be classified. *)
+        deferred_share_messages := !deferred_share_messages @ [item];
+        loop changed
+    | { ready_at_ns; message = msg } ->
         let waited_ns = Int64.sub (Mtime_clock.elapsed_ns ()) ready_at_ns in
         if Int64.compare waited_ns Masc_tui_http.slow_report_ns >= 0 then
           Log.Transport.info
@@ -23454,8 +23768,12 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~
             (Masc_tui_http.ms_of_ns waited_ns);
         let image_was_open = state.image_open in
         let machine_was_open = state.msx_open in
+        let previous_copy = state.resource_copy_ready in
         apply_async_message ~input_pending state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox msg;
+        if previous_copy != state.resource_copy_ready then begin
+          resource_copy_sweep := None; copy_sweep_complete := false
+        end;
         (* The image renderer cleared the text screen outside the presenter.
            If an async failure dismisses it, cached unchanged rows must also
            be restored, just as they are after a keyboard dismissal. *)
@@ -23465,7 +23783,27 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~
           Render_schedule.request render_schedule Render_schedule.Force);
         loop true
   in
-  loop (progress_changed || chat_changed || keeper_preferences_changed || credential_changed)
+  let changed = loop (progress_changed || chat_changed || keeper_preferences_changed || credential_changed) in
+  reset_input_sensitive_sweeps ();
+  match state.resource_copy_ready with
+  | Some copy when !copy_sweep_complete && not (over_budget ()) && not (share_input_pending ()) ->
+    if not (resource_public_copy_is_current state copy) then begin
+      state.resource_copy_ready <- None;
+      resource_copy_sweep := None;
+      report_action state "system" "Public link copy was retired after the report or workspace changed.";
+      true
+    end else if share_input_pending () then changed
+    else begin
+      state.resource_copy_ready <- None;
+      resource_copy_sweep := None;
+      Terminal_write_repair.note ();
+      write_to_terminal (Link.osc52_copy copy.public_copy_url);
+      Terminal_write_repair.request_repaint render_schedule;
+      report_action state "system"
+        "Public link sent via OSC 52 (terminal support and origin reachability unconfirmed)";
+      true
+    end
+  | Some _ | None -> changed
 
 (* What a size change costs, wherever it was noticed: the presenter's cached
    screen describes the old geometry, and the next frame has to be drawn
@@ -23914,6 +24252,7 @@ let main
   let pointer_gesture = ref Masc_tui_pane_selection.Idle in
   let terminal_title = Terminal_title.create () in
   let resize_requested = Atomic.make false in
+  let resize_generation = Atomic.make 0 in
 
   let restore_terminal_outcome () =
     (* No tracking-off here: suspend runs this too, and a terminal that
@@ -23972,7 +24311,9 @@ let main
     end
   in
 
-  let request_full_repaint _ = Atomic.set resize_requested true in
+  let request_full_repaint _ =
+    ignore (Atomic.fetch_and_add resize_generation 1);
+    Atomic.set resize_requested true in
   (* SIGTERM, SIGHUP and SIGQUIT used to call [exit] from the handler, and a
      second Ctrl-C did the same from the loop. [exit] runs the [at_exit]
      terminal restore and nothing else: the switch release in
@@ -24094,6 +24435,16 @@ let main
     Masc_tui_workspace_result.close workspace_results)) (Eio_context.get_switch_opt ());
   let async_messages = {notifications=Eio.Stream.create 32;workspace_results} in
   let async_delivery_round = ref Delivery_round.empty in
+  let deferred_share_messages = ref [] in
+  let deferred_share_sweep = ref None and resource_copy_sweep = ref None in
+  let resource_share_dispatch_allowed () =
+    let signal_generation = Masc_tui_exit_signals.generation exit_signals in
+    let terminal_generation = Atomic.get resize_generation in
+    let admitted = not (Masc_tui_exit_signals.pending_signal exit_signals)
+      && not (Atomic.get resize_requested) in
+    fun () -> admitted && not (Masc_tui_exit_signals.pending_signal exit_signals)
+      && signal_generation = Masc_tui_exit_signals.generation exit_signals
+      && terminal_generation = Atomic.get resize_generation in
   let workspace_write_ready action =
     match write_authority_refusal state state.workspace_authority with
     | None -> true
@@ -24256,7 +24607,11 @@ let main
     let presentation_changed = owner_changed || rejection_changed in
     let authority_changed = presentation_changed || quit_changed ||
       Approval_authority.authority_changed
-        ~presented:(!presented).approval ~candidate:approval in
+        ~presented:(!presented).approval ~candidate:approval
+      || Option.exists (fun prompt ->
+        not (Masc_tui_artifact_share_confirmation.ready prompt.recovery_confirmation))
+        state.resource_share_recovery_prompt
+    in
     let preset_confirmation_changed = match reader with
       | Some (Preset_detail_scroll (_, Some confirmation)) ->
         preset_confirmation_needs_present state confirmation
@@ -24281,6 +24636,28 @@ let main
     with
     | Frame_presenter.Presented _ as frame_result ->
         state.frames_presented <- state.frames_presented + 1;
+        (match Option.bind reader resource_scroll_position, state.resource_share_recovery_prompt with
+         | Some position, Some prompt
+           when not frame.Frame_presenter.compact_frame
+                && String.equal frame.surface_key "resources"
+                && state.view = Resources && state.resource_focus = Right_pane ->
+           let terminal_rows, terminal_cols = Masc_tui_render_prim.get_terminal_size () in
+           let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+           let count, height = Masc_tui_render_resources.document_viewport state
+             ~rows ~cols:terminal_cols in
+           let cols = resource_content_cols state ~cols:terminal_cols in
+           let visible = Masc_tui_scroll.Position.offset ~count ~height position = 0
+             && Option.exists (Masc_tui_resource_document.recovery_preview_fits ~cols ~height
+                  ~requested:prompt.recovery_entry.request.requested)
+                  (Masc_tui_resource_document.current state) in
+           Masc_tui_artifact_share_confirmation.observe_frame prompt.recovery_confirmation
+             ~visible
+             ~input_pending:(input_pending ()
+               || Atomic.get resize_requested
+               || Masc_tui_exit_signals.pending_signal exit_signals)
+         | (Some _ | None), Some prompt ->
+           Masc_tui_artifact_share_confirmation.withdraw prompt.recovery_confirmation
+         | (Some _ | None), None -> ());
         (match reader with
          | Some (Planning_confirmation_scroll (_, Some confirmation)) ->
              state.goal_confirmation_presented <- Some confirmation
@@ -25886,9 +26263,16 @@ and is loaded on demand through keeper_skill.
     reconcile_keeper_message_focus state ~cols
   in
   let consume_resize_request () =
-    if Atomic.exchange resize_requested false then
+    if Atomic.exchange resize_requested false then begin
+      state.resource_copy_pending <- None;
+      state.resource_copy_ready <- None;
+      state.resource_share_recovery_lookup <- None;
+      Option.iter (fun prompt -> Masc_tui_artifact_share_confirmation.withdraw prompt.recovery_confirmation)
+        state.resource_share_recovery_prompt;
       invalidate_frame_for_resize frame_presenter render_schedule
+    end
   in
+  let share_interrupt_barrier = ref false in
   let run_loop () =
     while true do
       (match poll_terminal_probe input_reader with
@@ -25915,6 +26299,12 @@ and is loaded on demand through keeper_skill.
            raise Break
        | (Masc_tui_exit_signals.Interrupt_armed
          | Masc_tui_exit_signals.Interrupt_again) as interrupt ->
+           share_interrupt_barrier := true;
+           state.resource_copy_pending <- None;
+           state.resource_copy_ready <- None;
+           state.resource_share_recovery_lookup <- None;
+           Option.iter (fun prompt -> Masc_tui_artifact_share_confirmation.withdraw prompt.recovery_confirmation)
+             state.resource_share_recovery_prompt;
            (match paste_phase input_reader, input_holds_incomplete_sequence input_reader with
             | No_paste, false -> ()
             | No_paste, true | Pasting _, (true | false) | Draining_tail _, (true | false) ->
@@ -26041,10 +26431,19 @@ and is loaded on demand through keeper_skill.
         if Option.is_some interrupted_paste || input_reader_has_started_input input_reader then
           withdraw_pending_music_editor state
       in
+      let asynchronous_input_pending () =
+        Masc_tui_exit_signals.pending_signal exit_signals
+        || Atomic.get resize_requested
+        || Option.is_some interrupted_paste
+        || input_reader_has_unsettled_input input_reader
+        || not (Queue.is_empty hangul_latin_queue)
+        || match paste_phase input_reader with No_paste -> false | Pasting _ | Draining_tail _ -> true
+      in
       retire_music_editor_for_input ();
       if
-        drain_async_messages ~delivery_round:async_delivery_round ~deadline_ns:drain_deadline_ns
-          ~input_pending:(fun () -> input_reader_has_ready_input input_reader) state ~base_path
+        drain_async_messages ~delivery_round:async_delivery_round ~deferred_share_messages ~deferred_share_sweep ~resource_copy_sweep ~deadline_ns:drain_deadline_ns
+          ~input_pending:(fun () -> input_reader_has_ready_input input_reader)
+          ~share_input_pending:asynchronous_input_pending state ~base_path
           ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
           ~frame_presenter ~render_schedule async_messages
@@ -26176,6 +26575,12 @@ and is loaded on demand through keeper_skill.
          SIGWINCH, without allowing nested renderers to disagree mid-frame. *)
       (match refresh_terminal_size () with
        | Render_schedule.Terminal_size_cache.Changed _ ->
+           ignore (Atomic.fetch_and_add resize_generation 1);
+           state.resource_copy_pending <- None;
+           state.resource_copy_ready <- None;
+           state.resource_share_recovery_lookup <- None;
+           Option.iter (fun prompt -> Masc_tui_artifact_share_confirmation.withdraw prompt.recovery_confirmation)
+             state.resource_share_recovery_prompt;
            discard_frame_for_new_size frame_presenter render_schedule;
            (* The panes a held gesture was placed in are not where they were. *)
            pointer_gesture := Masc_tui_pane_selection.Idle;
@@ -26405,6 +26810,24 @@ and is loaded on demand through keeper_skill.
        | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _) ->
            state.keeper_creation_focus <- None;
            withdraw_pending_music_editor state
+       | Some (Graphics_reply _) | None -> ());
+      (match input with
+       | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _) ->
+           state.resource_copy_pending <- None;
+           state.resource_copy_ready <- None
+       | Some (Graphics_reply _) | None -> ());
+      (match input with
+       | Some (Key "U") when state.view = Resources && state.resource_focus = Right_pane -> ()
+       | Some (Key "!") when state.view = Resources && state.resource_focus = Right_pane ->
+           state.resource_share_recovery_lookup <- None
+       | Some (Key ("j" | "k" | "J" | "K" | "up" | "down" | "pageup" | "pagedown" | "home" | "end") | Mouse_wheel _)
+           when state.view = Resources && state.resource_focus = Right_pane ->
+           state.resource_share_recovery_lookup <- None;
+           Option.iter (fun prompt -> Masc_tui_artifact_share_confirmation.withdraw prompt.recovery_confirmation)
+             state.resource_share_recovery_prompt
+       | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _) ->
+           state.resource_share_recovery_lookup <- None;
+           state.resource_share_recovery_prompt <- None
        | Some (Graphics_reply _) | None -> ());
       Option.iter
         (fun _ ->
@@ -31286,15 +31709,35 @@ and is loaded on demand through keeper_skill.
        | Some "o" when state.view = Resources -> open_resource_in_dashboard state ~mailbox:async_messages
        | Some "c" when state.view = Resources ->
            launch_artifact_check_change state ~mailbox:async_messages
+       | Some ("P" | "U" | "Y" | "!")
+           when state.view = Resources && state.resource_focus = Right_pane
+                && (!share_interrupt_barrier || Masc_tui_exit_signals.pending_signal exit_signals) ->
+           report_action state "system" "Share action interrupted; use the key again when ready."
        | Some "P" when state.view = Resources && state.resource_focus = Right_pane ->
            toggle_resource_external_share state ~mailbox:async_messages
+             ~dispatch_allowed:(resource_share_dispatch_allowed ())
+       | Some "U" when state.view = Resources && state.resource_focus = Right_pane ->
+           recover_resource_external_share state ~mailbox:async_messages ~confirm:false
+             ~dispatch_allowed:(resource_share_dispatch_allowed ())
+       | Some "!" when state.view = Resources && state.resource_focus = Right_pane
+             && Option.is_some state.resource_share_recovery_prompt ->
+           if Atomic.get resize_requested || Masc_tui_exit_signals.pending_signal exit_signals then begin
+             Option.iter (fun prompt -> Masc_tui_artifact_share_confirmation.withdraw prompt.recovery_confirmation)
+               state.resource_share_recovery_prompt;
+             report_action state "system" "Wait for pending terminal or signal changes before confirming."
+           end else recover_resource_external_share state ~mailbox:async_messages ~confirm:true
+             ~dispatch_allowed:(resource_share_dispatch_allowed ())
        | Some "Y" when state.view = Resources && state.resource_focus = Right_pane ->
-           (match Masc_tui_resource_document.copy_public_url state with
+           (match open_resource_report state with
             | Error detail -> report_action state "error" detail
-            | Ok url ->
-                copy_reference_to_terminal render_schedule url;
-                report_action state "system"
-                  "Public link sent via OSC 52 (terminal support and origin reachability unconfirmed)")
+            | Ok report ->
+              let key = Masc_tui_resource_catalog.Report_revision report in
+              launch_resources_read state ~mailbox:async_messages ~key;
+              (match state.resource_read_owner with
+               | Some owner ->
+                 state.resource_copy_pending <- Some {Masc_tui_resource_catalog.key;owner};
+                 report_action state "system" "Refreshing external sharing before copying the public link..."
+               | None -> report_action state "error" "Could not verify sharing before copying the public link"))
        | Some "R" when state.view = Resources && state.resource_focus = Right_pane ->
            (match Masc_tui_resource_document.current state with
             | Some reading ->
@@ -35628,6 +36071,14 @@ and is loaded on demand through keeper_skill.
             | Fusion | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs | Clients -> ())
       | _ -> ());
 
+      (* A signal can precede already-buffered keys, including after a
+         graphics reply. Keep the share barrier until that input is drained. *)
+      if !share_interrupt_barrier
+         && not (input_reader_has_unsettled_input input_reader)
+         && Queue.is_empty hangul_latin_queue
+         && (match paste_phase input_reader with No_paste -> true | Pasting _ | Draining_tail _ -> false)
+      then share_interrupt_barrier := false;
+
       (* Surface navigation asks only for datasets the destination adds. The
          full refresh owns aggregate connection status and global badges; replaying
          it for every Tab made an Overview -> Tools walk spend those requests
@@ -35660,8 +36111,9 @@ and is loaded on demand through keeper_skill.
          the next pass. *)
       retire_music_editor_for_input ();
       if
-        drain_async_messages ~delivery_round:async_delivery_round ~deadline_ns:drain_deadline_ns
-          ~input_pending:(fun () -> input_reader_has_ready_input input_reader) state ~base_path
+        drain_async_messages ~delivery_round:async_delivery_round ~deferred_share_messages ~deferred_share_sweep ~resource_copy_sweep ~deadline_ns:drain_deadline_ns
+          ~input_pending:(fun () -> input_reader_has_ready_input input_reader)
+          ~share_input_pending:asynchronous_input_pending state ~base_path
           ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
           ~frame_presenter ~render_schedule async_messages

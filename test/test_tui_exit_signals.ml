@@ -52,8 +52,14 @@ let test_a_second_ctrl_c_leaves_no_terminate_signal () =
 
 let test_first_ctrl_c_arms_and_second_needs_admission () =
   let t = Signals.create () in
+  let before = Signals.generation t in
+  check bool "no unconsumed signal initially" false (Signals.pending_signal t);
   Signals.request_interrupt t;
+  check bool "interrupt is visible before the loop consumes it" true (Signals.pending_signal t);
   check verdict "first Ctrl-C arms" Signals.Interrupt_armed (Signals.poll t);
+  check bool "the interrupt is consumed" false (Signals.pending_signal t);
+  check bool "consumption does not restore pre-interrupt authority" true
+    (Signals.generation t <> before);
   check verdict "the request is consumed" Signals.Continue (Signals.poll t);
   Signals.request_interrupt t;
   check verdict "second Ctrl-C requires display admission" Signals.Interrupt_again (Signals.poll t)

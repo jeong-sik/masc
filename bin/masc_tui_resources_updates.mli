@@ -35,21 +35,28 @@ val check_changed : Masc_tui_types.state -> Masc_tui_artifact_check_action.reque
     A retired write cannot update a new owner's view. No receipt is adopted as
     inventory state. The caller reports the outcome and launches that read. *)
 
-val begin_share_change : Masc_tui_types.state ->
-  report:Masc_tui_resource_catalog.report -> shared:bool ->
+val begin_share_recovery_lookup : Masc_tui_types.state ->
+  origin:Masc_tui_types.workspace_input_identity -> report:Masc_tui_resource_catalog.report -> unit
+(** Retire an earlier read and pending copy before observing the recovery
+    journal, so their delayed results cannot erase newer uncertainty. *)
+
+val begin_share_change : ?recovery:bool -> Masc_tui_types.state ->
+  report:Masc_tui_resource_catalog.report -> entry:Masc_tui_artifact_share_pending.entry ->
   (Masc_tui_types.resource_share_request, string) result
 (** Allocate a workspace-bound owner before dispatch, allowing at most one
-    outstanding share mutation. Refuse an artifact whose prior write has an
-    unknown outcome. Retire the previous share observation and pending read. *)
+    outstanding share mutation per workspace and artifact. Refuse an artifact whose prior write has an
+    unknown outcome unless an explicit recovery attempt is being made. Retire
+    the previous share observation and pending read. *)
 
 val share_changed : Masc_tui_types.state -> Masc_tui_types.resource_share_request ->
-  result:(bool, string) result ->
+  result:(Masc_tui_types.resource_share_outcome, Masc_tui_types.resource_share_failure) result ->
   Masc_tui_resource_catalog.key option
 (** Consume only the matching operation owner and retire reads for that report
     started while the write was pending, even after an authority change.
-    An error marks the artifact ID uncertain for this TUI session; a later GET
-    cannot settle it. Return the current fixed report key only when the original
-    workspace still owns it; the caller may reread only after confirmed success. *)
+    An unknown outcome marks the artifact ID uncertain for this TUI session;
+    a later GET cannot settle it. A not-started result does not taint it.
+    Return the current fixed report key only when the original workspace still
+    owns it; the caller may reread after confirmation, conflict or not-started. *)
 
 val read_done :
   Masc_tui_types.state -> request:Masc_tui_resource_catalog.read_request ->

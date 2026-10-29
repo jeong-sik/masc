@@ -21,7 +21,7 @@ val create : unit -> t
 val request_terminate : t -> signal:string -> unit
 (** SIGTERM, SIGHUP, SIGQUIT: the session is over. [signal] is the name the
     exit line writes down, so a day of ends can be read by cause. One atomic
-    store each, so it is safe from a handler. Stays set: a terminate is never
+    update each, so it is safe from a handler. Stays set: a terminate is never
     withdrawn. *)
 
 val terminate_signal : t -> string option
@@ -29,7 +29,13 @@ val terminate_signal : t -> string option
     did. Read after {!poll} returns [Quit] to record the cause. *)
 
 val request_interrupt : t -> unit
-(** SIGINT: asks the loop what a Ctrl-C means this time. One atomic store. *)
+(** SIGINT: asks the loop what a Ctrl-C means this time. *)
+
+val pending_signal : t -> bool
+(** Whether a terminate or unconsumed interrupt is waiting for the loop. *)
+
+val generation : t -> int
+(** Changes when a signal is requested, even after the loop consumes it. *)
 
 val interrupt_pending : t -> bool
 (** Observe an interrupt without consuming it, including immediately after

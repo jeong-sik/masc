@@ -161,8 +161,8 @@ let render_resources (state : state) =
       | Some resource ->
           let share_badge =
             match resource, Option.bind reading (fun r -> r.Masc_tui_resource_reading.shared) with
-            | Catalog.Report _, Some true -> " · [외부 공유중]"
-            | Catalog.Report _, Some false -> " · [비공개]"
+            | Catalog.Report _, Some true -> " · [마지막 확인: 외부 공유]"
+            | Catalog.Report _, Some false -> " · [마지막 확인: 비공개]"
             | Catalog.Report _, None | Catalog.Mcp _, _ -> ""
           in
           "Resource · " ^ Terminal_text.single_line (Catalog.display_name resource) ^ share_badge

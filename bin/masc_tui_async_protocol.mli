@@ -716,9 +716,11 @@ type async_msg =
       Masc_tui_types.code_lsp_query Masc_tui_fetched.request
       * (Masc.Tui_decode.lsp_answer, string) result
   | Resource_exported of string * (string, string) result
-  | Resource_share_changed of Masc_tui_types.resource_share_request * (Masc_tui_types.resource_share_outcome, string) result
+  | Resource_share_changed of Masc_tui_types.resource_share_request * (Masc_tui_types.resource_share_outcome, Masc_tui_types.resource_share_failure) result
+  | Resource_share_recovery_loaded of Masc_tui_types.resource_share_recovery_lookup * (Masc_tui_artifact_share_pending.entry option, string) result
   | Resource_read of
       Masc_tui_resource_catalog.read_request * (Masc_tui_resource_catalog.reading, string) result
+      * Masc_tui_types.resource_share_journal_observation
   | Github_identity_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
   | Identity_providers_loaded of
       Masc_tui_types.detail_read_request * (Masc_tui_identity_model.identity_provider list, string) result
@@ -797,6 +799,10 @@ module Delivery_round : sig
 end
 
 val workspace_message_is_read : async_msg -> bool
+val message_matches_share_input :
+  resource_read:(Masc_tui_resource_catalog.read_request -> bool) ->
+  recovery_loaded:(Masc_tui_types.resource_share_recovery_lookup -> bool) ->
+  async_msg -> bool
 val workspace_message_admitted :
   state -> authority:workspace_authority -> reading:unit ref option -> async_msg -> bool
 (** A stale read never re-enters a reconfirmed workspace. Admitted operation

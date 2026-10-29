@@ -18,6 +18,7 @@ val close : 'message t -> unit
 val launch :
   ?key:unit ref -> ?observation:bool ->
   ?cancelled:'message ->
+  ?cancelled_by:(unit -> 'message) ->
   ?observe_job:(Masc_tui_workspace_job.event -> unit) ->
   ?on_not_run:(unit -> unit) ->
   Masc_tui_types.state -> results:'message t ->
@@ -32,7 +33,10 @@ val launch :
 
     Cancellation propagates. An explicit [cancelled] receipt is published before
     propagation when the caller must retain an interrupted operation's uncertain
-    outcome. Omitting it preserves cancellation without a synthesized result. Worker and
+    outcome. [cancelled_by] instead forms that receipt at cancellation time,
+    allowing a caller to distinguish whether an effect was dispatched; if both
+    options are supplied, [cancelled_by] takes precedence. Omitting both preserves
+    cancellation without a synthesized result. Worker and
     synchronous-launch cleanup retire only an unpublished registration; an
     already published result remains until claimed or session close. Actual
     workspace-job cancellation/registration ownership stays with the existing

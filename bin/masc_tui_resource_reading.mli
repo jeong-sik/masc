@@ -13,6 +13,7 @@ type t = private {
   confirmation : Masc_tui_artifact_checks.status option;
   shared : bool option;
   share_uncertain : bool;
+  recovery_preview : string option;
   public_url : (string, string) result option;
   diagrams : Masc_tui_resource_diagrams.t option;
 }
@@ -24,6 +25,7 @@ val create : entry:Masc_tui_resource_catalog.t ->
   confirmation:Masc_tui_artifact_checks.status option ->
   shared:bool option ->
   share_uncertain:bool ->
+  recovery_preview:string option ->
   public_url:(string, string) result option ->
   diagrams:Masc_tui_resource_diagrams.t option -> t
 val searchable : t -> bool

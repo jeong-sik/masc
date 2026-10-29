@@ -539,6 +539,12 @@
  (libraries masc.fs_compat yojson unix))
 
 (library
+ (name masc_tui_artifact_share_pending)
+ (wrapped false)
+ (modules masc_tui_artifact_share_pending)
+ (libraries masc masc.fs_compat yojson unix))
+
+(library
  (name masc_tui_lane_broadcast_pending)
  (wrapped false)
  (modules masc_tui_lane_broadcast_pending)
@@ -1784,6 +1790,8 @@
   masc_skill_reference
   masc_tui_lane_broadcast_pending
   masc_tui_play_pending
+  masc_tui_artifact_share_pending
+  masc_tui_artifact_share_confirmation
   masc.masc_random_id
   masc_tui_fusion_launch
   masc_tui_queue_inspection
@@ -1917,7 +1925,7 @@
  (wrapped false)
  (modules masc_tui_resource_document)
  (libraries masc_tui_scroll masc_tui_image_viewport masc_tui_resource_diagrams masc_tui_resource_export masc_tui_resource_reading masc_tui_markdown masc_tui_detail_reading masc_tui_pick_list masc_tui_artifact_html masc_tui_artifact_html_rows masc_tui_types masc_tui_ansi masc_tui_message_layout masc_tui_text_block
-  masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_mcp masc_tui_resource_images
+  masc_tui_artifact_checks masc_tui_artifact_share_pending masc_tui_resource_catalog masc_tui_mcp masc_tui_resource_images
   masc_tui_markdown_theme masc_tui_roster_pane masc_tui_theme masc masc.config yojson))
 
 (library
@@ -1937,7 +1945,7 @@
  (name masc_tui_resources_updates)
  (wrapped false)
  (modules masc_tui_resources_updates)
- (libraries masc_tui_resource_reading masc_tui_scroll masc_tui_artifact_check_action masc_tui_resource_document masc_tui_resource_catalog masc_tui_artifact_checks masc_tui_fetched masc_tui_types masc_tui_mcp masc))
+ (libraries masc_tui_artifact_share_pending masc_tui_resource_reading masc_tui_scroll masc_tui_artifact_check_action masc_tui_resource_document masc_tui_resource_catalog masc_tui_artifact_checks masc_tui_fetched masc_tui_types masc_tui_mcp masc))
 
 (library
  (name masc_tui_board_updates)
@@ -2135,6 +2143,16 @@
  (wrapped false)
  (modules masc_tui_msx_checkpoint_pending)
  (libraries masc.keeper_operation_identity masc.machine_checkpoint masc.masc_process yojson unix))
+
+(library
+ (name masc_tui_artifact_share_attempt)
+ (wrapped false)
+ (modules masc_tui_artifact_share_attempt))
+
+(library
+ (name masc_tui_artifact_share_confirmation)
+ (wrapped false)
+ (modules masc_tui_artifact_share_confirmation))
 
 (library
  (name masc_tui_msx_tick)
@@ -2468,7 +2486,7 @@
  (name masc_tui_async_protocol)
  (wrapped false)
  (modules masc_tui_async_protocol)
- (libraries masc_tui_fleet_stream masc_tui_pele masc_tui_resource_diagrams masc_tui_attachment_action masc_tui_image_cache masc_tui_board_reader masc_tui_detail_reading masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_observation_store masc_tui_observation_origin masc_tui_ask_projection masc_tui_original_task_read masc_tui_code_draft
+ (libraries masc_tui_fleet_stream masc_tui_pele masc_tui_resource_diagrams masc_tui_attachment_action masc_tui_image_cache masc_tui_board_reader masc_tui_detail_reading masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_artifact_share_pending masc_tui_resource_catalog masc_tui_observation_store masc_tui_observation_origin masc_tui_ask_projection masc_tui_original_task_read masc_tui_code_draft
   masc_tui_task_dispatch
   masc
   masc.keeper_chat_operations
@@ -2671,6 +2689,9 @@
   masc_tui_msx
   masc_tui_msx_tick
   masc_tui_msx_checkpoint_pending
+  masc_tui_artifact_share_attempt
+  masc_tui_artifact_share_pending
+  masc_tui_artifact_share_confirmation
   masc.keeper_operation_identity
   masc_tui_machine_live
   masc_tui_terminal_profile

@@ -727,9 +727,11 @@ type async_msg =
       Masc_tui_types.code_lsp_query Masc_tui_fetched.request
       * (Masc.Tui_decode.lsp_answer, string) result
   | Resource_exported of string * (string, string) result
-  | Resource_share_changed of Masc_tui_types.resource_share_request * (Masc_tui_types.resource_share_outcome, string) result
+  | Resource_share_changed of Masc_tui_types.resource_share_request * (Masc_tui_types.resource_share_outcome, Masc_tui_types.resource_share_failure) result
+  | Resource_share_recovery_loaded of Masc_tui_types.resource_share_recovery_lookup * (Masc_tui_artifact_share_pending.entry option, string) result
   | Resource_read of
       Masc_tui_resource_catalog.read_request * (Masc_tui_resource_catalog.reading, string) result
+      * Masc_tui_types.resource_share_journal_observation
   | Github_identity_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
   | Identity_providers_loaded of
       Masc_tui_types.detail_read_request * (Masc_tui_identity_model.identity_provider list, string) result
@@ -1008,7 +1010,7 @@ let rec workspace_message_is_read = function
   | Acting_pane_changes_loaded _
   | Code_blame_loaded _
   | Code_lsp_answered _
-  | Resource_read _ | Resource_diagram_ready _
+  | Resource_read _ | Resource_share_recovery_loaded _ | Resource_diagram_ready _
   | Github_identity_view_loaded _
   | Identity_providers_loaded _
   | Observer_opened _
@@ -1098,6 +1100,92 @@ let rec workspace_message_is_read = function
   | Image_render_ready _
     -> false
 
+
+(* Whether a pending share or copy makes this message stale: a read of the
+   document being copied, or the answer to the share recovery lookup. Every
+   other message is unaffected. *)
+let rec message_matches_share_input ~resource_read ~recovery_loaded = function
+  | Workspace_scoped (_, _, message) ->
+      message_matches_share_input ~resource_read ~recovery_loaded message
+  | Resource_read (request, _, _) -> resource_read request
+  | Resource_share_recovery_loaded (request, _) -> recovery_loaded request
+  | Chat_search_finished _ | Workspace_operation _ | Chat_command_read_completed _
+  | Workspace_identity_unconfirmed _ | Schedule_form_authority_refused _
+  | Lane_package_catalog_loaded _ | Lane_package_preview_loaded _
+  | Keeper_queue_resume_confirmed _ | Keeper_queue_loaded _ | Lane_addons_loaded _
+  | Lane_application_loaded _ | Lane_subscriptions_loaded _ | Lane_declaration_loaded _
+  | Keeper_deletions_loaded _ | Msx_tick_withdrawn _ | Keeper_deletion_retry_done _
+  | Msx_frame_loaded _ | Msx_activity_loaded _ | Msx_live_loaded _ | Dos_live_loaded _
+  | Voice_wizard_saved _ | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
+  | Voice_wizard_probed _ | Voice_wizard_reread _ | Voice_config_loaded _ | Voice_calibrated _
+  | Voice_level _ | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _
+  | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _
+  | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _
+  | Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _
+  | Http_initial_identity_read _ | Http_refresh_done _ | Http_refresh_failed _
+  | Approvals_listing_superseded | Approvals_summary_loaded _ | Surface_composer_released
+  | Http_scoped_refresh_done _ | Http_scoped_refresh_failed _ | Board_post_refresh_done _
+  | Approval_decision_done _ | Ask_answer_done _ | Keeper_chat_dispatch_started _
+  | Keeper_chat_done _ | Keeper_chat_stream_deltas _ | Keeper_chat_stream_unavailable _
+  | Keeper_run_next_done _ | Keeper_observed_interrupt_done _ | Keeper_chat_interrupt_done _
+  | Keeper_chat_history_loaded _ | Keeper_chat_first_page_loaded _ | Keeper_chat_copy_loaded _
+  | Keeper_chat_operation_loaded _ | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded _
+  | Keeper_preparation_loaded _ | Keeper_child_content_loaded _ | Context_inspector_loaded _
+  | Context_inspector_part_loaded _ | Keeper_chat_older_loaded _ | Live_context_loaded _
+  | Local_keepers_read _ | Local_workspace_read _ | Lanes_loaded _ | Lane_inventory_loaded _
+  | Clients_loaded _ | Lane_runs_loaded _ | Lane_run_detail_loaded _
+  | Measurement_artifact_loaded _ | Verification_loaded _ | Harness_loaded _
+  | Fusion_runs_loaded _ | Fusion_detail_loaded _ | Fusion_historical_detail_loaded _
+  | Fusion_launch_options_loaded _ | Fusion_launched _ | Repositories_loaded _
+  | Workspace_activity_loaded _ | Memory_loaded _ | Memory_input_loaded _
+  | Memory_facts_loaded _ | Repository_changes_loaded _ | Repository_changes_diff_loaded _
+  | File_changes_loaded _ | Keeper_chat_file_changes_loaded _ | Git_diff_loaded _
+  | Browser_history_list_loaded _ | Browser_history_page_loaded _
+  | Browser_lane_clients_loaded _ | Browser_lane_loaded _ | Browser_lane_action_done _
+  | Browser_lane_scene_loaded _ | Browser_lane_follow_loaded _ | Browser_lane_screenshot_ready _
+  | Connectors_status_loaded _ | Connectors_loaded _ | Connector_unbind_all_done _
+  | Runtime_surface_loaded _ | Tools_loaded _ | Skills_catalog_loaded _
+  | Skill_evidence_loaded _ | Tools_async_observation_loaded _ | Tools_async_detail_loaded _
+  | Task_document_prepared _ | Tools_async_task_body_loaded _
+  | Tools_async_task_history_loaded _ | Runtime_lane_slots_written _ | Runtime_catalog_loaded _
+  | Runtime_assignment_changed _ | Keeper_chat_approval_answered _
+  | Keeper_tool_approvals_loaded _ | Listen_prepared _ | Resource_diagram_ready _
+  | Sent_image_ready _ | Image_render_ready _ | Keeper_turns_loaded _
+  | Keeper_chat_control_received _ | Gate_snapshot_loaded _ | Gate_approval_resolved _
+  | Gate_auto_judge_retried _ | Gate_mode_set _ | Surface_tool_approval_answered _
+  | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded _ | Keeper_tool_mode_set _
+  | Keeper_chat_dispatch_blocked _ | Keeper_logs_loaded _ | Keeper_settings_save_changed _
+  | Runtime_form_save_changed _ | Keeper_creation_changed _ | Keeper_action_done _
+  | Board_new_post_done _ | Board_vote_done _ | Goal_transition_done _
+  | Goal_confirmation_submitted _ | Goal_confirmation_loaded _ | Schedules_loaded _
+  | Schedule_wake_history_loaded _ | Keeper_schedules_loaded _ | System_logs_loaded _
+  | Schedule_cancel_done _ | Verification_verdict_done _ | Harness_label_done _
+  | Chat_call_loaded _ | Board_attachment_loaded _ | Board_attachment_prepared _
+  | Board_attachment_saved _ | Keeper_calls_loaded _ | Goal_timeline_loaded _
+  | Task_history_loaded _ | Task_cancel_done _ | Verification_evidence_exported _
+  | Verification_evidence_loaded _ | Keeper_settings_editor_loaded _
+  | Keeper_config_view_loaded _ | Keeper_items_loaded _ | Keeper_sandbox_view_loaded _
+  | Keeper_sandbox_logs_loaded _ | Exact_activity_read _ | Exact_activity_saved _
+  | Machine_activity_read _ | Machine_activity_saved _ | Runtime_config_view_loaded _
+  | Runtime_params_loaded _ | Runtime_param_written _ | Prompts_loaded _
+  | Keeper_board_quarantines_loaded _ | Board_quarantine_requeued _
+  | Board_quarantines_bulk_progress _ | Board_quarantines_bulk_requeued _ | Presets_listed _
+  | Preset_detail_loaded _ | Preset_contents_shown _ | Preset_saved _ | Preset_restored _
+  | Preset_deleted _ | Play_room_received _ | Play_invites_listed _ | Play_invite_issued _
+  | Play_invite_revoked _ | Librarian_input_loaded _ | Artifact_checks_loaded _
+  | Artifact_check_changed _ | Resources_listed _ | Code_catalog_loaded _
+  | Code_finder_file_loaded _ | Code_entries_loaded _ | Code_draft_saved _ | Code_file_loaded _
+  | Code_history_loaded _ | Code_diff_loaded _ | Acting_pane_changes_loaded _
+  | Code_blame_loaded _ | Code_lsp_answered _ | Resource_exported _ | Resource_share_changed _
+  | Github_identity_view_loaded _ | Identity_providers_loaded _ | Identity_switch_set _
+  | Identity_login_started _ | Identity_refreshed _ | Identity_app_saved _
+  | Identity_disconnected _ | Account_login_event _ | Account_login_json _
+  | Account_login_removal _ | Github_login_lines _ | Github_login_finished _
+  | Github_token_saved _ | Observer_opened _ | Observer_received _ | Observer_closed _
+  | Fleet_stream_view _ | Fleet_stream_reader_ended _ | Original_task_read_done _
+  | Original_task_history_done _ | Original_task_evidence_done _ | Task_dispatch_completed _
+  | Task_creation_read_done _
+  | Keeper_execute_loaded _ -> false
 let workspace_message_admitted state ~authority ~reading message =
   workspace_reply_admitted state ~authority ~reading
     ~kind:(if workspace_message_is_read message
@@ -1211,7 +1299,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
     | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
     | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _)
-    | Code_lsp_answered (_, _) | Resource_exported _ | Resource_share_changed _ | Resource_read (_, _) | Resource_diagram_ready _
+    | Code_lsp_answered (_, _) | Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _
     | Github_identity_view_loaded (_, _) | Identity_providers_loaded (_, _, _)
     | Identity_switch_set (_, _, _, _) | Identity_login_started (_, _)
     | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)
@@ -1348,7 +1436,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
   | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
   | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _)
-  | Code_lsp_answered (_, _) | Resource_exported _ | Resource_share_changed _ | Resource_read (_, _) | Resource_diagram_ready _
+  | Code_lsp_answered (_, _) | Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _
   | Github_identity_view_loaded (_, _) | Identity_providers_loaded (_, _, _)
   | Identity_switch_set (_, _, _, _) | Identity_login_started (_, _)
   | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)

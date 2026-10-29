@@ -1,15 +1,30 @@
 module History = Agent_core_base.History
 
+(* The block keeps its media type; the blob's mime only labels the bytes,
+   and the artifact address cannot carry a parameter ("text/plain;
+   charset=utf-8"), whitespace or an empty type. The label is the type and
+   subtype before any parameter, or application/octet-stream, the name for
+   bytes of unrecorded type, when that part is empty or still unencodable. *)
+let blob_mime media_type =
+  let essence =
+    String.trim
+      (match String.index_opt media_type ';' with
+       | None -> media_type
+       | Some cut -> String.sub media_type 0 cut)
+  in
+  if String.equal essence "" || not (Tool_output.mime_is_encodable essence)
+  then "application/octet-stream"
+  else essence
+;;
+
 let put store ~media_type ~raw =
-  match Tool_blob_store.put_durable_reuse store ~bytes:raw ~mime:media_type with
+  match Tool_blob_store.put_durable_reuse store ~bytes:raw ~mime:(blob_mime media_type) with
   | artifact ->
     (match History.stored ~sha256:artifact.Tool_output.sha256 ~bytes:artifact.bytes with
      | Ok stored -> Ok stored
      | Error error ->
        Error (History.Store_failed { detail = History.stored_error_to_string error }))
   | exception Sys_error detail -> Error (History.Store_failed { detail })
-  (* A media type the artifact address cannot carry (empty, unencodable). *)
-  | exception Invalid_argument detail -> Error (History.Store_failed { detail })
 ;;
 
 let get store (expected : History.stored) =

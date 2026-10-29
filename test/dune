@@ -3521,7 +3521,7 @@
 (test
  (name test_keeper_vision_ingest)
  (modules test_keeper_vision_ingest)
- (libraries alcotest masc masc.runtime masc.tool_types))
+ (libraries alcotest masc masc.agent_core masc.runtime masc.tool_types))
 
 ; task-1719 / #39331: lifetime contract for store_kept eviction, defined
 ; ahead of any cap.

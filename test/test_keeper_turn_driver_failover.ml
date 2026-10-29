@@ -828,7 +828,7 @@ let test_prior_checkpoint_appends_current_goal_once () =
          ~system_prompt:"You are the runtime failover test Keeper."
          ~runtime_id:"primary.test_model"
          ~keeper_name:"prior-checkpoint-current-goal"
-         ~base_path:(Filename.get_temp_dir_name ())
+         ~base_path:(Filename.get_temp_dir_name ()) ~media_store:(Tool_blob_media_store.of_base_path ~base_path:(Filename.get_temp_dir_name ()))
          ~agent_core_tools:[]
          ~goal:current_goal
 
@@ -965,7 +965,7 @@ let test_run_named_media_degrade_emits_typed_manifest () =
          ~system_prompt:"You are the runtime failover test Keeper."
          ~runtime_id:"resilient"
          ~keeper_name:"media-degrade-keeper"
-         ~base_path:(Filename.get_temp_dir_name ())
+         ~base_path:(Filename.get_temp_dir_name ()) ~media_store:(Tool_blob_media_store.of_base_path ~base_path:(Filename.get_temp_dir_name ()))
          ~agent_core_tools:[]
          ~goal:"inspect the audio"
          ~goal_blocks:[ audio ]
@@ -1833,7 +1833,7 @@ let run_deferred_lane_with_image ~next_runtime_id ~later_runtime_ids =
         ~system_prompt:"You are the runtime failover test Keeper."
         ~runtime_id:"resilient"
         ~keeper_name:"deferred-per-candidate"
-        ~base_path:(Filename.get_temp_dir_name ())
+        ~base_path:(Filename.get_temp_dir_name ()) ~media_store:(Tool_blob_media_store.of_base_path ~base_path:(Filename.get_temp_dir_name ()))
         ~agent_core_tools:[]
         ~goal:"describe the image"
         ~goal_blocks:[ Agent_core.Types.Text "describe the image"; image ]
@@ -1965,7 +1965,7 @@ let run_checkpoint_lane_turn ~history_messages ~on_manifests =
         ~system_prompt:"You are the runtime failover test Keeper."
         ~runtime_id:"checkpoint_lane"
         ~keeper_name:"checkpoint-runtime-compat-keeper"
-        ~base_path:(Filename.get_temp_dir_name ())
+        ~base_path:(Filename.get_temp_dir_name ()) ~media_store:(Tool_blob_media_store.of_base_path ~base_path:(Filename.get_temp_dir_name ()))
         ~agent_core_tools:[]
         ~goal:"continue the AGENT_CORE turn"
         ~initial_messages:history_messages
@@ -4805,7 +4805,7 @@ let test_deferred_dispatch_preserves_predispatch_quota_order () =
              ~system_prompt:"You are the runtime failover test Keeper."
              ~runtime_id:"quota_lane"
              ~keeper_name:"deferred-frozen-quota-order"
-             ~base_path:(Filename.get_temp_dir_name ())
+             ~base_path:(Filename.get_temp_dir_name ()) ~media_store:(Tool_blob_media_store.of_base_path ~base_path:(Filename.get_temp_dir_name ()))
              ~agent_core_tools:[]
              ~goal:"preserve the pre-dispatch runtime binding"
              ~deferred_runtime_lane:frozen
@@ -5021,7 +5021,7 @@ let first_dispatch ~walk_owner ?goal_blocks runtime_id =
       ~system_prompt:"You are the runtime failover test Keeper."
       ~runtime_id
       ~keeper_name:"keeper-a"
-      ~base_path:(Filename.get_temp_dir_name ())
+      ~base_path:(Filename.get_temp_dir_name ()) ~media_store:(Tool_blob_media_store.of_base_path ~base_path:(Filename.get_temp_dir_name ()))
       ~agent_core_tools:[]
       ~goal:"walk the lane"
       ?goal_blocks
@@ -6555,7 +6555,7 @@ let test_deferred_head_removed_by_reload_rotates () =
         ~system_prompt:"You are the runtime failover test Keeper."
         ~runtime_id:"resilient"
         ~keeper_name:"deferred-head-removed"
-        ~base_path:(Filename.get_temp_dir_name ())
+        ~base_path:(Filename.get_temp_dir_name ()) ~media_store:(Tool_blob_media_store.of_base_path ~base_path:(Filename.get_temp_dir_name ()))
         ~agent_core_tools:[]
         ~goal:"reach the live candidate"
         ~goal_blocks:[ Agent_core.Types.Text "reach the live candidate" ]
@@ -6783,7 +6783,17 @@ let test_a_pipeline_refusal_is_not_a_dispatched_attempt () =
              (Agent_core.Error.InvalidConfig { field = "max_context"; detail = "none" }))));
   Alcotest.check dispatch_disposition "a transport failure with no request serialized"
     Masc.Keeper_attempt_dispatch.Dispatched
-    (dispatch ~request_serialized:false (Error (retryable_network_error "count")))
+    (dispatch ~request_serialized:false (Error (retryable_network_error "count")));
+  let unreadable_media =
+    Agent_core.Error.Media
+      (Agent_core.History.Missing_bytes (Agent_core.History.stored_of_raw "absent"))
+  in
+  Alcotest.check dispatch_disposition "history media the store could not read"
+    Masc.Keeper_attempt_dispatch.Rejected_before_dispatch
+    (dispatch ~request_serialized:false (Error unreadable_media));
+  Alcotest.check dispatch_disposition "a media failure after a request went out"
+    Masc.Keeper_attempt_dispatch.Dispatched
+    (dispatch ~request_serialized:true (Error unreadable_media))
 ;;
 
 let () =

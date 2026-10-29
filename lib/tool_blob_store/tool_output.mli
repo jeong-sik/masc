@@ -46,6 +46,10 @@ type make_error =
           a parameter ("text/plain; charset=utf-8") cannot survive the round
           trip. *)
 
+(** No whitespace: the marker encoding writes [mime] unquoted between two
+    spaces. {!make_artifact_ref} refuses a [mime] that fails this. *)
+val mime_is_encodable : string -> bool
+
 val make_artifact_ref :
   sha256:string ->
   bytes:int ->

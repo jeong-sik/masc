@@ -1588,7 +1588,9 @@ let official_client_dispatch ~provider_config_transform =
    a request it will not send with [Attempt_rejected] (no output ceiling, an
    invalid prepared request), [InputCapacity] (a serving constraint it can
    judge locally), [ContextOverflow] (a window it counted locally) or
-   [InvalidConfig] (no or an invalid declared context limit). A provider gives
+   [InvalidConfig] (no or an invalid declared context limit), and the media
+   store refuses one whose history media it cannot read or keep ([Media]: a
+   local store, so no provider saw it). A provider gives
    the same capacity shapes only after a request went out, so they pair with a
    fired observer. Any other error with no request out, such as a failed
    token-count round trip, may have reached the provider and stays dispatched.
@@ -1603,7 +1605,8 @@ let provider_attempt_dispatch ~request_serialized result =
                 { reason = Llm_provider.Retry.Attempt_rejected; _ }
             | Llm_provider.Retry.InputCapacity _
             | Llm_provider.Retry.ContextOverflow _ )
-        | Agent_core.Error.Config (Agent_core.Error.InvalidConfig _) ) ) ->
+        | Agent_core.Error.Config (Agent_core.Error.InvalidConfig _)
+        | Agent_core.Error.Media _ ) ) ->
     Keeper_attempt_dispatch.Rejected_before_dispatch
   | ( (true | false)
     , ( Ok _
@@ -1649,7 +1652,7 @@ let provider_attempt_dispatch ~request_serialized result =
   | ((true | false), Error (Agent_core.Error.Serialization _))
   | ((true | false), Error (Agent_core.Error.Io _))
   | ((true | false), Error (Agent_core.Error.Orchestration _))
-  | ((true | false), Error (Agent_core.Error.Media _))
+  | (true, Error (Agent_core.Error.Media _))
   | ((true | false), Error (Agent_core.Error.Internal _))
   | ((true | false), Error (Agent_core.Error.Internal_carried _)) -> Keeper_attempt_dispatch.Dispatched
 

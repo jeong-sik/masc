@@ -1954,24 +1954,6 @@ let test_delegate_eviction_rejects_oversize_before_store () =
         assert (String_util.contains_substring placeholder "image too large")
       | _ -> failwith "oversize image must surface as a text placeholder"))
 
-(* History holds no payload that could fail to decode; the failure left is a
-   reference whose bytes the store does not have. *)
-let test_delegate_eviction_missing_bytes_surfaces_text_error () =
-  match
-    Vi.evict_blocks ~media_store:test_media_store
-      ~mode:Vi.Store_only
-      ~delegate:true
-      ~keeper_name:"vision-ingest-missing-bytes"
-      [ Agent_core.Types.Image
-          { media_type = "image/png"
-          ; source = Agent_core.Types.Stored (Agent_core.History.stored_of_raw "never put")
-          }
-      ]
-  with
-  | [ Agent_core.Types.Text placeholder ] ->
-    assert (String_util.contains_substring placeholder "image bytes unavailable")
-  | _ -> failwith "missing bytes must surface as a text placeholder"
-
 (* RFC-0430 / #33682: a URL or Files-API id is a reference, not a payload. The
    serializers put both on the wire natively (#33669), so eviction — which
    exists to trade heavy inline pixels for a local artifact handle — must hand
@@ -2970,7 +2952,6 @@ let run_all () =
   test_cancelled_candidate_leaves_start_and_cancelled_rows ();
   test_delegate_eviction_rejects_invalid_media_type_before_store ();
   test_delegate_eviction_rejects_oversize_before_store ();
-  test_delegate_eviction_missing_bytes_surfaces_text_error ();
   test_delegate_eviction_passes_reference_source_through ();
   test_non_delegate_eviction_preserves_inline_image ();
   test_evicted_history_has_no_image_modality ();

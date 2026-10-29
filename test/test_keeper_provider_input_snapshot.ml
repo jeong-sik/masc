@@ -442,6 +442,45 @@ let test_another_trace_does_not_end_the_scan () =
       failf "the scan stopped too early: %s" (Snapshot.read_error_to_string error))
 ;;
 
+(* A snapshot message blob names its media by reference, and blob retention
+   does not read message blobs. The row lists the references, so an image
+   named by a retained snapshot alone survives two deleting sweeps. *)
+let test_a_snapshot_keeps_its_history_media_live () =
+  with_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let media_store = Tool_blob_media_store.of_base_path ~base_path in
+    let raw = "provider input image" in
+    let stored =
+      match media_store.put ~media_type:"image/png" ~raw with
+      | Ok stored -> stored
+      | Error error -> failf "put: %s" (Agent_core.Error.to_string (Agent_core.Error.Media error))
+    in
+    let image_message =
+      Agent_core.Types.user_msg_blocks
+        [ Agent_core.Types.Image
+            { media_type = "image/png"; source = Agent_core.Types.Stored stored }
+        ]
+    in
+    Snapshot.write_best_effort ~config ~keeper ~trace_id:"trace-provider-input"
+      ~absolute_turn:1 ~runtime_profile:"local" ~wire ~system_prompt:""
+      ~messages:[ image_message ] ~tools:[];
+    let manifest = read_for config keeper 1 in
+    (match manifest.Snapshot.mf_snapshot.messages with
+     | [ { Snapshot.msg_media = [ ("image/png", listed) ]; _ } ] ->
+       check bool "the row lists the stored image" true (listed = stored)
+     | _ -> fail "the snapshot row must list the message's stored media");
+    for _pass = 1 to 2 do
+      match
+        Tool_blob_maintenance.run ~base_path
+          ~board_posts_file:Masc_board_handlers.Board_paths.posts_file
+          ~mode:Tool_blob_maintenance.Delete_previous_candidates
+      with
+      | Ok _ -> ()
+      | Error error -> failf "maintenance: %s" (Tool_blob_maintenance.error_to_string error)
+    done;
+    check bool "the snapshot image survives" true (media_store.get stored = Ok raw))
+;;
+
 let test_message_payload_matches_the_serialised_message () =
   let bytes =
     Keeper_context_core_message_json.message_to_json message |> Yojson.Safe.to_string
@@ -465,6 +504,8 @@ let () =
             "shared pool and nested worker preserve exact parts"
             `Quick
             test_shared_pool_and_nested_worker_round_trip
+        ; test_case "a snapshot keeps its history media live" `Quick
+          test_a_snapshot_keeps_its_history_media_live
         ; test_case "the list reads no blob" `Quick test_the_list_reads_no_blob
         ; test_case
             "a part the row does not list is refused"

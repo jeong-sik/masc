@@ -162,10 +162,19 @@ let evict_block ?base_path ~media_store ~read ~mode ~keeper_name ~eager_budget (
        block
      | Agent_core.Types.Stored stored ->
        match media_store.Agent_core.History.get stored with
-      | Error _ ->
+      | Error
+          ( Agent_core.History.Store_failed _ | Missing_bytes _ | Digest_mismatch _
+          | Invalid_base64 _ ) ->
         record_eviction ~keeper_name ~mode ~result:"error" ~reason:"media_unavailable";
-        Agent_core.Types.Text
-          (image_store_failed_placeholder ~reason:"image bytes unavailable")
+        (match mode with
+         | Store_only ->
+           (* A persisted message keeps the reference: bytes the store cannot
+              read now are still the bytes it names, and a placeholder written
+              here would replace the image in the checkpoint for good. *)
+           block
+         | Eager ->
+           Agent_core.Types.Text
+             (image_store_failed_placeholder ~reason:"image bytes unavailable"))
       | Ok bytes ->
         (match Keeper_vision_tool.validate_image_size bytes with
          | Error _ ->

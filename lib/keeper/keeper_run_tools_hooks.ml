@@ -1140,9 +1140,10 @@ let assemble_hooks
                        ~absolute_turn:keeper_turn_id
                    in
                    Option.iter
-                     (fun (recalled : Keeper_memory_recall_blocks.t) ->
-                        record_block Prompt_block_id.Recalled_memory_status recalled.status;
-                        Option.iter (record_block Prompt_block_id.Recalled_memory) recalled.body)
+                     (fun recalled ->
+                        List.iter
+                          (fun (block, text) -> record_block block text)
+                          (Keeper_memory_recall_blocks.prompt_blocks recalled))
                      (Keeper_memory_recall_blocks.prepare
                         ~memo:recall_memo
                         ~config

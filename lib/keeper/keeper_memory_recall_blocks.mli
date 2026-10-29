@@ -17,6 +17,11 @@ type t =
         (** The memories the judgment carried; [None] when it carried none. *)
   }
 
+val prompt_blocks : t -> (Prompt_block_id.t * string) list
+(** The texts as prompt blocks: the status line as
+    {!Prompt_block_id.Recalled_memory_status}, then the body, when there is
+    one, as {!Prompt_block_id.Recalled_memory}. *)
+
 val purpose :
   current_input:string -> keeper_instructions:string -> turn_ref:Ids.Turn_ref.t -> Yojson.Safe.t
 (** What the judgment is for: this turn's input, the Keeper's instructions and

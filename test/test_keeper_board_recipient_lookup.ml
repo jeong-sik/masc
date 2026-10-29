@@ -139,8 +139,18 @@ let test_an_unknown_name_is_not_declared config =
    can have is answered before any file name exists. *)
 let test_a_name_no_keeper_can_have_is_not_declared config =
   register_keeper config "alice";
-  let too_long = String.make 129 'a' in
-  expect_ok "129 bytes" ([], [ too_long ]) (ask config too_long)
+  let beyond_the_name_rule = String.make 129 'a' in
+  expect_ok
+    "129 bytes"
+    ([], [ beyond_the_name_rule ])
+    (ask config beyond_the_name_rule);
+  (* Past 250 bytes the name and its ".json" no longer fit a file name, so
+     reading it would fail with ENAMETOOLONG instead of finding nothing. *)
+  let beyond_a_file_name = String.make 300 'a' in
+  expect_ok
+    "300 bytes"
+    ([], [ beyond_a_file_name ])
+    (ask config beyond_a_file_name)
 ;;
 
 let test_two_keepers_claiming_one_alias_fail_the_lookup config =

@@ -77,7 +77,11 @@ let script = {js|async function nativeWorkflow(page, args) {
           receipt = await page.selectOption(step.selector, selection, options); break;
         }
         case 'goto': effect = effectStarted = true; receipt = await page.goto(step.url, options); break;
-        case 'waitForURL': await page.waitForURL(step.url, options); break;
+        case 'waitForURL': {
+          const matcher = step.urlRegex === undefined ? step.url
+            : new RegExp(step.urlRegex.source, step.urlRegex.flags);
+          await page.waitForURL(matcher, options); break;
+        }
         case 'waitForSelector': await page.waitForSelector(step.selector, {...options, state: step.state}); break;
         case 'waitForLoadState': await page.waitForLoadState(step.state, options); break;
         case 'evaluate': {

@@ -30,6 +30,40 @@ function fixture({fail,dialog,snapshot='native result'}={}) {
  return {page,calls};
 }
 const request=steps=>({expectedUrl:initial,steps,snapshotScope:'viewport',maxChars:100,cursor:'MASC · fixture · workflow'});
+test('URL regex waits pass native RegExp and unchanged options to the SDK',async()=>{
+ for(const urlRegex of [{source:'^HTTPS://FIXTURE\\.TEST/(start|done)$',flags:'i'},
+  {source:''},{source:'start',flags:'g'}]){
+  const f=fixture();let waits=0;
+  f.page.waitForURL=async(matcher,options)=>{
+   waits++;assert.equal(Object.prototype.toString.call(matcher),'[object RegExp]');
+   assert.equal(matcher.source,new RegExp(urlRegex.source,urlRegex.flags).source);
+   assert.equal(matcher.flags,urlRegex.flags??'');assert.equal(matcher.test(initial),true);
+   assert.deepEqual(JSON.parse(JSON.stringify(options)),{timeout:0});
+  };
+  const result=await run(f.page,request([{method:'waitForURL',urlRegex,options:{timeout:0}},
+   {method:'fill',selector:'#editor',text:'changed'}]));
+  assert.equal(waits,1);assert.equal(result.failure,null);
+  assert.equal(result.completed[0].method,'waitForURL');
+  assert.equal(result.completed[1].method,'fill');
+  assert.equal(f.calls.filter(call=>call[0]==='snapshot').length,1);
+ }
+});
+test('invalid native URL regex stops before SDK entry and preserves any earlier effect',async()=>{
+ for(const urlRegex of [{source:'['},{source:'x',flags:'ii'},{source:'x',flags:'z'},{source:'x',flags:'uv'}]){
+  for(const prior of [false,true]){
+   const f=fixture();let waits=0;
+   f.page.waitForURL=async()=>{waits++;throw Error('must not enter native wait');};
+   const prefix=prior?[{method:'fill',selector:'#editor',text:'changed'}]:[];
+   const result=await run(f.page,request([...prefix,{method:'waitForURL',urlRegex},
+    {method:'click',selector:'#never'}]));
+   assert.equal(waits,0);assert.equal(result.failure.method,'waitForURL');
+   assert.equal(result.failure.index,prefix.length);assert.equal(result.completed.length,prefix.length);
+   assert.equal(result.effectStarted,prior);assert.equal(result.completedEffect,prior);
+   assert.equal(result.inputReleased,true);
+   assert.equal(f.calls.some(call=>call[0]==='snapshot'||call[0]==='click'),false);
+  }
+ }
+});
 test('native evaluation timeout diagnostics preserve uncertainty and completed prefix',async()=>{
  for(const [executionStopped,pageResponsive] of [[false,true],[true,true],[false,false]]){
   const f=fixture();let evaluations=0;

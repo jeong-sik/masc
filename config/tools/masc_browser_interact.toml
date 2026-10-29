@@ -320,7 +320,7 @@ description = "set_zoom only: actual browser zoom factor (0.3–5), requires exa
 [[params]]
 name = "steps"
 type = "array"
-description = "workflow only: native Ego Page calls followed by one final snapshot. Each step uses only its method arguments and native options. click/dblclick/hover/focus take selector; dragAndDrop takes selector,destination; mouse.click/move/wheel take CSS x,y (wheel uses deltas and needs a move/click in this round first); fill takes selector,text; press takes selector,key; selectOption takes selector,selectionJson; goto takes an absolute HTTP(S) url; waitForURL takes a string/glob url; waitForSelector takes selector,state; waitForLoadState state is optional. Keyboard methods take text or key; paste also accepts html. evaluate/waitForFunction take source and optional argumentJson. fetch takes an HTTP(S) or relative url and returns its structured response as the step receipt. options.saveAs is an artifact filename, never a host path; retrieve the returned downloadId with BrowserRead mode=downloads on the same client/tab without repeating fetch. url/title/info return native Page state; snapshot returns native text with scope/root/action-mark/stable-locator options; events drains this SDK process's Page event buffer and is a non-replayable effect, not cross-process history. waitForTimeout takes nonnegative milliseconds and is not a page-readiness check. Native options use SDK names and are strictly validated for that method; omission uses SDK defaults. evaluate/keyboard.insertText/keyboard.paste/url/title/info/events/waitForTimeout accept no options. Source runs only in the browser; Page code and fetch may have effects even on failure. A failed pointer click/drag or lost key input result keeps release unconfirmed without synthetic cleanup. Paste can hold ControlOrMeta+V. Answering a dialog does not acknowledge button/key release; automatic continuation after interrupted input is unsupported. An unconfirmed release blocks further input. Choose the next action from current observations; no new judgment inside the call. There is no cumulative step/time limit."
+description = "workflow only: native Ego Page calls followed by one final snapshot. Each step uses only its method arguments and native options. click/dblclick/hover/focus take selector; dragAndDrop takes selector,destination; mouse.click/move/wheel take CSS x,y (wheel uses deltas and needs a move/click in this round first); fill takes selector,text; press takes selector,key; selectOption takes selector,selectionJson; goto takes an absolute HTTP(S) url; waitForURL takes exactly one string/glob url or native urlRegex {source,flags?}; waitForSelector takes selector,state; waitForLoadState state is optional. Keyboard methods take text or key; paste also accepts html. evaluate/waitForFunction take source and optional argumentJson. fetch takes an HTTP(S) or relative url and returns its structured response as the step receipt. options.saveAs is an artifact filename, never a host path; retrieve the returned downloadId with BrowserRead mode=downloads on the same client/tab without repeating fetch. url/title/info return native Page state; snapshot returns native text with scope/root/action-mark/stable-locator options; events drains this SDK process's Page event buffer and is a non-replayable effect, not cross-process history. waitForTimeout takes nonnegative milliseconds and is not a page-readiness check. Native options use SDK names and are strictly validated for that method; omission uses SDK defaults. evaluate/keyboard.insertText/keyboard.paste/url/title/info/events/waitForTimeout accept no options. Source runs only in the browser; Page code and fetch may have effects even on failure. A failed pointer click/drag or lost key input result keeps release unconfirmed without synthetic cleanup. Paste can hold ControlOrMeta+V. Answering a dialog does not acknowledge button/key release; automatic continuation after interrupted input is unsupported. An unconfirmed release blocks further input. Choose the next action from current observations; no new judgment inside the call. There is no cumulative step/time limit."
 
 [params.items]
 type = "object"
@@ -350,6 +350,21 @@ type = "string"
 
 [[params.items.params]]
 name = "url"
+type = "string"
+
+[[params.items.params]]
+name = "urlRegex"
+type = "object"
+description = "waitForURL only: native RegExp {source, flags?}, instead of url. Empty source is valid. Syntax and flags are checked by the JavaScript engine before the SDK wait; native polling and timeout remain SDK-owned. Does not accept function source."
+additional_properties = false
+
+[[params.items.params.params]]
+name = "source"
+type = "string"
+required = true
+
+[[params.items.params.params]]
+name = "flags"
 type = "string"
 
 [[params.items.params]]

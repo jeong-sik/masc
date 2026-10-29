@@ -117,6 +117,34 @@ let roundtrip () =
   check bool "SDK timeout survives unchanged" true
     (List.for_all (fun step -> Yojson.Safe.Util.(step |> member "options" |> member "timeout")=`Int 120_000)
       Yojson.Safe.Util.(W.to_json longer |> member "steps" |> to_list))
+let url_matchers () =
+  let regex fields=step "waitForURL" ["urlRegex",obj fields] in
+  let calls=[wait;regex ["source",str "^https://example\\.test/(done|ready)$";"flags",str "i"];
+    regex ["source",str ""];regex ["source",str "done";"flags",str ""];
+    regex ["source",str "done";"flags",str "gy"];regex ["source",str "[";"flags",str "ii"]] in
+  let parsed=request calls in
+  check bool "URL matcher data roundtrips without interpreting native syntax" true
+    (ok (W.of_json (W.to_json parsed))=parsed);
+  check bool "regex and glob URL waits remain read-only" true
+    (List.for_all (fun (step : W.step) -> not (W.is_effect step.action || W.holds_input step.action)) parsed.steps);
+  check bool "native optional flags distinguish omission from explicit empty flags" true
+    (List.map (fun (step : W.step) -> step.action) parsed.steps =
+      [W.Wait_for_url (W.Glob "**/done");
+       W.Wait_for_url (W.Regexp {source="^https://example\\.test/(done|ready)$";flags=Some "i"});
+       W.Wait_for_url (W.Regexp {source="";flags=None});
+       W.Wait_for_url (W.Regexp {source="done";flags=Some ""});
+       W.Wait_for_url (W.Regexp {source="done";flags=Some "gy"});
+       W.Wait_for_url (W.Regexp {source="[";flags=Some "ii"})]);
+  List.iter (fun value -> check bool "malformed or ambiguous URL matcher is refused" true
+    (Result.is_error (W.of_json (obj (base [value])))))
+    [step "waitForURL" [];step "waitForURL" ["url",str ""];
+     step "waitForURL" ["url",str "**/done";"urlRegex",obj ["source",str "done"]];
+     step "waitForURL" ["urlRegex",`Null];regex [];regex ["source",`Int 1];
+     regex ["source",str "x";"flags",`Null];regex ["source",str "x";"source",str "y"];
+     regex ["source",str "x";"flags",str "i";"flags",str "g"];
+     regex ["source",str "x";"test",str "process.exit()"];
+     step "goto" ["urlRegex",obj ["source",str "done"]];
+     step "fetch" ["url",str "/data";"urlRegex",obj ["source",str "data"]]]
 let strict_inputs () =
   List.iter (fun value -> check bool "invalid caller input is rejected" true (Result.is_error (W.of_json value)))
     [obj (("steps",`List [])::base []);
@@ -510,6 +538,7 @@ let () = if Array.length Sys.argv=3 && Sys.argv.(1)="--proof" then proof Sys.arg
   else if Array.length Sys.argv=3 && Sys.argv.(1)="--page-proof" then page_proof Sys.argv.(2)
   else run "native_browser_workflow" ["SDK contract",[
   test_case "native methods preserve values" `Quick roundtrip;
+  test_case "URL matcher forms preserve native syntax and reject ambiguous input" `Quick url_matchers;
   test_case "invalid methods and fields are refused" `Quick strict_inputs;
   test_case "snapshot completes the exact requested sequence" `Quick complete;
   test_case "failed waits and uncertain effects retain progress" `Quick progress_and_uncertainty;

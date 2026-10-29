@@ -8,6 +8,9 @@ type option_choice = Text of string | Match of option_match
 type selection = Clear | One of option_choice | Many of option_choice list
 type clipboard_content = { text : string; html : string option }
 type page_code = Expression of string | Call of { source : string; argument : Yojson.Safe.t }
+type url_matcher = Glob of string | Regexp of { source : string; flags : string option }
+(** Native URL matcher data. RegExp syntax and flags are interpreted by the
+    SDK's JavaScript engine; the host never evaluates caller function source. *)
 (** Validated SDK options for their exact method, excluding caller host paths.
     Fetch [saveAs] names an artifact file; the worker supplies the private path. *)
 type native_options
@@ -23,7 +26,7 @@ type action =
   | Keyboard_type of string | Keyboard_insert_text of string
   | Keyboard_paste of clipboard_content | Keyboard_press of string
   | Select_option of { selector : string; selection : selection }
-  | Goto of string | Wait_for_url of string
+  | Goto of string | Wait_for_url of url_matcher
   | Wait_for_selector of { selector : string; state : element_state }
   | Wait_for_load_state of load_state option
   | Evaluate of page_code
@@ -42,6 +45,9 @@ type t = private { tab_id : int; expected_url : string; steps : step list;
     [options] uses the native SDK names and is validated for the exact method.
     Omission preserves SDK defaults. Methods with no options reject that field.
     [selectionJson] carries the SDK's string/object/array/null selection form.
+    [waitForURL] takes exactly one of [url] (a nonempty string/glob) or
+    [urlRegex] with string [source] and optional string [flags]. Empty regex
+    source is valid; omission of flags preserves the native default.
     Paste passes plain text and optional
     HTML to the SDK, which restores the native clipboard. Focus and all keyboard
     calls are effects, including when a method fails before returning a receipt.

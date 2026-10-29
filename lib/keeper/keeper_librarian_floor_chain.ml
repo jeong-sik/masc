@@ -1,6 +1,7 @@
 module Step = Keeper_librarian_floor_step_request
 module Step_owner = Keeper_librarian_floor_step_owner
 module Judgment = Keeper_librarian_floor_step_judgment
+module Gate = Keeper_librarian_floor_step_gate
 module Edge = Keeper_librarian_durable_edge
 module Durable = Keeper_librarian_durable_request
 module Machine = Keeper_librarian_message_floor.Machine
@@ -52,6 +53,10 @@ let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~unread_me
   let* found = Step_owner.discover ~store ~owner |> Result.map_error owner_error in
   let mine = List.filter (fun (_, (header : Step.header)) -> header.range = range) found in
   let* retained = index mine in
+  (* The gate scope is read once for the pass. The judgments of the steps that
+     earlier passes finished are answered from it, so the pass reads the scope
+     once, not once per step. *)
+  let* inventory = io (fun () -> Gate.Inventory.read ~store ~owner) in
   (* A chain that has a step starts again from what its first step retained:
      the transaction, the facts the floor started from, and the state and unread
      messages it carried in. The caller's [fresh] names a chain's start only
@@ -126,7 +131,8 @@ let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~unread_me
             go machine ~previous:(Some (link_of record))
           | [], _ | _ :: _ :: _, _ | [_], None -> Ok (Stopped {position = question.position; report}))
        | Step_owner.Answered (answer, record) ->
-         let* judged = Judgment.judge ~store ~step ~record ~answer ~fresh_authority:(fresh_authority step) in
+         let* judged = Judgment.judge ~store ~step ~record ~answer ~fresh_authority:(fresh_authority step)
+           ~inventory in
          (match judged with
           | Judgment.Pending detail -> Ok (Pending detail)
           | Judgment.Decided decision ->

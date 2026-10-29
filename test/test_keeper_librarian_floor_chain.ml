@@ -12,6 +12,8 @@ module Exact = Lane_addon_exact
 module Program = Keeper_memory_os_program
 module Types = Keeper_memory_os_types
 module Refusal = Keeper_librarian_input_refusal
+module Judgment = Keeper_librarian_floor_step_judgment
+module Gate = Keeper_librarian_floor_step_gate
 
 let first_message = message first_text
 let second_message = message second_text
@@ -61,6 +63,48 @@ let finished = function
 
 let steps_of fixture ~owner =
   Step_owner.discover ~store:fixture.store ~owner |> Result.map_error Step_owner.error_to_string |> get
+
+let in_position_order steps =
+  List.sort (fun (_, (a : Step.header)) (_, (b : Step.header)) -> Int.compare a.position b.position) steps
+
+(* The directory a scope's records sit in: one directory per scope, named by the
+   scope's digest. *)
+let scope_directory fixture ~scope =
+  Filename.concat (Filename.concat (Store.root fixture.store) Store.tool_request_owners_directory)
+    (Store.digest scope)
+
+(* Take the gate scope away while [f] runs: whatever reads the scope in it
+   finds no journal. *)
+let without_gate_scope fixture ~owner f =
+  let directory = scope_directory fixture ~scope:(Gate.scope owner) in
+  let aside = directory ^ ".aside" in
+  check bool "the gate scope has a directory to take away" true (Sys.file_exists directory);
+  Sys.rename directory aside;
+  Fun.protect ~finally:(fun () -> Sys.rename aside directory) f
+
+(* The answer a finished step retained, read back through its owner. The worker
+   is never called: a finished step has nothing left to ask. *)
+let retained_answer fixture ~owner (record : Owner.retained) =
+  let step = Step.restore ~owner record |> get in
+  let call ~expected:_ ~original:_ ~arguments:_ = fail "a finished step is not sent to the worker again" in
+  match Step_owner.resume ~store:fixture.store ~config:fixture.config ~reserved:(Edge.reserved ())
+          ~original:record ~step ~call with
+  | Ok (Step_owner.Answered (answer, record)) -> step, record, answer
+  | Ok (Step_owner.Pending _ | Step_owner.Refused _) -> fail "a finished step has its answer"
+  | Error error -> failf "the finished step did not restore: %s" (Step_owner.error_to_string error)
+
+let judge_from fixture ~owner ~inventory (record, (_ : Step.header)) =
+  let step, record, answer = retained_answer fixture ~owner record in
+  Judgment.judge ~store:fixture.store ~step ~record ~answer
+    ~fresh_authority:(fun () -> Error "a judgment from the inventory asks for no authority") ~inventory
+
+let decision_of = function
+  | Ok (Judgment.Decided decision) -> decision
+  | Ok (Judgment.Pending detail) -> failf "the judgment was pending: %s" detail
+  | Error detail -> failf "the judgment was refused: %s" detail
+
+let run_ids_of (program : Program.t) =
+  List.map (fun (stage : Program.stage) -> stage.decision.run_id) program.stages
 
 let test_a_chain_runs_each_step_once_and_a_restart_replays_it () = with_fixture (fun fixture ->
   fixture.respond := answering ();
@@ -247,6 +291,39 @@ let test_a_chain_asks_for_its_start_only_while_it_has_no_step () = with_fixture 
   ignore (finished (drive_chain 12) : Machine.finished);
   check int "and a restart never asks" 1 !asked)
 
+(* A pass reads the gate scope once. The steps that earlier passes finished are
+   judged from that one read: with the scope taken away after it, each still
+   makes the decision the chain made, and the same judgment given an inventory
+   of nothing cannot, so it is the read that answered. *)
+let test_a_finished_step_is_judged_from_the_inventory_and_not_from_the_store () = with_fixture (fun fixture ->
+  fixture.respond := answering ();
+  let owner = owner fixture and range = range_link (owner fixture) in
+  let first = finished (drive fixture ~owner ~range ()) in
+  let steps = in_position_order (steps_of fixture ~owner) in
+  let inventory = Gate.Inventory.read ~store:fixture.store ~owner |> get in
+  check int "the scope holds one journal per step" (List.length steps) (Gate.Inventory.record_count inventory);
+  without_gate_scope fixture ~owner (fun () ->
+    let nothing = Gate.Inventory.read ~store:fixture.store ~owner |> get in
+    check int "with the scope away an inventory shows nothing" 0 (Gate.Inventory.record_count nothing);
+    List.iter (fun step ->
+      match judge_from fixture ~owner ~inventory:nothing step with
+      | Ok (Judgment.Decided _) -> fail "a judgment decided without the journal it reads"
+      | Ok (Judgment.Pending _) | Error _ -> ()) steps;
+    check (list string) "the inventory makes each step's decision the chain made" (run_ids_of first.program)
+      (List.map (fun step -> (decision_of (judge_from fixture ~owner ~inventory step)).run_id) steps)))
+
+(* An inventory that does not show a step's journal does not stand in for the
+   store: the judgment reads the journal itself. *)
+let test_a_step_the_inventory_does_not_show_is_judged_from_the_store () = with_fixture (fun fixture ->
+  fixture.respond := answering ();
+  let owner = owner fixture and range = range_link (owner fixture) in
+  let before = Gate.Inventory.read ~store:fixture.store ~owner |> get in
+  check int "no journal exists before the chain runs" 0 (Gate.Inventory.record_count before);
+  let first = finished (drive fixture ~owner ~range ()) in
+  let steps = in_position_order (steps_of fixture ~owner) in
+  check (list string) "the store answers where the inventory does not" (run_ids_of first.program)
+    (List.map (fun step -> (decision_of (judge_from fixture ~owner ~inventory:before step)).run_id) steps))
+
 let () =
   run "keeper_librarian_floor_chain"
     [ ( "chain"
@@ -267,5 +344,9 @@ let () =
         ; test_case "chains of other ranges do not mix" `Slow test_chains_of_other_ranges_do_not_mix
         ; test_case "a chain asks for its start only while it has no step" `Slow
             test_a_chain_asks_for_its_start_only_while_it_has_no_step
+        ; test_case "a finished step is judged from the inventory and not from the store" `Slow
+            test_a_finished_step_is_judged_from_the_inventory_and_not_from_the_store
+        ; test_case "a step the inventory does not show is judged from the store" `Slow
+            test_a_step_the_inventory_does_not_show_is_judged_from_the_store
         ] )
     ]

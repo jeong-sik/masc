@@ -43,8 +43,10 @@ val validate_inventory : inventory:Keeper_librarian_durable_gate.Inventory.t ->
 val receipt_state : Keeper_librarian_durable_request.t -> (bool, string) result
 (** Whether Memory holds the receipts of every range this original names. [true]
     when all of them are there, [false] when none is. A partial set, and an
-    original that names no range, are errors. Blocking read; offload it in an
-    Eio caller. *)
+    original that names no range, are errors. The messages a receipt could not
+    read are not part of the comparison: a range the message floor published
+    with unread messages is the original's range all the same. Blocking read;
+    offload it in an Eio caller. *)
 
 val is_superseded : request:Keeper_librarian_durable_request.t ->
   record:Lane_addon_tool_request_owner.retained -> (bool, string) result

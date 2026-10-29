@@ -1300,9 +1300,27 @@ let provider_refuses_one_turn fixture response =
   assert_pending (run_worker fixture);
   await_delivery fixture ~after:before;
   ended_by_one_refusal (run_worker fixture)
+(* An admission that arrives after the first read, so the next read of the
+   range sees one more than Memory holds. *)
+let record_external_admission ?(name="admitted-after-the-first-read") fixture =
+  let now=Time_compat.now () in
+  let item : Keeper_external_attention.item = {
+    event_id=Keeper_external_attention.event_id_of_dedupe_key name;
+    dedupe_key=name;keeper_name;
+    conversation={conversation_id="agent:" ^ name;surface=Keeper_external_attention.Agent};
+    external_message=None;source_label="agent";
+    actor={actor_id=Some "original-agent";display_name=Some "Original agent";authority=Keeper_chat_store.External};
+    urgency=Keeper_external_attention.Ambient;content_preview="Admitted after the first read";
+    content_ref=None;received_at=now;metadata=[]} in
+  match Keeper_external_attention.For_testing.record_with_clock ~now:(fun () -> now)
+    ~base_path:fixture.config.Workspace.base_path item with
+  | `Recorded -> ()
+  | `Duplicate _ -> fail "duplicate external fixture"
+  | `Error detail -> fail detail
 (* Turn 2 is consumed first, so the turn added here is the whole backlog. *)
-let add_unread_turn fixture turn =
+let add_unread_turn ?(external_admission=false) fixture turn =
   drive_advanced fixture;
+  if external_admission then record_external_admission fixture;
   let all=selected_messages @ turn in
   save_checkpoint fixture.config ~trace_id all 3;
   io (fun () -> append_boundary fixture.config ~turn:3 ~time:(Time_compat.now ())
@@ -1532,6 +1550,189 @@ let test_the_descent_reads_on_while_the_external_cursor_moves () = with_fixture 
   check (list string) "the chain still reads the turn" ["claim number 1";"claim number 2"]
     (program_claims (finished (descend fixture candidate)).program))
 
+(* Publication of a finished chain. The commit is the whole of it: the receipt
+   check, the cursor's acknowledgement and the move of the position are the
+   consumer's own tail, which these tests run through the consumer. *)
+module Publish = Keeper_librarian_floor_publish
+module Commit = Keeper_librarian_durable_commit
+let publish fixture candidate finished =
+  Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
+    memory_action fixture (fun () -> Publish.publish ~candidate ~finished))
+let published = function
+  | Ok Publish.Published -> ()
+  | Ok Publish.Superseded -> fail "the Memory was still the one the program judged"
+  | Error detail -> failf "the publication refused: %s" detail
+(* The consumer finds the range committed and moves its position without
+   asking a model. *)
+let consumer_tail fixture =
+  match memory_action fixture (fun () ->
+    Consumer.consume_one ~config:fixture.config ~keeper_name
+      ~commit:(fun _ -> fail "a range Memory already holds must not be read again")) with
+  | Ok (Consumer.Progress_advanced _ | Official_advanced _) -> ()
+  | Ok (Nothing_to_read | Baseline_advanced _ | Memory_not_committed _ | Pending) ->
+    fail "the consumer did not move the position of a committed range"
+  | Error error -> fail (Consumer.error_to_string error)
+let test_a_finished_chain_commits_its_program_and_the_consumer_moves_the_position () = with_fixture (fun ~sw:_ fixture ->
+  provider_refuses_one_turn fixture size_refusal;
+  let candidate,request=candidate_and_request fixture in
+  fixture.set_step_response (answering_steps ["Original question to retain";"Original completed answer"]);
+  let fin=finished (descend fixture candidate) in
+  let position=progress fixture in
+  published (publish fixture candidate fin);
+  check (list string) "Memory holds the claims of both messages" ["claim number 1";"claim number 2"]
+    (io (fun () -> claims fixture.keepers_dir));
+  check bool "the position has not moved: that is the consumer's tail" true (progress fixture=position);
+  check bool "the range reads as published" true (io (fun () -> Commit.receipt_state request) |> get);
+  let revision () = io (fun () ->
+    Option.map (fun (snapshot : Current.t) -> snapshot.revision) (current fixture.keepers_dir)) in
+  let written=revision () in
+  published (publish fixture candidate fin);
+  check bool "a second call writes no new revision, whatever the facts" true (revision ()=written);
+  check (list string) "and no more claims" ["claim number 1";"claim number 2"]
+    (io (fun () -> claims fixture.keepers_dir));
+  consumer_tail fixture;
+  check bool "the consumer moved the position" true (progress fixture<>position);
+  check bool "and the published range is no candidate" true (Option.is_none (candidate_of fixture)))
+let test_a_hole_travels_in_the_receipt_and_in_the_external_cursor () = with_fixture (fun ~sw:_ fixture ->
+  let huge=message (filler "huge-message" oversized_turn_bytes) in
+  add_unread_turn ~external_admission:true fixture [huge;reply "Oversized answer"];
+  frame_refuses_the_turn_twice fixture;
+  let candidate,request=candidate_and_request fixture in
+  let through=Keeper_librarian_input_sources.external_through (Source.counterparts (Capture.source request)) in
+  check int "the original saw the admission that came after the first read" 2 through;
+  fixture.set_step_response (answering_steps ["huge-message";"Oversized answer"]);
+  let fin=finished (descend fixture candidate) in
+  check int "the program has its hole" 1 (List.length fin.program.unread);
+  published (publish fixture candidate fin);
+  let runtime_keepers_dir=Workspace.keepers_runtime_dir fixture.config in
+  (match io (fun () -> Current.committed_durable_coverage ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+           ~receipt_scope:runtime_keepers_dir |> get) with
+   | Some range -> check bool "the receipt carries the hole" true (range.unread_messages=fin.program.unread)
+   | None -> fail "the range has no receipt");
+  check bool "and still reads as the original's range" true (io (fun () -> Commit.receipt_state request) |> get);
+  check bool "so it is no candidate before the consumer has moved the position" true
+    (Option.is_none (candidate_of fixture));
+  check int "the cursor was prepared with that receipt, so reading it acknowledges the admissions" through
+    (io (fun () -> Keeper_external_read_cursor.read ~memory_keepers_dir:fixture.keepers_dir ~runtime_keepers_dir
+       ~keeper_name |> get |> Keeper_external_read_cursor.offset));
+  consumer_tail fixture;
+  check bool "reading the committed ledger archives the hole of the receipt" true
+    (io (fun () -> Current.committed_unread_messages ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get)
+     =fin.program.unread))
+(* The turn has a hole and an admission after the first read, so the cursor the
+   publication would prepare differs from the one the consumer prepared. *)
+let test_a_memory_that_changed_since_the_chain_began_supersedes_the_program () = with_fixture (fun ~sw:_ fixture ->
+  let huge=message (filler "huge-message" oversized_turn_bytes) in
+  add_unread_turn ~external_admission:true fixture [huge;reply "Oversized answer"];
+  frame_refuses_the_turn_twice fixture;
+  let candidate,_=candidate_and_request fixture in
+  fixture.set_step_response (answering_steps ["huge-message";"Oversized answer"]);
+  let fin=finished (descend fixture candidate) in
+  let independent=Types.observed ~claim:"Independent explicit write" ~category:Types.Fact
+    ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="concurrent-floor-writer"} in
+  io (fun () -> Current.upsert_fact ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+    ~now:(Time_compat.now ()) ~source:{kind=Current.Explicit_write;trace_id="concurrent-floor-writer"}
+    independent |> Result.map_error Current.upsert_error_to_string |> get |> ignore);
+  let position=progress fixture in
+  let cursor () = io (fun () -> Keeper_external_read_cursor.observe
+    ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
+  let cursor_before=cursor () in
+  (match publish fixture candidate fin with
+   | Ok Publish.Superseded -> ()
+   | Ok Publish.Published -> fail "a program that judged another Memory was committed"
+   | Error detail -> failf "the publication refused: %s" detail);
+  check (list string) "only the independent write joined the earlier turn's claim in Memory"
+    ["Independent explicit write";"Knowledge from original completed history"]
+    (io (fun () -> claims fixture.keepers_dir));
+  check bool "and the position did not move" true (progress fixture=position);
+  check bool "and the external cursor was not prepared" true (cursor ()=cursor_before))
+(* A program that changes no fact still writes a receipt and a revision, so a
+   second call that did not see the first would write them again. *)
+let test_a_second_publication_of_a_program_that_changes_no_fact_writes_nothing () = with_fixture (fun ~sw:_ fixture ->
+  provider_refuses_one_turn fixture size_refusal;
+  let candidate,request=candidate_and_request fixture in
+  fixture.set_step_response (fun body ->
+    if contains body "Original question to retain" || contains body "Original completed answer"
+    then `OK,F.openai_response (`Assoc ["new_claims",`List [];"dropped",`List [];"working_contexts",`List [];
+      "working_state",`String "nothing to keep"])
+    else fail "a floor step carries none of the messages of the turn");
+  let fin=finished (descend fixture candidate) in
+  published (publish fixture candidate fin);
+  check bool "the range reads as published" true (io (fun () -> Commit.receipt_state request) |> get);
+  let revision () = io (fun () ->
+    Option.map (fun (snapshot : Current.t) -> snapshot.revision) (current fixture.keepers_dir)) in
+  let receipts () = io (fun () -> Fs_compat.load_file_opt
+    (Current.durable_range_receipt_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name)) in
+  let written=revision () and sidecar=receipts () in
+  published (publish fixture candidate fin);
+  check bool "a second call writes no new revision" true (revision ()=written);
+  check bool "and no new receipt" true (receipts ()=sidecar))
+(* The persistence of the snapshot fails after the rename: the commit says it
+   could not confirm durability, and the range is in Memory all the same. *)
+let test_a_commit_error_after_the_snapshot_was_renamed_does_not_hide_the_receipt () = with_fixture (fun ~sw:_ fixture ->
+  provider_refuses_one_turn fixture size_refusal;
+  let candidate,request=candidate_and_request fixture in
+  fixture.set_step_response (answering_steps ["Original question to retain";"Original completed answer"]);
+  let fin=finished (descend fixture candidate) in
+  let apply ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program =
+    Current.For_testing.apply_program_with_publication_io
+      ~write_snapshot:(Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+        ~sync_file:(fun _ -> ()) ~sync_parent:(fun _ -> failwith "after the snapshot rename"))
+      ~sync_snapshot:(fun _ -> Error "snapshot durability deliberately unconfirmed")
+      ~before_journal:(fun () -> ()) ~on_committed:(fun _ -> ())
+      ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program in
+  (match Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
+     memory_action fixture (fun () -> Publish.For_testing.publish_with ~apply ~candidate ~finished:fin)) with
+   | Ok Publish.Published -> ()
+   | Ok Publish.Superseded -> fail "the Memory was still the one the program judged"
+   | Error detail -> failf "the range was in Memory, but the publication said: %s" detail);
+  check bool "the range reads as published" true (io (fun () -> Commit.receipt_state request) |> get);
+  check (list string) "and Memory holds the claims of both messages" ["claim number 1";"claim number 2"]
+    (io (fun () -> claims fixture.keepers_dir));
+  consumer_tail fixture)
+(* The consumer prepares the cursor for the admissions it sees now. The commit
+   callback publishes the chain that read the admissions of its original and
+   returns, and the consumer's tail runs in the same pass: it acknowledges what
+   the chain read, never an admission that came after the original. *)
+let test_the_consumers_tail_runs_in_the_pass_that_published () = with_fixture (fun ~sw:_ fixture ->
+  let huge=message (filler "huge-message" oversized_turn_bytes) in
+  add_unread_turn ~external_admission:true fixture [huge;reply "Oversized answer"];
+  frame_refuses_the_turn_twice fixture;
+  let candidate,request=candidate_and_request fixture in
+  let through=Keeper_librarian_input_sources.external_through (Source.counterparts (Capture.source request)) in
+  check int "the original saw the admission that came after the first read" 2 through;
+  fixture.set_step_response (answering_steps ["huge-message";"Oversized answer"]);
+  let fin=finished (descend fixture candidate) in
+  check int "the program has its hole" 1 (List.length fin.program.unread);
+  record_external_admission ~name:"admitted-after-the-candidate" fixture;
+  let position=progress fixture in
+  (match memory_action fixture (fun () ->
+     Consumer.consume_one ~config:fixture.config ~keeper_name ~commit:(fun _ ->
+       match Publish.publish ~candidate ~finished:fin with
+       | Ok Publish.Published -> Consumer.Memory_committed
+       | Ok Publish.Superseded -> fail "the Memory was still the one the program judged"
+       | Error detail -> failf "the publication refused: %s" detail)) with
+   | Ok (Consumer.Progress_advanced _) -> ()
+   | Ok (Nothing_to_read | Baseline_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending) ->
+     fail "the pass that published must move the position"
+   | Error error -> fail (Consumer.error_to_string error));
+  check bool "the position moved" true (progress fixture<>position);
+  check int "the tail acknowledged the admissions the chain read, not the later one" through
+    (io (fun () -> Keeper_external_read_cursor.read ~memory_keepers_dir:fixture.keepers_dir
+       ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get
+       |> Keeper_external_read_cursor.offset)))
+let test_an_official_turn_is_published_with_its_own_receipt () = with_fixture ~history_kind:Official (fun ~sw:_ fixture ->
+  provider_refuses_one_turn fixture size_refusal;
+  let candidate,request=candidate_and_request fixture in
+  fixture.set_step_response (answering_steps ["Original official-client question";"Original official-client answer"]);
+  let fin=finished (descend fixture candidate) in
+  published (publish fixture candidate fin);
+  check (list string) "Memory holds the claims of both messages" ["claim number 1";"claim number 2"]
+    (io (fun () -> claims fixture.keepers_dir));
+  check bool "the official range reads as published" true (io (fun () -> Commit.receipt_state request) |> get);
+  consumer_tail fixture;
+  check bool "and is no candidate" true (Option.is_none (candidate_of fixture)))
+
 let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured completed-history",[
   test_case "missing attachment is reported without consuming source" `Quick test_unattached_reports_without_consuming;
   test_case "terminal refusal preserves reason and allows a fresh original" `Quick test_terminal_refusal_allows_fresh_original;
@@ -1597,4 +1798,18 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_a_refused_original_whose_read_position_moved_is_no_longer_a_candidate;
   test_case "the descent reads on while the external cursor moves" `Quick
     test_the_descent_reads_on_while_the_external_cursor_moves;
+  test_case "a finished chain commits its program and the consumer moves the position" `Quick
+    test_a_finished_chain_commits_its_program_and_the_consumer_moves_the_position;
+  test_case "a hole travels in the receipt and in the external cursor" `Quick
+    test_a_hole_travels_in_the_receipt_and_in_the_external_cursor;
+  test_case "a memory that changed since the chain began supersedes the program" `Quick
+    test_a_memory_that_changed_since_the_chain_began_supersedes_the_program;
+  test_case "a second publication of a program that changes no fact writes nothing" `Quick
+    test_a_second_publication_of_a_program_that_changes_no_fact_writes_nothing;
+  test_case "a commit error after the snapshot was renamed does not hide the receipt" `Quick
+    test_a_commit_error_after_the_snapshot_was_renamed_does_not_hide_the_receipt;
+  test_case "the consumer's tail runs in the pass that published" `Quick
+    test_the_consumers_tail_runs_in_the_pass_that_published;
+  test_case "an official turn is published with its own receipt" `Quick
+    test_an_official_turn_is_published_with_its_own_receipt;
 ]]

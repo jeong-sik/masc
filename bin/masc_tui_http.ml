@@ -76,6 +76,7 @@ let keeper_turn_interrupt_path = "/api/v1/keepers/turn/interrupt"
 let keeper_tool_approval_path = "/api/v1/keepers/tool-approval"
 let fusion_runs_path = "/api/v1/dashboard/fusion-runs"
 let fusion_config_path = "/api/v1/runtime/config/fusion"
+let memory_recall_standing_path = "/api/v1/runtime/config/memory-recall"
 let runtime_probe_path = "/api/v1/dashboard/runtime-probe"
 let msx_press_path = "/api/v1/msx/press"
 let msx_carts_path = "/api/v1/msx/carts"
@@ -3357,6 +3358,12 @@ let fetch_fusion_detail ~(host : string) ~(port : int) ~(run_id : string) :
 let fetch_fusion_config ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:fusion_config_path
+
+(** GET /api/v1/runtime/config/memory-recall -- which Keepers the memory
+    recall judgment reaches now, as the server reads its gate. *)
+let fetch_memory_recall_standing ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:memory_recall_standing_path
 
 (** POST /api/v1/keepers/<keeper>/fusion -- start a Fusion run the Keeper
     owns. Answered through [post_json_outcome]: the server's refusal (a 4xx,

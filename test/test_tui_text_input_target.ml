@@ -610,6 +610,78 @@ let test_the_recall_form_claims_only_on_the_runtime_pane () =
   check target "another pane keeps its keys" None (resolved state)
 ;;
 
+(* The server's reading for the recall form is numbered per open. An answer
+   that carries the number of a form the operator already left is dropped, and
+   one that arrives with no form open lands nowhere. *)
+let test_the_recall_form_hears_only_the_answer_of_its_own_open () =
+  let module Form = Masc_tui_memory_recall_form in
+  let state = fresh_state () in
+  let open_form () =
+    match
+      Form.open_on
+        ~keepers:[ { Form.name = "alpha"; presence = Form.Unknown } ]
+        "[models.probe]\napi-name = \"probe\"\n"
+    with
+    | Ok form -> form
+    | Error reason -> Alcotest.fail reason
+  in
+  let server () =
+    match state.Tui_types.memory_recall_form with
+    | Some form -> Some (Form.server form)
+    | None -> None
+  in
+  let answer detail = Form.Server_unavailable detail in
+  state.Tui_types.memory_recall_form <- Some (open_form ());
+  let first = Tui_types.begin_memory_recall_standing_read state in
+  check bool "a form waits" true (server () = Some Form.Server_unread);
+  Tui_types.finish_memory_recall_standing_read state ~generation:first (answer "first");
+  check bool "its own answer lands" true (server () = Some (answer "first"));
+  (* The operator leaves it and opens another. *)
+  state.Tui_types.memory_recall_form <- Some (open_form ());
+  let second = Tui_types.begin_memory_recall_standing_read state in
+  check bool "every open takes a number of its own" true (second <> first);
+  Tui_types.finish_memory_recall_standing_read state ~generation:first (answer "late");
+  check bool "the answer of the form left is dropped" true (server () = Some Form.Server_unread);
+  Tui_types.finish_memory_recall_standing_read state ~generation:second (answer "second");
+  check bool "the answer of this open lands" true (server () = Some (answer "second"));
+  state.Tui_types.memory_recall_form <- None;
+  Tui_types.finish_memory_recall_standing_read state ~generation:second (answer "after");
+  check bool "no form open: the answer lands nowhere" true (server () = None)
+;;
+
+(* When the workspace identity is lost the reply to a reading in flight is
+   retired. The form must say it stopped waiting, and an answer it already has
+   stays. *)
+let test_a_retired_reading_does_not_leave_the_recall_form_waiting () =
+  let module Form = Masc_tui_memory_recall_form in
+  let state = fresh_state () in
+  let form =
+    match
+      Form.open_on
+        ~keepers:[ { Form.name = "alpha"; presence = Form.Unknown } ]
+        "[models.probe]\napi-name = \"probe\"\n"
+    with
+    | Ok form -> form
+    | Error reason -> Alcotest.fail reason
+  in
+  let server () =
+    match state.Tui_types.memory_recall_form with
+    | Some form -> Some (Form.server form)
+    | None -> None
+  in
+  state.Tui_types.memory_recall_form <- Some form;
+  let (_ : int) = Tui_types.begin_memory_recall_standing_read state in
+  check bool "a form waits" true (server () = Some Form.Server_unread);
+  Tui_types.suspend_workspace_readings state;
+  check bool "the form stops waiting for the reply it will not get" true
+    (match server () with Some (Form.Server_unavailable _) -> true | _ -> false);
+  (* An answer the form already has is kept. *)
+  let answered = Form.Server_unavailable "answered" in
+  state.Tui_types.memory_recall_form <- Some (Form.with_server form answered);
+  Tui_types.suspend_workspace_readings state;
+  check bool "an answer is kept" true (server () = Some answered)
+;;
+
 (* The form outlives nothing. The loop asks this every iteration rather than
    the places that move the surface: the Activity pane's mouse handler and
    the async Task handoff both change [view] without passing any
@@ -745,7 +817,11 @@ let () =
           test_case "the account form claims only on the runtime pane" `Quick
             test_the_account_form_claims_only_on_the_runtime_pane;
           test_case "the recall form claims only on the runtime pane" `Quick
-            test_the_recall_form_claims_only_on_the_runtime_pane
+            test_the_recall_form_claims_only_on_the_runtime_pane;
+        test_case "the recall form hears only the answer of its own open" `Quick
+            test_the_recall_form_hears_only_the_answer_of_its_own_open;
+        test_case "a retired reading does not leave the recall form waiting" `Quick
+            test_a_retired_reading_does_not_leave_the_recall_form_waiting
         ] )
     ]
 ;;

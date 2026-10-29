@@ -100,7 +100,14 @@ range row chooses off, picked Keepers only, or every Keeper. In the picked
 range the form lists the Keepers the TUI knows, and a name the file lists that
 the TUI does not know stays in the list, marked. A Keeper that is paused, or
 that no fiber runs (the roster lacks it, or holds it without a running
-keepalive), is marked too. Space picks, Enter saves, Esc closes. A line under
+keepalive), is marked too. A line under the heading says what the server
+reads now (`GET /api/v1/runtime/config/memory-recall`, see "Watch it"): whether
+the lane has a key and how many Keepers the judgment reaches. A Keeper the
+server judges is marked, and one that is picked and the server does not reach
+says why. A file edited on disk and not yet loaded shows up that way. The
+reading is display only: it changes neither what Enter writes nor the line
+that says what saving would do. A server older than the route answers 404 and
+the form says it could not read it. Space picks, Enter saves, Esc closes. A line under
 the list says what saving would do, for example "off -> picked Keepers only",
 the Keepers added to or dropped from the list, or that nothing changes.
 

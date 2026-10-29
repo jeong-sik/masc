@@ -407,6 +407,10 @@ type async_msg =
   | Fusion_launch_options_loaded of
       int * (Masc.Tui_decode_fusion.fusion_launch_options, string) result
   | Fusion_launched of int * (string, string) result
+  (* Carries the generation of the form that asked: the answer to a read the
+     operator already left must not land on another form. *)
+  | Memory_recall_standing_loaded of
+      int * (Masc.Tui_decode_memory_recall.memory_recall_reading, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
   | Memory_loaded of (Masc.Tui_decode_memory_health.memory_health_snapshot, string) result

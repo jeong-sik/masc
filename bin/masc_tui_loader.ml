@@ -1530,6 +1530,14 @@ let load_fusion_launch_options ~(host : string) ~(port : int) :
   | Error err -> Error ("fusion presets load failed: " ^ err)
   | Ok json -> Masc.Tui_decode_fusion.decode_fusion_launch_options json
 
+(** Read which Keepers the memory recall judgment reaches now. A server older
+    than the route answers 404, which comes back as the error. *)
+let load_memory_recall_standing ~(host : string) ~(port : int) :
+    (Masc.Tui_decode_memory_recall.memory_recall_reading, string) result =
+  match fetch_memory_recall_standing ~host ~port with
+  | Error err -> Error ("memory recall standing load failed: " ^ err)
+  | Ok json -> Masc.Tui_decode_memory_recall.decode_memory_recall_reading json
+
 (** Start a Fusion run and read back its run id. A refusal is the server's
     sentence; an unanswered request says so, because the run may have
     started and the list is the place to look. *)

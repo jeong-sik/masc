@@ -30,6 +30,16 @@ type roster_entry =
   ; presence : presence
   }
 
+(** What the server says about the recall gate now, drawn beside the choice.
+    It is display only: it changes neither what the form writes nor what
+    {!change} says. It is the server's gate as loaded, so a file edited on
+    disk and not loaded shows as a picked Keeper the server does not reach. *)
+type server =
+  | Server_unread  (** Asked, not answered yet. *)
+  | Server_unavailable of string
+      (** The answer could not be read; the reason, as the loader worded it. *)
+  | Server_read of Masc.Tui_decode_memory_recall.memory_recall_reading
+
 type t
 
 val open_on : ?source_revision:string -> keepers:roster_entry list -> string -> (t, string) result
@@ -39,6 +49,35 @@ val open_on : ?source_revision:string -> keepers:roster_entry list -> string -> 
     the form starts with that list picked, so switching recall back on
     restores it. [Error] says why there is nothing to edit: the file does not
     parse as a runtime configuration. *)
+
+val with_server : t -> server -> t
+(** The form with the server's answer. The pane gives it when the answer
+    arrives, for the form it was asked for. *)
+
+val server : t -> server
+(** What the form holds of the server's answer. *)
+
+val stop_waiting : t -> string -> t
+(** A form still waiting for the server's answer stops waiting and says
+    why ([Server_unavailable]); one that has an answer, or has already
+    given up, is unchanged. The pane calls it when the answer cannot
+    come: the reply would be retired. *)
+
+(** What the Keeper list says of one Keeper beside the server's reading. *)
+type mark =
+  | No_mark  (** Nothing: no answer, or a Keeper that is neither picked nor admitted. *)
+  | Reached  (** The gate admits the Keeper. It does not say the Keeper runs. *)
+  | Not_reached of Masc.Keeper_memory_recall_standing.reason
+      (** Picked, and the gate does not admit it. *)
+  | No_declaration
+      (** Picked, and the server's reading does not list it: the server has no
+          declaration file under that name. *)
+
+val mark : t -> string -> mark
+(** The mark of the Keeper by that name. *)
+
+val mark_text : mark -> string
+(** The words the list draws for a mark; empty for {!No_mark}. *)
 
 val source_revision : t -> string option
 (** The revision the form was opened on. Editing a draft never advances it;

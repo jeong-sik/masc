@@ -105,7 +105,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 | 층 | 결과 | 설계 | 선행 |
 |---|---|---|---|
 | B1 | `authz.jsonl`을 파일에 쌓는 저장소다. B1a는 한 줄의 형식과 author 짝 검사, B1b는 파일이다. 세부는 표 아래 B1 범위다. lease 계열 group commit은 E1에서 붙인다. | §6.3, §8.1 | A3 |
-| B2 | backup 밖 append-only 저장소(설계의 외부 저장소·revocation ledger)와 `Intent_pending`/`Committed`. 저장소는 객체의 scoped epoch 최고값, artifact별 `credential_generation`, Intent 상태를 기록한다. Intent의 `Subject`는 `Grant`·`Credential`·`Principal`·`Runtime`·`Workspace`(모드 사건) 중 하나다(§4.5). 같은 writer lock 구역, 판정 1~5, `AuthorizationUncertain`, `Revocation_pending` 게이트, `Fresh_bootstrap`, 외부 저장소의 위치를 적은 설치 기록(§6의 결정 2). 세부는 표 아래 B2 범위다. | §4.5, §8.2~8.4 | B1 |
+| B2 | backup 밖 append-only 저장소(설계의 외부 저장소·revocation ledger)와 `Intent_pending`/`Committed`. 저장소는 Intent 상태를 기록하고(B2a), 객체의 scoped epoch 최고값과 artifact별 `credential_generation`은 epoch를 올리는 사건을 처음 쓰는 층이 더한다. Intent가 가리키는 것은 `Grant`·`Credential`·`Principal`·`Runtime` 중 하나이거나 모드 사건의 workspace다(§4.5). 같은 writer lock 구역, 판정 1~5, `AuthorizationUncertain`, `Revocation_pending` 게이트, `Fresh_bootstrap`, 외부 저장소의 위치를 적은 설치 기록(§6의 결정 2). 세부는 표 아래 B2 범위다. | §4.5, §8.2~8.4 | B1 |
 | B3 | Principal·Admin_assignment·WorkspaceMembership·초대 저장소, 마지막 Admin 보호, 호스트 로컬 bootstrap(`Fresh_bootstrap`을 부르고 A2의 `Multi_account_not_activatable` 거부를 거둔다), ID 발급 규칙, principal 삭제 사건. 세부는 표 아래 B3 범위다. | §4.1, §5.1 | B1, B2, A2 |
 | B4 | `Purge_pending`, `Purged`, `Purge_failed` 사건과 현재 상태 판정(target의 마지막 사건이 현재 상태, target 단위 멱등), `Purge_pending` 대상의 읽기 거부, 재기동 때 남은 `Purge_pending` 목록. `Purge_pending` 지정은 §8.2의 scoped epoch 사건이라 `Intent_pending`/`Committed` 규칙을 따른다(initiator 삭제이면 `Delete` 사건). 삭제는 하지 않는다. 삭제 실행기는 F1이다. | §8.5 | B2, B3 |
 
@@ -130,6 +130,17 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - 기록을 읽을 때 파일이 없는 것(ENOENT)과 읽지 못하는 것(`EACCES`, 다른 I/O 오류, 손상)을 구분한다. 앞은 `없음`이고 뒤는 `AuthorizationUncertain`이다.
 - 시험은 `XDG_CONFIG_HOME`을 임시 디렉터리로 돌려 쓰고 운영자의 설치 기록을 읽거나 쓰지 않는다(`default-base-path`가 시험 실행 파일에 거는 규칙과 같다).
 - 갈래마다 고장 주입 시험을 두고, `Intent_pending`만 남긴 것, 마지막 항목이 잘린 것, 설치 기록을 쓰다 죽은 것(기록 없음 또는 온전함)을 한 건씩 더한다. 설정 디렉터리를 알 수 없는 경우, 기록의 canonical base path가 다른 경우, 기록이 이미 있는 채 `Fresh_bootstrap`이 다시 도는 경우, 기록 없이 같은 경로에 옛 외부 저장소가 있는 경우도 한 건씩 본다.
+
+**B2a 범위** (외부 저장소 파일)
+
+- 외부 저장소는 설치 기록(B2b)이 가리키는 경로의 JSONL 파일이다. 한 줄이 항목 하나이고, `Authz_log`와 같은 공용 파일 기계 `Authz_jsonl_file`로 열고 잇는다. 줄을 읽고 쓰는 규칙은 `Authz_external_store`가 정한다. `authz.jsonl`과 달리 줄이 해시 사슬을 이루지 않는다. 이 파일을 되감거나 고쳐 쓸 수 있는 쪽은 설치 기록과 base path에 모두 쓸 수 있는 쪽이고, 그 쪽은 막지 못한다고 이미 정했다(§8.4).
+- 항목은 닫힌 변형 셋이다. `Intent_pending {previous_record_hash, intended_next_record_digest, change}`, `Committed {record_hash}`, `Aborted_intent`(대기 중인 intent를 그대로 되풀이한다). 설계 §8.2의 `aborted_intent`는 `previous_record_hash`를 빼고 적었는데, 되풀이하면 한 줄만 읽어도 무엇을 포기했는지 알 수 있어서 intent 전체를 싣는다.
+- `change`는 권한 사건과 모드 사건으로 나뉘는 닫힌 변형이다. 권한 사건 `Authz {event, subject}`는 `event`가 `Grant`, `Revoke`, `Disable`, `Delete`, `Block`, `Purge`, `Policy_revoke`, `Credential_replace` 중 하나이고 `subject`는 `Grant`·`Credential`·`Principal`·`Runtime` 중 하나다. 모드 사건 `Mode {event, workspace_id}`는 `event`가 `Fresh_bootstrap`, `Off`, `Reactivate` 중 하나다. 설계 §8.2가 `subject`에 `Workspace`를 더한다고 한 것을 타입으로는 이렇게 나눈다. 모드 사건에 권한 사건의 대상이 붙거나 그 반대가 되는 짝을 만들 수 없게 하고, A3의 `Subject`는 건드리지 않는다. 어느 권한 사건이 어느 대상에 쓰이는지는 설계가 정하지 않는다. 이 층은 모든 짝을 허용하고, 사건을 처음 쓰는 층이 쓰는 짝을 정한다. 권한 축소 사건(§8.3)인지는 `change`를 `match`로 가른다(`Grant`와 모드 사건은 축소가 아니다).
+- 파일의 상태는 줄을 접어 만든다. 대기 중인 intent는 최대 하나이고, 마지막 `Committed`의 해시, `Aborted_intent` 목록, `Committed`가 된 `Fresh_bootstrap`의 workspace_id를 가진다.
+- 줄이 이어야 할 것은 §8.2의 순서 그대로다. `Intent_pending`은 대기 중인 intent가 없을 때만 올 수 있다. `Committed.record_hash`는 대기 중인 intent의 `intended_next_record_digest`와 같아야 하고, `Aborted_intent`는 대기 중인 intent와 모든 필드가 같아야 한다. 하나 더, 파일은 `Fresh_bootstrap`으로 시작한다(§8.4). `Fresh_bootstrap`이 `Committed`가 되기 전에는 `Fresh_bootstrap`이 아닌 `Intent_pending`을 거절한다(`Intent_before_bootstrap`). 그 뒤에는 `Fresh_bootstrap`의 `Intent_pending`을 거절하고(`Bootstrap_already_committed`), `Off`·`Reactivate`의 `Intent_pending`이 `Committed`가 된 `Fresh_bootstrap`의 workspace가 아닌 것을 적으면 거절한다(`Workspace_mismatch`). 파일은 되돌릴 수 없는 append-only라서 순서가 어긋난 항목은 쓰기 전에 막고, workspace_id를 조용히 덮어쓰는 일도 없다. 규칙을 어기는 줄은 이을 때 `Rejected`이고 열 때 `Line_rejected`(§5.1의 `읽지 못함`)다.
+- 한 줄의 바이트는 `Authz_external_store`가 직접 쓴다(`Authz_record`와 같다). 멤버 순서가 정해져 있고, 읽은 줄이 `to_line`이 쓰는 줄과 다르면 거절한다. `append`는 쓰기 전에 줄을 되읽어서 쓰려던 항목과 같은지 비교한다(`Authz_jsonl_file`의 `equal_record`). principal을 쓰는 방법은 `Authz_record`와 같은 것을 쓴다.
+- epoch 최고값과 `credential_generation` 항목은 이 층이 정하지 않는다. 설계 §8.2의 `Intent_pending` 필드에 epoch 값이 없고, epoch를 올리는 사건을 쓰는 코드는 B3 전에 없다. 그 사건을 처음 쓰는 층(B3의 principal 사건)이 항목과 비교 판정을 같이 더한다. 그전까지 외부 고수위의 `맞음`은 마지막 `Committed`가 replay에 있는지와 대기 중인 intent의 판정(B2c)으로 정한다. 하드 컷이라 이전 형식을 읽는 코드는 두지 않는다.
+- 시험은 줄의 바이트(모든 사건의 낱말 포함), 모든 `change`의 읽고 쓰기와 다시 열었을 때의 상태, 규칙을 어기는 파일과 줄(순서 규칙과 부트스트랩 규칙), 끝이 잘린 마지막 항목의 자름을 본다.
 
 **B3 범위**
 

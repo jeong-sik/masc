@@ -580,7 +580,7 @@ let test_declared_root_escape_is_refused_as_the_callers () =
    against real symbolic links. The process runner is the server's own: once
    an earlier case in this executable has installed a SIGCHLD handler, as a
    full run does and a lone case does not, a bare [Unix.waitpid] here is cut
-   short by EINTR, and the runner retries. *)
+   short by EINTR; the runner polls the child and retries EINTR. *)
 let run_payload ?env ~stdin argv =
   match argv with
   | "sh" :: _ ->
@@ -596,9 +596,15 @@ let run_payload ?env ~stdin argv =
 (* The payloads are written for the endpoint's GNU userland: [mv -T], [stat -c]
    and [cp --remove-destination]. The BSD tools macOS ships take none of them,
    so there the payload's write step fails whatever the links are, and the two
-   cases below fail for that and not for the links; they skip there. The forms
-   are tried on scratch files and not through the payload, so a payload that
-   breaks on a GNU host still fails the cases. *)
+   cases below fail for that and not for the links. They skip on macOS when the
+   forms are missing, and on no other host: anywhere else a missing form is a
+   failure to see, not a reason to go quiet. The forms are tried on scratch
+   files and not through the payload, so a payload that breaks on a GNU host
+   still fails the cases. *)
+let host_is_macos () =
+  run_payload ~stdin:"" [ "sh"; "-c"; "[ \"$(uname -s)\" = Darwin ]" ] = Unix.WEXITED 0
+;;
+
 let host_takes_the_payload_forms () =
   let dir = temp_dir () in
   match
@@ -615,17 +621,17 @@ let host_takes_the_payload_forms () =
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
 ;;
 
-let skip_unless_host_takes_the_payload_forms () =
-  if not (host_takes_the_payload_forms ())
+let skip_on_macos_without_the_payload_forms () =
+  if host_is_macos () && not (host_takes_the_payload_forms ())
   then (
     prerr_endline
-      "skipped: this host's mv, stat or cp does not take the GNU forms the declared-root \
-       payload uses";
+      "skipped: this macOS host's mv, stat or cp does not take the GNU forms the \
+       declared-root payload uses";
     skip ())
 ;;
 
 let test_declared_payload_does_not_follow_a_link_out_of_the_root () =
-  skip_unless_host_takes_the_payload_forms ();
+  skip_on_macos_without_the_payload_forms ();
   let root = temp_dir () in
   let app = Filename.concat root "app" in
   let outside = Filename.concat root "outside" in
@@ -715,7 +721,7 @@ let env_with_shim ~command ~swap =
    check and its write. A file outside the root keeps its bytes, and no
    directory appears there, whichever moment the change lands at. *)
 let test_declared_payload_does_not_write_through_a_later_link () =
-  skip_unless_host_takes_the_payload_forms ();
+  skip_on_macos_without_the_payload_forms ();
   let root = temp_dir () in
   let app = Filename.concat root "app" in
   let outside = Filename.concat root "outside" in

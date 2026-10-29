@@ -102,11 +102,6 @@ let load_error_text = function
   | Store.Agent_core_error detail -> "sdk error: " ^ detail
   | Store.Objects_invalid _ as error -> Store.checkpoint_load_error_to_string error
 
-let write_file_bytes path bytes =
-  match Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc bytes) with
-  | () -> ()
-  | exception Sys_error detail -> error ("cannot write " ^ path ^ ": " ^ detail)
-
 let timestamp_utc () =
   let tm = Unix.gmtime (Unix.gettimeofday ()) in
   Printf.sprintf
@@ -213,10 +208,18 @@ let () =
   match Store.load_agent_core ~session_dir ~session_id:trace with
   | Error load_error -> error (load_error_text load_error)
   | Ok checkpoint ->
-    (* The canonical is a head whose objects the purge stops naming, so the
-       backup is the whole checkpoint in the value codec's JSON, which reads
-       back on its own. *)
+    (* The report measures the whole checkpoint in the value codec's JSON;
+       the canonical is a head, a small part of it. *)
     let original_bytes = Agent_core.Checkpoint.to_string checkpoint in
+    let source_content =
+      match
+        Agent_core.Checkpoint_objects.content_digest
+          (Agent_core.Checkpoint_objects.create_memo ())
+          checkpoint
+      with
+      | Ok digest -> (digest :> string)
+      | Error detail -> error ("checkpoint cannot be encoded: " ^ Agent_core.Error.to_string detail)
+    in
     let boundary_lines =
       match
         Masc.Keeper_turn_boundaries.read
@@ -272,7 +275,7 @@ let () =
          report.Purge.messages_before
          report.Purge.messages_after;
        Printf.printf
-         "bytes (canonical): %d -> %d (%+.1f%%)\n"
+         "bytes (checkpoint JSON): %d -> %d (%+.1f%%)\n"
          before_len
          after_len
          (if before_len = 0
@@ -330,13 +333,28 @@ let () =
              runtime_root
              (Printf.sprintf "backups-checkpoint-purge-%s-%s" trace (timestamp_utc ()))
          in
-         (match Sys.is_directory backup_dir with
-          | true -> ()
-          | false -> error (backup_dir ^ " exists and is not a directory")
-          | exception Sys_error _ -> Unix.mkdir backup_dir 0o755);
-         let backup_path = Filename.concat backup_dir (trace ^ ".json") in
-         write_file_bytes backup_path original_bytes;
-         Printf.printf "backup: %s (%d bytes)\n" backup_path before_len;
+         (* The head and the objects it names, as the session holds them:
+            copying the directory over the session dir puts the checkpoint
+            back. *)
+         (match
+            Store.back_up_canonical
+              ~session_dir
+              ~session_id:trace
+              ~ownership_root:runtime_root
+              ~backup_dir
+              ~content:source_content
+          with
+          | Error (Store.Backup_content_changed _ as changed) ->
+            error
+              ("the checkpoint changed underneath the purge; re-run against the current file: "
+               ^ Store.backup_error_to_string changed)
+          | Error
+              (( Store.Backup_canonical_unreadable _ | Store.Backup_canonical_absent
+               | Store.Backup_object_unreadable _ | Store.Backup_file_conflict _
+               | Store.Backup_write_failed _ | Store.Backup_read_back_mismatch _ ) as failure) ->
+            error ("backup failed, nothing purged: " ^ Store.backup_error_to_string failure)
+          | Ok backup ->
+            Printf.printf "backup: %s (%d bytes with its objects)\n" backup_dir backup.backup_bytes);
          (match
             Store.save_agent_core_classified ~session_dir
               ~history_retained:

@@ -1431,6 +1431,13 @@ let test_purge_keeps_the_librarian_position_and_every_message () =
   (match Checkpoints.purge_current config ~keeper_name ~apply:true with
    | Ok result ->
      check bool "applied" true result.applied;
+     (* The backup is the source head with its objects, at the session's
+        paths, so a copy over the session dir puts the source back. *)
+     (match result.backup_path with
+      | Some backup_dir ->
+        check string "the backup holds the source head" original
+          (Fs_compat.load_file (Store.agent_core_checkpoint_path ~session_dir:backup_dir ~session_id:trace_id))
+      | None -> fail "an applied purge names its backup");
      check bool "the reasoning was stripped" true
        (result.report.reasoning_blocks_stripped > 0);
      check bool "the result was cleared" true (result.report.tool_results_cleared > 0);

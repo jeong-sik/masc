@@ -440,10 +440,61 @@ let test_retired_input_history_cut () =
   | Operation_failed {detail;_} -> fail detail
   | Operation_deferred -> fail "cut dispatch deferred"
 
+(* The cut is a value in hand and the next seed a decode of saved bytes. The
+   checkpoint codec does not keep a tool result's structured [json], so the
+   two compare as the codec writes them: the seed keeps the cut. *)
+let test_a_decoded_seed_keeps_the_cut () =
+  let trace_id = Keeper_id.Trace_id.of_string session_id |> require "trace" in
+  let message role content : Agent_core.Types.message =
+    { origin = Llm_provider.Types.Conversation; role; content; name = None
+    ; tool_call_id = None; metadata = [] }
+  in
+  let messages =
+    [ message User [ Agent_core.Types.Text "look it up" ]
+    ; message Assistant
+        [ Agent_core.Types.ToolUse { id = "lookup-1"; name = "lookup"; input = `Assoc [] } ]
+    ; message Tool
+        [ Agent_core.Types.ToolResult
+            { tool_use_id = "lookup-1"; content = {|{"found":true}|}
+            ; outcome = Llm_provider.Types.Tool_succeeded
+            ; json = Some (`Assoc [ "found", `Bool true ]); content_blocks = None } ]
+    ; message Assistant [ Agent_core.Types.Text "an answer cut short" ]
+    ]
+  in
+  let source : Agent_core.Checkpoint.t =
+    { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version; session_id
+    ; agent_name = "cut-agent"; model = model_id; system_prompt = None; messages
+    ; usage = Agent_core.Types.empty_usage; turn_count = 2; created_at = 1000.0; tools = []
+    ; tool_choice = None; disable_parallel_tool_use = false; temperature = None; top_p = None
+    ; top_k = None; min_p = None; reasoning_effort = None; enable_thinking = None
+    ; preserve_thinking = None; response_format = Agent_core.Types.Off
+    ; cache_system_prompt = false; context = Agent_core.Context.create_sync ()
+    ; pending_input = None; mcp_sessions = []; working_context = None }
+  in
+  let snapshot value =
+    match Keeper_checkpoint_store.exact_snapshot_of_value ~expected_session_id:trace_id value with
+    | Ok snapshot -> snapshot
+    | Error error -> fail (Keeper_checkpoint_store.checkpoint_ref_load_error_to_string error)
+  in
+  let cut_value = { source with messages = List.take 3 messages } in
+  let cut = Keeper_input_history_cut.prepare ~source:(snapshot source) ~candidate:cut_value
+    |> require "prepare the cut" in
+  let decoded =
+    Agent_core.Checkpoint.of_string (Agent_core.Checkpoint.to_string cut_value)
+    |> require "decode the cut"
+  in
+  check bool "the decode drops the structured payload" false
+    (List.equal ( = ) decoded.messages cut_value.messages);
+  let seed = { decoded with messages = decoded.messages @ [ message Assistant [ Agent_core.Types.Text "the full answer" ] ] } in
+  match Keeper_input_history_cut.bind_seed cut ~seed:(snapshot seed) with
+  | Ok (_ : Keeper_input_history_cut.binding) -> ()
+  | Error detail -> fail detail
+
 let () = match Array.to_list Sys.argv with
   | [_; "--native-context-child"; root] -> run_phase ~child:true root
   | _ -> run "native shared context restart"
       ["context ownership", [test_case "exact retired response cut advances input authority" `Quick test_retired_input_history_cut;
+       test_case "a decoded seed keeps the cut" `Quick test_a_decoded_seed_keeps_the_cut;
        test_case "resumed tool and hook changes reach durable checkpoint"
         `Quick test_active_context_restart;
        test_case "first input checkpoint precedes native terminal settlement"

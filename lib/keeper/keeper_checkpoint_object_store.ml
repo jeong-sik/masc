@@ -25,35 +25,31 @@ let write_error_to_string { digest; error } =
     (Keeper_fs.durable_write_error_to_string error)
 ;;
 
-(* A file already there is kept only when its bytes have its name: a file a
-   crash cut short is written again. *)
-let holds ~session_dir digest =
-  match
-    Fs_compat.load_owned_regular_file
-      ~ownership_root:(ownership_root ~session_dir)
-      (path ~session_dir digest)
-  with
-  | Ok (Some bytes) -> String.equal (Objects.digest_of_bytes bytes :> string) (digest :> string)
-  | Ok None | Error _ -> false
-;;
-
+(* Every object is written whole, even when a file of that name is there:
+   the atomic write syncs the directory entry too, which a file a failed
+   save left behind may not have. *)
 let write ~session_dir objects =
   let rec go written = function
     | [] -> Ok written
     | (digest, bytes) :: rest ->
-      if holds ~session_dir digest
-      then go written rest
-      else (
-        match
-          Keeper_fs.save_bytes_durable_atomic
-            ~ownership_root:(ownership_root ~session_dir)
-            (path ~session_dir digest)
-            bytes
-        with
-        | Error error -> Error { digest; error }
-        | Ok () -> go (written + String.length bytes) rest)
+      (match
+         Keeper_fs.save_bytes_durable_atomic
+           ~ownership_root:(ownership_root ~session_dir)
+           (path ~session_dir digest)
+           bytes
+       with
+       | Error error -> Error { digest; error }
+       | Ok () -> go (written + String.length bytes) rest)
   in
   go 0 objects
+;;
+
+let present ~session_dir digest =
+  match Unix.lstat (path ~session_dir digest) with
+  | { Unix.st_kind = Unix.S_REG; _ } -> true
+  | { Unix.st_kind = Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK; _ } ->
+    false
+  | exception Unix.Unix_error ((_ : Unix.error), _, _) -> false
 ;;
 
 let read ~session_dir digest =

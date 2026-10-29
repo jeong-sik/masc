@@ -582,6 +582,31 @@ let test_installation_and_conditional_rollback_preserve_evidence () =
     check bool "missing live journal is not inferred as installed or rolled back" true (classification=Journal.Missing);
     (match Journal.restore_installation ~run_dir recovered with
      | Error _ -> () | Ok _ -> fail "missing journal was automatically recreated"))
+(* The content digest covers the last turn's chain and the open messages,
+   not which bundle a turn names. A canonical whose turn names another bundle
+   keeps that digest; a rollback still refuses it, because the canonical has
+   to decode, with its objects, to the installed reference. *)
+let test_a_canonical_naming_another_bundle_stops_the_rollback () =
+  with_installation (fun ~base_path:_ ~run_dir ~path:_ ~canonical ~metadata:_ ~snapshot:_
+      ~adoption:_ ~original:_ plan ->
+    let module Objects = Agent_core.Checkpoint_objects in
+    let head_of bytes = match Objects.head_of_string bytes with
+      | Ok head -> head
+      | Error error -> fail (Objects.load_error_to_string error) in
+    let record = install run_dir plan |> ok |> replaced in
+    let bytes = contents canonical in
+    let head = head_of bytes in
+    let bundle = ((List.hd head.history.turns).bundle :> string) in
+    let other = (Objects.digest_of_bytes "another bundle" :> string) in
+    let tampered = Str.global_replace (Str.regexp_string bundle) other bytes in
+    check bool "the canonical names another bundle" false (String.equal bytes tampered);
+    check string "and keeps its content digest"
+      (Objects.head_content_digest head :> string)
+      (Objects.head_content_digest (head_of tampered) :> string);
+    write canonical tampered;
+    expect_failure
+      (Journal.Input_source_changed "current metadata/canonical differs from installation evidence")
+      (Journal.restore_installation ~run_dir record))
 let test_installation_requires_reviewed_digests_and_offline_owner () =
   with_installation (fun ~base_path ~run_dir ~path ~canonical:_ ~metadata:_ ~snapshot:_ ~adoption:_ ~original plan ->
     check int "readonly absent intent inventory stays empty" 0 (List.length (Journal.list_installations ~base_path |> ok));
@@ -707,6 +732,7 @@ let () = run "Keeper journal offline bundles"
    "offline installation",[
     test_case "install and conditional rollback preserve source evidence" `Quick test_installation_and_conditional_rollback_preserve_evidence;
     test_case "installation requires reviewed digests and offline owner" `Quick test_installation_requires_reviewed_digests_and_offline_owner;
+    test_case "a canonical naming another bundle stops the rollback" `Quick test_a_canonical_naming_another_bundle_stops_the_rollback;
     test_case "late source edit preserves durable intent without replacement" `Quick test_changed_source_after_intent_is_not_overwritten;
     test_case "uncertain intent never permits replacement" `Quick test_uncertain_intent_never_replaces_journal;
     test_case "install and rollback sync uncertainty preserve visible result" `Quick test_install_and_restore_sync_uncertainty_are_not_no_write;

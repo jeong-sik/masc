@@ -5,11 +5,6 @@ open Result.Syntax
 let digest text = Agent_core_sha256.(digest_string text |> to_hex)
 (* A checkpoint reference names the head's content digest, not the digest of
    its bytes (RFC-0476 §3.2). *)
-let checkpoint_digest bytes =
-  match Agent_core.Checkpoint_objects.head_of_string bytes with
-  | Ok head -> Some (Agent_core.Checkpoint_objects.head_content_digest head :> string)
-  | Error (_ : Agent_core.Checkpoint_objects.load_error) -> None
-
 type plan =
   { base_path : string; keeper_name : string; source_path : string
   ; snapshot : Fs_compat.owned_regular_file_snapshot; source_hash : string }
@@ -312,6 +307,13 @@ let decode_checkpoint ~base_path ~trace_id bytes =
     ~expected_session_id:trace_id bytes
   |> Result.map_error (fun cause -> {bundle_id=None;
     failure=Input_selection_invalid (Checkpoint.checkpoint_ref_load_error_to_string cause)})
+(* A copied head stands for [reference] only when it and every object it
+   names decode to it. The content digest alone covers the last turn's chain
+   and the open messages, not the turns before them. *)
+let names_reference ~base_path (reference : Keeper_checkpoint_ref.t) bytes =
+  match decode_checkpoint ~base_path ~trace_id:reference.trace_id bytes with
+  | Ok snapshot -> Keeper_checkpoint_ref.equal reference (Checkpoint.exact_snapshot_reference snapshot)
+  | Error { bundle_id = _; failure = _ } -> false
 let same_pending left right = Option.equal (fun left right -> Yojson.Safe.equal
   (Agent_core.Agent_input_request.pending_to_json left)
   (Agent_core.Agent_input_request.pending_to_json right)) left right
@@ -577,7 +579,7 @@ let capture_adoption_files receipt =
   let* manifest = read_private ~base_path (Filename.concat directory "manifest.json") in
   let* json = decode_json manifest.content in
   if digest metadata.content<>receipt.ia_metadata_hash
-      || checkpoint_digest checkpoint.content<>Some receipt.ia_reference.sha256
+      || not (names_reference ~base_path receipt.ia_reference checkpoint.content)
       || digest derivative.content<>receipt.ia_derivative_hash
       || not (Yojson.Safe.equal json (input_adoption_to_json receipt)) then error Invalid_bundle
   else Ok (derivative,List.map (fun (name,file) -> Filename.concat directory name,file)
@@ -697,7 +699,7 @@ let live_input_evidence record =
   let* metadata = read ~base_path ~absent:(Input_source_changed metadata_path) metadata_path in
   let* canonical = read ~base_path ~absent:(Input_source_changed canonical_path) canonical_path in
   let* () = if digest metadata.content=adoption.ia_metadata_hash
-      && checkpoint_digest canonical.content=Some adoption.ia_reference.sha256
+      && names_reference ~base_path adoption.ia_reference canonical.content
     then Ok () else error (Input_source_changed "current metadata/canonical differs from installation evidence") in
   Ok (derivative,(metadata_path,metadata)::(canonical_path,canonical)::files)
 let inspect_installation ~base_path ~installation_id = blocking (fun () -> boundary base_path (fun () ->

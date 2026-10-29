@@ -398,46 +398,13 @@ let purge_result_json ~action result =
     ]
 ;;
 
-let backup_path_for_source ~config ~trace_id
-      (source_ref : Keeper_checkpoint_ref.t) =
-  let backup_dir =
-    Filename.concat
-      (Workspace.masc_dir config)
-      (Printf.sprintf
-         "backups-checkpoint-purge-%s-%s"
-         trace_id
-         source_ref.sha256)
-  in
-  Filename.concat backup_dir (trace_id ^ ".json")
-;;
-
-let ensure_exact_backup ~config ~trace_id ~source_ref source_bytes =
-  let backup_path = backup_path_for_source ~config ~trace_id source_ref in
-  let read_back () =
-    try Ok (Fs_compat.load_file backup_path) with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printexc.to_string exn)
-  in
-  match Fs_compat.load_file_opt backup_path with
-  | Some existing when String.equal existing source_bytes -> Ok backup_path
-  | Some _ ->
-    Error
-      (Printf.sprintf
-         "existing backup content does not match source ref %s"
-         source_ref.sha256)
-  | None ->
-    (match
-       Keeper_fs.save_bytes_durable_atomic
-         ~ownership_root:(Workspace.masc_dir config)
-         backup_path
-         source_bytes
-     with
-     | Error error -> Error (Keeper_fs.durable_write_error_to_string error)
-     | Ok () ->
-       (match read_back () with
-        | Ok exact when String.equal exact source_bytes -> Ok backup_path
-        | Ok _ -> Error "backup exact read-back mismatch"
-        | Error detail -> Error ("backup read-back failed: " ^ detail)))
+(* One backup per source checkpoint: the head and the objects it names, as
+   the session holds them, so a retried purge of the same source reuses it
+   and copying it over the session dir puts the checkpoint back. *)
+let backup_dir_for_source ~config ~trace_id (source_ref : Keeper_checkpoint_ref.t) =
+  Filename.concat
+    (Workspace.masc_dir config)
+    (Printf.sprintf "backups-checkpoint-purge-%s-%s" trace_id source_ref.sha256)
 ;;
 
 let purge_current_unlocked config ~keeper_name ~apply =
@@ -479,9 +446,8 @@ let purge_current_unlocked config ~keeper_name ~apply =
        | Ok progress, Ok boundary_lines, Ok continuity, Ok snapshot ->
          let source_ref = Keeper_checkpoint_store.exact_snapshot_reference snapshot in
          let source = Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot in
-         (* The backup and the report use the whole checkpoint in the value
-            codec's JSON: one file that reads back without the session's
-            objects, which the purge stops naming. *)
+         (* The report measures the whole checkpoint in the value codec's
+            JSON; the backup copies the head and its objects. *)
          let purge_result =
            Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
              let checkpoint =
@@ -572,15 +538,29 @@ let purge_current_unlocked config ~keeper_name ~apply =
                     ; warnings = []
                     }
                 else
+                  let backup_dir = backup_dir_for_source ~config ~trace_id source_ref in
                   (match
-                     ensure_exact_backup
-                       ~config
-                       ~trace_id
-                       ~source_ref
-                       source_bytes
+                     Keeper_checkpoint_store.back_up_canonical
+                       ~session_dir
+                       ~session_id:trace_id
+                       ~ownership_root:(Workspace.masc_dir config)
+                       ~backup_dir
+                       ~content:source_ref.sha256
                    with
-                   | Error detail -> Error (Purge_backup_failed detail)
-                   | Ok backup_path ->
+                   | Error (Keeper_checkpoint_store.Backup_content_changed _) ->
+                     Error Purge_source_changed
+                   | Error
+                       (( Keeper_checkpoint_store.Backup_canonical_unreadable _
+                        | Keeper_checkpoint_store.Backup_canonical_absent
+                        | Keeper_checkpoint_store.Backup_object_unreadable _
+                        | Keeper_checkpoint_store.Backup_file_conflict _
+                        | Keeper_checkpoint_store.Backup_write_failed _
+                        | Keeper_checkpoint_store.Backup_read_back_mismatch _ ) as failure) ->
+                     Error
+                       (Purge_backup_failed
+                          (Keeper_checkpoint_store.backup_error_to_string failure))
+                   | Ok (_ : Keeper_checkpoint_store.canonical_backup) ->
+                     let backup_path = backup_dir in
                      (match
                         Keeper_checkpoint_store.save_agent_core_if_source
                           ~session_dir

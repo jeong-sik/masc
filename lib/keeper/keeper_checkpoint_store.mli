@@ -85,7 +85,10 @@ type save_agent_core_outcome =
     objects and turn bundles the head names that the previous head did not,
     then the head. [boundary] says whether this save ends a Keeper turn
     ([Turn_closes] writes the turn's messages as one bundle). A failed object
-    write leaves the previous head in place.
+    write leaves the previous head in place. When this process has not seen
+    the previous head's objects (it only parsed that head), the save checks
+    that each is in the session first and writes the missing ones again from
+    [ckpt]'s messages, so a head never names an object that is not there.
 
     This save keeps nothing for the next one: it encodes every message.
     A Keeper's own saves use {!save_agent_core_for_keeper}. *)
@@ -659,6 +662,54 @@ val persist_exact_snapshot :
   session_dir:string ->
   exact_checkpoint_snapshot ->
   (string, persist_error) result
+
+(** What {!back_up_canonical} wrote: the copied head's path and the bytes of
+    the head and every object. *)
+type canonical_backup =
+  { backup_head : string
+  ; backup_bytes : int
+  }
+
+type backup_error =
+  | Backup_canonical_unreadable of checkpoint_load_error
+  | Backup_canonical_absent
+  | Backup_content_changed of
+      { expected : string
+      ; actual : string
+      }
+      (** The canonical's content digest is [actual], not the source the
+          caller read. *)
+  | Backup_object_unreadable of
+      { digest : string
+      ; detail : string
+      }
+  | Backup_file_conflict of string
+      (** A file in the backup holds other bytes than the one it copies. *)
+  | Backup_write_failed of
+      { path : string
+      ; error : Keeper_fs.durable_write_error
+      }
+  | Backup_read_back_mismatch of string
+
+val backup_error_to_string : backup_error -> string
+
+(** Copies the canonical head for [session_id] and every object it names into
+    [backup_dir], at the paths they have under [session_dir]
+    ([<session_id>.json], [objects/<aa>/<sha256>]): the objects first, each
+    checked against its digest, then the head. With the server stopped,
+    copying the contents of [backup_dir] over [session_dir] puts the
+    checkpoint back. [content] is the content digest of the checkpoint the
+    caller read; a canonical with another one is not copied. A file already
+    in [backup_dir] is kept when it holds the same bytes, so a retried backup
+    of one checkpoint succeeds. Files are written durably below
+    [ownership_root]. *)
+val back_up_canonical :
+  session_dir:string ->
+  session_id:string ->
+  ownership_root:string ->
+  backup_dir:string ->
+  content:string ->
+  (canonical_backup, backup_error) result
 
 (** The session subdirectory holding retained artifacts, each named
     [<sha256>.json] after its reference. *)

@@ -56,8 +56,10 @@ val error_to_string : error -> string
 (** [run ~runtime_root ~journal_inputs_dir ~journal_input_head] removes the
     objects under [<runtime_root>/traces/<session>/objects] that no root
     reaches. Each directory directly under [journal_inputs_dir] may hold a
-    copied head named [journal_input_head]. Directories are read without
-    following symlinks. *)
+    copied head named [journal_input_head]. The session root is resolved as
+    the store resolves it, so it may be a link; below it, and under
+    [journal_inputs_dir], only entries that are directories themselves are
+    read, and nothing else there is touched. *)
 val run :
   runtime_root:string ->
   journal_inputs_dir:string ->

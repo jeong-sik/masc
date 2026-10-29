@@ -97,6 +97,35 @@ let directory_entries path =
     Ok None
 ;;
 
+(* The entries of [path] that are directories themselves, not links to one.
+   Other entries, such as the [<session>.checkpoint.lock] files beside the
+   session directories, are no part of the sweep. *)
+let subdirectories path =
+  let* entries = directory_entries path in
+  List.fold_left
+    (fun acc name ->
+       let* found = acc in
+       let entry = Filename.concat path name in
+       match kind entry with
+       | Error detail -> Error (Listing_failed { path = entry; detail })
+       | Ok (Some (Unix.S_DIR, _)) -> Ok (name :: found)
+       | Ok None
+       | Ok (Some ((Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK), _)) ->
+         Ok found)
+    (Ok [])
+    (Option.value ~default:[] entries)
+  |> Result.map List.rev
+;;
+
+(* The session root as the store resolves it: a configured root may be a link
+   to the physical directory. *)
+let resolved path =
+  match Unix.realpath path with
+  | resolved -> Ok (Some resolved)
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | exception Unix.Unix_error (code, _, _) -> Error (Listing_failed { path; detail = Unix.error_message code })
+;;
+
 let read_root ~ownership_root path =
   match Fs_compat.load_owned_regular_file ~ownership_root path with
   | Ok None -> Ok None
@@ -117,11 +146,9 @@ let rec collect_roots read = function
    names. A head of an earlier version is not a root, so its session does
    not matter. *)
 let journal_input_roots ~journal_inputs_dir ~journal_input_head =
-  let* entries = directory_entries journal_inputs_dir in
+  let* inputs = subdirectories journal_inputs_dir in
   let paths =
-    List.map
-      (fun id -> Filename.concat (Filename.concat journal_inputs_dir id) journal_input_head)
-      (Option.value ~default:[] entries)
+    List.map (fun id -> Filename.concat (Filename.concat journal_inputs_dir id) journal_input_head) inputs
   in
   let* roots = collect_roots (read_root ~ownership_root:journal_inputs_dir) paths in
   List.fold_left
@@ -195,7 +222,7 @@ type session_plan =
   }
 
 let plan_sessions ~session_root ~external_roots =
-  let* entries = directory_entries session_root in
+  let* sessions = subdirectories session_root in
   List.fold_left
     (fun acc session_id ->
        let* roots_seen, plans = acc in
@@ -213,7 +240,7 @@ let plan_sessions ~session_root ~external_roots =
          let* current, live = reached ~session_dir (own @ others) in
          Ok (roots_seen + current, { objects_dir; live } :: plans))
     (Ok (0, []))
-    (Option.value ~default:[] entries)
+    sessions
 ;;
 
 let failed report detail = { report with failures = detail :: report.failures }
@@ -260,8 +287,12 @@ let run ~runtime_root ~journal_inputs_dir ~journal_input_head =
   let external_roots =
     String_map.union (fun _ gate journal -> Some (gate @ journal)) (gate_roots records) journal
   in
-  let session_root = Keeper_fs.session_store_path_for_runtime_root runtime_root in
-  let* roots, plans = plan_sessions ~session_root ~external_roots in
+  let* session_root = resolved (Keeper_fs.session_store_path_for_runtime_root runtime_root) in
+  let* roots, plans =
+    match session_root with
+    | None -> Ok (0, [])
+    | Some session_root -> plan_sessions ~session_root ~external_roots
+  in
   let empty =
     { sessions = List.length plans; roots; kept = 0; removed = 0; removed_bytes = 0; failures = [] }
   in

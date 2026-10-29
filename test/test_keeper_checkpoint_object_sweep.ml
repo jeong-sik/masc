@@ -167,11 +167,12 @@ let hold_in_gate_preparation root ~keeper_name ~session_id (plan : O.plan) =
 let test_every_root_keeps_what_it_reaches () = with_root (fun root ->
   let main = "trace-main" and gated = "trace-gated" and copied = "trace-copied" in
   (* The canonical's turns before its last segment are named only through
-     that segment. *)
-  let current = save_turns ~root ~session_id:main ~marker:"current" (O.turns_per_segment + 6) in
+     that segment and the one before it. *)
+  let current = save_turns ~root ~session_id:main ~marker:"current" ((2 * O.turns_per_segment) + 6) in
   (match current.head.history.segment with
-   | Some _ -> ()
-   | None -> fail "the canonical must have a segment");
+   | Some last ->
+     check int "two segments of two messages a turn" (2 * 2 * O.turns_per_segment) last.segment_messages
+   | None -> fail "the canonical must have segments");
   write (canonical root main) current.head_bytes;
   let archived = save_turns ~root ~session_id:main ~marker:"archived" 2 in
   write
@@ -205,6 +206,9 @@ let test_every_root_keeps_what_it_reaches () = with_root (fun root ->
   let misplaced = List.fold_left Filename.concat objects [ "00"; String.make 64 'f' ] in
   write notes "operator notes";
   write misplaced "a digest under another prefix";
+  (* Files beside the session directories and the journal inputs. *)
+  write (session_dir root main ^ ".checkpoint.lock") "";
+  write (Filename.concat (journal_inputs_dir root) ".DS_Store") "";
   let report = sweep root in
   check int "sessions with objects" 3 report.sessions;
   check int "canonical, archive, retained, Gate and journal heads" 5 report.roots;
@@ -222,6 +226,19 @@ let test_every_root_keeps_what_it_reaches () = with_root (fun root ->
   loads root copied journal;
   check bool "a file not named as an object is left" true (Sys.file_exists notes);
   check bool "a digest under another prefix is left" true (Sys.file_exists misplaced))
+
+(* The store writes through a session root that is a link at the root's
+   physical location; the sweep resolves the link as the store does. *)
+let test_a_linked_session_root_is_swept () = with_root (fun root ->
+  ignore (save_turns ~root ~session_id:"trace-linked" ~marker:"unnamed" 1 : O.plan);
+  let configured = Masc.Keeper_fs.session_store_path_for_runtime_root root in
+  let physical = Filename.concat root "physical-traces" in
+  Unix.rename configured physical;
+  Unix.symlink physical configured;
+  check bool "the objects are in the linked directory" true (object_files root "trace-linked" <> []);
+  let report = sweep root in
+  check int "the session behind the link" 1 report.sessions;
+  check (list string) "its unnamed objects are removed" [] (object_files root "trace-linked"))
 
 let test_an_earlier_version_is_not_a_root () = with_root (fun root ->
   let session_id = "trace-superseded" in
@@ -262,6 +279,13 @@ let test_a_head_it_cannot_read_removes_nothing () =
         Masc_test_deps.checkpoint_head_bytes_with_field plan.head_bytes "version"
           (`Int (Agent_core.Checkpoint.checkpoint_version + 1))) ]
 
+let test_a_journal_head_it_cannot_read_removes_nothing () = with_root (fun root ->
+  ignore (save_turns ~root ~session_id:"trace-refused" ~marker:"unnamed" 2 : O.plan);
+  write (List.fold_left Filename.concat (journal_inputs_dir root) [ "adoption-1"; journal_input_head ]) "not a head";
+  refused root ~expect:(function
+    | Sweep.Root_unusable _ -> true
+    | Sweep.Owner_stores_unreadable _ | Listing_failed _ | Root_unreadable _ | Segment_unreachable _ -> false))
+
 let test_a_segment_it_cannot_follow_removes_nothing () = with_root (fun root ->
   let current = save_turns ~root ~session_id:"trace-refused" ~marker:"current" (O.turns_per_segment + 1) in
   write (canonical root "trace-refused") current.head_bytes;
@@ -289,9 +313,12 @@ let () =
   run "keeper_checkpoint_object_sweep"
     [ ( "sweep"
       , [ test_case "every root keeps what it reaches" `Quick test_every_root_keeps_what_it_reaches
+        ; test_case "a linked session root is swept" `Quick test_a_linked_session_root_is_swept
         ; test_case "an earlier version is not a root" `Quick test_an_earlier_version_is_not_a_root
         ; test_case "a head it cannot read removes nothing" `Quick
             test_a_head_it_cannot_read_removes_nothing
+        ; test_case "a journal head it cannot read removes nothing" `Quick
+            test_a_journal_head_it_cannot_read_removes_nothing
         ; test_case "a segment it cannot follow removes nothing" `Quick
             test_a_segment_it_cannot_follow_removes_nothing
         ; test_case "an unread operation store removes nothing" `Quick

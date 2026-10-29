@@ -361,19 +361,6 @@ let select_finalization_checkpoint
          && messages_share_values_by_identity
               persisted.messages
               result_checkpoint.messages
-         && same_replay_state_metadata persisted result_checkpoint ->
-    persisted, true
-  | Some _ | None -> result_checkpoint, false
-;;
-
-let finalization_checkpoint_already_persisted
-    ~source_already_persisted
-    ~(source : Agent_core.Checkpoint.t)
-    ~(patched : Agent_core.Checkpoint.t)
-    ~replay_suffix_pruned =
-  source_already_persisted
-  && Option.is_none replay_suffix_pruned
-  && String.equal source.session_id patched.session_id
-  && source.messages == patched.messages
-  && same_replay_state_metadata source patched
+         && same_replay_state_metadata persisted result_checkpoint -> persisted
+  | Some _ | None -> result_checkpoint
 ;;

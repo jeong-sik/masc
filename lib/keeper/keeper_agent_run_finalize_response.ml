@@ -239,7 +239,7 @@ let finalize
         capture_replay_response ~response_text)
   in
   let save_agent_core_checkpoint result_checkpoint =
-    let checkpoint, source_already_persisted =
+    let checkpoint =
         Keeper_replay_checkpoint.select_finalization_checkpoint
           ~last_persisted_checkpoint
           result_checkpoint
@@ -262,17 +262,10 @@ let finalize
               ~keeper_name:meta.name
               ~detail)
        | Ok (patched, replay_suffix_pruned) ->
-         let already_persisted =
-           Keeper_replay_checkpoint.finalization_checkpoint_already_persisted
-             ~source_already_persisted
-             ~source:checkpoint
-             ~patched
-             ~replay_suffix_pruned
-         in
+         (* This save closes the turn: it writes the open messages as the
+            turn's bundle, so it runs even when the pipeline already saved
+            these messages (RFC-0476 §3.2). *)
          let save_outcome =
-           if already_persisted
-           then Ok `Reused
-           else (
              let save_started_at = Time_compat.now () in
              let save_started_mono = Mtime_clock.now () in
              let save_result =
@@ -306,21 +299,17 @@ let finalize
                duration_ms
                canonical_bytes
                outcome;
-             Result.map (fun outcome -> `Written outcome) save_result)
+             save_result
          in
-         (* What the file holds after this save. A reused save left the file as
-            [patched]; a written one reports the value it wrote, which is not
-            [patched] when the payload had to be recovered. *)
+         (* What the file holds after this save: the value it wrote, which is
+            not [patched] when the payload had to be recovered. *)
          let stored_checkpoint =
            match save_outcome with
-           | Ok `Reused -> Some patched
-           | Ok (`Written (Keeper_checkpoint_store.Saved { checkpoint; _ })) ->
-             Some checkpoint
-           | Ok (`Written (Keeper_checkpoint_store.Stale_noop _)) | Error _ -> None
+           | Ok (Keeper_checkpoint_store.Saved { checkpoint; _ }) -> Some checkpoint
+           | Ok (Keeper_checkpoint_store.Stale_noop _) | Error _ -> None
          in
          (match save_outcome with
-       | Ok `Reused
-       | Ok (`Written (Keeper_checkpoint_store.Saved _)) ->
+       | Ok (Keeper_checkpoint_store.Saved _) ->
          append_manifest ~site:"checkpoint_saved"
            ~keeper_turn_id:manifest_keeper_turn_id
            ~agent_core_turn_count:result.turns
@@ -351,8 +340,7 @@ let finalize
                ])
            Keeper_runtime_manifest.Checkpoint_saved;
          Ok stored_checkpoint
-       | Ok (`Written (Keeper_checkpoint_store.Stale_noop
-                { incoming_turn_count; known_turn_count })) ->
+       | Ok (Keeper_checkpoint_store.Stale_noop { incoming_turn_count; known_turn_count }) ->
          Log.Keeper.warn ~keeper_name:meta.name
            "runtime=%s AGENT_CORE checkpoint stale no-op: incoming turn_count=%d, last saved=%d"
            runtime_id_string

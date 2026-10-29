@@ -10,6 +10,7 @@ type runtime = Server_mcp_transport_http_types.runtime = {
   base_path : string;
   sw : Eio.Switch.t;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
+  tool_allowed_in_profile : tool_profile -> string -> bool;
   handle_request :
     ?profile:tool_profile ->
     ?mcp_session_id:string ->
@@ -21,6 +22,26 @@ type runtime = Server_mcp_transport_http_types.runtime = {
     Yojson.Safe.t;
   clear_resource_subscriptions_for_session : string -> unit;
 }
+
+let scope_challenge_cors_headers ~request_authority request =
+  match Server_auth.public_read_cors_origin_opt ~request_authority request with
+  | None -> [ "vary", "Origin" ]
+  | Some origin ->
+      Server_auth.cors_headers origin
+      |> List.map (fun (name, value) ->
+           if String.equal name "access-control-expose-headers" then
+             name, value ^ ", WWW-Authenticate"
+           else name, value)
+
+let tool_allowed_in_profile state profile name =
+  let policy_profile =
+    match profile with
+    | Full -> Mcp_server_eio_tool_profile.Full
+    | Managed_agent -> Mcp_server_eio_tool_profile.Managed_agent
+    | Operator_remote -> Mcp_server_eio_tool_profile.Operator_remote
+    | Seat -> Mcp_server_eio_tool_profile.Seat
+  in
+  Mcp_server_eio_tool_profile.tool_allowed_in_profile state policy_profile name
 
 include Server_mcp_transport_http_protocol
 include Server_mcp_transport_http_conn
@@ -471,6 +492,33 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
         | Error msg ->
             respond_mcp_error ~code:Mcp_error_code.Internal_error ~deps
               ~request_authority request reqd ~session_id ~protocol_version msg;
+            Error ()
+      in
+      let* () =
+        match
+          if Server_oauth_metadata.loopback_authority request_authority then
+            Auth_oauth.with_expected_resource expected_resource (fun () ->
+              Server_oauth_step_up.required_scope ~base_path ~auth_token
+                ~allowed_tool:(runtime.tool_allowed_in_profile profile)
+                ~body:body_str)
+          else None
+        with
+        | None -> Ok ()
+        | Some scope ->
+            let auth_cors =
+              scope_challenge_cors_headers ~request_authority request
+            in
+            let deps = { deps with cors_headers = (fun _ -> auth_cors) } in
+            respond_mcp_error
+              ~extra_headers:
+                [ ( "www-authenticate"
+                  , Server_oauth_metadata.insufficient_scope_challenge
+                      request_authority scope ) ]
+              ?id:(body_jsonrpc_id body_str)
+              ~code:Mcp_error_code.Insufficient_scope ~deps ~request_authority
+              request reqd ~session_id ~protocol_version
+              (Printf.sprintf "This tool needs the OAuth scope %s."
+                 (Auth_oauth.scope_to_string scope));
             Error ()
       in
       let sw = runtime.sw in

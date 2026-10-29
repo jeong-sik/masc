@@ -27,6 +27,12 @@ type t =
                               client SHOULD resume via Last-Event-ID. *)
   | Session_evicted       (** -32006 — session lifecycle terminated by server
                               policy (oldest-eviction at cap, idle timeout). *)
+  | Insufficient_scope    (** -32007 — the OAuth access token's role lacks the
+                              permission the called tool needs, and a wider
+                              scope would grant it. HTTP 403; the response
+                              carries a [WWW-Authenticate] [insufficient_scope]
+                              challenge (MCP 2026-07-28 Scope Challenge
+                              Handling). *)
   | Header_mismatch
   | Unsupported_protocol_version
         (** -32022 — the request declared a protocol version this server does

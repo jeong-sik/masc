@@ -146,6 +146,14 @@ let test_default_messages_non_empty () =
         Alcotest.failf "%a has empty default message" C.pp t)
     C.all
 
+let test_insufficient_scope_is_forbidden_at_minus_32007 () =
+  Alcotest.(check int) "wire code" (-32007) (C.to_wire_code C.Insufficient_scope);
+  (match C.to_http_status C.Insufficient_scope with
+   | `Forbidden -> ()
+   | _ -> Alcotest.fail "Insufficient_scope must map to HTTP 403 Forbidden");
+  Alcotest.(check bool) "the wire code reads back" true
+    (C.of_wire_code (-32007) = Some C.Insufficient_scope)
+
 let test_http_status_quiet_is_ok () =
   (* By contract: [Quiet _] is not a failure response. Embedded in a
      200 the client sees the [Quiet] envelope as a declared skip
@@ -274,6 +282,8 @@ let () =
           test_case "default messages non-empty" `Quick
             test_default_messages_non_empty;
           test_case "Quiet -> 200 OK" `Quick test_http_status_quiet_is_ok;
+          test_case "Insufficient_scope -> 403 at -32007" `Quick
+            test_insufficient_scope_is_forbidden_at_minus_32007;
           test_case "SSE register error JSON-RPC body" `Quick
             test_sse_register_error_body_uses_jsonrpc_invalid_request;
         ] );

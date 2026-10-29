@@ -399,7 +399,7 @@ let graphql_body = {|{"query":"{ status { project paused } }"}|}
 
 (* A workspace whose auth config requires a token, published as the running
    server's state, and the H2 gateway's own request handler serving it. *)
-let with_gateway ?(prepare_workspace=Fun.id) f =
+let with_gateway_and_switch ?(prepare_workspace=Fun.id) f =
   let base_path = Filename.temp_file "masc-h2-body-admission" "" in
   Sys.remove base_path;
   Unix.mkdir base_path 0o700;
@@ -435,7 +435,331 @@ let with_gateway ?(prepare_workspace=Fun.id) f =
               ~clock:(Eio.Stdenv.clock env) ~server_start_time:0.
               (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
           in
-          f ~base_path ~clock:(Eio.Stdenv.clock env) handler))
+          f ~base_path ~clock:(Eio.Stdenv.clock env) ~sw handler))
+
+let with_gateway ?prepare_workspace f =
+  with_gateway_and_switch ?prepare_workspace
+    (fun ~base_path ~clock ~sw:_ handler -> f ~base_path ~clock handler)
+
+(* Exercise the actual H2 MCP admission path, including OAuth and session
+   validation, so a response from an earlier refusal cannot satisfy the test. *)
+let test_oauth_scope_refusal_preserves_request_ids () =
+  Mirage_crypto_rng_unix.use_default ();
+  let allowed_origin = "http://localhost:5173" in
+  let rejected_origin = "https://example.invalid" in
+  let policy =
+    Server_auth_config.resolve
+      { allow_anonymous_mutations = None
+      ; loopback_dev_mutation_origins = Some allowed_origin
+      }
+    |> Result.get_ok
+  in
+  Server_auth.For_testing.restore_auth_config (Some policy);
+  Fun.protect
+    ~finally:(fun () -> Server_auth.For_testing.restore_auth_config None)
+    (fun () ->
+  with_gateway_and_switch @@ fun ~base_path ~clock ~sw handler ->
+  let bootstrap =
+    match Auth.create_token base_path ~agent_name:"h2-step-up" ~role:Masc_domain.Worker with
+    | Ok (token, _) -> token
+    | Error error -> fail (Masc_domain.masc_error_to_string error)
+  in
+  let redirect_uri = "http://127.0.0.1:43123/callback" in
+  let resource = "http://localhost:8935/mcp" in
+  let verifier = String.make 43 'v' in
+  let client = Auth_oauth.register_client ~base_path ~client_name:(Some "h2-step-up")
+      ~redirect_uris:[redirect_uri] |> Result.get_ok in
+  let oauth_authority =
+    match Server_request_authority.of_host_port ~host:listener_host ~port:listener_port with
+    | Ok value -> value
+    | Error `Malformed -> fail "fixture authority is invalid" in
+  let exposes_challenge = function
+    | None -> false
+    | Some value ->
+      String.split_on_char ',' value
+      |> List.exists (fun name ->
+           String.equal (String.lowercase_ascii (String.trim name)) "www-authenticate")
+  in
+  (* HTTP/1 calls this same builder with its captured authority after the
+     asynchronous body read, when the request-local authority is unavailable. *)
+  List.iter (fun (origin, admitted) ->
+    let request = Httpun.Request.create `POST "/mcp"
+        ~headers:(Httpun.Headers.of_list ["origin", origin]) in
+    let cors = Server_mcp_transport_http.scope_challenge_cors_headers
+        ~request_authority:oauth_authority request in
+    check (option string) "H1 scope response reflects only an admitted origin"
+      (if admitted then Some origin else None)
+      (List.assoc_opt "access-control-allow-origin" cors);
+    check bool "H1 scope response exposes the challenge only to admitted origin"
+      admitted (exposes_challenge (List.assoc_opt "access-control-expose-headers" cors)))
+    [allowed_origin, true; rejected_origin, false];
+  check bool "ordinary CORS headers do not gain challenge exposure" false
+    (exposes_challenge
+       (List.assoc_opt "access-control-expose-headers" (Server_auth.cors_headers allowed_origin)));
+  let form = Uri.encoded_of_query
+    [ "response_type", ["code"]; "client_id", [client.client_id]
+    ; "redirect_uri", [redirect_uri]; "resource", [resource]
+    ; "scope", ["mcp:tools"]; "code_challenge", [Auth_oauth.pkce_s256 verifier]
+    ; "code_challenge_method", ["S256"]; "bootstrap_token", [bootstrap]
+    ; "decision", ["authorize"] ] in
+  let location =
+    match Server_oauth_service.authorize_post ~base_path ~authority:oauth_authority
+        ~fetch_client_metadata:(fun _ -> Error "unexpected client document") ~body:form with
+    | Ok (Server_oauth_service.Authorization_redirect location) -> location
+    | Ok (Server_oauth_service.Authorization_form_error {message; _}) -> fail message
+    | Error error -> fail (Auth_oauth.show_error error) in
+  let code = match Uri.get_query_param (Uri.of_string location) "code" with
+    | Some code -> code | None -> fail "authorization returned no code" in
+  let oauth =
+    match Auth_oauth.exchange_authorization_code ~base_path ~expected_resource:resource
+        ~code ~client_id:client.client_id ~redirect_uri ~resource:(Some resource)
+        ~code_verifier:verifier with
+    | Ok pair -> pair.access_token
+    | Error error -> fail (Auth_oauth.show_error error) in
+  let protocol = Mcp_transport_protocol.default_protocol_version in
+  let headers =
+    [ "authorization", "Bearer " ^ oauth; "content-type", "application/json"
+    ; "accept", "application/json, text/event-stream"; "mcp-protocol-version", protocol ] in
+  let session = create_session ~clock ~handler () in
+  let session_id = ref None in
+  let writer, reply = open_request session ~headers
+      ~on_response_headers:(fun response ->
+        session_id := H2.Headers.get response.headers "mcp-session-id") "/mcp" in
+  let initialize = Yojson.Safe.to_string
+    (`Assoc ["jsonrpc", `String "2.0"; "id", `String "init";
+      "method", `String "initialize"; "params", `Assoc [
+        "protocolVersion", `String protocol; "capabilities", `Assoc [];
+        "clientInfo", `Assoc ["name", `String "h2-step-up"; "version", `String "0"]]]) in
+  send_whole initialize writer;
+  check int "initialize succeeds" 200 (await_reply session reply).status;
+  let session_id = match !session_id with
+    | Some value -> value | None -> fail "initialize returned no session id" in
+  List.iter (fun id ->
+    let request = Yojson.Safe.to_string
+      (`Assoc ["jsonrpc", `String "2.0"; "id", id; "method", `String "tools/call";
+        "params", `Assoc ["name", `String "masc_keeper_down"; "arguments", `Assoc []]]) in
+    let response_headers = ref None in
+    let writer, pending = open_request session
+        ~headers:(("origin", allowed_origin) :: ("mcp-session-id", session_id) :: headers)
+        ~on_response_headers:(fun response -> response_headers := Some response.headers)
+        "/mcp" in
+    send_whole request writer;
+    let reply = await_reply session pending in
+    check int "insufficient scope is HTTP 403" 403 reply.status;
+    let response_headers = match !response_headers with
+      | Some value -> value | None -> fail "scope response returned no headers" in
+    check (option string) "scope challenge names the exact OAuth scope"
+      (Some (Server_oauth_metadata.insufficient_scope_challenge oauth_authority Auth_oauth.Mcp_admin))
+      (H2.Headers.get response_headers "www-authenticate");
+    check (option string) "H2 scope response reflects the admitted origin"
+      (Some allowed_origin)
+      (H2.Headers.get response_headers "access-control-allow-origin");
+    check bool "H2 scope response exposes the challenge to the admitted origin"
+      true (exposes_challenge (H2.Headers.get response_headers "access-control-expose-headers"));
+    let response = Yojson.Safe.from_string reply.body in
+    check string "error echoes the request id" (Yojson.Safe.to_string id)
+      (Yojson.Safe.to_string (Yojson.Safe.Util.member "id" response));
+    check int "error is insufficient scope"
+      (Mcp_error_code.to_wire_code Mcp_error_code.Insufficient_scope)
+      Yojson.Safe.Util.(response |> member "error" |> member "code" |> to_int))
+    [`Int 17; `String "call-한글"];
+  (* 2026 requests carry routing headers and metadata on every request; no
+     legacy session is needed. A continuation must still reach the existing
+     no-resume refusal rather than the scope challenge. *)
+  let modern_version = Mcp_transport_protocol.protocol_version_2026_07_28 in
+  let modern_headers =
+    [ "mcp-method", "tools/call"; "mcp-name", "masc_keeper_down" ]
+    @ List.map (fun (name, value) ->
+        if String.equal name "mcp-protocol-version" then name, modern_version
+        else name, value) headers
+  in
+  let modern_call id extra =
+    Yojson.Safe.to_string
+      (`Assoc ["jsonrpc", `String "2.0"; "id", id; "method", `String "tools/call";
+        "params", `Assoc
+          ([ "name", `String "masc_keeper_down"
+           ; "arguments", `Assoc [ "name", `String "audit-fixture-absent" ]
+           ; "_meta", `Assoc
+               [ Mcp_transport_protocol.protocol_version_meta_key, `String modern_version
+               ; Mcp_transport_protocol.client_capabilities_meta_key, `Assoc [] ] ]
+           @ extra)])
+  in
+  let post_modern body =
+    let challenge = ref None in
+    let writer, pending = open_request session ~headers:modern_headers
+        ~on_response_headers:(fun response ->
+          challenge := H2.Headers.get response.headers "www-authenticate") "/mcp" in
+    send_whole body writer;
+    let reply = await_reply session pending in
+    reply, !challenge
+  in
+  let modern_id = `String "modern-admin-한글" in
+  let reply, challenge = post_modern (modern_call modern_id []) in
+  check int "2026 insufficient scope is HTTP 403" 403 reply.status;
+  check (option string) "2026 challenge names the admin scope"
+    (Some (Server_oauth_metadata.insufficient_scope_challenge oauth_authority Auth_oauth.Mcp_admin))
+    challenge;
+  let response = Yojson.Safe.from_string reply.body in
+  check bool "2026 scope challenge echoes the request id" true
+    Yojson.Safe.Util.(response |> member "id" = modern_id);
+  check int "2026 scope challenge has insufficient-scope code"
+    (Mcp_error_code.to_wire_code Mcp_error_code.Insufficient_scope)
+    Yojson.Safe.Util.(response |> member "error" |> member "code" |> to_int);
+  let continuation_id = `Int 21 in
+  let reply, challenge =
+    post_modern (modern_call continuation_id [ "requestState", `String "opaque" ]) in
+  check int "2026 unknown continuation is HTTP 400" 400 reply.status;
+  check (option string) "2026 continuation does not receive a scope challenge" None challenge;
+  let response = Yojson.Safe.from_string reply.body in
+  check bool "2026 continuation refusal echoes the request id" true
+    Yojson.Safe.Util.(response |> member "id" = continuation_id);
+  check int "2026 continuation retains invalid-params code" (-32602)
+    Yojson.Safe.Util.(response |> member "error" |> member "code" |> to_int);
+  check string "2026 continuation keeps the existing no-resume refusal"
+    "This server has no resumable request for the supplied continuation"
+    Yojson.Safe.Util.(response |> member "error" |> member "message" |> to_string);
+  (* This registered admin tool is callable on Full but is not public MCP.
+     Its worker refusal must reach the existing audit, not stop at step-up. *)
+  let non_public_tool = "masc_keeper_clear" in
+  let audit_config = Masc.Workspace.default_config base_path in
+  let matching_audit_entries () =
+    Masc.Audit_log.read_entries audit_config
+    |> List.filter (fun (entry : Masc.Audit_log.audit_entry) ->
+         entry.action = Masc.Audit_log.Custom "non_public_tool_call"
+         && Yojson.Safe.Util.member "tool_name" entry.details = `String non_public_tool)
+  in
+  check int "no prior non-public fixture audit" 0
+    (List.length (matching_audit_entries ()));
+  let non_public_request = Yojson.Safe.to_string
+    (`Assoc ["jsonrpc", `String "2.0"; "id", `Int 20; "method", `String "tools/call";
+      "params", `Assoc ["name", `String non_public_tool;
+        "arguments", `Assoc ["name", `String "audit-fixture-absent";
+                             "reason", `String "isolated OAuth permission test"]]]) in
+  let non_public_challenge = ref None in
+  let writer, pending = open_request session
+      ~headers:(("mcp-session-id", session_id) :: headers)
+      ~on_response_headers:(fun response ->
+        non_public_challenge := H2.Headers.get response.headers "www-authenticate")
+      "/mcp" in
+  send_whole non_public_request writer;
+  let non_public_reply = await_reply session pending in
+  check int "non-public tool retains its tool-level response" 200 non_public_reply.status;
+  check (option string) "non-public tool has no OAuth scope challenge" None !non_public_challenge;
+  let non_public_response = Yojson.Safe.from_string non_public_reply.body in
+  check bool "non-public refusal keeps the request id" true
+    Yojson.Safe.Util.(non_public_response |> member "id" = `Int 20);
+  check bool "non-public tool reports a permission failure" true
+    Yojson.Safe.Util.(non_public_response |> member "result" |> member "isError" |> to_bool);
+  check string "non-public tool retains insufficient-role classification" "insufficient_role"
+    Yojson.Safe.Util.(non_public_response |> member "result" |> member "structuredContent"
+                      |> member "auth_error_code" |> to_string);
+  let audit_entry = match matching_audit_entries () with
+    | [ entry ] -> entry
+    | entries -> failf "expected one non-public tool audit, got %d" (List.length entries) in
+  check string "non-public audit identifies the token owner" "h2-step-up" audit_entry.agent_id;
+  check bool "non-public audit records failure" true
+    (match audit_entry.outcome with Masc.Audit_log.Failure _ -> true | Masc.Audit_log.Success -> false);
+  check string "non-public audit marks its surface" "non_public"
+    Yojson.Safe.Util.(audit_entry.details |> member "surface" |> to_string);
+  let rejected_request = Yojson.Safe.to_string
+    (`Assoc ["jsonrpc", `String "2.0"; "id", `Int 18; "method", `String "tools/call";
+      "params", `Assoc ["name", `String "masc_keeper_down"; "arguments", `Assoc []]]) in
+  let rejected_headers = ref None in
+  let writer, pending = open_request session
+      ~headers:(("origin", rejected_origin) :: ("mcp-session-id", session_id) :: headers)
+      ~on_response_headers:(fun response -> rejected_headers := Some response.headers)
+      "/mcp" in
+  send_whole rejected_request writer;
+  let rejected = await_reply session pending in
+  check int "rejected origin is refused before dispatch" 403 rejected.status;
+  let rejected_headers = match !rejected_headers with
+    | Some value -> value | None -> fail "origin refusal returned no headers" in
+  List.iter (fun name ->
+    check (option string) ("rejected origin has no " ^ name) None
+      (H2.Headers.get rejected_headers name))
+    ["www-authenticate"; "access-control-allow-origin"; "access-control-expose-headers"];
+  let rejected_response = Yojson.Safe.from_string rejected.body in
+  check int "origin gate retains its invalid-request error"
+    (Mcp_error_code.to_wire_code Mcp_error_code.Invalid_request)
+    Yojson.Safe.Util.(rejected_response |> member "error" |> member "code" |> to_int);
+  check bool "origin gate retains null id" true
+    Yojson.Safe.Util.(rejected_response |> member "id" = `Null);
+  (* The same registered admin tool is excluded by the managed profile, so a
+     wider OAuth scope cannot unlock it; the ordinary profile refusal must win. *)
+  let managed_session_id = ref None in
+  let writer, pending = open_request session ~headers
+      ~on_response_headers:(fun response ->
+        managed_session_id := H2.Headers.get response.headers "mcp-session-id")
+      "/mcp/managed" in
+  send_whole initialize writer;
+  check int "managed initialize succeeds" 200 (await_reply session pending).status;
+  let managed_session_id = match !managed_session_id with
+    | Some value -> value | None -> fail "managed initialize returned no session id" in
+  let request = Yojson.Safe.to_string
+    (`Assoc ["jsonrpc", `String "2.0"; "id", `Int 19; "method", `String "tools/call";
+      "params", `Assoc ["name", `String "masc_keeper_down";
+        "arguments", `Assoc ["name", `String "audit-fixture-absent"]]]) in
+  let challenge = ref None in
+  let writer, pending = open_request session
+      ~headers:(("mcp-session-id", managed_session_id) :: headers)
+      ~on_response_headers:(fun response ->
+        challenge := H2.Headers.get response.headers "www-authenticate")
+      "/mcp/managed" in
+  send_whole request writer;
+  let reply = await_reply session pending in
+  check (option string) "managed refusal does not claim a wider scope fixes it" None !challenge;
+  let response = Yojson.Safe.from_string reply.body in
+  check int "managed profile keeps its method-not-found refusal"
+    (Mcp_error_code.to_wire_code Mcp_error_code.Method_not_found)
+    Yojson.Safe.Util.(response |> member "error" |> member "code" |> to_int);
+  (* The token was issued for the same loopback resource above. A server moved
+     to a public listener can still admit that authority explicitly, but OAuth
+     discovery is unavailable there and must not be advertised in a 403. *)
+  let public_policy =
+    match Server_request_authority.make_trust_policy
+        ~bind_host:"0.0.0.0" ~bind_port:listener_port
+        ~explicit_base_url:(Some "http://localhost:8935") with
+    | Ok policy -> policy
+    | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)
+  in
+  let public_handler =
+    Server_h2_gateway.make_request_handler
+      ~trust_policy:public_policy ~sw ~request_sw:sw ~clock ~server_start_time:0.
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
+  in
+  let public_session = create_session ~clock ~handler:public_handler () in
+  let discovery = exchange_on public_session ~meth:`GET
+      ~send:(send_whole "") "/.well-known/oauth-protected-resource" in
+  check int "public listener does not expose OAuth discovery" 404 discovery.status;
+  let public_session_id = ref None in
+  let writer, pending = open_request public_session ~headers
+      ~on_response_headers:(fun response ->
+        public_session_id := H2.Headers.get response.headers "mcp-session-id")
+      "/mcp" in
+  send_whole initialize writer;
+  check int "public listener still accepts the OAuth token" 200
+    (await_reply public_session pending).status;
+  let public_session_id = match !public_session_id with
+    | Some value -> value | None -> fail "public initialize returned no session id" in
+  let challenge = ref None in
+  let writer, pending = open_request public_session
+      ~headers:(("mcp-session-id", public_session_id) :: headers)
+      ~on_response_headers:(fun response ->
+        challenge := H2.Headers.get response.headers "www-authenticate")
+      "/mcp" in
+  send_whole request writer;
+  let reply = await_reply public_session pending in
+  check (option string) "public listener does not advertise unavailable OAuth" None !challenge;
+  check int "public listener retains the tool-level response" 200 reply.status;
+  let response = Yojson.Safe.from_string reply.body in
+  check bool "public listener refusal echoes the request id" true
+    Yojson.Safe.Util.(response |> member "id" = `Int 19);
+  check bool "public listener retains the permission refusal" true
+    Yojson.Safe.Util.(response |> member "result" |> member "isError" |> to_bool);
+  check string "public listener refusal retains insufficient-role classification"
+    "insufficient_role"
+    Yojson.Safe.Util.(response |> member "result" |> member "structuredContent"
+                      |> member "auth_error_code" |> to_string))
 
 (* The client starts the body and never ends it. With the gate ahead of the
    read the refusal arrives anyway; a gateway that read the body first would
@@ -666,7 +990,10 @@ let with_request_scope test () =
 
 let () =
   run "H2 request body admission"
-    [ ("package catalog", [
+    [ ("OAuth step-up", [
+        test_case "scope refusal echoes numeric and string request ids" `Quick
+          test_oauth_scope_refusal_preserves_request_ids])
+    ; ("package catalog", [
         test_case "H2 read auth and payload parity" `Quick test_package_h2_read_auth_and_payloads;
         test_case "active linked worktree controls discovery and preview" `Quick test_package_active_worktree_payloads])
     ; ( "body ceiling"

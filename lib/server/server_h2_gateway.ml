@@ -776,6 +776,42 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                    remember_mcp_profile ~otel_transport_context
                                      session_id profile);
                                  with_server_state h2_reqd (fun state ->
+                                 (match
+                                    if Server_oauth_metadata.loopback_authority request_authority then
+                                      Auth_oauth.with_expected_resource
+                                        (Server_oauth_metadata.resource request_authority)
+                                        (fun () ->
+                                          Server_oauth_step_up.required_scope ~base_path
+                                            ~auth_token ~body:body_str
+                                            ~allowed_tool:
+                                              (Server_mcp_transport_http.tool_allowed_in_profile
+                                                 state profile))
+                                    else None
+                                  with
+                                  | Some scope ->
+                                      let auth_cors =
+                                        Server_mcp_transport_http.scope_challenge_cors_headers
+                                          ~request_authority httpun_request
+                                      in
+                                      let body =
+                                        Mcp_error_code.jsonrpc_error_body_with_id
+                                          Mcp_error_code.Insufficient_scope
+                                          ~id:(Option.value
+                                            ~default:`Null
+                                            (Server_mcp_transport_http.body_jsonrpc_id body_str))
+                                          ~message:(Printf.sprintf
+                                             "This tool needs the OAuth scope %s."
+                                             (Auth_oauth.scope_to_string scope))
+                                      in
+                                      h2_respond_json h2_reqd body ~status:`Forbidden
+                                        ~extra_headers:
+                                          (( "www-authenticate"
+                                           , Server_oauth_metadata
+                                             .insufficient_scope_challenge
+                                               request_authority scope )
+                                          :: (auth_cors
+                                             @ mcp_headers session_id protocol_version))
+                                  | None ->
                                    let serves_listen =
                                      Server_mcp_transport_http
                                      .serves_subscriptions_listen ~profile
@@ -864,7 +900,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                           h2_respond_json_value h2_reqd json ~status:`Bad_request
                                             ~extra_headers:mcp_hdrs
                                         | None ->
-                                          h2_respond_json_value h2_reqd json ~extra_headers:mcp_hdrs))))))
+                                          h2_respond_json_value h2_reqd json ~extra_headers:mcp_hdrs)))))))
 
       | `DELETE, "/mcp"
       | `DELETE, "/mcp/managed"

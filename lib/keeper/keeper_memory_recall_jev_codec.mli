@@ -6,11 +6,24 @@
     Its wording is the one measured in layer 0 (two labels, 10 runs on one
     Keeper). Questions (b) and (c) have not been run against Jev yet. *)
 
+(** Which of the three questions a request asks: (a) per candidate, (b) per
+    turn, (c) per carried candidate. *)
+type request_kind =
+  | Candidate_question
+  | Turn_question
+  | Time_question
+
+val request_kind_token : request_kind -> string
+(** [candidates], [turn], [time]. *)
+
 type request =
-  { state : Yojson.Safe.t
+  { kind : request_kind
+  ; state : Yojson.Safe.t
   ; questions : (string * Typesafeai_types.question) list
   }
-(** What {!Typesafeai_types.request_to_yojson} takes besides the model id. *)
+(** What {!Typesafeai_types.request_to_yojson} takes besides the model id, and
+    the question it asks. A record of a request reads [kind] and does not infer
+    it from the shape of [state]. *)
 
 type build_error =
   | Duplicate_candidate_id of string

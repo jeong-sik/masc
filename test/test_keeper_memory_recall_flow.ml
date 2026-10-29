@@ -40,17 +40,12 @@ let standing = choice "standing" [ "standing", 0.9; "time_bound", 0.1 ] 0.9
 let time_bound = choice "time_bound" [ "standing", 0.2; "time_bound", 0.8 ] 0.9
 let response answers = { Types.model = "jev-test"; answers; usage = None }
 
-type kind =
+type kind = Codec.request_kind =
   | Candidate_question
   | Turn_question
   | Time_question
 
-let kind_of (request : Codec.request) =
-  match request.questions, request.state with
-  | [ ("turn", _) ], _ -> Turn_question
-  | _, `Assoc fields -> if List.mem_assoc "purpose" fields then Candidate_question else Time_question
-  | _, (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) ->
-    Alcotest.fail "state is not an object"
+let kind_of (request : Codec.request) = request.kind
 
 type call =
   { kind : kind
@@ -264,7 +259,7 @@ let test_a_lone_candidate_is_capacity_when_question_b_failed_another_way () =
       check_strings "results" [ "c0:possibly_needed"; "c1:capacity" ] (List.map (describe_result name) judged.results);
       Alcotest.(check string) "status" "selected 1/2 [c0]" (describe_status name judged.status);
       Alcotest.(check bool) "(b) counted as failed" true (judged.turn = J.Turn_question_failed))
-    [ Flow.Rate_limited; Flow.Failed ]
+    [ Flow.Rate_limited; Flow.Failed; Flow.Not_recorded ]
 
 let test_a_response_that_does_not_decode_still_shows_the_purpose_fits () =
   let candidates = [ sized 0 small; sized 1 huge ] in
@@ -301,22 +296,23 @@ let test_a_purpose_that_is_too_large_stops_everything () =
   Alcotest.(check string) "status" "unavailable 0/2 capacity" (describe_status name judged.status)
 
 let test_the_other_failures_leave_only_their_piece_undecided_and_are_not_retried () =
-  let candidates = List.init 4 (fun index -> sized index small) in
+  let candidates = List.init 5 (fun index -> sized index small) in
   let name = names candidates in
   let by_candidate ids =
     match List.map name ids with
     | [ "c0" ] -> Error Flow.Rate_limited
     | [ "c1" ] -> Error Flow.Invalid_response
     | [ "c2" ] -> Error Flow.Failed
+    | [ "c3" ] -> Error Flow.Not_recorded
     | _ -> answer_all possibly ids
   in
   let result, calls = run_flow ~piece_bytes:small { accepting with candidates = by_candidate } candidates in
   let judged = judged_of result in
   check_strings "results"
-    [ "c0:rate_limited"; "c1:invalid_answer"; "c2:provider_failed"; "c3:possibly_needed" ]
+    [ "c0:rate_limited"; "c1:invalid_answer"; "c2:provider_failed"; "c3:not_recorded"; "c4:possibly_needed" ]
     (List.map (describe_result name) judged.results);
-  Alcotest.(check string) "status" "selected 1/4 [c3]" (describe_status name judged.status);
-  check_strings "each piece once" [ "a[c0]"; "a[c1]"; "a[c2]"; "a[c3]" ]
+  Alcotest.(check string) "status" "selected 1/5 [c4]" (describe_status name judged.status);
+  check_strings "each piece once" [ "a[c0]"; "a[c1]"; "a[c2]"; "a[c3]"; "a[c4]" ]
     (sorted (rendered_calls candidates Candidate_question calls))
 
 let test_an_answer_that_does_not_decode_leaves_only_that_candidate () =
@@ -343,7 +339,7 @@ let test_a_time_question_that_fails_is_unjudged_and_never_cut () =
       check_strings "marks" [ "c0:unjudged"; "c1:unjudged" ] (List.map (describe_mark name) judged.marks);
       Alcotest.(check int) "one (c) request" 1 (List.length (calls_of_kind Time_question calls));
       Alcotest.(check string) "the status is not touched" "selected 2/2 [c0,c1]" (describe_status name judged.status))
-    [ Flow.Capacity_refused; Flow.Rate_limited; Flow.Invalid_response; Flow.Failed ]
+    [ Flow.Capacity_refused; Flow.Rate_limited; Flow.Invalid_response; Flow.Failed; Flow.Not_recorded ]
 
 let test_a_time_answer_that_does_not_decode_is_unjudged () =
   let candidates = List.init 2 (fun index -> sized index small) in
@@ -438,7 +434,11 @@ let test_a_piece_of_several_candidates_that_fails_another_way_leaves_all_of_them
       check_strings "results" (List.init 3 (fun index -> Printf.sprintf "c%d:%s" index token))
         (List.map (describe_result name) judged.results);
       Alcotest.(check string) "status" ("unavailable 0/3 " ^ token) (describe_status name judged.status))
-    [ Flow.Rate_limited, "rate_limited"; Flow.Invalid_response, "invalid_answer"; Flow.Failed, "provider_failed" ]
+    [ Flow.Rate_limited, "rate_limited"
+    ; Flow.Invalid_response, "invalid_answer"
+    ; Flow.Failed, "provider_failed"
+    ; Flow.Not_recorded, "not_recorded"
+    ]
 
 (* A 200 for (b) that nobody can read is a request the server took. The test
    with [Error Invalid_response] builds that case through the client failure

@@ -37,6 +37,7 @@ type unjudged_reason =
   | Rate_limited
   | Provider_failed
   | Invalid_answer
+  | Not_recorded
 [@@deriving enumerate]
 
 let unjudged_reason_token = function
@@ -45,6 +46,7 @@ let unjudged_reason_token = function
   | Rate_limited -> "rate_limited"
   | Provider_failed -> "provider_failed"
   | Invalid_answer -> "invalid_answer"
+  | Not_recorded -> "not_recorded"
 
 type candidate_result =
   | Decided of { id : string; decision : candidate_decision }
@@ -71,7 +73,7 @@ type unavailable =
 let unavailable_reason_token = function
   | Nothing_judged { reason = Too_large; total = _ } -> "capacity"
   | Nothing_judged
-      { reason = (Capacity | Rate_limited | Provider_failed | Invalid_answer) as reason
+      { reason = (Capacity | Rate_limited | Provider_failed | Invalid_answer | Not_recorded) as reason
       ; total = _
       } -> unjudged_reason_token reason
   | Turn_unanswered _ -> "turn_question"

@@ -26,6 +26,10 @@ type attempt_failure =
           does not decode. *)
   | Failed
       (** Any other failure, a timeout among them. *)
+  | Not_recorded
+      (** The caller could not save the record of the request, so nothing was
+          sent, or could not save the record of the response, so the response
+          is not used. *)
 
 type evaluate =
   Keeper_memory_recall_jev_codec.request ->
@@ -70,8 +74,8 @@ val run :
       purpose and the candidate is [Capacity], and the others go on. At most
       [2N - 1] question (a) requests go out for [N] candidates;
     - a piece that fails some other way leaves its candidates undecided:
-      [Rate_limited], [Invalid_answer] for [Invalid_response], or
-      [Provider_failed] for [Failed]. Nothing is retried;
+      [Rate_limited], [Invalid_answer] for [Invalid_response],
+      [Provider_failed] for [Failed], or [Not_recorded]. Nothing is retried;
     - once (a) and (b) are done, question (c) is asked for the carried
       candidates, one request for each request of (a) that was answered, holding
       the candidates that request carried. Those are some of the candidates

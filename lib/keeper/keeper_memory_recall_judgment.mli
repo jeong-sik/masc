@@ -61,7 +61,10 @@ type time_mark =
     a timeout among them: the client reports a timeout as text, so the reason
     cannot tell it from another transport failure. [Invalid_answer] covers a
     response that does not decode, and an answer that does not decode, is
-    missing, or arrives in a response with duplicate or unknown ids. A
+    missing, or arrives in a response with duplicate or unknown ids.
+    [Not_recorded]: the record of the request could not be saved, so the
+    request was not sent, or the record of its response could not be saved, so
+    the response was dropped. A judgment nobody can replay is not used. A
     cancelled request is not a reason: the cancellation is raised again and no
     status is built. *)
 type unjudged_reason =
@@ -70,12 +73,13 @@ type unjudged_reason =
   | Rate_limited
   | Provider_failed
   | Invalid_answer
+  | Not_recorded
 
 val all_of_unjudged_reason : unjudged_reason list
 
 val unjudged_reason_token : unjudged_reason -> string
 (** [capacity], [too_large], [rate_limited], [provider_failed],
-    [invalid_answer]. *)
+    [invalid_answer], [not_recorded]. *)
 
 type candidate_result =
   | Decided of { id : string; decision : candidate_decision }
@@ -123,8 +127,8 @@ type unavailable = private
 
 val unavailable_reason_token : unavailable -> string
 (** The token the status line shows: [capacity], [rate_limited],
-    [provider_failed], [invalid_answer] or [turn_question]. [Too_large] shows
-    as [capacity]. *)
+    [provider_failed], [invalid_answer], [not_recorded] or [turn_question].
+    [Too_large] shows as [capacity]. *)
 
 (** Only {!reduce} builds a status, so the selection, the counts and the
     reason always describe the same candidates. *)

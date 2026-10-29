@@ -1695,6 +1695,40 @@ let test_recall_anchor_tracks_the_original_history_row () =
     (Tui_types.recall_history_offset [first; persisted; queued] (Tui_types.msg_anchor session))
 ;;
 
+let test_recall_navigation_preserves_the_edited_queue_item () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let _, item = preflight_input () in
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_queued <- Q.restore_unsent Q.empty item;
+  Tui_types.set_recall_edit state item;
+  Masc_tui_message_input.insert state.msg_input "edited input";
+  check bool "an edit cannot start a second history walk" true
+    (Tui_types.recall_navigation_blocked state);
+  check bool "the edited queued item remains held" true
+    (Tui_types.recalling_for_keeper state "alpha"
+     && Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  Masc_tui_message_input.clear state.msg_input;
+  Masc_tui_message_input.insert state.msg_input item.request.message;
+  state.msg_attachments <- item.request.attachments;
+  state.msg_references <- item.request.references;
+  let entry = chat_entry ~request_id:item.request.request_id
+      ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
+      ~text:item.request.message ~at:1. () in
+  state.msg_recall_walk <- Some {Tui_types.krw_anchor=Tui_types.msg_anchor entry;
+    krw_original=("earlier draft", [], [], None)};
+  check bool "an existing unedited walk may continue" false
+    (Tui_types.recall_navigation_blocked state);
+  state.msg_target_keeper_name <- Some "beta";
+  state.msg_recall_walk <- None;
+  check bool "another Keeper can browse history" false
+    (Tui_types.recall_navigation_blocked state);
+  state.msg_target_keeper_name <- Some "alpha";
+  Tui_types.clear_current_recall_edit state;
+  check bool "abandoning the edit permits a new walk" false
+    (Tui_types.recall_navigation_blocked state)
+;;
+
 let test_new_enter_can_bypass_an_explicitly_stopped_input () =
   let module Q = Masc_tui_keeper_chat_queue in
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
@@ -6942,6 +6976,7 @@ let () =
         ; test_case "recalled admission uses the explicitly replaced payload" `Quick test_recalled_admission_uses_the_explicitly_replaced_payload
         ; test_case "recall edits and drafts follow workspace and Keeper" `Quick test_recall_edits_and_drafts_follow_workspace_and_keeper
         ; test_case "recall anchor survives history changes" `Quick test_recall_anchor_tracks_the_original_history_row
+        ; test_case "recall navigation preserves an edited queue item" `Quick test_recall_navigation_preserves_the_edited_queue_item
         ; test_case "new Enter bypasses an explicit stop hold" `Quick test_new_enter_can_bypass_an_explicitly_stopped_input
         ; test_case "empty composer preserves already queued input order" `Quick test_empty_composer_cannot_reverse_already_queued_input
         ; test_case "preflight restoration preserves submission chronology" `Quick test_preflight_restoration_preserves_submission_chronology

@@ -1173,6 +1173,30 @@ let recall_newer (state : state) =
            (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- references);
            state.msg_attachments_since <- since)
 
+let queued_edit_is_unchanged state item =
+  match Chat_queue.find state.msg_queued ~request_id:item.Chat_queue.request.request_id with
+  | Some current -> current.request = item.request
+  | None -> false
+
+let composer_empty_for_queue_edit state =
+  Option.is_none state.msg_recall_walk
+  && Masc_tui_message_input.length state.msg_input = 0
+  && state.msg_attachments = [] && state.msg_references = []
+  && Option.is_none state.msg_spill
+
+let explain_queued_edit state =
+  match current_recall_edit state with
+  | Some item ->
+      report_action state "system"
+        (if Option.is_some state.msg_recall_walk then
+           "Queued edit kept while browsing history."
+         else if not (queued_edit_is_unchanged state item) then
+           "Queued message changed or is gone · Ctrl-U: abandon (may send)"
+         else if composer_empty_for_queue_edit state then
+           "Ctrl-P: restore · Ctrl-U: abandon (may send)"
+         else "Enter: replace · Ctrl-U: abandon (may send)")
+  | None -> ()
+
 (* A queued line is drawn in the conversation, so cancelling one or pulling it
    back into the composer has to take its row with it. The row is found by the
    request's own id and not by its text: two identical lines to one keeper are
@@ -1219,6 +1243,50 @@ let drop_unsent_request (state : state) (request : Keeper_chat.request) =
     forget_queued_history state request;
     true
 ;;
+
+let load_queued_edit (state : state) item =
+  forget_recall state;
+  let request = item.Chat_queue.request in
+  set_recall_edit state item;
+  clear_staged_attachments state;
+  (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- request.Keeper_chat.attachments);
+  (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- request.Keeper_chat.references);
+  (* Recall makes this batch the current staged-image observation. *)
+  if request.Keeper_chat.attachments <> [] then note_attachment_staged state;
+  Masc_tui_message_input.clear state.msg_input;
+  Masc_tui_message_input.insert state.msg_input request.Keeper_chat.message
+
+(* Ctrl-P can restore an empty editor from its unchanged queued request. It
+   cannot overwrite an edit or a draft saved beneath an active recall walk. *)
+let edit_latest_queued_input (state : state) =
+  match current_recall_edit state with
+  | Some item ->
+      if queued_edit_is_unchanged state item && composer_empty_for_queue_edit state
+      then load_queued_edit state item
+      else explain_queued_edit state
+  | None ->
+      (match Option.bind state.msg_target_keeper_name (fun keeper_name ->
+          Chat_queue.take_newest_for_keeper state.msg_queued ~keeper_name) with
+       | None -> ()
+       | Some (item, _) ->
+           if composer_empty_for_queue_edit state then load_queued_edit state item
+           else report_action state "info"
+             (if Option.is_some state.msg_recall_walk then
+                "Draft kept · leaving history may send queued input."
+              else "Draft kept · sending or clearing it may send queued input."))
+
+let move_recall state ~drain_queue move =
+  if recall_navigation_blocked state then
+    match current_recall_edit state with
+    | Some item when queued_edit_is_unchanged state item
+                     && composer_empty_for_queue_edit state ->
+        load_queued_edit state item
+    | Some _ | None -> explain_queued_edit state
+  else begin
+    let was_editing = Option.is_some (current_recall_edit state) in
+    move state;
+    if was_editing && Option.is_none (current_recall_edit state) then drain_queue ()
+  end
 
 (* The chat pane's Enter: the draft goes to the keeper, the pane returns to
    the newest row, and a line held while the operator was composing may go
@@ -1303,12 +1371,6 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Masc_tui_message_input.insert state.msg_input completed;
     state.msg_command_menu <- Masc_tui_command.Menu_dismissed completed;
     true in
-  let move_recall move =
-    let was_editing = Option.is_some (current_recall_edit state) in
-    move state;
-    if was_editing && Option.is_none (current_recall_edit state)
-    then drain_queue ()
-  in
   match key with
   (* Esc cancels the innermost thing, and a running capture is inside
      everything else here: the operator is mid-utterance, not mid-turn. ^Y
@@ -1326,6 +1388,10 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Masc_tui_message_input.clear state.msg_input;
     discard_recovered_paste_lock state;
     drain_queue ();
+    true
+  | "down" when state.view = Keepers Keeper_message
+                && not (keeper_message_input_supported state) ->
+    if state.msg_scroll > 0 then set_msg_scroll state (state.msg_scroll - 1);
     true
   | ("up" | "down" | "shift-tab") when Option.is_some command_menu ->
     Option.iter (fun menu ->
@@ -1408,10 +1474,10 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   | "down" when slash_navigable () -> apply_autocomplete Masc_tui_command.Next
   | "up" when slash_navigable () -> apply_autocomplete Masc_tui_command.Prev
   | "up" ->
-    move_recall recall_older;
+    move_recall state ~drain_queue recall_older;
     true
   | "down" ->
-    move_recall recall_newer;
+    move_recall state ~drain_queue recall_newer;
     true
   | "wheel-up" ->
     (* A notch is worth more than a row. The wheel used to arrive as the arrow
@@ -1548,33 +1614,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     end else if c = Some 16 then begin
       (* Ctrl-P: pull the newest waiting line back into the composer. That is
          the edit: fix it and Enter queues it again. *)
-      (match
-         Option.bind state.msg_target_keeper_name (fun keeper_name ->
-           Chat_queue.take_newest_for_keeper state.msg_queued ~keeper_name)
-       with
-       | None -> ()
-       | Some (item, _rest) ->
-         forget_recall state;
-         let request = item.Chat_queue.request in
-         set_recall_edit state item;
-         (* The attachments come back with the text. They were staged for this
-            line and remain on the queued request while it is edited in place.
-            The composer mirrors them so replacing the body retains the exact
-            payload; Ctrl-U abandons only the edit and leaves the queue item.
-            The batch and its marker move together, so the old pair goes first:
-            a text-only recall would otherwise leave the dropped batch's anchor
-            behind. *)
-         clear_staged_attachments state;
-         (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- request.Keeper_chat.attachments);
-         (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- request.Keeper_chat.references);
-         (* The original staging moment is gone -- the send that queued this
-            line cleared the marker with the batch -- so the recall is what
-            Ctrl-O can weigh: the attachments are the freshest thing the
-            composer holds from this moment on. *)
-         if request.Keeper_chat.attachments <> [] then
-           note_attachment_staged state;
-         Masc_tui_message_input.clear state.msg_input;
-         Masc_tui_message_input.insert state.msg_input request.Keeper_chat.message);
+      edit_latest_queued_input state;
       true
     end else if c = Some 22 then begin
       (* Ctrl-V: the clipboard's image, staged for the next message. The key
@@ -8050,13 +8090,19 @@ let prepare_item_request state ~mailbox ~drain_queue =
     (match Masc_tui_keeper_items.request ~account:(selected_item_account state) item with
      | Error reason -> report_action state "error" reason
      | Ok request ->
-       enter_keeper_chat state ~mailbox ~keeper_name:keeper.k_name ~drain_queue;
-       if state.view = Keepers Keeper_message
-          && state.msg_target_keeper_name = Some keeper.k_name then
-         if keeper_message_draft_empty state then
-           set_composer_text state (Masc_tui_keeper_items.request_draft request)
-         else report_action state "info"
-           "Your existing chat draft is preserved. Send or save it before preparing an Item request.")
+       if Option.is_some (recall_edit_for_keeper state keeper.k_name) then
+         report_action state "info" "Item request not prepared; queued edit retained."
+       else begin
+         enter_keeper_chat state ~mailbox ~keeper_name:keeper.k_name ~drain_queue;
+         if state.view = Keepers Keeper_message
+            && state.msg_target_keeper_name = Some keeper.k_name then
+           if Option.is_some (current_recall_edit state) then
+             report_action state "info" "Item request not prepared; queued edit retained."
+           else if keeper_message_draft_empty state then
+             set_composer_text state (Masc_tui_keeper_items.request_draft request)
+           else report_action state "info"
+             "Your existing chat draft is preserved. Send or save it before preparing an Item request."
+       end)
   | (Some _ | None), None | None, Some _ ->
     report_action state "info" "Select an item before preparing a Keeper request"
 

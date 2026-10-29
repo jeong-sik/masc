@@ -116,6 +116,17 @@ let decision_of = function
 let run_ids_of (program : Program.t) =
   List.map (fun (stage : Program.stage) -> stage.decision.run_id) program.stages
 
+(* The request ID of the first attempt of a step's gate journal: the one record
+   of its execution that names no predecessor. The step's decision takes its run
+   identity from it, so it is what a judgment must return, found here from the
+   records and not from any earlier judgment. *)
+let first_attempt_id inventory ((record : Owner.retained), (_ : Step.header)) =
+  let names_no_predecessor (gate : Owner.retained) =
+    match Yojson.Safe.Util.member "predecessor" gate.request with `Null -> true | _ -> false in
+  match List.filter names_no_predecessor (Gate.Inventory.execution_records inventory ~execution_id:record.request_id) with
+  | [ gate ] -> gate.request_id
+  | [] | _ :: _ :: _ -> fail "a step's gate journal has exactly one first attempt"
+
 let test_a_chain_runs_each_step_once_and_a_restart_replays_it () = with_fixture (fun fixture ->
   fixture.respond := answering ();
   let owner = owner fixture and range = range_link (owner fixture) in
@@ -319,8 +330,10 @@ let test_a_finished_step_is_judged_from_the_inventory_and_not_from_the_store () 
       match judge_from fixture ~owner ~inventory:nothing step with
       | Ok (Judgment.Decided _) -> fail "a judgment decided without the journal it reads"
       | Ok (Judgment.Pending _) | Error _ -> ()) steps;
-    check (list string) "the inventory makes each step's decision the chain made" (run_ids_of first.program)
-      (List.map (fun step -> (decision_of (judge_from fixture ~owner ~inventory step)).run_id) steps)))
+    let judged = List.map (fun step -> (decision_of (judge_from fixture ~owner ~inventory step)).run_id) steps in
+    check (list string) "the inventory makes each step's decision the chain made" (run_ids_of first.program) judged;
+    check (list string) "and names it by the first attempt of the step's journal"
+      (List.map (first_attempt_id inventory) steps) judged))
 
 (* An inventory that does not show a step's journal does not stand in for the
    store: the judgment reads the journal itself. *)
@@ -405,7 +418,8 @@ let test_a_failed_gate_is_not_a_decision_and_a_retried_one_is_judged_from_the_in
     check bool "the retry left more than one attempt for the first step" true
       (Gate.Inventory.record_count inventory > List.length steps);
     without_gate_scope fixture ~owner (fun () ->
-      check (list string) "the inventory names each decision as the chain did" (run_ids_of retried.program)
+      check (list string) "the inventory names each decision by the first attempt of its journal"
+        (List.map (first_attempt_id inventory) steps)
         (List.map (fun step -> (decision_of (judge_from fixture ~owner ~inventory step)).run_id) steps))))
 
 let () =

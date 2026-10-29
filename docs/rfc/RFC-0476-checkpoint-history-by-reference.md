@@ -3,7 +3,7 @@ rfc: "0476"
 title: "Keeper checkpoint 를 참조로 저장한다: media 는 blob 으로, history 는 턴 묶음으로"
 status: Draft
 created: 2026-10-28
-updated: 2026-10-28
+updated: 2026-10-29
 author: vincent
 related: ["36690", "46396", "46541", "0265"]
 ---
@@ -19,12 +19,13 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
 1. **media 바이트는 언제나 참조로 둔다.** 이미지·문서·오디오 바이트는 blob 저장소에 한 번만 쓰고, history 에는 digest 만 남긴다. 설명을 새로 만들지 않는다. 바이트가 필요한 곳은 resolver 하나로 되돌린다.
 2. **history 는 턴 묶음과 작은 head 로 둔다.** 닫힌 턴은 묶음 파일 하나다. 진행 중인 턴은 메시지 파일 하나씩 쓰다가, 턴이 닫히면 묶는다. head 에는 나머지 필드와 묶음·메시지 digest 목록만 둔다. 어떤 편집이든 새 head 하나로 표현되고, 바뀌지 않은 묶음은 다시 쓰지 않는다.
 
-둘 다 checkpoint 형식을 바꾼다. 하드컷 한 번(checkpoint_version 16)으로 같이 들어간다. 배포 때 모든 Keeper 의 agent-core history 는 새로 시작한다(D1, 결정됨).
+둘 다 checkpoint 형식을 바꾼다. media 참조는 `checkpoint_version` 16 으로 먼저 배포됐다(L1-1·L1-2). head 와 객체는 17 로 한 번 더 하드컷한다(D7). 하드컷마다 모든 Keeper 의 agent-core history 는 새로 시작한다(D1, 결정됨).
 
 | 순서 | 내용 | 성공 기준(§8) |
 |---|---|---|
 | L0 | 측정 계기와 bench. 형식은 바꾸지 않는다 | 아래 기준을 전후로 잴 수 있다 |
-| L1 | 형식 v16 하드컷. native stack 하나로 들어간다: 타입·codec, store 쓰기·읽기, resolver 자리, head 로 읽기, blob 정리 | inline media 0바이트. tool 라운드당 쓴 바이트가 지난 턴 크기와 무관. 기동 `transcript_tail` 과 대시보드 `shell_light` 시간이 절반 이하 |
+| L1-1·L1-2 | 형식 v16 하드컷: history·provider media 타입 분리, media 를 참조로 저장. 병합·배포됐다 | inline media 0바이트 |
+| L1-3~L1-5 | 형식 v17 하드컷. native stack 하나로 들어간다: head 와 객체, store 쓰기·읽기, head 로 읽기, 객체 정리 | tool 라운드당 쓴 바이트가 지난 턴 크기와 무관. 기동 `transcript_tail` 과 대시보드 `shell_light` 시간이 절반 이하 |
 | L2 | 보관 snapshot 을 head 사본으로 바꾸고, 정리 경로를 head 를 따라가게 한다 | 보관 사본 때문에 늘어나는 디스크 0 |
 
 ## 1. 측정 (2026-10-28, 라이브 상태)
@@ -50,7 +51,7 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
   - 대시보드 `shell_light` 새로 고침은 평소 5~7초, 길게는 19.9초다.
   - 25초 `sample` 에서 CPU 를 가장 많이 쓴 것은 worker domain 의 Yojson 긴 문자열 해석이다. 호출자는 unwinder 가 잃어서 확인하지 못했다.
 
-## 2. 지금 코드가 하는 일
+## 2. 2026-10-28 의 코드가 하는 일
 
 줄 번호는 2026-10-28 main(`d7d97a28b41`) 기준이다. 맥락 없는 적대 리뷰가 §2 의 인용을 다시 확인했다.
 
@@ -116,17 +117,22 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
 ### 3.2 배치
 
 ```
-<trace>/<trace>.json              head: 메시지 외 필드 + turns[bundle digest] + open[message digest]
-<trace>/objects/<aa>/<sha256>     닫힌 턴 묶음(메시지 배열) 또는 진행 중 턴의 메시지 하나
+<session_dir>/<session_id>.json         head: 메시지 외 필드 + turns[(bundle, 메시지 수, chain)] + open[message digest]
+<session_dir>/objects/<aa>/<sha256>     닫힌 턴 묶음 또는 진행 중 턴의 메시지 하나
 <base>/.masc/tool_blobs/<aa>/<sha256>   media 바이트 (기존 Tool_blob_store)
 ```
 
 - 객체는 `Tool_blob_store.put_durable` 과 같은 방식으로 쓴다. 임시 파일에 쓰고, rename 하고, 디렉터리를 fsync 한다. 읽을 때 digest 를 검사한다. 이미 있는 객체는 다시 쓰지 않는다(`put_durable_reuse`).
   - 내구성은 그 쓰기 함수가 주는 만큼이다. 프로세스가 죽어도 남는다. macOS 의 `fsync` 는 디스크 캐시까지 비우지 않아서, 전원이 끊길 때도 남는지는 `Fs_compat` 의 `F_FULLFSYNC` 사용 여부를 따른다.
+- head 는 지금 checkpoint 파일과 같은 경로에 둔다. 경로만 쓰는 곳은 그대로다.
 - 객체 digest 는 codec 이 만든 바이트의 SHA-256 이다. 그래서 인코딩이 결정적이어야 한다. 필드 순서를 고정하고, 실수 표기도 하나로 정한다(`0.0`/`-0.0` 같은 함정은 `prefix_digest` 주석에 이미 적혀 있다). `encode (decode bytes) = bytes` 를 시험으로 고정한다.
-- 묶음은 머리에 메시지마다의 digest 를 순서대로 담는다. head 는 묶음마다 메시지 수와, 묶음이 끝나는 자리의 해시 체인 값을 담는다(§3.5).
+- 메시지 객체의 바이트는 checkpoint codec 이 그 메시지 하나를 검증하고 인코딩한 바이트다.
+- 묶음은 JSON 머리 한 줄 `{"messages":[{"sha256":..,"bytes":n},...]}` 뒤에 메시지 바이트를 한 줄에 하나씩 둔 것이다. compact JSON 에는 줄바꿈 문자가 없으므로 파일 전체가 JSON lines 로 읽힌다. 그래서 blob 정리의 파일 훑기와 운영자의 `jq` 가 그대로 읽는다. 읽을 때 파일 전체의 SHA-256 이 객체 이름과 같은지, 머리가 말한 조각마다 SHA-256 이 같고 줄로 끝나는지 확인한다. 메시지를 다시 인코딩하지 않는다.
+- head 는 `{"format":"masc.checkpoint.head","checkpoint":{..},"history":{"turns":[{"bundle","messages","chain"}],"open":[..]}}` 다. `checkpoint` 는 메시지를 뺀 나머지 필드이고, 메시지 목록은 비어 있어야 한다. turns 에는 묶음마다 메시지 수와, 묶음이 끝나는 자리의 해시 체인 값을 담는다(§3.5).
+- checkpoint ref 의 digest 는 내용 digest 다. 고정 태그, head 의 `checkpoint` 필드, 모든 메시지에 대한 `chain(n)` 을 이어 붙인 것의 SHA-256 이다. 턴을 어떻게 나눴든 값 하나에 하나다. 그래서 값으로 만든 ref 와 그 값을 쓴 head 의 ref 가 같고, 둘 다 메시지 객체를 읽지 않고 계산한다. `Keeper_checkpoint_ref` 의 모양은 바뀌지 않는다.
+- exact snapshot 은 바이트를 들고 다니지 않는다. 값과 ref 만 든다. 저장(정상 저장, CAS, accepted-checkpoints)은 잠금 안에서 그때의 canonical head 를 읽고, 그 history 를 기준으로 배치를 정한다.
 - 턴 경계는 Keeper 턴이다. 턴 마무리(`finalize`) 저장 때 `open` 의 메시지를 묶음 하나로 묶고, 그 digest 를 `turns` 에 붙인다.
-- **head 크기:** 턴은 Keeper 하나에 최대 525개라 `turns` 는 약 37KB 다. `open` 은 진행 중인 턴의 메시지 수를 따른다(중앙값 14개, 최대 3,341개면 약 224KB).
+- **head 크기:** 턴은 Keeper 하나에 최대 525개다. 턴 하나가 약 170바이트라 `turns` 는 약 88KB 다. `open` 은 진행 중인 턴의 메시지 수를 따른다(중앙값 14개, 최대 3,341개면 약 224KB).
 
 ### 3.3 저장
 
@@ -136,8 +142,9 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
 이 순서라서 head 는 언제나 이미 내구화된 객체만 가리킨다.
 
 - 진행 중인 턴의 끝을 고치면 그 메시지 객체만 새로 생긴다(응답 버리기, Text 고치기).
-- 닫힌 턴 중간에 끼우면 그 턴 묶음 하나만 새로 생긴다(`close_open_cycles`).
-- purge 와 history clear 는 고친 턴 묶음만 새로 쓴다. purge 는 내용을 지우려는 운영자 의도라서, 옛 묶음을 가리키는 보관 head 도 함께 지운다.
+- 저장은 이전 head 의 턴을 앞에서부터 보면서, 그 턴이 끝나는 자리의 chain 값이 새 메시지 목록의 같은 자리 값과 같은 동안 그 턴을 그대로 둔다.
+- 닫힌 턴 중간을 바꾸면(`close_open_cycles`, purge, history clear) 그 턴부터 뒤의 메시지는 모두 open 으로 돌아가고, 다음 턴 마무리 저장 때 묶음 하나로 다시 쓰인다. 바뀐 턴 하나만 다시 쓰는 것보다 더 쓴다. 이런 저장이 얼마나 자주 일어나는지는 아직 재지 않았다.
+- purge 는 내용을 지우려는 운영자 의도라서, 옛 묶음을 가리키는 보관 head 도 함께 지운다.
 
 **참조로 바꾸는 자리.** media 가 history 에 들어오는 순간 바꾼다. 저장할 때 바꾸면 메모리의 history 는 `Base64`, 다시 읽은 history 는 `Stored` 가 된다. 그러면 같은 대화가 프로세스 안팎에서 다른 모양이 되고, 앞부분 비교가 재시작마다 어긋난다.
 - 들어오는 곳은 다음과 같다. history 타입에 `Base64` 가 없으므로(D5) 컴파일러가 나머지를 찾아 준다.
@@ -168,7 +175,7 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
 - 메시지 개수(heartbeat, `keeper_status`)는 head 로 답한다. 묶음마다 메시지 수를 head 에 같이 둔다.
 - 대시보드 checkpoint 목록은 보관 head 만 읽는다. 미리보기는 마지막 객체 하나만 읽는다.
 - Librarian 과 continuation 의 앞부분 비교는 해시 체인으로 한다. 지금의 `prefix_digest` 는 덮은 메시지의 JSON 을 이어 붙인 한 덩어리의 SHA-256 이라서(lib/librarian_continuity_snapshot.ml:227), 묶음 digest 로는 만들 수 없다. 턴 중간까지 덮은 경우도 비교할 수 없다.
-  - 정의: `chain(0)` 은 정해 둔 상수이고, `chain(i+1) = SHA-256(chain(i) ‖ digest(message i))` 다.
+  - 정의: `chain(0) = SHA-256("masc.rfc-0476.chain.v1")` 이고, `chain(i+1) = SHA-256(hex(chain(i)) ‖ hex(digest(message i)))` 다. 저장도 hex 로 한다.
   - 앞부분 k 개의 값은 `chain(k)` 다. head 에 있는 "k 바로 앞 묶음의 끝 체인 값"에서 시작해, 그 묶음 머리의 메시지 digest 를 k 까지 이어 계산한다. 메시지를 다시 인코딩하지 않는다.
   - Librarian continuity snapshot 은 `prefix_sha256` 대신 `chain(k)` 를 저장한다. 옛 snapshot 은 하드컷 때 버려진다(§3.7). 임의의 k 에서 두 방법(전체 history 를 처음부터 잇기, head 와 묶음에서 이어 계산하기)이 같은 값을 내는지 시험으로 고정한다.
 - 턴 하나를 쓰는 history 읽기는 지금처럼 전체를 메모리에 올린다. 다만 media 를 빼면 msx-retro-mania 가 179MB 에서 약 58MB 가 된다. 같은 프로세스 안에서는 메모리 사본을 그대로 쓴다.
@@ -187,12 +194,14 @@ blob 정리는 L1 과 같은 stack 에 들어간다. `Tool_blob_maintenance` 의
   - 살아 있는 head
   - 보관 head
   - accepted-checkpoints
-  - chat-operations SQLite 에 Gate 가 든 `Prepared_agent_core` 의 checkpoint 바이트
+  - chat-operations SQLite 에 Gate 가 든 `Prepared_agent_core` 의 checkpoint head
+  - journal 준비 도구가 `upgrades/journal-inputs/` 에 복사한 checkpoint head
   - official client session store 가 저장한 history
+- media blob 정리는 지금처럼 `.masc` 아래 파일을 모두 훑는다. 메시지 객체와 묶음은 JSON lines 로 읽히므로, 그 안의 `Stored` 참조가 그대로 기준점이 된다. 아직 지우지 않은 객체도 훑으므로 blob 은 객체가 지워질 때까지 남는다.
 
 ### 3.7 하드컷
 
-- `checkpoint_version` 을 16 으로 올린다. 이전 파일은 지금도 있는 `Superseded` 로 읽혀서, 각 Keeper 의 다음 턴은 새 history 로 시작한다(lib/keeper/keeper_run_context.ml:127).
+- media 참조는 `checkpoint_version` 16 으로 들어갔다(L1-2b, #46729). head 와 객체는 17 로 올린다(D7). 이전 파일은 지금도 있는 `Superseded` 로 읽혀서, 각 Keeper 의 다음 턴은 새 history 로 시작한다(lib/keeper/keeper_run_context.ml:127).
 - 호환 reader 나 변환 코드는 만들지 않는다.
 - Librarian continuity snapshot 은 이전 history 를 가리키므로 함께 버려진다. Keeper 대화 기록(`keeper_chat`), Librarian 기억, 게시판은 그대로다.
 
@@ -207,10 +216,9 @@ blob 정리는 L1 과 같은 stack 에 들어간다. `Tool_blob_maintenance` 의
     - 운영자가 jq·rg 로 바로 볼 수 없다.
   - fsync 도 크게 줄지 않는다. masc 의 SQLite 규약은 `journal_mode=DELETE`, `synchronous=EXTRA` 라서 commit 한 번에 fsync 를 여러 번 한다(:728-738).
   - "바뀌지 않는 객체를 먼저 쓰고 head 를 마지막에 rename" 하면 한 번에 commit 하는 것과 같은 보장을 얻는다. Git 과 `Tool_blob_store` 가 쓰는 방식이다.
-- **append-only 연산 로그.** agent_core `Checkpoint_delta` 의 splice 연산이다. 검증 해시가 checkpoint 전체에 대한 MD5 라서 쓸 때마다 전체 비용이 든다. 처음부터 재생해야 하고 로그를 접는 일이 따로 필요하다.
+- **append-only 연산 로그.** 메시지 splice 연산을 덧붙이는 방식이다. 처음부터 재생해야 하고 로그를 접는 일이 따로 필요하다.
 - **메시지마다 파일 하나.** 약 13만 개 파일이 생기고, head 가 메시지 수만큼 커진다. 사용자 판단(D2)대로 닫힌 턴을 묶는다.
 - **진행 중인 턴도 묶음 하나로 다시 쓰기.** 메시지 3,341개 턴에서는 그 턴 안에서만 GB 단위를 쓴다. 그래서 진행 중인 턴은 loose 객체로 둔다.
-- **하드컷 두 번(media 먼저, 메시지 묶음 나중).** media 참조만으로도 codec 과 Librarian digest 가 바뀌어서 하드컷이 된다. 두 번 초기화할 이유가 없다.
 - **컴팩션, 이미지 설명 생성, URL 참조, Vision artifact 저장소.**
   - 컴팩션은 모델이 보는 것을 바꾼다.
   - 설명 생성은 사용자 결정으로 하지 않는다.
@@ -222,15 +230,18 @@ blob 정리는 L1 과 같은 stack 에 들어간다. `Tool_blob_maintenance` 의
 1. **L0.**
    - 저장마다 쓴 바이트, 읽기마다 읽은 바이트, 기동 단계 시간을 같은 이름으로 남긴다.
    - checkpoint 저장·읽기 bench 를 `test/` 에 둔다. 지금 형식으로 먼저 잰다.
-2. **L1, native stack 하나.**
-   1. 타입과 codec v16: history·provider media 타입 분리(D5), head, 묶음.
-   2. store: 객체 쓰기·읽기, head, 참조로 바꾸는 함수, `Saved` 반환값.
-   3. resolver 와 부르는 자리(§3.4).
-   4. head 로 읽기(§3.5).
-   5. blob 정리와 기준점(§3.6).
+2. **L1-1·L1-2, v16.** 병합·배포됐다.
+   - L1-1(#46651): media 를 payload 합타입으로 싣는다. 동작은 바뀌지 않는다.
+   - L1-2a(#46728): media 를 참조로 드는 history 타입(D5).
+   - L1-2b(#46729): history 와 checkpoint 가 media 를 참조로만 들고, 바이트는 resolver 로 되돌린다(§3.4). 리뷰 지적은 #46738, #46758 로 고쳤다.
+3. **L1-3~L1-5, v17, native stack 하나.**
+   1. L1-3a: agent_core `Checkpoint_objects`. 저장 계획, head·묶음 인코딩, chain, 읽기. I/O 는 하지 않는다. 쓰지 않는 delta API 와 `Agent_core.Checkpoint_store` 를 지운다.
+   2. L1-3b: Keeper store 와, store 밖에서 checkpoint 바이트를 다루는 곳. 객체 쓰기, head 쓰기, 턴 마무리 저장(`Turn_closes`) 인자, CAS 경로, 보관, accepted-checkpoints, v17. exact snapshot 이 바이트를 들지 않게 되므로 바이트를 비교하거나 풀던 곳(Gate, journal 준비, history clear, input history cut, input wait response, semantic execution, 대시보드 purge, bin 도구)이 같은 층에서 바뀐다. bench 를 턴 단위 저장으로 바꾼다.
+   3. L1-4: head 로 읽기(§3.5). 개수·미리보기, Librarian `chain(k)`.
+   4. L1-5: 객체 정리와 기준점(§3.6).
 
    층마다 리뷰를 받고, 모두 승인되면 맨 위에서 한 번에 병합한다. 배포가 곧 하드컷이다.
-3. **L2.** 보관 snapshot 을 head 사본으로 바꾸고, 정리를 head 를 따라가게 한다.
+4. **L2.** 보관 snapshot 을 head 사본으로 바꾸고, 정리를 head 를 따라가게 한다.
 
 ## 6. 하지 않는 것
 
@@ -241,9 +252,9 @@ blob 정리는 L1 과 같은 stack 에 들어간다. `Tool_blob_maintenance` 의
 
 ## 7. 위험
 
-- **되돌리기.** v16 을 배포한 뒤 이전 binary 로 되돌리면, 이전 binary 는 v16 파일을 읽지도 쓰지도 못한다.
-  - 읽으면 `checkpoint version 16 was written by a later binary; this one reads 15` 오류가 난다(keeper_checkpoint_store.ml:848).
-  - 저장은 기존 파일을 읽지 못해 `Existing_checkpoint_unreadable` 로 실패한다고 보고됐다(:2241-2255, 직접 확인하지 않았다).
+- **되돌리기.** v17 을 배포한 뒤 v16 binary 로 되돌리면, 이전 binary 는 v17 head 를 읽지도 쓰지도 못한다.
+  - 읽으면 `checkpoint version 17 was written by a later binary; this one reads 16` 오류가 난다(keeper_checkpoint_store.ml:868).
+  - 저장은 기존 파일을 읽지 못해 `Existing_checkpoint_unreadable` 로 실패한다(:2255-2264).
   - 되돌릴 때는 `traces/` 를 옮겨 두고 새로 시작해야 한다.
 - **fsync 횟수.** 저장 한 번에 새 객체 1~3개와 head 를 fsync 한다. 작은 파일 여러 번이 179MB 한 번보다 느린지는 L0 bench 로 잰다.
 - **정리 오류.** 기준점이 빠지면 쓰는 blob 을 지운다. 그 이미지가 범위에 들어온 요청은 typed 오류로 실패하고, 범위 시작이 그 뒤로 넘어갈 때까지 계속 실패한다. 그래서 기준점은 §3.6 목록을 시험으로 고정하고, 정리는 쓰는 쪽이 없을 때만 한다(서버 정지 중, 또는 기동 때 Keeper 시작 전).
@@ -267,3 +278,4 @@ blob 정리는 L1 과 같은 stack 에 들어간다. `Tool_blob_maintenance` 의
 - **D4. head 단계.** D2 로 풀렸다. head 는 턴 묶음 목록이다.
 - **D5. 타입 경계.** 결정됨(2026-10-28, 사용자). history 의 media 와 provider 로 가는 media 를 다른 타입으로 둔다. backend 에 `Stored` 가 가는 상태도, history 에 `Base64` 가 남는 상태도 표현할 수 없다. agent_core 의 메시지 타입을 쓰는 곳을 모두 바꾸는 비용을 받아들인다.
 - **D6. 그릇.** 결정됨(2026-10-28, 사용자). 객체마다 파일 하나와 head 파일 하나로 둔다(§3.2). SQLite 를 버린 이유는 §4 에 있다. L0 bench 에서 파일 방식의 저장 지연이 문제로 나오면 다시 연다.
+- **D7. 두 번째 하드컷.** 결정됨(2026-10-29, 사용자). L1-1·L1-2 가 v16 으로 먼저 배포됐으므로, head 와 객체는 `checkpoint_version` 17 로 한 번 더 하드컷한다. L1-3~L1-5 는 native stack 하나로 쌓아 맨 위에서 한 번에 병합한다.

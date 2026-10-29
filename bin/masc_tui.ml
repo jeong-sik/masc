@@ -23882,6 +23882,7 @@ let main
         | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
         | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
         | System_log_detail_scroll _ | Planning_confirmation_scroll _ | Planning_detail_scroll _
+        | Planning_list_page_rows _
         | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
         | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _ | Patch_modal_scroll _
         | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _
@@ -26351,6 +26352,7 @@ and is loaded on demand through keeper_skill.
           | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
           | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
           | System_log_detail_scroll _ | Planning_confirmation_scroll _ | Planning_detail_scroll _
+          | Planning_list_page_rows _
           | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
           | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _ | Patch_modal_scroll _
           | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _ | Keeper_list_scroll _

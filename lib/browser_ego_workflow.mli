@@ -33,7 +33,8 @@ type outcome =
       native_error : native_error option }
 
 (** Validates step indices/methods, native observation receipt types,
-    saving-Fetch provenance/download ID/filename against the exact request,
+    saving-Fetch provenance/download ID/filename and native Download cancel
+    return receipts against the exact request,
     progress/effect flags and final snapshot
     fields against the exact request, including the SDK's optional
     [failure.nativeError] evaluation/navigation timeout code, nonnegative finite

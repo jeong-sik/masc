@@ -185,6 +185,46 @@ let strict_inputs () =
      obj (base [step "selectOption" ["selector",str "#x";"selectionJson",str "{}"]]);
      obj (base [step "selectOption" ["selector",str "#x";"selectionJson",str "[1]"]]);
      obj (base [step "selectOption" ["selector",str "#x";"selectionJson",str "{\"index\":-1}"]])]
+let download_cancel () =
+  let id="60c7683f-f552-4c01-a5cb-2d487bb62e5e" in
+  let cancel=step "download.cancel" ["downloadId",str id] in
+  let wanted=request [cancel] in
+  check bool "cancellation round trip" true (W.of_json (W.to_json wanted)=Ok wanted);
+  check bool "cancellation is an effect" true (W.is_effect (List.hd wanted.steps).action);
+  check bool "cancellation does not press input" false (W.holds_input (List.hd wanted.steps).action);
+  List.iter (fun fields -> refused "invalid Download cancellation refused before SDK"
+    (W.of_json (obj (base [step "download.cancel" fields]))))
+    [["downloadId",str "../other"];["downloadId",str "60C7683F-F552-4C01-A5CB-2D487BB62E5E"];
+     ["downloadId",str id;"options",obj []];["downloadId",str id;"path",str "/tmp/file"];
+     ["downloadId",str id;"downloadId",str id];[]];
+  let receipt=obj ["downloadId",str id;"source",str "native_download";"cancelReturned",`Bool true] in
+  let completed receipt=obj (snapshot @ result ~started:true ~completed_effect:true
+    ~completed:[entry ~receipt 0 "download.cancel"] ~failure:`Null) in
+  (match ok (R.decode wanted (completed receipt)) with
+   | R.Completed {input=Rel.No_hold;_} -> ()
+   | R.Completed {input=Rel.Released _;_}|R.Stopped _ -> fail "cancellation manufactured input release");
+  List.iter (fun receipt -> refused "cancel receipt must bind exact native identity and return"
+    (R.decode wanted (completed receipt)))
+    [`Null;obj [];obj ["downloadId",str "foreign";"source",str "native_download";"cancelReturned",`Bool true];
+     obj ["downloadId",str id;"source",str "fetch";"cancelReturned",`Bool true];
+     obj ["downloadId",str id;"source",str "native_download";"cancelReturned",`Bool false];
+     obj ["downloadId",str id;"source",str "native_download";"cancelReturned",`Bool true;"cancelled",`Bool true]];
+  List.iter (fun (prior,steps,entries) ->
+    let req=request (steps @ [cancel]) in
+    let pre=obj (result ~started:prior ~completed_effect:prior ~completed:entries
+      ~failure:(failure (List.length entries) "downloadPreflight")) in
+    (match ok (R.decode req pre) with
+     | R.Stopped {effect_started;completed_effect;input;_} ->
+       check bool "preflight preserves prior effects" true (effect_started=prior && completed_effect=prior);
+       check bool "preflight did not press input" true (seen_input input=`No_hold)
+     | R.Completed _ -> fail "cancel preflight was called completed"))
+    [false,[],[];true,[step "fill" ["selector",str "#editor";"text",str "changed"]],[entry 0 "fill"]];
+  refused "download preflight must name a pending cancellation"
+    (R.decode (request [click]) (obj (result ~started:false ~completed_effect:false ~completed:[]
+      ~failure:(failure 0 "downloadPreflight"))));
+  stopped "lost cancellation does not claim a pressed key" `No_hold
+    (R.decode wanted (obj (result ~started:true ~completed_effect:false ~completed:[]
+      ~failure:(failure 0 "download.cancel"))))
 let complete () =
   let value=obj (snapshot @ result ~started:true ~completed_effect:true
     ~completed:[clicked 0;entry 1 "waitForURL"] ~failure:`Null) in
@@ -575,6 +615,7 @@ let () = if Array.length Sys.argv=3 && Sys.argv.(1)="--proof" then proof Sys.arg
   else if Array.length Sys.argv=3 && Sys.argv.(1)="--page-proof" then page_proof Sys.argv.(2)
   else run "native_browser_workflow" ["SDK contract",[
   test_case "native methods preserve values" `Quick roundtrip;
+  test_case "Download cancellation binds identity and exact effect progress" `Quick download_cancel;
   test_case "URL matcher forms preserve native syntax and reject ambiguous input" `Quick url_matchers;
   test_case "invalid methods and fields are refused" `Quick strict_inputs;
   test_case "snapshot completes the exact requested sequence" `Quick complete;

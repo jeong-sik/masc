@@ -30,6 +30,50 @@ function fixture({fail,dialog,snapshot='native result'}={}) {
  return {page,calls};
 }
 const request=steps=>({expectedUrl:initial,steps,snapshotScope:'viewport',maxChars:100,cursor:'MASC · fixture · workflow'});
+const downloadId='60c7683f-f552-4c01-a5cb-2d487bb62e5e';
+function cancelFixture({state='pending',source:provenance='native_download',rowLabel='p1',handleLabel='p1',cancel}={}) {
+ const f=fixture();let cancellations=0;
+ const row={id:downloadId,label:rowLabel,source:provenance,state,path:null,reason:null};
+ const context={mascDownloads:{rows:[row],handles:new Map([[downloadId,{label:handleLabel,
+  download:{async cancel(){cancellations++;if(cancel)await cancel(row);}}}]])}};
+ const invoke=vm.runInNewContext('('+source+')',context);
+ return {...f,row,context,cancellations:()=>cancellations,
+  invoke:steps=>invoke(f.page,{...request(steps),label:'p1'})};
+}
+test('native Download cancel calls its exact pending Page handle once without claiming interruption',async()=>{
+ const f=cancelFixture();
+ const result=await f.invoke([{method:'download.cancel',downloadId}]);
+ assert.equal(f.cancellations(),1);assert.equal(result.failure,null);
+ assert.equal(result.effectStarted,true);assert.equal(result.completedEffect,true);assert.equal(result.inputReleased,true);
+ assert.deepEqual(JSON.parse(JSON.stringify(result.completed[0].receipt)),{downloadId,source:'native_download',cancelReturned:true});
+ assert.equal(f.row.state,'pending','cancel return does not manufacture a terminal download state');
+});
+test('cancel refuses unknown, finished, Fetch and foreign Page handles before an SDK effect',async()=>{
+ for(const setup of [{state:'completed'},{state:'interrupted'},{source:'fetch'},{rowLabel:'p2'},{handleLabel:'p2'},{}]){
+  const f=cancelFixture(setup);if(Object.keys(setup).length===0)f.context.mascDownloads.handles.clear();
+  for(const prior of [false,true]){
+   const steps=prior?[{method:'fill',selector:'#editor',text:'changed'}]:[];
+   const result=await f.invoke([...steps,{method:'download.cancel',downloadId},{method:'click',selector:'#never'}]);
+   assert.equal(f.cancellations(),0);assert.equal(result.failure.method,'downloadPreflight');
+   assert.equal(result.failure.index,steps.length);assert.equal(result.completed.length,steps.length);
+   assert.equal(result.effectStarted,prior);assert.equal(result.completedEffect,prior);
+   assert.equal(f.calls.some(call=>call[0]==='click'||call[0]==='snapshot'),false);
+  }
+ }
+});
+test('a natural completion winning native cancellation remains completed',async()=>{
+ const f=cancelFixture({cancel:async row=>{row.state='completed';}});
+ const result=await f.invoke([{method:'download.cancel',downloadId}]);
+ assert.equal(f.cancellations(),1);assert.equal(result.failure,null);
+ assert.equal(f.row.state,'completed');assert.equal(result.completed[0].receipt.cancelReturned,true);
+});
+test('a lost native cancellation result retains uncertainty and stops without retry',async()=>{
+ const f=cancelFixture({cancel:async()=>{throw Error('native cancellation answer lost');}});
+ const result=await f.invoke([{method:'download.cancel',downloadId},{method:'click',selector:'#never'}]);
+ assert.equal(f.cancellations(),1);assert.equal(result.failure.method,'download.cancel');
+ assert.equal(result.effectStarted,true);assert.equal(result.completedEffect,false);assert.equal(result.completed.length,0);
+ assert.deepEqual(f.calls,['url']);
+});
 test('URL regex waits pass native RegExp and unchanged options to the SDK',async()=>{
  for(const urlRegex of [{source:'^HTTPS://FIXTURE\\.TEST/(start|done)$',flags:'i'},
   {source:''},{source:'start',flags:'g'}]){

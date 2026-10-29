@@ -157,7 +157,12 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     a page starts watching it, and a row says pending, completed or
     interrupted as {!Browser_downloads} does, a completed file once
     published. Rows distinguish [native_download] events from [fetch] save
-    receipts. A workflow Fetch [saveAs] is an artifact filename; the SDK writes
+    receipts. Pending native downloads retain their SDK handles privately in
+    this same process for explicit [download.cancel] workflow steps. Handles
+    are discarded once the save settles; neither Fetch rows nor foreign Page
+    rows grant cancellation authority. A returned cancellation call does not
+    prove interruption: completion may win the race.
+    A workflow Fetch [saveAs] is an artifact filename; the SDK writes
     a fresh worker-owned path and the receipt carries its download ID instead
     of that path. For Fetch rows [suggestedFilename] is the requested filename,
     not a name suggested by the server. Completed saves remain readable after

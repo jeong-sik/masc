@@ -144,6 +144,18 @@ let script = {js|async function nativeWorkflow(page, args) {
           }
           break;
         }
+        case 'download.cancel': {
+          const registry = globalThis.mascDownloads;
+          const row = registry?.rows.find(row => row.id === step.downloadId && row.label === args.label
+            && row.source === 'native_download' && row.state === 'pending');
+          const handle = registry?.handles?.get(step.downloadId);
+          if (row === undefined || handle === undefined || handle.label !== args.label)
+            return failure(index, 'downloadPreflight', 'no pending native Download handle on this Page; re-read downloads');
+          effect = effectStarted = pageResult = true;
+          await handle.download.cancel();
+          receipt = {downloadId: step.downloadId, source: 'native_download', cancelReturned: true};
+          break;
+        }
         case 'url':
           receipt = await page.url();
           if (typeof receipt !== 'string') throw new Error('ego returned a non-text URL');
@@ -305,6 +317,12 @@ let observation_receipt (step:Browser_lane.Native_workflow.step) value =
     | Info -> (match value with `Assoc _ -> true | _ -> false)
     | Events -> (match value with `List _ -> true | _ -> false)
     | Wait_for_timeout _ -> value=`Null
+    | Cancel_download id ->
+      (match object_fields ["downloadId";"source";"cancelReturned"] value with
+       | Error _ -> false
+       | Ok fields -> List.length fields=3 && List.assoc_opt "downloadId" fields=Some (`String id)
+           && List.assoc_opt "source" fields=Some (`String "native_download")
+           && List.assoc_opt "cancelReturned" fields=Some (`Bool true))
     | Click _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
     | Fill _|Press _|Focus _|Reload|Keyboard_type _|Keyboard_insert_text _|Keyboard_paste _|Keyboard_press _
     | Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
@@ -364,6 +382,19 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
     (* [entered]: when the failed step holds input, what the SDK did not give for it: no answer, or a dialog. *)
     let* expected_started,entered=match method_ with
       | "initialUrl" when index=0 && count=0 -> Ok (false,None)
+      | "downloadPreflight" when index=count ->
+        (match remaining with
+         | [] -> Error "workflow download preflight is outside the request"
+         | step :: _ ->
+           match step.action with
+           | Browser_lane.Native_workflow.Cancel_download _ -> Ok (has_effect,None)
+           | Click _ | Double_click _ | Hover _ | Drag_and_drop _ | Mouse_click _
+           | Mouse_move _ | Mouse_wheel _ | Fill _ | Press _ | Focus _ | Reload
+           | Keyboard_type _ | Keyboard_insert_text _ | Keyboard_paste _ | Keyboard_press _
+           | Select_option _ | Goto _ | Wait_for_url _ | Wait_for_selector _
+           | Wait_for_load_state _ | Evaluate _ | Wait_for_function _ | Fetch _
+           | Url | Title | Info | Snapshot | Events | Wait_for_timeout _ ->
+             Error "workflow download preflight does not match a pending cancellation")
       | "inputPreflight" when index=count ->
         (match remaining with
          | [] -> Error "workflow input preflight is outside the request"
@@ -374,7 +405,7 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
            | Mouse_move _ | Mouse_wheel _ | Fill _ | Focus _ | Reload
            | Keyboard_type _ | Keyboard_insert_text _ | Keyboard_paste _ | Keyboard_press _
            | Select_option _ | Goto _ | Wait_for_url _ | Wait_for_selector _
-           | Wait_for_load_state _ | Evaluate _ | Wait_for_function _ | Fetch _
+           | Wait_for_load_state _ | Evaluate _ | Wait_for_function _ | Fetch _ | Cancel_download _
            | Url | Title | Info | Snapshot | Events | Wait_for_timeout _ ->
              Error "workflow input preflight does not match a pending press")
       | "observation" when index=count && count>0 -> Ok (has_effect,None)

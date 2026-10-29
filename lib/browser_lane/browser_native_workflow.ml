@@ -25,6 +25,7 @@ type action =
   | Evaluate of page_code
   | Wait_for_function of page_code
   | Fetch of string
+  | Cancel_download of string
   | Url | Title | Info | Snapshot
   | Events
   | Wait_for_timeout of float
@@ -134,7 +135,7 @@ let options_of_json action raw =
     | Fetch _ -> Some ["timeout";"saveAs";"method";"headers";"body";"cache";"credentials";"integrity";
         "keepalive";"mode";"redirect";"referrer";"referrerPolicy"]
     | Snapshot -> Some ["scope";"root";"includeActionMarks";"includeStableLocator"]
-    | Keyboard_insert_text _|Keyboard_paste _|Evaluate _|Url|Title|Info|Events|Wait_for_timeout _ -> None in
+    | Keyboard_insert_text _|Keyboard_paste _|Evaluate _|Cancel_download _|Url|Title|Info|Events|Wait_for_timeout _ -> None in
   let* allowed=Option.to_result ~none:"this SDK method accepts no options" allowed in
   let* fields=object_fields allowed raw in
   let strings values=List.for_all (function _,`String _ -> true | _,_ -> false) values in
@@ -175,18 +176,18 @@ let options_of_json action raw =
   | (Click _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
     |Fill _|Press _|Focus _|Reload|Keyboard_type _|Keyboard_insert_text _|Keyboard_paste _|Keyboard_press _
     |Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
-    |Evaluate _|Wait_for_function _|Fetch _|Url|Title|Info|Events|Wait_for_timeout _),_,_ -> Ok raw
+    |Evaluate _|Wait_for_function _|Fetch _|Cancel_download _|Url|Title|Info|Events|Wait_for_timeout _),_,_ -> Ok raw
 let fetch_save_name step = match step.action,step.options with
   | Fetch _,Some (`Assoc fields) ->
       (match List.assoc_opt "saveAs" fields with Some (`String value) -> Some value | None|Some _ -> None)
   | (Click _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
     |Fill _|Press _|Focus _|Reload|Keyboard_type _|Keyboard_insert_text _|Keyboard_paste _|Keyboard_press _
     |Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
-    |Evaluate _|Wait_for_function _|Url|Title|Info|Snapshot|Events|Wait_for_timeout _),_
+    |Evaluate _|Wait_for_function _|Cancel_download _|Url|Title|Info|Snapshot|Events|Wait_for_timeout _),_
   | Fetch _,(None|Some (`Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _)) -> None
 let step_of_json value =
   let* fields = object_fields ["method";"selector";"destination";"x";"y";"text";"html";"key";"url";
-    "selectionJson";"state";"source";"argumentJson";"milliseconds";"options";"urlRegex"] value in
+    "selectionJson";"state";"source";"argumentJson";"milliseconds";"options";"urlRegex";"downloadId"] value in
   let* method_ = text "method" fields in
   let arguments names = object_fields ("method" :: "options" :: names) value in
   let selector () = text "selector" fields in
@@ -259,6 +260,12 @@ let step_of_json value =
       let* url=match Uri.scheme (Uri.of_string raw) with None -> Ok raw
         | Some _ -> url raw in
       Ok (Fetch url)
+    | "download.cancel" ->
+      let* _=arguments ["downloadId"] in let* id=text "downloadId" fields in
+      let* ()=match Uuidm.of_string id with
+        | Some uuid when Uuidm.to_string uuid=id -> Ok ()
+        | None|Some _ -> Error "downloadId must be a canonical UUID" in
+      Ok (Cancel_download id)
     | "url"|"title"|"info"|"snapshot"|"events" ->
       let* _=arguments [] in
       (match method_ with
@@ -294,13 +301,13 @@ let is_effect = function
   | Click _ | Double_click _ | Hover _ | Drag_and_drop _ | Mouse_click _ | Mouse_move _ | Mouse_wheel _
   | Fill _ | Press _ | Focus _ | Reload
   | Keyboard_type _ | Keyboard_insert_text _ | Keyboard_paste _ | Keyboard_press _
-  | Select_option _ | Goto _ | Evaluate _ | Wait_for_function _ | Fetch _ | Events -> true
+  | Select_option _ | Goto _ | Evaluate _ | Wait_for_function _ | Fetch _ | Cancel_download _ | Events -> true
   | Wait_for_url _ | Wait_for_selector _ | Wait_for_load_state _|Url|Title|Info|Snapshot|Wait_for_timeout _ -> false
 let holds_input = function
   | Click _|Double_click _|Mouse_click _|Drag_and_drop _|Press _|Keyboard_press _|Keyboard_type _|Keyboard_paste _ -> true
   | Hover _|Mouse_move _|Mouse_wheel _|Fill _|Focus _|Reload
   | Keyboard_insert_text _|Select_option _|Goto _
-  | Wait_for_url _|Wait_for_selector _|Wait_for_load_state _|Evaluate _|Wait_for_function _|Fetch _
+  | Wait_for_url _|Wait_for_selector _|Wait_for_load_state _|Evaluate _|Wait_for_function _|Fetch _|Cancel_download _
   | Url|Title|Info|Snapshot|Events|Wait_for_timeout _ -> false
 let method_name = function
   | Click _ -> "click" | Double_click _ -> "dblclick" | Hover _ -> "hover" | Fill _ -> "fill"
@@ -314,6 +321,7 @@ let method_name = function
   | Mouse_click _ -> "mouse.click" | Mouse_move _ -> "mouse.move" | Mouse_wheel _ -> "mouse.wheel"
   | Url -> "url" | Title -> "title" | Info -> "info" | Snapshot -> "snapshot" | Events -> "events"
   | Wait_for_timeout _ -> "waitForTimeout"
+  | Cancel_download _ -> "download.cancel"
 let string value = `String value
 let code_fields = function
   | Expression source -> ["source",string source]
@@ -334,6 +342,7 @@ let step_to_json {action;options} =
     | Mouse_click {x;y}|Mouse_move {x;y}|Mouse_wheel {x;y} -> ["x",`Float x;"y",`Float y]
     | Fill {selector=s;text} -> selector s @ ["text",string text]
     | Press {selector=s;key} -> selector s @ ["key",string key]
+    | Cancel_download id -> ["downloadId",string id]
     | Reload|Url|Title|Info|Snapshot|Events -> []
     | Wait_for_timeout milliseconds -> ["milliseconds",`Float milliseconds]
     | Keyboard_type text | Keyboard_insert_text text -> ["text",string text]

@@ -1,4 +1,4 @@
-(** A finite list of native Ego Page calls followed by one native snapshot.
+(** A finite list of native Ego Page/Download calls followed by one native snapshot.
     Locators and waits belong to the SDK. This is a browser capability, not
     host JavaScript, a ref registry or a composition interpreter. *)
 type element_state = Attached | Detached | Visible | Hidden
@@ -32,6 +32,7 @@ type action =
   | Evaluate of page_code
   | Wait_for_function of page_code
   | Fetch of string
+  | Cancel_download of string
   | Url | Title | Info | Snapshot
   | Events
   | Wait_for_timeout of float
@@ -60,6 +61,13 @@ type t = private { tab_id : int; expected_url : string; steps : step list;
     characters. The worker maps it to a fresh private UUID path and returns a
     download ID. Retrieve its bytes through the same tab's download reader;
     a completed save in a stopped workflow is not permission to repeat fetch.
+    [download.cancel] takes a canonical [downloadId] previously observed on
+    this exact Page in the same SDK process. It calls the native Download
+    handle's [cancel()] once. Its [cancelReturned] receipt reports only that
+    the call returned, not that transfer interruption was observed: completion
+    can win the race. Re-read the same Page's downloads; never replay after a
+    lost result. Fetch saves and completed/foreign downloads are refused before
+    calling the SDK. The handle and save/delete lifecycle remain worker-owned.
     [snapshot] forwards all SDK snapshot options, including subtree root and
     action-mark/stable-locator choices; the workflow still ends with its usual
     final snapshot. [url], [title], [info] and [snapshot] return their native

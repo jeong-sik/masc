@@ -272,6 +272,7 @@ let test_sweep_drains_a_post_larger_than_two_comment_batches () =
       ; parent_id = None
       ; author
       ; content = "permanent reply"
+      ; audience = None
       ; created_at = Unix.gettimeofday ()
       ; expires_at = 0.0
       ; votes_up = 0

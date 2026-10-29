@@ -46,6 +46,7 @@ let comment_field_names =
   ; "parent_id"
   ; "author"
   ; "content"
+  ; "audience"
   ; "created_at"
   ; "expires_at"
   ; "votes_up"
@@ -332,7 +333,8 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment option =
        , required_expiry fields
        , required_int fields "votes_up"
        , required_int fields "votes_down"
-       , parent_id )
+       , parent_id
+       , optional_audience fields )
      with
      | ( Some id_str
        , Some post_id_str
@@ -342,7 +344,8 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment option =
        , Some expires_at
        , Some votes_up
        , Some votes_down
-       , Ok parent_id ) ->
+       , Ok parent_id
+       , Ok audience ) ->
        (match
           ( Comment_id.of_string id_str
           , Post_id.of_string post_id_str
@@ -355,6 +358,7 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment option =
             ; parent_id
             ; author
             ; content
+            ; audience
             ; created_at
             ; expires_at
             ; votes_up
@@ -369,6 +373,7 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment option =
        , (Some _ | None)
        , (Some _ | None)
        , (Some _ | None)
+       , (Ok _ | Error _)
        , (Ok _ | Error _) ) -> None)
   | _ -> None
 ;;

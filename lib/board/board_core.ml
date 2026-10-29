@@ -293,6 +293,7 @@ let add_comment_with_audience
                ; parent_id = parent_cid
                ; author = author_id
                ; content
+               ; audience = Some audience
                ; created_at = now
                ; expires_at =
                    (if ttl_hours = 0

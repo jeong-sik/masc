@@ -106,7 +106,7 @@ let test_board_snapshot_projects_real_comments_without_losing_source () = with_r
   let comment : Board.comment =
     { id=Board.Comment_id.of_string "c-0123456789abcdef0123456789abcdef" |> Result.get_ok;
       post_id; parent_id=None; author=Board.Agent_id.of_string "reviewer" |> Result.get_ok;
-      content="Original objection\n보존해야 하는 댓글 근거"; created_at=2.; expires_at=0.;
+      content="Original objection\n보존해야 하는 댓글 근거"; audience=None; created_at=2.; expires_at=0.;
       votes_up=0; votes_down=0 } in
   let content = Yojson.Safe.to_string (`Assoc ["source",`String "board";
     "post",Board.post_to_yojson post; "comments",`List [Board.comment_to_yojson comment]]) in

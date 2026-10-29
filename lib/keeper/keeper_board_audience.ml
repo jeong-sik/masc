@@ -8,7 +8,6 @@ type t =
   | Discoverable
 
 type classification_error =
-  | Invalid_board_audience of Board.board_error
   | Invalid_board_target of string
   | Audience_not_recorded
 
@@ -40,17 +39,13 @@ let of_board_audience = function
   | Board.Discoverable -> Ok Discoverable
 ;;
 
-let of_post (post : Board.post) =
-  match post.audience with
+let of_recorded = function
   | Some audience -> of_board_audience audience
   | None -> Error Audience_not_recorded
 ;;
 
-let of_comment_text ~content =
-  match Board.audience_for_comment ~content with
-  | Error error -> Error (Invalid_board_audience error)
-  | Ok audience -> of_board_audience audience
-;;
+let of_post (post : Board.post) = of_recorded post.audience
+let of_comment (comment : Board.comment) = of_recorded comment.audience
 
 let keeper_target_ids (meta : Keeper_meta_contract.keeper_meta) =
   Keeper_lane_mentions.effective_target_ids
@@ -104,8 +99,7 @@ let label = function
 ;;
 
 let classification_error_to_string = function
-  | Invalid_board_audience error -> Board.show_board_error error
   | Invalid_board_target target ->
     Printf.sprintf "Board audience target cannot identify a Keeper lane: %s" target
-  | Audience_not_recorded -> "Board post records no audience"
+  | Audience_not_recorded -> "Board post or comment records no audience"
 ;;

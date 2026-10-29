@@ -19,6 +19,7 @@ let comment ~id ~author ~content ~parent_id : Board.comment =
       Option.map (fun p -> Board.Comment_id.of_string p |> Result.get_ok) parent_id
   ; author = Board.Agent_id.of_string author |> Result.get_ok
   ; content
+  ; audience = None
   ; created_at = 0.
   ; expires_at = 0.
   ; votes_up = 0

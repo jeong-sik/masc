@@ -1,13 +1,13 @@
 open Alcotest
 open Masc
 
-(* The Keeper board scan replays the audience a post recorded when it was
-   written. It does not read an address back out of the title and body.
+(* The Keeper board scan replays the audience a post or comment recorded when
+   it was written. It does not read an address back out of the text.
 
-   Each post below is written through the real write path and then has its
-   stored row edited, so that the recorded audience disagrees with what its own
-   text would give. A scan that still read the text delivers to a different
-   post set than the one asserted here. *)
+   Each post or comment below is written through the real write path and then
+   has its stored row edited, so that the recorded audience disagrees with what
+   its own text would give. A scan that still read the text delivers to a
+   different set than the one asserted here. *)
 
 module KBA = Keeper_board_audience
 
@@ -94,10 +94,16 @@ let get = function
 
 let post_id (post : Board.post) = Board.Post_id.to_string post.id
 
-(* Rewrites the stored row of each listed post so that it records the given
-   audience wire (none for [None]), then reloads the store from the file. *)
-let record_audiences edits =
-  let path = Board.persist_path () in
+let reload_board () =
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ()
+;;
+
+(* Rewrites the stored row of each listed id in the file at [path] so that it
+   records the given audience wire (none for [None]), then reloads the store
+   from the files. *)
+let record_audiences ~path edits =
   let rows =
     In_channel.with_open_text path In_channel.input_all
     |> String.split_on_char '\n'
@@ -119,13 +125,11 @@ let record_audiences edits =
             in
             Yojson.Safe.to_string (`Assoc fields))
        | _ -> row)
-    | _ -> fail "a stored post row is not a JSON object"
+    | _ -> fail "a stored row is not a JSON object"
   in
   Out_channel.with_open_text path (fun oc ->
     List.iter (fun row -> output_string oc (edited row ^ "\n")) rows);
-  Board.reset_global_for_test ();
-  Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ()
+  reload_board ()
 ;;
 
 let targets_wire names =
@@ -146,6 +150,21 @@ let queued_post_ids config name =
   | Ok queue ->
     Keeper_event_queue.to_list queue
     |> List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id)
+  | Error detail -> fail detail
+;;
+
+let queued_comment_ids config name =
+  match
+    Keeper_registry_event_queue.snapshot_result ~base_path:config.Workspace.base_path name
+  with
+  | Ok queue ->
+    Keeper_event_queue.to_list queue
+    |> List.filter_map (fun (stimulus : Keeper_event_queue.stimulus) ->
+      match stimulus.payload with
+      | Keeper_event_queue.Board_signal
+          { kind = Keeper_event_queue.Comment_added identity; _ } ->
+        Some identity.comment_id
+      | _ -> None)
   | Error detail -> fail detail
 ;;
 
@@ -174,6 +193,7 @@ let test_scan_follows_the_recorded_audience () =
   (* Text names the lane, record is open to discovery. *)
   let recorded_open = create "@scanreader please look" in
   record_audiences
+    ~path:(Board.persist_path ())
     [ post_id recorded_target, Some (targets_wire [ "scanreader" ])
     ; post_id recorded_open, Some (`Assoc [ "kind", `String "discoverable" ])
     ; post_id unrecorded, None
@@ -236,7 +256,7 @@ let test_an_old_post_without_an_audience_costs_nothing () =
          ~post_kind:Board.Human_post
          ())
   in
-  record_audiences [ post_id old_post, None ];
+  record_audiences ~path:(Board.persist_path ()) [ post_id old_post, None ];
   let scan () = Keeper_world_observation.collect_board_events ~base_path ~meta in
   let _events, listed, _mentions = scan () in
   check int "the first scan only starts the cursor" 0 listed;
@@ -296,7 +316,7 @@ let test_a_post_without_an_audience_does_not_stop_its_comments () =
           ~author:"external-author"
           ~content:"@scanreader please look"
           ()));
-  record_audiences [ post_id post, None ];
+  record_audiences ~path:(Board.persist_path ()) [ post_id post, None ];
   Keeper_registry.set_board_cursor
     ~base_path:config.Workspace.base_path
     meta.Keeper_meta_contract.name
@@ -317,6 +337,87 @@ let test_a_post_without_an_audience_does_not_stop_its_comments () =
     (board_event_failures () -. failures_before)
 ;;
 
+let comment_id (comment : Board.comment) = Board.Comment_id.to_string comment.id
+
+let test_scan_follows_the_recorded_comment_audience () =
+  with_workspace
+  @@ fun config ->
+  let meta = register_keeper config "scanreader" in
+  let post =
+    get
+      (Board_dispatch.create_post
+         ~author:"external-author"
+         ~content:"thread root"
+         ~title:"thread"
+         ~body:"thread root"
+         ~visibility:Board.Internal
+         ~post_kind:Board.Human_post
+         ())
+  in
+  let comment content =
+    get
+      (Board_dispatch.add_comment
+         ~post_id:(post_id post)
+         ~author:"external-author"
+         ~content
+         ())
+  in
+  (* Text names nobody, record names the lane. *)
+  let recorded_target = comment "plain follow-up" in
+  (* Text names the lane, record names someone else. *)
+  let recorded_elsewhere = comment "@scanreader please look" in
+  (* Text names the lane, row has no audience. *)
+  let unrecorded = comment "@scanreader older row" in
+  record_audiences
+    ~path:(Board.comments_path ())
+    [ comment_id recorded_target, Some (targets_wire [ "scanreader" ])
+    ; comment_id recorded_elsewhere, Some (targets_wire [ "someone-else" ])
+    ; comment_id unrecorded, None
+    ];
+  let audience_of comment =
+    match Board_dispatch.read_comments ~post_id:(post_id post) with
+    | Ok comments ->
+      (match
+         List.find_opt (fun c -> String.equal (comment_id c) (comment_id comment)) comments
+       with
+       | Some reloaded -> KBA.of_comment reloaded
+       | None -> fail "comment lost across reload")
+    | Error _ -> fail "comments unreadable after reload"
+  in
+  check
+    bool
+    "the edited rows reload with the audiences they were given"
+    true
+    (match
+       audience_of recorded_target, audience_of recorded_elsewhere, audience_of unrecorded
+     with
+     | Ok (KBA.Targets [ _ ]), Ok (KBA.Targets [ _ ]), Error KBA.Audience_not_recorded -> true
+     | _ -> false);
+  Keeper_registry.set_board_cursor
+    ~base_path:config.Workspace.base_path
+    meta.Keeper_meta_contract.name
+    1.0
+    None;
+  let failures_before = board_event_failures () in
+  let _events, post_count, mention_count =
+    Keeper_world_observation.collect_board_events
+      ~base_path:config.Workspace.base_path
+      ~meta
+  in
+  check int "the thread is replayed once" 1 post_count;
+  check int "one delivery counts as a mention" 1 mention_count;
+  check
+    (list string)
+    "only the comment whose record names the lane is delivered"
+    [ comment_id recorded_target ]
+    (queued_comment_ids config meta.Keeper_meta_contract.name);
+  check
+    (float 0.)
+    "the comment without a recorded audience is counted as a failure"
+    1.0
+    (board_event_failures () -. failures_before)
+;;
+
 let () =
   run
     "keeper Board recorded audience"
@@ -333,6 +434,10 @@ let () =
             "a post without an audience does not stop its comments"
             `Quick
             test_a_post_without_an_audience_does_not_stop_its_comments
+        ; test_case
+            "follows the recorded comment audience, not the text"
+            `Quick
+            test_scan_follows_the_recorded_comment_audience
         ] )
     ]
 ;;

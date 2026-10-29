@@ -1466,8 +1466,7 @@ let collect_board_events_with_cursor_policy
           ; author = Board.Agent_id.to_string p.author; title = p.title; content = p.body
           ; hearth = p.hearth; updated_at = Some p.content_updated_at }
         in
-        (* Each signal is paired with its audience. A post replays the audience
-           it recorded; a comment records none, so its own text is read. *)
+        (* Each signal is paired with the audience its post or comment recorded. *)
         let signals =
           (if signal_after_cursor p p.content_updated_at
            then [ Board_audience.of_post p, post_signal ]
@@ -1475,7 +1474,7 @@ let collect_board_events_with_cursor_policy
           @ List.filter_map (fun (comment : Board.comment) ->
               if not (signal_after_cursor p comment.created_at) then None
               else Some
-                ( Board_audience.of_comment_text ~content:comment.content
+                ( Board_audience.of_comment comment
                 , { post_signal with
                     kind = Board_dispatch.Board_comment_added
                       { comment_id = comment.id; parent_id = comment.parent_id }

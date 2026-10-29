@@ -73,6 +73,13 @@ val routing_target : string -> string option
     {!parse} this never refuses a text: a stray [@@], as in a diff hunk
     header, does not hide a direct target. *)
 
+val is_routable_target : string -> bool
+(** Whether a direct target, as {!parse} returns it, has the shape of a name:
+    not empty, and only letters, digits, ['_'] and ['-'].  A path separator or
+    a dot never passes, because the sinks build file names from the name.
+    {!routing_target} skips what fails this, and
+    [Recipient_resolution.Candidate.of_string] keeps the same rule. *)
+
 val blank_code_regions : string -> string
 (** Replace Markdown code spans and fences with spaces, keeping every
     offset and word boundary.  An unterminated backtick blanks to the end of

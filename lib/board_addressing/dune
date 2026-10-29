@@ -5,6 +5,9 @@
 ; import keeper modules) and the flat masc umbrella can both depend on it.
 ; Identity minting stays with each caller's id type — this leaf returns
 ; raw, case-preserved candidate names only.
+; Recipient_resolution sits on the grammar: it decides which candidates a
+; caller's declaration accepts. The declaration is an argument, so the leaf
+; still imports nothing from keeper.
 
 (include_subdirs no)
 
@@ -12,7 +15,7 @@
  (name masc_board_addressing)
  (public_name masc.board_addressing)
  (wrapped false)
- (modules board_addressing)
+ (modules board_addressing recipient_resolution)
  (flags
   (:standard -w +4 -w +33))
  (libraries))

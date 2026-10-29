@@ -1,6 +1,6 @@
 ; Standalone alcotest for the shared stdlib-only addressing grammar
-; (issue #25601).
+; (issue #25601) and the recipient resolution built on it.
 
 (tests
- (names test_board_addressing)
+ (names test_board_addressing test_recipient_resolution)
  (libraries alcotest masc.board_addressing))

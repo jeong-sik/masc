@@ -1,0 +1,6 @@
+{"mode":"create","n":200000,"allocated_bytes":27200208,"retained_bytes":27200224,"cpu_seconds":0.021961000,"wall_seconds":0.022042036,"kept":200000,"version":"baseline"}
+{"mode":"create","n":200000,"allocated_bytes":19200208,"retained_bytes":19200224,"cpu_seconds":0.014713000,"wall_seconds":0.014805079,"kept":200000,"version":"candidate"}
+{"mode":"project","n":200000,"allocated_bytes":56000208,"retained_bytes":27200224,"cpu_seconds":0.025582000,"wall_seconds":0.026237965,"kept":200000,"version":"baseline"}
+{"mode":"project","n":200000,"allocated_bytes":48000208,"retained_bytes":19200224,"cpu_seconds":0.017695000,"wall_seconds":0.018162966,"kept":200000,"version":"candidate"}
+{"mode":"updates","n":50000,"allocated_bytes":55200208,"retained_bytes":21600224,"cpu_seconds":0.031500000,"wall_seconds":0.032248974,"kept":50000,"version":"baseline"}
+{"mode":"updates","n":50000,"allocated_bytes":53200208,"retained_bytes":19600224,"cpu_seconds":0.031895000,"wall_seconds":0.032176018,"kept":50000,"version":"candidate"}

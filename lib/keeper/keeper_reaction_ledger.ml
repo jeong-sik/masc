@@ -662,12 +662,7 @@ let max_recorded_at current candidate =
 ;;
 
 type event_queue_reaction_evidence_accumulator =
-  { mutable stimulus_seen : bool
-  ; mutable turn_started_seen : bool
-  ; mutable turn_finished_seen : bool
-  ; mutable event_queue_ack_seen : bool
-  ; mutable event_queue_cancelled_seen : bool
-  ; mutable stimulus_recorded_at : float option
+  { mutable stimulus_recorded_at : float option
   ; mutable turn_started_recorded_at : float option
   ; mutable turn_finished_recorded_at : float option
   ; mutable event_queue_ack_recorded_at : float option
@@ -680,12 +675,7 @@ type event_queue_reaction_evidence_accumulator =
   }
 
 let empty_event_queue_reaction_evidence_accumulator () =
-  { stimulus_seen = false
-  ; turn_started_seen = false
-  ; turn_finished_seen = false
-  ; event_queue_ack_seen = false
-  ; event_queue_cancelled_seen = false
-  ; stimulus_recorded_at = None
+  { stimulus_recorded_at = None
   ; turn_started_recorded_at = None
   ; turn_finished_recorded_at = None
   ; event_queue_ack_recorded_at = None
@@ -725,23 +715,18 @@ let note_event_queue_reaction_evidence_row ~keeper_name accumulator row =
         <- max_recorded_at accumulator.latest_recorded_at recorded_at;
       (match current_row with
        | Current_stimulus _ ->
-         accumulator.stimulus_seen <- true;
          accumulator.stimulus_recorded_at
            <- max_recorded_at accumulator.stimulus_recorded_at recorded_at
        | Current_reaction { reaction_kind = Turn_started; _ } ->
-         accumulator.turn_started_seen <- true;
          accumulator.turn_started_recorded_at
            <- max_recorded_at accumulator.turn_started_recorded_at recorded_at
        | Current_reaction { reaction_kind = Turn_finished; _ } ->
-         accumulator.turn_finished_seen <- true;
          accumulator.turn_finished_recorded_at
            <- max_recorded_at accumulator.turn_finished_recorded_at recorded_at
        | Current_reaction { reaction_kind = Event_queue_ack; _ } ->
-         accumulator.event_queue_ack_seen <- true;
          accumulator.event_queue_ack_recorded_at
            <- max_recorded_at accumulator.event_queue_ack_recorded_at recorded_at
        | Current_reaction { reaction_kind = Event_queue_cancelled; _ } ->
-         accumulator.event_queue_cancelled_seen <- true;
          accumulator.event_queue_cancelled_recorded_at
            <- max_recorded_at
                 accumulator.event_queue_cancelled_recorded_at
@@ -756,11 +741,11 @@ let event_queue_reaction_evidence_of_accumulator
   let evidence =
     { keeper_name
     ; stimulus_id
-    ; stimulus_seen = accumulator.stimulus_seen
-    ; turn_started_seen = accumulator.turn_started_seen
-    ; turn_finished_seen = accumulator.turn_finished_seen
-    ; event_queue_ack_seen = accumulator.event_queue_ack_seen
-    ; event_queue_cancelled_seen = accumulator.event_queue_cancelled_seen
+    ; stimulus_seen = Option.is_some accumulator.stimulus_recorded_at
+    ; turn_started_seen = Option.is_some accumulator.turn_started_recorded_at
+    ; turn_finished_seen = Option.is_some accumulator.turn_finished_recorded_at
+    ; event_queue_ack_seen = Option.is_some accumulator.event_queue_ack_recorded_at
+    ; event_queue_cancelled_seen = Option.is_some accumulator.event_queue_cancelled_recorded_at
     ; stimulus_recorded_at = accumulator.stimulus_recorded_at
     ; turn_started_recorded_at = accumulator.turn_started_recorded_at
     ; turn_finished_recorded_at = accumulator.turn_finished_recorded_at
@@ -804,9 +789,9 @@ let unique_stimulus_ids stimulus_ids =
 
    What is kept per Keeper: the cursors, and one accumulator per stimulus the
    dashboard has asked about. Not the ledger, and not every stimulus in it -
-   an id nobody asks about is never tracked. An accumulator is five booleans,
-   six timestamps, two counts, a reason and the event ids seen for that one
-   stimulus.
+   an id nobody asks about is never tracked. An accumulator keeps six
+   timestamps, two counts, a reason and the event ids seen for that one
+   stimulus. Each observed kind is determined by its recorded timestamp.
 
    A stimulus asked about for the first time cannot be answered from a
    partial read, so it clears the cursors and every tracked accumulator

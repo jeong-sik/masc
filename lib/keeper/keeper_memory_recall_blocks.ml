@@ -31,14 +31,7 @@ let describe_build_error = function
   | Codec.Duplicate_candidate_id id -> "two facts share the id " ^ id
   | Codec.Choice_set_invalid detail -> "the option set is invalid: " ^ detail
 
-(* Whether this Keeper is judged: the kill switch of the older recall notice
-   first, then the gate of the judgment. *)
-let is_judged ~keeper_id =
-  Keeper_memory_os_recall.enabled ()
-  &&
-  match Typesafeai_config.memory_recall_destinations ~keeper_id with
-  | Ok _ -> true
-  | Error _ -> false
+let is_judged = Keeper_memory_recall_standing.is_judged
 
 (* The recall must not end the turn it is meant to help. Whatever raises in
    here (the store read and its lock, the IO pool job, the client, the

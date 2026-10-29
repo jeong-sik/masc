@@ -2574,6 +2574,22 @@ let add_routes ~sw ~clock router =
                      ("fusion config invalid: "
                       ^ String.concat "; "
                           (List.map Fusion_config.config_error_message errors)))))
+  (* The memory recall gate as this server reads it now, per declared Keeper
+     (see [Server_memory_recall_standing]): a settings form shows what a choice
+     would change, and this is what stands today. *)
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/runtime/config/memory-recall" (fun state _agent_name req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+           match Server_memory_recall_standing.read ~keepers_dir with
+           | Error detail ->
+             respond_dashboard_error ~status:`Internal_server_error ~request:req reqd
+               ("keeper declarations could not be read: " ^ detail)
+           | Ok standing ->
+             Http.Response.json_value ~compress:true ~request:req
+               (Server_memory_recall_standing.to_yojson
+                  ~generated_at:(Masc_domain.now_iso ())
+                  standing)
+               reqd)
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/runtime/config/fusion" (fun state agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              match parse_fusion_edit_body body_str with

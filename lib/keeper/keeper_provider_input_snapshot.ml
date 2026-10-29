@@ -12,6 +12,7 @@ type message =
   { msg_index : int
   ; msg_role : string
   ; msg_artifact : artifact
+  ; msg_media : (string * Agent_core.History.stored) list
   }
 
 type tool_schema =
@@ -132,6 +133,12 @@ let message_to_json message =
     [ "index", `Int message.msg_index
     ; "role", `String message.msg_role
     ; "artifact", artifact_to_json message.msg_artifact
+    ; ( "media"
+      , `List
+          (List.map
+             (fun (media_type, stored) ->
+                Agent_core.History.stored_source_to_json ~media_type stored)
+             message.msg_media) )
     ]
 ;;
 
@@ -212,15 +219,36 @@ let indexed_list ~name decode values =
   loop 0 [] values
 ;;
 
+let stored_media_of_json = function
+  | `List values ->
+    List.fold_right
+      (fun value acc ->
+         let* rest = acc in
+         match Agent_core.History.stored_source_of_json value with
+         | Agent_core.History.Decoded_stored_source { media_type; stored } ->
+           Ok ((media_type, stored) :: rest)
+         | Invalid_stored_source error ->
+           Error ("message.media: " ^ Agent_core.History.decode_error_to_string error)
+         | Not_stored_source -> Error "message.media holds a value that is not a stored source")
+      values
+      (Ok [])
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
+    Error "message.media must be a list"
+;;
+
 let message_of_json = function
-  | `Assoc fields when exact_fields [ "index"; "role"; "artifact" ] fields ->
+  | `Assoc fields when exact_fields [ "index"; "role"; "artifact"; "media" ] fields ->
     let* index_json = field "index" fields in
     let* index = nonnegative_int "message.index" index_json in
     let* role_json = field "role" fields in
     let* role = nonempty_string "message.role" role_json in
     let* artifact_json = field "artifact" fields in
     let* artifact = artifact_of_json artifact_json in
-    Ok (index, { msg_index = index; msg_role = role; msg_artifact = artifact })
+    let* media_json = field "media" fields in
+    let* media = stored_media_of_json media_json in
+    Ok
+      ( index
+      , { msg_index = index; msg_role = role; msg_artifact = artifact; msg_media = media } )
   | `Assoc _ -> Error "message fields are not exact"
   | _ -> Error "message must be an object"
 ;;
@@ -491,6 +519,7 @@ let write_best_effort
            , { msg_index = index
              ; msg_role = Agent_core.Types.role_to_string message.role
              ; msg_artifact = artifact
+             ; msg_media = List.concat_map Agent_core.History.stored_media message.content
              } ))
         (reusable, 0)
         (List.combine messages message_payloads)

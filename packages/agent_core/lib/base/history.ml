@@ -191,6 +191,22 @@ let rec media_bytes = function
   | P.ToolUse _ -> 0
 ;;
 
+let rec stored_media = function
+  | P.Image { media_type; source = Stored stored; _ }
+  | P.Document { media_type; source = Stored stored; _ }
+  | P.Audio { media_type; source = Stored stored; _ } -> [ media_type, stored ]
+  | P.Image { source = Url _ | File_id _; _ }
+  | P.Document { source = Url _ | File_id _; _ }
+  | P.Audio { source = Url _ | File_id _; _ }
+  | P.ToolResult { content_blocks = None; _ }
+  | P.Text _
+  | P.Thinking _
+  | P.ReasoningDetails _
+  | P.RedactedThinking _
+  | P.ToolUse _ -> []
+  | P.ToolResult { content_blocks = Some blocks; _ } -> List.concat_map stored_media blocks
+;;
+
 let rec media_wire_length = function
   | P.Image { source; _ } | P.Document { source; _ } | P.Audio { source; _ } ->
     media_source_wire_length source
@@ -210,17 +226,18 @@ let rec media_wire_length = function
 
 let stored_source_tag = "stored"
 
-let stored_media_json ~block_type ~media_type { sha256; bytes } =
+let stored_source_to_json ~media_type { sha256; bytes } =
   `Assoc
-    [ "type", `String block_type
-    ; ( "source"
-      , `Assoc
-          [ "type", `String stored_source_tag
-          ; "media_type", `String media_type
-          ; "sha256", `String sha256
-          ; "bytes", `Int bytes
-          ] )
+    [ "type", `String stored_source_tag
+    ; "media_type", `String media_type
+    ; "sha256", `String sha256
+    ; "bytes", `Int bytes
     ]
+;;
+
+let stored_media_json ~block_type ~media_type stored =
+  `Assoc
+    [ "type", `String block_type; "source", stored_source_to_json ~media_type stored ]
 ;;
 
 (* [Url] and [File_id] go through the provider encoder so their bytes stay

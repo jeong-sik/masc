@@ -50,8 +50,8 @@ type history_projection =
 val project_history
   :  ?tools_present:bool
   -> Provider_config.t
-  -> Types.message list
-  -> (Reasoning_history_projection.t, Reasoning_history_projection.error) result
+  -> 'source Types.message_with list
+  -> ('source Reasoning_history_projection.projection, Reasoning_history_projection.error) result
 (** The history the OpenAI-compatible codecs will actually serialize.
     [Openai_chat] and [Glm_chat] share it, which is why it is here rather than
     in either backend. Pure — the diagnostic [observe] belongs to the

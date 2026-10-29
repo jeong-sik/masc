@@ -22,13 +22,16 @@ val error_to_string : error -> string
 
 val policy_for_provider_config : Provider_config.t -> (policy, error) result
 
-type t =
-  { messages : Types.message list
+type 'source lowered =
+  { messages : 'source Types.message_with list
   ; source_indices : int list
     (** One canonical source coordinate per lowered message. The consolidated
         System frame names its first contributing occurrence; other messages
         retain their exact occurrence coordinates. *)
   }
+
+(** Lowering reads roles, origins and block kinds, never media. *)
+type t = Types.media_source lowered
 
 (** [Turn_scoped_system_context] preserves context positions/content, lowers
     typed current/historical context to native System, and requires a text-only
@@ -43,7 +46,7 @@ type t =
 
     Native Ollama tool images belong to ToolResult. A synthetic native media
     followup has no owning result identity and is rejected, not guessed. *)
-val lower : policy -> Types.message list -> (t, error) result
+val lower : policy -> 'source Types.message_with list -> ('source lowered, error) result
 
 (** Quote ordinary caller text as a JSON string at the wire boundary, so a
     caller cannot collide with the template's reserved tool_response syntax.

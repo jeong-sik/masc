@@ -26,13 +26,17 @@ type reasoning_block_kind =
   | Redacted_thinking_block
 [@@deriving show]
 
-type t =
-  { messages : Types.message list
+(** The projection is the same over any media source: it reads block
+    kinds, roles and metadata, never media. *)
+type 'source projection =
+  { messages : 'source Types.message_with list
   ; reasoning_target : Types.Reasoning_source.t
   ; reasoning_replay_drops : reasoning_replay_drop list
   ; removed_empty_assistant_indices : int list
   }
 [@@deriving show]
+
+type t = Types.media_source projection [@@deriving show]
 
 type error =
   | Invalid_control_lowering of Message_origin_lowering.error
@@ -126,19 +130,19 @@ val validate_replay_continuity_for_provider_config
     replay target, replay contract, and the declared rotation policy. *)
 val project
   :  ?control_lowering:Message_origin_lowering.policy
-  -> assistant_has_payload:(Types.content_block list -> bool)
-  -> reasoning_block_supported:(Types.content_block -> bool)
+  -> assistant_has_payload:('source Types.content_block_with list -> bool)
+  -> reasoning_block_supported:('source Types.content_block_with -> bool)
   -> replay_capability:Reasoning_dialect.replay_capability
-  -> Types.message list
-  -> (t, error) result
+  -> 'source Types.message_with list
+  -> ('source projection, error) result
 
 val project_for_provider_config
   :  ?tools_present:bool
-  -> assistant_has_payload:(Types.content_block list -> bool)
-  -> reasoning_block_supported:(Types.content_block -> bool)
+  -> assistant_has_payload:('source Types.content_block_with list -> bool)
+  -> reasoning_block_supported:('source Types.content_block_with -> bool)
   -> Provider_config.t
-  -> Types.message list
-  -> (t, error) result
+  -> 'source Types.message_with list
+  -> ('source projection, error) result
 
 (** Emit bounded aggregate diagnostics. Exact per-message evidence remains in
     the immutable projection value; payload size is independent of history

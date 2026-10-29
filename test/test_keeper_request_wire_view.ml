@@ -129,7 +129,7 @@ let test_the_window_counts_atoms_of_the_history_whatever_the_wire_deletes () =
     (carried_digest (seed 2).Front.front)
     (carried_digest observation.Window.model_input_front);
   Alcotest.(check int) "five messages carried" 5 (List.length v.Try_provider.carried);
-  match v.Try_provider.wire with
+  match v.Try_provider.transmitted with
   | Error error -> declined error
   | Ok wire -> Alcotest.(check int) "four messages on the wire" 4 (List.length wire)
 ;;
@@ -189,7 +189,7 @@ let test_a_declined_projection_hands_over_the_carried_range () =
     { (user "four") with Types.metadata = Types.Reasoning_source.metadata source }
   in
   let v = view ~front:None [ user "one"; assistant "1"; malformed ] in
-  Alcotest.(check bool) "declined" true (Result.is_error v.Try_provider.wire);
+  Alcotest.(check bool) "declined" true (Result.is_error v.Try_provider.transmitted);
   Alcotest.(check int) "the carried range stands in" 3 (List.length v.Try_provider.carried)
 ;;
 

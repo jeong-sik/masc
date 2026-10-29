@@ -1104,6 +1104,19 @@ let test_media_store_reads_back_what_it_put () =
     Alcotest.(check (result string media_error)) "get returns the bytes" (Ok raw)
       (media_store.get stored))
 
+(* The block keeps the media type; the blob store needs only a label it can
+   encode, so a parameter, whitespace or an empty type never fails a put. *)
+let test_media_store_keeps_any_media_type () =
+  with_temp_dir (fun base_path ->
+    let media_store = Tool_blob_media_store.of_base_path ~base_path in
+    List.iter
+      (fun media_type ->
+         let raw = "bytes of " ^ media_type in
+         let stored = media_put_ok media_store ~media_type ~raw in
+         Alcotest.(check (result string media_error)) ("get returns the bytes: " ^ media_type)
+           (Ok raw) (media_store.get stored))
+      [ "text/plain; charset=utf-8"; ""; "  "; "image/ png" ])
+
 let test_media_store_reports_missing_and_mismatched_bytes () =
   with_temp_dir (fun base_path ->
     let media_store = Tool_blob_media_store.of_base_path ~base_path in
@@ -2399,6 +2412,8 @@ let () =
             test_media_store_reads_back_what_it_put;
           Alcotest.test_case "media store reports missing and mismatched bytes" `Quick
             test_media_store_reports_missing_and_mismatched_bytes;
+          Alcotest.test_case "media store keeps any media type" `Quick
+            test_media_store_keeps_any_media_type;
           Alcotest.test_case
             "maintenance keeps wire-capture reference within retention"
             `Quick

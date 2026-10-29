@@ -24,6 +24,10 @@ type message =
   { msg_index : int
   ; msg_role : string
   ; msg_artifact : artifact
+  ; msg_media : (string * Agent_core.History.stored) list
+    (** The [Stored] media the message blob names, with their media types.
+        Blob retention reads this row, not the message blob, so the row
+        keeps those bytes live while it is retained. *)
   }
 
 type tool_schema =

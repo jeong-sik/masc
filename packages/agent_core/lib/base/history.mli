@@ -146,6 +146,10 @@ val media_source_wire_length : media_source -> int
     [content_blocks] included; [0] for a block without media. *)
 val media_bytes : content_block -> int
 
+(** The [Stored] media of a block with their media types, ToolResult
+    [content_blocks] included, in block order. *)
+val stored_media : content_block -> (string * stored) list
+
 (** Sum of {!media_source_wire_length} over the media in a block,
     ToolResult [content_blocks] included; [0] for a block without media. *)
 val media_wire_length : content_block -> int
@@ -253,6 +257,11 @@ type stored_source_decode =
       }
 
 val stored_source_of_json : Yojson.Safe.t -> stored_source_decode
+
+(** A [Stored] source as a block writes it, which {!stored_source_of_json}
+    decodes. A durable record that names history media without holding the
+    block writes this, so blob retention sees the reference. *)
+val stored_source_to_json : media_type:string -> stored -> Yojson.Safe.t
 
 (** The checkpoint message: [role], [origin], [content], then [name],
     [tool_call_id] and non-empty [metadata] when present. Role and content

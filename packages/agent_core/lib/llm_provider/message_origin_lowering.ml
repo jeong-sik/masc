@@ -54,7 +54,8 @@ let policy_for_provider_config config =
     Error Unsupported_codec
 ;;
 
-type t = { messages : Types.message list; source_indices : int list }
+type 'source lowered = { messages : 'source Types.message_with list; source_indices : int list }
+type t = Types.media_source lowered
 
 let text_content ~message_index content =
   let rec collect texts = function
@@ -67,7 +68,7 @@ let text_content ~message_index content =
   collect [] content
 ;;
 
-let is_turn_scoped_context policy (message : Types.message) =
+let is_turn_scoped_context policy (message : _ Types.message_with) =
   match policy, message.origin with
   | Turn_scoped_system_context, (System_context | Historical_system_context) -> true
   | Turn_scoped_system_context, (Conversation | Recovery_instruction | Tool_result_followup | Agent_instruction)
@@ -76,7 +77,7 @@ let is_turn_scoped_context policy (message : Types.message) =
 
 type native_role = Native_user | Native_assistant | Native_system
 
-let native_role policy (message : Types.message) =
+let native_role policy (message : _ Types.message_with) =
   if is_turn_scoped_context policy message then Native_system
   else match message.role with Assistant -> Native_assistant | User | System | Tool -> Native_user
 ;;
@@ -93,7 +94,7 @@ let validate_turn_scoped_contexts policy messages =
   | Preserve_positions | Initial_system_native_tools | Initial_system_tool_response_media -> Ok ()
   | Turn_scoped_system_context ->
     let rec group index = function
-      | (message : Types.message) :: rest when is_turn_scoped_context policy message ->
+      | (message : _ Types.message_with) :: rest when is_turn_scoped_context policy message ->
         (match message.role, message.content with
          | (Assistant | Tool), _ -> Error (Invalid_control_role {message_index=index;role=message.role})
          | (User | System), [] -> Error (Non_text_control {message_index=index})
@@ -125,13 +126,13 @@ let lower policy messages =
     Ok {messages; source_indices = List.mapi (fun index _ -> index) messages}
   | Turn_scoped_system_context ->
     Result.map (fun () ->
-      {messages=List.map (fun (message : Types.message) ->
+      {messages=List.map (fun (message : _ Types.message_with) ->
           if is_turn_scoped_context policy message then {message with role=System} else message) messages;
        source_indices=List.mapi (fun index _ -> index) messages})
       (validate_turn_scoped_contexts policy messages)
   | Initial_system_native_tools | Initial_system_tool_response_media ->
     let latest_caller =
-      List.fold_left (fun latest (index, (message : Types.message)) ->
+      List.fold_left (fun latest (index, (message : _ Types.message_with)) ->
         match message.role, message.origin with
         | User, Conversation -> Some index
         | (System | Assistant | Tool), _
@@ -143,7 +144,7 @@ let lower policy messages =
      | None -> Error Missing_caller_query
      | Some latest_caller ->
        let recovery_frontier =
-         List.fold_left (fun frontier (index, (message : Types.message)) ->
+         List.fold_left (fun frontier (index, (message : _ Types.message_with)) ->
            match message.role with
            | Assistant -> max frontier index
            | User | System | Tool -> frontier)
@@ -174,7 +175,7 @@ let lower policy messages =
                (source_index, system) :: retained
            in
            Ok {messages = List.map snd labelled; source_indices = List.map fst labelled}
-         | (message : Types.message) :: rest ->
+         | (message : _ Types.message_with) :: rest ->
            let control =
              match message.origin, message.role with
              | Conversation, System -> Some true

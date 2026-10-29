@@ -447,16 +447,13 @@ let test_prefit_real_continuity ~base_path () =
     ~materialize:(fun ~pending:_ _ -> Alcotest.fail "unfinished work was demoted") canonical with
     | Ok view -> view
     | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error)) in
-  let wire = view.wire
+  let transmitted = view.transmitted
     |> Result.map_error Agent_core.Llm_provider.Reasoning_history_projection.error_to_string |> get in
-  let summaries, suffix = List.partition (fun (message : Llm_provider.Types.message) ->
-    message.metadata = Runtime_model_input_tail_window.working_state_metadata) wire in
+  let summaries, suffix = List.partition (fun (message : Agent_core.Types.message) ->
+    message.metadata = Runtime_model_input_tail_window.working_state_metadata) transmitted in
   Alcotest.(check int) "next request contains exactly one saved working state" 1 (List.length summaries);
   Alcotest.(check bool) "next request preserves unfinished user and tool exchange exactly" true
-    (List.equal Llm_provider.Types.Message_value.equal
-       (Agent_core.History.to_wire_messages (Agent_core.History.Memory_store.create ()) pending
-        |> Result.get_ok)
-       suffix);
+    (List.equal Agent_core.Types.Message_value.equal pending suffix);
   let after = match C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id with
     | Ok value -> C.exact_snapshot_messages value
     | Error _ -> Alcotest.fail "source checkpoint disappeared" in

@@ -1379,8 +1379,11 @@ let current_turn_demotion ~(refused : composed) ~(demoted : composed) =
 (* One request: the range composed in the durable vocabulary, its demotions
    materialized, then the wire's view of the carried range. [composed] and
    [carried] count atoms of the checkpoint history — the vocabulary of the
-   ledger, the seed and the forecast — and [wire] is the dialect's reasoning
-   projection over [carried] alone, or why it declined. The order is the
+   ledger, the seed and the forecast — and [transmitted] is the dialect's
+   reasoning projection over [carried] alone, or why it declined. The
+   projection reads block kinds only, so it runs on the history and the media
+   stay [Stored] until the request is resolved; [carried_wire] is [carried]
+   resolved, which the prefix-binding check reads. The order is the
    point: a position measured on one runtime names the same atom on every
    runtime whatever reasoning each dialect replays or deletes, a dialect that
    deletes a whole reasoning-only assistant message shortens the wire list
@@ -1395,8 +1398,8 @@ type request_view =
   ; argument_prefix_protected : bool
   ; carried : Agent_core.Types.message list
   ; carried_wire : Agent_core.Llm_provider.Types.message list
-  ; wire :
-      ( Agent_core.Llm_provider.Types.message list
+  ; transmitted :
+      ( Agent_core.Types.message list
         , Agent_core.Llm_provider.Reasoning_history_projection.error )
         result
   }
@@ -1452,16 +1455,16 @@ let unchecked_request_view
   in
   Result.map
     (fun carried_wire ->
-       let wire =
+       let transmitted =
          offload_model_input_cpu (fun () ->
            Agent_core.Llm_provider.Complete_common.transmitted_history
              ~tools ~config:provider_config
-             carried_wire)
+             carried)
        in
        { composed
        ; carried
        ; carried_wire
-       ; wire
+       ; transmitted
        ; completed_arguments
        ; argument_prefix_protected = false
        })
@@ -1970,9 +1973,9 @@ let bounded_model_input_projection
                  messages
              in
              current_turn_demotion ~refused:composed ~demoted));
-    let windowed_count =
-      match view.wire with
-      | Ok transmitted -> List.length transmitted
+    let windowed =
+      match view.transmitted with
+      | Ok transmitted -> transmitted
       | Error error ->
         (* The backend runs this same projection over this same list and
            refuses the request with its typed error, which the turn's failure
@@ -1990,7 +1993,7 @@ let bounded_model_input_projection
             (Agent_core.Llm_provider.Reasoning_history_projection
              .error_to_string
                error));
-        List.length view.carried
+        view.carried
     in
     if not !front_reported
     then (
@@ -2003,13 +2006,13 @@ let bounded_model_input_projection
             view.carried)
       in
       emit_runtime_manifest ctx
-        ~status:(match view.wire with
+        ~status:(match view.transmitted with
           | Ok _ -> "history_projection_prepared"
           | Error _ -> "history_projection_declined")
         ~decision:(`Assoc
           [ "scope", `String "first_request_projection_in_provider_attempt_not_delivery"
           ; "source_message_count", `Int (List.length messages)
-          ; "projected_message_count", `Int windowed_count
+          ; "projected_message_count", `Int (List.length windowed)
           ; "history_atom_count", `Int history_atom_count
           ; "first_atom", `Int composed.projection.Runtime_model_input_tail_window.dropped_atoms
           ; "origin", `String (Keeper_carried_front.origin_to_string composed.origin)
@@ -2052,7 +2055,7 @@ let bounded_model_input_projection
          (Keeper_carried_front.dropped_front_to_string dropped)
          history_atom_count
      | Some _ | None -> ());
-    (match view.wire with
+    (match view.transmitted with
      | Ok _ ->
        Option.iter
          (fun observe ->
@@ -2138,19 +2141,17 @@ let bounded_model_input_projection
           ; digest_at = history_digest_at
           ; origin = view.composed.origin
           });
-    (* The masc projections rewrite the carried history; only their output
-       is resolved for the request. *)
     let result = match ctx.model_input_projection with
-      | None -> Ok view.carried
-      | Some inner -> inner view.carried in
+      | None -> Ok windowed
+      | Some inner -> inner windowed in
     let result=Result.map (Keeper_librarian_request_unread.attach ~role:Agent_core.Types.User
       (Option.fold ~none:Keeper_librarian_request_unread.empty ~some:request_unread (input_continuity ctx.request_input))) result in
-    (match view.wire, result with
+    (match view.transmitted, result with
      | Ok _, Ok projected ->
        let changed = match ctx.model_input_projection with
          | None -> false
          | Some _ -> offload_model_input_cpu (fun () ->
-             not (List.equal Agent_core.Types.Message_value.equal view.carried projected)) in
+             not (List.equal Agent_core.Types.Message_value.equal windowed projected)) in
        state.request_range := Some
          { Keeper_continuity_request.origin = composed.origin
          ; first_atom = composed.projection.Runtime_model_input_tail_window.dropped_atoms
@@ -2160,28 +2161,10 @@ let bounded_model_input_projection
      | Error _, (Ok _ | Error _) | Ok _, Error _ -> ());
     let* projected = result in
     on_resolved projected;
-    if projected == view.carried
-    then
-      (* Unchanged by the masc projections: [view] already resolved and
-         projected this list for the wire. *)
-      Ok (match view.wire with
-          | Ok transmitted -> transmitted
-          | Error _ -> view.carried_wire)
-    else
-      let* projected_wire =
-        resolve_carried ~to_wire projected
-        |> Result.map_error (fun error -> Agent_core.Error.Media error)
-      in
-      (* A declined projection hands the resolved list over as it is: the
-         backend runs the same projection and refuses the request. *)
-      Ok
-        (match
-           offload_model_input_cpu (fun () ->
-             Agent_core.Llm_provider.Complete_common.transmitted_history
-               ~tools:prefix_tools ~config:provider_config projected_wire)
-         with
-         | Ok transmitted -> transmitted
-         | Error _ -> projected_wire)
+    (* Only the request is resolved, after every projection: the carried
+       messages are already in the attempt's conversion memo from [view]. *)
+    resolve_carried ~to_wire projected
+    |> Result.map_error (fun error -> Agent_core.Error.Media error)
 ;;
 
 let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (ctx : try_provider_ctx) candidate =

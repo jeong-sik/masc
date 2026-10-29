@@ -91,8 +91,8 @@ val request_tools_present : config:Provider_config.t -> tools:Yojson.Safe.t list
 val transmitted_history
   :  ?tools:Yojson.Safe.t list
   -> config:Provider_config.t
-  -> Types.message list
-  -> (Types.message list, Reasoning_history_projection.error) result
+  -> 'source Types.message_with list
+  -> ('source Types.message_with list, Reasoning_history_projection.error) result
 
 val retained_prefix_reasoning_indices
   :  config:Provider_config.t

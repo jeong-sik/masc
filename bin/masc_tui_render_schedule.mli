@@ -680,6 +680,12 @@ val planning_layout :
 val planning_header_row :
   phase_width:int -> layout:planning_column Masc_tui_table.layout -> string
 
+val planning_header_row_korean :
+  phase_width:int -> layout:planning_column Masc_tui_table.layout -> string
+
+val planning_open_width : int
+(** Cell width available for the open Task count and its activity. *)
+
 val planning_row :
   ?priority_style:string ->
   ?open_style:string ->

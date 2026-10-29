@@ -496,6 +496,7 @@ val planning_backlog_clauses :
     each styled by magnitude band and kept atomic across clause packing. *)
 
 val planning_change_clauses :
+  ?ko:bool ->
   baseline:Masc_tui_types.planning_snapshot option ->
   Masc_tui_types.planning_snapshot ->
   string list

@@ -36,6 +36,11 @@ val render_planning_list :
   Masc_tui_types.state ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
+val planning_summary_reading :
+  cols:int -> Masc_tui_types.state -> Masc_tui_detail_reading.t
+(** A captured, read-only Goal and global Task summary, including the two
+    server snapshot timestamps used for its changes. *)
+
 val render_planning_detail :
   Masc_tui_types.state ->
   armed:Goal_phase.Public_action.t option ->

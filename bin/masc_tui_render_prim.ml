@@ -139,6 +139,7 @@ let clamped_scroll_now (state : state) = function
   | System_log_detail_scroll _ ->
       System_log_detail_scroll (system_logs_page state).lp_detail_scroll
   | Planning_detail_scroll _ | Planning_confirmation_scroll _ -> Planning_detail_scroll state.planning_scroll
+  | Planning_list_page_rows _ -> Planning_list_page_rows state.planning_list_page_rows
   | Lane_run_detail_scroll _ ->
       Lane_run_detail_scroll
         { scroll = state.lane_run_detail_scroll;
@@ -220,7 +221,7 @@ let reader_after_wheel (reader : clamped_scroll)
   (* Logs use their own bounded Metrics_tail movement through the key path. *)
   | Keeper_logs_scroll _ -> None
   (* List scrolls: the notch moves the list's cursor as the arrow does. *)
-  | Acting _ | Acting_selection _ | Keeper_list_scroll _ -> None
+  | Acting _ | Acting_selection _ | Keeper_list_scroll _ | Planning_list_page_rows _ -> None
   (* Resources has panes of its own that [h] and [l] move between. *)
   | Resource_scroll _ -> None
 
@@ -2588,16 +2589,16 @@ let planning_backlog_clauses (backlog : planning_backlog) =
        else item)
     (List.combine items bands)
 
-let planning_change_clauses ~(baseline : planning_snapshot option)
+let planning_change_clauses ?(ko = false) ~(baseline : planning_snapshot option)
     (current : planning_snapshot) =
   match baseline with
-  | None -> [ "Change: waiting for the first successful snapshot" ]
+  | None -> [ if ko then "첫 성공 스냅샷 대기" else "Change: waiting for the first successful snapshot" ]
   | Some first ->
-      [ Printf.sprintf "Change from baseline: Goals done %+d"
+      [ Printf.sprintf (if ko then "완료 단계 목표 %+d" else "Change from baseline: Goals in completed phase %+d")
           (current.pl_rollup.pr_done - first.pl_rollup.pr_done)
-      ; Printf.sprintf "Tasks done %+d"
+      ; Printf.sprintf (if ko then "완료 Task %+d" else "Tasks done %+d")
           (current.pl_backlog.pb_done - first.pl_backlog.pb_done)
-      ; Printf.sprintf "Goal reviews pending %+d"
+      ; Printf.sprintf (if ko then "검증 단계 목표 %+d" else "Goals in verifying phase %+d")
           (current.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying)
       ]
 
@@ -2655,7 +2656,8 @@ type planning_tab = Render_schedule.planning_tab =
    whatever followed -- at a hundred columns this title lost its badge and
    half its clock. Callers build that tail once and hand the same value here
    and to the row, so the measurement and the drawing cannot disagree. *)
-let planning_workspace_lead = screen_title " MASC Work" ^ "  "
+let planning_workspace_lead (state : state) =
+  screen_title (if state.ui_language = Lang_ko then " MASC 작업" else " MASC Work") ^ "  "
 
 let planning_workspace_tabs (state : state) ~(tab : planning_tab) ~(window : string) =
   let review_count = Option.map (fun s -> s.vs_total) state.verification in
@@ -2671,6 +2673,17 @@ let planning_workspace_tabs (state : state) ~(tab : planning_tab) ~(window : str
   let stops =
     Render_schedule.planning_strip_plain ~tab ~review_count ~verifying_count
       ~window
+  in
+  let stops = if state.ui_language <> Lang_ko then stops else
+    let counted label = function
+      | Some count when count > 0 -> Printf.sprintf "%s·%d" label count
+      | Some _ | None -> label in
+    List.map (fun (stop, _) ->
+      let label = match stop with
+        | Planning_goals -> counted "목표" verifying_count
+        | Planning_task_review -> counted "작업 검토" review_count
+        | Planning_verdicts -> "작업 판정" in
+      stop, if stop = tab then label ^ window else label) stops
   in
   (* Each stop is a surface of its own; [v] walks them in this order. *)
   let surface_of_stop = function
@@ -2688,6 +2701,7 @@ let planning_workspace_strip ~width tabs =
     tabs
 
 let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(window : string) ~(after : string) =
+  let planning_workspace_lead = planning_workspace_lead state in
   planning_workspace_lead
   ^ planning_workspace_strip
       ~width:(tab_strip_width ~cols ~before:planning_workspace_lead ~after)
@@ -2703,6 +2717,7 @@ let harness_detail_heading (state : state) ~cols ~task_id ~tail =
     Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
   in
   let tabs = planning_workspace_tabs state ~tab:Planning_verdicts ~window:"" in
+  let planning_workspace_lead = planning_workspace_lead state in
   let mark = " \xe2\x96\xb8 verdict  " in
   let around = cells planning_workspace_lead + cells mark in
   detail_heading ~cols

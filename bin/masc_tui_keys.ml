@@ -793,6 +793,8 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Planning ->
       [ b Navigate "j/k" "move"
+      ; b Act "b" "summary" ~detail:List_only
+          ~help:"read captured Goal totals, the global Task backlog, history, and snapshot changes"
       ; b Navigate "t" "Goals / Tasks"
           ~help:"switch between Goals and the active task list"
       ; b Navigate "p" "Approvals"

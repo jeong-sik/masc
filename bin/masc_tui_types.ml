@@ -9621,6 +9621,7 @@ type state = {
   mutable planning_error: string option;
   mutable planning_cursor: int;
   mutable planning_scroll: int;
+  mutable planning_list_page_rows: int;
   mutable runtime_mode: runtime_mode;
   mutable planning_mode: planning_mode;
   (* Client-side over the already-loaded goals: [f]/[s] re-render without a
@@ -16921,6 +16922,7 @@ let create_state
   planning_error = None;
   planning_cursor = 0;
   planning_scroll = 0;
+  planning_list_page_rows = 1;
   runtime_mode = Runtime_lanes;
   planning_mode = Planning_list;
   planning_filter = Planning_filter_active;
@@ -18127,6 +18129,7 @@ type clamped_scroll =
   | System_log_detail_scroll of int
   | Planning_confirmation_scroll of int * Masc_tui_planning_detail.confirmation option
   | Planning_detail_scroll of int
+  | Planning_list_page_rows of int
   | Lane_run_detail_scroll of { scroll : int; content_height : int }
   (* An open diff's rows are built by the drawing, out of the recorded before
      and after text, so the keypress cannot count them. It steps unbounded and
@@ -18227,6 +18230,7 @@ let apply_clamped_scroll (state : state) = function
       state.log_wrap_cols <- Some cols
   | Planning_detail_scroll value
   | Planning_confirmation_scroll (value, _) -> state.planning_scroll <- value
+  | Planning_list_page_rows value -> state.planning_list_page_rows <- max 1 value
   | Lane_run_detail_scroll { scroll; content_height } ->
       state.lane_run_detail_scroll <- scroll;
       state.lane_run_detail_content_height <- content_height

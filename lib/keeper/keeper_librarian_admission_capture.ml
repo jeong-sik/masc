@@ -367,6 +367,14 @@ let confirm_final ~store (capture:t) (final:Lane_addon_exact.final) =
     | Owner.Configuration id -> Ok id
     | Manual _ -> Error "Original admission host proof requires its configured installation" in
   let* observed = Exact.observe_retained ~store ~declaration_id ~schema original in
+  (* The worker refuses an unlistable request before the host retains it
+     (addons/exact_worker.py [submit]), so the host holds no terminal and no
+     execution proof for it. Keeper_librarian_durable_request.confirm_final
+     answers the same way for the same final. *)
+  let host_never_retained = match observed with
+    | Exact.Retained_absent -> Exact.refused_before_host final
+    | Retained_open | Retained_terminal _ -> false in
+  if host_never_retained then Ok () else
   let* () = match observed with
     | Exact.Retained_absent -> Error "Original admission host terminal is absent"
     | Retained_open -> Error "Original admission host terminal remains unresolved"

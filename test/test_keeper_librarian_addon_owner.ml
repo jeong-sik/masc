@@ -857,6 +857,20 @@ let test_mismatched_retained_judgment_cannot_borrow_host_proof ()=with_fixture (
   check bool "the genuine host final is still independently confirmable" true
     (io (fun () -> Capture.confirm_final ~store:fixture.store capture final=Ok ())))
 
+let test_admission_confirms_a_final_the_host_never_retained ()=with_fixture (fun ~sw:_ fixture ->
+  let _record,capture,answered=retained_answer_before_gate fixture in
+  let never_retained=Store.create ~root:(Filename.concat fixture.base_path "never-retained-store") in
+  let refused kind=Lane_addon_exact.Call_final (Input_refused kind) in
+  let confirmed final=io (fun () -> Capture.confirm_final ~store:never_retained capture final=Ok ()) in
+  check bool "the worker's unlistable-request refusal is confirmed without a host record" true
+    (confirmed (refused Lane_addon_exact.Request_body_refused));
+  check bool "an answer still needs its host terminal" false (confirmed answered);
+  check bool "another input refusal still needs its host terminal" false
+    (confirmed (refused Lane_addon_exact.Input_capacity));
+  check bool "the exception does not apply once the host holds a different terminal" false
+    (io (fun () -> Capture.confirm_final ~store:fixture.store capture
+       (refused Lane_addon_exact.Request_body_refused)=Ok ())))
+
 type root_publication_cut = Before_child | Child_before_ack | Acknowledged_then_missing
 let test_original_gate_root_publication_recovery cut ()=with_fixture (fun ~sw:_ fixture ->
   let record,capture,final=retained_answer_before_gate fixture in
@@ -1114,6 +1128,7 @@ let () =
   test_case "purge joins the actual provider after the Memory unit returned Pending" `Quick test_purge_joins_provider_after_memory_unit_returned;
   test_case "forged worker Finished cannot commit without original host execution proof" `Quick test_forged_worker_finished_cannot_commit_without_host_proof;
   test_case "mismatched retained final cannot borrow real original host proof" `Quick test_mismatched_retained_judgment_cannot_borrow_host_proof;
+  test_case "admission confirms a final the host never retained" `Quick test_admission_confirms_a_final_the_host_never_retained;
   test_case "pending first gate intent recovers the same absent child while Off" `Quick (test_original_gate_root_publication_recovery Before_child);
   test_case "published first gate before ACK recovers the same child while Off" `Quick (test_original_gate_root_publication_recovery Child_before_ack);
   test_case "acknowledged missing first gate refuses without replacement" `Quick (test_original_gate_root_publication_recovery Acknowledged_then_missing);

@@ -100,6 +100,12 @@ val admission_id : record -> P.Id.t
 val revision : record -> int64
 val payload_uid : record -> int
 
+val launch_record : launch_intent -> record
+(** The opaque original captured when this permit was committed, without I/O
+    or a new permission. Trusted lifetime owners retain it for original-source
+    cancellation and result readback before a native supervisor exists.
+    Mutations still refresh and validate that exact source. *)
+
 val refresh : record -> (record, error) result
 (** Read only this opaque record's original registry/job and known launch under
     the same nonwaiting shared read lock as [load].
@@ -134,6 +140,9 @@ val request_cancel :
     lost-reply requests sync the exact existing claim and its actual parent,
     then revalidate the same original before acknowledging that durable intent
     without advancing it. A failed sync or validation remains an error.
+    Source reads and lock admission remain cancellable. An entered claim
+    publication and recovery cleanup finish under cancellation protection;
+    the exclusive job lock releases before the original cancellation check.
     Cancellation before launch prevents a new launch permit, and cancellation
     after a permit was issued prevents its still-pending callback from starting.
     A currently active bounded launch callback returns [Busy]; no other job is

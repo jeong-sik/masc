@@ -68,6 +68,10 @@ val launch_effect_workspace :
     nonwaiting lock, create a new cgroup and original paused child, wait for
     kernel setup, durably publish its complete rendezvous and activation intent,
     then request gate activation. The callback does not wait for payload exit.
+    Native preparation/readiness and source work remain cancellable. Only
+    entered Fs recovery setup and each bounded metadata publication/cleanup are
+    protected; pending cancellation prevents activation and propagates after
+    the original job lock is released.
 
     Once a child exists, a typed startup failure returns its original owner
     as [Ok t] with [Held error], preserving its handles for cancellation and

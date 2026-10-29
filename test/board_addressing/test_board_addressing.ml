@@ -157,6 +157,19 @@ let test_routing_target_code_spans () =
   check_routing "a mention after a code span is still found" (Some "alpha")
     "main fails `dune build @check` today\n\n@alpha @beta look"
 
+(* The name reaches code that builds a file name from it, such as a Keeper's
+   metadata path, so a path separator or a dot must never pass. The first
+   name written decides: a later valid name is not put in its place. *)
+let test_routing_target_names () =
+  check_routing "a parent path is not a name" None "@../../etc/passwd please";
+  check_routing "an absolute path is not a name" None "@/etc/passwd please";
+  check_routing "a path with a separator is not a name" None "see @bin/all now";
+  check_routing "a dotted name is not a name" None "ping @team.alpha now";
+  check_routing "a possessive is not a name" None "@alpha's note";
+  check_routing "a selector with a separator is not a name" None "see @@bin/all";
+  check_routing "a later valid name does not replace the first" None
+    "@bin/all then @alpha"
+
 let () =
   run "board_addressing"
     [ ( "tokenization",
@@ -169,4 +182,5 @@ let () =
       ( "routing_target",
         [ test_case "direct targets" `Quick test_routing_target;
           test_case "selectors" `Quick test_routing_target_selectors;
-          test_case "code spans" `Quick test_routing_target_code_spans ] ) ]
+          test_case "code spans" `Quick test_routing_target_code_spans;
+          test_case "names" `Quick test_routing_target_names ] ) ]

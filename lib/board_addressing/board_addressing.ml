@@ -141,16 +141,35 @@ let parse text =
     | _ :: _ -> Raw_targets targets)
 ;;
 
+(* The sinks of a routed name build file names from it unchanged: a Keeper's
+   metadata path is the name plus a suffix. Only the characters the removed
+   regex extractor accepted may reach them, so a path separator or a dot never
+   does. *)
+let is_routable_name name =
+  (not (String.equal name ""))
+  && String.for_all
+       (function
+         | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> true
+         | _ -> false)
+       name
+;;
+
 (* A consumer that notifies one recipient routes on one name. A [@@] selector
    is that name: [@@all] or an unknown selector the caller rejects as an
    unknown target. A selector with nothing after it, such as the [@@] that
-   opens a diff hunk header, names nobody. *)
+   opens a diff hunk header, names nobody. The first name written decides: one
+   that is not routable gives no recipient, and a later name is never put in
+   its place, because that would notify someone the author did not address
+   first. *)
 let routing_target text =
+  let routable name = if is_routable_name name then Some name else None in
   match parse text with
   | No_explicit_address -> None
   | Broadcast_all -> Some broadcast_all_selector
   | Unsupported_broadcast selectors ->
-    List.find_opt (fun selector -> not (String.equal selector "")) selectors
+    Option.bind
+      (List.find_opt (fun selector -> not (String.equal selector "")) selectors)
+      routable
   | Raw_targets [] -> None
-  | Raw_targets (first :: _) -> Some first
+  | Raw_targets (first :: _) -> routable first
 ;;

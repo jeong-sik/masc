@@ -63,4 +63,10 @@ val routing_target : string -> string option
     other selector gives that selector, lowercased, for the caller to reject
     as an unknown target.  A selector with nothing after it, as in the
     [@@] of a diff hunk header, gives [None].  Otherwise the first direct
-    target, case preserved and not validated; no address gives [None]. *)
+    target, case preserved; no address gives [None].
+
+    The name holds only letters, digits, ['_'] and ['-'], the characters the
+    removed regex extractor accepted, because the callers' sinks build file
+    names from it.  A first name with any other character, such as ["a/b"],
+    ["a.b"] or ["alice's"], gives [None]; a later name is never substituted
+    for it. *)

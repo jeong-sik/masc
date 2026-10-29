@@ -840,7 +840,7 @@ let independent_completion_owners_keep_original_proofs () =
            | Intake_shutdown_reserved _ -> fail "the already admitted lock holder changed");
           let blocked = Eio.Promise.await alpha_blocked in
           (match blocked.failures with
-           | [id, error] ->
+           | [Outbox.Request_id id, error] ->
                check string "active batch retains original request" alpha.request_id id;
                (match error with
                 | Outbox.Storage_failed _ -> ()
@@ -965,7 +965,7 @@ let discovery_failure_retains_original_completion_and_recovers_with_partial_dama
          (match discovery.entries with
           | [] -> () | _ :: _ -> fail "delivered original obligation was not retired");
          (match discovery.failures with
-          | [name, Outbox.Invalid_obligation _] ->
+          | [Outbox.Record_file name, Outbox.Invalid_obligation _] ->
               check string "partial failure keeps its original filename" damaged_name name
           | [] | _ :: _ -> fail "partial malformed obligation was hidden or reattributed"));
     check string "partial damage stays visible and unchanged"

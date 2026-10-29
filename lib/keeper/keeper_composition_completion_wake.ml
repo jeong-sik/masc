@@ -300,9 +300,9 @@ let observe_recovery ~base_path ~keeper_name ~started_ns phase =
   Eio.Cancel.protect emit
 
 let log_report ~base_path ~keeper_name (report : Outbox.report) =
-  List.iter (fun (request_id,error) ->
-    Log.Server.warn "composition completion delivery retained keeper=%s request=%s error=%s base_path=%S"
-      keeper_name request_id (Outbox.error_to_string error) base_path) report.failures;
+  List.iter (fun (subject,error) ->
+    Log.Server.warn "composition completion delivery retained keeper=%s %s error=%s base_path=%S"
+      keeper_name (Outbox.failure_subject_to_string subject) (Outbox.error_to_string error) base_path) report.failures;
   if report.delivered > 0 then Log.Server.info
     "composition completion recovery keeper=%s inspected=%d delivered=%d waiting=%d failures=%d base_path=%S"
     keeper_name report.inspected report.delivered report.waiting (List.length report.failures) base_path
@@ -330,16 +330,16 @@ let recover_owner pending =
     | Ok Outbox.Retired -> report
     | Ok Outbox.Waiting -> {report with waiting=report.waiting+1}
     | Ok Outbox.Delivered -> {report with delivered=report.delivered+1}
-    | Error error -> {report with failures=(pending.request_id,error)::report.failures}) empty pending in
+    | Error error -> {report with failures=(Outbox.Request_id pending.request_id,error)::report.failures}) empty pending in
   {report with failures=List.rev report.failures}
 
 let discover_and_schedule ~sw supervisor =
   Eio.Switch.check sw;
   let open Result.Syntax in
   let* discovery = Outbox.discover ~base_path:supervisor.base_path in
-  List.iter (fun (identity,error) ->
-    Log.Server.warn "composition completion discovery retained pending_record=%s error=%s base_path=%S"
-      identity (Outbox.error_to_string error) supervisor.base_path) discovery.failures;
+  List.iter (fun (subject,error) ->
+    Log.Server.warn "composition completion discovery retained %s error=%s base_path=%S"
+      (Outbox.failure_subject_to_string subject) (Outbox.error_to_string error) supervisor.base_path) discovery.failures;
   let owners = List.fold_left (fun owners (pending : Outbox.pending) ->
     if Set_util.StringSet.mem pending.keeper_name supervisor.active then owners
     else

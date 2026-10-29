@@ -792,7 +792,8 @@ let surface_strip (state : state) ~cols =
     | Config | Resources | Tools | System_logs | Keepers _ -> ""
   in
   let badge =
-    Agenda.waiting_label ~cells:(cols / 2) (Masc_tui_types.agenda state)
+    Agenda.waiting_label ~ko:(state.ui_language = Lang_ko) ~cells:(cols / 2)
+      (Masc_tui_types.agenda state)
   in
   let badge_reserved =
     if badge = "" then 0
@@ -5660,15 +5661,17 @@ let split_summary_columns ~cols ~left_title ~left_rows ~right_title ~right_rows 
 
 let runtime_substrate_tab_strip (state : state) ~cols ~before ~after
     ~(current : [ `Runtime_lanes | `Runtime_all | `Features | `Clients ]) =
+  let ko = state.ui_language = Lang_ko in
   let lane_reading =
     Option.map
       (fun (snapshot : Masc.Tui_decode.runtime_surface_snapshot) ->
         let lane_count = List.length snapshot.rss_resolved.rrs_lanes in
         match current with
         | `Runtime_lanes | `Runtime_all ->
-          Printf.sprintf "%s, %s"
-            (Message_layout.count_noun lane_count "lane")
-            (Message_layout.count_noun (List.length snapshot.rss_candidates) "slot")
+          if ko then Printf.sprintf "레인 %d, 후보 %d" lane_count (List.length snapshot.rss_candidates)
+          else Printf.sprintf "%s, %s"
+              (Message_layout.count_noun lane_count "lane")
+              (Message_layout.count_noun (List.length snapshot.rss_candidates) "slot")
         | `Features | `Clients -> string_of_int lane_count)
       state.runtime_surface
   in
@@ -5683,7 +5686,7 @@ let runtime_substrate_tab_strip (state : state) ~cols ~before ~after
       (fun (snapshot : Masc.Tui_decode_lane_inventory.snapshot) ->
         let count = List.length snapshot.rows in
         match current with
-        | `Features -> Message_layout.count_noun count "feature"
+        | `Features -> if ko then Printf.sprintf "%d개" count else Message_layout.count_noun count "feature"
         | `Runtime_lanes | `Runtime_all | `Clients -> string_of_int count)
       state.lane_inventory
   in
@@ -5692,23 +5695,23 @@ let runtime_substrate_tab_strip (state : state) ~cols ~before ~after
       (fun (snapshot : Masc.Tui_decode.clients_snapshot) ->
         let count = List.length snapshot.cls_clients in
         match current with
-        | `Clients -> Printf.sprintf "%d attached" count
+        | `Clients -> Printf.sprintf (if ko then "%d개 연결" else "%d attached") count
         | `Runtime_lanes | `Runtime_all | `Features -> string_of_int count)
       state.clients_surface
   in
   tab_strip
     ~width:(tab_strip_width ~cols ~before ~after)
     ~press:pressable
-    [ ( tab_entry_label "Candidate orders" lane_reading
+    [ ( tab_entry_label (if ko then "후보 순서" else "Candidate orders") lane_reading
       , current = `Runtime_lanes
       , Press_runtime_mode Runtime_lanes )
-    ; ( tab_entry_label "All runtimes" all_reading
+    ; ( tab_entry_label (if ko then "전체 런타임" else "All runtimes") all_reading
       , current = `Runtime_all
       , Press_runtime_mode Runtime_all )
-    ; ( tab_entry_label "Features" feature_reading
+    ; ( tab_entry_label (if ko then "기능" else "Features") feature_reading
       , current = `Features
       , Press_standalone_lanes )
-    ; ( tab_entry_label "Clients" client_reading
+    ; ( tab_entry_label (if ko then "클라이언트" else "Clients") client_reading
       , current = `Clients
       , Press_surface Clients )
     ]

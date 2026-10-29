@@ -341,7 +341,7 @@ val help_sections_for_state :
     sections. This is the help sheet's state-aware entry point. *)
 
 val footer_hints_patch_review : unit -> string
-val footer_hints_runtime_detail : ?routes:bool -> unit -> string
+val footer_hints_runtime_detail : ?ko:bool -> ?routes:bool -> unit -> string
 
 val help_sections :
   ?current:Masc_tui_types.surface -> unit -> (string * (string * string) list) list

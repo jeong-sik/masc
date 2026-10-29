@@ -23,18 +23,29 @@ let keepers_for_lane = Masc_tui_types.keepers_for_lane
 let keepers_for_runtime_with_lanes = Masc_tui_types.keepers_for_runtime_with_lanes
 
 
-let runtime_refresh_badge refresh_state =
+let runtime_refresh_badge ~ko refresh_state =
   let open Masc.Tui_decode_runtime_probe in
   let label, style =
     match refresh_state with
-    | Runtime_probe_fresh -> "fresh", (Theme.ok ())
-    | Runtime_probe_recent -> "recent", (Theme.info ())
-    | Runtime_probe_served_stale -> "stale", (Theme.warn ())
-    | Runtime_probe_warming_up -> "warming", (Theme.warn ())
+    | Runtime_probe_fresh -> (if ko then "최신" else "fresh"), (Theme.ok ())
+    | Runtime_probe_recent -> (if ko then "최근" else "recent"), (Theme.info ())
+    | Runtime_probe_served_stale -> (if ko then "이전 관측" else "stale"), (Theme.warn ())
+    | Runtime_probe_warming_up -> (if ko then "준비 중" else "warming"), (Theme.warn ())
   in
   style ^ label ^ Ansi.reset
 
-let runtime_overall_badge status =
+let runtime_overall_label ~ko status =
+  let open Masc.Tui_decode_runtime_probe in
+  if ko then
+    match status with
+    | Runtime_probe_reachable -> "연결 가능"
+    | Runtime_probe_no_http_runtimes -> "HTTP 런타임 없음"
+    | Runtime_probe_warming -> "준비 중"
+    | Runtime_probe_degraded -> "일부 실패"
+    | Runtime_probe_unreachable -> "연결 불가"
+  else runtime_probe_status_to_string status
+
+let runtime_overall_badge ~ko status =
   let open Masc.Tui_decode_runtime_probe in
   let style =
     match status with
@@ -43,27 +54,31 @@ let runtime_overall_badge status =
     | Runtime_probe_degraded -> (Theme.warn ())
     | Runtime_probe_unreachable -> (Theme.bad ())
   in
-  style ^ runtime_probe_status_to_string status ^ Ansi.reset
+  style ^ runtime_overall_label ~ko status ^ Ansi.reset
 
 let runtime_usage_badge state runtime =
+  let ko = state.ui_language = Lang_ko in
   match state.runtime_surface with
-  | None -> Some (Ansi.dim ^ "usage unknown" ^ Ansi.reset)
+  | None -> Some (Ansi.dim ^ (if ko then "사용량 미확인" else "usage unknown") ^ Ansi.reset)
   | Some snapshot ->
       match runtime_spent_usage snapshot.rss_resolved runtime with
-      | Error _ -> Some (Ansi.dim ^ "usage unknown" ^ Ansi.reset)
+      | Error _ -> Some (Ansi.dim ^ (if ko then "사용량 미확인" else "usage unknown") ^ Ansi.reset)
       | Ok [] -> None
-      | Ok (_ :: _) -> Some (Theme.warn () ^ "account limit spent" ^ Ansi.reset)
+      | Ok (_ :: _) -> Some (Theme.warn () ^ (if ko then "계정 한도 소진" else "account limit spent") ^ Ansi.reset)
 
 let runtime_route_badge state (runtime : Masc.Tui_decode.runtime_option) =
+  let ko = state.ui_language = Lang_ko in
+  let warn label = Option.map (fun text -> Theme.warn () ^ text ^ Ansi.reset) label in
   match
     List.filter_map Fun.id
-      [ runtime_quota_badge runtime; runtime_rate_limit_badge runtime; runtime_usage_badge state runtime ]
+      [ warn (runtime_quota_label ~ko runtime); warn (runtime_rate_limit_label ~ko runtime)
+      ; runtime_usage_badge state runtime ]
   with
-  | [] -> (Theme.info ()) ^ "no refusal" ^ Ansi.reset
+  | [] -> (Theme.info ()) ^ (if ko then "거절 없음" else "no refusal") ^ Ansi.reset
   | badges -> String.concat " " badges
 
-let runtime_probe_badge = function
-  | None -> Ansi.dim ^ "unobserved" ^ Ansi.reset
+let runtime_probe_badge ~ko = function
+  | None -> Ansi.dim ^ (if ko then "미관측" else "unobserved") ^ Ansi.reset
   | Some (probe : Masc.Tui_decode_runtime_probe.runtime_provider_probe) ->
       let open Masc.Tui_decode_runtime_probe in
       let style =
@@ -80,11 +95,12 @@ let runtime_probe_badge = function
         | Runtime_provider_invalid_endpoint
         | Runtime_provider_invalid_execution_transport -> (Theme.bad ())
       in
-      let label = runtime_probe_status_label probe.rpp_status in
+      let label = runtime_probe_status_label ~ko probe.rpp_status in
       style ^ label ^ Ansi.reset
 
 let runtime_route_probe_badge state runtime probe =
-  runtime_route_badge state runtime ^ " / " ^ runtime_probe_badge probe
+  runtime_route_badge state runtime ^ " / "
+  ^ runtime_probe_badge ~ko:(state.ui_language = Lang_ko) probe
 
 let runtime_probe_detail = function
   | None -> []
@@ -120,12 +136,14 @@ type runtime_table_column =
   | Runtime_status_column
   | Runtime_detail_column
 
-let runtime_table_cells ~cols ~status_cells ~mode ~lane ~lane_is_label ~candidate ~identity ~status ~detail =
+let runtime_table_cells ~ko ~cols ~status_cells ~mode ~lane ~lane_is_label ~candidate ~identity ~status ~detail =
   let lane_width, candidate_width, identity_width, minimum_status_width = runtime_column_widths cols in
   let status_width = max minimum_status_width status_cells in
   let inner_width = max 1 (framed_inner_width cols - 2) in
   let candidate_heading =
-    match mode with Masc_tui_types.Runtime_lanes -> "CANDIDATE" | Runtime_all -> "RUNTIME"
+    match mode with
+    | Masc_tui_types.Runtime_lanes -> if ko then "후보" else "CANDIDATE"
+    | Runtime_all -> if ko then "런타임" else "RUNTIME"
   in
   (* Reserve the mode's identifying columns before allocating long status. *)
   let status_width, candidate_floor, drop_order = match mode with
@@ -160,13 +178,15 @@ let runtime_table_cells ~cols ~status_cells ~mode ~lane ~lane_is_label ~candidat
   List.map (fun column ->
     let header, value, fold = match column with
       | Runtime_lane_column ->
-          (match mode with Masc_tui_types.Runtime_lanes -> "LANE" | Runtime_all -> "USED BY"),
+          (match mode with
+           | Masc_tui_types.Runtime_lanes -> if ko then "레인" else "LANE"
+           | Runtime_all -> if ko then "사용 레인" else "USED BY"),
           lane, (if lane_is_label then Masc_tui_table.Fold_tail else Fold_middle)
       | Runtime_candidate_column ->
           candidate_heading, candidate, Masc_tui_table.Fold_middle
-      | Runtime_identity_column -> "PROVIDER / MODEL", identity, Masc_tui_table.Fold_middle
-      | Runtime_status_column -> "ROUTE / PROBE", status, Masc_tui_table.Fold_tail
-      | Runtime_detail_column -> "DETAIL", detail, Masc_tui_table.Fold_tail in
+      | Runtime_identity_column -> (if ko then "제공자 / 모델" else "PROVIDER / MODEL"), identity, Masc_tui_table.Fold_middle
+      | Runtime_status_column -> (if ko then "호출 / 연결" else "ROUTE / PROBE"), status, Masc_tui_table.Fold_tail
+      | Runtime_detail_column -> (if ko then "상세" else "DETAIL"), detail, Masc_tui_table.Fold_tail in
     let column_width = if column = Runtime_candidate_column then layout.flex_width else width column in
     Masc_tui_table.cell ~header ~width:column_width ~fold value) layout.shown
 
@@ -195,6 +215,8 @@ let runtime_detail_section = detail_section_heading
 (* A route is not a candidate. This reading remains available when the
    inventory is empty, and retains diagnostics beside a last-good snapshot. *)
 let runtime_routes_detail_lines state ~width =
+  let ko = state.ui_language = Lang_ko in
+  let text korean english = if ko then korean else english in
   let field ?(style = Ansi.reset) label value =
     runtime_detail_field ~width ~style label value
   in
@@ -206,22 +228,22 @@ let runtime_routes_detail_lines state ~width =
     (match state.runtime_lane_notice with
      | None -> []
      | Some notice ->
-         field ~style:(runtime_lane_notice_style notice) "Action result"
+         field ~style:(runtime_lane_notice_style notice) (text "작업 결과" "Action result")
            (Masc_tui_types.runtime_lane_notice_text notice))
-    @ List.concat_map (field ~style:(Theme.warn ()) "Stale configuration")
+    @ List.concat_map (field ~style:(Theme.warn ()) (text "이전 설정 관측" "Stale configuration"))
         (Masc_tui_types.runtime_lane_stale_lines state)
   in
   match state.runtime_surface with
   | None ->
-      runtime_detail_section ~first:true "1. 기본 라우트 · 진입 런타임 (Default Routes)"
-      @ optional "Runtime read warning" state.runtime_surface_error
-      @ field "Resolved" "Configuration has not been read"
+      runtime_detail_section ~first:true (if ko then "1. 기본 라우트 · 진입 런타임" else "1. Default routes")
+      @ optional (text "런타임 조회 경고" "Runtime read warning") state.runtime_surface_error
+      @ field (text "설정" "Resolved") (text "관측 없음" "No configuration observation")
       @ notice_and_stale
   | Some snapshot ->
       let resolved = snapshot.Tui_decode.rss_resolved in
       let route label values =
         match values with
-        | [] -> field label "none"
+        | [] -> field label (text "없음" "none")
         | values ->
             List.mapi
               (fun index value ->
@@ -234,30 +256,37 @@ let runtime_routes_detail_lines state ~width =
           (fun id -> not (List.exists (String.equal id) resolved.rrs_media_failover))
           resolved.rrs_media_failover_declared
       in
-      runtime_detail_section ~first:true "1. 기본 라우트 · 진입 런타임 (Default Routes)"
-      @ field "Default route" (Option.value resolved.rrs_default_route ~default:"none")
-      @ field "Entry runtime" (Option.value resolved.rrs_default_runtime_id ~default:"none")
-      @ field "Source" (Option.value resolved.rrs_config_path ~default:"unavailable")
-      @ field "Recorded" resolved.rrs_generated_at_iso
+      runtime_detail_section ~first:true (if ko then "1. 기본 라우트 · 진입 런타임" else "1. Default routes")
+      @ field (text "기본 라우트" "Default route") (Option.value resolved.rrs_default_route ~default:(text "없음" "none"))
+      @ field (text "시작 런타임" "Entry runtime") (Option.value resolved.rrs_default_runtime_id ~default:(text "없음" "none"))
+      @ field (text "설정 원본" "Source") (Option.value resolved.rrs_config_path ~default:(text "미확인" "unavailable"))
+      @ field (text "생성 시각" "Recorded") resolved.rrs_generated_at_iso
+      @ (match runtime_fleet_summary state with
+         | None -> []
+         | Some summary -> field (text "키퍼 전체" "Fleet") summary)
       @ notice_and_stale
-      @ runtime_detail_section "2. 미디어 Failover 순서 (Media Failover)"
-      @ route "Admitted media" resolved.rrs_media_failover
-      @ route "Declared media" resolved.rrs_media_failover_declared
-      @ route "Unresolved media" dropped
-      @ runtime_detail_section "3. 연결 진단 · 프로브 상태 (Probe & Diagnostics)"
-      @ optional "Runtime read warning" state.runtime_surface_error
-      @ optional "Probe read error" snapshot.rss_probe_error
+      @ runtime_detail_section (if ko then "2. 미디어 대체 순서" else "2. Media failover")
+      @ route (text "해소된 미디어 후보" "Admitted media") resolved.rrs_media_failover
+      @ route (text "선언된 미디어 후보" "Declared media") resolved.rrs_media_failover_declared
+      @ route (text "미해결 미디어 후보" "Unresolved media") dropped
+      @ runtime_detail_section (if ko then "3. 연결 진단 · 프로브 상태" else "3. Probe & diagnostics")
+      @ optional (text "런타임 조회 경고" "Runtime read warning") state.runtime_surface_error
+      @ optional (text "프로브 조회 오류" "Probe read error") snapshot.rss_probe_error
+      @ (if snapshot.rss_unassigned_probe_count = 0 then []
+         else field (text "후보 순서 외 프로브" "Probes outside candidate orders")
+                (string_of_int snapshot.rss_unassigned_probe_count))
       @ (match snapshot.rss_probe with
-         | None -> field "Probe" "unavailable; no observation has been read"
+         | None -> field (text "프로브" "Probe")
+             (text "미확인; 관측을 읽지 못함" "unavailable; no observation has been read")
          | Some probe ->
-             field "Probe status"
-               (Masc.Tui_decode_runtime_probe.runtime_probe_status_to_string probe.rps_status)
-             @ List.concat_map (field ~style:(Theme.warn ()) "Probe error") probe.rps_errors
-             @ List.concat_map (field "Probe limitation") probe.rps_limitations)
+             field (text "프로브 상태" "Probe status") (runtime_overall_label ~ko probe.rps_status)
+             @ List.concat_map (field ~style:(Theme.warn ()) (text "프로브 오류" "Probe error")) probe.rps_errors
+             @ List.concat_map (field (text "프로브 한계" "Probe limitation")) probe.rps_limitations)
 ;;
 
 let runtime_detail_lines state target ~width =
   let open Masc.Tui_decode in
+  let ko = state.ui_language = Lang_ko in
   let reading =
     match state.runtime_surface, target with
     | None, _ | Some _, Runtime_routes -> None
@@ -365,7 +394,7 @@ let runtime_detail_lines state target ~width =
               | Runtime_probe_cli -> "cli"
             in
             runtime_detail_field ~width ~style:Ansi.reset "Probe status"
-              (runtime_probe_status_label row.rpp_status)
+              (runtime_probe_status_label ~ko row.rpp_status)
             @ runtime_detail_field ~width ~style:Ansi.reset "Probe transport" transport
             @ (match row.rpp_latency_ms with
                | None -> []
@@ -457,13 +486,13 @@ let runtime_detail_lines state target ~width =
           runtime_detail_field ~width ~style:(Theme.warn ()) "Last failure"
             (Terminal_text.single_line (runtime_failed_attempt_text attempt))
       in
-      runtime_detail_section ~first:true "1. 현재 상태 · 연결 진단 (Health & Probe)"
+      runtime_detail_section ~first:true (if ko then "1. 현재 상태 · 연결 진단" else "1. Health & probe")
       @ probe_lines @ failed_attempt @ quota @ rate_limit @ usage_lines @ probe_limitations
-      @ runtime_detail_section "2. 레인 배정 · 실행 성적 (Assignment & History)"
+      @ runtime_detail_section (if ko then "2. 레인 배정 · 실행 성적" else "2. Assignment & history")
       @ assignment_fields @ keeper_lines @ evidence_lines
-      @ runtime_detail_section "3. 모델 · 컨텍스트 스펙 (Model & Context)"
+      @ runtime_detail_section (if ko then "3. 모델 · 컨텍스트" else "3. Model & context")
       @ model_fields
-      @ runtime_detail_section "4. 쿼터 범위 · 계정 연결 (Quota & Connection)"
+      @ runtime_detail_section (if ko then "4. 쿼터 범위 · 계정 연결" else "4. Quota & connection")
       @ connection_fields
 
 let render_runtime_detail (state : state) target =
@@ -472,14 +501,14 @@ let render_runtime_detail (state : state) target =
   let buf = Buffer.create 4096 in
   let target_label =
     match target with
-    | Runtime_routes -> "routes / status"
+    | Runtime_routes -> if state.ui_language = Lang_ko then "라우트 / 상태" else "routes / status"
     | Runtime_lane_candidate { lane_id; runtime_id } -> lane_id ^ " / " ^ runtime_id
     | Runtime_catalog_entry { runtime_id } -> runtime_id
   in
   box_top buf cols;
   box_line buf cols
     (detail_heading ~cols
-       ~lead:(Lead_text (screen_title runtime_detail_title ^ "  "))
+       ~lead:(Lead_text (screen_title (if state.ui_language = Lang_ko then " MASC 시스템 / 런타임 상세" else runtime_detail_title) ^ "  "))
        ~id:target_label ~after:"" ~tail:(connection_badge state));
   box_divider buf cols;
   let lines = runtime_detail_lines state target ~width:(max 1 (framed_inner_width cols - 4)) in
@@ -497,7 +526,7 @@ let render_runtime_detail (state : state) target =
   let position =
     if total > content_height then
       Some
-        (Printf.sprintf "lines %s"
+        (Printf.sprintf (if state.ui_language = Lang_ko then "행 %s" else "lines %s")
            (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
     else None
   in
@@ -505,6 +534,7 @@ let render_runtime_detail (state : state) target =
     (footer_line state ~max_cells:cols ?position
        ~hints:
          (Masc_tui_keys.footer_hints_runtime_detail
+            ~ko:(state.ui_language = Lang_ko)
             ~routes:(target = Runtime_routes) ()));
   finish_surface state ~clamped:(Runtime_detail_scroll scroll)
     ~surface_key:"runtime-detail" ~rows:terminal_rows ~cols buf
@@ -514,6 +544,7 @@ let render_runtime_detail (state : state) target =
    decoder module, so drawing never parses ids or reconstructs a lane. *)
 let render_runtime (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
   let ( runtime_lane_width
       , runtime_candidate_width
       , _
@@ -542,13 +573,13 @@ let render_runtime (state : state) =
   in
   let timestamp =
     match state.runtime_surface with
-    | None -> "reading unavailable"
+    | None -> if ko then "관측 없음" else "reading unavailable"
     | Some snapshot ->
         (match Masc_domain.parse_iso8601_opt snapshot.rss_resolved.rrs_generated_at_iso with
-         | None -> "reading time unavailable"
+         | None -> if ko then "관측 시각 없음" else "reading time unavailable"
          | Some generated_at ->
              let recorded = Unix.localtime generated_at in
-             Printf.sprintf "reading %02d:%02d:%02d"
+             Printf.sprintf (if ko then "관측 %02d:%02d:%02d" else "reading %02d:%02d:%02d")
                recorded.Unix.tm_hour recorded.Unix.tm_min recorded.Unix.tm_sec)
   in
   let header =
@@ -560,19 +591,19 @@ let render_runtime (state : state) =
           | Some _ -> ""
         in
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC System / Runtime") reading_note timestamp
+          (screen_title (if ko then " MASC 시스템 / 런타임" else " MASC System / Runtime")) reading_note timestamp
           (connection_badge state)
     | Some snapshot ->
         let probe_status =
           match snapshot.Masc.Tui_decode.rss_probe with
-          | None -> (Theme.warn ()) ^ "probe unavailable" ^ Ansi.reset
+          | None -> (Theme.warn ()) ^ (if ko then "프로브 미확인" else "probe unavailable") ^ Ansi.reset
           | Some probe ->
-              runtime_overall_badge probe.rps_status ^ " / "
-              ^ runtime_refresh_badge probe.rps_refresh_state
+              runtime_overall_badge ~ko probe.rps_status ^ " / "
+              ^ runtime_refresh_badge ~ko probe.rps_refresh_state
         in
         let probe_read =
           if Option.is_some snapshot.rss_probe_error then
-            (Theme.warn ()) ^ " / read failed" ^ Ansi.reset
+            (Theme.warn ()) ^ (if ko then " / 조회 실패" else " / read failed") ^ Ansi.reset
           else ""
         in
         let current =
@@ -580,7 +611,7 @@ let render_runtime (state : state) =
           | Masc_tui_types.Runtime_lanes -> `Runtime_lanes
           | Masc_tui_types.Runtime_all -> `Runtime_all
         in
-        let title = screen_title " MASC System / Runtime" in
+        let title = screen_title (if ko then " MASC 시스템 / 런타임" else " MASC System / Runtime") in
         let after =
           Printf.sprintf "  %s%s  %s  %s" probe_status probe_read timestamp
             (connection_badge state)
@@ -620,7 +651,8 @@ let render_runtime (state : state) =
   let candidates_window = Rows.of_list ~first:scroll ~height:content_height candidates in
   let scroll_hint =
     if shown > content_height then
-      Printf.sprintf "[rows %s]  " (Masc_tui_scroll.window_text ~scroll ~height:content_height shown)
+      Printf.sprintf (if ko then "[행 %s]  " else "[rows %s]  ")
+        (Masc_tui_scroll.window_text ~scroll ~height:content_height shown)
     else ""
   in
   let hints =
@@ -667,7 +699,7 @@ let render_runtime (state : state) =
                  declared
              in
              (match declared, dropped with
-              | [], [] -> Ansi.dim ^ "none — no vision runtimes" ^ Ansi.reset
+              | [], [] -> Ansi.dim ^ (if ko then "없음 — 비전 런타임 없음" else "none — no vision runtimes") ^ Ansi.reset
               | declared, dropped ->
                   String.concat " → "
                     (List.map Terminal_text.single_line declared)
@@ -676,9 +708,12 @@ let render_runtime (state : state) =
                    | [] -> ""
                    | _ ->
                      (Theme.warn ())
-                     ^ Printf.sprintf "  (%s unresolved at boot: %s)"
-                         (Message_layout.count_noun (List.length dropped) "entry")
-                         (String.concat ", " (List.map Terminal_text.single_line dropped))
+                     ^ (if ko then
+                          Printf.sprintf "  (시작 시 미해결 %d개: %s)"
+                            (List.length dropped) (String.concat ", " (List.map Terminal_text.single_line dropped))
+                        else Printf.sprintf "  (%s unresolved at boot: %s)"
+                          (Message_layout.count_noun (List.length dropped) "entry")
+                          (String.concat ", " (List.map Terminal_text.single_line dropped)))
                      ^ Ansi.reset))
        in
        List.iter
@@ -692,10 +727,10 @@ let render_runtime (state : state) =
            (Printf.sprintf "  %s %s   %s"
               (runtime_column runtime_lane_width "media_failover")
               (runtime_column runtime_candidate_width media_text)
-              (Ansi.dim ^ "m edits it · the vision runtimes, in call order" ^ Ansi.reset));
+              (Ansi.dim ^ (if ko then "m:편집 · 비전 호출 순서" else "m edits it · the vision runtimes, in call order") ^ Ansi.reset));
          c.push_divider ()
        end);
-  let table_cells = runtime_table_cells ~cols ~status_cells ~mode:state.runtime_mode in
+  let table_cells = runtime_table_cells ~ko ~cols ~status_cells ~mode:state.runtime_mode in
   c.push_styled ~style:(Theme.recede ())
     ("  " ^ Masc_tui_table.header_row
       (table_cells ~lane:"" ~lane_is_label:false ~candidate:"" ~identity:"" ~status:"" ~detail:""));

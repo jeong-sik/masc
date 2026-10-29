@@ -1405,20 +1405,21 @@ let patch_review_bindings =
   ; b Meta "Esc" "close" ~help:"Esc, q or Q closes the patch reader"
   ]
 
-let runtime_detail_bindings_for ~routes =
-  (if routes then [] else [ b Act "e" "model settings" ])
-  @ [ b Navigate "j/k" "scroll"
-    ; b Navigate "PgUp/PgDn" "page"
-    ; b Navigate "Home/End" "edges"
-    ; b Act "Left / Esc" "list"
-    ; b Meta "r" "refresh"
-    ; b Meta "Tab" "next"
-    ; b Meta "?" "help"
+let runtime_detail_bindings_for ~ko ~routes =
+  let text korean english = if ko then korean else english in
+  (if routes then [] else [ b Act "e" (text "모델 설정" "model settings") ])
+  @ [ b Navigate "j/k" (text "스크롤" "scroll")
+    ; b Navigate "PgUp/PgDn" (text "페이지" "page")
+    ; b Navigate "Home/End" (text "처음/끝" "edges")
+    ; b Act "Left / Esc" (text "목록" "list")
+    ; b Meta "r" (text "새로고침" "refresh")
+    ; b Meta "Tab" (text "다음" "next")
+    ; b Meta "?" (text "도움말" "help")
     ]
 
 let footer_hints_patch_review () = hints_of_bindings patch_review_bindings
-let footer_hints_runtime_detail ?(routes = false) () =
-  hints_of_bindings (runtime_detail_bindings_for ~routes)
+let footer_hints_runtime_detail ?(ko = false) ?(routes = false) () =
+  hints_of_bindings (runtime_detail_bindings_for ~ko ~routes)
 
 let voice_agent_bindings_for_saving saving =
   if saving then [ b ~ko:"도움말" Meta "?" "help"; b ~ko:"뒤로" Act "Esc" "back" ]
@@ -2392,7 +2393,7 @@ let help_sections_for_state (state : state) =
       Some ("Keeper voices", bindings)
     else if state.view = Runtime && Option.is_some state.runtime_detail_target then
       let routes = state.runtime_detail_target = Some Runtime_routes in
-      Some ("Runtime detail", runtime_detail_bindings_for ~routes)
+      Some ("Runtime detail", runtime_detail_bindings_for ~ko:(state.ui_language = Lang_ko) ~routes)
     else if state.view = Acting && Option.is_some state.acting_detail then
       Some ("Event evidence", bindings_acting_evidence)
     else if state.view = Code && state.code_focus_file = Right_pane

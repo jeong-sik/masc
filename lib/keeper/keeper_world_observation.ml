@@ -1384,8 +1384,8 @@ let collect_board_events_with_cursor_policy
          | Some id -> compare_board_cursor_token token (ts, id) > 0)
         && compare_board_cursor_token token (board_cursor_token_of_post p) <= 0
     in
-    let route_signal (p : Board.post) (signal : Board_dispatch.board_signal) =
-      match Board_audience.classify ~post_kind:p.post_kind ~visibility:p.visibility signal with
+    let route_signal ~classified (signal : Board_dispatch.board_signal) =
+      match classified with
       | Error error ->
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string ObservationQueryFailures)
@@ -1466,20 +1466,27 @@ let collect_board_events_with_cursor_policy
           ; author = Board.Agent_id.to_string p.author; title = p.title; content = p.body
           ; hearth = p.hearth; updated_at = Some p.content_updated_at }
         in
+        (* Each signal is paired with its audience. A post replays the audience
+           it recorded; a comment records none, so its own text is read. *)
         let signals =
-          (if signal_after_cursor p p.content_updated_at then [post_signal] else [])
+          (if signal_after_cursor p p.content_updated_at
+           then [ Board_audience.of_post p, post_signal ]
+           else [])
           @ List.filter_map (fun (comment : Board.comment) ->
               if not (signal_after_cursor p comment.created_at) then None
-              else Some { post_signal with
-                kind = Board_dispatch.Board_comment_added
-                  { comment_id = comment.id; parent_id = comment.parent_id }
-              ; author = Board.Agent_id.to_string comment.author
-              ; content = comment.content; updated_at = Some comment.created_at }) comments
+              else Some
+                ( Board_audience.of_comment_text ~content:comment.content
+                , { post_signal with
+                    kind = Board_dispatch.Board_comment_added
+                      { comment_id = comment.id; parent_id = comment.parent_id }
+                  ; author = Board.Agent_id.to_string comment.author
+                  ; content = comment.content; updated_at = Some comment.created_at } ))
+            comments
         in
         let rec collect acc = function
           | [] -> Ok (List.rev acc)
-          | signal :: rest ->
-            (match route_signal p signal with
+          | (classified, signal) :: rest ->
+            (match route_signal ~classified signal with
              | Error _ as error -> error
              | Ok None -> collect acc rest
              | Ok (Some event) -> collect (event :: acc) rest)

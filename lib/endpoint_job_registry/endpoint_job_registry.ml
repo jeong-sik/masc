@@ -68,9 +68,12 @@ type t =
 
 type record = { registry : t; claim : claim; spec : P.spec }
 type storage = { record : record; directory : Eio.Fs.dir_ty Eio.Path.t }
+type unlaunched = { original_storage : storage }
 let storage_record (storage : storage) = storage.record
 let storage_path (storage : storage) = storage.directory
-type launch_intent = { original : record; launch_id : P.Id.t; spent : bool Atomic.t }
+let unlaunched_storage proof = proof.original_storage
+type launch_use = Unused | Callback_reserved | Retired_without_callback
+type launch_intent = { original : record; launch_id : P.Id.t; use : launch_use Atomic.t }
 type launch_state = Not_requested | Requested of P.Id.t
 let binding record = record.claim.binding
 let specification record = record.spec
@@ -516,7 +519,7 @@ let commit_launch_with_hook ~after_publication (original : record) ~confirmed_ad
       after_publication ();
       let* committed=read_record registry binding in
       let* ()=if committed.claim=claim then Ok () else Error Stale_record in
-      Ok {original=committed;launch_id;spent=Atomic.make false})
+      Ok {original=committed;launch_id;use=Atomic.make Unused})
 
 let original_storage ~sw (current : record) =
   Eio.Switch.check sw;
@@ -545,6 +548,56 @@ let open_storage ~sw (original : record) =
     let* directory=original_storage ~sw current in
     Ok {record=current;directory})
 
+let unlaunched ~sw current =
+  let* directory=original_storage ~sw current in
+  Ok {original_storage={record=current;directory}}
+
+let settle_cancelled_admission_with_hook ~before_resync_parent ~sw (original : record) =
+  Eio.Switch.check sw;
+  let registry=original.registry and binding=original.claim.binding in
+  locked registry binding (fun () ->
+    let* current=read_record registry binding in
+    let* ()=if same_original original current then Ok () else Error Stale_record in
+    match current.claim.state with
+    | Cancel_requested {launch_id=None;_} ->
+      let* current=resync_cancel ~before_parent_sync:before_resync_parent current in
+      unlaunched ~sw current
+    | Cancel_requested {launch_id=Some _;_} | Launch_requested _ -> Error Launch_already_requested
+    | Preparing | Ready _ -> Error Stale_record)
+
+let settle_cancelled_admission ~sw original =
+  settle_cancelled_admission_with_hook ~before_resync_parent:(fun () -> ()) ~sw original
+
+let retire_cancelled_launch_with_hook ~before_resync_parent ~after_retirement ~sw (intent : launch_intent) =
+  Eio.Switch.check sw;
+  let original=intent.original in
+  let registry=original.registry and binding=original.claim.binding in
+  locked registry binding (fun () ->
+    let* current=read_record registry binding in
+    let* ()=if same_original original current then Ok () else Error Stale_record in
+    let* ()=match current.claim.state with
+      | Cancel_requested {launch_id;_} -> (match launch_id with
+          | Some actual when actual=intent.launch_id -> Ok ()
+          | None | Some _ -> Error Stale_record)
+      | Preparing | Ready _ | Launch_requested _ -> Error Stale_record in
+    let* ()=match Atomic.get intent.use with
+      | Callback_reserved -> Error Launch_intent_spent
+      | Unused | Retired_without_callback -> Ok () in
+    let* current=resync_cancel ~before_parent_sync:before_resync_parent current in
+    let* ()=match Atomic.get intent.use with
+      | Callback_reserved -> Error Launch_intent_spent
+      | Retired_without_callback -> Ok ()
+      | Unused ->
+        if Atomic.compare_and_set intent.use Unused Retired_without_callback then Ok ()
+        else Error Launch_intent_spent in
+    after_retirement ();
+    (* Retirement survives a cancelled or failed storage open. It can only
+       reopen this cancelled original; callback entry never becomes fresh. *)
+    unlaunched ~sw current)
+
+let retire_cancelled_launch ~sw intent =
+  retire_cancelled_launch_with_hook ~before_resync_parent:(fun () -> ()) ~after_retirement:(fun () -> ()) ~sw intent
+
 let with_launch_with_hook ~after_original ~sw (intent : launch_intent) perform =
   Eio.Switch.check sw;
   let original=intent.original in let registry=original.registry and binding=original.claim.binding in
@@ -560,7 +613,7 @@ let with_launch_with_hook ~after_original ~sw (intent : launch_intent) perform =
         | Preparing | Ready _ | Launch_requested _ -> Ok () in
       let* ()=if current.claim=original.claim then Ok () else Error Stale_record in
       let* ()=if current.claim.payload_uid=registry.payload_uid then Ok () else Error Execution_identity_changed in
-      if not (Atomic.compare_and_set intent.spent false true) then Error Launch_intent_spent
+      if not (Atomic.compare_and_set intent.use Unused Callback_reserved) then Error Launch_intent_spent
       else (
         after_original ();
         let* storage=original_storage ~sw current in
@@ -587,6 +640,10 @@ let commit_launch original ~confirmed_admission_id ~launch_id =
 let with_launch ~sw intent perform =
   with_launch_with_hook ~after_original:(fun () -> ()) ~sw intent perform
 module For_testing = struct
+  let settle_cancelled_admission ?(before_resync_parent=fun () -> ()) ~sw original =
+    settle_cancelled_admission_with_hook ~before_resync_parent ~sw original
+  let retire_cancelled_launch ?(before_resync_parent=fun () -> ()) ~after_retirement ~sw intent =
+    retire_cancelled_launch_with_hook ~before_resync_parent ~after_retirement ~sw intent
   let refresh = refresh_with_hook
   let with_launch = with_launch_with_hook
   let admit = admit_with_hooks

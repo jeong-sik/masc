@@ -4936,7 +4936,7 @@ let test_asks_list_publishes_written_alternative_capability () =
        | Ok () -> () | Error detail -> fail detail);
       let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
       let router = Lib.Http_server_eio.Router.create ()
-        |> Lib.Http_server_eio.Router.get "/api/v1/keepers/asks"
+        |> Server_route.get Server_route.Always_public "/api/v1/keepers/asks"
              (Server_routes_http_keeper_stream.handle_keeper_asks_list state)
       in
       let status, _, body = tools_h1_wire_response ~router ~headers:[]
@@ -5514,7 +5514,7 @@ let test_cached_read_status_comes_from_the_payload_json () =
   let read ?(headers = []) payload =
     let router =
       Lib.Http_server_eio.Router.create ()
-      |> Lib.Http_server_eio.Router.get "/cached" (fun request reqd ->
+      |> Server_route.get Server_route.Always_public "/cached" (fun request reqd ->
         Server_cached_read_http.respond ~request reqd payload)
     in
     tools_h1_wire_response ~router ~headers "/cached"
@@ -5556,7 +5556,7 @@ let test_respond_cached_read_sends_a_builder_timeout_as_504 () =
     Dashboard_cache.invalidate_all ();
     let router =
       Lib.Http_server_eio.Router.create ()
-      |> Lib.Http_server_eio.Router.get "/cached-read" (fun request reqd ->
+      |> Server_route.get Server_route.Always_public "/cached-read" (fun request reqd ->
         Server_routes_http_common.respond_cached_read ~request ~reqd
           ~cache_key:"test:cached-read-builder-timeout" ~ttl:60.0 (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
             `Assoc

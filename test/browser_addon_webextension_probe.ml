@@ -77,8 +77,8 @@ let () =
     and principal=Lane_addon_call_context.Keeper "webextension-probe" in
     let clicks=ref [] in
     let router=Http.Router.create ()
-      |> Http.Router.get "/fixture" (fun _ reqd -> Http.Response.html fixture reqd)
-      |> Http.Router.post "/fixture-click" (fun _ reqd -> Http.Request.read_body_async reqd (fun body ->
+      |> Server_route.get Server_route.Always_public "/fixture" (fun _ reqd -> Http.Response.html fixture reqd)
+      |> Server_route.post Server_route.Always_public "/fixture-click" (fun _ reqd -> Http.Request.read_body_async reqd (fun body ->
           clicks:=body::!clicks;Http.Response.text ("Received " ^ body) reqd))
       |> Server_routes_http_routes_browser_lane.add_routes ~config in
     let socket=Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true (`Tcp (Eio.Net.Ipaddr.V4.loopback,0)) in

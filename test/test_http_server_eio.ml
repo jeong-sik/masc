@@ -40,13 +40,13 @@ let test_router_empty () =
 
 let test_router_add_get () =
   let handler _req _reqd = () in
-  let routes = Router.create () |> Router.get "/test" handler in
+  let routes = Router.create () |> Server_route.get Server_route.Always_public "/test" handler in
   Alcotest.(check int) "one route" 1 (Router.route_count routes)
 ;;
 
 let test_router_add_post () =
   let handler _req _reqd = () in
-  let routes = Router.create () |> Router.post "/api" handler in
+  let routes = Router.create () |> Server_route.post Server_route.Always_public "/api" handler in
   Alcotest.(check int) "one route" 1 (Router.route_count routes)
 ;;
 
@@ -54,9 +54,9 @@ let test_router_add_multiple () =
   let handler _req _reqd = () in
   let routes =
     Router.create ()
-    |> Router.get "/health" handler
-    |> Router.post "/api/call" handler
-    |> Router.any "/any" handler
+    |> Server_route.get Server_route.Always_public "/health" handler
+    |> Server_route.post Server_route.Always_public "/api/call" handler
+    |> Server_route.add Server_route.Always_public ~path:"/any" ~methods:[ `GET; `POST; `PUT; `DELETE; `OPTIONS ] handler
   in
   Alcotest.(check int) "three routes" 3 (Router.route_count routes)
 ;;
@@ -66,8 +66,8 @@ let test_router_prefix_specificity () =
   let asset_handler _req _reqd = () in
   let routes =
     Router.create ()
-    |> Router.prefix_get "/dashboard/assets/" asset_handler
-    |> Router.prefix_get "/dashboard/" generic_handler
+    |> Server_route.prefix_get Server_route.Always_public "/dashboard/assets/" asset_handler
+    |> Server_route.prefix_get Server_route.Always_public "/dashboard/" generic_handler
   in
   let request = Httpun.Request.create `GET "/dashboard/assets/index.css" in
   match Router.resolve routes request with
@@ -87,9 +87,9 @@ let test_router_prefix_trie_preserves_specificity () =
   let sub_board_handler _req _reqd = () in
   let routes =
     Router.create ()
-    |> Router.prefix_get "/dashboard/" dashboard_handler
-    |> Router.prefix_get "/api/v1/board/" board_handler
-    |> Router.prefix_get "/api/v1/board/sub-boards/" sub_board_handler
+    |> Server_route.prefix_get Server_route.Always_public "/dashboard/" dashboard_handler
+    |> Server_route.prefix_get Server_route.Always_public "/api/v1/board/" board_handler
+    |> Server_route.prefix_get Server_route.Always_public "/api/v1/board/sub-boards/" sub_board_handler
   in
   let request = Httpun.Request.create `GET "/api/v1/board/sub-boards/main" in
   match Router.resolve routes request with
@@ -108,8 +108,8 @@ let test_router_prefix_trie_preserves_root_prefix () =
   let api_handler _req _reqd = () in
   let routes =
     Router.create ()
-    |> Router.prefix_get "/" root_handler
-    |> Router.prefix_get "/api/v1/" api_handler
+    |> Server_route.prefix_get Server_route.Always_public "/" root_handler
+    |> Server_route.prefix_get Server_route.Always_public "/api/v1/" api_handler
   in
   let request = Httpun.Request.create `GET "/unknown/path" in
   match Router.resolve routes request with
@@ -125,8 +125,8 @@ let test_router_indexed_prefix_fallback_after_exact_method_miss () =
   let prefix_handler _req _reqd = () in
   let routes =
     Router.create ()
-    |> Router.get "/api/v1/items/42" exact_handler
-    |> Router.prefix_post "/api/v1/items/" prefix_handler
+    |> Server_route.get Server_route.Always_public "/api/v1/items/42" exact_handler
+    |> Server_route.prefix_post Server_route.Always_public "/api/v1/items/" prefix_handler
   in
   let request = Httpun.Request.create `POST "/api/v1/items/42" in
   match Router.resolve routes request with
@@ -142,7 +142,7 @@ let test_router_indexed_prefix_fallback_after_exact_method_miss () =
 
 let test_router_method_index_preserves_exact_405 () =
   let handler _req _reqd = () in
-  let routes = Router.create () |> Router.get "/api/v1/exact-only" handler in
+  let routes = Router.create () |> Server_route.get Server_route.Always_public "/api/v1/exact-only" handler in
   let request = Httpun.Request.create `POST "/api/v1/exact-only" in
   match Router.resolve routes request with
   | `Method_not_allowed -> ()
@@ -196,7 +196,7 @@ let test_frontend_transport_routes_present () =
    on non-upgrade transports with 426. *)
 let test_router_ws_get_registers_ws_route () =
   let handler ~upgrade:_ _req _reqd = () in
-  let routes = Router.create () |> Router.ws_get "/ws" handler in
+  let routes = Router.create () |> Server_route.ws_get "/ws" handler in
   match Router.resolve routes (Httpun.Request.create `GET "/ws") with
   | `Matched route ->
     (match route.handler with
@@ -207,7 +207,7 @@ let test_router_ws_get_registers_ws_route () =
 
 let test_router_get_registers_plain_route () =
   let handler _req _reqd = () in
-  let routes = Router.create () |> Router.get "/plain" handler in
+  let routes = Router.create () |> Server_route.get Server_route.Always_public "/plain" handler in
   match Router.resolve routes (Httpun.Request.create `GET "/plain") with
   | `Matched route ->
     (match route.handler with

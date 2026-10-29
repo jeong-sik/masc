@@ -68,9 +68,9 @@ let test_original_questions_are_bound_to_receiving_workspace () =
         |> valid Keeper_ask.invalid_ask_to_string in
       Keeper_ask_store.record_ask ~base_path:config.base_path ask |> valid Fun.id;
       let router = Http_server_eio.Router.create ()
-        |> Http_server_eio.Router.get "/api/v1/keepers/asks"
+        |> Server_route.get Server_route.Always_public "/api/v1/keepers/asks"
              (Server_routes_http_keeper_stream.handle_keeper_asks_list state)
-        |> Http_server_eio.Router.post "/api/v1/keepers/ask-answer"
+        |> Server_route.post Server_route.Always_public "/api/v1/keepers/ask-answer"
              (Server_routes_http_keeper_stream.handle_keeper_ask_answer ~actor:"operator" state) in
       let base = Unix.realpath config.base_path and root = Unix.realpath (Workspace.masc_dir config) in
       let encode = Uri.pct_encode ~component:`Query_value in

@@ -123,6 +123,6 @@ let judge_by_fresh_reads ~store ~step ~(record : Owner.retained)
 let judge ~store ~step ~(record : Owner.retained) ~(answer : Keeper_librarian_floor_step_owner.answer)
     ~fresh_authority ~inventory =
   let absorbed = answer.proposal.proposal.accepted.selection.absorbed in
-  match settled ~inventory ~step ~record ~absorbed with
+  match io (fun () -> settled ~inventory ~step ~record ~absorbed) with
   | Some (root, gate) -> decide ~step ~answer ~root gate
   | None -> judge_by_fresh_reads ~store ~step ~record ~answer ~fresh_authority

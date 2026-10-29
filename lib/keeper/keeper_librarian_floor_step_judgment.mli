@@ -25,10 +25,10 @@ val judge : store:Lane_addon_store.t -> step:Keeper_librarian_floor_step_request
 
     [inventory] is the owner's gate scope read once for the whole pass. A step
     whose journal it shows complete and successful is judged from it, without
-    reading the store: the cost of a pass then grows with the chain's length,
-    not with its square. Every other step, which may recover, retry or
-    dispatch, reads and writes the store afresh, as an inventory is never
-    authority for a mutation.
+    reading the gate scope again: the cost of a pass then grows with the
+    chain's length, not with its square. Every other step, which may recover,
+    retry or dispatch, reads and writes the store afresh, as an inventory is
+    never authority for a mutation.
 
     An Eio entry point: offload no part of it; its blocking store reads and
     writes offload themselves. *)

@@ -42,6 +42,16 @@ let drive fixture ~owner ~range ?messages ?fresh () =
     | result -> result in
   go 12
 
+(* Run the chain until it stops for a reason other than a step awaiting its
+   worker. [drive] would wait for a delivery that a stopped gate never makes. *)
+let rec run_through_workers ?(attempts = 12) fixture ~owner ~range ?fresh () =
+  let before = !(fixture.deliveries) in
+  match run_once fixture ~owner ~range ?fresh () with
+  | Ok (Chain.Pending detail) when attempts > 0 && contains detail "waiting on its worker" ->
+    await_delivery fixture ~after:before;
+    run_through_workers ~attempts:(attempts - 1) fixture ~owner ~range ?fresh ()
+  | result -> result
+
 (* The provider reads the message a request carries. A request that carries one
    of [refuse] is refused as too large; any other is answered with a claim and a
    working state numbered by the message it carries. *)
@@ -324,6 +334,80 @@ let test_a_step_the_inventory_does_not_show_is_judged_from_the_store () = with_f
   check (list string) "the store answers where the inventory does not" (run_ids_of first.program)
     (List.map (fun step -> (decision_of (judge_from fixture ~owner ~inventory:before step)).run_id) steps))
 
+(* The pass reads the gate scope once, at its start, and the steps it replays
+   are judged from that read. A restart replays the refusal of the first
+   message, which asks for the hole after that read and before the second
+   message is judged; with the gate scope taken away there, the second message
+   can only be judged from the pass's own read. *)
+let test_a_chain_judges_the_steps_it_replays_from_the_read_it_made_at_its_start () = with_fixture (fun fixture ->
+  fixture.respond := answering ~refuse:[ first_text ] ();
+  let owner = owner fixture and range = range_link (owner fixture) in
+  let first = finished (drive fixture ~owner ~range ()) in
+  let directory = scope_directory fixture ~scope:(Gate.scope owner) in
+  let aside = directory ^ ".aside" in
+  let hidden = ref false in
+  let unread_message_hiding_the_scope source ~reasons =
+    if not !hidden then begin
+      hidden := true;
+      Sys.rename directory aside
+    end;
+    unread_message messages source ~reasons in
+  let restart =
+    Fun.protect ~finally:(fun () -> if !hidden then Sys.rename aside directory) (fun () ->
+      Chain.run ~store:fixture.store ~config:fixture.config ~reserved:(Edge.reserved ()) ~owner ~range
+        ~input:(input_over messages) ~sources:(sources_of messages) ~fresh:(fun () -> Ok fresh)
+        ~unread_message:unread_message_hiding_the_scope) in
+  check bool "the restart replayed a refusal after its read" true !hidden;
+  check bool "and judged the second message without the scope" true
+    (Yojson.Safe.equal (Program.to_json (finished restart).program) (Program.to_json first.program)))
+
+let absorbing_answer = `Assoc
+  [ "new_claims", `List [ `Assoc [ "claim", `String "a claim that absorbs the stale fact"; "category", `String "fact";
+      "board_post_id", `Null; "board_comment_id", `Null; "supersedes", `Null; "absorbs", `List [ `String "m1" ] ] ];
+    "dropped", `List []; "working_contexts", `List []; "working_state", `String "a working state" ]
+
+(* A gate that fails leaves a complete journal, which the inventory shows too,
+   and it is not a decision: the store is read again and the step retried. A
+   journal that took a retry to succeed names its decision by its first
+   attempt, and the inventory must agree. *)
+let test_a_failed_gate_is_not_a_decision_and_a_retried_one_is_judged_from_the_inventory () = with_fixture (fun fixture ->
+  fixture.respond := (fun body ->
+    if contains body second_text then `OK, F.openai_response (answer ~claim:"claim 2" ~state:"state 2")
+    else `OK, F.openai_response absorbing_answer);
+  let owner = owner fixture and range = range_link (owner fixture) in
+  let starting : Chain.fresh = { fresh with current = Some { Keeper_librarian.facts = [ stale_fact ] } } in
+  let original = Runtime_typesafeai_policy.current () in
+  Fun.protect ~finally:(fun () -> Runtime_typesafeai_policy.publish original) (fun () ->
+    (* The gate is declared on and its lane is off: nothing may be absorbed. *)
+    Runtime_typesafeai_policy.publish { original with absorb_gate = true; lane_enabled = false };
+    (match run_through_workers fixture ~owner ~range ~fresh:starting () with
+     | Ok (Chain.Pending detail) ->
+       check bool "the chain waits on the gate, not on a worker" false (contains detail "waiting on its worker")
+     | Ok (Chain.Finished _ | Chain.Stopped _) -> fail "a gate that failed was taken for a decision"
+     | Error detail -> failf "the chain refused: %s" detail);
+    let failed = Gate.Inventory.read ~store:fixture.store ~owner |> get in
+    check bool "the failed journal is in the inventory" true (Gate.Inventory.record_count failed > 0);
+    (match in_position_order (steps_of fixture ~owner) with
+     | step_zero :: _ ->
+       (match judge_from fixture ~owner ~inventory:failed step_zero with
+        | Ok (Judgment.Pending _) -> ()
+        | Ok (Judgment.Decided _) -> fail "the inventory made a decision of a journal that failed"
+        | Error detail -> failf "the judgment of a failed journal was refused: %s" detail)
+     | [] -> fail "the chain retained no step");
+    (* The gate is switched off: the step is judged again, as a new attempt. *)
+    Runtime_typesafeai_policy.publish original;
+    let retried = finished (run_through_workers fixture ~owner ~range ~fresh:starting ()) in
+    let restarted = finished (run_through_workers fixture ~owner ~range ~fresh:starting ()) in
+    check bool "a restart makes the same program" true
+      (Yojson.Safe.equal (Program.to_json restarted.program) (Program.to_json retried.program));
+    let steps = in_position_order (steps_of fixture ~owner) in
+    let inventory = Gate.Inventory.read ~store:fixture.store ~owner |> get in
+    check bool "the retry left more than one attempt for the first step" true
+      (Gate.Inventory.record_count inventory > List.length steps);
+    without_gate_scope fixture ~owner (fun () ->
+      check (list string) "the inventory names each decision as the chain did" (run_ids_of retried.program)
+        (List.map (fun step -> (decision_of (judge_from fixture ~owner ~inventory step)).run_id) steps))))
+
 let () =
   run "keeper_librarian_floor_chain"
     [ ( "chain"
@@ -348,5 +432,9 @@ let () =
             test_a_finished_step_is_judged_from_the_inventory_and_not_from_the_store
         ; test_case "a step the inventory does not show is judged from the store" `Slow
             test_a_step_the_inventory_does_not_show_is_judged_from_the_store
+        ; test_case "a chain judges the steps it replays from the read it made at its start" `Slow
+            test_a_chain_judges_the_steps_it_replays_from_the_read_it_made_at_its_start
+        ; test_case "a failed gate is not a decision and a retried one is judged from the inventory" `Slow
+            test_a_failed_gate_is_not_a_decision_and_a_retried_one_is_judged_from_the_inventory
         ] )
     ]

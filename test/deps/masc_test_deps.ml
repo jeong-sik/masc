@@ -55,6 +55,17 @@ let with_process_env key value f =
   Fun.protect ~finally:(fun () -> install inherited) f
 ;;
 
+(* Runs [f] with [values] ((name, value) pairs) as the runtime file's values,
+   the way the loader leaves them: every name declared file-owned and every
+   value in the boot store, so the shell's own values for these names are not
+   consulted. The store and the declaration are emptied before and after. *)
+let with_file_owned_values values f =
+  Config_boot_overrides.reset_for_tests ();
+  Config_boot_overrides.declare_file_owned (List.map fst values);
+  List.iter (fun (name, value) -> Config_boot_overrides.set name value) values;
+  Fun.protect ~finally:Config_boot_overrides.reset_for_tests f
+;;
+
 (** Publish a [typesafeai] policy for the duration of [f], then restore the
     one that was published: what [Runtime.set_loaded] does on load, for a test
     that has no runtime.toml. *)

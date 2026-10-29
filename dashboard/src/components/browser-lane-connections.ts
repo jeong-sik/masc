@@ -56,6 +56,19 @@ export function BrowserLaneConnections({ row, instances }: {
             ${client.lastActivities.map(({ work, outcome }) => html`<li key=${work.requestId}>${outcomes[outcome]} · ${interaction(work)}</li>`)}
           </ul>`}
         </article>`)}
+        <h5 class="font-semibold">Server-owned browser sessions</h5>
+        <p>These session observations do not identify a current caller or verify login.</p>
+        ${(['automation', 'stagehand'] as const).map(backend => {
+          const session = observation.value.owned_backends[backend]
+          const name = backend === 'automation' ? 'Automation' : 'Stagehand'
+          return html`<article key=${backend} class="border border-[var(--border)] rounded p-2 space-y-1"
+            aria-label=${`${name} browser session`}>
+            <h6 class="font-semibold">${name}</h6>
+            <p>Availability at observation: ${session.activity}</p>
+            <p>Executor registered: ${session.registered ? 'yes' : 'no'}</p>
+            <p>Browser session at observation: ${session.session}</p>
+          </article>`
+        })}
       </div>`}
   </section>`
 }

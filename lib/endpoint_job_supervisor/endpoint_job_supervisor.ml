@@ -121,7 +121,7 @@ let snapshot t = snapshot_with_hook ~after_original:(fun () -> ()) t
 let result_leaf=Endpoint_job_result.leaf
 let receipt_io f = try Ok (f ()) with
   | Eio.Io _ | Unix.Unix_error _ | Sys_error _ | Invalid_argument _ -> Error Receipt_storage_unavailable
-let cpu f = Domain_pool_ref.submit_cpu_or_inline f
+let cpu f = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ f
 let result_content (observation : observation) launch_id =
   let boundary=observation.settled.physical_exit.boundary in
   let preparation : Endpoint_job_result.preparation=match boundary.preparation with

@@ -27,7 +27,7 @@ type t = {
   file : reader;
   state : state Atomic.t;
   done_ : (seal,error) result Eio.Promise.t;
-  validate_read : (unit -> (unit,error) result) option;
+  validate_read : P.extent -> (unit,error) result;
 }
 type chunk = { data : string; extent : P.extent }
 type metadata_operation = Open_recovery | Publish of string
@@ -91,7 +91,7 @@ let publish owner on_metadata registry storage ~root_stat ~root_path stream ~lea
       Fs_compat.create_capability_file_exclusive ~recovery ~parent:storage ~target content
       |> Result.map_error (fun e -> Publication_failed e)))
 
-let start_with_hook ~after_chunk ~on_metadata ~sw ~fs ~owner ~stream ~source =
+let start_with_hook ~after_chunk ~after_prefix ~on_metadata ~sw ~fs ~owner ~stream ~source =
   Eio.Switch.check sw;
   let storage=L.storage owner in
   let* root_stat=io (fun () -> Eio.Path.stat ~follow:true storage) in
@@ -106,22 +106,35 @@ let start_with_hook ~after_chunk ~on_metadata ~sw ~fs ~owner ~stream ~source =
   let* expected=io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(storage / leaf)) in
   let* file=io (fun () -> Eio.Path.open_out ~sw ~create:`Never Eio.Path.(storage / leaf)) in
   let* actual=io (fun () -> Eio.File.stat file) in
-  let valid_file byte_length (stat : Eio.File.Stat.t) =
+  let valid_file (stat : Eio.File.Stat.t) =
     stat.kind=`Regular_file && stat.dev=actual.dev && stat.ino=actual.ino
-    && stat.nlink=1L && stat.uid=root_stat.uid && stat.perm land 0o7777=0o600
-    && Optint.Int63.to_int64 stat.size=byte_length in
-  let validate_attachment byte_length =
+    && stat.nlink=1L && stat.uid=root_stat.uid && stat.perm land 0o7777=0o600 in
+  let validate_attachment_size valid_size =
     let* root=io (fun () -> Eio.Path.stat ~follow:false storage) in
     let* held=io (fun () -> Eio.File.stat file) in
     let* canonical=io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(storage / leaf)) in
     if root.kind=`Directory && root.dev=root_stat.dev && root.ino=root_stat.ino
         && root.uid=root_stat.uid && root.perm land 0o7777=0o700
-        && valid_file byte_length held && valid_file byte_length canonical
+        && valid_file held && valid_file canonical
+        && valid_size (Optint.Int63.to_int64 held.size)
+        && valid_size (Optint.Int63.to_int64 canonical.size)
       then Ok () else Error Invalid_storage in
-  let* ()=if valid_file 0L expected && valid_file 0L actual
+  let validate_attachment byte_length = validate_attachment_size ((=) byte_length) in
+  let validate_read observed =
+    let valid_size=match observed with
+      | P.Growing prefix -> (fun size -> size>=prefix)
+      | P.Sealed {byte_length;_} -> ((=) byte_length) in
+    let* ()=validate_attachment_size valid_size in
+    match L.observe_original owner with
+    | Ok _ -> Ok ()
+    | Error (L.Registry_error error) -> Error (Registry_error error)
+    | Error (L.Scope_unavailable | Group_error _ | Process_error _ | Codec_error _
+        | Storage_unavailable | Publication_failed _ | Recovery_failed _) -> Error Invalid_storage in
+  let* ()=if valid_file expected && valid_file actual
+      && Optint.Int63.to_int64 expected.size=0L && Optint.Int63.to_int64 actual.size=0L
     then validate_attachment 0L else Error Invalid_storage in
   let done_,resolve=Eio.Promise.create () in
-  let t={file=Captured (file :> Eio.File.ro_ty Eio.Resource.t);state=Atomic.make (Growing 0L);done_;validate_read=None} in
+  let t={file=Captured (file :> Eio.File.ro_ty Eio.Resource.t);state=Atomic.make (Growing 0L);done_;validate_read} in
   let finish value =
     Atomic.set t.state (match value with Ok seal -> Sealed seal | Error e -> Unavailable e);
     Eio.Promise.resolve resolve value in
@@ -152,6 +165,7 @@ let start_with_hook ~after_chunk ~on_metadata ~sw ~fs ~owner ~stream ~source =
       let bytes=Cstruct.to_string part in
       let context=cpu (fun () -> Agent_core_sha256.feed_string context bytes) in
       Atomic.set t.state (Growing next);
+      after_prefix ();
       capture next context
     | exception End_of_file -> seal byte_length context in
   Eio.Switch.check sw;
@@ -167,21 +181,23 @@ let start_with_hook ~after_chunk ~on_metadata ~sw ~fs ~owner ~stream ~source =
   Ok t
 
 let start ~sw ~fs ~owner ~stream ~source =
-  start_with_hook ~after_chunk:(fun () -> ()) ~on_metadata:(fun _ _ -> ()) ~sw ~fs ~owner ~stream ~source
+  start_with_hook ~after_chunk:(fun () -> ()) ~after_prefix:(fun () -> ()) ~on_metadata:(fun _ _ -> ()) ~sw ~fs ~owner ~stream ~source
 
-let read t ~offset:requested ~max_bytes =
-  let validate ()=match t.validate_read with None -> Ok () | Some f -> f () in
-  let* ()=validate () in
+let read_with_hook ~after_read t ~offset:requested ~max_bytes =
   let* observed=extent t in
+  let* ()=t.validate_read observed in
   let length=match observed with P.Growing n -> n | P.Sealed {byte_length;_} -> byte_length in
   if requested<0L || requested>length || max_bytes<=0 then Error Invalid_range else
   let count=Int64.min (Int64.sub length requested) (Int64.of_int (min buffer_bytes max_bytes)) |> Int64.to_int in
   let* position=offset requested in
   let buffer=Cstruct.create count in
   let* ()=if count=0 then Ok () else io (fun () -> reader_pread_exact t.file ~file_offset:position [buffer]) in
+  after_read ();
+  let* ()=t.validate_read observed in
   let* _=extent t in
-  let* ()=validate () in
   Ok {data=Cstruct.to_string buffer;extent=observed}
+
+let read t ~offset ~max_bytes = read_with_hook ~after_read:(fun () -> ()) t ~offset ~max_bytes
 
 (* This private seal is a controller record, not payload text or a protocol
    result. Exact fields and the embedded original are still strictly decoded. *)
@@ -298,17 +314,22 @@ let reopen_with_hook ~after_chunk ~after_stat ~sync_reader ~sw ~storage ~stream 
   let* ()=validate () in
   Eio.Switch.check sw;
   let done_,resolve=Eio.Promise.create () in Eio.Promise.resolve resolve (Ok seal);
-  Ok {file;state=Atomic.make (Sealed seal);done_;validate_read=Some validate}
+  Ok {file;state=Atomic.make (Sealed seal);done_;validate_read=(fun _ -> validate ())}
 
 let reopen ~sw ~storage ~stream =
   reopen_with_hook ~after_chunk:(fun () -> ()) ~after_stat:(fun ~leaf:_ -> ())
     ~sync_reader:Fs_compat.sync_owned_reader ~sw ~storage ~stream
 
 let revalidate_sealed t =
-  match Atomic.get t.state,t.validate_read with
-  | Sealed seal,Some validate -> let* ()=validate () in Ok seal
-  | Unavailable e,_ -> Error e
-  | Growing _,_ | Sealed _,None -> Error Invalid_storage
+  match t.file with
+  | Captured _ -> Error Invalid_storage
+  | Reopened _ ->
+    match Atomic.get t.state with
+    | Sealed seal ->
+        let* ()=t.validate_read (P.Sealed {byte_length=seal.byte_length;sha256=seal.sha256}) in
+        Ok seal
+    | Unavailable e -> Error e
+    | Growing _ -> Error Invalid_storage
 
 let seal_unlaunched ~sw ~proof ~stream =
   Eio.Switch.check sw;
@@ -333,6 +354,7 @@ module For_testing = struct
   type nonrec metadata_operation = metadata_operation = Open_recovery | Publish of string
   type nonrec metadata_stage = metadata_stage = Waiting | Acquired
   let start = start_with_hook
+  let read = read_with_hook
   let reopen ~after_chunk ~after_stat ~before_sync ~sw ~storage ~stream =
     let sync_reader ~parent ~leaf reader =
       Fs_compat.Owned_reader_for_testing.sync_owned_reader ~before_sync:(before_sync ~leaf) ~parent ~leaf reader in

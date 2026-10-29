@@ -37,7 +37,7 @@ type t = {
 let leaf=R.evidence_leaf R.Terminal_receipt
 let sha256 t=t.digest
 let process t=t.frozen.process
-let cpu f=Domain_pool_ref.submit_cpu_or_inline f
+let cpu f=Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ f
 let io f=try Ok (f ()) with
   | Eio.Io _ | Unix.Unix_error _ | Sys_error _ | Invalid_argument _ | End_of_file -> Error Storage_unavailable
 let invalid ()=Error Invalid_receipt

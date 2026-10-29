@@ -8,6 +8,7 @@ module R = Endpoint_job_registry
 module L = Endpoint_job_launch
 module C = Endpoint_job_lifetime
 module D = Endpoint_job_result
+module O = Endpoint_job_output
 type t
 type operation
 type request
@@ -57,6 +58,28 @@ val inspect_original : operation -> (R.record,error) result
 (** Current source only, without waiting for startup, process exit or output.
     This is not an execution or complete-result projection. A concurrent source
     advance returns [Registry_error R.Stale_record] instead of rolling it back. *)
+type progress =
+  | Registered
+  | Activation_pending
+  | Owned_lifetime of C.progress
+  | Publication_known of P.Sha256.t
+  | Ownership_unknown
+type snapshot = private { record : R.record; progress : progress }
+val snapshot : operation -> (snapshot,error) result
+(** A current captured-source view and already available native progress.
+    Neither startup nor process/output/result settlement is awaited. Authority
+    errors stay errors; a concurrent source advance cannot be overwritten.
+    Publication_known is historical; load_result must verify actual bytes before
+    claiming fresh Result_ready. Ownership_unknown grants no recovered handle. *)
+val read_output :
+  sw:Eio.Switch.t -> operation -> stream:P.stream -> offset:int64 -> max_bytes:int ->
+  (O.chunk option,error) result
+(** Read the same captured original without waiting for startup, process exit
+    or pipe EOF. None means the original has no available capture/result yet,
+    not an empty stream or completion. Cold discovery verifies actual retained
+    receipt/output through original storage without restoring kernel authority.
+    Reader descriptors use this observer Switch; cancellation does not stop the
+    original. No host consumption, ACK, cleanup or launch permission is granted. *)
 val activate : operation -> request
 val cancel : operation -> request
 (** Reserve an endpoint-owned control and return before its I/O. Concurrent

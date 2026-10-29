@@ -65,18 +65,27 @@ type chunk = { data : string; extent : P.extent }
 val read : t -> offset:int64 -> max_bytes:int -> (chunk, error) result
 (** Read from the pinned original file descriptor within its observed prefix.
     May return less than requested capacity; reads use bounded transfer buffers
-    while leaving all bytes retrievable. A growing extent is not completion. *)
+    while leaving all bytes retrievable. Captured reads revalidate the launch's
+    opaque original source and private held/canonical spool attachment before
+    and after the bounded read. Growing files may exceed their published prefix
+    during append; this is neither a full-byte hash nor an immutable-prefix
+    guarantee. A growing extent or an empty range is not completion. *)
 module For_testing : sig
   type metadata_operation = Open_recovery | Publish of string
   type metadata_stage = Waiting | Acquired
   val start :
-    after_chunk:(unit -> unit) ->
+    after_chunk:(unit -> unit) -> after_prefix:(unit -> unit) ->
     on_metadata:(metadata_operation -> metadata_stage -> unit) ->
     sw:Eio.Switch.t -> fs:Eio.Fs.dir_ty Eio.Path.t -> owner:L.t -> stream:P.stream ->
     source:_ Eio.Flow.source -> (t, error) result
   (** [after_chunk] runs after each actual file write and before further capture
-      or EOF sealing. [on_metadata] observes an actual owner-lock acquisition;
-      [Acquired] runs inside that lock before the specified Fs operation. *)
+      or EOF sealing. [after_prefix] runs after publishing that written prefix
+      and before the next source read. [on_metadata] observes an actual owner-lock
+      acquisition; [Acquired] runs inside that lock before the specified Fs operation. *)
+  val read :
+    after_read:(unit -> unit) -> t -> offset:int64 -> max_bytes:int -> (chunk,error) result
+  (** Interleave after the actual bounded descriptor read, before the second
+      source/attachment and capture availability checks. No bytes are injected. *)
   val reopen :
     after_chunk:(unit -> unit) -> after_stat:(leaf:string -> unit) ->
     before_sync:(leaf:string -> Fs_compat.Owned_reader_for_testing.sync_stage -> unit) ->

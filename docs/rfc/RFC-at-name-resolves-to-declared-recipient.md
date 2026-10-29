@@ -48,7 +48,7 @@ board 글(`board_posts.jsonl`, 측정 시점 6,717개):
 
 ### 1.2 지금 구조
 
-받는 사람 후보를 글에서 뽑는 문법은 `Board_addressing` 이다. board 와 Keeper 는 이미 이 문법을 쓰고(이슈 #25601), 브로드캐스트도 PR #46755 가 병합되면 같은 문법을 쓴다. 그 뒤에 "이 이름이 받는 사람인가"를 정하는 곳이 셋이다.
+받는 사람 후보를 글에서 뽑는 문법은 `Board_addressing` 이다. board 와 Keeper 는 이미 이 문법을 쓰고(이슈 #25601), 브로드캐스트와 board 도구 알림도 PR #46755(2026-10-29 병합)부터 같은 문법을 쓴다. 그 뒤에 "이 이름이 받는 사람인가"를 정하는 곳이 셋이다.
 
 | 진입 | 확인하는 곳 | 기준 | 모르는 이름이면 |
 |---|---|---|---|
@@ -56,7 +56,7 @@ board 글(`board_posts.jsonl`, 측정 시점 6,717개):
 | 브로드캐스트(MCP·HTTP) | `resolve_broadcast_mention_target` (`lib/server/server_bootstrap_loops.ml:157`) | Keeper 메타데이터. 이름이 없으면 모든 Keeper 의 `mention_targets` 별칭을 훑는다 (`lib/keeper/keeper_meta_store.ml:439`) | `Rejected Target_not_configured`. 응답 `ok` 가 false 다 (`lib/workspace/workspace_broadcast.ml:198`) |
 | gRPC `Broadcast` | `mentions` 필드를 `@이름 ` 글로 바꿔서 위 길로 보낸다 (`lib/server/masc_grpc_service.ml:81`) | 위와 같다 | 위와 같다. 대상이 둘 이상이면 저장하지 않고 거절한다 (`:64`) |
 
-첫 이름을 고르는 일은 `Workspace_broadcast` 가 한다 (`lib/workspace/workspace_broadcast.ml:970`).
+첫 이름은 `Workspace_broadcast` 가 `Board_addressing.routing_target` 으로 고른다 (`lib/workspace/workspace_broadcast.ml:970`). board 도구의 알림도 같은 함수를 부른다 (`lib/mcp_tool_runtime_board.ml:253`).
 
 코드도 이 빈틈을 알고 있다. `lib/board/board_audience.ml:33` 은 "오탈자를 잡으려면 write boundary 에 Keeper 등록부가 필요하다"고 적고 있다.
 
@@ -129,7 +129,7 @@ val resolve :
 
 - board: `recipients` 가 비면 받는 사람이 없는 글이고, 있으면 `Targets` 다.
 - 브로드캐스트 전달: `recipients` 의 Keeper 를 깨운다. 글 속 말 때문에 `Rejected` 가 되는 일이 없어진다.
-- 알림: 알림에 쓰는 이름도 `recipient` 에서 온다. PR #46755 가 넣는 문자 규칙(`is_routable_selector`, `is_routable_target`)은 해석 전의 임시 방어선이라 필요 없어진다.
+- 알림: 알림에 쓰는 이름도 `recipient` 에서 온다. PR #46755 가 넣은 문자 규칙(`is_routable_selector`, `is_routable_target`)은 해석 전의 임시 방어선이라 필요 없어진다.
 - gRPC: `mentions` 필드를 글로 바꾸지 않고 후보로 바로 넘긴다. 선언에 없는 이름은 호출한 쪽이 명시한 값이 틀린 것이므로 오류로 돌려준다 (D3).
 
 해석 결과는 저장하지 않는다. 쓸 때(응답)와 읽을 때(주의 판단)에 같은 함수로 다시 계산한다. Keeper 를 추가하거나 지우면 옛 글의 해석도 바뀐다. 이 점은 D4 로 남긴다.
@@ -190,4 +190,4 @@ D4. 해석 시점. **읽을 때마다 다시 계산한다**(저장 상태가 없
 - 사람·계정 약 74개 글이 실제로 그 사람에게 닿아야 했던 글인지.
 - 별칭을 둘 이상의 Keeper 가 나눠 쓸 때 브로드캐스트의 동작.
 - 65개 글이 board 목록과 검색에서는 보이는지. 이 RFC 가 다루는 것은 Keeper 의 주의 판단 경로다.
-- 이 문서의 코드 위치는 `origin/main` `76965a57c83` 기준이다. PR #46755 가 병합되면 `workspace_broadcast.ml` 970줄과 1058줄의 `Mention.extract` 는 `Board_addressing.routing_target` 이 된다.
+- 이 문서의 코드 위치는 `origin/main` `1b9fc04cafc`(PR #46755 병합 커밋) 기준이다.

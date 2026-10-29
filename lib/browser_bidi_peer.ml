@@ -33,10 +33,12 @@ let error_code_to_wire = function
   | No_such_alert -> "no such alert"
   | Unexpected_alert_open -> "unexpected alert open"
   | Other_error code -> code
-type refusal = Rejected of error_code | Unanswered of string | Unsent of string
+type refusal = Rejected of error_code | Unanswered of string | Unsent of string | Deadline_before_send | Interrupted_before_send
 let refusal_message = function
   | Rejected code -> "BiDi command rejected: " ^ error_code_to_wire code
   | Unanswered why | Unsent why -> why
+  | Deadline_before_send -> "BiDi request deadline exceeded before send"
+  | Interrupted_before_send -> "BiDi request was interrupted before send"
 type verb = Browser_live_peer.verb =
   | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
   | Page_goto | Page_context | Page_snapshot | Page_downloads | Page_native_workflow
@@ -46,7 +48,10 @@ type session_end_failure = Connection_gone of string | Not_confirmed of string
 let session_end_failure_message = function Connection_gone why | Not_confirmed why -> why
 type session_failure = Session_refused of string | Session_failed of string
 let session_failure_message = function Session_refused why | Session_failed why -> why
-type t = { ask : string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
+type t = { ask : deadline:Monotonic_deadline.t option -> interruptions:unit Eio.Promise.t list -> on_send:(unit -> unit) -> string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
+  release_input : deadline:Monotonic_deadline.t option -> interruptions:unit Eio.Promise.t list -> string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
+  mutable request_deadline : Monotonic_deadline.t option;
+  mutable request_interruptions : unit Eio.Promise.t list;
   session_end : unit -> (unit,session_end_failure) result; mutable session_may_exist : bool;
   mutable contexts : (string * int) list; mutable next_tab : int;
   (* BiDi's window IDs, numbered in the order this connection first sees them, as tab IDs are. *)
@@ -60,9 +65,27 @@ type t = { ask : string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
   (* The dialog each context is blocked on, from the browser's own events. The session keeps prompts open
      (unhandledPromptBehavior ignore), so a person or this host answers them. *)
   prompts : (string, Browser_surface.dialog) Hashtbl.t }
-let create ~session_end ~command =
-  {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;windows=[];opened=[];sized=[];version=None;profile=None;process_id=None;
+let create_internal ~session_end ~command ~release_input =
+  {ask=command;release_input;request_deadline=None;request_interruptions=[];session_end;session_may_exist=false;contexts=[];next_tab=0;windows=[];opened=[];sized=[];version=None;profile=None;process_id=None;
    prompts=Hashtbl.create 4}
+let create_with_deadline ~session_end ~command =
+  create_internal ~session_end ~command:(fun ~deadline ~interruptions:_ ~on_send -> command ~deadline ~on_send)
+    ~release_input:(fun ~deadline:_ ~interruptions:_ -> command ~deadline:None ~on_send:(fun () -> ()))
+let create ~session_end ~command =
+  create_with_deadline ~session_end ~command:(fun ~deadline:_ ~on_send method_ params -> on_send (); command method_ params)
+let ask ?(on_send=(fun () -> ())) t method_ params =
+  t.ask ~deadline:t.request_deadline ~interruptions:t.request_interruptions ~on_send method_ params
+let cleanup_command t method_ params =
+  Result.map_error (fun refusal -> method_ ^ ": " ^ refusal_message refusal)
+    (t.release_input ~deadline:t.request_deadline ~interruptions:t.request_interruptions method_ params)
+let perform_input t ~on_send params =
+  t.ask ~deadline:t.request_deadline ~interruptions:t.request_interruptions ~on_send "input.performActions" params
+let input_result = function
+  | Ok result -> Ok result
+  | Error (Unsent _ | Deadline_before_send | Interrupted_before_send as refusal) ->
+    Error (Before_effect ("input.performActions: " ^ refusal_message refusal))
+  | Error ((Rejected _ | Unanswered _) as refusal) ->
+    Error (Outcome_unknown ("input.performActions: " ^ refusal_message refusal))
 (* A malformed prompt event cannot be tracked and is not counted: the tab row then shows no dialog, and an
    answer to it gets the browser's own refusal. *)
 let note_event t json =
@@ -79,7 +102,7 @@ let note_event t json =
   | Some (`String "browsingContext.userPromptClosed"), Some params ->
     (match field "context" params with Some (`String context) -> Hashtbl.remove t.prompts context | _ -> ())
   | _ -> ()
-let command t method_ params = Result.map_error (fun refusal -> method_ ^ ": " ^ refusal_message refusal) (t.ask method_ params)
+let command t method_ params = Result.map_error (fun refusal -> method_ ^ ": " ^ refusal_message refusal) (ask t method_ params)
 (* Firefox keeps a session whose socket closed and takes one session at a
    time, so one left behind refuses every later connection until that Firefox
    is restarted. Ending it closes no tab and leaves the browser running. *)
@@ -88,7 +111,7 @@ let end_session t =
   else begin
     (* Best effort: a tab that is gone, or a command that gets no answer, must not keep the session open. *)
     List.iter (fun context ->
-      ignore (t.ask "browsingContext.setViewport" (obj ["context",str context;"viewport",`Null]))) t.sized;
+      ignore (ask t "browsingContext.setViewport" (obj ["context",str context;"viewport",`Null]))) t.sized;
     t.sized <- [];
     let* () = t.session_end () in t.session_may_exist <- false; Ok ()
   end
@@ -102,10 +125,10 @@ let metadata t =
      open (probed 2026-10-22, Firefox 158: confirm() returned false at once for a session made with empty
      capabilities). A person using this browser must still get the dialog. *)
   let capabilities = obj ["alwaysMatch",obj ["unhandledPromptBehavior",obj ["default",str "ignore"]]] in
-  match t.ask "session.new" (obj ["capabilities",capabilities]) with
+  match ask t "session.new" (obj ["capabilities",capabilities]) with
   | Error (Rejected Session_not_created as refused) ->
     t.session_may_exist <- false; Error (Session_refused (refusal_message refused))
-  | Error (Rejected (Invalid_session_id | No_such_alert | Unexpected_alert_open | Other_error _) | Unsent _ as refused) ->
+  | Error (Rejected (Invalid_session_id | No_such_alert | Unexpected_alert_open | Other_error _) | Unsent _ | Deadline_before_send | Interrupted_before_send as refused) ->
     t.session_may_exist <- false; Error (Session_failed (refusal_message refused))
   | Error (Unanswered _ as unanswered) -> Error (Session_failed (refusal_message unanswered))
   | Ok result ->
@@ -119,12 +142,12 @@ let metadata t =
            | Some (`Int pid) when pid>1 -> Some pid
            | None | Some _ -> None);
          let* _ = Result.map_error (fun refusal -> "session.subscribe: " ^ refusal_message refusal)
-           (t.ask "session.subscribe" (obj ["events",`List [str "browsingContext.userPromptOpened";
+           (ask t "session.subscribe" (obj ["events",`List [str "browsingContext.userPromptOpened";
              str "browsingContext.userPromptClosed"]])) in
          Ok version)
 let profile t = t.profile
 let process_id t = t.process_id
-let close_browser t = Result.map (fun _ -> ()) (t.ask "browser.close" (obj []))
+let close_browser t = Result.map (fun _ -> ()) (ask t "browser.close" (obj []))
 (* Firefox 157.0.1 reports the profile path as it was given, a link left as
    a link (2026-10-09), so both paths are resolved before they are compared.
    A path that cannot be resolved is compared as written. *)
@@ -157,9 +180,9 @@ let answer_too_large units =
   Printf.sprintf "page_answer_exceeds_bidi_reply_limit: %d UTF-16 units, at most %d cross this connection"
     units script_answer_limit_units
 type evaluation_failure = Rpc_failed of refusal | Page_failed of string
-let evaluate_typed t context body args =
+let evaluate_typed ?(on_send=(fun () -> ())) t context body args =
   let declaration = Browser_scene_script.page_function ~answer_limit_units:script_answer_limit_units body in
-  let* result = Result.map_error (fun reason -> Rpc_failed reason) (t.ask "script.callFunction" (obj [
+  let* result = Result.map_error (fun reason -> Rpc_failed reason) (ask ~on_send t "script.callFunction" (obj [
     "functionDeclaration",str declaration;"target",obj ["context",str context];
     "awaitPromise",`Bool false;"arguments",`List [obj ["type",str "string";"value",str (Yojson.Safe.to_string args)]]])) in
   (* Arguments cross the protocol as a JSON string, decoded by the fixed body. *)
@@ -180,9 +203,10 @@ let evaluate_typed t context body args =
 let evaluation_failure_message = function
   | Rpc_failed refusal -> "script.callFunction: " ^ refusal_message refusal
   | Page_failed message -> message
-let evaluate t context body args =
-  Result.map_error evaluation_failure_message (evaluate_typed t context body args)
-let script t context body args = evaluate t context ("arguments[0]=JSON.parse(arguments[0]);\n" ^ body) args
+let script_typed ?(on_send=(fun () -> ())) t context body args =
+  evaluate_typed ~on_send t context ("arguments[0]=JSON.parse(arguments[0]);\n" ^ body) args
+let script ?(on_send=(fun () -> ())) t context body args =
+  Result.map_error evaluation_failure_message (script_typed ~on_send t context body args)
 let scene t context args = script t context "return browserScene(arguments[0]);" args
 (* BiDi names a frame's document by its own browsing context. The iframe
    element's [contentWindow] comes back as a window remote value that carries
@@ -202,7 +226,7 @@ let frame_declaration = {js|function(selector) {
 let frame_context t context selectors =
   let enter context selector =
     let* result = Result.map_error (fun reason -> "script.callFunction: " ^ refusal_message reason)
-      (t.ask "script.callFunction" (obj [
+      (ask t "script.callFunction" (obj [
         "functionDeclaration",str frame_declaration;"target",obj ["context",str context];
         "awaitPromise",`Bool false;"arguments",`List [obj ["type",str "string";"value",str selector]]])) in
     match field "type" result with
@@ -217,8 +241,29 @@ let frame_context t context selectors =
       Error detail
     | _ -> Error "invalid BiDi frame answer" in
   List.fold_left (fun acc selector -> let* context = acc in enter context selector) (Ok context) selectors
-let tab_metadata t context = script t context
-  "return {url:location.href,title:document.title,active:document.visibilityState==='visible'};" (obj [])
+let tab_metadata_script = "return {url:location.href,title:document.title,active:document.visibilityState==='visible'};"
+let tab_metadata t context = script t context tab_metadata_script (obj [])
+(* The effect was answered by Firefox, but the requested follow-up page
+   observation was never sent. The receipt states only that known boundary,
+   not the page's final state. No replay is authorized. *)
+type observation_omission = Request_expired | Request_interrupted
+let unobserved_after_confirmed id action why =
+  let reason = match why with Request_expired -> "expired" | Request_interrupted -> "was interrupted" in
+  Partial_failure {tab_id=id;
+    message="Firefox confirmed the dispatched browser command, but the request " ^ reason
+      ^ " before its page observation was sent. Inspect this tab before repeating.";
+    receipt=obj ["tabId",`Int id;"action",str action;"commandConfirmed",`Bool true;"postEffectObservation",str "not_sent"]}
+let confirmed_observation t context id action body =
+  match script_typed t context body (obj []) with
+  | Ok data -> Ok data
+  | Error (Rpc_failed reason) ->
+    (match reason with
+     | Deadline_before_send -> Error (unobserved_after_confirmed id action Request_expired)
+     | Interrupted_before_send -> Error (unobserved_after_confirmed id action Request_interrupted)
+     | Rejected _ | Unsent _ | Unanswered _ ->
+       Error (Outcome_unknown (evaluation_failure_message (Rpc_failed reason))))
+  | Error (Page_failed _ as failure) ->
+    Error (Outcome_unknown (evaluation_failure_message failure))
 (* Capture guards need document identity and geometry, never page text. Read
    the URL and viewport in the same script on each side of the screenshot. *)
 let capture_state t context = script t context Browser_page_script.capture_state (obj [])
@@ -249,9 +294,9 @@ let open_tab ?(kind="tab") t url =
     | exception Failure _ -> invalid () in
   (* Only a fresh context is navigated. A protected existing start page does
      not need a script realm and is never replaced to make this work. *)
-  let* created = match t.ask "browsingContext.create" (obj ["type",str kind;"background",`Bool true]) with
+  let* created = match ask t "browsingContext.create" (obj ["type",str kind;"background",`Bool true]) with
     | Ok created -> Ok created
-    | Error (Rejected _ | Unsent _ as refusal) ->
+    | Error (Rejected _ | Unsent _ | Deadline_before_send | Interrupted_before_send as refusal) ->
       Error (Before_effect ("browsingContext.create: " ^ refusal_message refusal))
     | Error (Unanswered _ as refusal) ->
       Error (Outcome_unknown ("browsingContext.create: " ^ refusal_message refusal ^ "; inspect this connection before opening another tab")) in
@@ -261,19 +306,24 @@ let open_tab ?(kind="tab") t url =
   t.opened <- id :: t.opened;
   let message reason =
     Printf.sprintf "New %s was created as tabId %d on this connection. %s. Do not open another %s to retry." kind id reason kind in
-  let partial reason = Partial_failure {tab_id=id;message=message reason ^
+  let partial ?(details=[]) reason = Partial_failure {tab_id=id;message=message reason ^
     " Inspect it using this same clientId and tabId.";
-    receipt=obj ["action",str ("open_" ^ kind);"created",`Bool true;"tabId",`Int id]} in
-  let rpc_failure = function
-    | Rejected (Other_error _ | No_such_alert | Unexpected_alert_open) as refusal -> partial (refusal_message refusal)
+    receipt=obj (["action",str ("open_" ^ kind);"created",`Bool true;"tabId",`Int id] @ details)} in
+  let rpc_failure ~after_navigation = function
+    | (Deadline_before_send | Interrupted_before_send) as refusal ->
+      let details = if after_navigation then ["navigationConfirmed",`Bool true;"postEffectObservation",str "not_sent"]
+        else ["navigationSent",`Bool false] in
+      partial ~details (refusal_message refusal)
+    | Rejected (Other_error _ | No_such_alert | Unexpected_alert_open) as refusal ->
+      partial (refusal_message refusal)
     | Rejected (Session_not_created | Invalid_session_id) | Unanswered _ | Unsent _ as refusal ->
       Outcome_unknown (message (refusal_message refusal) ^
         " This connection cannot be reused. Re-list connections and tabs, then use newly observed IDs to inspect it; the old tabId does not identify a tab on a replacement connection.") in
-  let* _ = Result.map_error rpc_failure (t.ask "browsingContext.navigate"
+  let* _ = Result.map_error (rpc_failure ~after_navigation:false) (ask t "browsingContext.navigate"
     (obj ["context",str context;"url",str url;"wait",str "complete"])) in
   let* summary = Result.map_error (function
-    | Rpc_failed refusal -> rpc_failure refusal
-    | Page_failed reason -> partial reason)
+    | Rpc_failed refusal -> rpc_failure ~after_navigation:true refusal
+    | Page_failed reason -> partial ~details:["navigationConfirmed",`Bool true] reason)
     (evaluate_typed t context
       "arguments[0]=JSON.parse(arguments[0]);\nreturn {url:location.href,title:document.title,active:document.visibilityState==='visible'};" (obj [])) in
   match summary with
@@ -332,7 +382,7 @@ type pointer_motion = Hover_pointer | Click_pointer of Browser_lane.Pointer.butt
   | Wheel_pointer of { x : int; y : int }
   | Tap_pointer
   | Swipe_pointer of { destination : Browser_lane.Pointer.point; via : Browser_lane.Pointer.point list; duration_ms : int }
-let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start motion =
+let pointer t context id args ~(viewport : Browser_lane.Pointer.viewport) ~start motion =
   let before result = Result.map_error (fun e -> Before_effect e) result in
   let unknown result = Result.map_error (fun e -> Outcome_unknown e) result in
   let* observed = before (script t context Browser_interaction.pointer_guard_script args) in
@@ -349,32 +399,33 @@ let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start mo
   (* No replay after dispatch. Release is itself a protocol action and remains
      bounded by the transport deadline. Protected release cleanup may outlast
      the host command deadline by that bound; failure ends the client. *)
-  let released=ref (Ok ()) in
+  let released=ref (Ok ()) and input_sent=ref false in
   let applied=Eio.Switch.run (fun sw ->
     (match motion with
     | Hover_pointer | Wheel_pointer _ -> ()
     | Click_pointer _ | Double_click_pointer | Drag_pointer _ | Tap_pointer | Swipe_pointer _ -> Eio.Switch.on_release sw (fun ()->
-      released:=Result.map (fun _->()) (command t "input.releaseActions" (obj ["context",str context]))));
-    command t "input.performActions" (obj ["context",str context;"actions",sources])) in
-  let* _=unknown applied in
+      if !input_sent then
+        released:=Result.map (fun _->()) (cleanup_command t "input.releaseActions" (obj ["context",str context]))));
+    perform_input t ~on_send:(fun () -> input_sent:=true) (obj ["context",str context;"actions",sources])) in
+  let* _=input_result applied in
   let* ()=unknown !released in
-  let* after = unknown (script t context Browser_interaction.pointer_receipt_script (obj [])) in
-  let* old_url = unknown (string "url" observed) in
   let action=match motion with Hover_pointer->"hover_at"|Click_pointer _->"click_at"|Double_click_pointer->"double_click_at"|Drag_pointer _->"drag"|Wheel_pointer _->"scroll_at"|Tap_pointer->"tap_at"|Swipe_pointer _->"swipe" in
+  let* after = confirmed_observation t context id action Browser_interaction.pointer_receipt_script in
+  let* old_url = unknown (string "url" observed) in
   match after with `Assoc fields -> Ok (obj (("action",str action)::("urlBefore",str old_url)::fields))
   | _ -> Error (Outcome_unknown "invalid post-input observation")
-let keyboard t context args ~sources ~name =
+let keyboard t context id args ~sources ~name =
   let pre result = Result.map_error (fun detail -> Before_effect detail) result in
   let unknown result = Result.map_error (fun detail -> Outcome_unknown detail) result in
   let* observed = pre (script t context Browser_interaction.keyboard_guard_script args) in
-  let released = ref (Ok ()) in
+  let released = ref (Ok ()) and input_sent = ref false in
   let applied = Eio.Switch.run (fun sw ->
-    Eio.Switch.on_release sw (fun () -> released := Result.map (fun _ -> ())
-      (command t "input.releaseActions" (obj ["context",str context])));
-    command t "input.performActions" (obj ["context",str context;"actions",sources])) in
-  let* _ = unknown applied in
+    Eio.Switch.on_release sw (fun () -> if !input_sent then released := Result.map (fun _ -> ())
+      (cleanup_command t "input.releaseActions" (obj ["context",str context])));
+    perform_input t ~on_send:(fun () -> input_sent:=true) (obj ["context",str context;"actions",sources])) in
+  let* _ = input_result applied in
   let* () = unknown !released in
-  let* after = unknown (script t context Browser_interaction.pointer_receipt_script (obj [])) in
+  let* after = confirmed_observation t context id name Browser_interaction.pointer_receipt_script in
   let* old_url = unknown (string "url" observed) in
   match after with
   | `Assoc fields -> Ok (obj (("action",str name)::("urlBefore",str old_url)::fields))
@@ -386,17 +437,18 @@ let keyboard t context args ~sources ~name =
    other error, like a command that got no answer, may have had an effect: a navigation step reads the tab
    again ([settle_navigation]) and a close stays [Outcome_unknown]. *)
 let codes_before_acting = ["no such history entry"; "invalid argument"; "no such frame"]
-let ask_on_tab ?(before=codes_before_acting) t method_ params = match t.ask method_ params with
+let ask_on_tab ?(before=codes_before_acting) t method_ params = match ask t method_ params with
   | Ok result -> Ok result
-  | Error (Unsent _ as refusal) -> Error (Before_effect (method_ ^ ": " ^ refusal_message refusal))
+  | Error (Unsent _ | Deadline_before_send | Interrupted_before_send as refusal) -> Error (Before_effect (method_ ^ ": " ^ refusal_message refusal))
   | Error (Rejected (Other_error code) as refusal) when List.mem code before ->
     Error (Before_effect (method_ ^ ": " ^ refusal_message refusal))
   | Error (Rejected No_such_alert) -> Error (Before_effect "no dialog is open in this tab")
   | Error (Rejected (Other_error _ | Session_not_created | Invalid_session_id | Unexpected_alert_open) | Unanswered _ as refusal) ->
     Error (Outcome_unknown (method_ ^ ": " ^ refusal_message refusal ^ "; inspect the tab before repeating"))
-let tab_receipt t context id name =
-  let* summary = Result.map_error (fun e -> Outcome_unknown e)
-    (script t context "return {url:location.href,title:document.title};" (obj [])) in
+let tab_receipt ~confirmed t context id name =
+  let body="return {url:location.href,title:document.title};" in
+  let* summary = if confirmed then confirmed_observation t context id name body
+    else Result.map_error (fun e -> Outcome_unknown e) (script t context body (obj [])) in
   match summary with
   | `Assoc fields -> Ok (obj (("tabId",`Int id)::("action",str name)::fields))
   | _ -> Error (Outcome_unknown ("invalid post-" ^ name ^ " observation"))
@@ -405,9 +457,9 @@ let tab_receipt t context id name =
    where it is, so the step is a known partial effect and the connection
    stays; only a tab that cannot be read leaves the outcome unknown. *)
 let settle_navigation t context id name = function
-  | Ok _ -> tab_receipt t context id name
+  | Ok _ -> tab_receipt ~confirmed:true t context id name
   | Error (Outcome_unknown message) ->
-    (match tab_receipt t context id name with
+    (match tab_receipt ~confirmed:false t context id name with
      | Ok receipt -> Error (Partial_failure {tab_id=id;message;receipt})
      | Error _ -> Error (Outcome_unknown message))
   | Error (Before_effect _ | Partial_failure _ | Observed_failure _ as failure) -> Error failure
@@ -499,8 +551,8 @@ let activate t context id args =
   | Error (Before_effect _ | Partial_failure _ | Observed_failure _ as failure) -> Error failure
   | Error (Outcome_unknown message) -> settle message
   | Ok _ ->
-    match tab_metadata t context with
-    | Error message -> Error (Outcome_unknown message)
+    match confirmed_observation t context id "activate_tab" tab_metadata_script with
+    | Error failure -> Error failure
     | Ok after -> match field "url" after, field "active" after with
       | Some (`String url), Some (`Bool true) when String.equal url old_url ->
         Ok (obj ["urlBefore",str old_url;"url",str url;"active",`Bool true;
@@ -511,23 +563,28 @@ let activate t context id args =
 
 (* The override stays on the tab until a later [Browser_default] clears it, so a refusal before the
    command leaves the viewport as it was. *)
-let set_viewport t context args size =
+let set_viewport t context id args size =
   let before result = Result.map_error (fun e -> Before_effect e) result in
   let unknown result = Result.map_error (fun e -> Outcome_unknown e) result in
   let* observed = before (script t context Browser_interaction.url_guard_script args) in
   let viewport = match size with
     | Browser_lane.Fit {width;height} -> obj ["width",`Int width;"height",`Int height]
     | Browser_lane.Browser_default -> `Null in
-  let* _ = unknown (command t "browsingContext.setViewport" (obj ["context",str context;"viewport",viewport])) in
+  let* _ = match ask t "browsingContext.setViewport" (obj ["context",str context;"viewport",viewport]) with
+    | Ok result -> Ok result
+    | Error (Unsent _ | Deadline_before_send | Interrupted_before_send as refusal) ->
+      Error (Before_effect ("browsingContext.setViewport: " ^ refusal_message refusal))
+    | Error ((Rejected _ | Unanswered _) as refusal) ->
+      Error (Outcome_unknown ("browsingContext.setViewport: " ^ refusal_message refusal)) in
   t.sized <- (match size with
     | Browser_lane.Fit _ -> if List.mem context t.sized then t.sized else context :: t.sized
     | Browser_lane.Browser_default -> List.filter (fun sized -> not (String.equal sized context)) t.sized);
-  let* after = unknown (script t context Browser_interaction.viewport_receipt_script (obj [])) in
+  let* after = confirmed_observation t context id "set_viewport" Browser_interaction.viewport_receipt_script in
   let* old_url = unknown (string "url" observed) in
   match after with
   | `Assoc fields -> Ok (obj (("action",str "set_viewport")::("urlBefore",str old_url)::fields))
   | _ -> Error (Outcome_unknown "invalid post-resize observation")
-let dispatch ?actor ?request_id t ~verb args =
+let dispatch_with_window ?actor ?request_id t ~verb args =
   let pre r = Result.map_error (fun e -> Before_effect e) r in
   let on_tab use =
     let* context,id=pre (resolve t args) in
@@ -537,12 +594,17 @@ let dispatch ?actor ?request_id t ~verb args =
       let metadata = ["requestId",str request_id;"actor",(match actor with Some name->str name|None->`Null);"action",str action] in
       (* Feedback is observational. A page refusing its overlay must not replay
          or prevent the authoritative interaction. Cleanup cannot mask input. *)
-      let _ = script t context Browser_pointer_feedback.begin_script (obj metadata) in
+      let feedback_sent = ref false in
+      let begin_script = match t.request_deadline with
+        | None -> Browser_pointer_feedback.begin_script
+        | Some _ -> Browser_pointer_feedback.begin_record_script in
+      let _ = script ~on_send:(fun () -> feedback_sent:=true) t context begin_script (obj metadata) in
       Eio.Switch.run (fun sw ->
         let phase = ref Browser_pointer_feedback.Unknown in
         Eio.Switch.on_release sw (fun () ->
-          let _ = script t context Browser_pointer_feedback.finish_script
-            (obj (("phase",Browser_pointer_feedback.outcome_to_json !phase)::metadata)) in ());
+          if !feedback_sent then (
+            let _ = script t context Browser_pointer_feedback.finish_script
+              (obj (("phase",Browser_pointer_feedback.outcome_to_json !phase)::metadata)) in ()));
         let result = use context id in
         phase := (match result with Ok _ -> Browser_pointer_feedback.Finished | Error (Before_effect _ | Observed_failure {disposition=Not_started;_}) -> Browser_pointer_feedback.Refused | Error (Partial_failure _ | Outcome_unknown _ | Observed_failure {disposition=Uncertain;_}) -> Browser_pointer_feedback.Unknown);
         result)
@@ -638,43 +700,58 @@ let dispatch ?actor ?request_id t ~verb args =
           pre (Browser_interaction.resolve_pointer_input request.action resolved)
         else Ok (request.expected_url,request.action) in
       let args = Browser_lane.interaction_args ~tab_id:id ~frame_path:[] ~expected_url action in
-      let* receipt = match action with
-      | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
-        Error (Before_effect "unresolved semantic pointer target")
-      | Browser_lane.Double_click_at {point;viewport} -> pointer t context args ~viewport ~start:point Double_click_pointer
-      | Browser_lane.Type_text {text;_} ->
-        let* sources = pre (Browser_lane.Keyboard.text_source ~id:"masc-keyboard" text) in
-        keyboard t context args ~sources ~name:"type_text"
-      | Browser_lane.Press_key {key;_} ->
-        keyboard t context args ~sources:(Browser_lane.Keyboard.input_source ~id:"masc-keyboard" key) ~name:"press_key"
-      | Browser_lane.Hover_at {point;viewport} -> pointer t context args ~viewport ~start:point Hover_pointer
-      | Browser_lane.Click_at {point;viewport;button} -> pointer t context args ~viewport ~start:point (Click_pointer button)
-      | Browser_lane.Scroll_at {point;viewport;x;y} -> pointer t context args ~viewport ~start:point (Wheel_pointer {x;y})
-      | Browser_lane.Tap_at {point;viewport} -> pointer t context args ~viewport ~start:point Tap_pointer
-      | Browser_lane.Swipe {from;to_;viewport;via;duration_ms} -> pointer t context args ~viewport ~start:from (Swipe_pointer {destination=to_;via;duration_ms})
-      | Browser_lane.Drag {from;to_;viewport;via;duration_ms} -> pointer t context args ~viewport ~start:from (Drag_pointer {destination=to_;via;duration_ms})
-      | Browser_lane.Fill _ | Browser_lane.Select_option _ | Fill_node _ | Scroll _ | Follow_link _ ->
-        (match script t context Browser_interaction.script args with
-        | Error e -> Error (Outcome_unknown e)
-        | Ok result -> (match field "interactionFailure" result with
-            | Some failure -> let message=match string "message" failure with Ok s->s|Error s->s in
-              (match field "effectStarted" failure with Some (`Bool false)->Error (Before_effect message)
-               | _ -> Error (Outcome_unknown message))
-            | None -> Ok result))
-      | Browser_lane.Set_viewport size -> set_viewport t context args size
-      | Browser_lane.Set_zoom _ -> Error (Before_effect "set_zoom requires a connected WebExtension browser")
-      | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ -> Error (Before_effect Browser_lane.snapshot_target_refused)
-      | Browser_lane.Activate_tab -> activate t context id args in
-      let receipt = match receipt with
+      let normalize_receipt = function
         | `Assoc fields ->
-          (* The receipt's url is the frame document's; name the frame chain. *)
+          (* Keep the caller's semantic action and target frame also when a
+             confirmed effect has no post-effect observation. *)
           let framed = match request.frame_path with
             | [] -> []
             | path -> ["framePath",`List (List.map str path)] in
           obj (("action",str (Browser_lane.interaction_verb request.action))
             :: framed @ List.remove_assoc "action" fields)
         | other -> other in
+      let outcome = match action with
+      | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
+        Error (Before_effect "unresolved semantic pointer target")
+      | Browser_lane.Double_click_at {point;viewport} -> pointer t context id args ~viewport ~start:point Double_click_pointer
+      | Browser_lane.Type_text {text;_} ->
+        let* sources = pre (Browser_lane.Keyboard.text_source ~id:"masc-keyboard" text) in
+        keyboard t context id args ~sources ~name:"type_text"
+      | Browser_lane.Press_key {key;_} ->
+        keyboard t context id args ~sources:(Browser_lane.Keyboard.input_source ~id:"masc-keyboard" key) ~name:"press_key"
+      | Browser_lane.Hover_at {point;viewport} -> pointer t context id args ~viewport ~start:point Hover_pointer
+      | Browser_lane.Click_at {point;viewport;button} -> pointer t context id args ~viewport ~start:point (Click_pointer button)
+      | Browser_lane.Scroll_at {point;viewport;x;y} -> pointer t context id args ~viewport ~start:point (Wheel_pointer {x;y})
+      | Browser_lane.Tap_at {point;viewport} -> pointer t context id args ~viewport ~start:point Tap_pointer
+      | Browser_lane.Swipe {from;to_;viewport;via;duration_ms} -> pointer t context id args ~viewport ~start:from (Swipe_pointer {destination=to_;via;duration_ms})
+      | Browser_lane.Drag {from;to_;viewport;via;duration_ms} -> pointer t context id args ~viewport ~start:from (Drag_pointer {destination=to_;via;duration_ms})
+      | Browser_lane.Fill _ | Browser_lane.Select_option _ | Fill_node _ | Scroll _ | Follow_link _ ->
+        (match script_typed t context Browser_interaction.script args with
+        | Error (Rpc_failed (Unsent _ | Deadline_before_send | Interrupted_before_send as refusal)) ->
+          Error (Before_effect ("script.callFunction: " ^ refusal_message refusal))
+        | Error (Rpc_failed (Rejected _ | Unanswered _) | Page_failed _ as failure) ->
+          Error (Outcome_unknown (evaluation_failure_message failure))
+        | Ok result -> (match field "interactionFailure" result with
+            | Some failure -> let message=match string "message" failure with Ok s->s|Error s->s in
+              (match field "effectStarted" failure with Some (`Bool false)->Error (Before_effect message)
+               | _ -> Error (Outcome_unknown message))
+            | None -> Ok result))
+      | Browser_lane.Set_viewport size -> set_viewport t context id args size
+      | Browser_lane.Set_zoom _ -> Error (Before_effect "set_zoom requires a connected WebExtension browser")
+      | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ -> Error (Before_effect Browser_lane.snapshot_target_refused)
+      | Browser_lane.Activate_tab -> activate t context id args in
+      let* receipt = Result.map_error (function
+        | Partial_failure partial -> Partial_failure {partial with receipt=normalize_receipt partial.receipt}
+        | (Before_effect _ | Outcome_unknown _ | Observed_failure _) as failure -> failure) outcome in
+      let receipt = normalize_receipt receipt in
       Result.map_error (fun detail -> Outcome_unknown detail) (with_tab id receipt))
+
+let dispatch ?actor ?request_id ?deadline ?(interruptions=[]) t ~verb args =
+  let previous = t.request_deadline and previous_interruptions = t.request_interruptions in
+  t.request_deadline <- deadline;
+  t.request_interruptions <- interruptions;
+  Fun.protect ~finally:(fun () -> t.request_deadline <- previous; t.request_interruptions <- previous_interruptions)
+    (fun () -> dispatch_with_window ?actor ?request_id t ~verb args)
 
 (* How long a finishing connection waits for Firefox to end the session. A
    Firefox that is there answers at once; the window only bounds one that is
@@ -682,19 +759,22 @@ let dispatch ?actor ?request_id t ~verb args =
 let session_end_window_sec = 2.
 module Endpoint = Ws_direct_core.Endpoint
 module Message = Ws_direct_core.Connection.Message
+type send_authority = Request_window | Cleanup
 exception Peer_finished of (unit, string) result
-let with_connection ~env ~timeout ~url use =
+let with_connection_with_hook ~after_serialize ~env ~timeout ~url use =
   let* host,port,resource=Browser_bidi_downloads.endpoint url in
   try Eio.Switch.run (fun sw ->
     let clock=Eio.Stdenv.clock env and net=Eio.Stdenv.net env in
     let pending=Hashtbl.create 4 and sequence=ref 0 and broken=ref None and shut=ref None in
     let ended,set_ended=Eio.Promise.create () in
+    let broken_signal,signal_broken=Eio.Promise.create () in
     (* No further page command is carried. The socket may still be open: this
        side stops trusting a connection whose command got no reply. *)
     let disconnect reason =
       if !broken=None then (
         broken:=Some reason;
-        Eio.Promise.resolve set_ended reason);
+        Eio.Promise.resolve set_ended reason;
+        Eio.Promise.resolve signal_broken ());
       Hashtbl.iter (fun _ resolve->Eio.Promise.resolve resolve (Error (Unanswered reason))) pending;
       Hashtbl.clear pending in
     (* The socket itself is gone; nothing more can be sent. *)
@@ -737,18 +817,49 @@ let with_connection ~env ~timeout ~url use =
         | exception Failure detail->Error ("BiDi connection: " ^ detail) in
       (* One command and its reply. A reply that arrived as the window
          closed is the reply. *)
-      let exchange ~window method_ params =
+      let exchange ~window ~deadline ~interruptions ~authority ~on_send method_ params =
         incr sequence;let id= !sequence in
-        let reply,resolve=Eio.Promise.create () in Hashtbl.add pending id resolve;
-        Endpoint.Wsd.send_text wsd (Yojson.Safe.to_string (obj ["id",`Int id;"method",str method_;"params",params]));
-        Watched_work.run
-          ~watcher:(fun ()->Eio.Time.sleep clock window; Error `Deadline_exceeded)
-          (fun ()->Ok (Eio.Promise.await reply)) in
-      let command method_ params =
+        let payload=Yojson.Safe.to_string (obj ["id",`Int id;"method",str method_;"params",params]) in
+        after_serialize method_;
+        if Endpoint.Wsd.is_closed wsd then Error `Closed_before_send
+        else if (match authority with Request_window -> List.exists Eio.Promise.is_resolved interruptions
+                 | Cleanup -> false) then Error `Interrupted_before_send
+        else if (match authority with Request_window -> Option.fold ~none:false ~some:Monotonic_deadline.passed deadline
+                 | Cleanup -> false) then Error `Expired_before_send
+        else (
+          let reply,resolve=Eio.Promise.create () in Hashtbl.add pending id resolve;
+          on_send ();
+          Endpoint.Wsd.send_text wsd payload;
+          (* Once sent, a caller's short window must not kill an otherwise
+             healthy peer. Continue the original transport window, or the
+             caller's longer remaining window, whichever ends later. *)
+          let transport_deadline = Monotonic_deadline.after ~seconds:window in
+          let remaining () = Monotonic_deadline.remaining_seconds transport_deadline in
+          let extended = match deadline with None -> remaining ()
+            | Some deadline -> max (remaining ()) (Monotonic_deadline.remaining_seconds deadline) in
+          let watch () =
+            let wait seconds = Eio.Time.sleep clock seconds in
+            (match interruptions with
+             | [] -> wait extended
+             | _::_ ->
+               let first = Eio.Fiber.first
+                 (fun () -> wait extended; `Expired)
+                 (fun () -> Eio.Fiber.any (List.map (fun signal () -> Eio.Promise.await signal) interruptions); `Interrupted) in
+               (match first with `Expired -> () | `Interrupted -> wait (remaining ())));
+            Error `Deadline_exceeded in
+          Watched_work.run ~watcher:watch (fun ()->Ok (Eio.Promise.await reply))) in
+      let command ~deadline ~interruptions ~on_send method_ params =
         match !broken with Some e->Error (Unsent e)|None->
           (* The connection is ended only for a command that got no reply. *)
-          (match exchange ~window:timeout method_ params with
-           | Ok reply->reply
+          if Endpoint.Wsd.is_closed wsd then Error (Unsent "BiDi socket closed before send")
+          else if Option.fold ~none:false ~some:Monotonic_deadline.passed deadline then Error Deadline_before_send
+          else (match exchange ~window:timeout ~deadline ~interruptions ~authority:Request_window ~on_send method_ params with
+           | Ok (Error (Unanswered detail) as reply) ->
+             disconnect ("BiDi response was unreadable: " ^ detail); reply
+           | Ok ((Ok _ | Error (Rejected _ | Unsent _ | Deadline_before_send | Interrupted_before_send)) as reply) -> reply
+           | Error `Interrupted_before_send -> Error Interrupted_before_send
+           | Error `Expired_before_send -> Error Deadline_before_send
+           | Error `Closed_before_send -> Error (Unsent "BiDi socket closed before send")
            | Error `Deadline_exceeded->
              disconnect "BiDi transport deadline exceeded";
              Error (Unanswered "BiDi transport deadline exceeded")
@@ -757,12 +868,30 @@ let with_connection ~env ~timeout ~url use =
            | exception (Eio.Cancel.Cancelled _ as cancelled)->
              disconnect "BiDi command cancelled";
              raise cancelled) in
+      (* Release is cleanup of an input already attempted, not another page
+         command. Like session.end it may use the original socket even after
+         an unanswered command fenced that socket against further input. *)
+      let release_input ~deadline ~interruptions method_ params =
+        match !shut with
+        | Some reason -> Error (Unsent reason)
+        | None when Endpoint.Wsd.is_closed wsd -> Error (Unsent "BiDi socket closed before input release")
+        | None -> (match exchange ~window:timeout ~deadline ~interruptions:(broken_signal::interruptions)
+                          ~authority:Cleanup ~on_send:(fun () -> ()) method_ params with
+            | Ok (Error (Unanswered detail) as reply) ->
+              disconnect ("BiDi input release response was unreadable: " ^ detail); reply
+            | Ok ((Ok _ | Error (Rejected _ | Unsent _ | Deadline_before_send | Interrupted_before_send)) as reply) -> reply
+            | Error `Interrupted_before_send -> Error (Unsent "BiDi input release was interrupted before send")
+            | Error `Expired_before_send -> Error (Unsent "BiDi input release deadline exceeded before send")
+            | Error `Closed_before_send -> Error (Unsent "BiDi socket closed before input release")
+            | Error `Deadline_exceeded ->
+              disconnect "BiDi input release deadline exceeded";
+              Error (Unanswered "BiDi input release deadline exceeded")) in
       (* Ending the session is not a page command. It is sent on a connection
          this side stopped trusting too, for as long as the socket is open: a
          page whose script hung is not a browser that is gone. *)
       let session_end () =
         match !shut with Some reason->Error (Connection_gone reason)|None->
-          (match exchange ~window:session_end_window_sec "session.end" (obj []) with
+          (match exchange ~window:session_end_window_sec ~deadline:None ~interruptions:[] ~authority:Cleanup ~on_send:(fun () -> ()) "session.end" (obj []) with
            | Ok (Ok _)->Ok ()
            (* A session asked for and never confirmed, which Firefox says it
               does not have: there is none to end. *)
@@ -773,14 +902,15 @@ let with_connection ~env ~timeout ~url use =
              Error (Not_confirmed (refusal_message declined))
            (* No answer: the socket closing under the request is the
               connection going, not Firefox declining. *)
-           | Ok (Error (Unanswered _ | Unsent _ as lost))->
+           | Ok (Error (Unanswered _ | Unsent _ | Deadline_before_send | Interrupted_before_send as lost))->
              (match !shut with
               | Some reason->Error (Connection_gone reason)
               | None->Error (Not_confirmed (refusal_message lost)))
-           | Error `Deadline_exceeded->Error (Not_confirmed "no answer to session.end in time")) in
+           | Error `Closed_before_send -> Error (Connection_gone "BiDi socket closed before session.end")
+           | Error `Expired_before_send | Error `Interrupted_before_send | Error `Deadline_exceeded->Error (Not_confirmed "no answer to session.end in time")) in
       (* The host owns the whole command deadline. A cancelled command ends this
          connection instead of admitting another write behind an unknown one. *)
-      let peer = create ~session_end ~command in
+      let peer = create_internal ~session_end ~command ~release_input in
       on_event := note_event peer;
       Ok peer in
     try
@@ -805,3 +935,10 @@ let with_connection ~env ~timeout ~url use =
     | Eio.Io _->raise (Peer_finished (Error "BiDi connection failed"))
     | End_of_file->raise (Peer_finished (Error "BiDi connection EOF")))
   with Peer_finished result->result
+
+let with_connection ~env ~timeout ~url use =
+  with_connection_with_hook ~after_serialize:(fun _ -> ()) ~env ~timeout ~url use
+module For_testing = struct
+  let create = create_with_deadline
+  let with_connection = with_connection_with_hook
+end

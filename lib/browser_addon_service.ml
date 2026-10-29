@@ -8,11 +8,8 @@ let decode text =
   match Yojson.Safe.from_string text with
   | value -> W.of_json value
   | exception Yojson.Json_error _ -> Error "invalid browser worker JSON"
-let handle owner raw =
-  match decode raw with
-  | Error message -> refusal W.Not_started message
-  | Ok request ->
-    match Owner.dispatch owner request with
+let handle_dispatch ~dispatch request =
+    match dispatch request with
     | reply -> reply
     | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
     | exception _ ->
@@ -20,6 +17,62 @@ let handle owner raw =
          It cannot establish a pre-effect refusal or authorize replay. *)
       Printf.eprintf "browser addon request failed; outcome unknown\n%!";
       refusal W.Outcome_unknown "browser worker request failed; outcome unknown"
+(* Unlike [Buf_read.line], retain whether EOF arrived before the terminator.
+   Unwatched requests keep the old EOF-terminated framing behaviour. *)
+let read_frame reader =
+  let raw = Eio.Buf_read.take_while (fun c -> c <> '\n') reader in
+  match Eio.Buf_read.peek_char reader with
+  | None -> raw, false
+  | Some _ ->
+    Eio.Buf_read.char '\n' reader;
+    let length = String.length raw in
+    let raw = if length > 0 && raw.[length - 1] = '\r'
+      then String.sub raw 0 (length - 1) else raw in
+    raw, true
+
+type watched_state = Waiting | Finished of W.reply | Abandoned
+
+let handle_watched_with_hook ~before_observation ~dispatch reader request =
+  (* Both branches update this state without yielding, on the same Eio domain.
+     Completion checks bytes read by the watcher before it commits. Bytes not
+     yet read from the kernel have no observed ordering. *)
+  let state = ref Waiting in
+  Eio.Fiber.first
+    (fun () ->
+      let reply = dispatch request in
+      match !state with
+      | Waiting -> state := (if Eio.Buf_read.buffered_bytes reader > 0
+          then Abandoned else Finished reply)
+      | Finished _ | Abandoned -> ())
+    (fun () ->
+      (match Eio.Buf_read.peek_char reader with
+       | None | Some _ -> ()
+       | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ());
+      before_observation ();
+      match !state with
+      | Waiting -> state := Abandoned
+      | Finished _ | Abandoned -> ());
+  match !state with
+  | Finished reply -> Some reply
+  | Abandoned -> None
+  | Waiting -> failwith "browser caller observation returned without a decision"
+let handle_watched ~dispatch reader request =
+  handle_watched_with_hook ~before_observation:(fun () -> ()) ~dispatch reader request
+let read_request ~dispatch ~reader ~max_message_bytes =
+  match read_frame reader with
+  | "", false -> Some (refusal W.Not_started "incomplete browser request")
+  | raw, terminated when String.length raw <= max_message_bytes ->
+    (match decode raw with
+     | Error message -> Some (refusal W.Not_started message)
+     | Ok request when W.ends_with_caller request.command ->
+       if not terminated || Eio.Buf_read.buffered_bytes reader > 0 then None
+       else handle_watched ~dispatch reader request
+     | Ok request -> Some (dispatch request))
+  | _ -> Some (refusal W.Not_started "browser request exceeds installation transport bound")
+  | exception Eio.Buf_read.Buffer_limit_exceeded ->
+    Some (refusal W.Not_started "browser request exceeds installation transport bound")
+  | exception End_of_file -> Some (refusal W.Not_started "incomplete browser request")
+
 let check_path socket_path =
   let parent = Filename.dirname socket_path in
   if Filename.is_relative socket_path ||
@@ -34,25 +87,24 @@ let check_path socket_path =
   match Unix.lstat socket_path with
   | _ -> invalid_arg "browser socket path already exists"
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
-let serve ~net ~owner ~socket_path ~max_message_bytes =
+let serve_with_dispatch ~net ~dispatch ~on_error ~before_write ~socket_path ~max_message_bytes =
   Eio.Switch.run (fun sw ->
-  if max_message_bytes <= 0 || max_message_bytes >= Sys.max_string_length then
+  if max_message_bytes <= 0 || max_message_bytes > Sys.max_string_length - 2 then
     invalid_arg "invalid browser transport bound";
   check_path socket_path;
   Eio.Switch.check sw;
   let socket = Eio.Net.listen ~sw ~backlog:(Int32.to_int Int32.max_int) net (`Unix socket_path) in
-  let on_error _ = Printf.eprintf "browser addon connection failed\n%!" in
   while true do
     Eio.Switch.check sw;
     Eio.Net.accept_fork ~sw socket ~on_error (fun flow _address ->
-      let reader = Eio.Buf_read.of_flow flow ~initial_size:(min 4096 (max_message_bytes+1))
-        ~max_size:(max_message_bytes+1) in
-      let reply = match Eio.Buf_read.line reader with
-        | raw when String.length raw <= max_message_bytes -> handle owner raw
-        | _ -> refusal W.Not_started "browser request exceeds installation transport bound"
-        | exception Eio.Buf_read.Buffer_limit_exceeded ->
-          refusal W.Not_started "browser request exceeds installation transport bound"
-        | exception End_of_file -> refusal W.Not_started "incomplete browser request" in
+      (* The payload limit excludes the terminator; CRLF needs two bytes. *)
+      let reader = Eio.Buf_read.of_flow flow ~initial_size:(min 4096 (max_message_bytes+2))
+        ~max_size:(max_message_bytes+2) in
+      let reply = read_request ~dispatch:(handle_dispatch ~dispatch) ~reader ~max_message_bytes in
+      match reply with
+      | None -> Printf.eprintf "browser addon caller left or violated framing; request cancelled\n%!"
+      | Some reply ->
+      before_write ();
       let text = Yojson.Safe.to_string (W.reply_to_json reply) in
       let text = if String.length text <= max_message_bytes then text else
         Yojson.Safe.to_string (W.reply_to_json (refusal W.Outcome_unknown
@@ -60,6 +112,19 @@ let serve ~net ~owner ~socket_path ~max_message_bytes =
       if String.length text <= max_message_bytes then
         Eio.Flow.copy_string (text ^ "\n") flow)
   done)
+let serve ~net ~owner ~socket_path ~max_message_bytes =
+  serve_with_dispatch ~net ~dispatch:(Owner.dispatch owner)
+    ~on_error:(fun _ -> Printf.eprintf "browser addon connection failed\n%!")
+    ~before_write:(fun () -> ())
+    ~socket_path ~max_message_bytes
+
+module For_testing = struct
+  let read_request = read_request
+  let handle_watched = handle_watched
+  let handle_watched_with_hook = handle_watched_with_hook
+  let handle_dispatch = handle_dispatch
+  let serve_with_dispatch = serve_with_dispatch
+end
 let mcp owner =
   let model_ports server =
     if not (Owner.models_enabled owner) then server else

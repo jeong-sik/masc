@@ -123,7 +123,7 @@ let ready ~env ~process ~port =
     (fun () -> match Eio.Time.with_timeout clock firefox_ready_timeout_s (fun () -> Ok (poll ())) with
       | Ok result -> result | Error `Timeout -> Error "owned Firefox did not open its debugging port")
     (fun () -> ignore (Eio.Process.await process);Error "original Firefox owner exited before readiness")
-let run_with ~before_command_validation ~env ~owner ~directory work =
+let run_with ~before_command_validation ~connection_timeout_sec ~env ~owner ~directory work =
   let c=match Eio_unix.run_in_systhread (fun () ->
     let* text=Fs_compat.load_owned_regular_file ~ownership_root:directory (Filename.concat directory "live-bidi.json")
       |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
@@ -212,7 +212,7 @@ let run_with ~before_command_validation ~env ~owner ~directory work =
                 if Eio.Promise.is_resolved stopping then Error "owned Firefox retired during validation"
                 else Ok ())) in
           let* ()=check () in let* ()=ready ~env ~process:child ~port:c.port in
-          Peer.with_connection ~env ~timeout:B.default_timeout_sec
+          Peer.with_connection ~env ~timeout:connection_timeout_sec
             ~url:(Printf.sprintf "ws://127.0.0.1:%d/session" c.port) (fun ~ended peer ->
             let session () =
               let* ()=check () in
@@ -236,21 +236,37 @@ let run_with ~before_command_validation ~env ~owner ~directory work =
               let rec serve () =
                 let* command=poll B.default_timeout_sec in
                 let* ()=match command with None -> Ok () | Some command ->
-                  let result=let* ()=check ~before:before_command_validation ()
-                      |> Result.map_error (fun detail -> Peer.Before_effect detail) in
-                    let* verb,args,actor=Browser_live_peer.decode command |> Result.map_error (fun detail -> Peer.Before_effect detail) in
-                    Peer.dispatch ?actor ~request_id:command.id peer ~verb args in
-                  (* A refused delivery loses this one result. When its
-                     caller stopped waiting (it was told the command timed
-                     out) the connection is still good. A retired client
-                     fails the next poll, and a closed BiDi socket ends this
-                     loop through [ended]. *)
-                  (match Browser_addon_owner.deliver_live owner ~client_id ~id:command.id ~payload:(Browser_live_peer.payload result) with
-                   | Ok () -> ()
-                   | Error detail ->
-                     Log.Server.warn "browser Add-on Firefox result of command %s was not delivered: %s" command.id detail);
-                  (match result with Error (Peer.Outcome_unknown detail | Peer.Observed_failure {disposition=Peer.Uncertain;message=detail;_}) -> Error detail
-                    | Ok _|Error (Before_effect _|Partial_failure _|Observed_failure {disposition=Not_started;_}) -> Ok ()) in
+                  let window () = Browser_addon_owner.live_request_window owner ~client_id ~id:command.id in
+                  let deliver result =
+                    (* A caller may stop waiting while a command is in flight.
+                       Its late result does not itself invalidate the peer. *)
+                    (match Browser_addon_owner.deliver_live owner ~client_id ~id:command.id ~payload:(Browser_live_peer.payload result) with
+                     | Ok () -> ()
+                     | Error detail ->
+                       Log.Server.warn "browser Add-on Firefox result of command %s was not delivered: %s" command.id detail);
+                    match result with
+                    | Error (Peer.Outcome_unknown detail
+                            | Peer.Observed_failure {disposition=Peer.Uncertain;message=detail;_}) -> Error detail
+                    | Ok _
+                    | Error (Before_effect _|Partial_failure _|Observed_failure {disposition=Not_started;_}) -> Ok () in
+                  let dispatch deadline interrupted =
+                    let result=let* verb,args,actor=Browser_live_peer.decode command
+                        |> Result.map_error (fun detail -> Peer.Before_effect detail) in
+                      Peer.dispatch ?actor ~request_id:command.id ?deadline ~interruptions:[interrupted;stopping] peer ~verb args in
+                    deliver result in
+                  (match window () with
+                   | B.No_live_waiter -> Ok ()
+                   | B.Live_waiting_until (deadline,_) when Monotonic_deadline.passed deadline -> Ok ()
+                   | B.Live_executor_owned _ | B.Live_waiting_until _ ->
+                     (match check ~before:before_command_validation () with
+                      | Error detail -> deliver (Error (Peer.Before_effect detail))
+                      | Ok () ->
+                        (* Validation may yield while the issuer stops waiting. *)
+                        match window () with
+                        | B.No_live_waiter -> Ok ()
+                        | B.Live_waiting_until (deadline,_) when Monotonic_deadline.passed deadline -> Ok ()
+                        | B.Live_waiting_until (deadline,interrupted) -> dispatch (Some deadline) interrupted
+                        | B.Live_executor_owned interrupted -> dispatch None interrupted)) in
                 if Browser_addon_owner.is_retired owner then Ok () else serve () in
               let result=Eio.Fiber.first serve (fun () ->
                 Eio.Fiber.first
@@ -268,7 +284,9 @@ let run_with ~before_command_validation ~env ~owner ~directory work =
                       |> Result.map_error Browser_process_owner.error_to_string in verify c) in
                   let* ()=Peer.close_browser peer |> Result.map_error (function
                     | Peer.Rejected code -> "Firefox browser.close rejected: " ^ Peer.error_code_to_wire code
-                    | Unanswered detail | Unsent detail -> detail) in
+                    | Unanswered detail | Unsent detail -> detail
+                    | Deadline_before_send -> "Firefox browser.close deadline exceeded before send"
+                    | Interrupted_before_send -> "Firefox browser.close was interrupted before send") in
                   ignore (Eio.Process.await child);
                   let* ()=Eio_unix.run_in_systhread (fun () -> lease (Lease.retire child_admission)) in
                   Eio_unix.run_in_systhread (fun () -> let* ()=settled child_admission in verify c) in
@@ -298,5 +316,7 @@ let run_with ~before_command_validation ~env ~owner ~directory work =
       Eio.Fiber.first work (fun () -> match Eio.Promise.await stopped with
         | Ok () -> Eio.Fiber.await_cancel ()
         | Error detail -> raise (Sys_error ("owned Firefox backend ended: " ^ detail)))))
-let run = run_with ~before_command_validation:(fun () -> ())
+let run ~env ~owner ~directory work =
+  run_with ~before_command_validation:(fun () -> ()) ~connection_timeout_sec:B.default_timeout_sec
+    ~env ~owner ~directory work
 module For_testing = struct let run = run_with end

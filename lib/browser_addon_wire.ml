@@ -167,6 +167,20 @@ type command = Snapshot | Retire
   | Disconnect of B.client_id
   | Issue of {route:B.route;verb:B.verb;actor:string option;timeout_sec:float;only_if_idle:bool}
 type request = {incarnation:string;command:command}
+let ends_with_caller = function
+  | Issue {route=B.Live_route (Some _);verb;_} ->
+    (match verb with
+     | B.Page_downloads _ -> false
+     | B.Tabs_list | Page_read _ | Page_document _ | Page_console _
+     | Page_network _ | Page_cookies _ | Page_capture _ | Page_scene _
+     | Page_snapshot _ | Page_native_workflow _ | Page_interact _
+     | Session_open _ | Session_close | Session_status | Page_goto _
+     | Page_elements _ | Page_act _ | Page_context _ | Page_instruct _
+     | Page_locate _ | Page_extract _ -> true)
+  | Issue {route=(B.Automation_route | B.Stagehand_route | B.Live_route None);_}
+  | Snapshot | Retire | Upload_stage _ | Upload_discard _ | Download_claim _
+  | Download_commit _ | Download_release _ | Model_requests | Model_result _
+  | Model_wait _ | Extension _ | Poll _ | Deliver _ | Disconnect _ -> false
 let changes_nothing = function
   | Snapshot | Model_requests | Model_wait _ -> true
   | Issue {only_if_idle;_} -> only_if_idle

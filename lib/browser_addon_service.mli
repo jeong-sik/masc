@@ -1,6 +1,9 @@
 (** The private concurrent transport of one browser worker. This is not an HTTP
     route or a Keeper tool. Each connection carries one JSON line and one reply;
-    callers must never retry issued work after losing the connection. *)
+    callers must never retry issued work after losing the connection. For a
+    selected live request, the caller must leave its sending side open and send
+    no more bytes while awaiting the reply. EOF or reset cancels the host wait,
+    but does not undo or establish the outcome of a delivered browser effect. *)
 val serve :
   net:_ Eio.Net.t -> owner:Browser_addon_owner.t ->
   socket_path:string -> max_message_bytes:int -> unit
@@ -16,3 +19,25 @@ val mcp : Browser_addon_owner.t -> Mcp_protocol_eio.Server.t
     two private model request/result ports. Execution requires the
     host-owned caller-context control port; model arguments supply no identity.
     Poll/results remain on the independent concurrent private transport. *)
+
+module For_testing : sig
+  val read_request :
+    dispatch:(Browser_addon_wire.request -> Browser_addon_wire.reply) ->
+    reader:Eio.Buf_read.t -> max_message_bytes:int -> Browser_addon_wire.reply option
+  val handle_watched :
+    dispatch:(Browser_addon_wire.request -> Browser_addon_wire.reply) ->
+    Eio.Buf_read.t -> Browser_addon_wire.request -> Browser_addon_wire.reply option
+  val handle_watched_with_hook :
+    before_observation:(unit -> unit) ->
+    dispatch:(Browser_addon_wire.request -> Browser_addon_wire.reply) ->
+    Eio.Buf_read.t -> Browser_addon_wire.request -> Browser_addon_wire.reply option
+  val handle_dispatch :
+    dispatch:(Browser_addon_wire.request -> Browser_addon_wire.reply) ->
+    Browser_addon_wire.request -> Browser_addon_wire.reply
+  val serve_with_dispatch :
+    net:_ Eio.Net.t ->
+    dispatch:(Browser_addon_wire.request -> Browser_addon_wire.reply) ->
+    on_error:(exn -> unit) ->
+    before_write:(unit -> unit) ->
+    socket_path:string -> max_message_bytes:int -> unit
+end

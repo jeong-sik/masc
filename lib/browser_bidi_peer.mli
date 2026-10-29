@@ -34,8 +34,11 @@ val error_code_to_wire : error_code -> string
     answer, with its code. [Unanswered] is a command that was written and got
     no readable answer: the connection ended under it, the reply did not come
     in time, or it was not a BiDi result. [Unsent] was never written: the
-    connection had already ended. *)
-type refusal = Rejected of error_code | Unanswered of string | Unsent of string
+    connection had already ended. [Deadline_before_send] was never written
+    because the request window ended while the connection was still open.
+    [Interrupted_before_send] was never written because local caller or owner
+    authority was withdrawn. *)
+type refusal = Rejected of error_code | Unanswered of string | Unsent of string | Deadline_before_send | Interrupted_before_send
 type t
 (** Why a session was not ended. [Connection_gone]: there was no socket left
     to ask over, so a Firefox that has quit holds no session and one that
@@ -52,6 +55,15 @@ val create
   :  session_end:(unit -> (unit, session_end_failure) result)
   -> command:(string -> Yojson.Safe.t -> (Yojson.Safe.t, refusal) result)
   -> t
+(** Test an individual peer with a transport that observes its request window. *)
+module For_testing : sig
+  val create : session_end:(unit -> (unit, session_end_failure) result) ->
+    command:(deadline:Monotonic_deadline.t option -> on_send:(unit -> unit) -> string -> Yojson.Safe.t -> (Yojson.Safe.t, refusal) result) -> t
+  val with_connection : after_serialize:(string -> unit) -> env:Eio_unix.Stdenv.base -> timeout:float -> url:string ->
+    (ended:string Eio.Promise.t -> t -> (unit, string) result) -> (unit, string) result
+  (** The hook runs after an exchange is encoded and before its final deadline
+      check; it does not change the encoded command or the original connection. *)
+end
 (** Why the browser gave no session. [Session_refused]: it answered
     [session.new] with "session not created". Firefox does that while it
     holds a session, which it keeps after the socket that asked for it has
@@ -107,7 +119,19 @@ val profile_refusal_message : expected:string -> profile_refusal -> string
     {!session_end_window_sec}. *)
 val end_session : t -> (unit, session_end_failure) result
 val session_end_window_sec : float
-val dispatch : ?actor:string -> ?request_id:string -> t -> verb:verb -> Yojson.Safe.t -> (Yojson.Safe.t, failure) result
+val dispatch : ?actor:string -> ?request_id:string -> ?deadline:Monotonic_deadline.t ->
+  ?interruptions:unit Eio.Promise.t list ->
+  t -> verb:verb -> Yojson.Safe.t -> (Yojson.Safe.t, failure) result
+(** Run one request on this peer. When [deadline] is supplied, page work is
+    refused before its next exchange once the request expires, accounting for
+    time spent in the queue and earlier exchanges. A confirmed effect whose
+    observation was not sent is a partial failure, without claiming the page's
+    final state. After a send, the response may use the longer of the transport
+    window and the remaining request window. Input release may still send
+    after expiry, and uses the same response window. Once any [interruptions]
+    resolves, an outstanding response waits only until its original transport
+    deadline. Session end keeps its own cleanup window. Calls on one peer are
+    serial; these signals do not undo a command already sent. *)
 (** One socket message carries at most this many bytes; a larger one ends the
     connection. *)
 val reply_limit_bytes : int
@@ -118,7 +142,8 @@ val script_answer_limit_units : int
 (** [with_connection ~env ~timeout ~url use] connects and hands [use] the
     peer. [ended] resolves, with why, once the connection carries no further
     command: Firefox closed it, the socket failed, a message was not BiDi, or
-    a command got no reply within [timeout]. From then on every command
-    answers that reason; the caller decides when to stop. *)
+    a sent command got no reply within the longer of [timeout] and its
+    original request's remaining window. From then on every command answers
+    that reason; the caller decides when to stop. *)
 val with_connection : env:Eio_unix.Stdenv.base -> timeout:float -> url:string ->
   (ended:string Eio.Promise.t -> t -> (unit, string) result) -> (unit, string) result

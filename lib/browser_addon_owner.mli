@@ -75,6 +75,13 @@ val cleanup_downloads : t -> (unit, string) result
     end. Each is the request a native host sends, made inside the worker. *)
 val poll_live : t -> client:Browser_lane.client_info -> window_sec:float ->
   (Browser_lane.issued option, string) result
+val live_request_window : t -> client_id:Browser_lane.client_id -> id:string ->
+  Browser_lane.live_request_window
+(** Read the original local issuer's remaining window and interruption
+    signal, which resolves on local cancellation or client disconnection.
+    Normal reply timeout does not resolve that signal; socket EOF in
+    another process does not by itself prove local caller cancellation. A
+    missing waiter or retired owner cannot authorize a browser effect. *)
 val deliver_live : t -> client_id:Browser_lane.client_id -> id:string -> payload:Yojson.Safe.t ->
   (unit, string) result
 val disconnect_live : t -> Browser_lane.client_id -> unit

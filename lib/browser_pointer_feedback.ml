@@ -4,7 +4,7 @@ let runtime = {js|function mascPointerFeedback(args) {
   if (!state || state.document !== document) {
     // A receipt can arrive after navigation. Only a new operation installs
     // feedback in this document; the old document's finish owns no badge here.
-    if (args.phase !== 'working') return null;
+    if (args.phase !== 'working' && args.phase !== 'recorded') return null;
     const host = document.createElement('div');
     host.setAttribute('data-masc-browser-overlay', '');
     host.setAttribute('aria-hidden', 'true');
@@ -45,18 +45,24 @@ let runtime = {js|function mascPointerFeedback(args) {
       }
     }, {capture:true,passive:true});
   }
+  // A late finish belongs only to its own operation. It must not reattach or
+  // rewrite the feedback of a newer request in the same document.
+  if (args.phase !== 'working' && args.phase !== 'recorded' && args.requestId !== state.requestId) return null;
   if (!state.host.isConnected) document.documentElement.append(state.host);
-  if (args.phase === 'working') {
+  if (args.phase === 'working' || args.phase === 'recorded') {
     state.requestId = args.requestId; state.actor = args.actor; state.action = args.action;
-    state.phase = 'working';
+    state.phase = args.phase;
   } else if (args.requestId === state.requestId) state.phase = args.phase;
-  const phases = {working:'Working',finished:'Finished',refused:'Not performed',unknown:'Outcome unknown'};
+  const phases = {working:'Working',recorded:'Last request',finished:'Finished',refused:'Not performed',unknown:'Outcome unknown'};
   state.badge.textContent = 'MASC · ' + (state.actor || 'agent') + '\n'
     + (phases[state.phase] || state.phase) + ' · ' + state.action;
   return {actor:state.actor,action:state.action,phase:state.phase,pointer:state.pointer};
 }|js}
 
 let begin_script = runtime ^ "\nreturn mascPointerFeedback({...arguments[0],phase:'working'});"
+(* A request with a caller deadline may end before a finish can safely be
+   sent. Record that it was requested rather than assert it is still working. *)
+let begin_record_script = runtime ^ "\nreturn mascPointerFeedback({...arguments[0],phase:'recorded'});"
 let finish_script = runtime ^ "\nreturn mascPointerFeedback(arguments[0]);"
 
 type outcome = Finished | Refused | Unknown

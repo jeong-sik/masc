@@ -252,9 +252,15 @@ let context_message snapshot =
       {origin=Agent_instruction;role=System;content=[Text (String.concat "\n\n" contexts)];
        name=None;tool_call_id=None;metadata=["masc_retained_tool_results",`Bool true]}
 
+let is_context_parts ~(role : Agent_core.Types.role) ~(origin : Agent_core.Types.message_origin) ~metadata =
+  role=System && origin=Agent_instruction
+  && List.assoc_opt "masc_retained_tool_results" metadata=Some (`Bool true)
+
 let is_context_message (message : Agent_core.Types.message) =
-  message.role=System && message.origin=Agent_instruction
-  && List.assoc_opt "masc_retained_tool_results" message.metadata=Some (`Bool true)
+  is_context_parts ~role:message.role ~origin:message.origin ~metadata:message.metadata
+
+let is_wire_context_message (message : Llm_provider.Types.message) =
+  is_context_parts ~role:message.role ~origin:message.origin ~metadata:message.metadata
 
 let acknowledge snapshot =
   List.fold_left (fun acc entry ->

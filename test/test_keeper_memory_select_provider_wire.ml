@@ -159,13 +159,13 @@ let replay ~provider_wire () =
     let provider_cfg=Llm_provider.Provider_config.make ~kind:Llm_provider.Provider_config.OpenAI_compat
       ~model_id:"fixture" ~base_url:provider.base_url ~api_key:"synthetic-local-key"
       ~request_path:"/chat/completions" ~tool_stream:false () in
-    let runtime_config=Runtime_agent.default_config ~name:"selection-wire" ~provider_cfg
+    let runtime_config=Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:"selection-wire" ~provider_cfg
       ~system_prompt:meta.instructions ~tools:bundle.tools in
     (match Runtime_agent.run_blocks ~sw ~net ~config:runtime_config
       [Agent_core.Types.Text (jstring "query" query)] with
      | Ok {Runtime_agent.stop_reason=Runtime_agent.Completed _;response;_} ->
        check bool "runtime consumes the expected final provider answer" true
-         (List.exists (function Agent_core.Types.Text text -> text="Selection inspected." | _ -> false) response.content)
+         (List.exists (function Llm_provider.Types.Text text -> text="Selection inspected." | _ -> false) response.content)
      | Ok _ -> fail "provider wire run did not complete normally"
      | Error error -> failf "provider wire run failed: %s" (Agent_core.Error.to_string error));
     check (list string) "exact captured Jev input through real Keeper bundle" [] (List.rev !errors);

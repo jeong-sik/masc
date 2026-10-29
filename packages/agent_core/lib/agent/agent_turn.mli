@@ -14,7 +14,9 @@
 (** Pre-processed inputs for an LLM turn. *)
 type turn_preparation =
   { tools_json : Yojson.Safe.t list option
-  ; effective_messages : Types.message list
+  ; effective_messages : Llm_provider.Types.message list
+    (** The request messages: the caller projection's output, or the
+        history converted with {!History.to_wire_message}. *)
   ; context_message : (Types.message option, Error.t) result
     (** The fresh carrier as actually transmitted after projection, or [None]
         if no carrier was generated or the projection removed it. An ambiguous
@@ -56,7 +58,8 @@ val prepare_messages
     @since 0.185.0 added optional [config] parameter for provider-facing
       thinking preservation. *)
 val prepare_turn
-  :  tools:Tool_set.t
+  :  media_store:History.media_store
+  -> tools:Tool_set.t
   -> messages:Types.message list
   -> turn_params:Hooks.turn_params
   -> ?model_input_projection:Agent_types.model_input_projection
@@ -112,7 +115,7 @@ type turn_params_resolution_error =
 (** Extract the most recent non-empty canonical [Tool]-role result batch.
     ToolResult blocks carried by any other role, or mixed with other blocks,
     are not consumed. *)
-val last_tool_results_from : Types.message list -> Types.tool_result list
+val last_tool_results_from : Types.message list -> Hooks.history_tool_result list
 
 (** Resolve the single canonical [BeforeTurnParams] contract. Illegal hook
     decisions remain explicit instead of falling back to defaults. *)
@@ -149,13 +152,18 @@ val apply_context_injection
   :  context:Context.t
   -> messages:Types.message list
   -> injector:Hooks.context_injector
-  -> tool_uses:Types.content_block list
+  -> tool_uses:Llm_provider.Types.content_block list
   -> results:Agent_tools.tool_execution_result list
   -> (context_injection_outcome, context_injection_error) result
 
 (** {1 Tool result construction} *)
 
-(** Convert tool execution results into [ToolResult] content blocks.
-    Content is preserved exactly in canonical agent messages. Any
-    provider-specific transport adaptation belongs at provider projection. *)
-val make_tool_results : Agent_tools.tool_execution_result list -> Types.content_block list
+(** Convert tool execution results into history [ToolResult] blocks. Text
+    content is preserved exactly; result media is put in [media_store] and
+    held by reference. A result whose media payload is not padded standard
+    base64 becomes a [Non_retryable_tool_error] result that names the media
+    type and holds no media. Any other media error fails the conversion. *)
+val make_tool_results
+  :  media_store:History.media_store
+  -> Agent_tools.tool_execution_result list
+  -> (Types.content_block list, Error.t) result

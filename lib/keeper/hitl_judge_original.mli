@@ -27,7 +27,7 @@ val messages_of
   :  system_prompt:string
   -> output_contract:string
   -> context_bundle:Yojson.Safe.t
-  -> Agent_core.Types.message list
+  -> Llm_provider.Types.message list
 (** The system message, the output contract and the context bundle, in that
     order. The original and worker preparation supply a canonical context
     bundle so persistence cannot reorder its serialized message bytes. *)
@@ -48,7 +48,7 @@ val system_prompt_text : t -> string
 val output_contract : t -> string
 val context_bundle : t -> Yojson.Safe.t
 
-val messages : t -> Agent_core.Types.message list
+val messages : t -> Llm_provider.Types.message list
 (** {!messages_of} over the captured pieces. *)
 
 val to_json : t -> Yojson.Safe.t

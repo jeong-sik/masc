@@ -113,7 +113,7 @@ let run_minimal_agent ~env ~sw ~provider_label ~provider_config ~model =
     ; system_prompt = Some "Reply with the single word: ok."
     }
   in
-  let agent = Agent.create ~net:env#net ~config ~options () in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~options () in
   let result = Agent.run ~sw agent "Say ok." in
   let events = Event_bus.drain sub in
   let names =

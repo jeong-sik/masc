@@ -10,7 +10,7 @@ let response : Types.api_response =
   { id = "periodic-cleanup-response"
   ; model = "mock-model"
   ; stop_reason = Types.EndTurn
-  ; content = [ Types.Text "ok" ]
+  ; content = [ Llm_provider.Types.Text "ok" ]
   ; usage = None
   ; telemetry = None
   }
@@ -52,7 +52,7 @@ let make_agent ?on_run_complete ?raw_trace ~net ~transport ?(periodic_callbacks 
     ; model = "mock-model"
     }
   in
-  Agent.create ~net ~config ~options ()
+  Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ~options ()
 ;;
 
 let with_log_capture f =

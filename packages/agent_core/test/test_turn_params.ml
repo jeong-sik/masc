@@ -136,7 +136,7 @@ let test_provider_mock_basic () =
      let text =
        List.filter_map
          (function
-           | Types.Text s -> Some s
+           | Llm_provider.Types.Text s -> Some s
            | _ -> None)
          resp.content
        |> String.concat ""
@@ -161,7 +161,7 @@ let test_provider_mock_cycling () =
      let text =
        List.filter_map
          (function
-           | Types.Text s -> Some s
+           | Llm_provider.Types.Text s -> Some s
            | _ -> None)
          resp.content
        |> String.concat ""
@@ -198,7 +198,7 @@ let test_provider_mock_tool_use () =
     let has_tool_use =
       List.exists
         (function
-          | Types.ToolUse { name = "search"; _ } -> true
+          | Llm_provider.Types.ToolUse { name = "search"; _ } -> true
           | _ -> false)
         resp.content
     in

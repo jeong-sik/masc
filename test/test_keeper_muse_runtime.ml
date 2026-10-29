@@ -945,7 +945,7 @@ let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_inpu
       ~runtime_id
       ~keeper_name
       ~pre_tool_rejects:(ref [])
-      ~base_path
+      ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
       ~workspace_root:(Option.value workspace_root ~default:(playground ~base_path))
       ~goal:"Call masc_probe once"
       ~goal_blocks
@@ -1009,7 +1009,7 @@ let read_text path = In_channel.with_open_bin path In_channel.input_all
 
 let response_text (result : Runtime_agent.run_result) =
   result.response.content
-  |> List.filter_map (function Agent_core.Types.Text text -> Some text | _ -> None)
+  |> List.filter_map (function Llm_provider.Types.Text text -> Some text | _ -> None)
   |> String.concat ""
 ;;
 
@@ -1367,7 +1367,7 @@ default = "reloaded.reloaded"
       | _ -> fail "expected before_turn_params hook event") } in
   let run () = Eio.Switch.run (fun sw ->
     match Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name }) ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk
-      ~runtime_id ~keeper_name ~base_path ~goal:"Call masc_probe once"
+      ~runtime_id ~keeper_name ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path) ~goal:"Call masc_probe once"
       ~system_prompt:"" ~hooks
       ~tools:[tool] ~agent_core_tools:[tool]
       ~initial_messages:[user_message "MUSE_EARLIER_QUESTION";
@@ -2889,16 +2889,18 @@ let test_missing_selected_account_auth_requires_sign_in () =
       (match Store.load ~base_path ~keeper_name with Ok None -> true | _ -> false))
 ;;
 
+(* History holds goal images by reference to bytes already decoded, so a
+   payload that is not base64 cannot reach a goal block; what stays invalid is
+   the media type, an empty image and text that is not UTF-8. *)
 let test_invalid_goal_media_never_claims_or_spawns () =
-  let image media_type data = Agent_core.Types.Image
-    {media_type; source = Agent_core.Types.Base64 data} in
-  let invalid_blocks =
-    [ [Agent_core.Types.Text "Call masc_probe once"; image "image/png" "!not-base64!"];
-      [Agent_core.Types.Text "Call masc_probe once"; image "image/svg+xml" "aGVsbG8="];
-      [Agent_core.Types.Text "Call masc_probe once"; image "image/png\255" "aGVsbG8="];
-      [Agent_core.Types.Text "Call masc_probe once"; image "image/png" "\255"];
+  let invalid_blocks ~base_path =
+    let image media_type raw =
+      match (Tool_blob_media_store.of_base_path ~base_path).put ~media_type ~raw with
+      | Ok stored -> Agent_core.Types.Image {media_type; source = Agent_core.Types.Stored stored}
+      | Error error -> fail (Agent_core.Error.to_string (Agent_core.Error.Media error)) in
+    [ [Agent_core.Types.Text "Call masc_probe once"; image "image/svg+xml" "hello"];
+      [Agent_core.Types.Text "Call masc_probe once"; image "image/png\255" "hello"];
       [Agent_core.Types.Text "Call masc_probe once"; image "image/png" ""];
-      [Agent_core.Types.Text "Call masc_probe once"; image "image/png" "aGVs\nbG8="];
       [Agent_core.Types.Text "invalid goal \255"] ] in
   List.iter (fun seeded -> with_scripted_host (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
@@ -2918,7 +2920,7 @@ let test_invalid_goal_media_never_claims_or_spawns () =
         (before = (Store.load ~base_path ~keeper_name |> Result.get_ok));
       check bool "invalid media admits no provider effect" true
         (run.outcome.effect_disposition = Keeper_provider_attempt_effect.No_effect_observed))
-      invalid_blocks)) [false; true]
+      (invalid_blocks ~base_path))) [false; true]
 ;;
 
 let test_native_none_is_refused_before_spawn () =

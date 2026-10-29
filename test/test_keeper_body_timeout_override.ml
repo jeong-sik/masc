@@ -116,7 +116,7 @@ max-context = 200000
       ~system_prompt:"Body timeout override proof."
       ~runtime_id:"silent.sample"
       ~keeper_name:"body-timeout-override-proof"
-      ~base_path
+      ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
       ~agent_core_tools:[]
       ~goal:"ask, and hear nothing back"
       ~on_runtime_attempt_error:(fun ~runtime_id:_ ~attempt:_ ~dispatch:_ error ->

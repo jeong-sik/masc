@@ -71,7 +71,7 @@ type host_stop = Runtime_official_client_tool.host_stop =
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
-  ; content_blocks : Agent_core.Types.content_block list option
+  ; content_blocks : Llm_provider.Types.content_block list option
   ; abort_turn : host_stop option
   ; on_response_sent : (unit -> unit) option
   }
@@ -220,14 +220,16 @@ type image_block =
   }
 
 val text_and_images_of_blocks :
+  media_store:Agent_core.History.media_store ->
   runtime_label:string ->
   field:string ->
   Agent_core.Types.content_block list ->
   (string * image_block list, Agent_core.Error.t) result
 (** Project a goal into the prompt text plus its base64 images. Use this for a
     transport that carries images; {!text_of_blocks} is for one that does not,
-    and rejects an image rather than dropping it. Non-base64 image sources and
-    every other block kind are rejected here too. *)
+    and rejects an image rather than dropping it. A [Stored] image is read
+    from [media_store]; [Url] and [File_id] sources and every other block
+    kind are rejected. *)
 
 val text_of_blocks :
   runtime_label:string ->
@@ -466,7 +468,7 @@ type librarian_position = Keeper_turn_driver_try_provider.librarian_position
 
 val project_source :
   unread:Keeper_librarian_request_unread.t ->
-  Agent_core.Agent.model_input_projection option -> Agent_core.Agent.model_input_projection
+  Keeper_history_projection.t option -> Keeper_history_projection.t
 (** Preserve the same frozen unread evidence after a custom source projection.
     It may change the history view, but cannot remove or replace this evidence.
     Native requests explicitly carry known empty observations too, allowing a
@@ -675,8 +677,8 @@ val carried_history_projection :
   turn_start:Keeper_carried_front.turn_start ->
   keeper_name:string ->
   runtime_id:string ->
-  Agent_core.Agent.model_input_projection option ->
-  Agent_core.Agent.model_input_projection
+  Keeper_history_projection.t option ->
+  Keeper_history_projection.t
 (** Unbounded carried-history composition for clients that compact their own
     input. Freeze the durable Librarian position before applying the range and
     source projection. Window/front observations are published only after that
@@ -705,7 +707,7 @@ val prepare_turn :
   tools:Agent_core.Tool.t list ->
   initial_messages:Agent_core.Types.message list ->
   model_input_projection:
-    (tools:Agent_core.Tool.t list -> Agent_core.Agent.model_input_projection) option ->
+    (tools:Agent_core.Tool.t list -> Keeper_history_projection.t) option ->
   hooks:Agent_core.Hooks.hooks option ->
   composed_context:(unit -> composed_context option) option ->
   configured_reasoning_effort:Llm_provider.Reasoning_effort.t option ->

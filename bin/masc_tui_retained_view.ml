@@ -33,15 +33,15 @@ let rec block_sections (block : Types.content_block) : section list =
   | Types.Image { media_type; source } ->
       [ Marker
           (Printf.sprintf "image %s, %d bytes" media_type
-             (String.length (Types.media_source_payload source))) ]
+             (Agent_core.History.media_source_bytes source)) ]
   | Types.Document { media_type; source } ->
       [ Marker
           (Printf.sprintf "document %s, %d bytes" media_type
-             (String.length (Types.media_source_payload source))) ]
+             (Agent_core.History.media_source_bytes source)) ]
   | Types.Audio { media_type; source } ->
       [ Marker
           (Printf.sprintf "audio %s, %d bytes" media_type
-             (String.length (Types.media_source_payload source))) ]
+             (Agent_core.History.media_source_bytes source)) ]
 
 let sections ~text =
   let parsed =

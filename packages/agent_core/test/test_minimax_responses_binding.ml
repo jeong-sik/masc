@@ -30,13 +30,19 @@ let restored config response =
     | Some response -> response | None -> Alcotest.fail "response cache rejected native source" in
   let message = match assistant_message_of_response response with
     | Ok message -> message | Error error -> Alcotest.fail (show_assistant_message_error error) in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let message = match Agent_core.History.of_wire_message media_store message with
+    | Ok message -> message | Error error -> Alcotest.fail (Agent_core.History.show_media_error error) in
   let path = Filename.temp_file "minimax-responses-" ".json" in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
     Out_channel.with_open_bin path (fun ch -> output_string ch
       (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)));
     let json = In_channel.with_open_bin path In_channel.input_all |> Yojson.Safe.from_string in
     match Agent_core.Checkpoint.message_of_json json with
-    | Ok message -> message | Error _ -> Alcotest.fail "checkpoint message rejected native source")
+    | Error _ -> Alcotest.fail "checkpoint message rejected native source"
+    | Ok message ->
+      match Agent_core.History.to_wire_message media_store message with
+      | Ok message -> message | Error error -> Alcotest.fail (Agent_core.History.show_media_error error))
 let stream model =
   let state = Streaming.create_openai_stream_state () in
   let acc = Complete_stream_acc.create_stream_acc () in

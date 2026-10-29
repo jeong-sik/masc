@@ -1676,7 +1676,7 @@ let test_responses_stream_incomplete_drops_partial_tool () =
       false
       (List.exists
          (function
-           | ToolUse _ -> true
+           | Llm_provider.Types.ToolUse _ -> true
            | _ -> false)
          response.content)
 ;;
@@ -1716,7 +1716,7 @@ let test_responses_stream_incomplete_content_filter_drops_tool () =
       false
       (List.exists
          (function
-           | ToolUse _ -> true
+           | Llm_provider.Types.ToolUse _ -> true
            | _ -> false)
          response.content)
 ;;

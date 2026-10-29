@@ -41,7 +41,7 @@ let echo_tool =
        Ok { Types.content = input |> member "message" |> to_string; content_blocks = None; _meta = None })
 ;;
 
-let text_response ?(content = [ Types.Text "ok" ]) () : Types.api_response =
+let text_response ?(content = [ Llm_provider.Types.Text "ok" ]) () : Types.api_response =
   { id = "resp-1"
   ; model = "openai_chat"
   ; stop_reason = EndTurn
@@ -58,7 +58,7 @@ let with_agent
   =
   Eio_main.run
   @@ fun env ->
-  let agent = Internal_agent.create ~net:env#net ~config ~options () in
+  let agent = Internal_agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~options () in
   f agent
 ;;
 
@@ -120,7 +120,7 @@ let test_agent_type_accessors_card_and_state_mutators () =
   Eio_main.run
   @@ fun env ->
   let agent =
-    Internal_agent.create ~net:env#net ~config ~tools:[ echo_tool ] ~options ()
+    Internal_agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~tools:[ echo_tool ] ~options ()
   in
   check_string "config name" "coverage-agent" (Internal_agent.state agent).config.name;
   check_bool "same net accessor" true (Internal_agent.net agent == env#net);
@@ -172,7 +172,7 @@ let test_agent_type_create_merges_mcp_tools () =
   in
   let options = { Internal_agent.default_options with mcp_clients = [ managed ] } in
   let config = Types.default_config ~model:"test-model" in
-  let agent = Internal_agent.create ~net:env#net ~config ~options () in
+  let agent = Internal_agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~options () in
   check_bool "mcp tool merged" true (Tool_set.mem "echo" (Internal_agent.tools agent))
 ;;
 
@@ -180,7 +180,7 @@ let test_agent_type_lifecycle_rejects_invalid_transition () =
   Eio_main.run
   @@ fun env ->
   let config = Types.default_config ~model:"test-model" in
-  let agent = Internal_agent.create ~net:env#net ~config () in
+  let agent = Internal_agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config () in
   Internal_agent.set_lifecycle agent ~accepted_at:1.0 Accepted;
   Internal_agent.set_lifecycle agent ~ready_at:2.0 Ready;
   Internal_agent.set_lifecycle agent ~current_run_id:"run-1" ~started_at:3.0 Running;
@@ -206,7 +206,7 @@ let test_agent_type_clone_variants () =
   let context = Context.create_sync () in
   Context.set context "marker" (`String "copied");
   let agent =
-    Internal_agent.create ~net:env#net ~config ~context ~tools:[ echo_tool ] ()
+    Internal_agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~context ~tools:[ echo_tool ] ()
   in
   Internal_agent.set_state
     agent

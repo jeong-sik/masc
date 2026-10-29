@@ -6,6 +6,16 @@ open Masc
 module AR = Task.Anti_rationalization
 module VAT = Verification_authority_tools
 
+(* A verifier reads goal media from the BasePath store, as the review path
+   that puts it there does. *)
+let stored_png ~base_path png =
+  match
+    (Tool_blob_media_store.of_base_path ~base_path).put ~media_type:"image/png"
+      ~raw:(Base64.decode_exn png)
+  with
+  | Ok stored -> Agent_core.Types.Stored stored
+  | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error))
+
 let write path body = Out_channel.with_open_bin path (fun out -> output_string out body)
 let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
 
@@ -136,7 +146,7 @@ candidates = ["forbidden.verifier", "official.verifier"]
     let tool = Agent_core.Tool.create ~name:"report_review_verdict" ~description:"Required verifier callback"
       ~parameters:[] (fun _ -> fail "an arbitrary transform must be refused before tool dispatch") in
     let refused = Keeper_turn_driver.run_named ~input_source:Masc.Keeper_request_source.Completion_review ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk ~runtime_id:"official.verifier"
-      ~keeper_name:"arbitrary-transform-probe" ~base_path:root
+      ~keeper_name:"arbitrary-transform-probe" ~base_path:root ~media_store:(Tool_blob_media_store.of_base_path ~base_path:root)
       ~goal:"Reject the unsupported transform." ~system_prompt:"Explicit verifier contract."
       ~tools:[tool] ~agent_core_tools:[tool] ~output_contract:Keeper_turn_driver.Tool_verdict
       ~provider_config_transform:(fun config -> Ok config) ~sw () in
@@ -183,7 +193,7 @@ candidates = ["forbidden.verifier", "official.verifier"]
     ~log_info:(fun _ -> ()) ~log_warn:(fun _ -> ())
     ~render_prompt:(fun () -> Ok "Verify the supplied image and read proof.txt before reporting.")
     ~goal_blocks:[Agent_core.Types.Image
-      { media_type="image/png"; source = Base64 png }]
+      { media_type="image/png"; source = stored_png ~base_path:root png }]
     ~lookup ~provider_rest:Verification_retry.provider_rest ~base_path:root
     ~on_tool_result:(fun ~input:_ result -> calls := result :: !calls) () in
   let result = review () in
@@ -323,7 +333,7 @@ let test_unsafe_slots_refused_before_spawn () =
       ~log_info:(fun _ -> ()) ~log_warn:(fun _ -> ())
       ~render_prompt:(fun () -> Ok "A prose approval must never authorize this review.")
       ~goal_blocks:[Agent_core.Types.Image
-        { media_type="image/png"; source = Base64 png }]
+        { media_type="image/png"; source = stored_png ~base_path:root png }]
       ~lookup ~provider_rest:Verification_retry.provider_rest ~base_path:root () in
     check bool (label ^ " explicit override cannot bypass admission") true
       (result.verdict = None && result.gate = AR.Evaluator_unavailable);

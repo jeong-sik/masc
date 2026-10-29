@@ -25,7 +25,7 @@ let test_concurrent_context_access () =
 let test_sync_context_at_eio_agent_boundary () =
   let ctx = Context.create_sync () in
   Eio_main.run (fun env ->
-    let agent = Agent.create ~net:env#net
+    let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net
       ~config:(Types.default_config ~model:"context-boundary") ~context:ctx () in
     let shared = Agent.context agent in
     Alcotest.(check bool) "constructor preserves shared context identity" true (shared == ctx);

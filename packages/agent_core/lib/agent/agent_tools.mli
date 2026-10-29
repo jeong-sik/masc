@@ -75,13 +75,13 @@ val strip_registered_suffix : available:string list -> string -> string option
     conversation carried six such notes, every one of them for a single
     unnamed call. *)
 type tool_use_admission =
-  { admitted : Types.content_block list
+  { admitted : Llm_provider.Types.content_block list
   ; retained_content_indices : int list
   ; rejected_names : string list
   ; tool_source_map : Hooks.admitted_tool_source_map
   }
 
-val admit_tool_use_names : tool_index -> Types.content_block list -> tool_use_admission
+val admit_tool_use_names : tool_index -> Llm_provider.Types.content_block list -> tool_use_admission
 
 val describe_rejected_names : string list -> string
 (** Render [rejected_names] for the sentence the model reads: distinct names in
@@ -292,7 +292,7 @@ val execute_tools
         -> decision:Hooks.hook_decision
         -> detail:string option
         -> unit)
-  -> Types.content_block list
+  -> Llm_provider.Types.content_block list
   -> (execution_report, execution_failure) result
 
 (** Recover terminal completion exclusively from immutable persisted
@@ -300,5 +300,5 @@ val execute_tools
     deliberately absent from this boundary. *)
 val recovered_batch_completion
   :  invocations:Tool_contract.Invocation.t list
-  -> Types.content_block list
+  -> Llm_provider.Types.content_block list
   -> (batch_completion, Error.t) result

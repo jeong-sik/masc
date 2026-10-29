@@ -9,5 +9,5 @@ let of_provider_config (cfg : Llm_provider.Provider_config.t) : t = cfg
 
 let provider_cfg (t : t) : Llm_provider.Provider_config.t = t
 
-let default_config ~name ~system_prompt ~tools (t : t) =
-  Runtime_agent.default_config ~name ~provider_cfg:t ~system_prompt ~tools
+let default_config ~media_store ~name ~system_prompt ~tools (t : t) =
+  Runtime_agent.default_config ~media_store ~name ~provider_cfg:t ~system_prompt ~tools

@@ -1,4 +1,3 @@
-module Canonical_tool = Agent_core.Canonical_tool
 
 let role_to_string role = Agent_core.Types.role_to_string role
 
@@ -11,86 +10,50 @@ let role_to_string role = Agent_core.Types.role_to_string role
    prompt privileges. Same anti-pattern class as #8605/#8615. *)
 let role_of_string_opt role = Agent_core.Types.role_of_string role
 
-(* [content_block_to_json] is the provider-wire projection, and for ToolResult
-   the wire cannot carry everything the type holds: [outcome] flattens to
-   [is_error], and [json] has no field at all. Reading that back guesses — any
-   error becomes [Reported_tool_error], and [json] is re-derived by parsing
-   [content], which only agrees when the two happened to be the same text.
+(* Blocks are written in the history codec ({!Agent_core.History}), which
+   keeps media by reference and a ToolResult's typed outcome. Its [json]
+   payload has no field there, so it rides alongside as [tool_result_json]
+   and a ToolResult comes back as it was written (#25109). *)
+let tool_result_json_key = "tool_result_json"
 
-   History is not a wire. These two fields ride alongside the wire shape so a
-   ToolResult comes back as it was written (#25109). A block without them
-   parses exactly as before. *)
-let tool_result_history_fields (block : Agent_core.Types.content_block) =
-  match block with
-  | Agent_core.Types.ToolResult { outcome; json; _ } ->
-      let outcome_field =
-        match outcome with
-        | Agent_core.Types.Tool_succeeded -> []
-        | Agent_core.Types.Tool_failed { failure_kind; error_class } ->
-            [ ( "tool_failure",
-                `Assoc
-                  (( "failure_kind",
-                     Agent_core.Types.tool_failure_kind_to_yojson failure_kind )
-                  :: (match error_class with
-                     | Some cls ->
-                         [ ( "error_class",
-                             Agent_core.Types.tool_error_class_to_yojson cls ) ]
-                     | None -> [])) ) ]
-      in
-      (match json with
-       | Some payload -> ("tool_result_json", payload) :: outcome_field
-       | None -> outcome_field)
-  | Llm_provider.Types.Text _ | Llm_provider.Types.Thinking _
-  | Llm_provider.Types.ReasoningDetails _ | Llm_provider.Types.RedactedThinking _
-  | Llm_provider.Types.ToolUse _ | Llm_provider.Types.Image _ | Llm_provider.Types.Document _
-  | Llm_provider.Types.Audio _ -> []
+let content_block_to_history_json (block : Agent_core.Types.content_block) =
+  let json = Agent_core.History.content_block_to_json block in
+  match block, json with
+  | Agent_core.Types.ToolResult { json = Some payload; _ }, `Assoc fields ->
+    `Assoc (fields @ [ tool_result_json_key, payload ])
+  | Agent_core.Types.ToolResult { json = Some _; _ },
+    (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
+  | Agent_core.Types.ToolResult { json = None; _ }, _
+  | ( ( Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+      | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+      | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _
+      | Agent_core.Types.Document _ | Agent_core.Types.Audio _ ),
+      _ ) -> json
 
-let content_block_to_history_json block =
-  match
-    ( Agent_core.Llm_provider.Api_common.content_block_to_json block,
-      tool_result_history_fields block )
-  with
-  | wire, [] -> wire
-  | `Assoc wire, extra -> `Assoc (wire @ extra)
-  | wire, _ -> wire
-
-let content_block_of_history_json json =
-  match
-    Agent_core.Llm_provider.Api_common.content_block_of_json
-      ~parse_tool_result_json:false
-      json
-  with
-  | Some (Agent_core.Types.ToolResult result) ->
-      let outcome =
-        match Json_util.assoc_member_opt "tool_failure" json with
-        | Some (`Assoc _ as failure) -> (
-            let kind =
-              Json_util.assoc_member_opt "failure_kind" failure
-              |> Option.map Agent_core.Types.tool_failure_kind_of_yojson
-            in
-            let error_class =
-              match Json_util.assoc_member_opt "error_class" failure with
-              | Some value -> (
-                  match Agent_core.Types.tool_error_class_of_yojson value with
-                  | Ok cls -> Some cls
-                  | Error _ -> None)
-              | None -> None
-            in
-            match kind with
-            | Some (Ok failure_kind) ->
-                Agent_core.Types.Tool_failed { failure_kind; error_class }
-            | Some (Error _) | None -> result.outcome)
-        | _ -> result.outcome
-      in
-      let json_payload =
-        match Json_util.assoc_member_opt "tool_result_json" json with
-        | Some payload -> Some payload
-        | None -> None
-      in
-      Some
-        (Agent_core.Types.ToolResult
-           { result with outcome; json = json_payload })
-  | (Some (Llm_provider.Types.Text _ | (Llm_provider.Types.Thinking _ | (Llm_provider.Types.ReasoningDetails _ | (Llm_provider.Types.RedactedThinking _ | (Llm_provider.Types.ToolUse _ | (Llm_provider.Types.Image _ | (Llm_provider.Types.Document _ | Llm_provider.Types.Audio _))))))) | None) as other -> other
+let content_block_of_history_json (json : Yojson.Safe.t) =
+  let block_json, payload =
+    match json with
+    | `Assoc fields ->
+      ( `Assoc (List.filter (fun (key, _) -> not (String.equal key tool_result_json_key)) fields)
+      , List.assoc_opt tool_result_json_key fields )
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> json, None
+  in
+  match Agent_core.History.content_block_of_json block_json, payload with
+  | Ok (Agent_core.Types.ToolResult result), payload ->
+    Some (Agent_core.Types.ToolResult { result with json = payload })
+  | Ok
+      (( Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+       | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+       | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _
+       | Agent_core.Types.Document _ | Agent_core.Types.Audio _ ) as block),
+    None -> Some block
+  | Ok
+      ( Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+      | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+      | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _
+      | Agent_core.Types.Document _ | Agent_core.Types.Audio _ ),
+    Some _
+  | Error _, _ -> None
 
 let content_blocks_to_json
     (blocks : Agent_core.Types.content_block list) : Yojson.Safe.t =
@@ -124,9 +87,13 @@ let message_to_json (m : Agent_core.Types.message) : Yojson.Safe.t =
         match m.role with
         | Agent_core.Types.Tool ->
             List.find_map
-              (fun block ->
-                Canonical_tool.tool_result_of_block block
-                |> Option.map (fun result -> result.Canonical_tool.call_id))
+              (fun (block : Agent_core.Types.content_block) ->
+                match block with
+                | Agent_core.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
+                | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+                | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+                | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _
+                | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
               m.content
         (* Non-Tool roles never own a tool_call_id. *)
         | Agent_core.Types.System
@@ -214,5 +181,9 @@ let message_measurer () =
   fun (message : Agent_core.Types.message) ->
     Buffer.clear buffer;
     Yojson.Safe.to_buffer buffer (message_to_json message);
-    Buffer.length buffer
+    (* A [Stored] source is a digest here; the request carries its base64. *)
+    List.fold_left
+      (fun total block -> total + Agent_core.History.media_wire_length block)
+      (Buffer.length buffer)
+      message.content
 ;;

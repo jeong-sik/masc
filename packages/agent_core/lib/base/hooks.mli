@@ -63,6 +63,14 @@ type admitted_tool_source_map =
           inventory contains neither missing nor extra calls. *)
   }
 
+(** A [ToolResult] block of the history, with its media by reference. *)
+type history_tool_result =
+  { tool_use_id : string
+  ; content : string
+  ; outcome : Types.tool_result_outcome
+  ; content_blocks : Types.content_block list option
+  }
+
 (** Events emitted during agent execution *)
 type hook_event =
   | BeforeTurn of
@@ -72,7 +80,9 @@ type hook_event =
   | BeforeTurnParams of
       { turn : int
       ; messages : Types.message list
-      ; last_tool_results : Types.tool_result list
+      ; last_tool_results : history_tool_result list
+        (** The [ToolResult] blocks of the last Tool message whose blocks are
+            all tool results. *)
       ; current_params : turn_params
       ; reasoning : reasoning_summary
       }

@@ -26,7 +26,7 @@ let with_agent ~tools f =
   Eio_main.run
   @@ fun env ->
   let agent =
-    Agent_core.Agent.create
+    Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net:(Eio.Stdenv.net env)
       ~config:(Agent_core.Types.default_config ~model:"fixture-model")
       ~tools

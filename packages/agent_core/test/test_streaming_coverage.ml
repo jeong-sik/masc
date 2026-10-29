@@ -181,12 +181,12 @@ let test_acc_content_block_start_image () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source = Types.Base64 "iVBORw0KGgo="
+             ; source = Llm_provider.Types.Base64 "iVBORw0KGgo="
              }
        });
   let resp = finalize_ok acc in
   match resp.content with
-  | [ Image { media_type; source } ] ->
+  | [ Llm_provider.Types.Image { media_type; source } ] ->
     check_string "media_type" "image/png" media_type;
     check_string
       "source_type"

@@ -100,7 +100,7 @@ let core_error_is_hard_quota (err : Agent_core.Error.t) =
   | Agent_core.Error.Config _
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _ ->
     false
 ;;
@@ -143,7 +143,7 @@ let core_error_is_model_absent : Agent_core.Error.t -> bool = function
   | Agent_core.Error.Config _
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _ ->
     false
 ;;
@@ -419,7 +419,7 @@ let route_of_error_family (err : Agent_core.Error.t) : route =
   | Agent_core.Error.Agent _
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
     exhaust Internal_opaque
 ;;

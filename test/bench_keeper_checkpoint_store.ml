@@ -33,7 +33,8 @@ module T = Agent_core.Types
 (* The live median message without media is 1.3 KB. *)
 let body_bytes = 1_200
 
-(* Base64 of this many bytes is about 80 KB, a [masc_dos_screen] frame. *)
+(* A [masc_dos_screen] frame. History holds it by reference, so the
+   checkpoint carries its digest and length, not its bytes. *)
 let image_raw_bytes = 60_000
 let rounds = 5
 
@@ -49,9 +50,11 @@ let message role content =
   { T.origin = Llm_provider.Types.Conversation; role; content; name = None; tool_call_id = None
   ; metadata = [] }
 
-(* Distinct bytes per image, so no two frames share an encoding. *)
-let image_data rng =
-  Base64.encode_exn (String.init image_raw_bytes (fun _ -> Char.chr (Random.State.int rng 256)))
+(* Distinct bytes per image, so no two frames share a reference. *)
+let image_source rng =
+  T.Stored
+    (Agent_core.History.stored_of_raw
+       (String.init image_raw_bytes (fun _ -> Char.chr (Random.State.int rng 256))))
 
 let body index = Printf.sprintf "%08d%s" index (String.make (body_bytes - 8) 'b')
 
@@ -63,7 +66,7 @@ let tool_cycle rng ~index ~with_image =
       Some
         [ T.Text (body index)
         ; T.Image
-            { media_type = "image/png"; source = Llm_provider.Types.Base64 (image_data rng) }
+            { media_type = "image/png"; source = image_source rng }
         ]
     else None
   in

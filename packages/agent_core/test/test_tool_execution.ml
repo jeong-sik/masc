@@ -48,7 +48,7 @@ let execute_result_with_tools_in_env
   let net = Eio.Stdenv.net env in
   let options = { Agent.default_options with hooks; elicitation; tool_approval } in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Types.default_config ~model:"test-model")
       ~net
       ~tools
@@ -1409,7 +1409,9 @@ let test_singleton_terminal_reports_exact_invocation_and_recovers () =
   Eio_main.run
   @@ fun env ->
   let tool = terminal_tool ~name:"finish" ignore in
-  let tool_uses = [ ToolUse { id = "terminal-1"; name = "finish"; input = `Assoc [] } ] in
+  let tool_uses : Llm_provider.Types.content_block list =
+    [ ToolUse { id = "terminal-1"; name = "finish"; input = `Assoc [] } ]
+  in
   match
     execute_result_with_tools_in_env env ~tools:[ tool ] ~hooks:Hooks.empty tool_uses
   with

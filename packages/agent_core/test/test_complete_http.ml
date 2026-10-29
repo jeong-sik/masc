@@ -268,7 +268,7 @@ let test_complete_anthropic_ok () =
       let text =
         List.filter_map
           (function
-            | Types.Text s -> Some s
+            | Llm_provider.Types.Text s -> Some s
             | _ -> None)
           resp.content
         |> String.concat ""
@@ -638,7 +638,7 @@ let test_complete_openai_ok () =
       let text =
         List.filter_map
           (function
-            | Types.Text s -> Some s
+            | Llm_provider.Types.Text s -> Some s
             | _ -> None)
           resp.content
         |> String.concat ""
@@ -924,7 +924,7 @@ let test_complete_openai_mlx_vlm_telemetry () =
       let text =
         List.filter_map
           (function
-            | Types.Text s -> Some s
+            | Llm_provider.Types.Text s -> Some s
             | _ -> None)
           resp.content
         |> String.concat ""
@@ -1048,7 +1048,7 @@ let test_complete_cache_store_and_hit () =
       let text =
         List.filter_map
           (function
-            | Types.Text s -> Some s
+            | Llm_provider.Types.Text s -> Some s
             | _ -> None)
           resp.content
         |> String.concat ""
@@ -2026,7 +2026,7 @@ let test_complete_injected_http_transport_preserves_stream_status_metrics () =
 let text_of_response (resp : Types.api_response) =
   List.filter_map
     (function
-      | Types.Text s -> Some s
+      | Llm_provider.Types.Text s -> Some s
       | _ -> None)
     resp.content
   |> String.concat ""
@@ -2254,7 +2254,7 @@ let test_complete_stream_ok () =
       let text =
         List.filter_map
           (function
-            | Types.Text s -> Some s
+            | Llm_provider.Types.Text s -> Some s
             | _ -> None)
           resp.content
         |> String.concat ""
@@ -3760,7 +3760,7 @@ let test_complete_body_timeout_does_not_fire_on_fast_response () =
        let text =
          List.filter_map
            (function
-             | Types.Text s -> Some s
+             | Llm_provider.Types.Text s -> Some s
              | _ -> None)
            resp.content
          |> String.concat ""
@@ -3885,7 +3885,7 @@ let test_complete_body_timeout_requires_finite_positive_value_before_request () 
        let text =
          List.filter_map
            (function
-             | Types.Text value -> Some value
+             | Llm_provider.Types.Text value -> Some value
              | _ -> None)
            resp.content
          |> String.concat ""
@@ -3911,7 +3911,7 @@ let test_complete_without_body_timeout_or_clock_succeeds () =
        let text =
          List.filter_map
            (function
-             | Types.Text value -> Some value
+             | Llm_provider.Types.Text value -> Some value
              | _ -> None)
            resp.content
          |> String.concat ""

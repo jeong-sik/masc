@@ -4017,6 +4017,8 @@
   masc_tui_keeper_chat_projection
   masc_tui_message_layout
   masc.masc_random_id
+  ;; parse_keeper_chat_stream_request puts attachment bytes in a media store.
+  masc.agent_core
   yojson))
 
 (test

@@ -189,7 +189,7 @@ let test_rebound_account_observation env ~rate_limited () =
   let requirement = Exact.make_output_requirement
     ~schema:(`Assoc ["type", `String "object"]) ~minimum_guarantee:Exact.Json_syntax in
   let snapshot = Exact.snapshot_flow ~first ~rest:[]
-    ~messages:[Agent_core.Types.user_msg "return JSON"] requirement
+    ~messages:[Llm_provider.Types.user_msg "return JSON"] requirement
     |> require_ok "freeze old flow" in
   let attempt = Exact.start_flow ~admission_class:Llm_provider.Admission_class.Standard snapshot |> require_ok "start old flow" in
   Masc_test_deps.with_process_env "OPENROUTER_API_KEY" (Some "synthetic-rebound-account")
@@ -225,7 +225,7 @@ let execute_first_slot env (resolved : Registry.resolved_lane) ~validate =
   let requirement = Exact.make_output_requirement
     ~schema:(`Assoc ["type",`String "object"]) ~minimum_guarantee:Exact.Json_syntax in
   let snapshot = Exact.snapshot_flow ~first ~rest:[]
-    ~messages:[Agent_core.Types.user_msg "return JSON"] requirement
+    ~messages:[Llm_provider.Types.user_msg "return JSON"] requirement
     |> require_ok "freeze actual HTTP flow" in
   let attempt = Exact.start_flow ~admission_class:Llm_provider.Admission_class.Standard snapshot
     |> require_ok "start actual HTTP flow" in

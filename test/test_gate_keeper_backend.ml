@@ -4,6 +4,15 @@ open Masc
 module K = Keeper_chat_store
 module KT = Keeper_turn
 
+(* History in these fixtures holds media by reference; every agent, runtime
+   config and projector here reads the bytes back from this store. *)
+let test_media_store = Agent_core.History.Memory_store.create ()
+
+let stored_source ~media_type raw =
+  match test_media_store.put ~media_type ~raw with
+  | Ok stored -> Agent_core.Types.Stored stored
+  | Error error -> failwith (Agent_core.Error.to_string (Agent_core.Error.Media error))
+
 let stream_payload_exn
       ?(user_blocks = [])
       ?(attachments = [])
@@ -20,7 +29,7 @@ let stream_payload_exn
   =
   let direct_message =
     match
-      Keeper_invocation_contract.direct_message
+      Keeper_invocation_contract.direct_message ~media_store:test_media_store
         ~keeper_name:name
         ~prompt:message
         ~direct_reply:true
@@ -259,7 +268,7 @@ let test_parse_keeper_chat_stream_request_accepts_connector_context () =
   let body =
     {|{"request_id":"kmsg-connector","name":"luna","message":"hello","channel":"discord","channel_user_id":"user-42","channel_user_name":"Alice","channel_workspace_id":"workspace-9"}|}
   in
-  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
   | Ok payload ->
       check string "channel" "discord" payload.channel;
       check string "user id" "user-42" payload.channel_user_id;
@@ -281,7 +290,7 @@ let test_chat_input_preserves_text_whitespace () =
   in
   List.iter
     (fun body ->
-       match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+       match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
        | Error detail -> fail detail
        | Ok payload ->
            check string "chat message retained" text payload.message;
@@ -298,7 +307,7 @@ let test_chat_input_preserves_text_whitespace () =
   | Ok decoded ->
       check string "durable message retained" text decoded.message;
       check bool "durable block retained" true (decoded.user_blocks = blocks);
-      (match Keeper_multimodal_input.to_agent_core_blocks ~attachments:[] decoded.user_blocks with
+      (match Keeper_multimodal_input.to_agent_core_blocks ~media_store:test_media_store ~attachments:[] decoded.user_blocks with
        | Ok [ Agent_core.Types.Text actual ] ->
            check string "model input retained" text actual
        | Ok _ -> fail "expected one text block"
@@ -306,7 +315,7 @@ let test_chat_input_preserves_text_whitespace () =
 
 let test_blank_chat_input_still_rejected () =
   let body = {|{"request_id":"kmsg-blank","name":"luna","message":"  \n\t "}|} in
-  (match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  (match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
    | Error _ -> ()
    | Ok _ -> fail "blank message without media should be rejected");
   match Keeper_multimodal_input.parse_user_blocks
@@ -316,7 +325,7 @@ let test_blank_chat_input_still_rejected () =
 
 let test_parse_keeper_chat_stream_request_rejects_unknown_field () =
   let body = {|{"request_id":"kmsg-unknown","name":"luna","message":"hello","unexpected":true}|} in
-  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
   | Ok _ -> fail "expected an undeclared field to be rejected"
   | Error err ->
     check bool "unknown field is named" true (string_contains err "unexpected")
@@ -324,14 +333,14 @@ let test_parse_keeper_chat_stream_request_rejects_unknown_field () =
 
 let test_parse_keeper_chat_stream_request_requires_request_id () =
   let body = {|{"name":"luna","message":"hello"}|} in
-  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
   | Ok _ -> fail "expected request_id to be required"
   | Error err -> check string "missing id error" "request_id is required" err
 ;;
 
 let test_parse_keeper_chat_stream_request_rejects_duplicate_field () =
   let body = {|{"request_id":"kmsg-duplicate","name":"luna","name":"other","message":"hello"}|} in
-  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
   | Ok _ -> fail "expected duplicate fields to be rejected"
   | Error err ->
     check string "duplicate field error"
@@ -340,7 +349,7 @@ let test_parse_keeper_chat_stream_request_rejects_duplicate_field () =
 
 let test_parse_keeper_chat_stream_request_rejects_wrong_field_type () =
   let body = {|{"request_id":"kmsg-type","name":"luna","message":"hello","channel":42}|} in
-  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
   | Ok _ -> fail "expected wrong field type to be rejected"
   | Error err -> check string "wrong type error" "channel must be a string" err
 ;;
@@ -349,7 +358,7 @@ let test_parse_keeper_chat_stream_request_rejects_partial_connector_context () =
   let body =
     {|{"request_id":"kmsg-partial","name":"luna","message":"hello","channel":"discord"}|}
   in
-  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
   | Ok _ -> fail "expected partial connector context to be rejected"
   | Error err ->
       check string "validation message"
@@ -360,7 +369,7 @@ let test_parse_keeper_chat_stream_request_accepts_copilot_context () =
   let body =
     {|{"request_id":"kmsg-copilot","name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","turn_instructions":"focus on overview"}|}
   in
-  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
   | Ok payload ->
       check string "channel" "copilot" payload.channel;
       check string "workspace id" "session-7" payload.channel_workspace_id;
@@ -373,7 +382,7 @@ let test_parse_keeper_chat_stream_request_formats_surface_context () =
   let body =
     {|{"request_id":"kmsg-surface","name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","surface_context":{"label":"Overview","route":"/overview","scene":"fleet view","fields":[{"k":"run","v":"2/5"},{"k":"alert","v":"1"}]}}|}
   in
-  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
   | Ok payload ->
       check string "channel" "copilot" payload.channel;
       check (option string) "turn instructions" None payload.turn_instructions;
@@ -382,9 +391,9 @@ let test_parse_keeper_chat_stream_request_formats_surface_context () =
 
 let test_parse_keeper_chat_stream_request_accepts_attachment_only_user_blocks () =
   let body =
-    {|{"request_id":"kmsg-attachment","name":"luna","message":"","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,abc123"}],"user_blocks":[{"type":"image","attachment_id":"att-img","name":"screen.png","mime_type":"image/png","size":1024}]}|}
+    {|{"request_id":"kmsg-attachment","name":"luna","message":"","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,YWJjMTIz"}],"user_blocks":[{"type":"image","attachment_id":"att-img","name":"screen.png","mime_type":"image/png","size":1024}]}|}
   in
-  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
   | Ok payload -> (
       check string "fallback message" "[image attached: screen.png]" payload.message;
       check int "attachment preserved" 1 (List.length payload.attachments);
@@ -400,7 +409,7 @@ let test_parse_keeper_chat_stream_request_rejects_unknown_user_block_type () =
   let body =
     {|{"request_id":"kmsg-block","name":"luna","message":"hello","user_blocks":[{"type":"tool_result","text":"nope"}]}|}
   in
-  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
   | Ok _ -> fail "expected unknown user block type to be rejected"
   | Error err ->
       check string "validation message"
@@ -415,7 +424,7 @@ let test_parse_keeper_chat_stream_request_rejects_duplicate_attachment_id () =
   let body =
     {|{"request_id":"kmsg-dup-id","name":"luna","message":"compare these","attachments":[{"id":"att-img","type":"image","name":"one.png","size":1,"mime_type":"image/png","data":"abc"},{"id":"att-img","type":"image","name":"two.png","size":1,"mime_type":"image/png","data":"def"}],"user_blocks":[{"type":"image","attachment_id":"att-img","name":"one.png","mime_type":"image/png","size":1}]}|}
   in
-  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
   | Ok _ -> fail "expected a duplicate attachment id to be rejected"
   | Error err ->
       check bool "duplicated id is named" true
@@ -426,9 +435,9 @@ let test_parse_keeper_chat_stream_request_rejects_duplicate_attachment_id () =
    references must be rejected instead of silently dropped. *)
 let test_parse_keeper_chat_stream_request_rejects_orphan_attachment () =
   let body =
-    {|{"request_id":"kmsg-orphan","name":"luna","message":"look at this","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,abc123"}]}|}
+    {|{"request_id":"kmsg-orphan","name":"luna","message":"look at this","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,YWJjMTIz"}]}|}
   in
-  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
   | Ok _ -> fail "expected an unreferenced attachment to be rejected"
   | Error err ->
       check string "validation message"
@@ -438,9 +447,9 @@ let test_parse_keeper_chat_stream_request_rejects_orphan_attachment () =
 let test_parse_keeper_chat_stream_request_rejects_orphan_attachment_with_empty_user_blocks
     () =
   let body =
-    {|{"request_id":"kmsg-orphan-empty","name":"luna","message":"look at this","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,abc123"}],"user_blocks":[{"type":"text","text":"look at this"}]}|}
+    {|{"request_id":"kmsg-orphan-empty","name":"luna","message":"look at this","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,YWJjMTIz"}],"user_blocks":[{"type":"text","text":"look at this"}]}|}
   in
-  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
   | Ok _ -> fail "expected an attachment not referenced by user_blocks to be rejected"
   | Error err ->
       check bool "orphan id is named" true (string_contains err {|"att-img"|})
@@ -449,7 +458,7 @@ let test_parse_keeper_chat_stream_request_names_every_orphan_attachment () =
   let body =
     {|{"request_id":"kmsg-orphans","name":"luna","message":"hello","attachments":[{"id":"att-one","type":"image","name":"one.png","size":1,"mime_type":"image/png","data":"abc"},{"id":"att-two","type":"image","name":"two.png","size":1,"mime_type":"image/png","data":"def"}],"user_blocks":[{"type":"image","attachment_id":"att-two","name":"two.png","mime_type":"image/png","size":1}]}|}
   in
-  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
   | Ok _ -> fail "expected the unreferenced attachment to be rejected"
   | Error err ->
       check bool "orphan id is named" true (string_contains err {|"att-one"|});
@@ -458,9 +467,9 @@ let test_parse_keeper_chat_stream_request_names_every_orphan_attachment () =
 
 let test_parse_keeper_chat_stream_request_accepts_duplicate_attachment_reference () =
   let body =
-    {|{"request_id":"kmsg-dup-ref","name":"luna","message":"compare these","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,abc123"}],"user_blocks":[{"type":"image","attachment_id":"att-img","name":"screen.png","mime_type":"image/png","size":1024},{"type":"image","attachment_id":"att-img","name":"screen.png","mime_type":"image/png","size":1024}]}|}
+    {|{"request_id":"kmsg-dup-ref","name":"luna","message":"compare these","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,YWJjMTIz"}],"user_blocks":[{"type":"image","attachment_id":"att-img","name":"screen.png","mime_type":"image/png","size":1024},{"type":"image","attachment_id":"att-img","name":"screen.png","mime_type":"image/png","size":1024}]}|}
   in
-  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
   | Ok payload ->
       check int "attachment preserved" 1 (List.length payload.attachments);
       check int "both references kept" 2 (List.length payload.user_blocks)
@@ -470,7 +479,7 @@ let test_parse_keeper_chat_stream_request_accepts_request_without_attachments ()
   let body =
     {|{"request_id":"kmsg-plain","name":"luna","message":"hello"}|}
   in
-  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
   | Ok payload ->
       check int "no attachments" 0 (List.length payload.attachments);
       check int "no user blocks" 0 (List.length payload.user_blocks)
@@ -485,7 +494,7 @@ let test_keeper_chat_operation_input_rejects_orphan_attachment () =
         name = "screen.png";
         size = 1024;
         mime_type = "image/png";
-        data = "data:image/png;base64,abc123";
+        data = "data:image/png;base64,YWJjMTIz";
         width = None;
         height = None;
       };
@@ -509,7 +518,7 @@ let test_keeper_chat_operation_input_accepts_referenced_attachment () =
         name = "screen.png";
         size = 1024;
         mime_type = "image/png";
-        data = "data:image/png;base64,abc123";
+        data = "data:image/png;base64,YWJjMTIz";
         width = None;
         height = None;
       };
@@ -546,7 +555,7 @@ let test_keeper_multimodal_input_converts_user_blocks_to_agent_core_blocks () =
         name = "screen.png";
         size = 1024;
         mime_type = "image/png";
-        data = "data:image/png;base64,abc123";
+        data = "data:image/png;base64,YWJjMTIz";
       width = None;
         height = None;
       };
@@ -560,8 +569,9 @@ let test_keeper_multimodal_input_converts_user_blocks_to_agent_core_blocks () =
       size = Some 1024;
     }
   in
+  let media_store = Agent_core.History.Memory_store.create () in
   match
-    Keeper_multimodal_input.to_agent_core_blocks ~attachments
+    Keeper_multimodal_input.to_agent_core_blocks ~media_store ~attachments
       [
         Keeper_multimodal_input.User_image (Attached media);
         Keeper_multimodal_input.User_text "describe this";
@@ -569,13 +579,12 @@ let test_keeper_multimodal_input_converts_user_blocks_to_agent_core_blocks () =
   with
   | Ok
       [
-        Agent_core.Types.Image { media_type; source };
+        Agent_core.Types.Image { media_type; source = Agent_core.Types.Stored stored };
         Agent_core.Types.Text text;
       ] ->
       check string "media type" "image/png" media_type;
-      check string "data" "abc123" (Agent_core.Types.media_source_payload source);
-      check bool "source type" true
-        (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64_kind);
+      check bool "the store holds the decoded attachment" true
+        (media_store.get stored = Ok "abc123");
       check string "text" "describe this" text
   | Ok _ -> fail "expected image then text AGENT_CORE blocks"
   | Error err -> fail ("expected AGENT_CORE block conversion: " ^ err)
@@ -706,7 +715,7 @@ let test_keeper_multimodal_parse_rejects_ambiguous_image_carriers () =
 
 let test_keeper_multimodal_reference_crosses_in_native_form () =
   match
-    Keeper_multimodal_input.to_agent_core_blocks ~attachments:[]
+    Keeper_multimodal_input.to_agent_core_blocks ~media_store:test_media_store ~attachments:[]
       [ Keeper_multimodal_input.User_image
           (Keeper_multimodal_input.Url_ref
              { value = "https://example.test/a.png"; mime_type = Some "image/png" })
@@ -777,7 +786,7 @@ let test_keeper_multimodal_reference_does_not_satisfy_attachment_referencing () 
     ; name = "screen.png"
     ; size = 1024
     ; mime_type = "image/png"
-    ; data = "data:image/png;base64,abc123"
+    ; data = "data:image/png;base64,YWJjMTIz"
     ; width = None
     ; height = None
     }
@@ -846,7 +855,7 @@ let test_keeper_multimodal_input_projects_text_documents_as_text () =
          document_input ~mime_type ~payload:(Base64.encode_string body)
        in
        match
-         Keeper_multimodal_input.to_agent_core_blocks ~attachments
+         Keeper_multimodal_input.to_agent_core_blocks ~media_store:test_media_store ~attachments
            [ Keeper_multimodal_input.User_document media ]
        with
        | Ok [ Agent_core.Types.Text projected ] ->
@@ -871,15 +880,14 @@ let test_keeper_multimodal_input_projects_text_documents_as_text () =
 let test_keeper_multimodal_input_preserves_binary_document () =
   let payload = Base64.encode_string "%PDF-1.7" in
   let attachments, media = document_input ~mime_type:"application/pdf" ~payload in
+  let media_store = Agent_core.History.Memory_store.create () in
   match
-    Keeper_multimodal_input.to_agent_core_blocks ~attachments
+    Keeper_multimodal_input.to_agent_core_blocks ~media_store ~attachments
       [ Keeper_multimodal_input.User_document media ]
   with
-  | Ok [ Agent_core.Types.Document { media_type; source } ] ->
+  | Ok [ Agent_core.Types.Document { media_type; source = Agent_core.Types.Stored stored } ] ->
       check string "media type" "application/pdf" media_type;
-      check string "base64 payload" payload (Agent_core.Types.media_source_payload source);
-      check bool "source type" true
-        (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64_kind)
+      check bool "the store holds the document bytes" true (media_store.get stored = Ok "%PDF-1.7")
   | Ok _ -> fail "PDF should remain one AGENT_CORE document block"
   | Error err -> fail ("PDF document projection failed: " ^ err)
 
@@ -888,7 +896,7 @@ let test_keeper_multimodal_input_rejects_invalid_text_document_payload () =
     document_input ~mime_type:"text/markdown" ~payload:"%%%"
   in
   (match
-     Keeper_multimodal_input.to_agent_core_blocks ~attachments
+     Keeper_multimodal_input.to_agent_core_blocks ~media_store:test_media_store ~attachments
        [ Keeper_multimodal_input.User_document media ]
    with
    | Ok _ -> fail "invalid textual document base64 should be rejected"
@@ -900,7 +908,7 @@ let test_keeper_multimodal_input_rejects_invalid_text_document_payload () =
     document_input ~mime_type:"text/html" ~payload:invalid_utf8
   in
   match
-    Keeper_multimodal_input.to_agent_core_blocks ~attachments
+    Keeper_multimodal_input.to_agent_core_blocks ~media_store:test_media_store ~attachments
       [ Keeper_multimodal_input.User_document media ]
   with
   | Ok _ -> fail "invalid UTF-8 textual document should be rejected"
@@ -912,7 +920,7 @@ let test_keeper_multimodal_input_rejects_invalid_text_document_payload () =
         document_input ~mime_type:"text/plain" ~payload:unsupported_control
       in
       match
-        Keeper_multimodal_input.to_agent_core_blocks ~attachments
+        Keeper_multimodal_input.to_agent_core_blocks ~media_store:test_media_store ~attachments
           [ Keeper_multimodal_input.User_document media ]
       with
       | Ok _ -> fail "text control characters should not be silently repaired"
@@ -929,7 +937,7 @@ let test_keeper_multimodal_input_accepts_mixed_case_data_url () =
         name = "screen.png";
         size = 1024;
         mime_type = "image/png";
-        data = "DATA:IMAGE/PNG;BASE64,abc123";
+        data = "DATA:IMAGE/PNG;BASE64,YWJjMTIz";
       width = None;
         height = None;
       };
@@ -943,15 +951,15 @@ let test_keeper_multimodal_input_accepts_mixed_case_data_url () =
       size = Some 1024;
     }
   in
+  let media_store = Agent_core.History.Memory_store.create () in
   match
-    Keeper_multimodal_input.to_agent_core_blocks ~attachments
+    Keeper_multimodal_input.to_agent_core_blocks ~media_store ~attachments
       [ Keeper_multimodal_input.User_image (Attached media) ]
   with
-  | Ok [ Agent_core.Types.Image { media_type; source } ] ->
+  | Ok [ Agent_core.Types.Image { media_type; source = Agent_core.Types.Stored stored } ] ->
       check string "media type" "image/png" media_type;
-      check string "data" "abc123" (Agent_core.Types.media_source_payload source);
-      check bool "source type" true
-        (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64_kind)
+      check bool "the store holds the decoded attachment" true
+        (media_store.get stored = Ok "abc123")
   | Ok _ -> fail "expected image AGENT_CORE block"
   | Error err -> fail ("expected mixed-case data URL conversion: " ^ err)
 
@@ -964,7 +972,7 @@ let test_keeper_multimodal_input_normalizes_inferred_data_url_mime () =
         name = "screen.png";
         size = 1024;
         mime_type = "";
-        data = "DATA:IMAGE/PNG;BASE64,abc123";
+        data = "DATA:IMAGE/PNG;BASE64,YWJjMTIz";
       width = None;
         height = None;
       };
@@ -978,15 +986,15 @@ let test_keeper_multimodal_input_normalizes_inferred_data_url_mime () =
       size = Some 1024;
     }
   in
+  let media_store = Agent_core.History.Memory_store.create () in
   match
-    Keeper_multimodal_input.to_agent_core_blocks ~attachments
+    Keeper_multimodal_input.to_agent_core_blocks ~media_store ~attachments
       [ Keeper_multimodal_input.User_image (Attached media) ]
   with
-  | Ok [ Agent_core.Types.Image { media_type; source } ] ->
+  | Ok [ Agent_core.Types.Image { media_type; source = Agent_core.Types.Stored stored } ] ->
       check string "media type" "image/png" media_type;
-      check string "data" "abc123" (Agent_core.Types.media_source_payload source);
-      check bool "source type" true
-        (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64_kind)
+      check bool "the store holds the decoded attachment" true
+        (media_store.get stored = Ok "abc123")
   | Ok _ -> fail "expected image AGENT_CORE block"
   | Error err -> fail ("expected inferred data URL MIME conversion: " ^ err)
 
@@ -999,7 +1007,7 @@ let test_keeper_multimodal_input_rejects_mismatched_data_url_mime () =
         name = "screen.png";
         size = 1024;
         mime_type = "image/png";
-        data = "data:image/png;base64,abc123";
+        data = "data:image/png;base64,YWJjMTIz";
       width = None;
         height = None;
       };
@@ -1014,7 +1022,7 @@ let test_keeper_multimodal_input_rejects_mismatched_data_url_mime () =
     }
   in
   match
-    Keeper_multimodal_input.to_agent_core_blocks ~attachments
+    Keeper_multimodal_input.to_agent_core_blocks ~media_store:test_media_store ~attachments
       [ Keeper_multimodal_input.User_image (Attached media) ]
   with
   | Ok _ -> fail "expected mismatched data URL MIME to be rejected"
@@ -1047,7 +1055,7 @@ let test_keeper_multimodal_input_rejects_malformed_data_url () =
     }
   in
   match
-    Keeper_multimodal_input.to_agent_core_blocks ~attachments
+    Keeper_multimodal_input.to_agent_core_blocks ~media_store:test_media_store ~attachments
       [ Keeper_multimodal_input.User_image (Attached media) ]
   with
   | Ok _ -> fail "expected malformed data URL to be rejected"
@@ -1076,7 +1084,7 @@ let test_keeper_stream_args_preserve_user_blocks () =
       ; name = "screen.png"
       ; size = 1024
       ; mime_type = "image/png"
-      ; data = "data:image/png;base64,abc123"
+      ; data = "data:image/png;base64,YWJjMTIz"
       ; width = None; height = None}
     ]
   in
@@ -1430,7 +1438,7 @@ let test_agent_core_tool_call_projection_preserves_adjacent_reasoning_groups () 
       failf "expected three projected tool calls, got %d" (List.length calls)
 
 let test_agent_core_interleaving_matches_masc_receipt_and_progress_facts () =
-  let open Agent_core.Types in
+  let open Llm_provider.Types in
   let thinking_before_read =
     Thinking { content = "inspect board first"; signature = Some "sig-read" }
   in
@@ -2597,7 +2605,7 @@ let test_keeper_stream_bridge_preserves_typed_media_source () =
               MediaDelta
                 {
                   media_type = "image/png";
-                  source = Base64 encoded_media;
+                  source = Llm_provider.Types.Base64 encoded_media;
                 };
           };
         ContentBlockStop { index = 0 };
@@ -2642,7 +2650,7 @@ let test_keeper_stream_bridge_rejects_media_delta_for_tool_block () =
               MediaDelta
                 {
                   media_type = "image/png";
-                  source = Base64 (Base64.encode_string "image");
+                  source = Llm_provider.Types.Base64 (Base64.encode_string "image");
                 };
           };
         ContentBlockDelta { index = 2; delta = InputJsonDelta "{\"q\":\"ok\"}" };
@@ -2689,7 +2697,7 @@ let test_keeper_stream_bridge_surfaces_bad_media_base64 () =
             index = 0;
             delta =
               MediaDelta
-                { media_type = "image/png"; source = Base64 "not base64!" };
+                { media_type = "image/png"; source = Llm_provider.Types.Base64 "not base64!" };
           };
         ContentBlockStop { index = 0 };
       ]
@@ -2721,7 +2729,7 @@ let test_keeper_stream_bridge_rejects_oversize_media_payload () =
                 MediaDelta
                   {
                     media_type = "image/png";
-                    source = Base64 oversized;
+                    source = Llm_provider.Types.Base64 oversized;
                   };
             };
           ContentBlockStop { index = 0 };
@@ -2754,7 +2762,7 @@ let test_keeper_stream_bridge_suppresses_media_after_oversize () =
                 MediaDelta
                   {
                     media_type = "image/png";
-                    source = Base64 oversized;
+                    source = Llm_provider.Types.Base64 oversized;
                   };
             };
           ContentBlockDelta
@@ -2764,7 +2772,7 @@ let test_keeper_stream_bridge_suppresses_media_after_oversize () =
                 MediaDelta
                   {
                     media_type = "image/png";
-                    source = Base64 "QQ==";
+                    source = Llm_provider.Types.Base64 "QQ==";
                   };
             };
           ContentBlockStop { index = 0 };
@@ -2815,7 +2823,7 @@ let test_keeper_stream_bridge_joins_many_media_chunks_in_order () =
   let open Agent_core.Types in
   let raw_media = String.init 768 (fun i -> Char.chr (i * 7 mod 256)) in
   let encoded = Base64.encode_string raw_media in
-  let chunks = List.init (String.length encoded / 4) (fun i -> Base64 (String.sub encoded (i * 4) 4)) in
+  let chunks = List.init (String.length encoded / 4) (fun i -> Llm_provider.Types.Base64 (String.sub encoded (i * 4) 4)) in
   let events =
     translate_agent_core_stream_events
       (bridge_media_deltas ~index:0 chunks @ [ ContentBlockStop { index = 0 } ])
@@ -2830,8 +2838,8 @@ let test_keeper_stream_bridge_rejects_last_media_chunk_over_the_cap () =
     let open Agent_core.Types in
     let cap = Keeper_chat_media_store.max_wire_bytes () in
     let width = 8 in
-    let at_cap = List.init (cap / width) (fun _ -> Base64 (String.make width 'A')) in
-    let crossing = Base64 (String.make (cap mod width + 1) 'A') in
+    let at_cap = List.init (cap / width) (fun _ -> Llm_provider.Types.Base64 (String.make width 'A')) in
+    let crossing = Llm_provider.Types.Base64 (String.make (cap mod width + 1) 'A') in
     let events =
       translate_agent_core_stream_events
         (bridge_media_deltas ~index:0 (at_cap @ [ crossing ])
@@ -3881,7 +3889,7 @@ let test_runtime_run_blocks_appends_multimodal_input_to_agent_core_agent () =
   Eio.Switch.run
   @@ fun sw ->
   let config =
-    Runtime_agent.default_config
+    Runtime_agent.default_config ~media_store:test_media_store
       ~name:"multimodal-runtime-proof"
       ~provider_cfg:(vision_provider_cfg ())
       ~system_prompt:""
@@ -3896,7 +3904,7 @@ let test_runtime_run_blocks_appends_multimodal_input_to_agent_core_agent () =
   let blocks =
     [
       Agent_core.Types.Text "Inspect this";
-      Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "img");
+      Agent_core.Types.image_block ~media_type:"image/png" ~source:((stored_source ~media_type:"image/png" "img"));
     ]
   in
   (match
@@ -3918,13 +3926,12 @@ let test_runtime_run_blocks_appends_multimodal_input_to_agent_core_agent () =
           match content with
           | [
               Agent_core.Types.Text text;
-              Agent_core.Types.Image { media_type; source };
+              Agent_core.Types.Image { media_type; source = Agent_core.Types.Stored stored };
             ] ->
               check string "text preserved" "Inspect this" text;
               check string "image media type" "image/png" media_type;
-              check string "image data" "img" (Agent_core.Types.media_source_payload source);
-              check bool "source type" true
-                (Agent_core.Types.media_source_kind_of_source source = Agent_core.Types.Base64_kind)
+              check bool "the history names the stored image" true
+                (stored = Agent_core.History.stored_of_raw "img")
           | _ -> fail "stored user input lost multimodal block shape")
       | _ -> fail "missing appended AGENT_CORE user message")
 
@@ -3949,7 +3956,7 @@ let test_runtime_multimodal_gate_model_caps_fail_closed () =
       model_caps
   in
   let blocks =
-    [ Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc") ]
+    [ Agent_core.Types.image_block ~media_type:"image/png" ~source:((stored_source ~media_type:"image/png" "abc")) ]
   in
   match
     Runtime_agent.For_testing.validate_content_blocks_against_capabilities
@@ -3971,8 +3978,8 @@ let test_runtime_multimodal_gate_lists_required_modalities () =
   let blocks =
     [
       Agent_core.Types.Text "describe these";
-      Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc");
-      Agent_core.Types.audio_block ~media_type:"audio/wav" ~source:(Agent_core.Types.Base64 "def");
+      Agent_core.Types.image_block ~media_type:"image/png" ~source:((stored_source ~media_type:"image/png" "abc"));
+      Agent_core.Types.audio_block ~media_type:"audio/wav" ~source:((stored_source ~media_type:"audio/wav" "def"));
     ]
   in
   check (list string) "required modalities" [ "image"; "audio" ]
@@ -3985,7 +3992,7 @@ let test_runtime_multimodal_gate_includes_initial_messages () =
         content =
           [
             Agent_core.Types.Text "previous image turn";
-            Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc");
+            Agent_core.Types.image_block ~media_type:"image/png" ~source:((stored_source ~media_type:"image/png" "abc"));
           ];
         name = None;
         tool_call_id = None;
@@ -4021,7 +4028,7 @@ let test_runtime_multimodal_gate_includes_initial_messages () =
 
 let test_runtime_multimodal_gate_rejects_unsupported_image () =
   let blocks =
-    [ Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc") ]
+    [ Agent_core.Types.image_block ~media_type:"image/png" ~source:((stored_source ~media_type:"image/png" "abc")) ]
   in
   match
     Runtime_agent.For_testing.validate_content_blocks_against_capabilities
@@ -4048,7 +4055,7 @@ let test_runtime_multimodal_gate_allows_supported_image () =
   let blocks =
     [
       Agent_core.Types.Text "describe this";
-      Agent_core.Types.image_block ~media_type:"image/png" ~source:(Agent_core.Types.Base64 "abc");
+      Agent_core.Types.image_block ~media_type:"image/png" ~source:((stored_source ~media_type:"image/png" "abc"));
     ]
   in
   match
@@ -4066,7 +4073,7 @@ let test_runtime_multimodal_gate_requires_multimodal_for_document () =
     [
       Agent_core.Types.document_block
         ~media_type:"application/pdf"
-        ~source:(Agent_core.Types.Base64 "abc");
+        ~source:((stored_source ~media_type:"application/pdf" "abc"));
     ]
   in
   let rejected =

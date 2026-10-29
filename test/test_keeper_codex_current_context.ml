@@ -173,7 +173,7 @@ default = "codex.context"
       ~turn_start
       ?carried_front_seed ?librarian_front
       ?on_model_input_window_observation
-      ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_task_reference ?official_client_continuation
+      ~pre_tool_rejects:(ref []) ~base_path:root ~media_store:(Tool_blob_media_store.of_base_path ~base_path:root) ~goal ?official_task_reference ?official_client_continuation
       ?on_official_client_tool_boundary
       ~goal_blocks:None ~system_prompt:instructions ~tools
       ~initial_messages

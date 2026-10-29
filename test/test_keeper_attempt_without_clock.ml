@@ -67,7 +67,7 @@ max-context = 200000
       ~system_prompt:"Attempt without a clock."
       ~runtime_id:"listener.sample"
       ~keeper_name:"attempt-without-clock"
-      ~base_path:(Filename.get_temp_dir_name ())
+      ~base_path:(Filename.get_temp_dir_name ()) ~media_store:(Tool_blob_media_store.of_base_path ~base_path:(Filename.get_temp_dir_name ()))
       ~agent_core_tools:[]
       ~goal:"this must not be sent"
       ~on_runtime_attempt_error:(fun ~runtime_id:_ ~attempt:_ ~dispatch:_ error ->
@@ -133,7 +133,7 @@ let test_a_process_with_only_the_child_process_clock_refuses_the_attempt () =
          (Exact_output_fixture.openai_response (`Assoc [ "answer", `String "unreached" ])))
   in
   let config =
-    Runtime_agent.default_config
+    Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
       ~name:"child-process-clock-only"
       ~provider_cfg:
         (Llm_provider.Provider_config.make

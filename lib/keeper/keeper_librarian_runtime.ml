@@ -9,8 +9,10 @@ let input_trace_id (inp : Keeper_librarian.input) =
   Ids.Turn_ref.trace_id inp.turn_ref
 ;;
 
+(* The Librarian's answer request is a rendered prompt sent straight to a
+   provider. *)
 let message role text =
-  Agent_core.Types.make_message ~role [ Agent_core.Types.Text text ]
+  Llm_provider.Types.make_message ~role [ Llm_provider.Types.Text text ]
 ;;
 
 type slot_refusal =
@@ -826,23 +828,23 @@ let exact_execution_error ~declared_http ~excluded_http ~declared_cli ~semantic_
    that text back out of the fitted list. Anything else is a structural
    drift this lane has never produced, so the walk is skipped with a log
    rather than inventing an input. *)
-let cli_prompt_of_messages ~keeper_id (messages : Agent_core.Types.message list) =
+let cli_prompt_of_messages ~keeper_id (messages : Llm_provider.Types.message list) =
   match messages with
-  | [ { Agent_core.Types.content = [ Agent_core.Types.Text prompt ]; _ } ] ->
+  | [ { Llm_provider.Types.content = [ Llm_provider.Types.Text prompt ]; _ } ] ->
     Some prompt
   | ( []
     | _ :: _ :: _
-    | [ { Agent_core.Types.content = []; _ } ]
-    | [ { Agent_core.Types.content = _ :: _ :: _; _ } ]
-    | [ { Agent_core.Types.content =
-            [ ( Agent_core.Types.Thinking _
-              | Agent_core.Types.ReasoningDetails _
-              | Agent_core.Types.RedactedThinking _
-              | Agent_core.Types.ToolUse _
-              | Agent_core.Types.ToolResult _
-              | Agent_core.Types.Image _
-              | Agent_core.Types.Document _
-              | Agent_core.Types.Audio _ ) ]
+    | [ { Llm_provider.Types.content = []; _ } ]
+    | [ { Llm_provider.Types.content = _ :: _ :: _; _ } ]
+    | [ { Llm_provider.Types.content =
+            [ ( Llm_provider.Types.Thinking _
+              | Llm_provider.Types.ReasoningDetails _
+              | Llm_provider.Types.RedactedThinking _
+              | Llm_provider.Types.ToolUse _
+              | Llm_provider.Types.ToolResult _
+              | Llm_provider.Types.Image _
+              | Llm_provider.Types.Document _
+              | Llm_provider.Types.Audio _ ) ]
       ; _
       } ] ) as messages ->
     Log.Keeper.warn

@@ -1299,9 +1299,9 @@ let test_goal_and_task_read_deliver_full_png () =
       | Some blocks -> blocks | None -> Alcotest.fail "bridge erased image blocks" in
     Alcotest.(check bool) "bridge preserves complete PNG" true
       (List.exists (function
-         | Agent_core.Types.Image { media_type="image/png"; source = Base64 data } -> data = encoded
+         | Llm_provider.Types.Image { media_type="image/png"; source = Llm_provider.Types.Base64 data } -> data = encoded
          | _ -> false) actual_blocks);
-    let message role content : Agent_core.Types.message =
+    let message role content : Llm_provider.Types.message =
       { origin = Llm_provider.Types.Conversation;  role; content; name=None; tool_call_id=None; metadata=[] } in
     let messages =
       [ message User [ Text "Inspect the artifact visually" ]
@@ -1377,7 +1377,7 @@ let test_goal_and_task_inspect_real_pdf () =
        let pages = member "pages" data |> to_list in
        Alcotest.(check int) "all page metadata delivered" 3 (List.length pages);
        let images = List.filter_map (function
-         | Llm_provider.Types.Image {media_type="image/png";source=Base64 data} ->
+         | Llm_provider.Types.Image {media_type="image/png";source=Llm_provider.Types.Base64 data} ->
            Some (Base64.decode_exn data)
          | _ -> None) blocks in
        Alcotest.(check int) "all three parsed pages actually rendered" 3 (List.length images);

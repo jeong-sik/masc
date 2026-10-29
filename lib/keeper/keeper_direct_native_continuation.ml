@@ -204,7 +204,9 @@ let retired_evidence binding call disposition =
 let retains_settled_results binding (call : Native.t) messages results =
   let* seed = load_checkpoint binding call.seed_checkpoint in
   Ok (Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-    Keeper_native_result_retention.retains ~seed:seed.messages ~messages ~results))
+    Keeper_native_result_retention.retains
+      ~media_store:(Tool_blob_media_store.of_base_path ~base_path:binding.base_path)
+      ~seed:seed.messages ~messages ~results))
 
 let load ~binding =
   let* observed = state binding in

@@ -141,7 +141,7 @@ let cause_of_core_error (error : Agent_core.Error.t) =
   | Agent_core.Error.Config _
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
   | Agent_core.Error.Internal _
   | Agent_core.Error.Internal_carried _ -> unnamed_core_cause error
 ;;

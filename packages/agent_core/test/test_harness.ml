@@ -75,7 +75,7 @@ let test_adversarial_no_tool_execution () =
           { id = "test"
           ; model = "test"
           ; stop_reason = Types.EndTurn
-          ; content = [ Types.Text "ok" ]
+          ; content = [ Llm_provider.Types.Text "ok" ]
           ; usage = None
           ; telemetry = None
           }

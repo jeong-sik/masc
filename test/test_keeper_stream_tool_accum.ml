@@ -85,7 +85,7 @@ let media_delta ~index data =
     { index
     ; delta =
         Agent_core.Types.MediaDelta
-          { media_type = "image/png"; source = Agent_core.Types.Base64 data }
+          { media_type = "image/png"; source = Agent_core.Llm_provider.Types.Base64 data }
     }
 
 let test_fragments_concatenate_in_order () =
@@ -1249,7 +1249,7 @@ let test_max_tokens_keeps_live_and_durable_tools_aligned () =
           events
       in
       (match S.finalize_stream_acc producer with
-       | Ok { content = [ Agent_core.Types.Text "report draft" ];
+       | Ok { content = [ Agent_core.Llm_provider.Types.Text "report draft" ];
               stop_reason = Agent_core.Types.MaxTokens; _ } -> ()
        | Ok _ -> fail (label ^ ": cut tool entered canonical response")
        | Error _ -> fail (label ^ ": producer lost surviving text"));
@@ -1338,7 +1338,7 @@ let recovered_source_map registered_names calls =
       (fun _ -> Ok {Agent_core.Types.content="not executed"; content_blocks=None; _meta=None}))
     registered_names in
   let blocks = List.map (fun (id, name, input) ->
-    Agent_core.Types.ToolUse {id; name; input}) calls in
+    Agent_core.Llm_provider.Types.ToolUse {id; name; input}) calls in
   let admission = Agent_core.Agent_tools.admit_tool_use_names
     (Agent_core.Agent_tools.build_index tools) blocks in
   admission.tool_source_map

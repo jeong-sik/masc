@@ -334,17 +334,17 @@ let make_hooks
            variant must be a compile-time decision here, not a silent drop. *)
         (let visible_text =
            response.content
-           |> List.filter_map (fun (block : Agent_core.Types.content_block) ->
+           |> List.filter_map (fun (block : Llm_provider.Types.content_block) ->
                   match block with
-                  | Agent_core.Types.Text text -> Some text
-                  | Agent_core.Types.Thinking _
-                  | Agent_core.Types.ReasoningDetails _
-                  | Agent_core.Types.RedactedThinking _
-                  | Agent_core.Types.ToolUse _
-                  | Agent_core.Types.ToolResult _
-                  | Agent_core.Types.Image _
-                  | Agent_core.Types.Document _
-                  | Agent_core.Types.Audio _ -> None)
+                  | Llm_provider.Types.Text text -> Some text
+                  | Llm_provider.Types.Thinking _
+                  | Llm_provider.Types.ReasoningDetails _
+                  | Llm_provider.Types.RedactedThinking _
+                  | Llm_provider.Types.ToolUse _
+                  | Llm_provider.Types.ToolResult _
+                  | Llm_provider.Types.Image _
+                  | Llm_provider.Types.Document _
+                  | Llm_provider.Types.Audio _ -> None)
            |> String.concat "\n"
          in
          Keeper_turn_preview.note_text

@@ -41,7 +41,7 @@ let result (_,acc)=match Acc.finalize_stream_acc acc with
 let fails s=match Acc.finalize_stream_acc(snd s)with
   | Error _->() | Ok _->Alcotest.fail "contradictory stream was accepted"
 let texts response=List.filter_map(function Thinking{content;_}->Some content
-  | Text _|RedactedThinking _|ReasoningDetails _|ToolUse _|ToolResult _|Image _|Document _|Audio _->None)response.content
+  | Llm_provider.Types.Text _| Llm_provider.Types.RedactedThinking _| Llm_provider.Types.ReasoningDetails _| Llm_provider.Types.ToolUse _| Llm_provider.Types.ToolResult _| Llm_provider.Types.Image _| Llm_provider.Types.Document _| Llm_provider.Types.Audio _->None)response.content
 let check expected s=Alcotest.(check(list string))"canonical reasoning"expected(texts(result s))
 let persisted_input response =
   let response=Complete_common.patch_telemetry response ~config None in
@@ -49,12 +49,18 @@ let persisted_input response =
     | Some r->r | None->Alcotest.fail "response cache rejected stream" in
   let message=match assistant_message_of_response restored with Ok m->m
     | Error e->Alcotest.fail(show_assistant_message_error e) in
+  let media_store=Agent_core.History.Memory_store.create () in
+  let message=match Agent_core.History.of_wire_message media_store message with Ok m->m
+    | Error e->Alcotest.fail(Agent_core.History.show_media_error e) in
   let path=Filename.temp_file "responses-sse-history-" ".json" in
   let message=Fun.protect ~finally:(fun()->Sys.remove path)(fun()->
     Out_channel.with_open_bin path(fun ch->output_string ch
       (Agent_core.Checkpoint.message_to_json message |> Yojson.Safe.to_string));
     let json=In_channel.with_open_bin path In_channel.input_all |> Yojson.Safe.from_string in
-    match Agent_core.Checkpoint.message_of_json json with Ok m->m|Error _->Alcotest.fail "checkpoint message refused") in
+    match Agent_core.Checkpoint.message_of_json json with
+    | Error _->Alcotest.fail "checkpoint message refused"
+    | Ok m->(match Agent_core.History.to_wire_message media_store m with Ok m->m
+      | Error e->Alcotest.fail(Agent_core.History.show_media_error e))) in
   let tool=make_message ~role:Tool[ToolResult{tool_use_id="call";content="receipt";outcome=Tool_succeeded
     ;json=None;content_blocks=None}] in
   Backend_openai_responses.build_request ~config

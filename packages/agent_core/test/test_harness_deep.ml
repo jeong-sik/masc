@@ -40,7 +40,7 @@ let test_adversarial_error_contains_none () =
           { id = "ok"
           ; model = "m"
           ; stop_reason = Types.EndTurn
-          ; content = [ Types.Text "fine" ]
+          ; content = [ Llm_provider.Types.Text "fine" ]
           ; usage = None
           ; telemetry = None
           }
@@ -59,7 +59,7 @@ let test_adversarial_graceful_error_ok_result () =
           { id = "ok"
           ; model = "m"
           ; stop_reason = Types.EndTurn
-          ; content = [ Types.Text "ok" ]
+          ; content = [ Llm_provider.Types.Text "ok" ]
           ; usage = None
           ; telemetry = None
           }

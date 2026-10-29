@@ -8,7 +8,13 @@
 
 type t
 
-val create : net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t -> model:Types.model -> t
+(** [media_store] is passed to {!Agent.create}, which documents why it has
+    no default. *)
+val create
+  :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> media_store:History.media_store
+  -> model:Types.model
+  -> t
 
 (** {2 Configuration} *)
 

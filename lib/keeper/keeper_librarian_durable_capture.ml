@@ -222,23 +222,24 @@ let tool_observations messages =
     List.fold_left
       (fun (calls_rev, results) (message : Agent_core.Types.message) ->
          List.fold_left
-           (fun (calls_rev, results) block ->
-              match Agent_core.Canonical_tool.tool_call_of_block block with
-              | Some call -> (call :: calls_rev), results
-              | None ->
-                (match Agent_core.Canonical_tool.tool_result_of_block block with
-                 | None -> calls_rev, results
-                 | Some result ->
-                   calls_rev, Tool_map.add result.call_id result.outcome results))
+           (fun (calls_rev, results) (block : Agent_core.Types.content_block) ->
+              match block with
+              | Agent_core.Types.ToolUse { id; name; _ } -> ((id, name) :: calls_rev), results
+              | Agent_core.Types.ToolResult { tool_use_id; outcome; _ } ->
+                calls_rev, Tool_map.add tool_use_id outcome results
+              | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+              | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+              | Agent_core.Types.Image _ | Agent_core.Types.Document _
+              | Agent_core.Types.Audio _ -> calls_rev, results)
            (calls_rev, results)
            message.content)
       ([], Tool_map.empty)
       messages
   in
   List.rev_map
-    (fun (call : Agent_core.Canonical_tool.provider_tool_call) ->
+    (fun (call_id, name) ->
        let outcome =
-         match Tool_map.find_opt call.call_id results with
+         match Tool_map.find_opt call_id results with
          | None -> Keeper_librarian.Unknown
          | Some result ->
            if Agent_core.Types.tool_result_outcome_is_error result
@@ -246,7 +247,7 @@ let tool_observations messages =
            else Keeper_librarian.Succeeded
        in
        ({ tool_name =
-            Keeper_tool_descriptor_resolution.canonical_tool_name call.name
+            Keeper_tool_descriptor_resolution.canonical_tool_name name
         ; outcome
         }
          : Keeper_librarian.tool_observation))

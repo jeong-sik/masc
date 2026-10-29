@@ -179,6 +179,7 @@ type t =
   | Serialization of serialization_error
   | Io of io_error
   | Orchestration of orchestration_error
+  | Media of History.media_error
   | Internal of string
   | Internal_carried of
       { message : string
@@ -197,6 +198,7 @@ type category =
   | Serialization_category
   | Io_category
   | Orchestration_category
+  | Media_category
   | Internal_category
 
 let category : t -> category = function
@@ -208,6 +210,7 @@ let category : t -> category = function
   | Serialization _ -> Serialization_category
   | Io _ -> Io_category
   | Orchestration _ -> Orchestration_category
+  | Media _ -> Media_category
   | Internal _ | Internal_carried _ -> Internal_category
 ;;
 
@@ -220,6 +223,7 @@ let category_label : category -> string = function
   | Serialization_category -> "serialization"
   | Io_category -> "io"
   | Orchestration_category -> "orchestration"
+  | Media_category -> "media"
   | Internal_category -> "internal"
 ;;
 
@@ -351,6 +355,24 @@ let orchestration_error_to_string = function
   | DiscoveryFailed r -> Printf.sprintf "Agent discovery failed for %s: %s" r.url r.detail
 ;;
 
+let media_error_to_string : History.media_error -> string = function
+  | Store_failed { detail } -> Printf.sprintf "Media store failed: %s" detail
+  | Missing_bytes stored ->
+    Printf.sprintf
+      "Media store holds no bytes for sha256 %s (%d bytes)"
+      stored.sha256
+      stored.bytes
+  | Invalid_base64 { media_type; detail } ->
+    Printf.sprintf "%s payload is not padded standard base64: %s" media_type detail
+  | Digest_mismatch { expected; actual } ->
+    Printf.sprintf
+      "Media store returned sha256 %s (%d bytes) for sha256 %s (%d bytes)"
+      actual.sha256
+      actual.bytes
+      expected.sha256
+      expected.bytes
+;;
+
 let to_string = function
   | Api err -> Retry.error_message err
   | Provider err -> Llm_provider.Error.to_string err
@@ -360,6 +382,7 @@ let to_string = function
   | Serialization err -> serialization_error_to_string err
   | Io err -> io_error_to_string err
   | Orchestration err -> orchestration_error_to_string err
+  | Media err -> media_error_to_string err
   | Internal msg | Internal_carried { message = msg; _ } ->
     Printf.sprintf "Internal error: %s" msg
 ;;
@@ -400,7 +423,7 @@ let is_retryable = function
   | Mcp (InitializeFailed _ | ToolListFailed _ | ToolCallFailed _ | HttpTransportFailed _)
     -> true
   | Mcp (ServerStartFailed _) -> false
-  | Agent _ | Config _ | Serialization _ | Io _ | Orchestration _ | Internal _
+  | Agent _ | Config _ | Serialization _ | Io _ | Orchestration _ | Media _ | Internal _
   | Internal_carried _ -> false
 ;;
 

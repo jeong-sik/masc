@@ -1,12 +1,30 @@
 module String_set = Set_util.StringSet
 
-module Artifact_reference_set = Set.Make (struct
-  type t = Tool_output.artifact_ref
+(* A live blob is named either by a tool artifact reference, which carries
+   the media type a manifest is recognised by, or by a history [Stored] media
+   source (RFC-0476), which names only digest and length. *)
+type live_reference =
+  | Artifact of Tool_output.artifact_ref
+  | History_media of Agent_core_base.History.stored
+
+let live_reference_sha256 = function
+  | Artifact reference -> reference.Tool_output.sha256
+  | History_media stored -> stored.Agent_core_base.History.sha256
+;;
+
+module Live_reference_set = Set.Make (struct
+  type t = live_reference
 
   let compare left right =
-    match String.compare left.Tool_output.sha256 right.Tool_output.sha256 with
-    | 0 -> String.compare left.mime right.mime
-    | order -> order
+    match left, right with
+    | Artifact left, Artifact right ->
+      (match String.compare left.Tool_output.sha256 right.Tool_output.sha256 with
+       | 0 -> String.compare left.mime right.mime
+       | order -> order)
+    | History_media left, History_media right ->
+      String.compare left.Agent_core_base.History.sha256 right.sha256
+    | Artifact _, History_media _ -> -1
+    | History_media _, Artifact _ -> 1
 end)
 
 type mode =
@@ -142,7 +160,7 @@ let add_references ~path ~line references text =
       Tool_output.encode_for_agent_core (Tool_output.Stored reference)
     in
     if String.equal text canonical
-    then Ok (Artifact_reference_set.add reference references)
+    then Ok (Live_reference_set.add (Artifact reference) references)
     else
       Error
         (Malformed_artifact_reference
@@ -179,12 +197,23 @@ let rec references_in_json
   | (`Assoc fields as json) ->
     (match Tool_output.normalized_artifact_ref_of_json json with
      | Tool_output.Decoded_normalized_artifact_ref reference ->
-       Ok (Artifact_reference_set.add reference references)
+       Ok (Live_reference_set.add (Artifact reference) references)
      | Tool_output.Invalid_normalized_artifact_ref { detail } ->
        Error
          (Malformed_structured_artifact_reference
             { path; line; detail })
      | Tool_output.Not_normalized_artifact_ref ->
+       (match Agent_core_base.History.stored_source_of_json json with
+        | Agent_core_base.History.Decoded_stored_source { stored; media_type = _ } ->
+          Ok (Live_reference_set.add (History_media stored) references)
+        | Agent_core_base.History.Invalid_stored_source error ->
+          Error
+            (Malformed_structured_artifact_reference
+               { path
+               ; line
+               ; detail = Agent_core_base.History.decode_error_to_string error
+               })
+        | Agent_core_base.History.Not_stored_source ->
        List.fold_left
          (fun result (key, value) ->
             match context, key with
@@ -201,7 +230,7 @@ let rec references_in_json
                   current
                   value))
          (Ok references)
-         fields)
+         fields))
   | `List values ->
     List.fold_left
       (fun result value ->
@@ -235,7 +264,7 @@ let references_in_file ~ownership_root path =
       references_in_json
         ~path
         ~line:1
-        Artifact_reference_set.empty
+        Live_reference_set.empty
         (Yojson.Safe.from_string payload)
     with
     | Yojson.Json_error _ ->
@@ -273,7 +302,7 @@ let references_in_file ~ownership_root path =
                         line))
               in
                line_number + 1, next)
-            (1, Ok Artifact_reference_set.empty)
+            (1, Ok Live_reference_set.empty)
        |> snd
 ;;
 
@@ -313,7 +342,7 @@ let references_in_chat_operation_store ~ownership_root path =
          List.fold_left
            (fun result operation ->
               fold_json result (Keeper_chat_operation.to_json operation))
-           (Ok Artifact_reference_set.empty)
+           (Ok Live_reference_set.empty)
            chat_operations
        in
        let with_batch_inputs =
@@ -415,7 +444,7 @@ let unix_reason fn arg code =
   Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
 ;;
 
-let live_references ~base_path ~board_posts_file =
+let scan_live_references ~base_path ~board_posts_file =
   let read_directory path =
     let inspect () =
       match
@@ -485,7 +514,7 @@ let live_references ~base_path ~board_posts_file =
              operations, semantic executions, and prepared Gate checkpoints
              through the SQLite store reader rather than raw JSONL text scan. *)
           Result.map
-            (Artifact_reference_set.union references)
+            (Live_reference_set.union references)
             (references_in_chat_operation_store ~ownership_root:base_path path)
         else if Common.is_chat_operation_store_sidecar_file basename
         then
@@ -519,7 +548,7 @@ let live_references ~base_path ~board_posts_file =
                     }))
         else
           Result.map
-            (Artifact_reference_set.union references)
+            (Live_reference_set.union references)
             (references_in_file ~ownership_root:base_path path)
         | Unix.S_LNK ->
           Error
@@ -570,7 +599,7 @@ let live_references ~base_path ~board_posts_file =
   |> List.fold_left
        (fun result source ->
           Result.bind result (fun progress -> scan_source progress source))
-       (Ok Artifact_reference_set.empty)
+       (Ok Live_reference_set.empty)
 ;;
 
 let expand_artifact_manifests ~store references =
@@ -585,7 +614,7 @@ let expand_artifact_manifests ~store references =
     | reference :: rest
       when String_set.mem reference.Tool_output.sha256 expanded ->
       expand expanded references rest
-    | reference :: rest ->
+    | (reference : Tool_output.artifact_ref) :: rest ->
       let sha256 = reference.Tool_output.sha256 in
       let expanded = String_set.add sha256 expanded in
       (match Tool_blob_store.fetch store ~sha256 with
@@ -611,9 +640,9 @@ let expand_artifact_manifests ~store references =
             let references, added =
               List.fold_left
                 (fun (references, added) child ->
-                   if Artifact_reference_set.mem child references
+                   if Live_reference_set.mem (Artifact child) references
                    then references, added
-                   else Artifact_reference_set.add child references, child :: added)
+                   else Live_reference_set.add (Artifact child) references, child :: added)
                 (references, [])
                 artifact_refs
             in
@@ -625,7 +654,16 @@ let expand_artifact_manifests ~store references =
           | Tool_output.Invalid_artifact_manifest { detail } ->
             Error (Artifact_manifest_invalid { sha256; detail })))
   in
-  expand String_set.empty references (Artifact_reference_set.elements references)
+  let artifacts =
+    Live_reference_set.fold
+      (fun reference artifacts ->
+         match reference with
+         | Artifact reference -> reference :: artifacts
+         | History_media _ -> artifacts)
+      references
+      []
+  in
+  expand String_set.empty references (List.rev artifacts)
 ;;
 
 let candidate_snapshot_to_json candidates =
@@ -752,15 +790,35 @@ let save_candidate_snapshot ~base_path candidates =
     Error (Candidate_snapshot_write_failed { path; detail })
 ;;
 
+type live_references = Live_reference_set.t
+
+let live_references ~base_path ~board_posts_file =
+  let open Result.Syntax in
+  let* direct_live = scan_live_references ~base_path ~board_posts_file in
+  expand_artifact_manifests ~store:(Tool_blob_store.create ~base_path) direct_live
+;;
+
+(* History sources sort after every artifact and among themselves by digest,
+   so the first element at or past [sha256] is the only one that can match. *)
+let holds_history_media references ~sha256 =
+  match
+    Live_reference_set.find_first_opt
+      (function
+        | Artifact _ -> false
+        | History_media stored -> String.compare stored.Agent_core_base.History.sha256 sha256 >= 0)
+      references
+  with
+  | Some (History_media stored) -> String.equal stored.Agent_core_base.History.sha256 sha256
+  | Some (Artifact _) | None -> false
+;;
+
 let run ~base_path ~board_posts_file ~mode =
   let open Result.Syntax in
   let store = Tool_blob_store.create ~base_path in
-  let* direct_live = live_references ~base_path ~board_posts_file in
-  let* live_references = expand_artifact_manifests ~store direct_live in
+  let* live_references = live_references ~base_path ~board_posts_file in
   let live =
-    Artifact_reference_set.fold
-      (fun reference hashes ->
-         String_set.add reference.Tool_output.sha256 hashes)
+    Live_reference_set.fold
+      (fun reference hashes -> String_set.add (live_reference_sha256 reference) hashes)
       live_references
       String_set.empty
   in

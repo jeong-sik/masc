@@ -65,7 +65,8 @@ module Behavioral = struct
       match result with
       | Ok resp ->
         List.filter_map
-          (function
+          (fun (block : Llm_provider.Types.content_block) ->
+            match block with
             | Text s -> Some s
             | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
             | Image _ | Document _ | Audio _ -> None)

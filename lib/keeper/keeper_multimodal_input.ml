@@ -622,7 +622,13 @@ let text_block_of_document
                 metadata
                 text))
 
-let document_block_to_agent_core ~attachments media =
+(* A user attachment enters history here: its bytes go to the store and the
+   block keeps the reference. *)
+let stored_block ~media_store wire =
+  Agent_core.History.of_wire_block media_store wire
+  |> Result.map_error (fun error -> Agent_core.Error.to_string (Agent_core.Error.Media error))
+
+let document_block_to_agent_core ~media_store ~attachments media =
   match resolve_media_payload ~attachments "document" media with
   | Error _ as error -> error
   | Ok (att, media_type, data) ->
@@ -634,9 +640,9 @@ let document_block_to_agent_core ~attachments media =
              ~media_type
              data
        | Preserve_document ->
-           Ok
-             (Agent_core.Types.document_block ~media_type
-                ~source:(Agent_core.Types.Base64 data)))
+           stored_block ~media_store
+             (Llm_provider.Types.document_block ~media_type
+                ~source:(Llm_provider.Types.Base64 data)))
 
 (* A reference image crosses as the native carrier form: the source's [Url] or
    [File_id] constructor holds the URL or file id verbatim and tells the
@@ -650,7 +656,7 @@ let image_reference_to_agent_core (reference : user_image_reference) source =
     ~media_type:(Option.value reference.mime_type ~default:"application/octet-stream")
     ~source
 
-let to_agent_core_blocks ~attachments blocks =
+let to_agent_core_blocks ~media_store ~attachments blocks =
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
     | User_text text :: rest ->
@@ -660,11 +666,13 @@ let to_agent_core_blocks ~attachments blocks =
         loop acc rest
     | User_image (Attached media) :: rest -> (
         match
-          media_block_to_agent_core ~attachments "image"
-            (fun ~media_type ~data () ->
-               Agent_core.Types.image_block ~media_type
-                 ~source:(Agent_core.Types.Base64 data))
-            media
+          Result.bind
+            (media_block_to_agent_core ~attachments "image"
+               (fun ~media_type ~data () ->
+                  Llm_provider.Types.image_block ~media_type
+                    ~source:(Llm_provider.Types.Base64 data))
+               media)
+            (stored_block ~media_store)
         with
         | Ok block -> loop (block :: acc) rest
         | Error err -> Error err)
@@ -683,16 +691,18 @@ let to_agent_core_blocks ~attachments blocks =
            :: acc)
           rest
     | User_document media :: rest -> (
-        match document_block_to_agent_core ~attachments media with
+        match document_block_to_agent_core ~media_store ~attachments media with
         | Ok block -> loop (block :: acc) rest
         | Error err -> Error err)
     | User_audio media :: rest -> (
         match
-          media_block_to_agent_core ~attachments "audio"
-            (fun ~media_type ~data () ->
-               Agent_core.Types.audio_block ~media_type
-                 ~source:(Agent_core.Types.Base64 data))
-            media
+          Result.bind
+            (media_block_to_agent_core ~attachments "audio"
+               (fun ~media_type ~data () ->
+                  Llm_provider.Types.audio_block ~media_type
+                    ~source:(Llm_provider.Types.Base64 data))
+               media)
+            (stored_block ~media_store)
         with
         | Ok block -> loop (block :: acc) rest
         | Error err -> Error err)

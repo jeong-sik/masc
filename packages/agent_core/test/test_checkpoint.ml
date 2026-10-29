@@ -114,7 +114,7 @@ let append_json_field name value = function
 
 let checkpoint_json_with_tool_result ?(extra_fields = []) outcome =
   let block =
-    Types.ToolResult
+    Llm_provider.Types.ToolResult
       { tool_use_id = "tool-result-outcome"
       ; content = "result"
       ; outcome
@@ -226,7 +226,7 @@ let test_encoding_memo_writes_to_string_bytes () =
            ; outcome = reported_tool_failure
            ; json = Some (`Assoc [ "rows", `Int 3 ])
            ; content_blocks =
-               Some [ Image { media_type = "image/png"; source = Base64 "aW1hZ2U=" } ]
+               Some [ Image { media_type = "image/png"; source = Stored (History.stored_of_raw "image") } ]
            })
     ]
   in
@@ -646,8 +646,9 @@ let test_a_read_message_the_encoder_rewrites_is_not_held () =
 
 let test_image_carriers_remain_canonical () =
   let open Types in
+  let stored = History.stored_of_raw "image" in
   let images =
-    [ Image { media_type = "image/png"; source = Base64 "aW1hZ2U=" }
+    [ Image { media_type = "image/png"; source = Stored stored }
     ; Image { media_type = "image/png"; source = Url "https://images.invalid/old.png" }
     ; Image { media_type = "image/png"; source = File_id "file_history_image" }
     ]
@@ -666,15 +667,17 @@ let test_image_carriers_remain_canonical () =
   let saved_images = json |> member "messages" |> to_list |> List.hd
                      |> member "content" |> to_list in
   let expected_sources =
-    [ "base64", "aW1hZ2U="
-    ; "url", "https://images.invalid/old.png"
-    ; "file_id", "file_history_image" ]
+    [ `Assoc [ "type", `String "stored"; "media_type", `String "image/png"
+             ; "sha256", `String stored.sha256; "bytes", `Int stored.bytes ]
+    ; `Assoc [ "type", `String "url"; "media_type", `String "image/png"
+             ; "data", `String "https://images.invalid/old.png" ]
+    ; `Assoc [ "type", `String "file_id"; "media_type", `String "image/png"
+             ; "data", `String "file_history_image" ]
+    ]
   in
-  List.iter2 (fun image (kind, data) ->
-    Alcotest.(check bool) "checkpoint keeps canonical media source fields" true
-      (Yojson.Safe.equal (image |> member "source")
-         (`Assoc [ "type", `String kind; "media_type", `String "image/png"
-                 ; "data", `String data ])))
+  List.iter2 (fun image expected ->
+    Alcotest.(check bool) "checkpoint keeps the history media source fields" true
+      (Yojson.Safe.equal (image |> member "source") expected))
     saved_images expected_sources;
   match Checkpoint.of_json json with
   | Error error -> Alcotest.fail (Error.to_string error)
@@ -689,7 +692,10 @@ let test_tool_image_survives_dispatch_and_checkpoint () =
   Eio_main.run @@ fun env ->
   let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a14sAAAAASUVORK5CYII=" in
   let summary = "artifact.png: original PNG bytes" in
-  let blocks = [ Types.image_block ~media_type:"image/png" ~source:(Types.Base64 png) ] in
+  let blocks =
+    [ Llm_provider.Types.image_block ~media_type:"image/png" ~source:(Llm_provider.Types.Base64 png) ]
+  in
+  let media_store = History.Memory_store.create () in
   let calls = ref 0 in
   let tool =
     Tool.create ~name:"inspect_image" ~description:"Read an image" ~parameters:[]
@@ -698,11 +704,13 @@ let test_tool_image_survives_dispatch_and_checkpoint () =
          Ok { Types.content = summary; content_blocks = Some blocks; _meta = None })
   in
   let agent =
-    Agent.create ~config:(Types.default_config ~model:"test-model")
+    Agent.create ~media_store ~config:(Types.default_config ~model:"test-model")
       ~net:(Eio.Stdenv.net env) ~tools:[ tool ] ()
   in
   let options = Agent.options agent in
-  let uses = [ Types.ToolUse { id = "image-1"; name = "inspect_image"; input = `Assoc [] } ] in
+  let uses =
+    [ Llm_provider.Types.ToolUse { id = "image-1"; name = "inspect_image"; input = `Assoc [] } ]
+  in
   let report =
     Agent_tools.execute_tools
       ~context:(Agent.context agent) ~tools:[ tool ] ~hooks:options.hooks
@@ -710,11 +718,30 @@ let test_tool_image_survives_dispatch_and_checkpoint () =
       ~turn_count:0 ~usage:Types.empty_usage uses
     |> Result.get_ok
   in
-  let results = Agent_turn.make_tool_results report.completed_results in
+  let results =
+    match Agent_turn.make_tool_results ~media_store report.completed_results with
+    | Ok results -> results
+    | Error error -> Alcotest.fail (Error.to_string error)
+  in
+  let history_blocks =
+    match History.of_wire_blocks media_store blocks with
+    | Ok history_blocks -> history_blocks
+    | Error error -> Alcotest.fail (History.show_media_error error)
+  in
   let message role content : Types.message =
     { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
   in
-  let messages = [ message Types.User [ Types.Text "Inspect" ]; message Types.Assistant uses; message Types.Tool results ] in
+  let history_uses =
+    match History.of_wire_blocks media_store uses with
+    | Ok history_uses -> history_uses
+    | Error error -> Alcotest.fail (History.show_media_error error)
+  in
+  let messages =
+    [ message Types.User [ Types.Text "Inspect" ]
+    ; message Types.Assistant history_uses
+    ; message Types.Tool results
+    ]
+  in
   let original = make_checkpoint ~messages () in
   let restored = Checkpoint.of_json (Checkpoint.to_json original) |> Result.get_ok in
   Alcotest.(check int) "one real tool invocation" 1 !calls;
@@ -723,7 +750,7 @@ let test_tool_image_survives_dispatch_and_checkpoint () =
        match List.rev checkpoint.Checkpoint.messages with
        | { Types.content = [ Types.ToolResult { content; content_blocks = Some actual; _ } ]; _ } :: _ ->
          Alcotest.(check string) "independent summary survives" summary content;
-         Alcotest.(check bool) "exact image survives" true (actual = blocks)
+         Alcotest.(check bool) "the image is held by reference" true (actual = history_blocks)
        | _ -> Alcotest.fail "image result missing")
     [ original; restored ];
   let config =
@@ -731,8 +758,11 @@ let test_tool_image_survives_dispatch_and_checkpoint () =
       ~base_url:"https://api.anthropic.com" ~max_tokens:1024 ()
   in
   let request checkpoint =
-    Llm_provider.Backend_anthropic.build_request ~config
-      ~messages:checkpoint.Checkpoint.messages () |> Yojson.Safe.from_string
+    match History.to_wire_messages media_store checkpoint.Checkpoint.messages with
+    | Error error -> Alcotest.fail (History.show_media_error error)
+    | Ok messages ->
+      Llm_provider.Backend_anthropic.build_request ~config ~messages ()
+      |> Yojson.Safe.from_string
   in
   Alcotest.(check bool) "next provider request identical after resume" true
     (request original = request restored);
@@ -749,10 +779,9 @@ let test_tool_image_survives_dispatch_and_checkpoint () =
     (image_data (request restored))
 ;;
 
-(* The v15 validator builds an element's scope string only for an element
-   that fails, so these pin the error text for a failure deep inside nested
-   lists: it must name the message, the block and the detail exactly as a
-   validator that built every scope up front did. *)
+(* The decoder names the path of the element that fails, so these pin the
+   error for a failure deep inside nested lists: it must name the message and
+   the JSON path down to the refused value. *)
 let checkpoint_json_with_raw_messages messages =
   match Checkpoint.to_json (make_checkpoint ()) with
   | `Assoc fields ->
@@ -771,7 +800,7 @@ let reasoning_message details =
 
 let detail index = `Assoc [ "type", `String "reasoning.text"; "text", `String (string_of_int index) ]
 
-let v15_detail json =
+let decode_detail json =
   match Checkpoint.of_json json with
   | Ok _ -> Alcotest.fail "the damaged checkpoint was accepted"
   | Error (Error.Serialization (Error.JsonParseError { detail })) -> detail
@@ -789,15 +818,15 @@ let test_a_failure_deep_in_nested_lists_names_its_element () =
    | Error error -> Alcotest.failf "a valid checkpoint was refused: %s" (Error.to_string error));
   Alcotest.(check string)
     "a duplicated detail field names message, block and detail"
-    "Checkpoint v15 message[1] content[0].details[2] duplicates fields [text]"
-    (v15_detail (checkpoint_json_with_raw_messages [ valid; damaged ]));
+    "Checkpoint v16 message[1]: $.content[0].details[2] has field text twice"
+    (decode_detail (checkpoint_json_with_raw_messages [ valid; damaged ]));
   let unknown_field =
     `Assoc [ "origin", `String "conversation";  "role", `String "user"; "content", `List []; "extra", `Bool true ]
   in
   Alcotest.(check string)
     "an unknown message field names the message"
-    "Checkpoint v15 message[2] schema mismatch (missing=[], unknown=[extra], duplicate=[])"
-    (v15_detail (checkpoint_json_with_raw_messages [ valid; valid; unknown_field ]))
+    "Checkpoint v16 message[2]: $ has unknown field extra"
+    (decode_detail (checkpoint_json_with_raw_messages [ valid; valid; unknown_field ]))
 ;;
 
 (* A tool result may hold tool results, to any depth. A validator that checked
@@ -813,6 +842,7 @@ let test_a_bad_leaf_under_nested_tool_results_fails_once_with_its_path () =
       ; "tool_use_id", `String "call-1"
       ; "content", `List [ content ]
       ; "is_error", `Bool false
+      ; "text_content", `String ""
       ]
   in
   let rec nest depth leaf = if depth = 0 then leaf else nest (depth - 1) (tool_result leaf) in
@@ -828,8 +858,70 @@ let test_a_bad_leaf_under_nested_tool_results_fails_once_with_its_path () =
   in
   Alcotest.(check string)
     "the error names every level down to the leaf"
-    (Printf.sprintf "Checkpoint v15 message[0] content[0]%s.text must be a string" path)
-    (v15_detail (checkpoint_json_with_raw_messages [ message ]))
+    (Printf.sprintf
+       "Checkpoint v16 message[0]: $.content[0]%s.text must be a string"
+       path)
+    (decode_detail (checkpoint_json_with_raw_messages [ message ]))
+;;
+
+(* Hard cut: v15 bytes are not read, whatever their messages hold. *)
+let test_a_v15_checkpoint_is_refused () =
+  match Checkpoint.to_json (make_checkpoint ()) with
+  | `Assoc fields ->
+    let v15 = `Assoc (("version", `Int 15) :: List.remove_assoc "version" fields) in
+    (match Checkpoint.of_json v15 with
+     | Error (Error.Serialization (Error.VersionMismatch { expected = 16; got = 15 })) -> ()
+     | Error error -> Alcotest.failf "expected a version mismatch, got %s" (Error.to_string error)
+     | Ok _ -> Alcotest.fail "a v15 checkpoint was read")
+  | json -> Alcotest.failf "checkpoint must serialize to an object, got %s" (Yojson.Safe.to_string json)
+;;
+
+let image_message source =
+  `Assoc
+    [ "origin", `String "conversation"; "role", `String "user"
+    ; ( "content"
+      , `List [ `Assoc [ "type", `String "image"; "source", source ] ] )
+    ]
+;;
+
+(* History holds no media bytes, so a base64 payload in a message is refused
+   rather than read into history. *)
+let test_a_base64_media_source_is_refused () =
+  let base64 =
+    `Assoc [ "type", `String "base64"; "media_type", `String "image/png"; "data", `String "aW1hZ2U=" ]
+  in
+  let stored = History.stored_of_raw "image" in
+  let reference =
+    `Assoc
+      [ "type", `String "stored"; "media_type", `String "image/png"
+      ; "sha256", `String stored.sha256; "bytes", `Int stored.bytes ]
+  in
+  (match Checkpoint.of_json (checkpoint_json_with_raw_messages [ image_message reference ]) with
+   | Ok _ -> ()
+   | Error error -> Alcotest.failf "a stored reference was refused: %s" (Error.to_string error));
+  Alcotest.(check string)
+    "the base64 source is named"
+    "Checkpoint v16 message[0]: $.content[0].source is a base64 source; history holds media by reference"
+    (decode_detail (checkpoint_json_with_raw_messages [ image_message base64 ]))
+;;
+
+(* The History decoder reads each block; which role may carry a ToolResult is
+   a message rule the checkpoint keeps. *)
+let test_a_tool_result_outside_a_tool_message_is_refused () =
+  let message =
+    `Assoc
+      [ "origin", `String "conversation"; "role", `String "user"
+      ; ( "content"
+        , `List
+            [ `Assoc
+                [ "type", `String "tool_result"; "tool_use_id", `String "call-1"
+                ; "content", `String "done"; "is_error", `Bool false ] ] )
+      ]
+  in
+  Alcotest.(check string)
+    "the role rule is kept"
+    "Checkpoint v16 message[0]: ToolResult requires role tool"
+    (decode_detail (checkpoint_json_with_raw_messages [ message ]))
 ;;
 
 let test_usage_payload_coverage_contract () =
@@ -957,19 +1049,19 @@ let () =
             test_image_carriers_remain_canonical
         ; test_case "tool PNG reaches provider after checkpoint" `Quick
             test_tool_image_survives_dispatch_and_checkpoint ] )
-    ; ( "v15 contract"
+    ; ( "v16 contract"
       , [ test_case "a failure deep in nested lists names its element" `Quick
             test_a_failure_deep_in_nested_lists_names_its_element
         ; test_case "a bad leaf under nested tool results fails once with its path" `Quick
             test_a_bad_leaf_under_nested_tool_results_fails_once_with_its_path ] )
     ; ( "version"
-      , [ test_case "checkpoint_version is 15" `Quick (fun () ->
-            check int "version" 15 Checkpoint.checkpoint_version)
+      , [ test_case "checkpoint_version is 16" `Quick (fun () ->
+            check int "version" 16 Checkpoint.checkpoint_version)
         ; test_case "version field in to_json" `Quick (fun () ->
             let cp = make_checkpoint () in
             let json = Checkpoint.to_json cp in
             let v = Yojson.Safe.Util.(json |> member "version" |> to_int) in
-            check int "version" 15 v)
+            check int "version" 16 v)
         ; test_case "wrong version returns Error" `Quick (fun () ->
             let cp = make_checkpoint () in
             let json = Checkpoint.to_json cp in
@@ -983,6 +1075,11 @@ let () =
               | other -> other
             in
             check bool "is error" true (Result.is_error (Checkpoint.of_json bad)))
+        ; test_case "a v15 checkpoint is refused" `Quick test_a_v15_checkpoint_is_refused
+        ; test_case "a base64 media source is refused" `Quick
+            test_a_base64_media_source_is_refused
+        ; test_case "a ToolResult outside a tool message is refused" `Quick
+            test_a_tool_result_outside_a_tool_message_is_refused
         ; test_case "to_json_result rejects a malformed public checkpoint" `Quick (fun () ->
             let malformed =
               { (make_checkpoint ()) with version = Checkpoint.checkpoint_version - 1 }
@@ -1599,9 +1696,14 @@ let () =
                        }
                  }
                in
-               let content = Agent_turn.make_tool_results [ execution_result ] in
+               let media_store = Agent_core.History.Memory_store.create () in
+               let content = Agent_turn.make_tool_results ~media_store [ execution_result ] |> Result.get_ok in
                let block = List.hd content in
-               let wire_json = Llm_provider.Api_common.content_block_to_json block in
+               let wire_json =
+                 Agent_core.History.to_wire_block media_store block
+                 |> Result.get_ok
+                 |> Llm_provider.Api_common.content_block_to_json
+               in
                let open Yojson.Safe.Util in
                check
                  bool
@@ -1868,7 +1970,7 @@ let () =
               check
                 string
                 "schema mismatch detail"
-                "Checkpoint v15 usage schema mismatch (missing=[], unknown=[extra], \
+                "Checkpoint v16 usage schema mismatch (missing=[], unknown=[extra], \
                  duplicate=[])"
                 detail
             | Error _ -> fail "expected a JsonParseError"
@@ -1886,7 +1988,7 @@ let () =
             let p1 = List.hd t.parameters in
             check string "param name" "city" p1.name;
             check bool "required" true p1.required)
-        ; test_case "authoritative schema is a v15 wire" `Quick (fun () ->
+        ; test_case "authoritative schema is a v16 wire" `Quick (fun () ->
             let input_schema : Yojson.Safe.t =
               `Assoc
                 [ "type", `String "object"
@@ -1906,7 +2008,7 @@ let () =
             in
             let json = Checkpoint.to_json (make_checkpoint ~tools:[ tool ] ()) in
             let open Yojson.Safe.Util in
-            check int "new wire version" 15 (json |> member "version" |> to_int);
+            check int "new wire version" 16 (json |> member "version" |> to_int);
             check
               string
               "authoritative schema persisted"
@@ -2027,7 +2129,7 @@ let () =
               ; tool_choice = Some Types.Auto
               }
             in
-            let agent = Agent.create ~net ~config ~tools:[ sample_echo_tool ] () in
+            let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ~tools:[ sample_echo_tool ] () in
             Agent.set_state
               agent
               { (Agent.state agent) with
@@ -2075,7 +2177,7 @@ let () =
             @@ fun env ->
             let net = Eio.Stdenv.net env in
             let agent =
-              Agent.create ~config:(Types.default_config ~model:"test-model") ~net ()
+              Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(Types.default_config ~model:"test-model") ~net ()
             in
             let sidecar =
               `Assoc
@@ -2238,7 +2340,7 @@ let () =
               ; temperature = Some 0.5
               }
             in
-            let agent = Agent.create ~net ~config () in
+            let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config () in
             Agent.set_state
               agent
               { (Agent.state agent) with
@@ -2283,7 +2385,7 @@ let () =
                         "checkpoint decode failed: %s"
                         (Agent_core.Error.to_string err))
                in
-               let agent = (Agent.resume ~net ~checkpoint:decoded () |> Result.get_ok) in
+               let agent = (Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~checkpoint:decoded () |> Result.get_ok) in
                let resumed_context = Agent.context agent in
                check_context_backend
                  "agent context backend"
@@ -2514,7 +2616,7 @@ let () =
               | other -> other
             in
             check bool "error" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v15 rejects unknown nested message field" `Quick (fun () ->
+        ; test_case "current v16 rejects unknown nested message field" `Quick (fun () ->
             let message : Types.message =
               { origin = Llm_provider.Types.Conversation;  role = Types.User
               ; content = [ Types.Text "hello" ]
@@ -2535,7 +2637,7 @@ let () =
               "unknown message field"
               true
               (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v15 rejects normalized empty metadata" `Quick (fun () ->
+        ; test_case "current v16 rejects normalized empty metadata" `Quick (fun () ->
             let message : Types.message =
               { origin = Llm_provider.Types.Conversation;  role = Types.User
               ; content = [ Types.Text "hello" ]
@@ -2552,7 +2654,7 @@ let () =
                    (update_first_json (append_json_field "metadata" (`Assoc [])))
             in
             check bool "empty metadata" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v15 preserves blank reasoning content" `Quick (fun () ->
+        ; test_case "current v16 preserves blank reasoning content" `Quick (fun () ->
             let message : Types.message =
               { origin = Llm_provider.Types.Conversation;  role = Types.Assistant
               ; content =
@@ -2599,7 +2701,7 @@ let () =
                |> index 0
                |> member "reasoning_content"
                |> to_string))
-        ; test_case "current v15 rejects duplicate nested content field" `Quick (fun () ->
+        ; test_case "current v16 rejects duplicate nested content field" `Quick (fun () ->
             let message : Types.message =
               { origin = Llm_provider.Types.Conversation;  role = Types.User
               ; content = [ Types.Text "hello" ]
@@ -2625,7 +2727,7 @@ let () =
               "duplicate content field"
               true
               (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v15 rejects unknown nested tool field" `Quick (fun () ->
+        ; test_case "current v16 rejects unknown nested tool field" `Quick (fun () ->
             let bad =
               make_checkpoint ~tools:[ sample_tool_schema ] ()
               |> Checkpoint.to_json
@@ -2638,7 +2740,7 @@ let () =
               "unknown tool field"
               true
               (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v15 rejects noncanonical response format" `Quick (fun () ->
+        ; test_case "current v16 rejects noncanonical response format" `Quick (fun () ->
             let bad =
               make_checkpoint ()
               |> Checkpoint.to_json
@@ -2649,7 +2751,7 @@ let () =
               "legacy response format"
               true
               (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v15 rejects malformed nested MCP headers" `Quick (fun () ->
+        ; test_case "current v16 rejects malformed nested MCP headers" `Quick (fun () ->
             let session : Mcp_session.info =
               { server_name = "http-tools"
               ; command = "http"
@@ -2669,7 +2771,7 @@ let () =
                    (update_first_json (replace_json_field "http_headers" (`Assoc [])))
             in
             check bool "malformed headers" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v15 rejects duplicate context keys" `Quick (fun () ->
+        ; test_case "current v16 rejects duplicate context keys" `Quick (fun () ->
             let bad =
               make_checkpoint ()
               |> Checkpoint.to_json
@@ -2678,7 +2780,7 @@ let () =
                    (`Assoc [ "channel", `String "one"; "channel", `String "two" ])
             in
             check bool "duplicate context" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v15 rejects normalized reasoning effort" `Quick (fun () ->
+        ; test_case "current v16 rejects normalized reasoning effort" `Quick (fun () ->
             let bad =
               make_checkpoint ()
               |> Checkpoint.to_json
@@ -2776,7 +2878,7 @@ let () =
             @@ fun env ->
             let net = Eio.Stdenv.net env in
             let agent =
-              Agent.create
+              Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
                 ~net
                 ~config:
                   { (Types.default_config ~model:"test-model") with name = "mcp-test" }
@@ -2789,7 +2891,7 @@ let () =
             @@ fun env ->
             let net = Eio.Stdenv.net env in
             let agent =
-              Agent.create
+              Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
                 ~net
                 ~config:
                   { (Types.default_config ~model:"test-model") with name = "wc-test" }
@@ -2809,7 +2911,7 @@ let () =
             @@ fun env ->
             let net = Eio.Stdenv.net env in
             let agent =
-              Agent.create
+              Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
                 ~net
                 ~config:
                   { (Types.default_config ~model:"test-model") with name = "wc-none" }

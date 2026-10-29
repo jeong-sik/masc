@@ -218,15 +218,15 @@ let wire_tool_of_schema (schema : Masc_domain.tool_schema) =
 let tool_use_names (response : Agent_core.Types.api_response) =
   List.filter_map
     (function
-      | Agent_core.Types.ToolUse { name; _ } -> Some name
-      | Agent_core.Types.Text _
-      | Agent_core.Types.Thinking _
-      | Agent_core.Types.RedactedThinking _
-      | Agent_core.Types.ReasoningDetails _
-      | Agent_core.Types.ToolResult _
-      | Agent_core.Types.Image _
-      | Agent_core.Types.Document _
-      | Agent_core.Types.Audio _ -> None)
+      | Llm_provider.Types.ToolUse { name; _ } -> Some name
+      | Llm_provider.Types.Text _
+      | Llm_provider.Types.Thinking _
+      | Llm_provider.Types.RedactedThinking _
+      | Llm_provider.Types.ReasoningDetails _
+      | Llm_provider.Types.ToolResult _
+      | Llm_provider.Types.Image _
+      | Llm_provider.Types.Document _
+      | Llm_provider.Types.Audio _ -> None)
     response.content
 ;;
 
@@ -234,15 +234,15 @@ let reply_bytes (response : Agent_core.Types.api_response) =
   List.fold_left
     (fun acc block ->
       match block with
-      | Agent_core.Types.Text t -> acc + String.length t
-      | Agent_core.Types.Thinking _
-      | Agent_core.Types.RedactedThinking _
-      | Agent_core.Types.ReasoningDetails _
-      | Agent_core.Types.ToolUse _
-      | Agent_core.Types.ToolResult _
-      | Agent_core.Types.Image _
-      | Agent_core.Types.Document _
-      | Agent_core.Types.Audio _ -> acc)
+      | Llm_provider.Types.Text t -> acc + String.length t
+      | Llm_provider.Types.Thinking _
+      | Llm_provider.Types.RedactedThinking _
+      | Llm_provider.Types.ReasoningDetails _
+      | Llm_provider.Types.ToolUse _
+      | Llm_provider.Types.ToolResult _
+      | Llm_provider.Types.Image _
+      | Llm_provider.Types.Document _
+      | Llm_provider.Types.Audio _ -> acc)
     0
     response.content
 ;;
@@ -295,8 +295,8 @@ let probe_invocation ~sw ~net ~clock ~now ~runtime_id ~tool ~prompt () =
            | Error detail -> Error (Tool_schema_rejected detail)
            | Ok tool_json ->
              let messages =
-               [ { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.User
-                 ; content = [ Agent_core.Types.Text prompt ]
+               [ { origin = Llm_provider.Types.Conversation;  Llm_provider.Types.role = Llm_provider.Types.User
+                 ; content = [ Llm_provider.Types.Text prompt ]
                  ; name = None
                  ; tool_call_id = None
                  ; metadata = []

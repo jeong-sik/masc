@@ -97,6 +97,13 @@ let extract_reasoning (messages : message list) : reasoning_summary =
   { thinking_blocks; has_uncertainty = false; tool_rationale = None }
 ;;
 
+type history_tool_result =
+  { tool_use_id : string
+  ; content : string
+  ; outcome : tool_result_outcome
+  ; content_blocks : content_block list option
+  }
+
 (** Events emitted during agent execution *)
 type hook_event =
   | BeforeTurn of
@@ -106,7 +113,7 @@ type hook_event =
   | BeforeTurnParams of
       { turn : int
       ; messages : message list
-      ; last_tool_results : tool_result list
+      ; last_tool_results : history_tool_result list
       ; current_params : turn_params
       ; reasoning : reasoning_summary
       }

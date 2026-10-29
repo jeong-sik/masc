@@ -62,7 +62,8 @@ let seed first_atom : Front.seed =
 ;;
 
 let view ~front history : Try_provider.request_view =
-  Try_provider.For_testing.request_view
+  match Try_provider.For_testing.request_view
+    ~to_wire:(Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ()))
     ~provider_config
     ~measure_message_bytes
     ~accepted:None ~front
@@ -73,6 +74,9 @@ let view ~front history : Try_provider.request_view =
     ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 })
     ~materialize:(fun ~pending:_ messages -> messages)
     history
+  with
+  | Ok view -> view
+  | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error))
 ;;
 
 (* A turn that did not finish is read at the position it reached. The range it
@@ -135,13 +139,23 @@ let test_the_window_counts_atoms_of_the_history_whatever_the_wire_deletes () =
    front measured on the history past that point opens with another message
    there: [for_history] drops it and the whole history starts over. *)
 let test_projected_first_the_atom_count_would_be_the_dialects () =
+  (* The dialect projects the wire form; read back as history, it is what a
+     history-first window would have counted. This history holds no media. *)
+  let media_store = Agent_core.History.Memory_store.create () in
+  let media_ok = function
+    | Ok value -> value
+    | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error))
+  in
   match
     Agent_core.Llm_provider.Complete_common.transmitted_history
       ~config:provider_config
-      history
+      (media_ok (Agent_core.History.to_wire_messages media_store history))
   with
   | Error error -> declined error
-  | Ok projected ->
+  | Ok wire ->
+    let projected =
+      List.map (fun message -> media_ok (Agent_core.History.of_wire_message media_store message)) wire
+    in
     let _, atoms = Window.annotate projected in
     Alcotest.(check int) "one atom fewer" 6 atoms;
     Alcotest.(check bool) "a front measured on the history is dropped there" true

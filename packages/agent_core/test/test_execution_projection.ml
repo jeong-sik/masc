@@ -46,7 +46,7 @@ let child_response : Types.api_response =
   { id = "projection-child-response"
   ; model = "projection-child-model"
   ; stop_reason = Types.EndTurn
-  ; content = [ Types.Text "child-finished" ]
+  ; content = [ Llm_provider.Types.Text "child-finished" ]
   ; usage = None
   ; telemetry = None
   }
@@ -77,7 +77,7 @@ let child_agent ~net =
              ())
     }
   in
-  Agent.create
+  Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
     ~net
     ~config:
       { (Types.default_config ~model:"projection-child-model") with name = "child-agent" }
@@ -670,7 +670,7 @@ let test_native_request_provenance_reopen () =
           ~model_capabilities_override:
             { Llm_provider.Capabilities.anthropic_capabilities with max_output_tokens = Some 100 } () in
         let options = { Agent.default_options with provider_config=Some config } in
-        let agent = Agent.create ~net ~options
+        let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~options
           ~config:{(Types.default_config ~model:"receipt-model") with
             name="receipt-agent"; max_tokens=Some 200}
           ~pre_dispatch_serialization_observer:(fun _ ->

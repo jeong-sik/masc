@@ -22,7 +22,8 @@ type config =
 
 let text_of_response (resp : api_response) =
   List.filter_map
-    (function
+    (fun (block : Llm_provider.Types.content_block) ->
+      match block with
       | Text s -> Some s
       | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ | Image _
       | Document _ | Audio _ -> None)
@@ -48,7 +49,7 @@ let api_usage_to_json = function
       ]
 ;;
 
-let content_block_to_json = function
+let content_block_to_json : Llm_provider.Types.content_block -> Yojson.Safe.t = function
   | Text text -> `Assoc [ "type", `String "text"; "text", `String text ]
   | Thinking { content; signature } ->
     `Assoc

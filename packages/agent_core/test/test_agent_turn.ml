@@ -42,7 +42,7 @@ let prepared_turn = function
 
 let test_prepare_turn_empty_tools () =
   let prep =
-    Agent_turn.prepare_turn
+    Agent_turn.prepare_turn ~media_store:(Agent_core.History.Memory_store.create ())
       ~tools:Tool_set.empty
       ~messages:[]
       ~turn_params:Hooks.default_turn_params
@@ -68,7 +68,7 @@ let test_prepare_turn_with_tools () =
       (fun _ -> Ok { Types.content = "ok"; content_blocks = None; _meta = None })
   in
   let prep =
-    Agent_turn.prepare_turn
+    Agent_turn.prepare_turn ~media_store:(Agent_core.History.Memory_store.create ())
       ~tools:(Tool_set.of_list [ tool ])
       ~messages:[]
       ~turn_params:Hooks.default_turn_params
@@ -99,7 +99,7 @@ let test_prepare_turn_preserves_supplied_tools () =
       Ok { Types.content = ""; content_blocks = None; _meta = None })
   in
   let prep =
-    Agent_turn.prepare_turn
+    Agent_turn.prepare_turn ~media_store:(Agent_core.History.Memory_store.create ())
       ~tools:(Tool_set.of_list [ tool_a; tool_b ])
       ~messages:[]
       ~turn_params:Hooks.default_turn_params
@@ -123,7 +123,7 @@ let test_prepare_turn_preserves_supplied_tools () =
    Empty when the caller supplies no tools. *)
 let test_prepare_turn_visible_tool_names_empty () =
   let prep =
-    Agent_turn.prepare_turn
+    Agent_turn.prepare_turn ~media_store:(Agent_core.History.Memory_store.create ())
       ~tools:Tool_set.empty
       ~messages:[]
       ~turn_params:Hooks.default_turn_params
@@ -140,7 +140,7 @@ let test_prepare_turn_visible_tool_names_preserves_order () =
   in
   let tools = Tool_set.of_list [ make "Bash"; make "Read"; make "Edit" ] in
   let prep =
-    Agent_turn.prepare_turn ~tools ~messages:[] ~turn_params:Hooks.default_turn_params ()
+    Agent_turn.prepare_turn ~media_store:(Agent_core.History.Memory_store.create ()) ~tools ~messages:[] ~turn_params:Hooks.default_turn_params ()
     |> prepared_turn
   in
   Alcotest.(check (list string))
@@ -197,17 +197,22 @@ let test_prepare_messages_extra_context () =
 
 let test_retained_context_respects_projection () =
   let turn_params = { Hooks.default_turn_params with extra_system_context = Some "private" } in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let to_wire messages =
+    Agent_core.History.to_wire_messages media_store messages
+    |> Result.map_error (fun error -> Error.Media error)
+  in
   let prepare project =
-    Agent_turn.prepare_turn ~tools:Tool_set.empty ~messages:[Types.user_msg "hello"]
+    Agent_turn.prepare_turn ~media_store ~tools:Tool_set.empty ~messages:[Types.user_msg "hello"]
       ~turn_params ~model_input_projection:project () |> Result.get_ok
   in
   let is_current (message : Types.message) =
     message.origin = Types.System_context
   in
-  let removed = prepare (fun messages -> Ok (List.filter (fun m -> not (is_current m)) messages)) in
+  let removed = prepare (fun messages -> to_wire (List.filter (fun m -> not (is_current m)) messages)) in
   Alcotest.(check bool) "removed context is never retained" true
     (Result.get_ok removed.context_message = None);
-  let rewritten = prepare (fun messages -> Ok (List.map (fun message ->
+  let rewritten = prepare (fun messages -> to_wire (List.map (fun (message : Types.message) ->
     if is_current message then
       { message with content = [Text "redacted"];
         metadata = ("test-origin", `String "projected") :: message.metadata }
@@ -228,11 +233,15 @@ let test_context_ambiguity_does_not_reject_preparation () =
     { Hooks.default_turn_params with extra_system_context = Some "context" }
   in
   let messages = [Types.user_msg "request"] in
-  let duplicate_current projected =
-    let carrier = List.hd (List.rev projected) in
-    Ok (projected @ [carrier])
+  let media_store = Agent_core.History.Memory_store.create () in
+  let duplicate_current history =
+    match Agent_core.History.to_wire_messages media_store history with
+    | Error error -> Error (Error.Media error)
+    | Ok projected ->
+      let carrier = List.hd (List.rev projected) in
+      Ok (projected @ [carrier])
   in
-  let prepared = Agent_turn.prepare_turn ~tools:Tool_set.empty ~messages ~turn_params
+  let prepared = Agent_turn.prepare_turn ~media_store ~tools:Tool_set.empty ~messages ~turn_params
       ~model_input_projection:duplicate_current () |> Result.get_ok in
   Alcotest.(check int) "all projected messages remain available" 3
     (List.length prepared.effective_messages);
@@ -528,7 +537,7 @@ let test_make_tool_results () =
       }
     ]
   in
-  let blocks = Agent_turn.make_tool_results results in
+  let blocks = Agent_turn.make_tool_results ~media_store:(Agent_core.History.Memory_store.create ()) results |> Result.get_ok in
   Alcotest.(check int) "2 results" 2 (List.length blocks);
   match List.hd blocks with
   | Types.ToolResult { tool_use_id; outcome; _ } ->
@@ -545,6 +554,75 @@ let test_make_tool_results () =
          } -> ()
      | _ -> Alcotest.fail "expected second ToolResult")
   | _ -> Alcotest.fail "expected ToolResult"
+;;
+
+let media_result ~id media : Agent_tools.tool_execution_result =
+  { invocation = invocation id
+  ; tool_name = "inspect"
+  ; input = `Null
+  ; content = "inspected"
+  ; content_blocks = Some [ media ]
+  ; outcome = Tool_succeeded
+  }
+;;
+
+let test_make_tool_results_puts_media_in_the_store () =
+  let media_store = Agent_core.History.Memory_store.create () in
+  let raw = "\137PNG raw bytes" in
+  let encoded = "iVBORyByYXcgYnl0ZXM=" in
+  let wire =
+    Llm_provider.Types.Image
+      { media_type = "image/png"; source = Llm_provider.Types.Base64 encoded }
+  in
+  match Agent_turn.make_tool_results ~media_store [ media_result ~id:"m1" wire ] with
+  | Ok [ Types.ToolResult { content_blocks = Some [ Types.Image { source = Types.Stored stored; _ } ]; _ } ] ->
+    Alcotest.(check bool) "history holds the reference of the bytes" true
+      (stored = Agent_core.History.stored_of_raw raw);
+    Alcotest.(check bool) "the store returns the bytes" true (media_store.get stored = Ok raw)
+  | Ok _ -> Alcotest.fail "expected one ToolResult holding a stored image"
+  | Error error -> Alcotest.fail (Error.to_string error)
+;;
+
+let test_make_tool_results_fails_the_tool_on_undecodable_media () =
+  let puts = ref 0 in
+  let memory = Agent_core.History.Memory_store.create () in
+  let media_store =
+    { memory with put = (fun ~media_type ~raw -> incr puts; memory.put ~media_type ~raw) }
+  in
+  let wire =
+    Llm_provider.Types.Image
+      { media_type = "image/png"; source = Llm_provider.Types.Base64 "not base64!" }
+  in
+  match Agent_turn.make_tool_results ~media_store [ media_result ~id:"m1" wire ] with
+  | Ok [ Types.ToolResult { tool_use_id; content; outcome; content_blocks; _ } ] ->
+    Alcotest.(check string) "same tool call" "m1" tool_use_id;
+    Alcotest.(check bool) "the tool output is replaced" false (String.equal content "inspected");
+    Alcotest.(check bool) "no media reaches history" true (content_blocks = None);
+    Alcotest.(check bool) "nothing is put" true (!puts = 0);
+    Alcotest.(check bool) "a deterministic failure the model cannot retry" true
+      (outcome
+       = Tool_failed
+           { failure_kind = Types.Non_retryable_tool_error
+           ; error_class = Some Types.Deterministic
+           })
+  | Ok _ -> Alcotest.fail "expected one failed ToolResult"
+  | Error error -> Alcotest.fail (Error.to_string error)
+;;
+
+let test_make_tool_results_fails_the_turn_when_the_store_fails () =
+  let media_store : Agent_core.History.media_store =
+    { put = (fun ~media_type:_ ~raw:_ -> Error (Agent_core.History.Store_failed { detail = "disk full" }))
+    ; get = (fun stored -> Error (Agent_core.History.Missing_bytes stored))
+    }
+  in
+  let wire =
+    Llm_provider.Types.Image
+      { media_type = "image/png"; source = Llm_provider.Types.Base64 "cG5n" }
+  in
+  match Agent_turn.make_tool_results ~media_store [ media_result ~id:"m1" wire ] with
+  | Error (Error.Media (Agent_core.History.Store_failed { detail = "disk full" })) -> ()
+  | Error error -> Alcotest.failf "expected the store failure, got %s" (Error.to_string error)
+  | Ok _ -> Alcotest.fail "a failed put must fail the turn"
 ;;
 
 (* ── accumulate_usage: no provider ──────────────────────── *)
@@ -604,7 +682,7 @@ let test_accumulate_usage_cumulative () =
 (* ── apply_context_injection ─────────────────────────────── *)
 
 let make_tool_use name input =
-  Types.ToolUse { id = "t1"; name; input = Yojson.Safe.from_string input }
+  Llm_provider.Types.ToolUse { id = "t1"; name; input = Yojson.Safe.from_string input }
 ;;
 
 let test_apply_context_injection_no_injector () =
@@ -619,7 +697,7 @@ let test_apply_context_injection_no_injector () =
     ]
   in
   let tool_uses =
-    [ Types.ToolUse { id = "t1"; name = "search"; input = `Assoc [ "q", `String "test" ] }
+    [ Llm_provider.Types.ToolUse { id = "t1"; name = "search"; input = `Assoc [ "q", `String "test" ] }
     ]
   in
   let results =
@@ -905,7 +983,14 @@ let () =
         ; Alcotest.test_case "cumulative" `Quick test_accumulate_usage_cumulative
         ] )
     ; ( "make_tool_results"
-      , [ Alcotest.test_case "tool results" `Quick test_make_tool_results ] )
+      , [ Alcotest.test_case "tool results" `Quick test_make_tool_results
+        ; Alcotest.test_case "media is put in the store" `Quick
+            test_make_tool_results_puts_media_in_the_store
+        ; Alcotest.test_case "undecodable media fails the tool" `Quick
+            test_make_tool_results_fails_the_tool_on_undecodable_media
+        ; Alcotest.test_case "a store failure fails the turn" `Quick
+            test_make_tool_results_fails_the_turn_when_the_store_fails
+        ] )
     ; ( "apply_context_injection"
       , [ Alcotest.test_case "no injector" `Quick test_apply_context_injection_no_injector
         ; Alcotest.test_case

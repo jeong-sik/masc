@@ -919,7 +919,7 @@ let keeper_stream_success = function
   | Tool_result.Completed () | Tool_result.Deferred () -> true
   | Tool_result.Failed _ -> false
 
-let parse_keeper_chat_stream_request body_str =
+let parse_keeper_chat_stream_request ~media_store body_str =
   try
     let open Result.Syntax in
     let json = Yojson.Safe.from_string body_str in
@@ -1080,6 +1080,7 @@ let parse_keeper_chat_stream_request body_str =
       in
       let* direct_message =
         Keeper_invocation_contract.direct_message
+          ~media_store
           ~keeper_name:name
           ~prompt:invocation_prompt
           ~direct_reply:true
@@ -1155,7 +1156,7 @@ let operation_source_of_payload
     ~user_row_origin
 ;;
 
-let operation_payload_of_json ~keeper_name ~operation_id ~source ~input =
+let operation_payload_of_json ~media_store ~keeper_name ~operation_id ~source ~input =
   let open Result.Syntax in
   let* source = Keeper_chat_operation_payload.source_of_json source in
   let* input = Keeper_chat_operation_payload.input_of_json input in
@@ -1187,6 +1188,7 @@ let operation_payload_of_json ~keeper_name ~operation_id ~source ~input =
   in
   let* direct_message =
     Keeper_invocation_contract.direct_message
+      ~media_store
       ~keeper_name
       ~prompt:invocation_prompt
       ~direct_reply:true
@@ -3103,7 +3105,9 @@ let persist_batch_user_rows ~base_dir ~keeper_name members =
       let* () = result in
       let* input = match operation.input with Some input -> Ok input
         | None -> Error "active batch member has no original input" in
-      let* decoded = operation_payload_of_json ~keeper_name ~operation_id:operation.operation_id
+      let* decoded = operation_payload_of_json
+        ~media_store:(Tool_blob_media_store.of_base_path ~base_path:base_dir)
+        ~keeper_name ~operation_id:operation.operation_id
         ~source:operation.source ~input in
       let source = decoded.source in
       match source.user_row_origin with
@@ -3157,6 +3161,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
        | Some input ->
          (match
             operation_payload_of_json
+              ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
               ~keeper_name
               ~operation_id:operation.operation_id
               ~source:operation.source

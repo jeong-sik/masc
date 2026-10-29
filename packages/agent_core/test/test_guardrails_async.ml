@@ -15,7 +15,7 @@ let make_response text : Types.api_response =
   }
 ;;
 
-let dummy_messages : Types.message list =
+let dummy_messages : Llm_provider.Types.message list =
   [ { origin = Llm_provider.Types.Conversation;  role = User
     ; content = [ Text "hello" ]
     ; name = None

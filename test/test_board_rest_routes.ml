@@ -1331,7 +1331,7 @@ let test_board_context_inference_uses_current_owner_contract_and_actor () =
   in
   let message =
     match
-      Masc.Keeper_invocation_contract.direct_message
+      Masc.Keeper_invocation_contract.direct_message ~media_store:(Agent_core.History.Memory_store.create ())
         ~keeper_name ~prompt:"Shared submission contract" ~direct_reply:true
         ~channel:"" ~user_blocks:[] ~attachments:[] ()
     with

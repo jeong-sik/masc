@@ -18,7 +18,7 @@ let text_response text : Types.api_response =
   { id = "advanced-text"
   ; model = "mock-model"
   ; stop_reason = Types.EndTurn
-  ; content = [ Types.Text text ]
+  ; content = [ Llm_provider.Types.Text text ]
   ; usage = None
   ; telemetry = None
   }
@@ -29,7 +29,7 @@ let tool_use_response : Types.api_response =
   ; model = "mock-model"
   ; stop_reason = Types.StopToolUse
   ; content =
-      [ Types.ToolUse
+      [ Llm_provider.Types.ToolUse
           { id = "call_1"
           ; name = "get_time"
           ; input = `Assoc [ "timezone", `String "UTC" ]
@@ -95,7 +95,7 @@ let make_agent_with_options
     ; max_tool_rounds
     }
   in
-  Agent.create ~net ~config ~tools:[ tool ] ~options ~checkpoint_sink ()
+  Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ~tools:[ tool ] ~options ~checkpoint_sink ()
 ;;
 
 let make_agent ~net ~transport ~raw_trace ~checkpoint_sink ~context_injector

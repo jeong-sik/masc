@@ -398,7 +398,7 @@ let test_run_context_binds_generation_before_agent_core_checkpoint () =
   check bool "caller-owned context remains the AGENT_CORE context" true
     (run_context.shared_context == shared_context);
   let agent =
-    Agent_core.Agent.create
+    Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net:(Eio.Stdenv.net env)
       ~config:(Agent_core.Types.default_config ~model:"test-model")
       ~context:run_context.shared_context

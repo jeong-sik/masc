@@ -1117,7 +1117,7 @@ let test_media_metadata_is_frozen_by_first_delta () =
   | _ -> Alcotest.fail "a media carrier change escaped canonical validation"
 ;;
 
-let media_source = Alcotest.testable pp_media_source ( = )
+let media_source = Alcotest.testable Llm_provider.Types.pp_media_source ( = )
 
 let collect_media_chunks first rest =
   List.fold_left

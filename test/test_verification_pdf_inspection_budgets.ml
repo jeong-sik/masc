@@ -295,17 +295,22 @@ let test_extract_text_stops_a_slow_tool_at_the_callers_deadline () =
 (* H5-S2 through the production document reader: a PDF-only fact reaches the
    projection by way of [extract_text]. Poppler is faked, so this proves the
    wiring and the failure mapping, not extraction of a real PDF. *)
-let h5_pdf_block () =
-  Agent_core.Types.document_block
-    ~media_type:"application/pdf"
-    ~source:(Agent_core.Types.Base64 (Base64.encode_string two_page_pdf))
+(* The history block holds the PDF by reference; the projection reads it back
+   from the same store. *)
+let stored_pdf_block (media_store : Agent_core.History.media_store) raw =
+  match media_store.put ~media_type:"application/pdf" ~raw with
+  | Ok stored ->
+    Agent_core.Types.document_block ~media_type:"application/pdf"
+      ~source:(Agent_core.Types.Stored stored)
+  | Error error -> fail (Agent_core.Error.to_string (Agent_core.Error.Media error))
 
 let project_pdf ~base_path ~budget_sec =
-  Masc.Keeper_media_reading.project_blocks
+  let media_store = Agent_core.History.Memory_store.create () in
+  Masc.Keeper_media_reading.project_blocks ~media_store
     ~base_path ~keeper_name:"h5-pdf" ~needs_projection:(fun _ -> true)
     ~deadline:(Monotonic_deadline.after ~seconds:budget_sec)
     ~read:(Masc.Keeper_media_reading.production_reader ~base_path ~budget_sec)
-    [ h5_pdf_block () ]
+    [ stored_pdf_block media_store two_page_pdf ]
 
 let text_of = function
   | [ Agent_core.Types.Text text ], _ -> text
@@ -389,20 +394,20 @@ let test_h5_real_poppler_reaches_the_projection () =
   if not poppler_available then skipped "H5 real projection"
   else
     with_base_path (fun base_path ->
+      let media_store = Agent_core.History.Memory_store.create () in
       let blocks =
-        Masc.Keeper_media_reading.project_blocks
+        Masc.Keeper_media_reading.project_blocks ~media_store
           ~base_path ~keeper_name:"h5-real-pdf" ~needs_projection:(fun _ -> true)
           ~deadline:(Monotonic_deadline.after ~seconds:60.)
           ~read:(Masc.Keeper_media_reading.production_reader ~base_path ~budget_sec:60.)
-          [ Agent_core.Types.document_block ~media_type:"application/pdf"
-              ~source:(Agent_core.Types.Base64 (Base64.encode_string h5_ledger_pdf)) ]
+          [ stored_pdf_block media_store h5_ledger_pdf ]
       in
       let text = text_of blocks in
       check bool "status is read" true (contains ~needle:"status=read" text);
       check bool "the fact is in the projection" true
         (contains ~needle:"ledger year is 1987" text);
       check bool "bound to the source bytes" true
-        (contains ~needle:("sha256:" ^ Masc.Keeper_media_reading.source_sha256 h5_ledger_pdf) text))
+        (contains ~needle:("sha256:" ^ (Agent_core.History.stored_of_raw h5_ledger_pdf).sha256) text))
 
 let () =
   run "verification pdf inspection budgets"

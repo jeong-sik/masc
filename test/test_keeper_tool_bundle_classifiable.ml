@@ -431,7 +431,7 @@ let with_bundle_tools
              (if record_activations then Some skill_activation_context else None)
            ()
        in
-       Option.iter (fun cell -> cell := Some (Agent_core.Agent.create
+       Option.iter (fun cell -> cell := Some (Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
          ~config:(Agent_core.Types.default_config ~model:"fixture-model")
          ~net ~tools:bundle.agent_core_tools ())) agent_cell;
        Fun.protect ~finally:bundle.cleanup (fun () ->

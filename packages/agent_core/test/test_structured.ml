@@ -1,6 +1,7 @@
 (** Unit tests for Structured output module. *)
 
 open Agent_core
+module Types = Llm_provider.Types
 open Types
 
 (* --- Test schema --- *)
@@ -345,7 +346,7 @@ let check_private_evidence ~reason ~raw = function
     Alcotest.(check bool) "parse failure remains nonretryable" false (Error.is_retryable error)
   | Error ((Api _ | Provider _ | Agent _ | Mcp _ | Config _
            | Serialization (JsonParseError _ | StructuredOutputStateError _ | VersionMismatch _ | UnknownVariant _)
-           | Io _ | Orchestration _ | Internal _ | Internal_carried _) as error) ->
+           | Io _ | Orchestration _ | Internal _ | Internal_carried _ | Media _) as error) ->
     Alcotest.failf "expected structured evidence, got %s" (Error.to_string error)
   | Ok _ -> Alcotest.fail "invalid response was accepted"
 ;;
@@ -408,7 +409,7 @@ let test_long_response_evidence_keeps_utf8_boundary () =
     Alcotest.(check bool) "private diagnostic is also bounded" true (String.length evidence.detail <= 4096)
   | Api _ | Provider _ | Agent _ | Mcp _ | Config _
   | Serialization (JsonParseError _ | StructuredOutputStateError _ | VersionMismatch _ | UnknownVariant _)
-  | Io _ | Orchestration _ | Internal _ | Internal_carried _ ->
+  | Io _ | Orchestration _ | Internal _ | Internal_carried _ | Media _ ->
     Alcotest.fail "wrong evidence constructor"
 ;;
 
@@ -456,7 +457,7 @@ let check_response_state expected response =
     | Error ((Api _ | Provider _ | Agent _ | Mcp _ | Config _
              | Serialization (JsonParseError _ | StructuredOutputParseError _
                  | VersionMismatch _ | UnknownVariant _)
-             | Io _ | Orchestration _ | Internal _ | Internal_carried _) as error) ->
+             | Io _ | Orchestration _ | Internal _ | Internal_carried _ | Media _) as error) ->
       Alcotest.failf "wrong error family: %s" (Error.to_string error)
     | Ok _ -> Alcotest.fail "Result wrapper accepted a nonterminal response"
   in
@@ -489,7 +490,7 @@ let test_authoritative_stop_states_precede_valid_json () =
 ;;
 
 let test_tool_call_turn_requires_tool_results_before_json () =
-  let tool = ToolUse {id="call";name="lookup";input=`Assoc []} in
+  let tool = Llm_provider.Types.ToolUse {id="call";name="lookup";input=`Assoc []} in
   List.iter (fun stop_reason ->
     List.iter (fun content ->
       check_response_state Error.Awaiting_tool_results

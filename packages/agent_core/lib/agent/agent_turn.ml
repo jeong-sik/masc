@@ -19,7 +19,7 @@ let provider_turn_ordinal (state : agent_state) : int = state.turn_count
 
 type turn_preparation =
   { tools_json : Yojson.Safe.t list option
-  ; effective_messages : message list
+  ; effective_messages : Llm_provider.Types.message list
   ; context_message : (message option, Error.t) result
   ; visible_tool_names : string list
   }
@@ -70,13 +70,15 @@ let prepare_messages ~messages ~turn_params () =
   append_context_message ~messages ~context_message:(context_message turn_params)
 ;;
 
-let prepare_turn ~tools ~messages ~turn_params ?model_input_projection () =
+let prepare_turn ~media_store ~tools ~messages ~turn_params ?model_input_projection () =
   let tools_json, visible_tool_names = prepare_tools ~tools () in
   let context_message = context_message turn_params in
   let prepared = append_context_message ~messages ~context_message in
   let effective_messages =
     match model_input_projection with
-    | None -> Ok prepared
+    | None ->
+      History.to_wire_messages media_store prepared
+      |> Result.map_error (fun error -> Error.Media error)
     | Some project ->
       (try project prepared with
        | exn ->
@@ -88,11 +90,16 @@ let prepare_turn ~tools ~messages ~turn_params ?model_input_projection () =
       match context_message with
       | None -> Ok None
       | Some _ ->
-        (match List.filter (fun (message : Types.message) ->
+        (match List.filter (fun (message : Llm_provider.Types.message) ->
            message.origin = System_context)
            effective_messages with
          | [] -> Ok None
-         | [message] -> Ok (Some message)
+         | [message] ->
+           (* The carrier as transmitted re-enters history: Anthropic
+              collection retains it before its response. *)
+           History.of_wire_message media_store message
+           |> Result.map Option.some
+           |> Result.map_error (fun error -> Error.Media error)
          | _ -> Error (Error.Internal "model input projection returned multiple current context carriers"))
     in
     { tools_json; effective_messages; context_message; visible_tool_names })
@@ -213,8 +220,12 @@ type turn_params_resolution_error =
       ; detail : string
       }
 
-let tool_result_of_projection (proj : Llm_provider.Canonical_tool.provider_tool_result) =
-  Types.tool_result_of_outcome ?content_blocks:proj.content_blocks ~content:proj.content proj.outcome
+let history_tool_result_of_block : content_block -> Hooks.history_tool_result option =
+  function
+  | ToolResult { tool_use_id; content; outcome; content_blocks; json = _ } ->
+    Some { tool_use_id; content; outcome; content_blocks }
+  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _
+  | Document _ | Audio _ -> None
 ;;
 
 let last_tool_results_from messages =
@@ -227,11 +238,7 @@ let last_tool_results_from messages =
                | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _
                | Document _ | Audio _ -> false)
              content ->
-      List.filter_map
-        (fun (block : content_block) ->
-           Llm_provider.Canonical_tool.tool_result_of_block block
-           |> Option.map tool_result_of_projection)
-        content
+      List.filter_map history_tool_result_of_block content
     | User, _ | System, _ | Assistant, _ | Tool, _ -> []
   in
   List.fold_left
@@ -279,7 +286,12 @@ type context_injection_outcome =
   | Injected of Types.message list
 
 let apply_context_injection ~context ~messages ~injector ~tool_uses ~results =
-  let rec collect updates_rev messages_rev tool_uses results =
+  let rec collect
+            updates_rev
+            messages_rev
+            (tool_uses : Llm_provider.Types.content_block list)
+            results
+    =
     match tool_uses, results with
     | [], [] -> Ok (List.rev updates_rev, List.rev messages_rev)
     | ( ToolUse { name; input; _ } :: tool_uses
@@ -331,22 +343,57 @@ let apply_context_injection ~context ~messages ~injector ~tool_uses ~results =
     Ok (Injected messages)
 ;;
 
+(* A tool that returns a payload which is not padded standard base64 gets a
+   failed result in place of its media: sending those bytes on would make
+   every later request carrying this history fail at the provider. Any other
+   media error fails the turn. *)
+let undecodable_media_content ~media_type ~detail =
+  Printf.sprintf
+    "Tool result media %s was dropped: its payload is not padded standard base64 (%s)."
+    media_type
+    detail
+;;
+
+let make_tool_result ~media_store (result : Agent_tools.tool_execution_result) =
+  let tool_use_id = Tool_contract.Invocation.tool_use_id result.invocation in
+  let tool_result ~content ~outcome content_blocks =
+    ToolResult { tool_use_id; content; outcome; json = None; content_blocks }
+  in
+  match result.content_blocks with
+  | None -> Ok (tool_result ~content:result.content ~outcome:result.outcome None)
+  | Some blocks ->
+    (match History.of_wire_blocks media_store blocks with
+     | Ok blocks ->
+       Ok (tool_result ~content:result.content ~outcome:result.outcome (Some blocks))
+     | Error (History.Invalid_base64 { media_type; detail }) ->
+       Ok
+         (tool_result
+            ~content:(undecodable_media_content ~media_type ~detail)
+            ~outcome:
+              (Tool_failed
+                 { failure_kind = Non_retryable_tool_error
+                 ; error_class = Some Deterministic
+                 })
+            None)
+     | Error
+         ((History.Store_failed _ | History.Missing_bytes _ | History.Digest_mismatch _) as
+          error) -> Error (Error.Media error))
+;;
+
 (** Process tool results into ToolResult content blocks.
     All entries are valid ToolUse results — non-ToolUse blocks are filtered
     upstream in {!Agent_tools.execute_tools}. Tool result content is preserved
     exactly; provider-specific projection is responsible for any transport
     adaptation. *)
-let make_tool_results results =
-  List.map
-    (fun (result : Agent_tools.tool_execution_result) ->
-       ToolResult
-         { tool_use_id = Tool_contract.Invocation.tool_use_id result.invocation
-         ; content = result.content
-         ; outcome = result.outcome
-         ; json = None
-         ; content_blocks = result.content_blocks
-         })
-    results
+let make_tool_results ~media_store results =
+  let rec convert acc = function
+    | [] -> Ok (List.rev acc)
+    | result :: rest ->
+      (match make_tool_result ~media_store result with
+       | Ok block -> convert (block :: acc) rest
+       | Error _ as error -> error)
+  in
+  convert [] results
 ;;
 
 (* === make_tool_results inline tests === *)
@@ -383,23 +430,25 @@ let[@warning "-32"] mock_result ?(is_error = false) ~id content : Agent_tools.to
 
 (* Inline-test-only; the release profile strips the tests that call it. *)
 let[@warning "-32"] single_tool_result = function
-  | [ ToolResult { tool_use_id; content; outcome; _ } ] ->
+  | Error _ -> None
+  | Ok [ ToolResult { tool_use_id; content; outcome; _ } ] ->
     Some (tool_use_id, content, Types.tool_result_outcome_is_error outcome)
-  | []
-  | [ Text _ ]
-  | [ Thinking _ ]
-  | [ ReasoningDetails _ ]
-  | [ RedactedThinking _ ]
-  | [ ToolUse _ ]
-  | [ Image _ ]
-  | [ Document _ ]
-  | [ Audio _ ]
-  | _ :: _ :: _ -> None
+  | Ok
+      ( []
+      | [ Text _ ]
+      | [ Thinking _ ]
+      | [ ReasoningDetails _ ]
+      | [ RedactedThinking _ ]
+      | [ ToolUse _ ]
+      | [ Image _ ]
+      | [ Document _ ]
+      | [ Audio _ ]
+      | _ :: _ :: _ ) -> None
 ;;
 
 let%test "make_tool_results: small result passes through unchanged" =
   let results = [ mock_result ~id:"t1" "hello world" ] in
-  match single_tool_result (make_tool_results results) with
+  match single_tool_result (make_tool_results ~media_store:(History.Memory_store.create ()) results) with
   | Some (_, content, _) -> content = "hello world"
   | None -> false
 ;;
@@ -407,14 +456,14 @@ let%test "make_tool_results: small result passes through unchanged" =
 let%test "make_tool_results: large result is preserved exactly" =
   let big = String.make 100_000 'x' in
   let results = [ mock_result ~id:"t1" big ] in
-  match single_tool_result (make_tool_results results) with
+  match single_tool_result (make_tool_results ~media_store:(History.Memory_store.create ()) results) with
   | Some (_, content, _) -> String.equal content big
   | None -> false
 ;;
 
 let%test "make_tool_results: tool_use_id and is_error preserved" =
   let results = [ mock_result ~id:"err1" ~is_error:true (String.make 60_000 'e') ] in
-  match single_tool_result (make_tool_results results) with
+  match single_tool_result (make_tool_results ~media_store:(History.Memory_store.create ()) results) with
   | Some (tool_use_id, _, is_error) -> tool_use_id = "err1" && is_error = true
   | None -> false
 ;;

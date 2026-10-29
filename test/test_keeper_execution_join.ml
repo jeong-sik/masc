@@ -811,8 +811,8 @@ let run_real_tool_bridge ~durable inspect =
   let response content stop_reason : Core.Types.api_response =
     {id="join-response";model="test-model";content;stop_reason;usage=None;telemetry=None} in
   let responses=ref
-    [response [Core.Types.ToolUse {id="same-provider-id";name="joined_tool";input=`Assoc []}] Core.Types.StopToolUse;
-     response [Core.Types.Text "done"] Core.Types.EndTurn] in
+    [response [Llm_provider.Types.ToolUse {id="same-provider-id";name="joined_tool";input=`Assoc []}] Core.Types.StopToolUse;
+     response [Llm_provider.Types.Text "done"] Core.Types.EndTurn] in
   let next ()=match !responses with response::rest->responses:=rest;Ok response
     | []->fail "unexpected joined provider retry" in
   let transport=Llm_provider.Llm_transport.custom
@@ -829,7 +829,7 @@ let run_real_tool_bridge ~durable inspect =
       expected_id:=Some execution_id;
       Join.record ~invocation ~execution_id) (Core.Hooks.invocation_of_event event);
     Core.Hooks.Continue)} in
-  let agent=Core.Agent.create ~net:(Eio.Stdenv.net env) ~tools:[tool]
+  let agent=Core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:(Eio.Stdenv.net env) ~tools:[tool]
       ~config:{(Core.Types.default_config ~model:"test-model") with name="real-joined"}
       ~options:{Core.Agent.default_options with transport=Some transport;provider_config=Some provider;
         event_bus=Some bus;hooks} () in

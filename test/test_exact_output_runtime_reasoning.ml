@@ -5,7 +5,7 @@ module Resolver = Llm_provider.Exact_output_resolver
 module Plan = Llm_provider.Exact_output_plan
 module Registry = Runtime_exact_output_registry
 
-let messages = [ Agent_core.Types.user_msg "Return one JSON object." ]
+let messages = [ Llm_provider.Types.user_msg "Return one JSON object." ]
 let requirement = EO.make_output_requirement
     ~schema:(`Assoc [ "type", `String "object" ]) ~minimum_guarantee:EO.Json_syntax
 

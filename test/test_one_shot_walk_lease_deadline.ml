@@ -179,7 +179,7 @@ tools-support = true
       ~walk_owner:Keeper_turn_driver.One_shot_walk
       ~runtime_id:"fixture.sample"
       ~keeper_name:"completion-review-lease-deadline"
-      ~base_path
+      ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
       ~system_prompt:"Review the submission."
       ~goal:"Look the evidence up, then answer."
       ~masc_tools:

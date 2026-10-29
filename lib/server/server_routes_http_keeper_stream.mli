@@ -162,6 +162,7 @@ val split_keeper_reply_chunks : string -> string list
 (** {1 Parsing} *)
 
 val parse_keeper_chat_stream_request :
+  media_store:Agent_core.History.media_store ->
   string -> (keeper_chat_stream_request, string) result
 (** Parses the HTTP body string into a
     {!keeper_chat_stream_request}.  Returns
@@ -416,7 +417,9 @@ module For_testing : sig
     pending_continuation:(unit -> (Keeper_direct_gate_continuation.pending option, string) result) ->
     outcome:queued_turn_outcome option -> delivery:(unit, string) result ->
     Keeper_owner.operation_execution
-  val parse_request : string -> (keeper_chat_stream_request, string) result
+  val parse_request :
+    media_store:Agent_core.History.media_store ->
+    string -> (keeper_chat_stream_request, string) result
 
   (** Reconnect dedup: [false] only for a seq the replay already wrote. *)
   val live_event_is_new : replayed:(int, unit) Hashtbl.t -> int option -> bool

@@ -458,7 +458,7 @@ let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
                         | Agent_core.Error.StructuredOutputStateError _
                         | Agent_core.Error.UnknownVariant _)
                     | Agent_core.Error.Io _
-                    | Agent_core.Error.Orchestration _
+                    | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
                     | Agent_core.Error.Internal _
                     | Agent_core.Error.Internal_carried _) as err) ->
                  Log.Keeper.warn ~keeper_name

@@ -122,7 +122,7 @@ let test_handoff_emits_request_and_completion () =
       }
     in
     let agent =
-      Agent.create
+      Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
         ~config:(Types.default_config ~model:"test-model")
         ~net:env#net
         ~options
@@ -238,7 +238,7 @@ let run_agent_once ~sw env ~base_url bus =
     }
   in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Types.default_config ~model:"test-model")
       ~net:env#net
       ~options
@@ -391,7 +391,7 @@ let test_run_emits_terminal_on_switch_cancel () =
       }
     in
     let agent =
-      Agent.create
+      Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
         ~config:(Types.default_config ~model:"test-model")
         ~net:env#net
         ~options

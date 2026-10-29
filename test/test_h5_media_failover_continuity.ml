@@ -39,45 +39,41 @@ let stage name = log "STAGE %s" name
 let marker_audio_data = "h5-audio-bytes-띄어쓰기-007::" ^ String.make 512 'a'
 let marker_document_data = "h5-document-bytes-0007::" ^ String.make 512 'b'
 
-let audio_block ?(source = Types.Base64 marker_audio_data) () =
+(* History holds media by reference; the provider-facing stages read the
+   wire form back from this store. *)
+let media_store = Agent_core.History.Memory_store.create ()
+
+let media_ok = function
+  | Ok value -> value
+  | Error error -> fail (Agent_core.Error.to_string (Agent_core.Error.Media error))
+;;
+
+let stored ~media_type raw = Types.Stored (media_ok (media_store.put ~media_type ~raw))
+let wire block = media_ok (Agent_core.History.to_wire_block media_store block)
+
+let audio_block ?(source = stored ~media_type:"audio/wav" marker_audio_data) () =
   Types.audio_block ~media_type:"audio/wav" ~source
 ;;
 
-let document_block ?(source = Types.Base64 marker_document_data) () =
+let document_block ?(source = stored ~media_type:"application/pdf" marker_document_data) () =
   Types.document_block ~media_type:"application/pdf" ~source
 ;;
 
-let sha256_of_block block =
+let sha256_of_wire_block block =
   Api_common.content_block_to_json block
   |> Yojson.Safe.to_string
   |> Digest.string
   |> Digest.to_hex
 ;;
 
-(* block 의 (modality, media_type, source_type, data) 를 관측 문자로. *)
-let describe_block block =
-  match block with
-  | Types.Audio { media_type; source } ->
-    Printf.sprintf "audio media_type=%s source=%s data_len=%d data_sha256_prefix=%s"
-      media_type
-      (Types.media_source_wire_tag source)
-      (String.length (Types.media_source_payload source))
-      (String.sub (sha256_of_block block) 0 16)
-  | Types.Document { media_type; source } ->
-    Printf.sprintf "document media_type=%s source=%s data_len=%d data_sha256_prefix=%s"
-      media_type
-      (Types.media_source_wire_tag source)
-      (String.length (Types.media_source_payload source))
-      (String.sub (sha256_of_block block) 0 16)
-  | Types.Image _ -> "image"
-  | Types.Text _ -> "text"
-  | _ -> "other"
-;;
+let sha256_of_block block = sha256_of_wire_block (wire block)
 
-let blocks_equal a b =
+let wire_blocks_equal a b =
   let json_of = Api_common.content_block_to_json in
   Yojson.Safe.equal (json_of a) (json_of b)
 ;;
+
+let blocks_equal a b = wire_blocks_equal (wire a) (wire b)
 
 (* ------------------------------------------------------------------ *)
 (* s1: 공통 직렬화 왕복 — 의미·출처의 바이트 동일성                     *)
@@ -85,14 +81,15 @@ let blocks_equal a b =
 let s1_serialization_roundtrip () =
   stage "s1: content_block_to_json roundtrip keeps audio/document bytes";
   let cases =
-    [ ("audio_base64", audio_block ())
-    ; ("document_base64", document_block ())
+    [ ("audio_stored", audio_block ())
+    ; ("document_stored", document_block ())
     ; ("audio_url", audio_block ~source:(Types.Url marker_audio_data) ())
     ; ("document_url", document_block ~source:(Types.Url marker_document_data) ())
     ]
   in
   List.iter
-    (fun (name, block) ->
+    (fun (name, history_block) ->
+       let block = wire history_block in
        let json = Api_common.content_block_to_json block in
        (* 재해독 경계: content_block_of_json_result 는 decode 오류 합타입을
           result 로 돌려준다. Ok 면 원본과 structural+byte 로 같아야 한다. *)
@@ -104,9 +101,9 @@ let s1_serialization_roundtrip () =
          | Error error ->
            fail (name ^ ": decode failed: " ^ Api_common.content_block_decode_error_to_string error)
        in
-       let equal = blocks_equal block decoded in
-       let original_sha = sha256_of_block block in
-       let decoded_sha = sha256_of_block decoded in
+       let equal = wire_blocks_equal block decoded in
+       let original_sha = sha256_of_wire_block block in
+       let decoded_sha = sha256_of_wire_block decoded in
        log "S1 %s roundtrip_equal=%b original_sha=%s decoded_sha=%s bytes_equal=%b"
          name equal original_sha decoded_sha (String.equal original_sha decoded_sha);
        (* JSON 안에서 출처 필드가 그대로 남는지 직접 관측한다. *)
@@ -144,14 +141,20 @@ let s3_fail_closed_sources () =
     ]
   in
   List.iter
-    (fun (name, block) ->
+    (fun (name, history_block) ->
        let backend = "gemini" in
-       let block_name = match block with Types.Audio _ -> "audio" | Types.Document _ -> "document" | _ -> "other" in
+       let block = wire history_block in
+       let block_name =
+         match block with
+         | Llm_provider.Types.Audio _ -> "audio"
+         | Llm_provider.Types.Document _ -> "document"
+         | _ -> "other"
+       in
        let source =
          match block with
-         | Types.Audio { source; _ }
-         | Types.Document { source; _ } -> source
-         | _ -> Types.Base64 ""
+         | Llm_provider.Types.Audio { source; _ }
+         | Llm_provider.Types.Document { source; _ } -> source
+         | _ -> Llm_provider.Types.Base64 ""
        in
        match
          Api_common.base64_media_payload

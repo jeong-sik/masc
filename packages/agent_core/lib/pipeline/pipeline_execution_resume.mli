@@ -35,21 +35,21 @@ val dispatch
   -> execute:
        (turn:int
         -> response:Types.api_response
-        -> Types.content_block Nonempty.t
+        -> Llm_provider.Types.content_block Nonempty.t
         -> ('a, Error.t) result)
   -> tools_settled_before_checkpoint:
        (response:Types.api_response
         -> turn:int
         -> invocations:Execution_agent_scope.invocation_authority list
-        -> tool_results:Types.content_block list
-        -> Types.content_block Nonempty.t
+        -> tool_results:Llm_provider.Types.content_block list
+        -> Llm_provider.Types.content_block Nonempty.t
         -> ('a, Error.t) result)
   -> tools_settled:
        (response:Types.api_response
         -> turn:int
         -> invocations:Execution_agent_scope.invocation_authority list
-        -> tool_results:Types.content_block list
-        -> Types.content_block Nonempty.t
+        -> tool_results:Llm_provider.Types.content_block list
+        -> Llm_provider.Types.content_block Nonempty.t
         -> ('a, Error.t) result)
   -> all_pre_tool_use_blocked:'a
   -> terminal:(Types.api_response -> 'a)

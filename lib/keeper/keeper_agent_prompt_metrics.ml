@@ -1,6 +1,5 @@
 (** Prompt metrics for keeper Agent.run turns. *)
 
-module Canonical_tool = Agent_core.Canonical_tool
 
 (** Structured prompt result from [build_turn_prompt] callback.
     [dynamic_context] contains soft context (continuity, skill route,
@@ -321,62 +320,39 @@ let metric_of_block
     ~role:(_ : Agent_core.Types.role)
     (block : Agent_core.Types.content_block) : prompt_segment_metrics =
   let bytes =
-    match Canonical_tool.tool_result_of_block block with
-    | Some result ->
-        String.length
-          (Inference_utils.sanitize_text_utf8 result.Canonical_tool.call_id)
-        + String.length
-            (Inference_utils.sanitize_text_utf8 result.Canonical_tool.content)
-        + (match result.Canonical_tool.structured_content with
+    match block with
+    | Agent_core.Types.ToolResult { tool_use_id; content; json; _ } ->
+        String.length (Inference_utils.sanitize_text_utf8 tool_use_id)
+        + String.length (Inference_utils.sanitize_text_utf8 content)
+        + (match json with
            | Some value -> String.length (Yojson.Safe.to_string value)
            | None -> 0)
-    | None -> (
-        match Canonical_tool.tool_call_of_block block with
-        | Some call ->
-            String.length
-              (Inference_utils.sanitize_text_utf8 call.Canonical_tool.call_id)
-            + String.length
-                (Inference_utils.sanitize_text_utf8 call.Canonical_tool.name)
-            + String.length (Yojson.Safe.to_string call.Canonical_tool.input)
-        | None -> (
-          match block with
-          | Agent_core.Types.Text text ->
-              String.length (Inference_utils.sanitize_text_utf8 text)
-          | Agent_core.Types.Thinking { content; _ } ->
-              String.length (Inference_utils.sanitize_text_utf8 content)
-          | Agent_core.Types.ReasoningDetails { reasoning_content; details } ->
-              Agent_core.Types.reasoning_details_text ~reasoning_content ~details
-              |> Inference_utils.sanitize_text_utf8
-              |> String.length
-          | Agent_core.Types.RedactedThinking text ->
-              String.length (Inference_utils.sanitize_text_utf8 text)
-          | Agent_core.Types.Image { source; _ }
-          | Agent_core.Types.Document { source; _ }
-          | Agent_core.Types.Audio { source; _ } ->
-              String.length (Agent_core.Types.media_source_payload source)
-          | Agent_core.Types.ToolResult _ ->
-              invalid_arg
-                "keeper_agent_prompt_metrics: AGENT_CORE canonical tool-result projection unavailable"
-          | Agent_core.Types.ToolUse _ ->
-              invalid_arg
-                "keeper_agent_prompt_metrics: AGENT_CORE canonical tool-call projection unavailable"))
+    | Agent_core.Types.ToolUse { id; name; input } ->
+        String.length (Inference_utils.sanitize_text_utf8 id)
+        + String.length (Inference_utils.sanitize_text_utf8 name)
+        + String.length (Yojson.Safe.to_string input)
+    | Agent_core.Types.Text text ->
+        String.length (Inference_utils.sanitize_text_utf8 text)
+    | Agent_core.Types.Thinking { content; _ } ->
+        String.length (Inference_utils.sanitize_text_utf8 content)
+    | Agent_core.Types.ReasoningDetails { reasoning_content; details } ->
+        Agent_core.Types.reasoning_details_text ~reasoning_content ~details
+        |> Inference_utils.sanitize_text_utf8
+        |> String.length
+    | Agent_core.Types.RedactedThinking text ->
+        String.length (Inference_utils.sanitize_text_utf8 text)
+    | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _ ->
+        (* The base64 the request carries, not the stored reference. *)
+        Agent_core.History.media_wire_length block
   in
   { bytes; fingerprint = None }
 
 let input_component_of_block
     ~(role : Agent_core.Types.role)
     (block : Agent_core.Types.content_block) : Turn_record.input_component_id =
-  if Option.is_some (Canonical_tool.tool_call_of_block block)
-  then Turn_record.Message_tool_use
-  else
-    match Canonical_tool.tool_result_of_block block with
-    | Some _ -> Turn_record.Message_tool_result
-    | None ->
-      (match block with
+  match block with
+  | Agent_core.Types.ToolUse _ -> Turn_record.Message_tool_use
   | Agent_core.Types.ToolResult _ -> Turn_record.Message_tool_result
-  | Agent_core.Types.ToolUse _ ->
-      invalid_arg
-        "keeper_agent_prompt_metrics: AGENT_CORE canonical tool-call projection unavailable"
   | Agent_core.Types.Text _ -> (
       match role with
       | Agent_core.Types.User -> Turn_record.Message_user
@@ -388,7 +364,7 @@ let input_component_of_block
   | Agent_core.Types.RedactedThinking _ -> Turn_record.Message_redacted_thinking
   | Agent_core.Types.Image _ -> Turn_record.Message_image
   | Agent_core.Types.Document _ -> Turn_record.Message_document
-  | Agent_core.Types.Audio _ -> Turn_record.Message_audio)
+  | Agent_core.Types.Audio _ -> Turn_record.Message_audio
 
 let build_ctx_segments
     ~(prompt_blocks : Turn_record.prompt_block list)

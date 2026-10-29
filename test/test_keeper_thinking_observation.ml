@@ -53,12 +53,12 @@ let hidden_details = "hidden reasoning detail text"
 let hidden_redacted = "opaque-provider-signature-blob"
 
 let sample_content =
-  [ T.Text "visible answer"
-  ; T.Thinking { content = hidden_thinking; signature = None }
-  ; T.ReasoningDetails
+  [ Agent_core.Llm_provider.Types.Text "visible answer"
+  ; Agent_core.Llm_provider.Types.Thinking { content = hidden_thinking; signature = None }
+  ; Agent_core.Llm_provider.Types.ReasoningDetails
       { reasoning_content = Some hidden_details; details = [] }
-  ; T.RedactedThinking hidden_redacted
-  ; T.ReasoningDetails { reasoning_content = Some "   "; details = [] }
+  ; Agent_core.Llm_provider.Types.RedactedThinking hidden_redacted
+  ; Agent_core.Llm_provider.Types.ReasoningDetails { reasoning_content = Some "   "; details = [] }
   ]
 ;;
 
@@ -138,8 +138,8 @@ let test_whitespace_details_and_text_blocks_record_nothing () =
       ~keeper_name
       ~trajectory_acc:(Some acc)
       ~turn:2
-      [ T.Text "plain"
-      ; T.ReasoningDetails { reasoning_content = Some " \n " ; details = [] }
+      [ Agent_core.Llm_provider.Types.Text "plain"
+      ; Agent_core.Llm_provider.Types.ReasoningDetails { reasoning_content = Some " \n " ; details = [] }
       ];
     check int "nothing recorded" 0 (List.length (thinking_lines root)))
 ;;

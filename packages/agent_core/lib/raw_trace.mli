@@ -178,7 +178,7 @@ val start_run
 val record_assistant_block
   :  active_run
   -> block_index:int
-  -> Types.content_block
+  -> Llm_provider.Types.content_block
   -> (unit, Error.t) result
 (** Persist observable assistant blocks verbatim. Thinking,
     ReasoningDetails, and RedactedThinking persist typed metadata with

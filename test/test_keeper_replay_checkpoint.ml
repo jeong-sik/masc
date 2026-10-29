@@ -82,6 +82,12 @@ let has_content predicate messages =
     messages
 ;;
 
+let has_wire_content predicate messages =
+  List.exists
+    (fun (msg : Llm_provider.Types.message) -> List.exists predicate msg.content)
+    messages
+;;
+
 let rec remove_tree path =
   if Sys.is_directory path
   then (
@@ -138,11 +144,15 @@ let test_finalization_preserves_reasoning_source_through_restore () =
     let producing_source = source "https://producer.test" in
     let response : Types.api_response =
       { id = "fixture"; model = "replay-fixture"; stop_reason = EndTurn;
-        content = [artifact; Types.Text "draft"]; usage = None;
+        content = [artifact; Llm_provider.Types.Text "draft"]; usage = None;
         telemetry = Some {Types.default_inference_telemetry with
           reasoning_source = Some producing_source} } in
     let assistant = Types.assistant_message_of_response response
       |> Result.map_error Types.show_assistant_message_error |> expect_ok in
+    let assistant =
+      match Agent_core.History.of_wire_message (Agent_core.History.Memory_store.create ()) assistant with
+      | Ok assistant -> assistant
+      | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error)) in
     let assistant = {assistant with metadata =
       ("test-origin", `String "keep") :: assistant.metadata} in
     let history = [Types.user_msg "question"] in
@@ -176,30 +186,33 @@ let test_finalization_preserves_reasoning_source_through_restore () =
         Provider.Reasoning_history_projection.project
           ~assistant_has_payload:(fun content -> content <> [])
           ~reasoning_block_supported:(function
-            | Types.Thinking _ | Types.RedactedThinking _ | Types.ReasoningDetails _ -> true
-            | Types.Text _ | Types.ToolUse _ | Types.ToolResult _ | Types.Image _
-            | Types.Document _ | Types.Audio _ -> false)
-          ~replay_capability restored.messages
+            | Llm_provider.Types.Thinking _ | Llm_provider.Types.RedactedThinking _ | Llm_provider.Types.ReasoningDetails _ -> true
+            | Llm_provider.Types.Text _ | Llm_provider.Types.ToolUse _ | Llm_provider.Types.ToolResult _ | Llm_provider.Types.Image _
+            | Llm_provider.Types.Document _ | Llm_provider.Types.Audio _ -> false)
+          ~replay_capability
+          (Agent_core.History.to_wire_messages (Agent_core.History.Memory_store.create ())
+             restored.messages
+           |> Result.get_ok)
         |> Result.map_error Provider.Reasoning_history_projection.error_to_string
         |> expect_ok in
       let same = project producing_source in
       Alcotest.(check bool) "same source can still replay its artifact"
-        true (has_content ((=) artifact) same.messages);
+        true (has_wire_content ((=) artifact) same.messages);
       Alcotest.(check int) "same source records no replay loss"
         0 (List.length same.reasoning_replay_drops);
       let rotated = project (source "https://other.test") in
       Alcotest.(check bool) "foreign endpoint cannot replay a bound artifact"
-        false (has_content ((=) artifact) rotated.messages);
+        false (has_wire_content ((=) artifact) rotated.messages);
       match rotated.reasoning_replay_drops with
       | [{ reason = Incompatible_reasoning_source _; _ }] -> ()
       | _ -> Alcotest.fail "rotation must be decided from provenance, not missing source"))
     Provider.Provider_config.[
       Anthropic, Provider.Reasoning_replay_contract.All_assistant_messages,
-        Types.Thinking {signature = Some "signature"; content = "reasoning"};
+        Llm_provider.Types.Thinking {signature = Some "signature"; content = "reasoning"};
       Gemini, Provider.Reasoning_replay_contract.All_assistant_messages,
-        Types.RedactedThinking "gemini-fixture";
+        Llm_provider.Types.RedactedThinking "gemini-fixture";
       OpenAI_compat, Provider.Reasoning_replay_contract.Provider_opaque_state,
-        Types.RedactedThinking "responses-fixture"]
+        Llm_provider.Types.RedactedThinking "responses-fixture"]
 ;;
 
 let test_finalization_reuses_matching_pipeline_checkpoint () =
@@ -736,7 +749,7 @@ let test_media_degraded_projection_persists_canonical_checkpoint () =
   let canonical_history =
     [ message User
         [ Text "canonical history"
-        ; image_block ~media_type:"image/png" ~source:(Base64 "canonical-image")
+        ; image_block ~media_type:"image/png" ~source:(Stored (Agent_core.History.stored_of_raw "canonical-image"))
         ]
     ]
   in
@@ -1074,7 +1087,9 @@ let test_blank_response_drops_only_blank_assistant () =
 let test_native_response_groups_survive_visible_normalization () =
   let open Agent_core.Types in
   let content=[Text "checking";Text "one";Text "two"] in
-  let replay=match Response_replay.make ~content
+  let wire_content = Agent_core.History.to_wire_blocks (Agent_core.History.Memory_store.create ()) content
+    |> Result.get_ok in
+  let replay=match Response_replay.make ~content:wire_content
     [{kind=Message Commentary;content_count=1};
      {kind=Message Final_answer;content_count=2}] with
     | Ok replay->replay | Error detail->Alcotest.fail detail in

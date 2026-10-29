@@ -42,7 +42,7 @@ val host_stop_failed : host_stop -> bool
 type dynamic_tool_result =
   { success : bool
   ; content : string
-  ; content_blocks : Agent_core.Types.content_block list option
+  ; content_blocks : Llm_provider.Types.content_block list option
     (** Model-visible producer content. [None] selects the text fallback;
         [Some blocks] is preserved through client transport. *)
   ; abort_turn : host_stop option
@@ -129,26 +129,26 @@ val validate_base64_image_data : string -> (unit, string) result
 
 val project_content :
   content_transport -> content:string ->
-  content_blocks:Agent_core.Types.content_block list option ->
+  content_blocks:Llm_provider.Types.content_block list option ->
   (Yojson.Safe.t list, string) result
 (** Validate delivery before host settlement and terminal outcome selection. *)
 
 val codex_content_items :
-  content:string -> content_blocks:Agent_core.Types.content_block list option ->
+  content:string -> content_blocks:Llm_provider.Types.content_block list option ->
   (Yojson.Safe.t list, string) result
 (** Project tool text and images to the app-server's typed contentItems. An
     unsupported block is an explicit delivery error, not successful text-only
     evidence. [Some blocks] is authoritative; [None] uses [content]. *)
 
 val mcp_content :
-  content:string -> content_blocks:Agent_core.Types.content_block list option ->
+  content:string -> content_blocks:Llm_provider.Types.content_block list option ->
   (Yojson.Safe.t list, string) result
 (** MCP image content carries base64 bytes and mimeType. URL/file-id images
     require a separate resolver and are refused here rather than fetched. *)
 
 val mcp_tool_result_content :
   success:bool -> content:string ->
-  content_blocks:Agent_core.Types.content_block list option ->
+  content_blocks:Llm_provider.Types.content_block list option ->
   Yojson.Safe.t list * bool
 (** An MCP [tools/call] result's [content] items and its [isError]. When
     {!mcp_content} refuses a block the tool has already run, so the result

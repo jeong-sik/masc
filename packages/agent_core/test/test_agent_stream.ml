@@ -45,7 +45,7 @@ let count_kind events pred = List.length (List.filter pred events)
 (* ------------------------------------------------------------------ *)
 
 let test_emit_text_only () =
-  let response = make_response [ Types.Text "hello world" ] in
+  let response = make_response [ Llm_provider.Types.Text "hello world" ] in
   let events = collect_events response in
   Alcotest.(check int) "6 events" 6 (List.length events);
   (match List.nth events 0 with
@@ -62,7 +62,7 @@ let test_emit_tool_use () =
   let response =
     make_response
       ~stop_reason:Types.StopToolUse
-      [ Types.ToolUse { id = "tool-1"; name = "get_weather"; input } ]
+      [ Llm_provider.Types.ToolUse { id = "tool-1"; name = "get_weather"; input } ]
   in
   let events = collect_events response in
   Alcotest.(check int) "6 events" 6 (List.length events);
@@ -81,7 +81,7 @@ let test_emit_tool_use () =
 
 let test_emit_thinking () =
   let response =
-    make_response [ Types.Thinking { signature = Some "sig"; content = "I think..." } ]
+    make_response [ Llm_provider.Types.Thinking { signature = Some "sig"; content = "I think..." } ]
   in
   let events = collect_events response in
   Alcotest.(check int) "7 events" 7 (List.length events);
@@ -102,8 +102,8 @@ let test_emit_thinking () =
 let test_emit_multiple_blocks () =
   let response =
     make_response
-      [ Types.Text "Here is the result:"
-      ; Types.ToolUse { id = "t1"; name = "calc"; input = `Assoc [ "x", `Int 42 ] }
+      [ Llm_provider.Types.Text "Here is the result:"
+      ; Llm_provider.Types.ToolUse { id = "t1"; name = "calc"; input = `Assoc [ "x", `Int 42 ] }
       ]
   in
   let events = collect_events response in
@@ -122,7 +122,7 @@ let test_emit_multiple_blocks () =
 (* ------------------------------------------------------------------ *)
 
 let test_event_order () =
-  let response = make_response [ Types.Text "hi" ] in
+  let response = make_response [ Llm_provider.Types.Text "hi" ] in
   let events = collect_events response in
   (* Order: MessageStart, CBS, CBD, CBStop, MessageDelta, MessageStop *)
   (match List.nth events 0 with
@@ -147,7 +147,7 @@ let test_event_order () =
 
 let test_message_start_has_usage () =
   let usage = make_usage ~inp:100 ~out:50 () in
-  let response = make_response ~usage:(Some usage) [ Types.Text "x" ] in
+  let response = make_response ~usage:(Some usage) [ Llm_provider.Types.Text "x" ] in
   let events = collect_events response in
   match List.nth events 0 with
   | Types.MessageStart { usage = Some u; _ } ->
@@ -158,7 +158,7 @@ let test_message_start_has_usage () =
 ;;
 
 let test_message_delta_has_stop_reason () =
-  let response = make_response ~stop_reason:Types.MaxTokens [ Types.Text "trunc" ] in
+  let response = make_response ~stop_reason:Types.MaxTokens [ Llm_provider.Types.Text "trunc" ] in
   let events = collect_events response in
   let md = List.nth events (List.length events - 2) in
   match md with
@@ -167,7 +167,7 @@ let test_message_delta_has_stop_reason () =
 ;;
 
 let test_message_stop_last () =
-  let response = make_response [ Types.Text "done" ] in
+  let response = make_response [ Llm_provider.Types.Text "done" ] in
   let events = collect_events response in
   let last = List.nth events (List.length events - 1) in
   match last with
@@ -197,7 +197,7 @@ let test_emit_empty_content () =
 
 let test_tool_use_has_ids () =
   let response =
-    make_response [ Types.ToolUse { id = "id-abc"; name = "my_tool"; input = `Assoc [] } ]
+    make_response [ Llm_provider.Types.ToolUse { id = "id-abc"; name = "my_tool"; input = `Assoc [] } ]
   in
   let events = collect_events response in
   match List.nth events 1 with
@@ -207,7 +207,7 @@ let test_tool_use_has_ids () =
 ;;
 
 let test_content_block_indices_sequential () =
-  let response = make_response [ Types.Text "a"; Types.Text "b"; Types.Text "c" ] in
+  let response = make_response [ Llm_provider.Types.Text "a"; Llm_provider.Types.Text "b"; Llm_provider.Types.Text "c" ] in
   let events = collect_events response in
   let indices =
     List.filter_map
@@ -221,7 +221,7 @@ let test_content_block_indices_sequential () =
 
 let test_text_delta_content () =
   let long_text = String.make 1000 'x' in
-  let response = make_response [ Types.Text long_text ] in
+  let response = make_response [ Llm_provider.Types.Text long_text ] in
   let events = collect_events response in
   match List.nth events 2 with
   | Types.ContentBlockDelta { delta = Types.TextDelta s; _ } ->
@@ -236,7 +236,7 @@ let test_text_delta_content () =
 let test_thinking_delta_content () =
   let response =
     make_response
-      [ Types.Thinking { signature = Some "sig123"; content = "deep thought" } ]
+      [ Llm_provider.Types.Thinking { signature = Some "sig123"; content = "deep thought" } ]
   in
   let events = collect_events response in
   match List.nth events 2 with
@@ -250,7 +250,7 @@ let test_input_json_snapshot_content () =
   let response =
     make_response
       ~stop_reason:Types.StopToolUse
-      [ Types.ToolUse { id = "t1"; name = "fn"; input } ]
+      [ Llm_provider.Types.ToolUse { id = "t1"; name = "fn"; input } ]
   in
   let events = collect_events response in
   match List.nth events 2 with
@@ -264,8 +264,8 @@ let test_input_json_snapshot_content () =
 let test_image_block_media_delta () =
   let response =
     make_response
-      [ Types.Image
-          { media_type = "image/png"; source = Types.Base64 "base64data" }
+      [ Llm_provider.Types.Image
+          { media_type = "image/png"; source = Llm_provider.Types.Base64 "base64data" }
       ]
   in
   let events = collect_events response in
@@ -289,8 +289,8 @@ let test_image_block_media_delta () =
 let test_document_block_media_delta () =
   let response =
     make_response
-      [ Types.Document
-          { media_type = "application/pdf"; source = Types.Base64 "pdfdata" }
+      [ Llm_provider.Types.Document
+          { media_type = "application/pdf"; source = Llm_provider.Types.Base64 "pdfdata" }
       ]
   in
   let events = collect_events response in
@@ -318,7 +318,7 @@ let test_document_block_media_delta () =
 let test_roundtrip_text_event_count () =
   (* Verify that emit produces the same number of ContentBlockDelta events
      as parse_sse_event would generate for a single text block *)
-  let response = make_response [ Types.Text "hello" ] in
+  let response = make_response [ Llm_provider.Types.Text "hello" ] in
   let events = collect_events response in
   let cbd_count =
     count_kind events (function
@@ -332,7 +332,7 @@ let test_roundtrip_tool_event_count () =
   let response =
     make_response
       ~stop_reason:Types.StopToolUse
-      [ Types.ToolUse { id = "t1"; name = "fn"; input = `Assoc [] } ]
+      [ Llm_provider.Types.ToolUse { id = "t1"; name = "fn"; input = `Assoc [] } ]
   in
   let events = collect_events response in
   let cbd_count =
@@ -346,9 +346,9 @@ let test_roundtrip_tool_event_count () =
 let test_roundtrip_mixed_block_count () =
   let response =
     make_response
-      [ Types.Text "intro"
-      ; Types.Thinking { signature = Some "sig"; content = "hmm" }
-      ; Types.Text "conclusion"
+      [ Llm_provider.Types.Text "intro"
+      ; Llm_provider.Types.Thinking { signature = Some "sig"; content = "hmm" }
+      ; Llm_provider.Types.Text "conclusion"
       ]
   in
   let events = collect_events response in
@@ -361,7 +361,7 @@ let test_roundtrip_mixed_block_count () =
 ;;
 
 let test_roundtrip_message_start_fields () =
-  let response = make_response ~id:"msg-xyz" ~model:"claude-test" [ Types.Text "x" ] in
+  let response = make_response ~id:"msg-xyz" ~model:"claude-test" [ Llm_provider.Types.Text "x" ] in
   let events = collect_events response in
   match List.nth events 0 with
   | Types.MessageStart { id; model; _ } ->
@@ -375,7 +375,7 @@ let test_roundtrip_message_start_fields () =
 (* ------------------------------------------------------------------ *)
 
 let test_emit_stop_reason_end_turn () =
-  let response = make_response ~stop_reason:Types.EndTurn [ Types.Text "done" ] in
+  let response = make_response ~stop_reason:Types.EndTurn [ Llm_provider.Types.Text "done" ] in
   let events = collect_events response in
   let md = List.nth events (List.length events - 2) in
   match md with
@@ -384,7 +384,7 @@ let test_emit_stop_reason_end_turn () =
 ;;
 
 let test_emit_stop_reason_max_tokens () =
-  let response = make_response ~stop_reason:Types.MaxTokens [ Types.Text "trunc" ] in
+  let response = make_response ~stop_reason:Types.MaxTokens [ Llm_provider.Types.Text "trunc" ] in
   let events = collect_events response in
   let md = List.nth events (List.length events - 2) in
   match md with
@@ -396,7 +396,7 @@ let test_emit_stop_reason_stop_tool_use () =
   let response =
     make_response
       ~stop_reason:Types.StopToolUse
-      [ Types.ToolUse { id = "t1"; name = "fn"; input = `Null } ]
+      [ Llm_provider.Types.ToolUse { id = "t1"; name = "fn"; input = `Null } ]
   in
   let events = collect_events response in
   let md = List.nth events (List.length events - 2) in
@@ -406,7 +406,7 @@ let test_emit_stop_reason_stop_tool_use () =
 ;;
 
 let test_emit_stop_reason_stop_sequence () =
-  let response = make_response ~stop_reason:Types.StopSequence [ Types.Text "stop" ] in
+  let response = make_response ~stop_reason:Types.StopSequence [ Llm_provider.Types.Text "stop" ] in
   let events = collect_events response in
   let md = List.nth events (List.length events - 2) in
   match md with
@@ -419,7 +419,7 @@ let test_emit_stop_reason_stop_sequence () =
 (* ------------------------------------------------------------------ *)
 
 let test_emit_none_usage () =
-  let response = make_response ~usage:None [ Types.Text "no usage" ] in
+  let response = make_response ~usage:None [ Llm_provider.Types.Text "no usage" ] in
   let events = collect_events response in
   (match List.nth events 0 with
    | Types.MessageStart { usage = None; _ } -> ()
@@ -431,7 +431,7 @@ let test_emit_none_usage () =
 ;;
 
 let test_emit_empty_model () =
-  let response = make_response ~model:"" [ Types.Text "x" ] in
+  let response = make_response ~model:"" [ Llm_provider.Types.Text "x" ] in
   let events = collect_events response in
   match List.nth events 0 with
   | Types.MessageStart { model; _ } -> Alcotest.(check string) "empty model" "" model
@@ -439,7 +439,7 @@ let test_emit_empty_model () =
 ;;
 
 let test_emit_empty_id () =
-  let response = make_response ~id:"" [ Types.Text "x" ] in
+  let response = make_response ~id:"" [ Llm_provider.Types.Text "x" ] in
   let events = collect_events response in
   match List.nth events 0 with
   | Types.MessageStart { id; _ } -> Alcotest.(check string) "empty id" "" id
@@ -450,8 +450,8 @@ let test_emit_multiple_tool_uses () =
   let response =
     make_response
       ~stop_reason:Types.StopToolUse
-      [ Types.ToolUse { id = "t1"; name = "fn1"; input = `Assoc [ "a", `Int 1 ] }
-      ; Types.ToolUse { id = "t2"; name = "fn2"; input = `Assoc [ "b", `Int 2 ] }
+      [ Llm_provider.Types.ToolUse { id = "t1"; name = "fn1"; input = `Assoc [ "a", `Int 1 ] }
+      ; Llm_provider.Types.ToolUse { id = "t2"; name = "fn2"; input = `Assoc [ "b", `Int 2 ] }
       ]
   in
   let events = collect_events response in

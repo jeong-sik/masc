@@ -72,6 +72,7 @@ type core_error_poly =
   | `Serialization of string
   | `Io of string
   | `Orchestration of string
+  | `Media of History.media_error
   | `Internal of string
   ]
 
@@ -182,6 +183,7 @@ let of_core_error (err : Error.t) : core_error_poly =
   | Error.Serialization e -> `Serialization (Error.to_string (Error.Serialization e))
   | Error.Io e -> `Io (Error.to_string (Error.Io e))
   | Error.Orchestration e -> `Orchestration (Error.to_string (Error.Orchestration e))
+  | Error.Media e -> `Media e
   | Error.Internal s -> `Internal s
   | Error.Internal_carried { message = s; _ } -> `Internal s
 ;;
@@ -279,6 +281,7 @@ let to_core_error (err : core_error_poly) : Error.t =
   | `Serialization detail -> Error.Serialization (JsonParseError { detail })
   | `Io detail -> Error.Io (ValidationFailed { detail })
   | `Orchestration detail -> Error.Internal detail
+  | `Media e -> Error.Media e
   | `Internal s -> Error.Internal s
 ;;
 
@@ -344,6 +347,7 @@ let is_retryable (err : [< core_error_poly ]) : bool =
   | `Serialization _
   | `Io _
   | `Orchestration _
+  | `Media _
   | `Internal _ -> false
 ;;
 

@@ -4,6 +4,7 @@
 
 open Alcotest
 open Agent_core
+module Types = Llm_provider.Types
 
 let rec find_repo_root dir =
   if Sys.file_exists (Filename.concat dir "dune-project")

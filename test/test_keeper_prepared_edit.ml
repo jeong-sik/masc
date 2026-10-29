@@ -72,7 +72,7 @@ let failed result =
 ;;
 
 let execute ?(hooks = Agent_core.Hooks.empty) env tools calls =
-  let agent = Agent_core.Agent.create ~tools ~net:env#net
+  let agent = Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~tools ~net:env#net
       ~config:(Agent_core.Types.default_config ~model:"fixture") () in
   let options = Agent_core.Agent.options agent in
   match Agent_core.Agent_tools.execute_tools ~context:(Agent_core.Agent.context agent)
@@ -115,7 +115,7 @@ let batch env config meta recovery inputs =
       ~input_schema:(`Assoc ["type", `String "object"]) () |> get in
   let tool = Agent_core.Tool.of_schema ~descriptor schema
       (fun _ input -> consume config meta recovery None input |> to_sdk) in
-  let calls = List.mapi (fun index input -> Agent_core.Types.ToolUse
+  let calls = List.mapi (fun index input -> Llm_provider.Types.ToolUse
       {id = "edit-" ^ string_of_int index; name = "fixture_edit"; input}) inputs in
   dispatch env [tool] calls
 ;;
@@ -189,7 +189,7 @@ let public_args path before after =
   `Assoc ["file_path", `String path; "old_string", `String before; "new_string", `String after]
 ;;
 
-let public_calls inputs = List.mapi (fun index input -> Agent_core.Types.ToolUse
+let public_calls inputs = List.mapi (fun index input -> Llm_provider.Types.ToolUse
     {id = "public-edit-" ^ string_of_int index; name = "Edit"; input}) inputs
 ;;
 
@@ -263,7 +263,7 @@ let publish_write_skills ?(with_read = false) sw config =
 ;;
 
 let inline_write_calls ?(prefix = "inline-write") inputs = List.mapi (fun index input ->
-  Agent_core.Types.ToolUse {id=prefix ^ "-" ^ string_of_int index;
+  Llm_provider.Types.ToolUse {id=prefix ^ "-" ^ string_of_int index;
     name="keeper_compose_write-" ^ (if index=0 then "left" else "right");input}) inputs
 ;;
 
@@ -276,7 +276,7 @@ let inline_calls bundle inputs = List.mapi (fun index input ->
   let name = "keeper_compose_edit-" ^ (if index = 0 then "left" else "right") in
   check bool "published Inline tool is in the actual bundle" true
     (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) bundle.Keeper_tools_agent_core.tools);
-  Agent_core.Types.ToolUse {id = "inline-edit-" ^ string_of_int index; name; input}) inputs
+  Llm_provider.Types.ToolUse {id = "inline-edit-" ^ string_of_int index; name; input}) inputs
 ;;
 
 let two_patch_args left before after right other_before other_after =
@@ -298,7 +298,7 @@ let recipe_edit ?(after = []) id input =
 ;;
 
 let recipe_call ?(id = "recipe-edit") nodes =
-  Agent_core.Types.ToolUse
+  Llm_provider.Types.ToolUse
     {id; name = Keeper_composition_draft.run_tool_name;
      input = `Assoc ["recipe", `Assoc ["execution", `String "inline"; "nodes", `List nodes]]}
 ;;
@@ -963,7 +963,7 @@ let test_dynamic_failed_conflict_keeps_independent_branch () =
     recipe_dynamic_edit "blocked" "shared-source" "before" "must-not-run";
     recipe_dynamic_edit "independent" "other-source" "before" "after";
     recipe_read "other-source" other] in
-  let call = Agent_core.Types.ToolUse {id = "failed-dynamic"; name = Keeper_composition_draft.run_tool_name;
+  let call = Llm_provider.Types.ToolUse {id = "failed-dynamic"; name = Keeper_composition_draft.run_tool_name;
     input = `Assoc ["recipe", `Assoc ["execution", `String "inline";
       "branch_failure_policy", `String "continue_independent"; "nodes", `List nodes]]} in
   let rows = execute env bundle.tools [call] in
@@ -1080,7 +1080,7 @@ let test_cancelled_inner_edits_release_for_next_invocation () =
    | exception Exit -> ());
   check string "cancelled left authorization wrote nothing" "first" (read left);
   check string "cancelled right authorization wrote nothing" "first" (read right);
-  ignore (dispatch env bundle.tools [Agent_core.Types.ToolUse
+  ignore (dispatch env bundle.tools [Llm_provider.Types.ToolUse
     {id = "inline-after-cancel"; name = "keeper_compose_edit-left"; input}]);
   check string "new invocation can acquire left resource" "second" (read left);
   check string "new invocation can acquire right resource" "second" (read right)
@@ -1626,7 +1626,7 @@ let test_mixed_missing_or_nonregular_read_keeps_ordinary_admission () =
       | `Assoc fields -> `Assoc (fields @ ["read_path", `String read_path])
       | _ -> fail "patch arguments are not an object" in
     let name = match inline_calls bundle [input] with
-      | [Agent_core.Types.ToolUse call] -> call.name
+      | [Llm_provider.Types.ToolUse call] -> call.name
       | _ -> fail "one Skill did not produce one call" in
     let tool = List.find (fun tool -> String.equal tool.Agent_core.Tool.schema.name name) bundle.tools in
     check bool "the actual mixed producer opts into resource preparation" true

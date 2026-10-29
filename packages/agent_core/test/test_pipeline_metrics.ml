@@ -23,7 +23,7 @@ let mk_mock_response () : Types.api_response =
   { id = "test-msg-1"
   ; model = "mock-model"
   ; stop_reason = Types.EndTurn
-  ; content = [ Types.Text "hello from mock transport" ]
+  ; content = [ Llm_provider.Types.Text "hello from mock transport" ]
   ; usage = None
   ; telemetry = None
   }
@@ -67,7 +67,7 @@ let make_empty_agent ~net ~stop_reason ~name =
     ; provider_config = Some (Provider_mock.to_provider_config ())
     }
   in
-  Agent.create
+  Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
     ~net
     ~config:{ (Types.default_config ~model:"test-model") with name }
     ~options
@@ -129,7 +129,7 @@ let test_sync_dispatches_via_complete_triggers_metrics () =
   Llm_provider.Metrics.set_global metrics;
   let options = { Agent_types.default_options with transport = Some transport } in
   let _agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net
       ~config:{ (Types.default_config ~model:"test-model") with name = "pr-o2-test" }
       ~options
@@ -157,7 +157,7 @@ let test_sync_dispatches_via_complete_triggers_metrics () =
       ~transport
       ~config:pc
       ~messages:
-        [ { origin = Llm_provider.Types.Conversation;  Types.role = User
+        [ { origin = Llm_provider.Types.Conversation;  Llm_provider.Types.role = User
           ; content = [ Text "ping" ]
           ; name = None
           ; tool_call_id = None
@@ -201,7 +201,7 @@ let test_stage_route_passes_trace_context_headers () =
     }
   in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net
       ~config:
         { (Types.default_config ~model:"test-model") with name = "trace-context-test" }
@@ -368,7 +368,7 @@ let test_core_error_preserves_streaming_timeout_phase () =
     }
   in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net
       ~config:
         { (Types.default_config ~model:"test-model") with name = "timeout-phase-test" }

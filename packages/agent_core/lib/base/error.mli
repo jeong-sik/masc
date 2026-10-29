@@ -183,6 +183,9 @@ type t =
   | Serialization of serialization_error
   | Io of io_error
   | Orchestration of orchestration_error
+  | Media of History.media_error
+  (** A media store could not keep or return the bytes a history block
+      names, or a provider payload did not decode. *)
   | Internal of string
   | Internal_carried of
       { message : string
@@ -201,6 +204,7 @@ type category =
   | Serialization_category
   | Io_category
   | Orchestration_category
+  | Media_category
   | Internal_category
 
 (** {1 Operations} *)

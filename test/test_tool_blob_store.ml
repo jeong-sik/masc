@@ -1040,6 +1040,88 @@ let test_maintenance_keeps_prepared_lane_broadcast () =
     Alcotest.(check (option string)) "child remains readable for retry"
       (Some "prepared Lane evidence") (fetch_ok store ~sha256:child.sha256))
 
+let media_put_ok (media_store : Agent_core.History.media_store) ~media_type ~raw =
+  match media_store.put ~media_type ~raw with
+  | Ok stored -> stored
+  | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error))
+
+(* RFC-0476: a checkpoint holds history media as a [Stored] source, which is
+   neither a Tool_output marker nor a [_blob] object. Two complete deletion
+   scans must still treat its blob as live. *)
+let test_maintenance_keeps_history_media_of_a_checkpoint () =
+  with_temp_dir (fun base_path ->
+    let store = B.create ~base_path in
+    let media_store = Tool_blob_media_store.create store in
+    let raw = "checkpoint history image" in
+    let stored = media_put_ok media_store ~media_type:"image/png" ~raw in
+    let dead = B.put store ~bytes:"unreferenced image" ~mime:"image/png" |> stored_ref_exn in
+    let path =
+      Filename.concat (Common.masc_dir_from_base_path ~base_path)
+        (Filename.concat Common.keepers_runtime_dirname "reviewer/checkpoint.json")
+    in
+    (* The agent context is Eio state, so the checkpoint is written inside
+       the event loop, as a Keeper writes it. *)
+    (Eio_main.run @@ fun env ->
+      let agent =
+        Agent_core.Agent.create ~media_store ~net:env#net
+          ~config:(Agent_core.Types.default_config ~model:"fixture-model") ()
+      in
+      Agent_core.Agent.set_state agent
+        { (Agent_core.Agent.state agent) with
+          messages =
+            [ Agent_core.Types.user_msg_blocks
+                [ Agent_core.Types.Text "look"
+                ; Agent_core.Types.Image
+                    { media_type = "image/png"; source = Agent_core.Types.Stored stored }
+                ]
+            ]
+        };
+      Fs_compat.mkdir_p (Filename.dirname path);
+      Fs_compat.save_file path (Agent_core.Checkpoint.to_string (Agent_core.Agent.checkpoint agent)));
+    for _pass = 1 to 2 do
+      let result = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+      Alcotest.(check int) "the stored image is the only live reference" 1 result.live_references
+    done;
+    Alcotest.(check (option string)) "the checkpoint image survives" (Some raw)
+      (fetch_ok store ~sha256:stored.sha256);
+    Alcotest.(check (option string)) "the unreferenced blob is deleted" None
+      (fetch_ok store ~sha256:dead.sha256))
+
+let media_error =
+  Alcotest.testable
+    (fun fmt error -> Format.pp_print_string fmt (Agent_core.Error.to_string (Agent_core.Error.Media error)))
+    ( = )
+
+let test_media_store_reads_back_what_it_put () =
+  with_temp_dir (fun base_path ->
+    let media_store = Tool_blob_media_store.of_base_path ~base_path in
+    let raw = "\000\255 media bytes" in
+    let stored = media_put_ok media_store ~media_type:"image/png" ~raw in
+    Alcotest.(check bool) "the reference names the bytes" true
+      (stored = Agent_core.History.stored_of_raw raw);
+    Alcotest.(check bool) "the same bytes give the same reference" true
+      (media_put_ok media_store ~media_type:"image/png" ~raw = stored);
+    Alcotest.(check (result string media_error)) "get returns the bytes" (Ok raw)
+      (media_store.get stored))
+
+let test_media_store_reports_missing_and_mismatched_bytes () =
+  with_temp_dir (fun base_path ->
+    let media_store = Tool_blob_media_store.of_base_path ~base_path in
+    let absent = Agent_core.History.stored_of_raw "never put" in
+    Alcotest.(check (result string media_error)) "an absent digest is missing"
+      (Error (Agent_core.History.Missing_bytes absent)) (media_store.get absent);
+    let stored = media_put_ok media_store ~media_type:"image/png" ~raw:"twelve bytes" in
+    let wrong_length =
+      match Agent_core.History.stored ~sha256:stored.sha256 ~bytes:(stored.bytes + 1) with
+      | Ok reference -> reference
+      | Error error -> Alcotest.fail (Agent_core.History.stored_error_to_string error)
+    in
+    Alcotest.(check (result string media_error)) "a reference with another length is refused"
+      (Error
+         (Agent_core.History.Digest_mismatch
+            { expected = wrong_length; actual = stored }))
+      (media_store.get wrong_length))
+
 let test_maintenance_keeps_wire_capture_reference_within_retention () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -2311,6 +2393,12 @@ let () =
             test_maintenance_ignores_marker_embedded_in_prose;
           Alcotest.test_case "maintenance keeps prepared Lane Broadcast artifacts" `Quick
             test_maintenance_keeps_prepared_lane_broadcast;
+          Alcotest.test_case "maintenance keeps history media of a checkpoint" `Quick
+            test_maintenance_keeps_history_media_of_a_checkpoint;
+          Alcotest.test_case "media store reads back what it put" `Quick
+            test_media_store_reads_back_what_it_put;
+          Alcotest.test_case "media store reports missing and mismatched bytes" `Quick
+            test_media_store_reports_missing_and_mismatched_bytes;
           Alcotest.test_case
             "maintenance keeps wire-capture reference within retention"
             `Quick

@@ -178,59 +178,6 @@ let result_all items =
   |> Result.map List.rev
 ;;
 
-let checkpoint_tool_result_to_json ~tool_use_id ~content ~outcome content_override =
-  let fields =
-    Llm_provider.Api_common.tool_result_wire_fields ~tool_use_id ~content ~outcome
-  in
-  let fields =
-    match content_override with
-    | None -> fields
-    | Some content ->
-      List.map
-        (fun (name, value) ->
-           if String.equal name "content" then name, content else name, value)
-        fields
-  in
-  let provenance =
-    match outcome with
-    | Tool_succeeded -> []
-    | Tool_failed { failure_kind; error_class } ->
-      [ "failure_kind", Types.tool_failure_kind_to_yojson failure_kind ]
-      @
-        (match error_class with
-        | Some error_class ->
-          [ "error_class", Types.tool_error_class_to_yojson error_class ]
-        | None -> [])
-  in
-  `Assoc
-    (fields @ provenance
-     @ match content_override with
-       | None -> []
-       | Some _ -> [ "text_content", `String content ])
-;;
-
-(* Total: every arm builds JSON from typed fields and raises nothing.
-   Callers rely on that and do not catch around it, so an arm that can fail
-   must change the return type instead of raising. *)
-let rec checkpoint_content_block_to_json block =
-  match block with
-  | ToolResult { tool_use_id; content; outcome; json = _; content_blocks } ->
-    let content_override =
-      Option.map
-        (fun blocks -> `List (List.map checkpoint_content_block_to_json blocks))
-        content_blocks
-    in
-    checkpoint_tool_result_to_json ~tool_use_id ~content ~outcome content_override
-  | Text _
-  | Thinking _
-  | ReasoningDetails _
-  | RedactedThinking _
-  | ToolUse _
-  | Image _
-  | Document _
-  | Audio _ -> Llm_provider.Api_common.content_block_to_json block
-;;
-
 let checkpoint_json_validation_error error =
   Error.Serialization
     (JsonParseError { detail = Execution_json.validation_error_to_string error })
@@ -241,282 +188,327 @@ let validate_checkpoint_json ~context json =
   |> Result.map_error checkpoint_json_validation_error
 ;;
 
-let unique_optional_field ~field fields =
-  match
-    List.filter_map
-      (fun (name, value) -> if String.equal name field then Some value else None)
-      fields
-  with
-  | [] -> Ok None
-  | [ value ] -> Ok (Some value)
-  | _ ->
-    Error
-      (Error.Serialization
-         (JsonParseError
-            { detail = Printf.sprintf "Checkpoint ToolResult duplicates field %s" field }))
-;;
+(* The execution journal records provider blocks, base64 media included, in
+   this shape; checkpoint messages are history blocks and use {!History}. *)
+module Wire_block = struct
+  open Llm_provider.Types
 
-let optional_typed_field ~field ~type_name ~decode fields =
-  let* value = unique_optional_field ~field fields in
-  match value with
-  | None -> Ok None
-  | Some value ->
-    decode value
-    |> Result.map Option.some
-    |> Result.map_error (fun detail ->
-      Error.Serialization
-        (JsonParseError
-           { detail =
-               Printf.sprintf
-                 "Checkpoint ToolResult field %s has invalid %s: %s"
-                 field
-                 type_name
-                 detail
-           }))
-;;
+  let tool_result_to_json ~tool_use_id ~content ~outcome content_override =
+    let fields =
+      Llm_provider.Api_common.tool_result_wire_fields ~tool_use_id ~content ~outcome
+    in
+    let fields =
+      match content_override with
+      | None -> fields
+      | Some content ->
+        List.map
+          (fun (name, value) ->
+             if String.equal name "content" then name, content else name, value)
+          fields
+    in
+    let provenance =
+      match outcome with
+      | Tool_succeeded -> []
+      | Tool_failed { failure_kind; error_class } ->
+        [ "failure_kind", Types.tool_failure_kind_to_yojson failure_kind ]
+        @
+          (match error_class with
+          | Some error_class ->
+            [ "error_class", Types.tool_error_class_to_yojson error_class ]
+          | None -> [])
+    in
+    `Assoc
+      (fields @ provenance
+       @ match content_override with
+         | None -> []
+         | Some _ -> [ "text_content", `String content ])
+  ;;
 
-let tool_result_fields json =
-  match json with
-  | `Assoc fields -> Ok fields
-  | non_object ->
-    Error
-      (Error.Serialization
-         (JsonParseError
-            { detail =
-                Printf.sprintf
-                  "Checkpoint ToolResult must be an object, got %s"
-                  (Yojson.Safe.to_string non_object)
-            }))
-;;
+  (* Total: every arm builds JSON from typed fields and raises nothing.
+     Callers rely on that and do not catch around it, so an arm that can fail
+     must change the return type instead of raising. *)
+  let rec to_json (block : content_block) =
+    match block with
+    | ToolResult { tool_use_id; content; outcome; json = _; content_blocks } ->
+      let content_override =
+        Option.map
+          (fun blocks -> `List (List.map to_json blocks))
+          content_blocks
+      in
+      tool_result_to_json ~tool_use_id ~content ~outcome content_override
+    | Text _
+    | Thinking _
+    | ReasoningDetails _
+    | RedactedThinking _
+    | ToolUse _
+    | Image _
+    | Document _
+    | Audio _ -> Llm_provider.Api_common.content_block_to_json block
+  ;;
 
-let rec content_block_of_json_strict json =
-  try
+  let unique_optional_field ~field fields =
     match
-      Llm_provider.Api_common.content_block_of_json
-        ~parse_tool_result_json:false
-        json
+      List.filter_map
+        (fun (name, value) -> if String.equal name field then Some value else None)
+        fields
     with
-    | Some
-        (ToolResult
-           { tool_use_id
-           ; content
-           ; outcome = wire_outcome
-           ; json = _
-           ; content_blocks = _
-           }) ->
-      let* fields = tool_result_fields json in
-      let* text_content = unique_optional_field ~field:"text_content" fields in
-      let* content =
-        match text_content with
-        | None -> Ok content
-        | Some (`String text) -> Ok text
-        | Some _ ->
-          Error
-            (Error.Serialization
-               (JsonParseError
-                  { detail = "Checkpoint ToolResult text_content must be a string" }))
-      in
-      let* content_blocks =
-        match List.assoc_opt "content" fields with
-        | Some (`String _) -> Ok None
-        | Some (`List blocks) ->
-          let+ blocks = List.map content_block_of_json_strict blocks |> result_all in
-          Some blocks
-        | Some _ ->
-          Error
-            (Error.Serialization
-               (JsonParseError
-                  { detail = "Checkpoint ToolResult content must be a string or an array"
-                  }))
-        | None ->
-          Error
-            (Error.Serialization
-               (JsonParseError { detail = "Checkpoint ToolResult is missing content" }))
-      in
-      let* failure_kind =
-        optional_typed_field
-          ~field:"failure_kind"
-          ~type_name:"tool_failure_kind"
-          ~decode:Types.tool_failure_kind_of_yojson
-          fields
-      and* error_class =
-        optional_typed_field
-          ~field:"error_class"
-          ~type_name:"tool_error_class"
-          ~decode:Types.tool_error_class_of_yojson
-          fields
-      in
-      let* outcome =
-        match wire_outcome, failure_kind, error_class with
-        | Tool_succeeded, None, None -> Ok Tool_succeeded
-        | Tool_succeeded, _, _ ->
-          Error
-            (Error.Serialization
-               (JsonParseError
-                  { detail =
-                      "Checkpoint ToolResult marks success but contains failure \
-                       provenance"
-                  }))
-        | Tool_failed _, Some failure_kind, error_class ->
-          Ok (Tool_failed { failure_kind; error_class })
-        | Tool_failed _, None, None ->
-          Error
-            (Error.Serialization
-               (JsonParseError
-                  { detail =
-                      "Checkpoint ToolResult failure is missing failure_kind provenance"
-                  }))
-        | Tool_failed _, None, Some _ ->
-          Error
-            (Error.Serialization
-               (JsonParseError
-                  { detail = "Checkpoint ToolResult has error_class without failure_kind"
-                  }))
-      in
-      Ok
-        (ToolResult { tool_use_id; content; outcome; json = None; content_blocks })
-    | Some (ReasoningDetails { details; _ }) ->
-      let* fields =
-        match json with
-        | `Assoc fields -> Ok fields
-        | _ ->
-          Error
-            (Error.Serialization
-               (JsonParseError
-                  { detail = "Checkpoint ReasoningDetails must be a JSON object" }))
-      in
-      let* reasoning_content = unique_optional_field ~field:"reasoning_content" fields in
-      (match reasoning_content with
-       | None -> Ok (ReasoningDetails { reasoning_content = None; details })
-       | Some (`String reasoning_content) ->
-         Ok (ReasoningDetails { reasoning_content = Some reasoning_content; details })
-       | Some _ ->
-         Error
-           (Error.Serialization
-              (JsonParseError
-                 { detail =
-                     "Checkpoint ReasoningDetails reasoning_content must be a string"
-                 })))
-    | Some
-        (( Text _ | Thinking _ | RedactedThinking _ | ToolUse _ | Image _ | Document _
-         | Audio _ ) as block) -> Ok block
-    | None ->
-      (* The option-returning decoder collapses every refusal into [None], and
-         reading the block's own "type" back out of the JSON described the
-         wrong thing: a [tool_use] block with a blank id is refused for the id,
-         not for being an unknown type, and the message said "Unknown content
-         block type: tool_use" about a type the decoder knows perfectly well.
-         The result-returning decoder next to it already names the field it
-         refused, so the reason travels instead of being guessed. *)
-      let detail =
-        match
-          Llm_provider.Api_common.content_block_of_json_result
-            ~parse_tool_result_json:false
-            json
-        with
-        | Ok _ ->
-          (* [content_block_of_json] is [content_block_of_json_result] with the
-             error dropped, so the two cannot disagree; this arm exists because
-             the type does not say so. *)
-          "Checkpoint content block was refused without a reason"
-        | Error error ->
-          Llm_provider.Api_common.content_block_decode_error_to_string error
-      in
-      Error (Error.Serialization (JsonParseError { detail }))
-  with
-  | Yojson.Safe.Util.Type_error (msg, _) ->
-    Error
-      (Error.Serialization
-         (JsonParseError { detail = Printf.sprintf "Invalid content block: %s" msg }))
-  | Yojson.Json_error msg ->
-    Error
-      (Error.Serialization
-         (JsonParseError { detail = Printf.sprintf "Invalid content block: %s" msg }))
-  | Failure msg ->
-    Error
-      (Error.Serialization
-         (JsonParseError { detail = Printf.sprintf "Invalid content block: %s" msg }))
+    | [] -> Ok None
+    | [ value ] -> Ok (Some value)
+    | _ ->
+      Error
+        (Error.Serialization
+           (JsonParseError
+              { detail = Printf.sprintf "Checkpoint ToolResult duplicates field %s" field }))
+  ;;
+
+  let optional_typed_field ~field ~type_name ~decode fields =
+    let* value = unique_optional_field ~field fields in
+    match value with
+    | None -> Ok None
+    | Some value ->
+      decode value
+      |> Result.map Option.some
+      |> Result.map_error (fun detail ->
+        Error.Serialization
+          (JsonParseError
+             { detail =
+                 Printf.sprintf
+                   "Checkpoint ToolResult field %s has invalid %s: %s"
+                   field
+                   type_name
+                   detail
+             }))
+  ;;
+
+  let tool_result_fields json =
+    match json with
+    | `Assoc fields -> Ok fields
+    | non_object ->
+      Error
+        (Error.Serialization
+           (JsonParseError
+              { detail =
+                  Printf.sprintf
+                    "Checkpoint ToolResult must be an object, got %s"
+                    (Yojson.Safe.to_string non_object)
+              }))
+  ;;
+
+  let rec of_json_strict json : (content_block, Error.t) result =
+    try
+      match
+        Llm_provider.Api_common.content_block_of_json
+          ~parse_tool_result_json:false
+          json
+      with
+      | Some
+          (ToolResult
+             { tool_use_id
+             ; content
+             ; outcome = wire_outcome
+             ; json = _
+             ; content_blocks = _
+             }) ->
+        let* fields = tool_result_fields json in
+        let* text_content = unique_optional_field ~field:"text_content" fields in
+        let* content =
+          match text_content with
+          | None -> Ok content
+          | Some (`String text) -> Ok text
+          | Some _ ->
+            Error
+              (Error.Serialization
+                 (JsonParseError
+                    { detail = "Checkpoint ToolResult text_content must be a string" }))
+        in
+        let* content_blocks =
+          match List.assoc_opt "content" fields with
+          | Some (`String _) -> Ok None
+          | Some (`List blocks) ->
+            let+ blocks = List.map of_json_strict blocks |> result_all in
+            Some blocks
+          | Some _ ->
+            Error
+              (Error.Serialization
+                 (JsonParseError
+                    { detail = "Checkpoint ToolResult content must be a string or an array"
+                    }))
+          | None ->
+            Error
+              (Error.Serialization
+                 (JsonParseError { detail = "Checkpoint ToolResult is missing content" }))
+        in
+        let* failure_kind =
+          optional_typed_field
+            ~field:"failure_kind"
+            ~type_name:"tool_failure_kind"
+            ~decode:Types.tool_failure_kind_of_yojson
+            fields
+        and* error_class =
+          optional_typed_field
+            ~field:"error_class"
+            ~type_name:"tool_error_class"
+            ~decode:Types.tool_error_class_of_yojson
+            fields
+        in
+        let* outcome =
+          match wire_outcome, failure_kind, error_class with
+          | Tool_succeeded, None, None -> Ok Tool_succeeded
+          | Tool_succeeded, _, _ ->
+            Error
+              (Error.Serialization
+                 (JsonParseError
+                    { detail =
+                        "Checkpoint ToolResult marks success but contains failure \
+                         provenance"
+                    }))
+          | Tool_failed _, Some failure_kind, error_class ->
+            Ok (Tool_failed { failure_kind; error_class })
+          | Tool_failed _, None, None ->
+            Error
+              (Error.Serialization
+                 (JsonParseError
+                    { detail =
+                        "Checkpoint ToolResult failure is missing failure_kind provenance"
+                    }))
+          | Tool_failed _, None, Some _ ->
+            Error
+              (Error.Serialization
+                 (JsonParseError
+                    { detail = "Checkpoint ToolResult has error_class without failure_kind"
+                    }))
+        in
+        Ok
+          (ToolResult { tool_use_id; content; outcome; json = None; content_blocks })
+      | Some (ReasoningDetails { details; _ }) ->
+        let* fields =
+          match json with
+          | `Assoc fields -> Ok fields
+          | _ ->
+            Error
+              (Error.Serialization
+                 (JsonParseError
+                    { detail = "Checkpoint ReasoningDetails must be a JSON object" }))
+        in
+        let* reasoning_content = unique_optional_field ~field:"reasoning_content" fields in
+        (match reasoning_content with
+         | None -> Ok (ReasoningDetails { reasoning_content = None; details })
+         | Some (`String reasoning_content) ->
+           Ok (ReasoningDetails { reasoning_content = Some reasoning_content; details })
+         | Some _ ->
+           Error
+             (Error.Serialization
+                (JsonParseError
+                   { detail =
+                       "Checkpoint ReasoningDetails reasoning_content must be a string"
+                   })))
+      | Some
+          (( Text _ | Thinking _ | RedactedThinking _ | ToolUse _ | Image _ | Document _
+           | Audio _ ) as block) -> Ok block
+      | None ->
+        (* The option-returning decoder collapses every refusal into [None], and
+           reading the block's own "type" back out of the JSON described the
+           wrong thing: a [tool_use] block with a blank id is refused for the id,
+           not for being an unknown type, and the message said "Unknown content
+           block type: tool_use" about a type the decoder knows perfectly well.
+           The result-returning decoder next to it already names the field it
+           refused, so the reason travels instead of being guessed. *)
+        let detail =
+          match
+            Llm_provider.Api_common.content_block_of_json_result
+              ~parse_tool_result_json:false
+              json
+          with
+          | Ok _ ->
+            (* [content_block_of_json] is [content_block_of_json_result] with the
+               error dropped, so the two cannot disagree; this arm exists because
+               the type does not say so. *)
+            "Checkpoint content block was refused without a reason"
+          | Error error ->
+            Llm_provider.Api_common.content_block_decode_error_to_string error
+        in
+        Error (Error.Serialization (JsonParseError { detail }))
+    with
+    | Yojson.Safe.Util.Type_error (msg, _) ->
+      Error
+        (Error.Serialization
+           (JsonParseError { detail = Printf.sprintf "Invalid content block: %s" msg }))
+    | Yojson.Json_error msg ->
+      Error
+        (Error.Serialization
+           (JsonParseError { detail = Printf.sprintf "Invalid content block: %s" msg }))
+    | Failure msg ->
+      Error
+        (Error.Serialization
+           (JsonParseError { detail = Printf.sprintf "Invalid content block: %s" msg }))
+  ;;
+end
+
+let wire_content_block_to_json = Wire_block.to_json
+let wire_content_block_of_json_strict = Wire_block.of_json_strict
+
+let message_to_json = History.message_to_json
+
+let tool_result_block : content_block -> bool = function
+  | ToolResult _ -> true
+  | Text _
+  | Thinking _
+  | ReasoningDetails _
+  | RedactedThinking _
+  | ToolUse _
+  | Image _
+  | Document _
+  | Audio _ -> false
 ;;
 
-let metadata_of_json json =
-  let open Yojson.Safe.Util in
-  match json |> member "metadata" with
-  | `Null -> Ok []
-  | `Assoc fields -> Ok fields
-  | other ->
-    Error
-      (Error.Serialization
-         (JsonParseError
-            { detail =
-                Printf.sprintf
-                  "Checkpoint.message metadata must be an object, got %s"
-                  (Yojson.Safe.to_string other)
-            }))
+(* The pairing of role and content that {!History.message_of_json} does not
+   check: a Tool message holds only, and at least one, ToolResult, and no other
+   role holds one. *)
+let role_content_problem (message : Types.message) =
+  let has_tool_result = List.exists tool_result_block message.content in
+  match message.role, message.content with
+  | Tool, [] -> Some "role tool requires at least one ToolResult"
+  | Tool, _ :: _ ->
+    if List.for_all tool_result_block message.content
+    then None
+    else Some "role tool may contain only ToolResult blocks"
+  | (System | User | Assistant), _ ->
+    if has_tool_result then Some "ToolResult requires role tool" else None
 ;;
 
-let message_json (msg : Types.message) content =
-  let base_fields =
-    [ "role", `String (Types.role_to_string msg.role)
-    ; "origin", `String (Types.message_origin_to_string msg.origin)
-    ; "content", `List content
-    ]
-  in
-  let optional_fields =
-    (match msg.name with
-     | Some name -> [ "name", `String name ]
-     | None -> [])
-    @ (match msg.tool_call_id with
-       | Some tool_call_id -> [ "tool_call_id", `String tool_call_id ]
-       | None -> [])
-    @ if msg.metadata = [] then [] else [ "metadata", `Assoc msg.metadata ]
-  in
-  `Assoc (base_fields @ optional_fields)
+let message_decode_problem json =
+  match History.message_of_json json with
+  | Error error -> Error (History.decode_error_to_string error)
+  | Ok message ->
+    (match role_content_problem message with
+     | None -> Ok message
+     | Some problem -> Error problem)
 ;;
 
-let message_to_json (msg : Types.message) =
-  message_json msg (List.map checkpoint_content_block_to_json msg.content)
+let message_decode_error detail =
+  Error.Serialization (JsonParseError { detail })
 ;;
 
 let message_of_json json =
-  let open Yojson.Safe.Util in
-  let origin = match json with
-    | `Assoc fields ->
-      (match List.filter_map (fun (key,value) -> if key="origin" then Some value else None) fields with
-       | [`String value] ->
-         (match Types.message_origin_of_string value with
-          | Some origin -> Ok origin
-          | None -> Error (Error.Serialization
-              (UnknownVariant {type_name="message_origin";value})))
-       | [] | _::_ -> Error (Error.Serialization
-           (JsonParseError {detail="Checkpoint.message requires one valid origin"})))
-    | _ -> Error (Error.Serialization (JsonParseError {detail="Checkpoint.message must be an object"})) in
-  let role_str = json |> member "role" |> to_string in
-  let role =
-    match Types.role_of_string role_str with
-    | Some role -> Ok role
-    | None ->
-      Error
-        (Error.Serialization (UnknownVariant { type_name = "role"; value = role_str }))
+  message_decode_problem json
+  |> Result.map_error (fun problem -> message_decode_error ("Checkpoint message: " ^ problem))
+;;
+
+let messages_of_json json =
+  let rec decode index acc = function
+    | [] -> Ok (List.rev acc)
+    | message :: rest ->
+      (match message_decode_problem message with
+       | Ok message -> decode (index + 1) (message :: acc) rest
+       | Error problem ->
+         Error
+           (message_decode_error
+              (Printf.sprintf "%s message[%d]: %s" checkpoint_context index problem)))
   in
-  let content =
-    json
-    |> member "content"
-    |> to_list
-    |> List.map content_block_of_json_strict
-    |> result_all
-  in
-  let metadata = metadata_of_json json in
-  let* origin = origin
-  and* role = role
-  and* content = content
-  and* metadata = metadata in
-  Ok
-    { origin; role
-    ; content
-    ; name = json |> member "name" |> to_string_option
-    ; tool_call_id = json |> member "tool_call_id" |> to_string_option
-    ; metadata
-    }
+  match json with
+  | `List messages -> decode 0 [] messages
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
+    Error (message_decode_error (checkpoint_context ^ " messages must be an array"))
 ;;
 
 let messages_field = "messages"
@@ -580,8 +572,7 @@ let decode_current_json json =
     let* model =
       model_of_yojson (json |> member "model")
       |> Result.map_error (fun e -> Error.Serialization (JsonParseError { detail = e }))
-    and* messages =
-      json |> member "messages" |> to_list |> List.map message_of_json |> result_all
+    and* messages = messages_of_json (json |> member "messages")
     and* tools =
       json |> member "tools" |> to_list |> List.map tool_schema_of_json |> result_all
     and* context =
@@ -1113,17 +1104,15 @@ let decode_written_bytes ~decode bytes =
 ;;
 
 (* The passes [checkpoint_json_result] runs over the whole checkpoint,
-   restricted to one message: encode, [Execution_json.validate], the current
-   message contract, and a decode. None of them reads past the message's own
-   subtree ([Checkpoint_contract.validate_messages] maps
-   [validate_message] over the array; [Execution_json.validate] checks keys and
-   numbers inside each object), so a message that passes here passes inside any
-   checkpoint. The decode reads the written bytes, with the handlers of
+   restricted to one message: encode, [Execution_json.validate] and a decode.
+   Neither reads past the message's own subtree ([Execution_json.validate]
+   checks keys and numbers inside each object, [messages_of_json] decodes each
+   element alone), so a message that passes here passes inside any checkpoint.
+   The decode reads the written bytes, with the handlers of
    [decode_current_json]. *)
-let validated_message_encoding ~message_index message =
+let validated_message_encoding message =
   let json = message_to_json message in
   let* () = validate_checkpoint_json ~context:checkpoint_context json in
-  let* _ = Checkpoint_contract.validate_message message_index json in
   let bytes = Yojson.Safe.to_string json in
   let+ decoded = decode_written_bytes ~decode:message_of_json bytes in
   { bytes; decoded }
@@ -1174,13 +1163,13 @@ let encoded_checkpoint_pieces ~before_messages ~after_messages messages =
    does. *)
 let to_pieces_with_encoding_memo memo (cp : Checkpoint_types.t) =
   let next = Encoded_messages.create (List.length cp.messages) in
-  let rec encode_messages message_index rev_encoded = function
+  let rec encode_messages rev_encoded = function
     | [] -> Ok (List.rev rev_encoded)
     | message :: rest ->
       let encoding =
         match Encoded_messages.find_opt memo.entries message with
         | Some encoded -> Ok encoded
-        | None -> validated_message_encoding ~message_index message
+        | None -> validated_message_encoding message
       in
       (match encoding with
        | Error _ as error -> error
@@ -1188,11 +1177,11 @@ let to_pieces_with_encoding_memo memo (cp : Checkpoint_types.t) =
          Encoded_messages.replace next message encoded;
          (* A save that starts from the decoded checkpoint passes these. *)
          Encoded_messages.replace next encoded.decoded encoded;
-         encode_messages (message_index + 1) (encoded :: rev_encoded) rest)
+         encode_messages (encoded :: rev_encoded) rest)
   in
   match
     let* fields = validated_fields_around_messages cp in
-    let+ messages = encode_messages 0 [] cp.messages in
+    let+ messages = encode_messages [] cp.messages in
     fields, messages
   with
   | Ok (((before_messages, after_messages), decoded_header), messages) ->
@@ -1245,11 +1234,10 @@ let rec same_printed_json (left : Yojson.Safe.t) (right : Yojson.Safe.t) =
    them. A document an older build or another writer produced can carry other
    bytes for the same message -- fields in another order, text the encoder
    sanitizes -- and such a message is left for the save to encode. *)
-let held_read_message ~message_index message json =
+let held_read_message message json =
   match
     let encoded = message_to_json message in
-    let* () = validate_checkpoint_json ~context:checkpoint_context encoded in
-    let+ _ = Checkpoint_contract.validate_message message_index encoded in
+    let+ () = validate_checkpoint_json ~context:checkpoint_context encoded in
     encoded
   with
   | Ok encoded when same_printed_json encoded json -> Some (Yojson.Safe.to_string encoded)
@@ -1267,18 +1255,18 @@ let of_string_with_encoding_memo s =
   | json ->
     let+ cp = of_json json in
     let memo = create_encoding_memo () in
-    let rec hold message_index messages message_jsons =
+    let rec hold messages message_jsons =
       match messages, message_jsons with
       | message :: messages, message_json :: message_jsons ->
-        (match held_read_message ~message_index message message_json with
+        (match held_read_message message message_json with
          | Some bytes ->
            Encoded_messages.replace memo.entries message { bytes; decoded = message }
          | None -> ());
-        hold (message_index + 1) messages message_jsons
+        hold messages message_jsons
       | [], [] | [], _ :: _ | _ :: _, [] -> ()
     in
     (match Yojson.Safe.Util.member messages_field json with
-     | `List message_jsons -> hold 0 cp.messages message_jsons
+     | `List message_jsons -> hold cp.messages message_jsons
      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> ());
     cp, memo
 ;;

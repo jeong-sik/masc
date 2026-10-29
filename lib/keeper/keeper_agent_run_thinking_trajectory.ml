@@ -29,7 +29,7 @@ let persist_response_content ~keeper_name ~trajectory_acc ~turn content =
     let now_iso = Masc_domain.now_iso () in
     List.iteri
       (fun block_index -> function
-        | Agent_core.Types.Thinking { content; _ } ->
+        | Llm_provider.Types.Thinking { content; _ } ->
           let entry : Trajectory.withheld_thinking_entry =
             { ts = now
             ; ts_iso = now_iso
@@ -40,7 +40,7 @@ let persist_response_content ~keeper_name ~trajectory_acc ~turn content =
             }
           in
           append_entry ~keeper_name ~failure_label:"thinking" acc entry
-        | Agent_core.Types.ReasoningDetails { reasoning_content; details } ->
+        | Llm_provider.Types.ReasoningDetails { reasoning_content; details } ->
           let content =
             Agent_core.Types.reasoning_details_text ~reasoning_content ~details
           in
@@ -55,7 +55,7 @@ let persist_response_content ~keeper_name ~trajectory_acc ~turn content =
               }
             in
             append_entry ~keeper_name ~failure_label:"reasoning details" acc entry
-        | Agent_core.Types.RedactedThinking _ ->
+        | Llm_provider.Types.RedactedThinking _ ->
           let entry : Trajectory.withheld_thinking_entry =
             { ts = now
             ; ts_iso = now_iso
@@ -66,11 +66,11 @@ let persist_response_content ~keeper_name ~trajectory_acc ~turn content =
             }
           in
           append_entry ~keeper_name ~failure_label:"redacted thinking" acc entry
-        | Agent_core.Types.Text _
-        | Agent_core.Types.ToolUse _
-        | Agent_core.Types.ToolResult _
-        | Agent_core.Types.Image _
-        | Agent_core.Types.Document _
-        | Agent_core.Types.Audio _ -> ())
+        | Llm_provider.Types.Text _
+        | Llm_provider.Types.ToolUse _
+        | Llm_provider.Types.ToolResult _
+        | Llm_provider.Types.Image _
+        | Llm_provider.Types.Document _
+        | Llm_provider.Types.Audio _ -> ())
       content
 ;;

@@ -83,7 +83,7 @@ let check_no_stale_request_after_prepare_failure env binding =
         | Llm_provider.Completion_outcome.External_unobserved
         | Llm_provider.Completion_outcome.Interrupted_unobserved) -> false) old);
   let boundary = Native.capture_request_boundary binding |> require "capture exact request boundary" in
-  let config = Runtime_agent.default_config ~name:"blocked-before-publication"
+  let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:"blocked-before-publication"
     ~provider_cfg:(Llm_provider.Provider_config.make ~kind:Anthropic ~model_id:"fixture"
       ~base_url:"http://not-used.invalid" ()) ~system_prompt:"fixture" ~tools:[] in
   let config = {config with Runtime_agent.execution_store=Some (Agent_core.Agent.execution_store ~runtime ~dir ())} in
@@ -142,7 +142,7 @@ let test_unbound_journal_unavailable_evidence () =
   Unix.unlink base_path; Unix.mkdir base_path 0o700;
   Eio.Switch.on_release sw (fun () -> remove base_path);
   let keeper_name = "request-journal-fixture" in
-  let config = Runtime_agent.default_config ~name:keeper_name
+  let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:keeper_name
     ~provider_cfg:(Llm_provider.Provider_config.make ~kind:Anthropic ~model_id:"fixture"
       ~base_url:"http://not-used.invalid" ()) ~system_prompt:"fixture" ~tools:[] in
   check bool "fixture starts without an application execution runtime" true
@@ -344,7 +344,7 @@ is-default = true
         ~on_request_observation:(fun observation -> request_observations := observation :: !request_observations)
         ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = session_id }) ?native_binding ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
         ~runtime_id:(match admission with None -> "direct" | Some value -> (Continuation.lane value).next_runtime_id)
-        ~keeper_name ~base_path  ~goal:"Finish original task"
+        ~keeper_name ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)  ~goal:"Finish original task"
         ~system_prompt:"Use the effect receipt to finish the original task."
         ~agent_core_tools:[tool] ~context ~checkpoint_sink ~sw:turn_sw ~net:env#net
         ?agent_core_checkpoint:(Option.map Continuation.checkpoint admission)
@@ -641,7 +641,7 @@ is-default = true
         ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = session_id }) ?native_binding ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
         ~checkpoint_progress
         ~runtime_id:(match admission with None -> "direct" | Some value -> (Continuation.lane value).next_runtime_id)
-        ~keeper_name ~base_path  ~goal:"Finish original task"
+        ~keeper_name ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)  ~goal:"Finish original task"
         ~system_prompt:"Use the effect receipt to finish the original task."
         ~agent_core_tools:[tool] ~context ~checkpoint_sink ~sw:turn_sw ~net:env#net
         ?agent_core_checkpoint:(Option.map Continuation.checkpoint admission)

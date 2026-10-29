@@ -78,7 +78,7 @@ let test_keeper_screen_carries_the_frame () =
                 let png = match result.content_blocks with
                   | Some blocks ->
                       (match List.find_map (function
-                        | Llm_provider.Types.Image {source=Base64 data;media_type="image/png"} ->
+                        | Llm_provider.Types.Image {source=Llm_provider.Types.Base64 data;media_type="image/png"} ->
                             Some (Base64.decode_exn data)
                         | _ -> None) blocks with
                        | Some png -> png | None -> fail "Keeper result lost PNG image block")

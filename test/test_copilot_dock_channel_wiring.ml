@@ -22,7 +22,7 @@ let surface : Masc.Surface_ref.t testable =
     Masc.Surface_ref.equal
 
 let parse_ok body =
-  match Stream.For_testing.parse_request body with
+  match Stream.For_testing.parse_request ~media_store:(Agent_core.History.Memory_store.create ()) body with
   | Ok payload -> payload
   | Error err -> fail ("expected parse to succeed: " ^ err)
 

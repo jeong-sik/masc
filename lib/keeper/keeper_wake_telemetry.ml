@@ -12,7 +12,6 @@
     Both include the pending user turn that AGENT_CORE will synthesize from
     [~goal_blocks] when present, or [~goal] otherwise. *)
 
-module Canonical_tool = Agent_core.Canonical_tool
 
 type sizes = {
   system_prompt_bytes : int;
@@ -26,34 +25,18 @@ type sizes = {
 let role_key : Agent_core.Types.role -> string = Agent_core.Types.role_to_string
 
 let bytes_of_content_block (block : Agent_core.Types.content_block) : int =
-  match Canonical_tool.tool_result_of_block block with
-  | Some result ->
-    String.length result.Canonical_tool.call_id
-    + String.length result.Canonical_tool.content
-  | None -> (
-    match Canonical_tool.tool_call_of_block block with
-    | Some call ->
-      String.length call.Canonical_tool.call_id
-      + String.length call.Canonical_tool.name
-      + String.length (Yojson.Safe.to_string call.Canonical_tool.input)
-    | None -> (
-      match block with
-      | Agent_core.Types.Text s -> String.length s
-      | Agent_core.Types.Thinking { content; _ } -> String.length content
-      | Agent_core.Types.ReasoningDetails { reasoning_content; details } ->
-        Agent_core.Types.reasoning_details_text ~reasoning_content ~details
-        |> String.length
-      | Agent_core.Types.RedactedThinking s -> String.length s
-      | Agent_core.Types.ToolResult _ ->
-        invalid_arg
-          "keeper_wake_telemetry: AGENT_CORE canonical tool-result projection unavailable"
-      | Agent_core.Types.ToolUse _ ->
-        invalid_arg
-          "keeper_wake_telemetry: AGENT_CORE canonical tool-call projection unavailable"
-      | Agent_core.Types.Image { source; _ }
-      | Agent_core.Types.Document { source; _ }
-      | Agent_core.Types.Audio { source; _ } ->
-        String.length (Agent_core.Types.media_source_payload source)))
+  match block with
+  | Agent_core.Types.ToolResult { tool_use_id; content; _ } ->
+    String.length tool_use_id + String.length content
+  | Agent_core.Types.ToolUse { id; name; input } ->
+    String.length id + String.length name + String.length (Yojson.Safe.to_string input)
+  | Agent_core.Types.Text s -> String.length s
+  | Agent_core.Types.Thinking { content; _ } -> String.length content
+  | Agent_core.Types.ReasoningDetails { reasoning_content; details } ->
+    Agent_core.Types.reasoning_details_text ~reasoning_content ~details |> String.length
+  | Agent_core.Types.RedactedThinking s -> String.length s
+  | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _ ->
+    Agent_core.History.media_wire_length block
 
 let bytes_of_message_content (m : Agent_core.Types.message) : int =
   List.fold_left

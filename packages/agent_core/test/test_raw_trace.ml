@@ -118,7 +118,7 @@ let assert_monotonic_seq records =
 let response_text (response : Types.api_response) =
   response.content
   |> List.filter_map (function
-    | Types.Text text -> Some text
+    | Llm_provider.Types.Text text -> Some text
     | _ -> None)
   |> String.concat "\n"
 ;;
@@ -250,7 +250,7 @@ let test_agent_run_stream_append_only_raw_trace () =
       }
     in
     let agent =
-      Agent.create
+      Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
         ~config:(Types.default_config ~model:"test-model")
         ~net:env#net
         ~tools
@@ -266,7 +266,7 @@ let test_agent_run_stream_append_only_raw_trace () =
       | None -> Alcotest.fail "missing first raw trace run ref"
     in
     let checkpoint = Agent.checkpoint ~session_id:"sess-raw" agent in
-    let resumed = (Agent.resume ~net:env#net ~checkpoint ~tools ~options () |> Result.get_ok) in
+    let resumed = (Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~checkpoint ~tools ~options () |> Result.get_ok) in
     let response2 = unwrap (Agent.run ~sw resumed "trace chain again") in
     let text2 = response_text response2 in
     Alcotest.(check string) "second final text" "trace complete" text2;
@@ -958,7 +958,7 @@ let test_tool_result_assistant_block_summary () =
     (Raw_trace.record_assistant_block
        active
        ~block_index:0
-       (Types.ToolResult
+       (Llm_provider.Types.ToolResult
           { tool_use_id = "tool-1"
           ; content = "ok"
           ; outcome = Tool_succeeded
@@ -999,36 +999,36 @@ let test_hidden_reasoning_is_metadata_only () =
   let secret_details = "PRIVATE_REASONING_DETAILS" in
   unwrap
     (Raw_trace.record_assistant_block active ~block_index:0
-       (Types.Thinking
+       (Llm_provider.Types.Thinking
           { content = secret_thinking; signature = Some "PRIVATE_SIGNATURE" }));
   unwrap
     (Raw_trace.record_assistant_block active ~block_index:1
-       (Types.ReasoningDetails
+       (Llm_provider.Types.ReasoningDetails
           { reasoning_content = Some secret_details
           ; details = [ { raw = `String "PRIVATE_RAW_DETAIL"; text = None } ]
           }));
   unwrap
     (Raw_trace.record_assistant_block active ~block_index:2
-       (Types.RedactedThinking "PRIVATE_REDACTED_PAYLOAD"));
+       (Llm_provider.Types.RedactedThinking "PRIVATE_REDACTED_PAYLOAD"));
   unwrap
     (Raw_trace.record_assistant_block active ~block_index:3
-       (Types.ToolResult
+       (Llm_provider.Types.ToolResult
           { tool_use_id = "tool-with-reasoning"
           ; content = "structured"
           ; outcome = Tool_succeeded
           ; json = None
           ; content_blocks =
               Some
-                [ Types.Thinking
+                [ Llm_provider.Types.Thinking
                     { content = "NESTED_PRIVATE_THINKING"
                     ; signature = Some "NESTED_PRIVATE_SIGNATURE"
                     }
-                ; Types.ReasoningDetails
+                ; Llm_provider.Types.ReasoningDetails
                     { reasoning_content = Some "NESTED_PRIVATE_REASONING"
                     ; details =
                         [ { raw = `String "NESTED_PRIVATE_RAW"; text = None } ]
                     }
-                ; Types.RedactedThinking "NESTED_PRIVATE_REDACTED"
+                ; Llm_provider.Types.RedactedThinking "NESTED_PRIVATE_REDACTED"
                 ]
           }));
   ignore

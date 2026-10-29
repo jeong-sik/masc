@@ -75,7 +75,7 @@ let test_json_extractor_valid () =
     { Types.id = "r"
     ; model = "m"
     ; stop_reason = Types.EndTurn
-    ; content = [ Types.Text {|{"x": 99}|} ]
+    ; content = [ Llm_provider.Types.Text {|{"x": 99}|} ]
     ; usage = None
     ; telemetry = None
     }
@@ -91,7 +91,7 @@ let test_json_extractor_invalid_json () =
     { Types.id = "r"
     ; model = "m"
     ; stop_reason = Types.EndTurn
-    ; content = [ Types.Text "not json" ]
+    ; content = [ Llm_provider.Types.Text "not json" ]
     ; usage = None
     ; telemetry = None
     }
@@ -126,7 +126,7 @@ let test_json_extractor_type_error () =
     { Types.id = "r"
     ; model = "m"
     ; stop_reason = Types.EndTurn
-    ; content = [ Types.Text {|{"x": "not_int"}|} ]
+    ; content = [ Llm_provider.Types.Text {|{"x": "not_int"}|} ]
     ; usage = None
     ; telemetry = None
     }
@@ -147,7 +147,7 @@ let test_text_extractor_some () =
     { Types.id = "r"
     ; model = "m"
     ; stop_reason = Types.EndTurn
-    ; content = [ Types.Text "hello" ]
+    ; content = [ Llm_provider.Types.Text "hello" ]
     ; usage = None
     ; telemetry = None
     }
@@ -163,7 +163,7 @@ let test_text_extractor_none () =
     { Types.id = "r"
     ; model = "m"
     ; stop_reason = Types.EndTurn
-    ; content = [ Types.Text "anything" ]
+    ; content = [ Llm_provider.Types.Text "anything" ]
     ; usage = None
     ; telemetry = None
     }

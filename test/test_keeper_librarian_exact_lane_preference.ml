@@ -504,9 +504,9 @@ let test_excluded_last_slot_preserves_domain_failure () =
       (Fixture.Reply (Fixture.openai_response (`Assoc [])))
   in
   let message text =
-    Agent_core.Types.make_message
-      ~role:Agent_core.Types.User
-      [ Agent_core.Types.Text text ]
+    Llm_provider.Types.make_message
+      ~role:Llm_provider.Types.User
+      [ Llm_provider.Types.Text text ]
   in
   let publish slots =
     let snapshot =
@@ -624,9 +624,9 @@ let test_excluded_last_slot_preserves_domain_failure () =
    the caller that routes an empty slot list to the cli lane expects it to. *)
 let test_an_empty_ladder_reports_nothing () =
   let message =
-    Agent_core.Types.make_message
-      ~role:Agent_core.Types.User
-      [ Agent_core.Types.Text "one small prompt" ]
+    Llm_provider.Types.make_message
+      ~role:Llm_provider.Types.User
+      [ Llm_provider.Types.Text "one small prompt" ]
   in
   match Runtime.preflight_slots ~requirement:ordinary_requirement ~selected_slots:[] ~messages:[ message ] with
   | Ok preflight ->

@@ -201,11 +201,11 @@ let through_complete ~stream response =
   let result =
     if stream then
       (Llm_provider.Complete.complete_stream ~sw ~net:env#net ~transport ~config
-        ~messages:[ Types.user_msg "controlled terminal response" ]
+        ~messages:[ Llm_provider.Types.user_msg "controlled terminal response" ]
         ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result
     else
       (Llm_provider.Complete.complete ~sw ~net:env#net ~transport ~config
-        ~messages:[ Types.user_msg "controlled terminal response" ] ()).Llm_provider.Completion_outcome.result
+        ~messages:[ Llm_provider.Types.user_msg "controlled terminal response" ] ()).Llm_provider.Completion_outcome.result
   in
   match result with
   | Ok response -> response
@@ -271,7 +271,7 @@ let test_responses_stream_token_cut () =
 let serialization_error = function
   | Error (Error.Serialization error) -> error
   | Error ((Error.Api _ | Provider _ | Agent _ | Mcp _ | Config _ | Io _
-            | Orchestration _ | Internal _ | Internal_carried _) as error) ->
+            | Orchestration _ | Internal _ | Internal_carried _ | Media _) as error) ->
     Alcotest.fail (Error.to_string error)
   | Ok _ -> Alcotest.fail "structured result unexpectedly succeeded"
 

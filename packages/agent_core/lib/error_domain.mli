@@ -118,6 +118,7 @@ type core_error_poly =
   | `Serialization of string
   | `Io of string
   | `Orchestration of string
+  | `Media of History.media_error
   | `Internal of string
   ]
 

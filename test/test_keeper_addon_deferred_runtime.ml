@@ -125,7 +125,7 @@ let with_bundle ~config ~meta ~net ~export ~deny f =
     ~identity_surface:{Keeper_tools_agent_core.offered=[];agent_cell=cell;history=[];
       load_receipts=receipts;keeper_turn_id=1} () in
   Fun.protect ~finally:bundle.cleanup (fun () ->
-    let agent = Agent_core.Agent.create ~config:(Agent_core.Types.default_config ~model:"fixture-model")
+    let agent = Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(Agent_core.Types.default_config ~model:"fixture-model")
       ~net ~tools:bundle.agent_core_tools () in
     cell := Some agent;f bundle agent)
 let load agent =

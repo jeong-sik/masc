@@ -750,7 +750,7 @@ let phase_name : Session_store.phase -> string = function
   | Session_store.Settled _ -> "Settled"
 ;;
 
-let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready
+let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
@@ -964,7 +964,8 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
     let* goal, goal_images =
       match goal_blocks with
       | None -> Ok (goal, [])
-      | Some blocks -> Host.text_and_images_of_blocks ~runtime_label ~field:"goal_blocks" blocks
+      | Some blocks -> Host.text_and_images_of_blocks
+            ~media_store ~runtime_label ~field:"goal_blocks" blocks
     in
     let* () =
       match goal_images, accepts_image_input with
@@ -1747,7 +1748,7 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
                  recovery_detail)))
 ;;
 
-let run ~input_source ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture
+let run ~input_source ~media_store ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture
     ?official_client_continuation ~runtime_id ~configured_reasoning_effort
     ~turn_timeout_s ~quota_scope ~keeper_name ~pre_tool_rejects ~base_path ~workspace_root ?native_workspace_context ~goal
     ~goal_blocks ~system_prompt ~tools
@@ -1781,7 +1782,7 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
   let result =
     Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle ~result_scope ~input_source
+      run_without_lifecycle ~result_scope ~media_store ~input_source
         ~argument_source
         ~official_task_reference
         ~composed_context

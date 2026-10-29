@@ -191,7 +191,7 @@ let test_effect_attempt_and_settlement_survive_restart () =
     make_dir dir;
     let restart_pairs = ref None in
     let result =
-      Types.ToolResult
+      Llm_provider.Types.ToolResult
         { tool_use_id = "call-0"
         ; content = "done"
         ; outcome = Types.Tool_succeeded
@@ -321,7 +321,7 @@ let test_effect_attempt_and_settlement_survive_restart () =
       let cancelled_pair = open_invocation 2 in
       let cancelled = authority cancelled_pair in
       let cancelled_result =
-        Types.ToolResult
+        Llm_provider.Types.ToolResult
           { tool_use_id = "call-2"
           ; content = "settled after cancellation"
           ; outcome = Types.Tool_succeeded
@@ -347,7 +347,7 @@ let test_effect_attempt_and_settlement_survive_restart () =
       let pre_effect_cancel = authority pre_effect_cancel_pair in
       let pre_effect_cancel_invoked = ref false in
       let pre_effect_cancel_result =
-        Types.ToolResult
+        Llm_provider.Types.ToolResult
           { tool_use_id = "call-3"
           ; content = "effect ran after committed-attempt cancellation"
           ; outcome = Types.Tool_succeeded
@@ -664,8 +664,8 @@ let test_agent_scope_owns_effect_topology () =
     make_dir dir;
     let scope_locator_json = ref None in
     let invocation_locator_json = ref None in
-    let image_blocks = [ Types.image_block ~media_type:"image/png"
-      ~source:(Types.Base64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a14sAAAAASUVORK5CYII=") ] in
+    let image_blocks = [ Llm_provider.Types.image_block ~media_type:"image/png"
+      ~source:(Llm_provider.Types.Base64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a14sAAAAASUVORK5CYII=") ] in
     let calls = ref 0 in
     let settled_before_observer = ref false in
     with_fresh codec dir (fun _sw writer ->
@@ -841,7 +841,7 @@ let test_agent_scope_owns_effect_topology () =
                ; tool_name = "effect"
                ; _
                }
-           , Types.ToolUse
+           , Llm_provider.Types.ToolUse
                { id = "tu-effect-topology"
                ; name = "effect"
                ; input = `Assoc [ ("value", `Int 7) ]

@@ -33,7 +33,7 @@ val execute_tools_with_trace
   -> Raw_trace.active_run option
   -> turn:int
   -> ?before_tool_execution:(unit -> unit)
-  -> Types.content_block list
+  -> Llm_provider.Types.content_block list
   -> (Agent_tools.execution_report, Agent_tools.execution_failure) result
 
 (** {1 Assistant block recording} *)
@@ -41,7 +41,7 @@ val execute_tools_with_trace
 (** Record assistant content blocks in the active run. *)
 val trace_assistant_blocks
   :  Raw_trace.active_run option
-  -> Types.content_block list
+  -> Llm_provider.Types.content_block list
   -> (unit, Error.t) result
 
 (** {1 Response inspection} *)

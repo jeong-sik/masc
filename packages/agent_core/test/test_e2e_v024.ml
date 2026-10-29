@@ -38,11 +38,11 @@ let provider_m_config ?(system_prompt = None) ?(max_tokens = Some 200) name =
 let options = { Agent.default_options with provider_config = Some provider_config }
 
 let print_result label = function
-  | Ok response ->
+  | Ok (response : api_response) ->
     let text =
       List.filter_map
         (function
-          | Text s -> Some s
+          | Llm_provider.Types.Text s -> Some s
           | _ -> None)
         response.content
       |> String.concat ""
@@ -90,7 +90,7 @@ let test_multi_turn_tool_loop () =
       ~system_prompt:
         (Some "You are a math assistant. Use the calculator tool to compute.")
   in
-  let agent = Agent.create ~net:env#net ~config ~tools:[ calc ] ~options () in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~tools:[ calc ] ~options () in
   let result = Agent.run ~sw agent "What is 6 * 7? Use the calculator." in
   print_result "multi-turn" result;
   match result with
@@ -154,7 +154,7 @@ let test_context_injection () =
   in
   let inject_options = { options with context_injector = Some injector } in
   let agent =
-    Agent.create ~net:env#net ~config ~tools:[ file_tool ] ~options:inject_options ()
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~tools:[ file_tool ] ~options:inject_options ()
   in
   let result = Agent.run ~sw agent "Read the file at /tmp/hello.txt" in
   print_result "inject" result;

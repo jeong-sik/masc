@@ -82,10 +82,17 @@ let recovered_tool_results messages_after =
     messages_after
 ;;
 
+(* The restored blocks re-enter the tool path as provider blocks, as a fresh
+   turn's response and tool outputs do. *)
+let wire_blocks agent blocks =
+  History.to_wire_blocks agent.Agent_types.media_store blocks
+  |> Result.map_error (fun error -> Error.Media error)
+;;
+
 type settled_replay =
   | Replay_tools_settled of
-      { tool_uses : Types.content_block Nonempty.t
-      ; tool_results : Types.content_block list
+      { tool_uses : Llm_provider.Types.content_block Nonempty.t
+      ; tool_results : Llm_provider.Types.content_block list
       }
   | Replay_terminal of Types.message
 
@@ -119,6 +126,7 @@ let last_assistant_message messages =
 let classify_settled agent =
   match last_tool_turn agent.Agent_types.state.messages with
   | Some (tool_blocks, expected_ids, messages_after) ->
+    let* tool_blocks = wire_blocks agent tool_blocks in
     let* tool_blocks =
       match Nonempty.of_list tool_blocks with
       | Some tool_blocks -> Ok tool_blocks
@@ -129,7 +137,8 @@ let classify_settled agent =
     in
     (match recovered_tool_results messages_after with
      | Some tool_results when tool_result_ids tool_results = expected_ids ->
-       Ok (Replay_tools_settled { tool_uses = tool_blocks; tool_results })
+       let+ tool_results = wire_blocks agent tool_results in
+       Replay_tools_settled { tool_uses = tool_blocks; tool_results }
      | Some _ ->
        Error
          (Error.Internal
@@ -186,7 +195,8 @@ let run_settled agent boundary ~turn ~all_pre_tool_use_blocked ~tools_settled ~t
          (Error.Internal
             "durable execution resume terminal turn contains persisted tool invocations")
      | [] ->
-       if response.content <> message.content
+       let* restored_content = wire_blocks agent message.content in
+       if response.content <> restored_content
        then
          Error
            (Error.Internal
@@ -216,6 +226,7 @@ let run
            "durable execution resume found an open provider attempt without a restored \
             ToolUse checkpoint")
     | Some (tool_blocks, expected_ids, messages_after) ->
+      let* tool_blocks = wire_blocks agent tool_blocks in
       let* () =
         Pipeline_terminal_tool.validate_response_tool_uses
           ~response
@@ -269,6 +280,7 @@ let run
                        ~tool_results
                        tool_blocks)))
        | Some tool_results when tool_result_ids tool_results = expected_ids ->
+         let* tool_results = wire_blocks agent tool_results in
          let* settled = Pipeline_execution_scope.invocations_settled execution in
          if settled
          then (

@@ -104,7 +104,7 @@ let capacity_refusal_of_error
   | Agent_core.Error.Mcp _
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
     None
 ;;

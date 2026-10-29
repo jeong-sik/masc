@@ -2189,13 +2189,13 @@ let test_dynamic_tool_callback ?(content = "MASC_TOOL_RESULT")
 ;;
 
 let test_response_observer_requires_original_projection () =
-  let image = Agent_core.Types.Image
-    {media_type = "image/tiff"; source = Base64 "AAAA"} in
+  let image = Llm_provider.Types.Image
+    {media_type = "image/tiff"; source = Llm_provider.Types.Base64 "AAAA"} in
   List.iter (fun (content, content_blocks, expected_writes) ->
     test_dynamic_tool_callback ~content ~content_blocks ~expected_writes ())
-    ["invalid\255", [Agent_core.Types.Text "invalid\255"], 0;
+    ["invalid\255", [Llm_provider.Types.Text "invalid\255"], 0;
      "unsupported image fallback", [image], 0;
-     "unused fallback\255", [Agent_core.Types.Text "authoritative original"], 1]
+     "unused fallback\255", [Llm_provider.Types.Text "authoritative original"], 1]
 ;;
 
 

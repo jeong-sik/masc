@@ -2864,6 +2864,7 @@ let () =
     | Agent_core.Error.Io_category -> 6
     | Agent_core.Error.Orchestration_category -> 7
     | Agent_core.Error.Internal_category -> 8
+    | Agent_core.Error.Media_category -> 9
   in
   let categories =
     [ Agent_core.Error.Api_category
@@ -2875,12 +2876,13 @@ let () =
     ; Agent_core.Error.Io_category
     ; Agent_core.Error.Orchestration_category
     ; Agent_core.Error.Internal_category
+    ; Agent_core.Error.Media_category
     ]
   in
   check
     "the category samples cover every agent-core category"
     (List.sort_uniq Int.compare (List.map category_index categories)
-     = List.init 9 Fun.id);
+     = List.init 10 Fun.id);
   List.iter
     (fun category ->
        let core = { Keeper_request_failure_core.category; message = "boom" } in

@@ -41,9 +41,9 @@ val validate_image_size : string -> (unit, string) result
 
 val message_of_request
   :  Multimodal.Vision_analyze.request
-  -> Agent_core.Types.message
+  -> Llm_provider.Types.message
 (** One-shot user message [text query; image], with bytes base64-encoded and
-    an [Agent_core.Types.Base64] source (the OpenAI/ollama serializer emits
+    an [Llm_provider.Types.Base64] source (the OpenAI/ollama serializer emits
     [data:<media_type>;base64,<data>]). *)
 
 val provider_for_vision

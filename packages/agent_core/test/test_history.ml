@@ -120,30 +120,30 @@ let test_base64_becomes_stored () =
   Alcotest.check
     (media_result block)
     "image holds the digest and length of the decoded bytes"
-    (Ok (H.Image { media_type = "image/png"; source = stored_of png_bytes }))
+    (Ok (P.Image { media_type = "image/png"; source = stored_of png_bytes }))
     (H.of_wire_block store wire_image);
   Alcotest.check
     (media_result block)
     "nested media is stored too"
     (Ok
-       (H.ToolResult
+       (P.ToolResult
           { tool_use_id = "call_1"
           ; content = "page 1"
           ; outcome = P.Tool_succeeded
           ; json = None
           ; content_blocks =
               Some
-                [ H.Text "page 1"
-                ; H.Image { media_type = "image/png"; source = stored_of png_bytes }
-                ; H.ToolResult
+                [ P.Text "page 1"
+                ; P.Image { media_type = "image/png"; source = stored_of png_bytes }
+                ; P.ToolResult
                     { tool_use_id = "call_1"
                     ; content = ""
                     ; outcome = P.Tool_succeeded
                     ; json = None
                     ; content_blocks =
                         Some
-                          [ H.Audio { media_type = "audio/wav"; source = stored_of wav_bytes }
-                          ; H.Document
+                          [ P.Audio { media_type = "audio/wav"; source = stored_of wav_bytes }
+                          ; P.Document
                               { media_type = "application/pdf"
                               ; source = stored_of pdf_bytes
                               }
@@ -166,7 +166,7 @@ let test_message_round_trip () =
     }
   in
   let history = ok_media "of_wire_message" (H.of_wire_message store original) in
-  Alcotest.(check int) "same block count" 3 (List.length history.H.content);
+  Alcotest.(check int) "same block count" 3 (List.length history.P.content);
   Alcotest.check
     (media_result wire_message)
     "message round trip"
@@ -196,13 +196,13 @@ let test_references_pass_through () =
          (H.to_wire_block refusing_store expected))
     [ ( "image url"
       , P.Image { media_type = "image/png"; source = P.Url "https://example.test/a.png" }
-      , H.Image { media_type = "image/png"; source = H.Url "https://example.test/a.png" } )
+      , P.Image { media_type = "image/png"; source = H.Url "https://example.test/a.png" } )
     ; ( "document file id"
       , P.Document { media_type = "application/pdf"; source = P.File_id "file-123" }
-      , H.Document { media_type = "application/pdf"; source = H.File_id "file-123" } )
+      , P.Document { media_type = "application/pdf"; source = H.File_id "file-123" } )
     ; ( "audio url"
       , P.Audio { media_type = "audio/wav"; source = P.Url "https://example.test/a.wav" }
-      , H.Audio { media_type = "audio/wav"; source = H.Url "https://example.test/a.wav" } )
+      , P.Audio { media_type = "audio/wav"; source = H.Url "https://example.test/a.wav" } )
     ]
 ;;
 
@@ -244,7 +244,7 @@ let test_missing_bytes () =
     (media_result wire_block)
     "to_wire_block"
     (Error (H.Missing_bytes absent))
-    (H.to_wire_block store (H.Image { media_type = "image/png"; source = H.Stored absent }))
+    (H.to_wire_block store (P.Image { media_type = "image/png"; source = H.Stored absent }))
 ;;
 
 let test_digest_mismatch () =
@@ -259,7 +259,7 @@ let test_digest_mismatch () =
 ;;
 
 let test_media_bytes () =
-  let image = H.Image { media_type = "image/png"; source = stored_of png_bytes } in
+  let image = P.Image { media_type = "image/png"; source = stored_of png_bytes } in
   let url = "https://example.test/a.png" in
   Alcotest.(check int)
     "stored counts raw bytes"
@@ -268,17 +268,17 @@ let test_media_bytes () =
   Alcotest.(check int)
     "url counts its length"
     (String.length url)
-    (H.media_bytes (H.Image { media_type = "image/png"; source = H.Url url }));
+    (H.media_bytes (P.Image { media_type = "image/png"; source = H.Url url }));
   Alcotest.(check int)
     "file id counts its length"
     (String.length "file-123")
     (H.media_source_bytes (H.File_id "file-123"));
-  Alcotest.(check int) "text has none" 0 (H.media_bytes (H.Text "hello"));
+  Alcotest.(check int) "text has none" 0 (H.media_bytes (P.Text "hello"));
   Alcotest.(check int)
     "nested media is summed"
     (String.length png_bytes + String.length url)
     (H.media_bytes
-       (H.ToolResult
+       (P.ToolResult
           { tool_use_id = "call_1"
           ; content = ""
           ; outcome = P.Tool_succeeded
@@ -286,8 +286,8 @@ let test_media_bytes () =
           ; content_blocks =
               Some
                 [ image
-                ; H.Text "between"
-                ; H.Document { media_type = "application/pdf"; source = H.Url url }
+                ; P.Text "between"
+                ; P.Document { media_type = "application/pdf"; source = H.Url url }
                 ]
           }))
 ;;
@@ -299,16 +299,16 @@ let test_media_bytes () =
 let failed ?error_class failure_kind = P.Tool_failed { failure_kind; error_class }
 
 let history_tool_result ?(outcome = P.Tool_succeeded) ~content content_blocks =
-  H.ToolResult { tool_use_id = "call_7"; content; outcome; json = None; content_blocks }
+  P.ToolResult { tool_use_id = "call_7"; content; outcome; json = None; content_blocks }
 ;;
 
 (* Blocks without media, each with a provider twin. *)
 let non_media_blocks =
-  [ "text", H.Text "hello ✓"
-  ; "signed thinking", H.Thinking { content = "plan"; signature = Some "sig==" }
-  ; "unsigned thinking", H.Thinking { content = "plan"; signature = None }
+  [ "text", P.Text "hello ✓"
+  ; "signed thinking", P.Thinking { content = "plan"; signature = Some "sig==" }
+  ; "unsigned thinking", P.Thinking { content = "plan"; signature = None }
   ; ( "reasoning details with content"
-    , H.ReasoningDetails
+    , P.ReasoningDetails
         { reasoning_content = Some "why"
         ; details =
             [ { P.raw = `Assoc [ "type", `String "reasoning.text"; "text", `String "step" ]
@@ -317,7 +317,7 @@ let non_media_blocks =
             ]
         } )
   ; ( "reasoning details without content"
-    , H.ReasoningDetails
+    , P.ReasoningDetails
         { reasoning_content = None
         ; details =
             [ { P.raw = `Assoc [ "type", `String "reasoning.encrypted"; "data", `String "xx" ]
@@ -325,9 +325,9 @@ let non_media_blocks =
               }
             ]
         } )
-  ; "redacted thinking", H.RedactedThinking "opaque"
+  ; "redacted thinking", P.RedactedThinking "opaque"
   ; ( "tool use"
-    , H.ToolUse
+    , P.ToolUse
         { id = "call_7"; name = "read"; input = `Assoc [ "path", `String "/tmp/x" ] } )
   ; "tool result", history_tool_result ~content:"done" None
   ; ( "failed tool result with class"
@@ -338,52 +338,52 @@ let non_media_blocks =
   ; ( "failed tool result without class"
     , history_tool_result ~outcome:(failed P.Validation_error) ~content:"bad args" None )
   ; ( "structured tool result"
-    , history_tool_result ~content:"line one" (Some [ H.Text "line one" ]) )
+    , history_tool_result ~content:"line one" (Some [ P.Text "line one" ]) )
   ; ( "failed structured tool result"
     , history_tool_result
         ~outcome:(failed ~error_class:P.Deterministic P.Non_retryable_tool_error)
         ~content:"line one"
-        (Some [ H.Text "line one"; H.Thinking { content = "aside"; signature = None } ]) )
+        (Some [ P.Text "line one"; P.Thinking { content = "aside"; signature = None } ]) )
   ]
 ;;
 
 let reference_media_blocks =
   [ ( "image url"
-    , H.Image { media_type = "image/png"; source = H.Url "https://example.test/a.png" } )
-  ; "image file id", H.Image { media_type = "image/png"; source = H.File_id "file-1" }
+    , P.Image { media_type = "image/png"; source = H.Url "https://example.test/a.png" } )
+  ; "image file id", P.Image { media_type = "image/png"; source = H.File_id "file-1" }
   ; ( "document url"
-    , H.Document { media_type = "application/pdf"; source = H.Url "https://e.test/a.pdf" }
+    , P.Document { media_type = "application/pdf"; source = H.Url "https://e.test/a.pdf" }
     )
   ; ( "document file id"
-    , H.Document { media_type = "application/pdf"; source = H.File_id "file-2" } )
-  ; "audio url", H.Audio { media_type = "audio/wav"; source = H.Url "https://e.test/a" }
-  ; "audio file id", H.Audio { media_type = "audio/wav"; source = H.File_id "file-3" }
+    , P.Document { media_type = "application/pdf"; source = H.File_id "file-2" } )
+  ; "audio url", P.Audio { media_type = "audio/wav"; source = H.Url "https://e.test/a" }
+  ; "audio file id", P.Audio { media_type = "audio/wav"; source = H.File_id "file-3" }
   ; ( "tool result with a url image"
     , history_tool_result
         ~content:"see"
         (Some
-           [ H.Text "see"
-           ; H.Image { media_type = "image/png"; source = H.Url "https://e.test/b.png" }
+           [ P.Text "see"
+           ; P.Image { media_type = "image/png"; source = H.Url "https://e.test/b.png" }
            ]) )
   ]
 ;;
 
 let stored_media_blocks =
-  [ "stored image", H.Image { media_type = "image/png"; source = stored_of png_bytes }
+  [ "stored image", P.Image { media_type = "image/png"; source = stored_of png_bytes }
   ; ( "stored document"
-    , H.Document { media_type = "application/pdf"; source = stored_of pdf_bytes } )
-  ; "stored audio", H.Audio { media_type = "audio/wav"; source = stored_of wav_bytes }
+    , P.Document { media_type = "application/pdf"; source = stored_of pdf_bytes } )
+  ; "stored audio", P.Audio { media_type = "audio/wav"; source = stored_of wav_bytes }
   ; ( "tool result with stored media"
     , history_tool_result
         ~outcome:(failed P.Reported_tool_error)
         ~content:"rendered"
         (Some
-           [ H.Text "rendered"
-           ; H.Image { media_type = "image/png"; source = stored_of png_bytes }
+           [ P.Text "rendered"
+           ; P.Image { media_type = "image/png"; source = stored_of png_bytes }
            ; history_tool_result
                ~content:""
                (Some
-                  [ H.Audio { media_type = "audio/wav"; source = stored_of wav_bytes } ])
+                  [ P.Audio { media_type = "audio/wav"; source = stored_of wav_bytes } ])
            ]) )
   ]
 ;;
@@ -404,7 +404,7 @@ let test_json_round_trip () =
 
 let test_message_json_round_trip () =
   let full =
-    { H.role = P.Tool
+    { P.role = P.Tool
     ; origin = P.Conversation
     ; content = List.map snd stored_media_blocks
     ; name = Some "reader"
@@ -413,7 +413,7 @@ let test_message_json_round_trip () =
     }
   in
   let bare =
-    { full with H.content = [ H.Text "hi" ]; name = None; tool_call_id = None; metadata = [] }
+    { full with P.content = [ P.Text "hi" ]; name = None; tool_call_id = None; metadata = [] }
   in
   List.iter
     (fun (name, original) ->
@@ -429,24 +429,24 @@ let to_wire_without_store what history =
   ok_media what (H.to_wire_block refusing_store history)
 ;;
 
-let checkpoint_json what wire =
-  match Agent_core.Checkpoint.content_block_to_json_result ~scope:what wire with
+let journal_json what wire =
+  match Agent_core.Checkpoint.wire_content_block_to_json_result ~scope:what wire with
   | Ok json -> Yojson.Safe.to_string json
   | Error error -> Alcotest.failf "%s: %s" what (Agent_core.Error.to_string error)
 ;;
 
-let test_same_bytes_as_checkpoint () =
+let test_same_bytes_as_journal_codec () =
   List.iter
     (fun (name, history) ->
        let wire = to_wire_without_store name history in
-       let expected = checkpoint_json name wire in
+       let expected = journal_json name wire in
        Alcotest.(check string)
          name
          expected
          (Yojson.Safe.to_string (H.content_block_to_json history));
        Alcotest.check
          (decode_result block)
-         (name ^ " decodes the current checkpoint bytes")
+         (name ^ " decodes the journal block bytes")
          (Ok history)
          (H.content_block_of_json (Yojson.Safe.from_string expected)))
     (non_media_blocks @ reference_media_blocks)
@@ -456,33 +456,16 @@ let test_same_bytes_as_api_common () =
   List.iter
     (fun (name, history) ->
        match history with
-       | H.Text _ | H.Thinking _ | H.ReasoningDetails _ | H.RedactedThinking _ | H.ToolUse _
-       | H.Image _ | H.Document _ | H.Audio _ ->
+       | P.Text _ | P.Thinking _ | P.ReasoningDetails _ | P.RedactedThinking _ | P.ToolUse _
+       | P.Image _ | P.Document _ | P.Audio _ ->
          Alcotest.(check string)
            name
            (Yojson.Safe.to_string
               (Llm_provider.Api_common.content_block_to_json
                  (to_wire_without_store name history)))
            (Yojson.Safe.to_string (H.content_block_to_json history))
-       | H.ToolResult _ -> ())
+       | P.ToolResult _ -> ())
     (non_media_blocks @ reference_media_blocks)
-;;
-
-let test_message_same_bytes_as_checkpoint () =
-  let history =
-    { H.role = P.User
-    ; origin = P.Recovery_instruction
-    ; content = List.map snd (non_media_blocks @ reference_media_blocks)
-    ; name = Some "operator"
-    ; tool_call_id = None
-    ; metadata = [ "turn", `Int 3 ]
-    }
-  in
-  let wire = ok_media "to_wire_message" (H.to_wire_message refusing_store history) in
-  Alcotest.(check string)
-    "message bytes"
-    (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json wire))
-    (Yojson.Safe.to_string (H.message_to_json history))
 ;;
 
 let test_stored_json_shape () =
@@ -494,7 +477,7 @@ let test_stored_json_shape () =
        reference.H.sha256)
     (Yojson.Safe.to_string
        (H.content_block_to_json
-          (H.Image { media_type = "image/png"; source = H.Stored reference })))
+          (P.Image { media_type = "image/png"; source = H.Stored reference })))
 ;;
 
 let test_decode_rejects () =
@@ -628,12 +611,8 @@ let () =
     ; ( "json"
       , [ Alcotest.test_case "block round trip" `Quick test_json_round_trip
         ; Alcotest.test_case "message round trip" `Quick test_message_json_round_trip
-        ; Alcotest.test_case "same bytes as checkpoint" `Quick test_same_bytes_as_checkpoint
+        ; Alcotest.test_case "same bytes as the journal block codec" `Quick test_same_bytes_as_journal_codec
         ; Alcotest.test_case "same bytes as api_common" `Quick test_same_bytes_as_api_common
-        ; Alcotest.test_case
-            "message same bytes as checkpoint"
-            `Quick
-            test_message_same_bytes_as_checkpoint
         ; Alcotest.test_case "stored shape" `Quick test_stored_json_shape
         ; Alcotest.test_case "block decode rejects" `Quick test_decode_rejects
         ; Alcotest.test_case "message decode rejects" `Quick test_message_decode_rejects

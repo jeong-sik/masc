@@ -1,7 +1,7 @@
-(* Two-pass reference sweep for stored media readings. The rules and the
-   one difference from the kept vision store are in the .mli. The structure
-   follows Multimodal.Vision_kept_maintenance on purpose: same snapshot
-   contract, same abort-before-delete on anything unreadable. *)
+(* Two-pass reference sweep for stored media readings; the rules are in the
+   .mli. The snapshot contract and the abort-before-delete on anything
+   unreadable follow Multimodal.Vision_kept_maintenance; liveness comes from
+   Tool_blob_maintenance's typed scan instead of a text search. *)
 
 open Result.Syntax
 
@@ -17,10 +17,6 @@ type error =
       { name : string
       ; detail : string
       }
-  | Reference_scan_failed of
-      { name : string
-      ; detail : string
-      }
   | Snapshot_read_failed of { detail : string }
   | Snapshot_write_failed of { detail : string }
   | Delete_failed of
@@ -33,8 +29,6 @@ let error_to_string = function
     Printf.sprintf "media reading store root rejected at %s: %s" dir detail
   | Record_read_failed { name; detail } ->
     Printf.sprintf "media reading record unreadable %s: %s" name detail
-  | Reference_scan_failed { name; detail } ->
-    Printf.sprintf "reference scan failed for media reading %s: %s" name detail
   | Snapshot_read_failed { detail } ->
     Printf.sprintf "media reading candidate snapshot read failed: %s" detail
   | Snapshot_write_failed { detail } ->
@@ -46,7 +40,6 @@ let error_to_string = function
 type report =
   { scanned : int
   ; live : int
-  ; unprobed : int
   ; candidates_recorded : int
   ; deleted : int
   ; reclaimed_bytes : Int64.t
@@ -57,7 +50,6 @@ type report =
 let empty_report =
   { scanned = 0
   ; live = 0
-  ; unprobed = 0
   ; candidates_recorded = 0
   ; deleted = 0
   ; reclaimed_bytes = 0L
@@ -76,8 +68,9 @@ let is_lower_hex = function
 ;;
 
 (* Mirrors Keeper_media_reading.record_path: "<kind>-<sha>-<media>.json",
-   where <media> is the already-sanitised media type segment. *)
-let is_record_name name =
+   where <media> is the already-sanitised media type segment. The digest is
+   the attachment's, as its history [Stored] source names it. *)
+let record_digest name =
   let strip_prefix prefix value =
     if String.starts_with ~prefix value
     then
@@ -91,13 +84,17 @@ let is_record_name name =
     | None -> strip_prefix "document-" name
   in
   match after_kind with
-  | None -> false
+  | None -> None
   | Some rest ->
-    String.length rest > sha256_hex_length + 1 + String.length record_suffix
-    && String.for_all is_lower_hex (String.sub rest 0 sha256_hex_length)
-    && rest.[sha256_hex_length] = '-'
-    && String.ends_with ~suffix:record_suffix rest
+    if String.length rest > sha256_hex_length + 1 + String.length record_suffix
+       && String.for_all is_lower_hex (String.sub rest 0 sha256_hex_length)
+       && rest.[sha256_hex_length] = '-'
+       && String.ends_with ~suffix:record_suffix rest
+    then Some (String.sub rest 0 sha256_hex_length)
+    else None
 ;;
+
+let is_record_name name = Option.is_some (record_digest name)
 
 exception Sweep_stop of error
 
@@ -127,41 +124,6 @@ let record_entries ~dir =
                | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> acc)))
        []
   |> List.sort (fun (a, _) (b, _) -> String.compare a b)
-;;
-
-type liveness =
-  | Live
-  | Unreferenced
-  | Unprobed
-  | Gone
-
-let probe_of_record content =
-  match Yojson.Safe.from_string content with
-  | exception Yojson.Json_error _ -> None
-  | json ->
-    (match Yojson.Safe.Util.member "source_probe" json with
-     | `String probe when probe <> "" -> Some probe
-     | _ -> None)
-;;
-
-let record_liveness ~masc_dir ~dir name =
-  match Fs_compat.load_owned_regular_file ~ownership_root:dir (Filename.concat dir name) with
-  | Ok None -> Ok Gone
-  | Error rejection ->
-    Error
-      (Record_read_failed
-         { name; detail = Fs_compat.owned_regular_file_read_error_to_string rejection })
-  | Ok (Some content) ->
-    (match probe_of_record content with
-     | None -> Ok Unprobed
-     | Some probe ->
-       (match Multimodal.Vision_artifact_reference.is_referenced ~masc_dir ~handle:probe with
-        | Ok true -> Ok Live
-        | Ok false -> Ok Unreferenced
-        | Error error ->
-          Error
-            (Reference_scan_failed
-               { name; detail = Multimodal.Vision_artifact_reference.error_to_string error })))
 ;;
 
 let decode_snapshot raw =
@@ -256,7 +218,7 @@ let keeper_dirs ~masc_dir =
            | exception Unix.Unix_error _ -> true)))
 ;;
 
-let run ~masc_dir ~dir =
+let run ~live ~dir =
   let* present = store_root_is_directory dir in
   if not present
   then Ok empty_report
@@ -269,17 +231,16 @@ let run ~masc_dir ~dir =
           String_map.empty
           entries
       in
-      let rec classify live unprobed candidates = function
-        | [] -> Ok (live, unprobed, candidates)
-        | (name, _) :: rest ->
-          let* liveness = record_liveness ~masc_dir ~dir name in
-          (match liveness with
-           | Live -> classify (live + 1) unprobed candidates rest
-           | Unreferenced -> classify live unprobed (Name_set.add name candidates) rest
-           | Unprobed -> classify live (unprobed + 1) (Name_set.add name candidates) rest
-           | Gone -> classify live unprobed candidates rest)
+      let live_count, candidates =
+        List.fold_left
+          (fun (live_count, candidates) (name, _) ->
+             match record_digest name with
+             | Some sha256 when Tool_blob_maintenance.holds_history_media live ~sha256 ->
+               live_count + 1, candidates
+             | Some _ | None -> live_count, Name_set.add name candidates)
+          (0, Name_set.empty)
+          entries
       in
-      let* live, unprobed, candidates = classify 0 0 Name_set.empty entries in
       let* previous = load_previous_candidates ~dir in
       let* () = save_candidates ~dir candidates in
       let deletable =
@@ -293,8 +254,7 @@ let run ~masc_dir ~dir =
       in
       Ok
         { scanned = List.length entries
-        ; live
-        ; unprobed
+        ; live = live_count
         ; candidates_recorded = Name_set.cardinal candidates
         ; deleted
         ; reclaimed_bytes

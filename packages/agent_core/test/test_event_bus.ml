@@ -17,7 +17,7 @@ let mock_response text =
   { Types.id = "r-1"
   ; model = "mock"
   ; stop_reason = Types.EndTurn
-  ; content = [ Types.Text text ]
+  ; content = [ Llm_provider.Types.Text text ]
   ; usage = None
   ; telemetry = None
   }

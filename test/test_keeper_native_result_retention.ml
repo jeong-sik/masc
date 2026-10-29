@@ -15,8 +15,14 @@ let seed = old_cycle @ [T.user_msg "new operation"]
 let current_request = message T.Assistant [use "reused-id"]
 let current_result = message T.Tool [receipt]
 
+(* The runtime hands its results over as provider blocks; these hold no
+   media, so an empty store converts them. *)
 let check label expected messages results =
-  Alcotest.(check bool) label expected (Retention.retains ~seed ~messages ~results)
+  let media_store = Agent_core.History.Memory_store.create () in
+  let results =
+    List.map (fun block -> Agent_core.History.to_wire_block media_store block |> Result.get_ok) results
+  in
+  Alcotest.(check bool) label expected (Retention.retains ~media_store ~seed ~messages ~results)
 
 let test_previous_receipt_does_not_settle_current_call () =
   check "prior identical receipt cannot close current checkpoint gap" false

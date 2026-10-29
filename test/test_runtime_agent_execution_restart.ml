@@ -83,7 +83,7 @@ let setup ~sw env ~root ~reply ~require_receipt =
   let hooks = { Agent_core.Hooks.empty with
     pre_tool_use = Some (fun _ -> record root "gate"; Agent_core.Hooks.Continue);
     post_tool_use = Some (fun _ -> record root "observer"; Agent_core.Hooks.Continue) } in
-  let config = Runtime_agent.default_config ~name:agent_name ~provider_cfg
+  let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:agent_name ~provider_cfg
       ~system_prompt ~tools:[tool] in
   let config = {config with initial_messages=seed; hooks=Some hooks} in
   let runtime = Agent_core.Agent.create_execution_runtime ~sw
@@ -166,7 +166,7 @@ let run_restart () =
   Alcotest.(check (option int)) "resumed provider frontier ordinal"
     (Some 1) (Runtime_agent.final_provider_turn_ordinal result.stop_reason);
   Alcotest.(check string) "run continues with the preserved ToolResult"
-    "effect receipt preserved" (Agent_core.Types.text_of_content result.response.content);
+    "effect receipt preserved" (Llm_provider.Types.text_of_content result.response.content);
   assert_counts root ~providers:2;
   (match !terminal with
    | None -> Alcotest.fail "resumed call has no terminal disposition"

@@ -113,6 +113,7 @@ let of_core_error error =
     | Error.Serialization _
     | Error.Io _
     | Error.Orchestration _
+    | Error.Media _
     | Error.Internal _
     | Error.Internal_carried _ -> None
   in

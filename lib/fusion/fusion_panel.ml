@@ -84,7 +84,7 @@ let attempt_of_result ~(model : string)
        | Agent_core.Error.Config _
        | Agent_core.Error.Serialization _
        | Agent_core.Error.Io _
-       | Agent_core.Error.Orchestration _
+       | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
        | Agent_core.Error.Internal _
        | Agent_core.Error.Internal_carried _ ) as e) ->
     Error
@@ -100,7 +100,7 @@ let bridge_failure_of_error (error : Agent_core.Error.t) : Fusion_types.panel_fa
   | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _ | (Llm_provider.Retry.Overloaded _ | (Llm_provider.Retry.ServerError _ | (Llm_provider.Retry.AuthError _ | (Llm_provider.Retry.AuthorizationError _ | (Llm_provider.Retry.PaymentRequired _ | (Llm_provider.Retry.InvalidRequest _ | (Llm_provider.Retry.NotFound _ | (Llm_provider.Retry.ContextOverflow _ | (Llm_provider.Retry.InputCapacity _ | Llm_provider.Retry.NetworkError _))))))))))
   | Agent_core.Error.Provider (Llm_provider.Error.MissingApiKey _ | (Llm_provider.Error.InvalidConfig _ | (Llm_provider.Error.ParseError _ | (Llm_provider.Error.ProviderWireError _ | (Llm_provider.Error.ProviderReportedError _ | (Llm_provider.Error.UnknownVariant _ | (Llm_provider.Error.ProviderUnavailable _ | (Llm_provider.Error.EmptyCompletion _ | ((Llm_provider.Error.RateLimit _ | (Llm_provider.Error.HardQuota _ | (Llm_provider.Error.CapacityExhausted _ | (Llm_provider.Error.AuthError _ | (Llm_provider.Error.AuthorizationError _ | (Llm_provider.Error.ServerError _ | (Llm_provider.Error.NetworkError _ | (Llm_provider.Error.InvalidRequest _ | (Llm_provider.Error.NotFound _ | Llm_provider.Error.ProviderTerminal _))))))))))))))))))
   | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
-  | Agent_core.Error.Serialization _ | Agent_core.Error.Io _ | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Serialization _ | Agent_core.Error.Io _ | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _ -> Fusion_types.Bridge_error (Agent_core.Error.to_string error)
 
 let panel_failure_of_route_failure : Fusion_seat.route_failure -> Fusion_types.panel_failure

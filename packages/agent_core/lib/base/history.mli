@@ -26,6 +26,9 @@ type stored_error =
   | Negative_byte_count of int
 [@@deriving show]
 
+(** One line naming the refused field. *)
+val stored_error_to_string : stored_error -> string
+
 (** Checks the field forms. It reads no media, so it cannot tell whether
     [sha256] and [bytes] describe the same bytes; {!media_store.get} does. *)
 val stored : sha256:string -> bytes:int -> (stored, stored_error) result
@@ -41,55 +44,12 @@ type media_source =
   | File_id of string
 [@@deriving show]
 
-(** {!Llm_provider.Types.content_block} constructor for constructor. Only the
-    media [source] type differs. *)
-type content_block =
-  | Text of string
-  | Thinking of
-      { content : string
-      ; signature : string option
-      }
-  | ReasoningDetails of
-      { reasoning_content : string option
-      ; details : Llm_provider.Types.reasoning_detail list
-      }
-  | RedactedThinking of string
-  | ToolUse of
-      { id : string
-      ; name : string
-      ; input : Yojson.Safe.t
-      }
-  | ToolResult of
-      { tool_use_id : string
-      ; content : string
-      ; outcome : Llm_provider.Types.tool_result_outcome
-      ; json : Yojson.Safe.t option
-      ; content_blocks : content_block list option
-      }
-  | Image of
-      { media_type : string
-      ; source : media_source
-      }
-  | Document of
-      { media_type : string
-      ; source : media_source
-      }
-  | Audio of
-      { media_type : string
-      ; source : media_source
-      }
-[@@deriving show]
+(** The provider's block over this source, with the provider's constructors.
+    Code that reads only kinds, positions, text or reasoning takes either. *)
+type content_block = media_source Llm_provider.Types.content_block_with [@@deriving show]
 
-(** {!Llm_provider.Types.message} with history content. *)
-type message =
-  { role : Llm_provider.Types.role
-  ; origin : Llm_provider.Types.message_origin
-  ; content : content_block list
-  ; name : string option
-  ; tool_call_id : string option
-  ; metadata : Llm_provider.Types.metadata
-  }
-[@@deriving show]
+(** {!Llm_provider.Types.message_with} over history content. *)
+type message = media_source Llm_provider.Types.message_with [@@deriving show]
 
 (** {1 Media store} *)
 
@@ -154,19 +114,46 @@ val to_wire_message
   -> message
   -> (Llm_provider.Types.message, media_error) result
 
+(** The conversions above over a list, in order, stopping at the first
+    error. *)
+
+val of_wire_blocks
+  :  media_store
+  -> Llm_provider.Types.content_block list
+  -> (content_block list, media_error) result
+
+val to_wire_blocks
+  :  media_store
+  -> content_block list
+  -> (Llm_provider.Types.content_block list, media_error) result
+
+val to_wire_messages
+  :  media_store
+  -> message list
+  -> (Llm_provider.Types.message list, media_error) result
+
 (** {1 Byte accounting} *)
 
 (** Raw bytes for [Stored], payload length for [Url] and [File_id]. *)
 val media_source_bytes : media_source -> int
 
+(** Characters the source occupies in a provider request: the padded
+    standard base64 length of [Stored] bytes, payload length for [Url] and
+    [File_id]. *)
+val media_source_wire_length : media_source -> int
+
 (** Sum of {!media_source_bytes} over the media in a block, ToolResult
     [content_blocks] included; [0] for a block without media. *)
 val media_bytes : content_block -> int
 
+(** Sum of {!media_source_wire_length} over the media in a block,
+    ToolResult [content_blocks] included; [0] for a block without media. *)
+val media_wire_length : content_block -> int
+
 (** {1 JSON}
 
-    A block without media encodes to the same bytes as the current
-    checkpoint encoding of the provider block: {!Llm_provider.Api_common}
+    A block without media encodes to the same bytes as the provider block
+    under the execution journal's block codec: {!Llm_provider.Api_common}
     for Text, Thinking, ReasoningDetails, RedactedThinking and ToolUse, and
     its ToolResult fields followed by [failure_kind], [error_class] and
     [text_content]. [Url] and [File_id] media keep the provider shape. A
@@ -175,7 +162,7 @@ val media_bytes : content_block -> int
 
     The decoder accepts only these shapes: every object has its listed
     fields and no other, no field twice, and a [base64] source is refused.
-    As in the current checkpoint, ToolResult [json] is not written and
+    As in that codec, ToolResult [json] is not written and
     decodes as [None], and Text, unsigned Thinking, reasoning content and
     string tool output pass through UTF-8 sanitizing on encode. *)
 
@@ -246,13 +233,30 @@ type decode_error =
   (** The encoder omits empty metadata, so a present one is not empty. *)
 [@@deriving show]
 
+(** One line: the JSON path, then what is wrong there. *)
+val decode_error_to_string : decode_error -> string
+
 val content_block_to_json : content_block -> Yojson.Safe.t
 val content_block_of_json : Yojson.Safe.t -> (content_block, decode_error) result
 
-(** Same fields and order as the current checkpoint message: [role],
-    [origin], [content], then [name], [tool_call_id] and non-empty
-    [metadata] when present. Role and content combinations are not checked
-    here. *)
+(** What a durable JSON value says about a [Stored] media source, for a
+    reader that walks JSON it does not otherwise decode (blob retention). An
+    object is a stored source when its [type] is ["stored"] and it has a
+    [sha256] field; it is then decoded strictly, as inside a block. Any other
+    value is [Not_stored_source]. *)
+type stored_source_decode =
+  | Not_stored_source
+  | Invalid_stored_source of decode_error
+  | Decoded_stored_source of
+      { media_type : string
+      ; stored : stored
+      }
+
+val stored_source_of_json : Yojson.Safe.t -> stored_source_decode
+
+(** The checkpoint message: [role], [origin], [content], then [name],
+    [tool_call_id] and non-empty [metadata] when present. Role and content
+    combinations are not checked here. *)
 val message_to_json : message -> Yojson.Safe.t
 
 val message_of_json : Yojson.Safe.t -> (message, decode_error) result

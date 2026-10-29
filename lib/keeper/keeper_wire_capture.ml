@@ -318,16 +318,16 @@ let rejected_reasoning_min_copies = 3
 let reasoning_text_of_response (response : Agent_core.Types.api_response) =
   response.content
   |> List.filter_map (function
-    | Agent_core.Types.Thinking { content; _ } -> Some content
-    | Agent_core.Types.ReasoningDetails { reasoning_content; details } ->
+    | Llm_provider.Types.Thinking { content; _ } -> Some content
+    | Llm_provider.Types.ReasoningDetails { reasoning_content; details } ->
       Some (Agent_core.Types.reasoning_details_text ~reasoning_content ~details)
-    | Agent_core.Types.RedactedThinking _
-    | Agent_core.Types.Text _
-    | Agent_core.Types.ToolUse _
-    | Agent_core.Types.ToolResult _
-    | Agent_core.Types.Image _
-    | Agent_core.Types.Document _
-    | Agent_core.Types.Audio _ -> None)
+    | Llm_provider.Types.RedactedThinking _
+    | Llm_provider.Types.Text _
+    | Llm_provider.Types.ToolUse _
+    | Llm_provider.Types.ToolResult _
+    | Llm_provider.Types.Image _
+    | Llm_provider.Types.Document _
+    | Llm_provider.Types.Audio _ -> None)
   |> String.concat ""
 
 let capture_rejected_reasoning ~base_path ~keeper_name ?turn_id ?trace_id

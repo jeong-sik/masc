@@ -485,7 +485,7 @@ let make_agent ~net ~transport name =
     ; transport = Some transport
     }
   in
-  Agent.create
+  Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
     ~net
     ~config:{ (Types.default_config ~model:"test-model") with name; model = "model-a" }
     ~options

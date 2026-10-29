@@ -30,7 +30,7 @@ let response_with_text text : Agent_core.Types.api_response =
   { id = "fusion-panel-test"
   ; model = "fusion-panel-test-model"
   ; stop_reason = Agent_core.Types.EndTurn
-  ; content = [ Agent_core.Types.Text text ]
+  ; content = [ Llm_provider.Types.Text text ]
   ; usage = None
   ; telemetry = None
   }

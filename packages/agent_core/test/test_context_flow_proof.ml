@@ -145,7 +145,7 @@ let test_full_chain_across_turns () =
          }
        in
        let config = default_config ~model:"mock-model" in
-       let agent = Agent.create ~net ~config ~options ~context:ctx ~tools:[ tool ] () in
+       let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ~options ~context:ctx ~tools:[ tool ] () in
        Agent.run ~sw agent "test context flow" |> require_run_success "context flow run";
        (* Verify Layer 1: write side *)
        Alcotest.(check bool)
@@ -202,7 +202,7 @@ let test_no_injector_no_context () =
          }
        in
        let config = default_config ~model:"mock-model" in
-       let agent = Agent.create ~net ~config ~options ~context:ctx ~tools:[ tool ] () in
+       let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ~options ~context:ctx ~tools:[ tool ] () in
        Agent.run ~sw agent "test no injector" |> require_run_success "no-injector run";
        Alcotest.(check bool)
          "Context.t stays empty"
@@ -271,7 +271,7 @@ let test_accumulation_across_tool_calls () =
       }
     in
     let config = default_config ~model:"mock-model" in
-    let agent = Agent.create ~net ~config ~options ~context:ctx ~tools:[ tool ] () in
+    let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ~options ~context:ctx ~tools:[ tool ] () in
     Agent.run ~sw agent "test accumulation" |> require_run_success "accumulation run";
     (* Tool was called twice *)
     Alcotest.(check int) "tool called twice" 2 !tool_calls;
@@ -345,7 +345,7 @@ let test_context_identity () =
          }
        in
        let config = default_config ~model:"mock-model" in
-       let agent = Agent.create ~net ~config ~options ~context:ctx ~tools:[ tool ] () in
+       let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ~options ~context:ctx ~tools:[ tool ] () in
        Agent.run ~sw agent "test identity" |> require_run_success "context identity run";
        (* Same Context.t object used throughout *)
        Alcotest.(check bool) "hook saw pre-seed" true !hook_saw_preseed;

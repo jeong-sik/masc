@@ -10,7 +10,7 @@ module EO = Agent_core.Exact_output
 module Registry = Runtime_exact_output_registry
 
 let lane_id = "librarian_exact"
-let messages = [ Agent_core.Types.user_msg "Return one JSON object." ]
+let messages = [ Llm_provider.Types.user_msg "Return one JSON object." ]
 
 let requirement =
   EO.make_output_requirement

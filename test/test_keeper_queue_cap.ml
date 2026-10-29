@@ -131,7 +131,7 @@ provider_call_deadline_sec = %g
              ~system_prompt:"Queue cap proof."
              ~runtime_id:"busy.sample"
              ~keeper_name:"queue-cap-proof"
-             ~base_path
+             ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
              ~agent_core_tools:[]
              ~goal:"wait for a permit that never comes"
              ~on_event:(fun _ -> ())

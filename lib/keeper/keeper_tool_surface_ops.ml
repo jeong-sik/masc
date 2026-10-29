@@ -822,6 +822,7 @@ let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
 let handle_keeper_msg_from_args ~submitted_by ctx args : tool_result =
   match
     Keeper_invocation_contract.direct_message
+      ~media_store:(Tool_blob_media_store.of_base_path ~base_path:ctx.config.Workspace.base_path)
       ~keeper_name:(get_string args "name" "")
       ~prompt:(get_string args "message" "")
       ~direct_reply:true

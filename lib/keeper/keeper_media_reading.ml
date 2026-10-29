@@ -16,23 +16,6 @@ let kind_to_string = function
   | Document -> "document"
 ;;
 
-let source_sha256 bytes = Agent_core_sha256.to_hex (Agent_core_sha256.digest_string bytes)
-
-(* A stored reading lives while a durable record still carries its
-   attachment. The sweep (Keeper_media_reading_maintenance) cannot decode and
-   hash every payload in every durable file, so the record keeps this slice of
-   the base64 text exactly as the block carried it, and the sweep searches the
-   durable files for the slice. A slice that also occurs in another payload only
-   keeps a reading longer. A durable record that re-encoded the payload hides
-   the slice, and the reading is read once more after the sweep removes it. *)
-let source_probe_length = 64
-
-let source_probe data =
-  let length = String.length data in
-  if length <= source_probe_length
-  then data
-  else String.sub data ((length - source_probe_length) / 2) source_probe_length
-;;
 
 let audio_extension media_type =
   match String.lowercase_ascii media_type with
@@ -151,9 +134,11 @@ let media_type_segment media_type =
     media_type
 ;;
 
-(* The store sits outside every durable-consumer tree that
-   Vision_artifact_reference scans, so a record's own [source_probe] never
-   counts as a reference to itself. *)
+(* A stored reading lives while a durable consumer still holds its
+   attachment's [Stored] reference. The record name carries that reference's
+   sha256, and the sweep (Keeper_media_reading_maintenance) checks it against
+   the blob registry's typed scan. The store sits outside every
+   durable-consumer tree, so a record never counts as a reference itself. *)
 let store_dirname = "media-readings"
 
 let record_path ~base_path ~keeper_name ~kind ~media_type ~sha =
@@ -192,7 +177,7 @@ let load_reading ~base_path ~keeper_name ~kind ~media_type ~sha =
            | _ -> None)))
 ;;
 
-let store_reading ~base_path ~keeper_name ~kind ~media_type ~sha ~probe ~text =
+let store_reading ~base_path ~keeper_name ~kind ~media_type ~sha ~text =
   match base_path with
   | None -> ()
   | Some base_path ->
@@ -203,7 +188,6 @@ let store_reading ~base_path ~keeper_name ~kind ~media_type ~sha ~probe ~text =
         ; "kind", `String (kind_to_string kind)
         ; "media_type", `String media_type
         ; "source_sha256", `String sha
-        ; "source_probe", `String probe
         ; "reader_version", `String reader_version
         ; "status", `String "read"
         ; "text", `String text
@@ -249,6 +233,13 @@ let read_text ~kind ~media_type ~sha ~text =
     text
 ;;
 
+let media_error_reason : Agent_core.History.media_error -> string = function
+  | Store_failed _ -> "store_failed"
+  | Missing_bytes _ -> "missing_bytes"
+  | Invalid_base64 _ -> "invalid_base64"
+  | Digest_mismatch _ -> "digest_mismatch"
+;;
+
 let reference_text ~kind ~media_type ~source =
   Printf.sprintf
     "[attachment kind=%s media_type=%s source=%s status=unavailable]\nThe attachment is a \
@@ -268,6 +259,7 @@ let reference_text ~kind ~media_type ~source =
    text-only candidate do not spend the reading budget. *)
 type projector =
   { base_path : string option
+  ; media_store : Agent_core.History.media_store
   ; keeper_name : string
   ; read : reader
   ; start_deadline : unit -> Monotonic_deadline.t
@@ -275,8 +267,15 @@ type projector =
   ; memo : (kind * string * string, string) Hashtbl.t
   }
 
-let projector ?base_path ~keeper_name ~start_deadline ~read () =
-  { base_path; keeper_name; read; start_deadline; deadline = None; memo = Hashtbl.create 4 }
+let projector ?base_path ~media_store ~keeper_name ~start_deadline ~read () =
+  { base_path
+  ; media_store
+  ; keeper_name
+  ; read
+  ; start_deadline
+  ; deadline = None
+  ; memo = Hashtbl.create 4
+  }
 ;;
 
 let projector_deadline projector =
@@ -289,7 +288,7 @@ let projector_deadline projector =
 ;;
 
 let project projector ~needs_projection blocks =
-  let { base_path; keeper_name; read; memo; _ } = projector in
+  let { base_path; media_store; keeper_name; read; memo; _ } = projector in
   let replaced : (string * int) list ref = ref [] in
   let project_one ~kind ~media_type ~source block =
     if not (needs_projection kind)
@@ -302,15 +301,12 @@ let project projector ~needs_projection blocks =
       | Agent_core.Types.Url _ -> Agent_core.Types.text_block (reference_text ~kind ~media_type ~source:"url")
       | Agent_core.Types.File_id _ ->
         Agent_core.Types.text_block (reference_text ~kind ~media_type ~source:"file_id")
-      | Agent_core.Types.Base64 data ->
-        (match Base64.decode data with
-         | Error _ ->
-           ignore block;
-           Agent_core.Types.text_block
-             (unavailable_text ~kind ~media_type ~sha:"unknown" ~reason:"invalid_base64")
-         | Ok bytes ->
-           let sha = source_sha256 bytes in
-           let text =
+      | Agent_core.Types.Stored stored ->
+        ignore block;
+        (* The digest names the reading, so the bytes are read from the store
+           only when no reading of them exists yet. *)
+        let sha = stored.Agent_core.History.sha256 in
+        let text =
              match Hashtbl.find_opt memo (kind, media_type, String.lowercase_ascii sha) with
              | Some text -> text
              | None ->
@@ -322,7 +318,10 @@ let project projector ~needs_projection blocks =
                    (match
                       if Monotonic_deadline.passed deadline
                       then Error "budget_spent"
-                      else read ~deadline ~kind ~media_type ~bytes
+                      else
+                        match media_store.get stored with
+                        | Ok bytes -> read ~deadline ~kind ~media_type ~bytes
+                        | Error error -> Error (media_error_reason error)
                     with
                     | Ok reading when String.trim reading <> "" ->
                       store_reading
@@ -331,7 +330,6 @@ let project projector ~needs_projection blocks =
                         ~kind
                         ~media_type
                         ~sha
-                        ~probe:(source_probe data)
                         ~text:reading;
                       read_text ~kind ~media_type ~sha ~text:reading
                     | Ok _ -> unavailable_text ~kind ~media_type ~sha ~reason:"empty_reading"
@@ -340,7 +338,7 @@ let project projector ~needs_projection blocks =
                Hashtbl.replace memo (kind, media_type, String.lowercase_ascii sha) text;
                text
            in
-           Agent_core.Types.text_block text))
+           Agent_core.Types.text_block text)
   in
   let projected =
     List.map
@@ -358,9 +356,9 @@ let project projector ~needs_projection blocks =
   projected, List.rev !replaced
 ;;
 
-let project_blocks ?base_path ~keeper_name ~needs_projection ~deadline ~read blocks =
+let project_blocks ?base_path ~media_store ~keeper_name ~needs_projection ~deadline ~read blocks =
   project
-    (projector ?base_path ~keeper_name ~start_deadline:(fun () -> deadline) ~read ())
+    (projector ?base_path ~media_store ~keeper_name ~start_deadline:(fun () -> deadline) ~read ())
     ~needs_projection
     blocks
 ;;

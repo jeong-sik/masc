@@ -65,6 +65,7 @@ let checkpoint_for_persistence
     List.map
       (Keeper_vision_ingest.evict_message
          ~base_path
+         ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
          ~mode:Keeper_vision_ingest.Store_only
          ~delegate:(Keeper_vision_ingest.delegates_media ~runtime_id)
          ~keeper_name)

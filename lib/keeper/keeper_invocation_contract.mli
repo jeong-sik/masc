@@ -25,6 +25,7 @@ type request_error =
 val request : keeper_name:string -> prompt:string -> (request, request_error) result
 
 val direct_message :
+  media_store:Agent_core.History.media_store ->
   keeper_name:string ->
   prompt:string ->
   direct_reply:bool ->

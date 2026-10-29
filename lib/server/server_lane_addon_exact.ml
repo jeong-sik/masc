@@ -186,12 +186,12 @@ let call ~before_dispatch ~admission_class ~cli_runner ~base_path ~(resolved : R
   let messages =
     Option.to_list
       (Option.map
-         (fun system -> Agent_core.Types.make_message ~role:System [ Agent_core.Types.text_block system ])
+         (fun system -> Llm_provider.Types.make_message ~role:System [ Llm_provider.Types.text_block system ])
          request.system)
     @ List.map
         (fun (message : Addon.message) ->
-           let role = match message.role with User -> Agent_core.Types.User | Assistant -> Agent_core.Types.Assistant in
-           Agent_core.Types.make_message ~role [ Agent_core.Types.text_block message.text ])
+           let role = match message.role with User -> Llm_provider.Types.User | Assistant -> Llm_provider.Types.Assistant in
+           Llm_provider.Types.make_message ~role [ Llm_provider.Types.text_block message.text ])
         request.messages
   in
   let ended () = ending (List.rev !failures) in

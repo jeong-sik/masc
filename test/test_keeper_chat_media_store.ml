@@ -172,7 +172,7 @@ let test_base64_source_decoded_before_persist () =
     let encoded = Base64.encode_string raw in
     match
       M.persist_media_source_result ~base_dir ~media_type:"image/png"
-        ~source:(Agent_core.Types.Base64 encoded)
+        ~source:(Llm_provider.Types.Base64 encoded)
     with
     | Error err ->
         Alcotest.failf "unexpected persist error: %s" (M.persist_error_to_string err)
@@ -200,7 +200,7 @@ let test_generated_media_cap_rejects_oversize_raw_media () =
              msg);
       match
         M.persist_media_source_result ~base_dir ~media_type:"image/png"
-          ~source:(Agent_core.Types.Base64 (Base64.encode_string raw))
+          ~source:(Llm_provider.Types.Base64 (Base64.encode_string raw))
       with
       | Ok _ -> Alcotest.fail "oversize decoded media must not be persisted"
       | Error (M.Media_too_large { size_bytes; max_bytes }) ->
@@ -234,7 +234,7 @@ let test_unsupported_source_type_rejected () =
   with_temp_base (fun base_dir ->
     match
       M.persist_media_source_result ~base_dir ~media_type:"image/png"
-        ~source:(Agent_core.Types.Url "https://example.invalid/image.png")
+        ~source:(Llm_provider.Types.Url "https://example.invalid/image.png")
     with
     | Ok _ -> Alcotest.fail "url source must not be persisted without resolver"
     | Error (M.Unsupported_source_type Agent_core.Types.Url_kind) -> ()

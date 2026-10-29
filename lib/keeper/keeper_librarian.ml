@@ -2,7 +2,6 @@
 
 open Keeper_memory_os_types
 
-module Canonical_tool = Agent_core.Canonical_tool
 module String_map = Map.Make (String)
 module String_set = Set.Make (String)
 
@@ -118,38 +117,23 @@ let trim_nonempty s =
 
 let role_to_string = Agent_core.Types.role_to_string
 
-let text_of_content block =
-  match Canonical_tool.tool_result_of_block block with
-  | Some result ->
+let text_of_content (block : Agent_core.Types.content_block) =
+  match block with
+  | Agent_core.Types.ToolResult { tool_use_id; outcome; _ } ->
     Some
       (Printf.sprintf
          "[tool result omitted: id=%s is_error=%b]"
-         result.Canonical_tool.call_id
-         (Agent_core.Types.tool_result_outcome_is_error
-            result.Canonical_tool.outcome))
-  | None -> (
-    match Canonical_tool.tool_call_of_block block with
-    | Some call ->
-      Some
-        (Printf.sprintf
-           "[tool use omitted: id=%s name=%s]"
-           call.Canonical_tool.call_id
-           call.Canonical_tool.name)
-    | None -> (
-      match block with
-      | Agent_core.Types.Text s -> trim_nonempty s
-      | Agent_core.Types.ToolResult _ ->
-        invalid_arg
-          "keeper_librarian: AGENT_CORE canonical tool-result projection unavailable"
-      | Agent_core.Types.ToolUse _ ->
-        invalid_arg
-          "keeper_librarian: AGENT_CORE canonical tool-call projection unavailable"
-      | Agent_core.Types.Thinking _
-      | Agent_core.Types.ReasoningDetails _
-      | Agent_core.Types.RedactedThinking _ -> None
-      | Agent_core.Types.Image _ -> Some "[image omitted]"
-      | Agent_core.Types.Document _ -> Some "[document omitted]"
-      | Agent_core.Types.Audio _ -> Some "[audio omitted]"))
+         tool_use_id
+         (Agent_core.Types.tool_result_outcome_is_error outcome))
+  | Agent_core.Types.ToolUse { id; name; _ } ->
+    Some (Printf.sprintf "[tool use omitted: id=%s name=%s]" id name)
+  | Agent_core.Types.Text s -> trim_nonempty s
+  | Agent_core.Types.Thinking _
+  | Agent_core.Types.ReasoningDetails _
+  | Agent_core.Types.RedactedThinking _ -> None
+  | Agent_core.Types.Image _ -> Some "[image omitted]"
+  | Agent_core.Types.Document _ -> Some "[document omitted]"
+  | Agent_core.Types.Audio _ -> Some "[audio omitted]"
 ;;
 
 (* RFC-0468 §3.2: the speaker comes from the metadata the host stamped when it

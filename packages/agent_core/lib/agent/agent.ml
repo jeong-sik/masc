@@ -54,7 +54,7 @@ type execution_terminal_disposition = Agent_execution_runner.terminal_dispositio
 type execution_terminal_evidence =
   { disposition : execution_terminal_disposition
   ; has_tool_attempts : bool
-  ; settled_tool_results : Types.content_block list
+  ; settled_tool_results : Llm_provider.Types.content_block list
   }
 
 module Execution_projection = Agent_execution_projection
@@ -404,6 +404,7 @@ let lifecycle_outcome_of_error error =
     | Error.Serialization _
     | Error.Io _
     | Error.Orchestration _
+    | Error.Media _
     | Error.Internal _
     | Error.Internal_carried _ ) as error -> Agent_lifecycle_events.Failed error
 ;;
@@ -670,6 +671,7 @@ let run_handoff_target ~sw ?clock agent (target : Handoff.handoff_target) prompt
   let sub =
     create
       ~net:agent.net
+      ~media_store:agent.media_store
       ~config:target.config
       ~tools:target.tools
       ~context_fit_admission:agent.context_fit_admission
@@ -750,6 +752,7 @@ let run_with_handoffs_blocks ~sw ?clock ?execution_store agent ~targets user_blo
 
 let resume
       ~net
+      ~media_store
       ~(checkpoint : Checkpoint.t)
       ?(tools = [])
       ?context
@@ -785,6 +788,7 @@ let resume
   ; net
   ; context = ctx
   ; options = {options with provider_config}
+  ; media_store
   ; context_fit_admission
   ; model_input_projection
   ; pre_dispatch_serialization_observer

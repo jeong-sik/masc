@@ -34,7 +34,7 @@ type context_fit_admission =
   | Body_only
   | Require_exact_fit
 
-type model_input_projection = message list -> (message list, Error.t) result
+type model_input_projection = message list -> (Llm_provider.Types.message list, Error.t) result
 type pre_dispatch_serialization_observer = Llm_provider.Request_wire_observer.try_observe
 
 (* Runs the serialisation of an admitted provider body. The closure reads
@@ -159,6 +159,7 @@ type t =
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   ; context : Context.t
   ; options : options
+  ; media_store : History.media_store
   ; context_fit_admission : context_fit_admission
   ; model_input_projection : model_input_projection option
   ; pre_dispatch_serialization_observer : pre_dispatch_serialization_observer option
@@ -174,6 +175,7 @@ let tools t = t.tools
 let context t = t.context
 let options t = t.options
 let provider_config t = t.options.provider_config
+let media_store t = t.media_store
 let net t = t.net
 
 (** Mutex-protected write to [state].  All mutations of [t.state] should
@@ -381,6 +383,7 @@ let set_lifecycle
 
 let create
       ~net
+      ~media_store
       ~config
       ?(tools = [])
       ?context
@@ -412,6 +415,7 @@ let create
   ; net
   ; context = ctx
   ; options
+  ; media_store
   ; context_fit_admission
   ; model_input_projection
   ; pre_dispatch_serialization_observer
@@ -437,6 +441,7 @@ let clone ?(copy_context = false) agent =
   ; net = agent.net
   ; context = ctx
   ; options = agent.options
+  ; media_store = agent.media_store
   ; context_fit_admission = agent.context_fit_admission
   ; model_input_projection = agent.model_input_projection
   ; pre_dispatch_serialization_observer = agent.pre_dispatch_serialization_observer

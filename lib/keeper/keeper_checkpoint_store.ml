@@ -341,7 +341,7 @@ let classify_core_error (e : Agent_core.Error.t) : checkpoint_load_error =
   | Serialization (UnknownVariant r) ->
       Parse_error (sprintf "unknown variant %s: %s" r.type_name r.value)
   | Api _ | Provider _ | Agent _ | Mcp _ | Config _
-  | Orchestration _ | Internal _ | Internal_carried { message = _; _ } ->
+  | Orchestration _ | Media _ | Internal _ | Internal_carried { message = _; _ } ->
       Agent_core_error (Agent_core.Error.to_string e)
 
 (* Both checkpoint reads take their bytes through

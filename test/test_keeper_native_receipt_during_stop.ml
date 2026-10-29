@@ -111,7 +111,7 @@ let stop_while_dispatching env ~root ~workspace ~session_dir =
     (match Native.load ~binding |> require "load native admission" with
      | Native.No_pending -> ()
      | Native.Resume _ | Native.Terminal_pending _ -> fail "a fresh operation has a native call");
-    let config = Runtime_agent.default_config ~name:keeper_name ~provider_cfg
+    let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:keeper_name ~provider_cfg
         ~system_prompt:"Answer once." ~tools:[] in
     let config = {config with context=Some (context_for_operation ())} in
     let agent_ref = ref None in

@@ -675,6 +675,7 @@ let dispatch_board_context_inference ~state ~sw ~clock ~submitted_by ~target_kee
   let post_id = Board.Post_id.to_string post.id in
   match
     Keeper_invocation_contract.direct_message
+      ~media_store:(Tool_blob_media_store.of_base_path ~base_path:config.Workspace.base_path)
       ~keeper_name:target_keeper
       ~prompt:(board_context_inference_message post)
       ~direct_reply:true

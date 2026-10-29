@@ -90,7 +90,7 @@ let test_task_scope_uses_typed_input_or_meta () =
    stays behavior-preserving. *)
 
 let thinking ?signature content =
-  Agent_core.Types.Thinking { signature; content }
+  Llm_provider.Types.Thinking { signature; content }
 
 let check_thinking_summary ~msg ~present ~blocks ~chars ~redacted ~kind content =
   let { Keeper_hooks_agent_core_types.thinking_present
@@ -113,7 +113,7 @@ let test_thinking_summary_none_empty () =
 
 let test_thinking_summary_none_text_only () =
   check_thinking_summary ~msg:"text-only" ~present:false ~blocks:0 ~chars:0
-    ~redacted:0 ~kind:"none" [ Agent_core.Types.Text "hello" ]
+    ~redacted:0 ~kind:"none" [ Llm_provider.Types.Text "hello" ]
 
 let test_thinking_summary_thinking_counts_chars () =
   check_thinking_summary ~msg:"thinking" ~present:true ~blocks:1 ~chars:5
@@ -121,15 +121,15 @@ let test_thinking_summary_thinking_counts_chars () =
 
 let test_thinking_summary_redacted_only () =
   check_thinking_summary ~msg:"redacted" ~present:true ~blocks:0 ~chars:0
-    ~redacted:1 ~kind:"redacted" [ Agent_core.Types.RedactedThinking "opaque" ]
+    ~redacted:1 ~kind:"redacted" [ Llm_provider.Types.RedactedThinking "opaque" ]
 
 let test_thinking_summary_mixed_sums () =
   check_thinking_summary ~msg:"mixed" ~present:true ~blocks:2 ~chars:7
     ~redacted:1 ~kind:"mixed"
     [ thinking "abcd"
-    ; Agent_core.Types.RedactedThinking "x"
+    ; Llm_provider.Types.RedactedThinking "x"
     ; thinking "efg"
-    ; Agent_core.Types.Text "ignored"
+    ; Llm_provider.Types.Text "ignored"
     ]
 
 let () =

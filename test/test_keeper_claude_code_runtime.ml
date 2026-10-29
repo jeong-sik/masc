@@ -388,7 +388,7 @@ let cleanup_tree root =
 
 let keeper_response_text (result : Runtime_agent.run_result) =
   result.response.content
-  |> List.filter_map (function Agent_core.Types.Text text -> Some text | _ -> None)
+  |> List.filter_map (function Llm_provider.Types.Text text -> Some text | _ -> None)
   |> String.concat ""
 ;;
 
@@ -461,7 +461,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                         (Keeper_turn_driver.run_named ~input_source ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                            ~runtime_id:"claude.claude"
                            ~keeper_name:"claude-fixture"
-                           ~base_path
+                           ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
                            ~goal
                            ~system_prompt
                            ~tools
@@ -3000,7 +3000,7 @@ let run_direct_attempt
                     ~pre_tool_rejects:(ref [])
                     ~runtime_id:"claude.claude"
                     ~keeper_name:"claude-pre-dispatch"
-                    ~base_path
+                    ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
                     ~goal
                     ~goal_blocks:None
                     (* Defaults to non-empty text. The keeper mainline refuses a
@@ -5447,7 +5447,7 @@ let test_exit_before_turn_admission_rotates_to_next_candidate () =
                       ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"claude_failover"
                       ~keeper_name:"claude-fixture"
-                      ~base_path
+                      ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
                       ~goal:"FAILOVER_GOAL"
                       ~system_prompt:"pre-dispatch fixture system prompt"
                       ~tools:[]

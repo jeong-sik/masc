@@ -93,7 +93,7 @@ let test_tokens_accumulate_across_turns () =
       { Agent.default_options with provider_config = Some (local_provider ~base_url) }
     in
     let config = default_config ~model:"mock-model" in
-    let agent = Agent.create ~net ~config ~options ~tools:[ tool ] () in
+    let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ~options ~tools:[ tool ] () in
     Agent.run ~sw agent "test" |> require_run_success "usage accumulation run";
     let st = Agent.state agent in
     (* 3 API calls: tool, tool, text — each with 100 input + 50 output *)
@@ -115,7 +115,7 @@ let test_single_turn_usage () =
       { Agent.default_options with provider_config = Some (local_provider ~base_url) }
     in
     let agent =
-      Agent.create ~config:(Types.default_config ~model:"mock-model") ~net ~options ()
+      Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(Types.default_config ~model:"mock-model") ~net ~options ()
     in
     Agent.run ~sw agent "test" |> require_run_success "single-turn usage run";
     let st = Agent.state agent in
@@ -149,7 +149,7 @@ let test_missing_usage_reaches_hooks_and_checkpoint () =
       | _ -> Alcotest.fail "expected pre-tool event") } in
     let options = { Agent.default_options with
       provider_config=Some (local_provider ~base_url); hooks } in
-    let agent = Agent.create ~net ~config:(default_config ~model:"mock-model")
+    let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config:(default_config ~model:"mock-model")
         ~options ~tools:[tool] () in
     Agent.run ~sw agent "measure partial usage" |> require_run_success "partial usage run";
     (match !hook_usage with

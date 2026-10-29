@@ -45,13 +45,13 @@ let test_simple_chat () =
   Eio.Switch.run
   @@ fun sw ->
   let config = provider_m_config "test-agent" None (Some 100) in
-  let agent = Agent.create ~net:env#net ~config ~options () in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~options () in
   match Agent.run ~sw agent "What is 2+3? Answer with just the number." with
   | Ok response ->
     let text =
       List.filter_map
         (function
-          | Text s -> Some s
+          | Llm_provider.Types.Text s -> Some s
           | _ -> None)
         response.content
       |> String.concat ""
@@ -99,13 +99,13 @@ let test_tool_calling () =
          (* Simple eval for demo *)
          Ok { Types.content = Printf.sprintf "Result of %s = 5" expr; content_blocks = None; _meta = None })
   in
-  let agent = Agent.create ~net:env#net ~config ~tools:[ calc_tool ] ~options () in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~tools:[ calc_tool ] ~options () in
   match Agent.run ~sw agent "What is 2+3? Use the calculator tool." with
   | Ok response ->
     let text =
       List.filter_map
         (function
-          | Text s -> Some s
+          | Llm_provider.Types.Text s -> Some s
           | _ -> None)
         response.content
       |> String.concat ""
@@ -149,7 +149,7 @@ let test_multi_tool () =
          Printf.printf "  [Tool called] read_file(%s)\n%!" path;
          Ok { Types.content = "hello world\nthis is a test file\n"; content_blocks = None; _meta = None })
   in
-  let agent = Agent.create ~net:env#net ~config ~tools:[ read_file_tool ] ~options () in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~config ~tools:[ read_file_tool ] ~options () in
   match
     Agent.run ~sw agent "Read the file at /tmp/test.txt and tell me what it says."
   with
@@ -157,7 +157,7 @@ let test_multi_tool () =
     let text =
       List.filter_map
         (function
-          | Text s -> Some s
+          | Llm_provider.Types.Text s -> Some s
           | _ -> None)
         response.content
       |> String.concat ""

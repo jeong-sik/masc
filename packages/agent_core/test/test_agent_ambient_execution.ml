@@ -29,7 +29,7 @@ let test_all_agent_entrypoints_consume_ambient_child () =
   @@ fun sw ->
   let agent_name = "ambient-child-agent" in
   let make_agent () =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net:(Eio.Stdenv.net env)
       ~config:{ (Types.default_config ~model:"unused") with name = agent_name }
       ()
@@ -72,7 +72,7 @@ let test_explicit_store_conflicts_with_ambient_child () =
        let store = Agent.execution_store ~runtime ~dir () in
        let factory_called = ref false in
        let agent =
-         Agent.create
+         Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
            ~net:(Eio.Stdenv.net env)
            ~config:
              { (Types.default_config ~model:"unused") with

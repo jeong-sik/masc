@@ -62,10 +62,11 @@ let resume_topology_error detail =
        (Execution_agent_scope.Resume_topology_mismatch detail))
 ;;
 
-let validate_response_tool_uses ~response ~tool_uses =
+let validate_response_tool_uses ~(response : Llm_provider.Types.api_response) ~tool_uses =
   let response_tool_uses =
     List.filter
-      (function
+      (fun (block : Llm_provider.Types.content_block) ->
+        match block with
         | ToolUse _ -> true
         | Text _
         | Thinking _
@@ -88,7 +89,13 @@ let validate_response_tool_uses ~response ~tool_uses =
 ;;
 
 let recovered_report ~response ~turn ~invocations ~tool_results tool_uses =
-  let rec recover_results expected_index acc invocations tool_uses tool_results =
+  let rec recover_results
+            expected_index
+            acc
+            invocations
+            (tool_uses : Llm_provider.Types.content_block list)
+            (tool_results : Llm_provider.Types.content_block list)
+    =
     match invocations, tool_uses, tool_results with
     | ( authority :: invocations
       , ToolUse { id; name; input } :: tool_uses

@@ -23,12 +23,12 @@ let settled ?(attempt_admitted=true) ?(outcome=T.Tool_succeeded) ~sequence conte
                  execution_mode=Contract.Serial}
       ~completion:Contract.Continue_after_success in
   {Projection.invocation; tool_name; input;
-   result=T.ToolResult {tool_use_id=id; content; outcome; json=None; content_blocks=None};
+   result=Llm_provider.Types.ToolResult {tool_use_id=id; content; outcome; json=None; content_blocks=None};
    attempt_admitted; settlement_seq=sequence}
 
 let observation ?base_path (call : Projection.settled_tool_invocation) =
   let output_text = match call.result with
-    | T.ToolResult {content; _} -> content
+    | Llm_provider.Types.ToolResult {content; _} -> content
     | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
     | ToolUse _ | Image _ | Document _ | Audio _ -> fail "fixture result must be a ToolResult" in
   let io = match Keeper_tool_progress_identity.digest_tool_io ?base_path

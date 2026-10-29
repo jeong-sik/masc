@@ -88,7 +88,7 @@ let run_case ~how root =
     let execution_store = Agent.execution_store ~runtime ~dir
         ~on_scope_ready:(fun published -> locator := Some published; Ok ())
         ~on_terminal_disposition:(fun _ -> Error "host receipt sink unavailable") () in
-    let config = Runtime_agent.default_config ~name:keeper_name ~provider_cfg
+    let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ()) ~name:keeper_name ~provider_cfg
         ~system_prompt:"Answer once." ~tools:[] in
     let config = {config with execution_store=Some execution_store} in
     (match Runtime_agent.run ~sw:turn_sw ~net:env#net ~config goal with

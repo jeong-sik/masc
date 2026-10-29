@@ -57,7 +57,7 @@ let make_agent ~net base_url name =
       ()
   in
   let options = { Agent.default_options with provider_config = Some provider_config } in
-  Agent.create ~net ~config ~options ()
+  Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~config ~options ()
 ;;
 
 (* ── run_agent tests ───────────────────────────────────────────── *)
@@ -77,7 +77,7 @@ let test_run_agent_basic () =
        let text =
          List.filter_map
            (function
-             | Types.Text s -> Some s
+             | Llm_provider.Types.Text s -> Some s
              | _ -> None)
            resp.content
          |> String.concat ""

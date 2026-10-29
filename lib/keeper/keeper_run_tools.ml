@@ -46,7 +46,7 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
   ; hooks : Agent_core.Hooks.hooks
   ; on_runtime_attempt : Keeper_turn_driver.runtime_attempt -> unit
   ; on_memory_capacity_refusal : Keeper_memory_delivery_reprojection.t
-  ; model_input_projection : Agent_core.Agent.model_input_projection
+  ; model_input_projection : Keeper_history_projection.t
   ; stage_skill_delivery_on_wire :
       runtime_id:string -> agent_core_turn:int -> Agent_core.Types.message list -> unit
   ; observe_official_client_result_handoff :

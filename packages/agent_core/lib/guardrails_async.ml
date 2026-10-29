@@ -15,7 +15,7 @@ let log = Log.create ~module_name:"guardrails_async" ()
 (** Input validator: checks messages before sending to the LLM. *)
 type input_validator =
   { name : string
-  ; validate : message list -> (unit, string) Result.t
+  ; validate : Llm_provider.Types.message list -> (unit, string) Result.t
   }
 
 (** Output validator: checks the LLM response. *)
@@ -71,7 +71,7 @@ let run_validator ~validator_name f =
     Creates a dedicated [Eio.Switch] for parallel execution.
     Returns the first failure found, or [Pass] if all succeed.
     Cancellation exceptions propagate correctly. *)
-let run_input (validators : input_validator list) (messages : message list)
+let run_input (validators : input_validator list) (messages : Llm_provider.Types.message list)
   : validation_result
   =
   match validators with
@@ -126,7 +126,7 @@ let run_output (validators : output_validator list) (response : api_response)
     Returns [Ok response] on success, [Error validation_result] on failure. *)
 let guarded
       ~(config : t)
-      ~(messages : message list)
+      ~(messages : Llm_provider.Types.message list)
       ~(action : unit -> (api_response, 'e) Result.t)
       ()
   : (api_response, [ `Validation of validation_result | `Action of 'e ]) Result.t

@@ -35,7 +35,7 @@ let test_image_media_persisted_as_block () =
           index = 0;
           delta =
             MediaDelta
-              { media_type = "image/png"; source = Base64 encoded_media };
+              { media_type = "image/png"; source = Agent_core.Llm_provider.Types.Base64 encoded_media };
         };
       ContentBlockStop { index = 0 };
     ];
@@ -62,7 +62,7 @@ let test_audio_media_as_voice_block () =
             MediaDelta
               {
                 media_type = "audio/mpeg";
-                source = Base64 (Base64.encode_string "audio bytes");
+                source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "audio bytes");
               };
         };
       ContentBlockStop { index = 0 };
@@ -82,7 +82,7 @@ let test_runtime_attempt_discards_unfinished_media () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source = Base64 (Base64.encode_string "stale")
+             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "stale")
              }
        });
   A.start_runtime_attempt accum;
@@ -93,7 +93,7 @@ let test_runtime_attempt_discards_unfinished_media () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source = Base64 (Base64.encode_string fresh)
+             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string fresh)
              }
        });
   A.on_event accum (ContentBlockStop { index = 0 });
@@ -119,7 +119,7 @@ let test_timeout_discards_unfinished_media () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source = Base64 (Base64.encode_string "timed out")
+             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "timed out")
              }
        });
   A.on_event accum (Timeout "idle timeout after 120.0s");
@@ -143,7 +143,7 @@ let test_open_media_finalized_on_message_stop () =
           delta =
             MediaDelta
               { media_type = "audio/mpeg";
-                source = Base64 (Base64.encode_string "audio")
+                source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "audio")
               }
         }
     ; ContentBlockDelta
@@ -151,7 +151,7 @@ let test_open_media_finalized_on_message_stop () =
           delta =
             MediaDelta
               { media_type = "image/png";
-                source = Base64 (Base64.encode_string raw_media)
+                source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string raw_media)
               }
         }
     ];
@@ -175,7 +175,7 @@ let test_stop_reason_finalizes_media_until_next_exact_scope () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source = Base64 (Base64.encode_string "first")
+             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "first")
              }
        });
   A.on_event ~stream_scope:0 accum
@@ -186,7 +186,7 @@ let test_stop_reason_finalizes_media_until_next_exact_scope () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source = Base64 (Base64.encode_string "late")
+             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "late")
              }
        });
   A.on_event ~stream_scope:1 accum
@@ -195,7 +195,7 @@ let test_stop_reason_finalizes_media_until_next_exact_scope () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source = Base64 (Base64.encode_string "second")
+             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "second")
              }
        });
   A.on_event ~stream_scope:1 accum (ContentBlockStop { index = 0 });
@@ -231,7 +231,7 @@ let test_tool_block_media_not_persisted () =
             MediaDelta
               {
                 media_type = "image/png";
-                source = Base64 (Base64.encode_string "must not persist");
+                source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "must not persist");
               };
         };
       ContentBlockStop { index = 0 };
@@ -254,7 +254,7 @@ let test_metadata_drift_preserves_first_media_block () =
             MediaDelta
               {
                 media_type = "image/png";
-                source = Base64 (Base64.encode_string raw_media);
+                source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string raw_media);
               };
         };
       ContentBlockDelta
@@ -264,7 +264,7 @@ let test_metadata_drift_preserves_first_media_block () =
             MediaDelta
               {
                 media_type = "audio/mpeg";
-                source = Base64 (Base64.encode_string "drift");
+                source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "drift");
               };
         };
       ContentBlockStop { index = 0 };
@@ -298,7 +298,7 @@ let test_many_media_chunks_join_in_order () =
   check int "the payload arrives in many chunks" 256 (List.length chunks);
   List.iter (A.on_event accum)
     (media_chunk_deltas ~index:0 ~media_type:"image/png"
-       (List.map (fun chunk -> Base64 chunk) chunks)
+       (List.map (fun chunk -> Agent_core.Llm_provider.Types.Base64 chunk) chunks)
      @ [ ContentBlockStop { index = 0 } ]);
   let base_dir = Filename.temp_dir "media_accum_test" "" in
   match A.to_chat_blocks ~base_dir accum with
@@ -321,7 +321,7 @@ let test_last_media_chunk_over_the_cap_drops_the_block () =
     check int "the last chunk is the one that crosses the cap" (cap + 1) observed;
     List.iter (A.on_event accum)
       (media_chunk_deltas ~index:0 ~media_type:"image/png"
-         (List.map (fun chunk -> Base64 chunk) (at_cap @ [ crossing ]))
+         (List.map (fun chunk -> Agent_core.Llm_provider.Types.Base64 chunk) (at_cap @ [ crossing ]))
        @ [ ContentBlockStop { index = 0 } ]);
     let base_dir = Filename.temp_dir "media_accum_test" "" in
     match A.to_chat_blocks ~base_dir accum with
@@ -336,7 +336,7 @@ let test_carrier_change_keeps_first_media_block () =
   let raw_media = "first carrier" in
   List.iter (A.on_event accum)
     (media_chunk_deltas ~index:0 ~media_type:"image/png"
-       [ Base64 (Base64.encode_string raw_media); Url "https://example.invalid/drift.png" ]
+       [ Agent_core.Llm_provider.Types.Base64 (Base64.encode_string raw_media); Agent_core.Llm_provider.Types.Url "https://example.invalid/drift.png" ]
      @ [ ContentBlockStop { index = 0 } ]);
   let base_dir = Filename.temp_dir "media_accum_test" "" in
   match A.to_chat_blocks ~base_dir accum with
@@ -362,7 +362,7 @@ let test_oversize_media_surfaces_as_dropped_placeholder () =
             index = 0;
             delta =
               MediaDelta
-                { media_type = "image/png"; source = Base64 oversized };
+                { media_type = "image/png"; source = Agent_core.Llm_provider.Types.Base64 oversized };
         };
         ContentBlockStop { index = 0 };
       ];
@@ -403,7 +403,7 @@ let test_media_persist_failure_surfaces_as_placeholder () =
           delta =
             MediaDelta
               { media_type = "image/png";
-                source = Base64 invalid_base64
+                source = Agent_core.Llm_provider.Types.Base64 invalid_base64
               }
         }
     ; ContentBlockStop { index = 0 }
@@ -434,7 +434,7 @@ let test_dropped_and_persisted_media_keep_stream_order () =
             delta =
               MediaDelta
                 { media_type = "image/png";
-                  source = Base64 oversized
+                  source = Agent_core.Llm_provider.Types.Base64 oversized
                 }
           }
       ; ContentBlockStop { index = 0 }
@@ -443,7 +443,7 @@ let test_dropped_and_persisted_media_keep_stream_order () =
             delta =
               MediaDelta
                 { media_type = "image/png";
-                  source = Base64 (Base64.encode_string "x")
+                  source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "x")
                 }
           }
       ; ContentBlockStop { index = 1 }
@@ -510,7 +510,7 @@ let test_failed_request_reloads_completed_media_across_attempts () =
           (fun data ->
             on_event
               (ContentBlockDelta
-                 { index; delta = MediaDelta { media_type; source = Base64 data } }))
+                 { index; delta = MediaDelta { media_type; source = Agent_core.Llm_provider.Types.Base64 data } }))
           [ String.sub encoded 0 split
           ; String.sub encoded split (String.length encoded - split)
           ]

@@ -34,7 +34,7 @@ let response_with_telemetry : Types.api_response =
   { id = "obs-1"
   ; model = "mock-model"
   ; stop_reason = Types.EndTurn
-  ; content = [ Types.Text "ok" ]
+  ; content = [ Llm_provider.Types.Text "ok" ]
   ; usage =
       Some
         { Types.input_tokens = 11
@@ -100,8 +100,8 @@ let thinking_then_tool_response : Types.api_response =
   ; model = "mock-model"
   ; stop_reason = Types.StopToolUse
   ; content =
-      [ Types.Thinking { signature = None; content = "I should check the time" }
-      ; Types.ToolUse
+      [ Llm_provider.Types.Thinking { signature = None; content = "I should check the time" }
+      ; Llm_provider.Types.ToolUse
           { id = "call_1"
           ; name = "get_time"
           ; input = `Assoc [ "timezone", `String "UTC" ]
@@ -116,7 +116,7 @@ let final_text_response : Types.api_response =
   { id = "obs-tool-2"
   ; model = "mock-model"
   ; stop_reason = Types.EndTurn
-  ; content = [ Types.Text "it is 12:00 UTC" ]
+  ; content = [ Llm_provider.Types.Text "it is 12:00 UTC" ]
   ; usage = Some sample_usage
   ; telemetry = Some sample_telemetry
   }
@@ -164,7 +164,7 @@ let test_builder_default_on_event_bus () =
   Eio_main.run
   @@ fun env ->
   let agent =
-    Builder.create ~net:env#net ~model:(Types.default_config ~model:"test-model").model
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:(Types.default_config ~model:"test-model").model
     |> build_or_fail
   in
   Alcotest.(check bool)
@@ -177,7 +177,7 @@ let test_builder_without_event_bus_opts_out () =
   Eio_main.run
   @@ fun env ->
   let agent =
-    Builder.create ~net:env#net ~model:(Types.default_config ~model:"test-model").model
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:(Types.default_config ~model:"test-model").model
     |> Builder.without_event_bus
     |> build_or_fail
   in
@@ -197,7 +197,7 @@ let test_pipeline_emits_inference_telemetry_on_default_bus () =
   (* Build through the default-on path and pull the bus the Builder created, so
      this also proves the producer publishes onto the *default* bus. *)
   let agent =
-    Builder.create ~net ~model:"mock-model"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"mock-model"
     |> Builder.with_name "obs-emit"
     |> Builder.with_provider_config mock_provider
     |> Builder.with_transport transport
@@ -270,7 +270,7 @@ let test_tools_turns_and_interleaving_observed_by_default () =
     sequence_transport [ thinking_then_tool_response; final_text_response ]
   in
   let agent =
-    Builder.create ~net ~model:"mock-model"
+    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"mock-model"
     |> Builder.with_name "obs-tools"
     |> Builder.with_provider_config mock_provider
     |> Builder.with_transport transport

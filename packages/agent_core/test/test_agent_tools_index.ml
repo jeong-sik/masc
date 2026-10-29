@@ -1,5 +1,6 @@
 open Alcotest
 open Agent_core
+module Types = Llm_provider.Types
 
 let make_tool ?(content = "ok") name =
   Tool.create
@@ -172,7 +173,7 @@ let admit names blocks =
 let admitted_names (admission : Agent_tools.tool_use_admission) =
   List.filter_map
     (function
-      | Types.ToolUse { name; _ } -> Some name
+      | Llm_provider.Types.ToolUse { name; _ } -> Some name
       | _ -> None)
     admission.admitted
 ;;

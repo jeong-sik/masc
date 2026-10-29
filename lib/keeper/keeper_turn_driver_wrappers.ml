@@ -26,6 +26,7 @@ let run_named_with_masc_tools
     ~goal
     ?goal_blocks
     ~base_path
+    ~media_store
     ~system_prompt
     ?(native_tools = [])
     ?tool_requirement
@@ -70,6 +71,7 @@ let run_named_with_masc_tools
       ~goal
       ?goal_blocks
       ~base_path
+      ~media_store
       ~system_prompt
       ~tools:bridged_tools
       ~agent_core_tools:bridged_tools

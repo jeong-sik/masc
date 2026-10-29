@@ -25,6 +25,7 @@ let identifier_gen =
 ;;
 
 let content_block_gen =
+  let open Llm_provider.Types in
   QCheck.Gen.oneof
     [ QCheck.Gen.map (fun s -> Text s) QCheck.Gen.string_printable
     ; QCheck.Gen.map2
@@ -67,6 +68,7 @@ let content_block_gen =
 let role_gen = QCheck.Gen.oneof [ QCheck.Gen.return User; QCheck.Gen.return Assistant ]
 
 let message_gen =
+  let open Llm_provider.Types in
   QCheck.Gen.map2
     (fun role content ->
        { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] })
@@ -112,7 +114,7 @@ let test_content_block_roundtrip =
   QCheck.Test.make
     ~count:500
     ~name:"content_block JSON round-trip"
-    (QCheck.make content_block_gen ~print:show_content_block)
+    (QCheck.make content_block_gen ~print:Llm_provider.Types.show_content_block)
     (fun block ->
        match
          Llm_provider.Api_common.content_block_of_json
@@ -126,7 +128,7 @@ let test_message_json_shape =
   QCheck.Test.make
     ~count:200
     ~name:"message_to_json produces valid JSON"
-    (QCheck.make message_gen ~print:show_message)
+    (QCheck.make message_gen ~print:Llm_provider.Types.show_message)
     (fun msg ->
        let json = Llm_provider.Api_common.message_to_json msg in
        match json with
@@ -351,7 +353,7 @@ let test_odd_but_present_identifiers_survive () =
            ]
        in
        match Llm_provider.Api_common.content_block_of_json_result json with
-       | Ok (Types.ToolUse { id; name; _ }) ->
+       | Ok (Llm_provider.Types.ToolUse { id; name; _ }) ->
          Alcotest.(check string) "id survives verbatim" odd id;
          Alcotest.(check string) "name survives verbatim" odd name
        | Ok _ -> Alcotest.fail "expected a tool_use block"

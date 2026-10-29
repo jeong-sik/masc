@@ -513,7 +513,7 @@ let of_core_error = function
     | Config _
     | Serialization _
     | Io _
-    | Orchestration _
+    | Orchestration _ | Media _
     | Internal _
     | Internal_carried _ ) ->
     None

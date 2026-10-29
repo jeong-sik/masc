@@ -83,7 +83,7 @@ let test_mock_text_response () =
     let text =
       List.filter_map
         (function
-          | Types.Text s -> Some s
+          | Llm_provider.Types.Text s -> Some s
           | _ -> None)
         resp.content
       |> String.concat ""
@@ -114,7 +114,7 @@ let test_mock_tool_use_response () =
     let tool_names =
       List.filter_map
         (function
-          | Types.ToolUse { name; _ } -> Some name
+          | Llm_provider.Types.ToolUse { name; _ } -> Some name
           | _ -> None)
         resp.content
     in
@@ -147,7 +147,7 @@ let test_mock_tool_then_text_sequence () =
      let text =
        List.filter_map
          (function
-           | Types.Text s -> Some s
+           | Llm_provider.Types.Text s -> Some s
            | _ -> None)
          resp.content
        |> String.concat ""
@@ -164,7 +164,7 @@ let test_agent_initial_state () =
   @@ fun env ->
   let net = Eio.Stdenv.net env in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net
       ~config:{ (Types.default_config ~model:"test-model") with name = "state-test" }
       ()
@@ -192,7 +192,7 @@ let test_agent_tools_registered () =
       Ok { Types.content = "ok"; content_blocks = None; _meta = None })
   in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Types.default_config ~model:"test-model")
       ~net
       ~tools:[ tool ]
@@ -228,7 +228,7 @@ let test_agent_turn_preparation () =
     ]
   in
   let prep =
-    Agent_turn.prepare_turn ~tools ~messages ~turn_params:Hooks.default_turn_params ()
+    Agent_turn.prepare_turn ~media_store:(Agent_core.History.Memory_store.create ()) ~tools ~messages ~turn_params:Hooks.default_turn_params ()
     |> Result.get_ok
   in
   (* tools_json should be Some with 2 tools *)
@@ -274,8 +274,8 @@ let test_provider_context_retention () =
       let source = Llm_provider.Reasoning_dialect.reasoning_source_for_provider_config
           request.config |> Result.get_ok in
       Ok { response with
-        content = [Types.Thinking {signature = Some "fixture-signature"; content = "fixture"};
-                   Types.Text "done"];
+        content = [Llm_provider.Types.Thinking {signature = Some "fixture-signature"; content = "fixture"};
+                   Llm_provider.Types.Text "done"];
         telemetry = Some {Types.default_inference_telemetry with reasoning_source = Some source} })
     else Ok response
   in
@@ -296,14 +296,19 @@ let test_provider_context_retention () =
       provider_config = Some
         { (Provider_mock.to_provider_config ()) with kind } }
   in
+  let media_store = Agent_core.History.Memory_store.create () in
   let projection (messages : Types.message list) =
-    match duplicate_context, List.rev messages with
-    | true, last :: _ when
-        last.origin = Types.System_context ->
-      Ok (messages @ [last])
-    | _ -> Ok messages
+    let messages =
+      match duplicate_context, List.rev messages with
+      | true, last :: _ when
+          last.origin = Types.System_context ->
+        messages @ [last]
+      | _ -> messages
+    in
+    Agent_core.History.to_wire_messages media_store messages
+    |> Result.map_error (fun error -> Error.Media error)
   in
-  let agent = Internal_agent.create ~net:env#net ~model_input_projection:projection
+  let agent = Internal_agent.create ~media_store ~net:env#net ~model_input_projection:projection
       ~config:{ (Types.default_config ~model:"test-model") with max_tokens = Some 64 } ~options () in
   Internal_agent.set_state agent
     { (Internal_agent.state agent) with messages = [Types.user_msg "first"] };
@@ -327,7 +332,7 @@ let test_provider_context_retention () =
         Some Llm_provider.Capabilities.{openai_compat_chat_capabilities with
           reasoning_replay_override=Force_no_replay}
         else None) } } in
-  let resumed = Internal_agent.create ~net:env#net
+  let resumed = Internal_agent.create ~media_store ~net:env#net
       ~config:{ (Types.default_config ~model:"test-model") with max_tokens = Some 64 }
       ~options:next_options () in
   Internal_agent.set_state resumed
@@ -339,13 +344,14 @@ let test_provider_context_retention () =
   run resumed (Internal_pipeline.Stream { on_event = ignore; on_telemetry = None });
   match !captured with
   | second :: first :: [] ->
-    let content messages = List.map (fun (m : Types.message) -> m.role, m.content) messages in
+    let content messages = List.map (fun (m : Llm_provider.Types.message) -> m.role, m.content) messages in
     if retained then
       Alcotest.(check bool) "Anthropic previous request stays an unchanged prefix" true
         (List.take (List.length first) (content second) = content first)
     else
       Alcotest.(check bool) "other-provider continuation keeps its existing transcript" true
-        (second = saved @ [Types.user_msg "next"])
+        (Ok second
+         = Agent_core.History.to_wire_messages media_store (saved @ [Types.user_msg "next"]))
   | _ -> Alcotest.fail "expected exactly two provider requests")
     Llm_provider.Provider_config.[
       Anthropic, Anthropic, true, true, false;
@@ -372,7 +378,7 @@ let make_pipeline_test_agent ~net ~response =
     }
   in
   let agent =
-    Internal_agent.create
+    Internal_agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net
       ~config:
         { (Types.default_config ~model:"test-model") with
@@ -415,7 +421,7 @@ let test_pipeline_sends_exact_supplied_tools () =
     }
   in
   let agent =
-    Internal_agent.create
+    Internal_agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net:(Eio.Stdenv.net env)
       ~config:
         { (Types.default_config ~model:"test-model") with name = "exact-tools-test" }
@@ -487,7 +493,7 @@ let test_effective_provider_config_drives_lifecycle_and_pricing () =
     }
   in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net:(Eio.Stdenv.net env)
       ~config:
         { (Types.default_config ~model:effective_model) with
@@ -600,7 +606,7 @@ let test_provider_turn_identity_is_shared_across_multiturn_tool_loop () =
   in
   let subscription = Event_bus.subscribe ~config:event_config event_bus in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net:(Eio.Stdenv.net env)
       ~config:
         { (Types.default_config ~model:"test-model") with
@@ -763,7 +769,7 @@ let test_turn_completed_log_carries_the_hook_turn_ordinal () =
   let (), records =
     with_debug_log_records (fun () ->
       let agent =
-        Agent.create
+        Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
           ~net:(Eio.Stdenv.net env)
           ~config:
             { (Types.default_config ~model:"test-model") with
@@ -839,7 +845,7 @@ let test_stream_route_uses_declared_support ~declared_streaming () =
          }
        in
        let agent =
-         Internal_agent.create
+         Internal_agent.create ~media_store:(Agent_core.History.Memory_store.create ())
            ~net:(Eio.Stdenv.net env)
            ~config:
              { (Types.default_config ~model:"test-model") with
@@ -916,7 +922,7 @@ let make_text_tool_intent_test_agent
     }
   in
   let agent =
-    Internal_agent.create
+    Internal_agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net
       ~tools:[ tool ]
       ~config:
@@ -1089,7 +1095,7 @@ let test_repeated_validation_error_without_judge_continues_to_provider () =
     }
   in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net
       ~tools:[ tool ]
       ~config:
@@ -1132,7 +1138,7 @@ let test_mock_reset () =
     let text =
       List.filter_map
         (function
-          | Types.Text s -> Some s
+          | Llm_provider.Types.Text s -> Some s
           | _ -> None)
         resp.content
       |> String.concat ""
@@ -1153,7 +1159,7 @@ let test_mock_cycle_wraps () =
     let text =
       List.filter_map
         (function
-          | Types.Text s -> Some s
+          | Llm_provider.Types.Text s -> Some s
           | _ -> None)
         resp.content
       |> String.concat ""
@@ -1187,14 +1193,14 @@ let test_mock_thinking_response () =
     let has_thinking =
       List.exists
         (function
-          | Types.Thinking _ -> true
+          | Llm_provider.Types.Thinking _ -> true
           | _ -> false)
         resp.content
     in
     let has_text =
       List.exists
         (function
-          | Types.Text _ -> true
+          | Llm_provider.Types.Text _ -> true
           | _ -> false)
         resp.content
     in
@@ -1218,7 +1224,7 @@ let test_agent_initial_usage () =
   @@ fun env ->
   let net = Eio.Stdenv.net env in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net
       ~config:{ (Types.default_config ~model:"test-model") with name = "usage-test" }
       ()
@@ -1234,7 +1240,7 @@ let test_agent_empty_tools () =
   @@ fun env ->
   let net = Eio.Stdenv.net env in
   let agent =
-    Agent.create ~config:(Types.default_config ~model:"test-model") ~net ~tools:[] ()
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~config:(Types.default_config ~model:"test-model") ~net ~tools:[] ()
   in
   let tools = Agent.tools agent in
   Alcotest.(check int) "0 tools" 0 (Tool_set.size tools)
@@ -1257,7 +1263,7 @@ let test_agent_multiple_tools () =
       Ok { Types.content = "c"; content_blocks = None; _meta = None })
   in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Types.default_config ~model:"test-model")
       ~net
       ~tools:[ t1; t2; t3 ]
@@ -1279,7 +1285,7 @@ let test_prepare_turn_no_tools () =
     ]
   in
   let prep =
-    Agent_turn.prepare_turn
+    Agent_turn.prepare_turn ~media_store:(Agent_core.History.Memory_store.create ())
       ~tools:Tool_set.empty
       ~messages
       ~turn_params:Hooks.default_turn_params
@@ -1317,7 +1323,7 @@ let test_prepare_turn_preserves_messages () =
     ]
   in
   let prep =
-    Agent_turn.prepare_turn
+    Agent_turn.prepare_turn ~media_store:(Agent_core.History.Memory_store.create ())
       ~tools:Tool_set.empty
       ~messages
       ~turn_params:Hooks.default_turn_params
@@ -1347,7 +1353,7 @@ let test_make_tool_results_ok () =
       }
     ]
   in
-  let tool_results = Agent_turn.make_tool_results results in
+  let tool_results = Agent_turn.make_tool_results ~media_store:(Agent_core.History.Memory_store.create ()) results |> Result.get_ok in
   Alcotest.(check int) "2 tool results" 2 (List.length tool_results);
   List.iter
     (fun block ->
@@ -1374,7 +1380,7 @@ let test_make_tool_results_error () =
       }
     ]
   in
-  let tool_results = Agent_turn.make_tool_results results in
+  let tool_results = Agent_turn.make_tool_results ~media_store:(Agent_core.History.Memory_store.create ()) results |> Result.get_ok in
   Alcotest.(check int) "1 tool result" 1 (List.length tool_results);
   match List.hd tool_results with
   | Types.ToolResult { outcome = Tool_failed _; content; _ } ->
@@ -1402,7 +1408,7 @@ let test_make_tool_results_mixed () =
       }
     ]
   in
-  let tool_results = Agent_turn.make_tool_results results in
+  let tool_results = Agent_turn.make_tool_results ~media_store:(Agent_core.History.Memory_store.create ()) results |> Result.get_ok in
   Alcotest.(check int) "2 results" 2 (List.length tool_results)
 ;;
 
@@ -1507,7 +1513,7 @@ let test_prepare_turn_extra_context () =
     }
   in
   let prep =
-    Agent_turn.prepare_turn ~tools:Tool_set.empty ~messages ~turn_params ()
+    Agent_turn.prepare_turn ~media_store:(Agent_core.History.Memory_store.create ()) ~tools:Tool_set.empty ~messages ~turn_params ()
     |> Result.get_ok
   in
   (* Extra context is appended at the end to preserve prefix for KV cache *)
@@ -1517,7 +1523,7 @@ let test_prepare_turn_extra_context () =
     (List.length prep.effective_messages);
   let last = List.nth prep.effective_messages 1 in
   match last.content with
-  | [ Types.Text s ] ->
+  | [ Llm_provider.Types.Text s ] ->
     Alcotest.(check string)
       "injected context at tail"
       "[system context] You are in debug mode."
@@ -1603,7 +1609,7 @@ let test_mock_multi_tool_response () =
       List.length
         (List.filter
            (function
-             | Types.ToolUse _ -> true
+             | Llm_provider.Types.ToolUse _ -> true
              | _ -> false)
            resp.content)
     in
@@ -1675,7 +1681,7 @@ let test_terminal_disposition_retires_settled_provider_failure () =
       (fun _input -> Ok { Types.content = "settled"; content_blocks = None; _meta = None })
   in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net:(Eio.Stdenv.net env)
       ~config:
         { (Types.default_config ~model:"test-model") with
@@ -1725,7 +1731,7 @@ let test_terminal_disposition_sink_failure_fails_call () =
     })
   in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net:(Eio.Stdenv.net env)
       ~config:
         { (Types.default_config ~model:"test-model") with
@@ -1787,7 +1793,7 @@ let test_trace_finalization_preserves_committed_success diagnostic_fault () =
       ~parameters:[] (fun _ -> incr tool_calls;
         Ok {Types.content="settled";content_blocks=None;_meta=None}) in
   let completion = ref None and locator = ref None and before = ref None in
-  let agent = Agent.create ~net:(Eio.Stdenv.net env)
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:(Eio.Stdenv.net env)
       ~config:{(Types.default_config ~model:"test-model") with name="trace-postcommit"}
       ~tools:[tool]
       ~options:{Agent.default_options with transport=Some transport;
@@ -1914,7 +1920,7 @@ let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) ?checkpoi
       fail ()
     | Agent.After_assistant_collected | Agent.After_context_injection
     | Agent.After_input_wait_changed | Agent.After_rejected_response_dropped -> Ok ()) checkpoint_failure in
-  let agent=Agent.create ~net:(Eio.Stdenv.net env) ~tools:[tool] ?checkpoint_sink
+  let agent=Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:(Eio.Stdenv.net env) ~tools:[tool] ?checkpoint_sink
       ~config:{(Types.default_config ~model:"test-model") with name="canonical-bus"}
       ~options:{Agent.default_options with transport=Some transport;event_bus=Some bus;
         provider_config=Some (Provider_mock.to_provider_config ())} () in
@@ -2079,7 +2085,7 @@ let test_terminal_disposition_observes_cancellation () =
     })
   in
   let agent =
-    Agent.create
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~net:(Eio.Stdenv.net env)
       ~config:
         { (Types.default_config ~model:"test-model") with
@@ -2202,7 +2208,7 @@ let test_native_parent_cancellation ?(resumed = false) source boundary () =
           interrupt ();
           Alcotest.fail "tool ignored cancellation")
     in
-    let agent = Agent.create ~net:(Eio.Stdenv.net env)
+    let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:(Eio.Stdenv.net env)
         ~config:{(Types.default_config ~model:"test-model") with name="native-parent-cancel"}
         ~tools:[tool]
         ~options:{Agent.default_options with transport=Some transport;
@@ -2382,7 +2388,7 @@ let test_agent_run_uses_durable_tool_authority () =
          }
        in
        let agent =
-         Agent.create
+         Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
            ~net:(Eio.Stdenv.net env)
            ~config:
              { (Types.default_config ~model:"test-model") with
@@ -2468,7 +2474,7 @@ let durable_tool_response
   ; model
   ; stop_reason = Types.StopToolUse
   ; content =
-      List.map (fun (id, name, input) -> Types.ToolUse { id; name; input }) tool_uses
+      List.map (fun (id, name, input) -> Llm_provider.Types.ToolUse { id; name; input }) tool_uses
   ; usage
   ; telemetry = None
   }
@@ -2656,7 +2662,7 @@ let test_agent_run_resumes_tool_without_duplicate_effects
          }
        in
        let agent =
-         Agent.create ~net:(Eio.Stdenv.net env) ~config ~tools:[ tool ] ~options ()
+         Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:(Eio.Stdenv.net env) ~config ~tools:[ tool ] ~options ()
        in
        Agent.set_state
          agent
@@ -2848,7 +2854,7 @@ let test_unattempted_legacy_invocation_requires_typed_readmission () =
              }
            in
            let agent =
-             Agent.create
+             Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
                ~net:(Eio.Stdenv.net env)
                ~config:(Types.default_config ~model:"test-model")
                ~tools:[ tool ]
@@ -2876,7 +2882,7 @@ let test_unattempted_legacy_invocation_requires_typed_readmission () =
                  ~agent_name:(Agent.state agent).config.name
                  ~turn_count:0
                  ~usage:Types.empty_usage
-                 [ Types.ToolUse
+                 [ Llm_provider.Types.ToolUse
                      { id = tool_use_id; name = "durable_tool"; input = tool_input }
                  ])
            in
@@ -3188,7 +3194,7 @@ let test_agent_run_resumes_settled_closed_turn
          }
        in
        let agent =
-         Agent.create
+         Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
            ~net:(Eio.Stdenv.net env)
            ~config
            ~tools:(if resume_tool_present then [ tool ] else [])
@@ -3340,9 +3346,12 @@ let test_advanced_replays_nonzero_settled_terminal_ordinal () =
     let hooks = {Hooks.empty with after_turn=Some (fun _ -> incr after_turns; Hooks.Continue)} in
     let options = {Agent.default_options with transport=Some transport;
       provider_config=Some provider_config;hooks} in
-    let agent = Agent.create ~net:(Eio.Stdenv.net env) ~config ~tools:[] ~options () in
+    let media_store = Agent_core.History.Memory_store.create () in
+    let agent = Agent.create ~media_store ~net:(Eio.Stdenv.net env) ~config ~tools:[] ~options () in
+    let persisted_content =
+      Agent_core.History.of_wire_blocks media_store persisted.content |> Result.get_ok in
     Agent.set_state agent { provider_binding = None;config;messages=[Types.user_msg "finish this request";
-      Types.make_message ~role:Types.Assistant persisted.content];turn_count=8;usage=Types.empty_usage};
+      Types.make_message ~role:Types.Assistant persisted_content];turn_count=8;usage=Types.empty_usage};
     let execution_store = Agent.execution_store ~runtime ~dir ~resume:locator () in
     (match Agent.Advanced.run_blocks ~sw:runtime_sw ~execution_store ~api_strategy:Agent.Sync
        ~on_tool_boundary:(fun _ -> Alcotest.fail "text replay reached a tool boundary")
@@ -3407,7 +3416,7 @@ let test_terminal_durability_failure_is_typed_non_retryable () =
        in
        let persisted_tool_use_id =
          match response.content with
-         | [ Types.ToolUse { id; _ } ] -> id
+         | [ Llm_provider.Types.ToolUse { id; _ } ] -> id
          | _ -> Alcotest.fail "terminal fixture did not produce one exact ToolUse"
        in
        let transport : Llm_provider.Llm_transport.t =
@@ -3451,7 +3460,7 @@ let test_terminal_durability_failure_is_typed_non_retryable () =
                   Ok { Types.content = "effect committed"; content_blocks = None; _meta = None })
            in
            let agent =
-             Internal_agent.create
+             Internal_agent.create ~media_store:(Agent_core.History.Memory_store.create ())
                ~net:(Eio.Stdenv.net env)
                ~config
                ~tools:[ tool ]
@@ -3708,7 +3717,7 @@ let test_settled_malformed_terminal_topology_does_not_finalize_turn () =
                  }
                in
                let agent =
-                 Internal_agent.create
+                 Internal_agent.create ~media_store:(Agent_core.History.Memory_store.create ())
                    ~net:(Eio.Stdenv.net env)
                    ~config
                    ~tools:[ tool ]
@@ -3773,7 +3782,7 @@ let test_settled_malformed_terminal_topology_does_not_finalize_turn () =
                  }
                in
                let agent =
-                 Internal_agent.create
+                 Internal_agent.create ~media_store:(Agent_core.History.Memory_store.create ())
                    ~net:(Eio.Stdenv.net env)
                    ~config
                    ~tools:[]
@@ -3982,7 +3991,7 @@ let test_agent_run_replays_stale_checkpoint_terminal_settlement () =
          in
          let saved_checkpoint = ref None in
          let initial_agent =
-           Internal_agent.create
+           Internal_agent.create ~media_store:(Agent_core.History.Memory_store.create ())
              ~net:(Eio.Stdenv.net env)
              ~config
              ~tools:[ initial_tool ]
@@ -4061,7 +4070,7 @@ let test_agent_run_replays_stale_checkpoint_terminal_settlement () =
          in
          let resumed_stages = ref [] in
          let resumed_agent =
-           (Agent.resume
+           (Agent.resume ~media_store:(Agent_core.History.Memory_store.create ())
              ~net:(Eio.Stdenv.net env)
              ~checkpoint
              ~tools:resumed_tools
@@ -4226,7 +4235,7 @@ let test_agent_run_resumes_all_blocked_settled_turn () =
          }
        in
        let agent =
-         Agent.create ~net:(Eio.Stdenv.net env) ~config ~tools:[ tool ] ~options ()
+         Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:(Eio.Stdenv.net env) ~config ~tools:[ tool ] ~options ()
        in
        (* Restored checkpoint: the blocked ToolResult is present (a blocked call
           still emits a model-visible ToolResult) even though no Tool_invocation
@@ -4424,7 +4433,7 @@ let test_agent_run_resume_fires_on_yield () =
          }
        in
        let agent =
-         Agent.create ~net:(Eio.Stdenv.net env) ~config ~tools:[ tool ] ~options ()
+         Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:(Eio.Stdenv.net env) ~config ~tools:[ tool ] ~options ()
        in
        (* Restored checkpoint: the ToolUse is collected, but no ToolResults exist
           yet, so resume re-executes the tools and must fire [on_yield] before the
@@ -4545,7 +4554,7 @@ let test_nested_tool_observation_audiences audience ~concurrent () =
     let transport=Llm_provider.Llm_transport.custom
       {complete_sync=(fun _->{Llm_provider.Llm_transport.response=next ();latency_ms=None});
        complete_stream=(fun ?on_telemetry:_ ~on_event:_ _->next ())} in
-    Agent.create ~net:(Eio.Stdenv.net env) ~tools
+    Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:(Eio.Stdenv.net env) ~tools
       ~config:{(Types.default_config ~model:"test-model") with name}
       ~options:{Agent.default_options with transport=Some transport;event_bus=bus;
         provider_config=Some (Provider_mock.to_provider_config ())} () in
@@ -4636,7 +4645,7 @@ let test_unattempted_tool_has_no_bus_execution_observation () =
   let transport=Llm_provider.Llm_transport.custom
     {complete_sync=(fun _->{Llm_provider.Llm_transport.response=next ();latency_ms=None});
      complete_stream=(fun ?on_telemetry:_ ~on_event:_ _->next ())} in
-  let agent=Agent.create ~net:(Eio.Stdenv.net env) ~tools:[tool]
+  let agent=Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:(Eio.Stdenv.net env) ~tools:[tool]
       ~config:{(Types.default_config ~model:"test-model") with name="blocked-observation"}
       ~options:{Agent.default_options with transport=Some transport;event_bus=Some bus;
         provider_config=Some (Provider_mock.to_provider_config ());

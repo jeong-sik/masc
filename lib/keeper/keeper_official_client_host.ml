@@ -1024,7 +1024,7 @@ let carried_history_projection ~input_source
     ?argument_projection
     ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
     ~turn_start ~keeper_name ~runtime_id source_projection
-  : Agent_core.Agent.model_input_projection
+  : Keeper_history_projection.t
   =
   fun history_messages ->
   let* frozen = match input_source with
@@ -1259,7 +1259,7 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
-  ; content_blocks : Agent_core.Types.content_block list option
+  ; content_blocks : Llm_provider.Types.content_block list option
   ; abort_turn : host_stop option
   ; on_response_sent : (unit -> unit) option
   }
@@ -1339,19 +1339,19 @@ let image_capability_error ~accepts_image_input content_blocks =
     | Some blocks ->
       if List.exists
            (function
-             | Agent_core.Types.Image _ -> true
+             | Llm_provider.Types.Image _ -> true
              (* Every other block is named so a new media kind has to decide
                 here. A nested ToolResult can carry blocks of its own, but
                 [Runtime_official_client_tool.project_content] refuses nested
                 tool-call content before anything is delivered. *)
-             | Agent_core.Types.Text _
-             | Agent_core.Types.Thinking _
-             | Agent_core.Types.ReasoningDetails _
-             | Agent_core.Types.RedactedThinking _
-             | Agent_core.Types.ToolUse _
-             | Agent_core.Types.ToolResult _
-             | Agent_core.Types.Document _
-             | Agent_core.Types.Audio _ -> false)
+             | Llm_provider.Types.Text _
+             | Llm_provider.Types.Thinking _
+             | Llm_provider.Types.ReasoningDetails _
+             | Llm_provider.Types.RedactedThinking _
+             | Llm_provider.Types.ToolUse _
+             | Llm_provider.Types.ToolResult _
+             | Llm_provider.Types.Document _
+             | Llm_provider.Types.Audio _ -> false)
            blocks
       then
         Some
@@ -1689,7 +1689,7 @@ let retain_original_result producer ~invocation ~call_id ~tool_name ~input
     | Some blocks ->
       List.fold_left (fun acc block ->
         let* encoded = acc in
-        let* block = Agent_core.Checkpoint.content_block_to_json_result
+        let* block = Agent_core.Checkpoint.wire_content_block_to_json_result
             ~scope:"official_client_original_tool_result" block
           |> Result.map_error Agent_core.Error.to_string in
         Ok (block :: encoded)) (Ok []) blocks

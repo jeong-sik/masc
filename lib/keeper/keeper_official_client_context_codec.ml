@@ -1,12 +1,4 @@
-let schema = "masc.official-client-context-message.v3"
-
-let media_source_to_json ~media_type ~source =
-  `Assoc
-    [ "type", `String (Agent_core.Types.media_source_wire_tag source)
-    ; "media_type", `String media_type
-    ; "data", `String (Agent_core.Types.media_source_payload source)
-    ]
-;;
+let schema = "masc.official-client-context-message.v4"
 
 let rec content_block_to_json = function
   | Agent_core.Types.Text text ->
@@ -69,21 +61,9 @@ let rec content_block_to_json = function
        ]
        @ structured_content
        @ failure)
-  | Image { media_type; source } ->
-    `Assoc
-      [ "type", `String "image"
-      ; "source", media_source_to_json ~media_type ~source
-      ]
-  | Document { media_type; source } ->
-    `Assoc
-      [ "type", `String "document"
-      ; "source", media_source_to_json ~media_type ~source
-      ]
-  | Audio { media_type; source } ->
-    `Assoc
-      [ "type", `String "audio"
-      ; "source", media_source_to_json ~media_type ~source
-      ]
+  (* Media by reference, in the history codec's shape: a [Stored] source
+     names the blob, it does not carry it. *)
+  | (Image _ | Document _ | Audio _) as block -> Agent_core.History.content_block_to_json block
 ;;
 
 let message_to_json (message : Agent_core.Types.message) =

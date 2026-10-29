@@ -84,10 +84,10 @@ let error_to_string = function
       block_index
 ;;
 
-let validate_and_classify (messages : Types.message list) =
+let validate_and_classify (messages : _ Types.message_with list) =
   let rec loop message_index classified = function
     | [] -> Ok (List.rev classified)
-    | (message : Types.message) :: rest ->
+    | (message : _ Types.message_with) :: rest ->
       let classification = Types.Reasoning_source.classify message.metadata in
       let result =
         let open Result.Syntax in
@@ -119,10 +119,11 @@ let validate_and_classify (messages : Types.message list) =
   loop 0 [] messages
 ;;
 
-let content_has_reasoning =
+let content_has_reasoning content =
   List.exists (function
     | Thinking _ | ReasoningDetails _ | RedactedThinking _ -> true
     | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+    content
 ;;
 
 type source_change_policy =
@@ -144,7 +145,7 @@ type replay_continuity_admission =
   }
 
 
-let content_has_tool_use =
+let content_has_tool_use content =
   List.exists (function
     | ToolUse _ -> true
     | Text _
@@ -155,6 +156,7 @@ let content_has_tool_use =
     | Image _
     | Document _
     | Audio _ -> false)
+    content
 ;;
 
 let filter_content keep content =
@@ -229,7 +231,7 @@ let validate_supported_reasoning ~reasoning_block_supported ~message_index conte
 
 (* Only an ordinary caller User opens the semantic query boundary. The wire
    adapter must preserve this boundary when it lowers control messages. *)
-let is_caller_query (message : Types.message) =
+let is_caller_query (message : _ Types.message_with) =
   match message.role, message.origin with
   | User, Conversation -> true
   | (System | Assistant | Tool), _
@@ -239,7 +241,7 @@ let is_caller_query (message : Types.message) =
 
 let find_latest_user_message_index classified_messages =
   List.fold_left
-    (fun latest (message_index, (message : Types.message), _) ->
+    (fun latest (message_index, (message : _ Types.message_with), _) ->
        match message.role with
        | User when is_caller_query message -> Some message_index
        | User | System | Assistant | Tool -> latest)
@@ -281,7 +283,7 @@ let validate_replay_continuity_for_provider_config
     | Ok replay_capability ->
       let latest_user_message_index = find_latest_user_message_index classified in
       let target_replay_policy = (Reasoning_dialect.for_provider_config config).replay_policy in
-      let selected message_index (message : Types.message) =
+      let selected message_index (message : _ Types.message_with) =
         match replay_capability.contract.Reasoning_replay_contract.replay_policy with
         | Provider_opaque_state -> true
         | (No_replay | All_assistant_messages
@@ -306,7 +308,7 @@ let validate_replay_continuity_for_provider_config
             | [] -> if caller_excluded then Caller_excluded_reasoning else Preserve_reasoning
             | _ :: _ -> Source_change_admitted (List.rev exclusions) in
           Ok {capability=replay_capability; disposition}
-        | (message_index, (message : Types.message), classification) :: rest ->
+        | (message_index, (message : _ Types.message_with), classification) :: rest ->
           let open Result.Syntax in
           let* inline_replay = Inline_content_replay.of_metadata
               ~content:message.content message.metadata

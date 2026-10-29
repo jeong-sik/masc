@@ -1,7 +1,7 @@
 (* task-2187 (H5) review P2: stored media readings had no retention. The sweep
    in lib/keeper/keeper_media_reading_maintenance.mli keeps a reading while a
-   durable record still carries its attachment and deletes it only after two
-   complete sweeps found it unreferenced. *)
+   durable consumer still holds its attachment's Stored reference and deletes
+   it only after two complete sweeps found it unreferenced. *)
 
 open Alcotest
 module Reading = Masc.Keeper_media_reading
@@ -27,26 +27,37 @@ let write ~dir ~rel content =
   Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel content)
 ;;
 
-let record_name letter = Printf.sprintf "audio-%s-audio_wav.json" (String.make 64 letter)
+let attachment raw = Agent_core.History.stored_of_raw raw
+let record_name (stored : Agent_core.History.stored) =
+  Printf.sprintf "audio-%s-audio_wav.json" stored.sha256
 
-let store_record ~dir ?probe letter =
-  let fields =
-    ("status", `String "read")
-    :: (match probe with
-        | Some probe -> [ "source_probe", `String probe ]
-        | None -> [])
+let store_record ~dir stored =
+  write ~dir ~rel:(record_name stored)
+    (Yojson.Safe.to_string (`Assoc [ "status", `String "read" ]))
+;;
+
+(* A durable consumer that holds [stored] as history media. *)
+let hold ~base_path ~rel stored =
+  let block =
+    Agent_core.Types.audio_block ~media_type:"audio/wav" ~source:(Agent_core.Types.Stored stored)
   in
-  write ~dir ~rel:(record_name letter) (Yojson.Safe.to_string (`Assoc fields))
+  write ~dir:(Common.masc_dir_from_base_path ~base_path) ~rel
+    (Yojson.Safe.to_string (Agent_core.History.content_block_to_json block))
 ;;
 
-let mention ~masc_dir ~rel probe =
-  write ~dir:masc_dir ~rel (Printf.sprintf {|{"data":"QUJD%sQUJD"}|} probe)
+(* One pass: one scan of the durable consumers, then the keeper directory. *)
+let sweep ~base_path ~dir =
+  match
+    Tool_blob_maintenance.live_references
+      ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~base_path
+  with
+  | Error error -> Error (Tool_blob_maintenance.error_to_string error)
+  | Ok live -> Sweep.run ~live ~dir |> Result.map_error Sweep.error_to_string
 ;;
 
-let sweep ~masc_dir ~dir = Sweep.run ~masc_dir ~dir |> Result.map_error Sweep.error_to_string
-let exists ~dir letter = Sys.file_exists (Filename.concat dir (record_name letter))
-let probe_a = String.make 64 'P'
-let probe_b = String.make 64 'Q'
+let exists ~dir stored = Sys.file_exists (Filename.concat dir (record_name stored))
+let attachment_a = attachment "first attachment"
+let attachment_b = attachment "second attachment"
 
 let report_of = function
   | Ok (report : Sweep.report) -> report
@@ -54,78 +65,92 @@ let report_of = function
 ;;
 
 let test_unreferenced_reading_is_deleted_on_the_second_sweep () =
-  let masc_dir = fresh_dir () in
+  let base_path = fresh_dir () in
   let dir = fresh_dir () in
-  store_record ~dir ~probe:probe_a 'a';
-  store_record ~dir ~probe:probe_b 'b';
-  mention ~masc_dir ~rel:"keepers/k/checkpoint.json" probe_a;
-  let first = report_of (sweep ~masc_dir ~dir) in
+  store_record ~dir attachment_a;
+  store_record ~dir attachment_b;
+  hold ~base_path ~rel:"keepers/k/checkpoint.json" attachment_a;
+  let first = report_of (sweep ~base_path ~dir) in
   check int "one live reading" 1 first.live;
   check int "one candidate recorded" 1 first.candidates_recorded;
   check int "the first sweep deletes nothing" 0 first.deleted;
-  check bool "the candidate is still there after one sweep" true (exists ~dir 'b');
-  let second = report_of (sweep ~masc_dir ~dir) in
+  check bool "the candidate is still there after one sweep" true (exists ~dir attachment_b);
+  let second = report_of (sweep ~base_path ~dir) in
   check int "the second sweep deletes the candidate" 1 second.deleted;
-  check bool "the unreferenced reading is gone" false (exists ~dir 'b');
-  check bool "the referenced reading is kept" true (exists ~dir 'a')
+  check bool "the unreferenced reading is gone" false (exists ~dir attachment_b);
+  check bool "the referenced reading is kept" true (exists ~dir attachment_a)
 ;;
 
 let test_reading_referenced_again_is_kept () =
-  let masc_dir = fresh_dir () in
+  let base_path = fresh_dir () in
   let dir = fresh_dir () in
-  store_record ~dir ~probe:probe_a 'a';
-  let _ = report_of (sweep ~masc_dir ~dir) in
-  mention ~masc_dir ~rel:"keeper_chat/k/turn.jsonl" probe_a;
-  let second = report_of (sweep ~masc_dir ~dir) in
+  store_record ~dir attachment_a;
+  let _ = report_of (sweep ~base_path ~dir) in
+  hold ~base_path ~rel:"keeper_chat/k/turn.jsonl" attachment_a;
+  let second = report_of (sweep ~base_path ~dir) in
   check int "nothing deleted" 0 second.deleted;
   check bool "a reading referenced again before the second sweep is kept" true
-    (exists ~dir 'a')
+    (exists ~dir attachment_a)
 ;;
 
-let test_record_without_probe_is_a_candidate () =
-  let masc_dir = fresh_dir () in
+(* The live set keeps history media apart from tool artifacts: a tool output
+   of the same bytes is not the attachment the reading was made from. *)
+let test_a_tool_artifact_of_the_same_bytes_does_not_keep_a_reading () =
+  let base_path = fresh_dir () in
   let dir = fresh_dir () in
-  store_record ~dir 'c';
-  write ~dir ~rel:(record_name 'd') "not json";
-  let first = report_of (sweep ~masc_dir ~dir) in
-  check int "both records count as unprobed" 2 first.unprobed;
-  check int "both are candidates" 2 first.candidates_recorded;
-  let second = report_of (sweep ~masc_dir ~dir) in
-  check int "both are deleted on the second sweep" 2 second.deleted
+  let raw = "bytes a tool also returned" in
+  let stored = attachment raw in
+  store_record ~dir stored;
+  let artifact =
+    Tool_blob_store.put_durable (Tool_blob_store.create ~base_path) ~bytes:raw ~mime:"audio/wav"
+  in
+  write ~dir:(Common.masc_dir_from_base_path ~base_path) ~rel:"tool_calls/k/call.json"
+    (Yojson.Safe.to_string
+       (`Assoc [ "artifact", Tool_output.normalized_artifact_ref_to_json artifact ]));
+  check string "the artifact names the same digest" stored.sha256 artifact.Tool_output.sha256;
+  let first = report_of (sweep ~base_path ~dir) in
+  check int "the reading is not live" 0 first.live;
+  let second = report_of (sweep ~base_path ~dir) in
+  check int "the reading is deleted on the second sweep" 1 second.deleted
 ;;
 
 let test_symlink_stops_the_sweep () =
-  let masc_dir = fresh_dir () in
+  let base_path = fresh_dir () in
   let dir = fresh_dir () in
-  store_record ~dir ~probe:probe_b 'b';
-  let _ = report_of (sweep ~masc_dir ~dir) in
+  store_record ~dir attachment_b;
+  let _ = report_of (sweep ~base_path ~dir) in
   let target = Filename.concat (fresh_dir ()) "elsewhere.json" in
   write ~dir:(Filename.dirname target) ~rel:(Filename.basename target) "{}";
-  Unix.symlink target (Filename.concat dir (record_name 'e'));
+  Unix.symlink target (Filename.concat dir (record_name attachment_a));
   write ~dir ~rel:"notes.txt" "not a record";
-  (match sweep ~masc_dir ~dir with
+  (match sweep ~base_path ~dir with
    | Ok _ -> fail "a symlinked record must stop the sweep"
    | Error _ -> ());
-  check bool "the earlier candidate survives the stopped sweep" true (exists ~dir 'b');
+  check bool "the earlier candidate survives the stopped sweep" true (exists ~dir attachment_b);
   check bool "a non-record entry is left alone" true
     (Sys.file_exists (Filename.concat dir "notes.txt"))
 ;;
 
 (* End to end: a reading written by the projection is kept while the durable
-   checkpoint still carries the attachment's base64, and removed after two
+   checkpoint still holds the attachment's reference, and removed after two
    sweeps once nothing does. *)
 let test_projected_reading_follows_its_attachment () =
   let base_path = fresh_dir () in
   let masc_dir = Common.masc_dir_from_base_path ~base_path in
   let payload = String.init 400 (fun index -> Char.chr (Char.code 'A' + (index mod 26))) in
-  let data = Base64.encode_string payload in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let stored =
+    match media_store.put ~media_type:"audio/wav" ~raw:payload with
+    | Ok stored -> stored
+    | Error error -> fail (Agent_core.Error.to_string (Agent_core.Error.Media error))
+  in
   let block =
     Agent_core.Types.audio_block
       ~media_type:"audio/wav"
-      ~source:(Agent_core.Types.Base64 data)
+      ~source:(Agent_core.Types.Stored stored)
   in
   let _ =
-    Reading.project_blocks
+    Reading.project_blocks ~media_store
       ~base_path
       ~keeper_name:"sweep-keeper"
       ~needs_projection:(fun _ -> true)
@@ -134,7 +159,7 @@ let test_projected_reading_follows_its_attachment () =
       [ block ]
   in
   let checkpoint = "keepers/sweep-keeper/checkpoint.json" in
-  write ~dir:masc_dir ~rel:checkpoint (Printf.sprintf {|{"type":"audio","data":"%s"}|} data);
+  hold ~base_path ~rel:checkpoint stored;
   let dir =
     match Sweep.keeper_dirs ~masc_dir with
     | Ok [ dir ] -> dir
@@ -145,13 +170,13 @@ let test_projected_reading_follows_its_attachment () =
     Array.to_list (Sys.readdir dir) |> List.filter Sweep.is_record_name
   in
   check int "the projection wrote one record the sweep recognises" 1 (List.length (records ()));
-  let _ = report_of (sweep ~masc_dir ~dir) in
-  let kept = report_of (sweep ~masc_dir ~dir) in
-  check int "the reading is live while the checkpoint carries the attachment" 1 kept.live;
+  let _ = report_of (sweep ~base_path ~dir) in
+  let kept = report_of (sweep ~base_path ~dir) in
+  check int "the reading is live while the checkpoint holds the attachment" 1 kept.live;
   check int "nothing deleted" 0 kept.deleted;
   Sys.remove (Filename.concat masc_dir checkpoint);
-  let _ = report_of (sweep ~masc_dir ~dir) in
-  let gone = report_of (sweep ~masc_dir ~dir) in
+  let _ = report_of (sweep ~base_path ~dir) in
+  let gone = report_of (sweep ~base_path ~dir) in
   check int "the reading is deleted after two sweeps without the attachment" 1 gone.deleted;
   check int "no record left" 0 (List.length (records ()))
 ;;
@@ -169,9 +194,9 @@ let () =
             `Quick
             test_reading_referenced_again_is_kept
         ; test_case
-            "record without probe is a candidate"
+            "a tool artifact of the same bytes does not keep a reading"
             `Quick
-            test_record_without_probe_is_a_candidate
+            test_a_tool_artifact_of_the_same_bytes_does_not_keep_a_reading
         ; test_case "symlink stops the sweep" `Quick test_symlink_stops_the_sweep
         ; test_case
             "projected reading follows its attachment"

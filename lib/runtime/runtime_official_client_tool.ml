@@ -27,7 +27,7 @@ let host_stop_failed = function
 type dynamic_tool_result =
   { success : bool
   ; content : string
-  ; content_blocks : Agent_core.Types.content_block list option
+  ; content_blocks : Llm_provider.Types.content_block list option
   ; abort_turn : host_stop option
   ; on_response_sent : (unit -> unit) option
   }
@@ -88,7 +88,7 @@ let validate_base64_image_data data =
 let project_content transport ~content ~content_blocks =
   (* DET-OK: [None] is the producer's text-only result, so [content] is the payload;
      [Some] stays authoritative even when empty, and unsupported media error below. *)
-  let blocks = Option.value ~default:[Agent_core.Types.Text content] content_blocks in
+  let blocks = Option.value ~default:[Llm_provider.Types.Text content] content_blocks in
   (* [Api_common.content_block_to_json] sanitizes every Text it serializes, so
      a block that reaches a provider through the canonical path can never carry
      invalid UTF-8. This path writes the client's JSON itself; without the same
@@ -124,10 +124,10 @@ let project_content transport ~content ~content_blocks =
     else base64_payload ~media_type data
   in
   let project = function
-    | Agent_core.Types.Text value -> Ok (text value)
-    | Agent_core.Types.Image {media_type; source} ->
+    | Llm_provider.Types.Text value -> Ok (text value)
+    | Llm_provider.Types.Image {media_type; source} ->
       (match transport, source with
-       | Codex, Base64 data ->
+       | Codex, Llm_provider.Types.Base64 data ->
          Result.map
            (fun (media_type, data) -> `Assoc
               ["type", `String "inputImage";
@@ -139,7 +139,7 @@ let project_content transport ~content ~content_blocks =
           the shared set before it spawns. Letting a tool result through here
           would reach the provider in a format the initial-image path already
           rejects, and fail the turn after the tool ran. *)
-       | Mcp, Base64 data ->
+       | Mcp, Llm_provider.Types.Base64 data ->
          Result.map
            (fun (media_type, data) -> `Assoc
               ["type", `String "image"; "mimeType", `String media_type;
@@ -147,13 +147,13 @@ let project_content transport ~content ~content_blocks =
            (checked_base64 ~media_type data)
        | (Codex | Mcp), File_id _ -> unsupported "file-id image content"
        | Mcp, Url _ -> unsupported "URL image content over MCP")
-    | Agent_core.Types.Audio _ -> unsupported "audio content"
-    | Agent_core.Types.Document _ -> unsupported "document content"
-    | Agent_core.Types.Thinking _
-    | Agent_core.Types.ReasoningDetails _
-    | Agent_core.Types.RedactedThinking _ -> unsupported "reasoning content as a tool result"
-    | Agent_core.Types.ToolUse _
-    | Agent_core.Types.ToolResult _ -> unsupported "nested tool-call content"
+    | Llm_provider.Types.Audio _ -> unsupported "audio content"
+    | Llm_provider.Types.Document _ -> unsupported "document content"
+    | Llm_provider.Types.Thinking _
+    | Llm_provider.Types.ReasoningDetails _
+    | Llm_provider.Types.RedactedThinking _ -> unsupported "reasoning content as a tool result"
+    | Llm_provider.Types.ToolUse _
+    | Llm_provider.Types.ToolResult _ -> unsupported "nested tool-call content"
   in
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
@@ -183,8 +183,8 @@ let response_observer transport (result : dynamic_tool_result) =
     let text_is_valid = match result.content_blocks with
       | None -> String_util.is_valid_utf8 result.content
       | Some blocks -> List.for_all (function
-          | Agent_core.Types.Text text -> String_util.is_valid_utf8 text
-          | Agent_core.Types.Image _ | Audio _ | Document _ | Thinking _
+          | Llm_provider.Types.Text text -> String_util.is_valid_utf8 text
+          | Llm_provider.Types.Image _ | Audio _ | Document _ | Thinking _
           | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ -> true) blocks in
     if not text_is_valid then None
     else match project_content transport ~content:result.content ~content_blocks:result.content_blocks with

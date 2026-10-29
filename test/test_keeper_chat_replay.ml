@@ -138,7 +138,7 @@ let body ?since_seq () =
   | Some raw -> "{" ^ base ^ {|,"since_seq":|} ^ raw ^ "}"
 
 let parse_ok body =
-  match Stream.For_testing.parse_request body with
+  match Stream.For_testing.parse_request ~media_store:(Agent_core.History.Memory_store.create ()) body with
   | Ok payload -> payload
   | Error err -> Alcotest.fail ("expected parse to succeed: " ^ err)
 
@@ -167,7 +167,7 @@ let test_parser_reads_since_seq () =
 let test_parser_rejects_malformed_since_seq () =
   List.iter
     (fun raw ->
-       match Stream.For_testing.parse_request (body ~since_seq:raw ()) with
+       match Stream.For_testing.parse_request ~media_store:(Agent_core.History.Memory_store.create ()) (body ~since_seq:raw ()) with
        | Ok _ -> Alcotest.fail ("since_seq " ^ raw ^ " was accepted")
        | Error message ->
          Alcotest.(check bool)

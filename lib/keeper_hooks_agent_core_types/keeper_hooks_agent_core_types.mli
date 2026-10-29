@@ -112,7 +112,7 @@ type thinking_log_summary =
     in this summary. *)
 
 val summarize_thinking_blocks :
-  Agent_core.Types.content_block list -> thinking_log_summary
+  Agent_core.Llm_provider.Types.content_block list -> thinking_log_summary
 (** Summarize thinking block presence for logs/metrics without exposing raw
     thinking content. *)
 

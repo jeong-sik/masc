@@ -661,11 +661,22 @@ let test_dropping_unsent_reasoning_widens_the_window () =
   in
   let capacity_bytes = total_all_blocks history / 4 in
   let raw = ok_exn ~what:"raw cut" (project_all ~capacity_bytes history) in
+  (* The window measures history; the dialect's projection runs on the wire
+     form. These messages hold no media, so an empty store converts them. *)
+  let media_store = Agent_core.History.Memory_store.create () in
+  let media_ok = function
+    | Ok value -> value
+    | Error error ->
+      Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error))
+  in
   let transmitted =
     match
-      Agent_core.Llm_provider.Complete_common.transmitted_history ~config history
+      Agent_core.Llm_provider.Complete_common.transmitted_history ~config
+        (media_ok (Agent_core.History.to_wire_messages media_store history))
     with
-    | Ok messages -> messages
+    | Ok messages ->
+      List.map (fun message -> media_ok (Agent_core.History.of_wire_message media_store message))
+        messages
     | Error error ->
       Alcotest.failf
         "transmitted history: %s"

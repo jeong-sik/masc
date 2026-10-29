@@ -932,7 +932,7 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
             | Result_error ->
               if Agent_core.Response_shape.has_deliverable_content
                    (Agent_core.Response_shape.summarize_blocks
-                      [ Agent_core.Types.Text response ])
+                      [ Llm_provider.Types.Text response ])
               then
                 emit_stream_event
                   on_stream_event
@@ -1242,7 +1242,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
     when not
            (Agent_core.Response_shape.has_deliverable_content
               (Agent_core.Response_shape.summarize_blocks
-                 [ Agent_core.Types.Text text ])) ->
+                 [ Llm_provider.Types.Text text ])) ->
     Error
       (Turn_failed
          (empty_success_detail ~model ~tool_steps:state.tool_steps stderr))
@@ -1273,7 +1273,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
     Some (Result_error, text, error, num_turns, usage)
     when Agent_core.Response_shape.has_deliverable_content
            (Agent_core.Response_shape.summarize_blocks
-              [ Agent_core.Types.Text text ]) ->
+              [ Llm_provider.Types.Text text ]) ->
     emit_stream_event on_stream_event (Turn_finished { text });
     Ok
       { conversation_id

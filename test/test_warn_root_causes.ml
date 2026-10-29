@@ -340,12 +340,12 @@ let test_explicit_concurrent_tools_enter_one_agent_core_batch () =
                              ~agent_name:"test-concurrent-tool-batch-agent"
                              ~turn_count:7
                              ~usage:Agent_core.Types.empty_usage
-                             [ Agent_core.Types.ToolUse
+                             [ Llm_provider.Types.ToolUse
                                  { id = "lane-1"
                                  ; name = "keeper_lane_status"
                                  ; input = `Assoc []
                                  }
-                             ; Agent_core.Types.ToolUse
+                             ; Llm_provider.Types.ToolUse
                                  { id = "stats-1"
                                  ; name = "masc_board_stats"
                                  ; input = `Assoc []
@@ -471,12 +471,12 @@ let test_memory_write_runs_beside_another_tool_in_one_provider_turn () =
                 ~agent_name:"test-memory-write-batch-agent"
                 ~turn_count:3
                 ~usage:Agent_core.Types.empty_usage
-                [ Agent_core.Types.ToolUse
+                [ Llm_provider.Types.ToolUse
                     { id = "memory-1"
                     ; name = "keeper_memory_write"
                     ; input = `Assoc [ "content", `String "batched claim" ]
                     }
-                ; Agent_core.Types.ToolUse
+                ; Llm_provider.Types.ToolUse
                     { id = "stats-1"; name = "masc_board_stats"; input = `Assoc [] }
                 ]
             with

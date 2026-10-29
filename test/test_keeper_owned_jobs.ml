@@ -5367,7 +5367,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
     Agent_core.Agent_tools.execute_tools ~context:(Agent_core.Context.create ()) ~tools ~hooks:sdk_hooks
       ~event_bus:None ~tracer:Agent_core.Tracing.null ~agent_name:keeper ~turn_count:turn
       ~usage:Agent_core.Types.empty_usage
-      [Agent_core.Types.ToolUse {id=status_id;name;input}]
+      [Llm_provider.Types.ToolUse {id=status_id;name;input}]
     |> require "real SDK status input and tool occurrence boundary" in
   let invalid = with_bundle fixture (fun bundle ->
     execute_sdk ~turn:12 bundle.Masc.Keeper_tools_agent_core.tools "keeper_composition_status" (`Assoc [])) in
@@ -5473,7 +5473,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
   let execute_action ?(input=`Assoc []) ~turn ~id tool =
     Agent_core.Agent_tools.execute_tools ~context:(Agent_core.Context.create ()) ~tools:[tool] ~hooks:action_hooks
       ~event_bus:None ~tracer:Agent_core.Tracing.null ~agent_name:keeper ~turn_count:turn
-      ~usage:Agent_core.Types.empty_usage [Agent_core.Types.ToolUse {id;name=tool.Agent_core.Tool.schema.name;input}]
+      ~usage:Agent_core.Types.empty_usage [Llm_provider.Types.ToolUse {id;name=tool.Agent_core.Tool.schema.name;input}]
     |> require "real SDK follow-on execution" in
   handoff observation;
   let before_actions = action_count () in

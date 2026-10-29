@@ -204,8 +204,12 @@ type reasoning_detail =
   }
 [@@deriving show]
 
-(** Content block types -- inline records for clarity *)
-type content_block =
+(** A content block over a media source. The provider instantiates it with
+    {!media_source}, which carries payloads; history instantiates it with a
+    source that holds bytes by reference. Constructors are shared, so code
+    that reads only kinds, positions, text or reasoning is written once for
+    both. *)
+type 'source content_block_with =
   | Text of string
   | Thinking of
       { content : string
@@ -245,24 +249,26 @@ type content_block =
         (** Parsed JSON payload when available. Consumers
                         should prefer [json] over [content] for structured access.
                         [content] remains the canonical string for API serialization. *)
-      ; content_blocks : content_block list option
+      ; content_blocks : 'source content_block_with list option
         (** Structured multi-block result (e.g. text + image). When [Some],
                         providers that accept an array tool_result content serialize
                         the blocks; [content] stays the canonical string fallback. *)
       }
   | Image of
       { media_type : string
-      ; source : media_source
+      ; source : 'source
       }
   | Document of
       { media_type : string
-      ; source : media_source
+      ; source : 'source
       }
   | Audio of
       { media_type : string
-      ; source : media_source
+      ; source : 'source
       }
 [@@deriving show]
+
+type content_block = media_source content_block_with [@@deriving show]
 
 type tool_output =
   { content : string
@@ -630,20 +636,21 @@ let message_origin_of_string = function
   | "agent_instruction" -> Some Agent_instruction
   | _ -> None
 
-type message =
+(** A message over a media source; see {!content_block_with}. *)
+type 'source message_with =
   { role : role
   ; origin : message_origin
-  ; content : content_block list
+  ; content : 'source content_block_with list
   ; name : string option [@default None]
   ; tool_call_id : string option [@default None]
   ; metadata : metadata [@default []]
   }
 [@@deriving show]
 
-module Message_value = struct
-  type t = message
+type message = media_source message_with [@@deriving show]
 
-  let equal (left : t) (right : t) = Stdlib.compare left right = 0
+module Message_value_with = struct
+  let equal (left : _ message_with) right = Stdlib.compare left right = 0
   let mix accumulator value = ((accumulator * 65599) lxor value) land max_int
 
   (* A string contributes its length, bytes at a fixed stride of
@@ -687,7 +694,7 @@ module Message_value = struct
      [tool_call_id] are [None] on every message of a live 13,871-message
      checkpoint (2026-09-15), so without the blocks the hash takes one value per
      role and a lookup walks that role's whole history. *)
-  let block_hint : content_block -> int = function
+  let block_hint ~source_hint : _ content_block_with -> int = function
     | Text text -> mix 1 (string_hint text)
     | Thinking { content; signature } ->
       mix (mix 2 (string_hint content)) (optional_string_hint signature)
@@ -697,19 +704,30 @@ module Message_value = struct
     | ToolUse { id; name; _ } -> mix (mix 5 (string_hint id)) (string_hint name)
     | ToolResult { tool_use_id; content; _ } ->
       mix (mix 6 (string_hint tool_use_id)) (string_hint content)
-    | Image { source; _ } -> mix 7 (string_hint (media_source_payload source))
-    | Document { source; _ } -> mix 8 (string_hint (media_source_payload source))
-    | Audio { source; _ } -> mix 9 (string_hint (media_source_payload source))
+    | Image { source; _ } -> mix 7 (source_hint source)
+    | Document { source; _ } -> mix 8 (source_hint source)
+    | Audio { source; _ } -> mix 9 (source_hint source)
   ;;
 
-  let hash (message : t) =
+  let hash ~source_hint (message : _ message_with) =
     List.fold_left
-      (fun accumulator block -> mix accumulator (block_hint block))
+      (fun accumulator block -> mix accumulator (block_hint ~source_hint block))
       (mix
          (mix (mix (role_hint message.role) (Hashtbl.hash message.origin))
             (optional_string_hint message.name))
          (optional_string_hint message.tool_call_id))
       message.content
+  ;;
+end
+
+module Message_value = struct
+  type t = message
+
+  let equal = Message_value_with.equal
+
+  let hash =
+    Message_value_with.hash ~source_hint:(fun source ->
+      Message_value_with.string_hint (media_source_payload source))
   ;;
 end
 
@@ -1531,7 +1549,7 @@ type tool_result_validation_error =
 let validate_tool_result_shape
       ~expect_object:(expect_obj : bool)
       ~expect_array:(expect_arr : bool)
-      (block : content_block)
+      (block : _ content_block_with)
   : (unit, tool_result_validation_error) result
   =
   match block with
@@ -1576,7 +1594,7 @@ let text_of_content content =
 ;;
 
 (** Extract text from a message. *)
-let text_of_message (msg : message) = text_of_content msg.content
+let text_of_message (msg : _ message_with) = text_of_content msg.content
 
 (** Extract text from an api_response. *)
 let text_of_response (resp : api_response) = text_of_content resp.content

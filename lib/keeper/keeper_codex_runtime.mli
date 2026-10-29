@@ -22,6 +22,7 @@ type attempt_outcome =
 
 val run :
   input_source:Keeper_request_source.t ->
+  media_store:Agent_core.History.media_store ->
   ?argument_source:Keeper_official_client_host.argument_source ->
   ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
   ?official_task_reference:Keeper_official_task_reference.t ->
@@ -40,7 +41,7 @@ val run :
   tools:Agent_core.Tool.t list ->
   ?loading_plan:Keeper_official_client_host.loading_plan ->
   initial_messages:Agent_core.Types.message list ->
-  model_input_projection:Agent_core.Agent.model_input_projection option ->
+  model_input_projection:Keeper_history_projection.t option ->
   on_transmitted_model_input:
     (Keeper_official_client_host.transmitted_model_input -> unit) ->
   hooks:Agent_core.Hooks.hooks option ->

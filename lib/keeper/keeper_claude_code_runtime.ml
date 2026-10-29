@@ -672,7 +672,7 @@ let note_transport_uncertainty effect_disposition =
   |> ignore
 ;;
 
-let run_without_lifecycle ~result_scope ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
+let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~loading_plan ~initial_messages ~model_input_projection_for
     ~on_transmitted_model_input ~hooks ~context_injector
@@ -812,7 +812,8 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
       | None -> Ok (goal, [])
       | Some blocks ->
         let* text, images =
-          Host.text_and_images_of_blocks ~runtime_label ~field:"goal_blocks" blocks
+          Host.text_and_images_of_blocks
+            ~media_store ~runtime_label ~field:"goal_blocks" blocks
         in
         Ok
           ( text
@@ -1600,7 +1601,7 @@ let run_without_lifecycle ~result_scope ~official_task_reference ~composed_conte
                   recovery_detail))))
 ;;
 
-let run ~input_source ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1670,7 +1671,7 @@ let run ~input_source ?argument_source ?on_memory_capacity_refusal ?official_tas
               previous_capacity_bytes
               capacity_bytes)
         ~attempt:(fun ~capacity:capacity_bytes ->
-          run_without_lifecycle ~result_scope ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation
+          run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation
           ~required_native_posture
             ~runtime_id
             ~quota_scope

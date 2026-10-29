@@ -109,7 +109,7 @@ let test_accumulate_content_block_start () =
        { index = 0; content_type = "text"; tool_id = None; tool_name = None });
   let response = finalize_ok acc in
   match response.content with
-  | [ Types.Text "" ] -> ()
+  | [ Llm_provider.Types.Text "" ] -> ()
   | _ -> Alcotest.fail "expected announced empty text block"
 ;;
 
@@ -125,7 +125,7 @@ let test_accumulate_content_block_start_tool () =
        });
   let response = finalize_ok acc in
   match response.content with
-  | [ Types.ToolUse { id = "tu_1"; name = "read_file"; input = `Assoc [] } ] -> ()
+  | [ Llm_provider.Types.ToolUse { id = "tu_1"; name = "read_file"; input = `Assoc [] } ] -> ()
   | _ -> Alcotest.fail "expected typed tool block"
 ;;
 
@@ -143,7 +143,7 @@ let test_accumulate_content_block_delta_text () =
     (Types.ContentBlockDelta { index = 0; delta = Types.TextDelta "world" });
   let response = finalize_ok acc in
   match response.content with
-  | [ Types.Text text ] -> Alcotest.(check string) "text" "hello world" text
+  | [ Llm_provider.Types.Text text ] -> Alcotest.(check string) "text" "hello world" text
   | _ -> Alcotest.fail "expected text block"
 ;;
 
@@ -158,7 +158,7 @@ let test_accumulate_content_block_delta_thinking () =
     (Types.ContentBlockDelta { index = 0; delta = Types.ThinkingDelta "reasoning..." });
   let response = finalize_ok acc in
   match response.content with
-  | [ Types.Thinking { content; _ } ] ->
+  | [ Llm_provider.Types.Thinking { content; _ } ] ->
     Alcotest.(check string) "thinking" "reasoning..." content
   | _ -> Alcotest.fail "expected thinking block"
 ;;
@@ -181,7 +181,7 @@ let test_accumulate_content_block_delta_json () =
     (Types.ContentBlockDelta { index = 0; delta = Types.InputJsonDelta {|val"}|} });
   let response = finalize_ok acc in
   match response.content with
-  | [ Types.ToolUse { input; _ } ] ->
+  | [ Llm_provider.Types.ToolUse { input; _ } ] ->
     Alcotest.(check string) "json" {|{"key":"val"}|} (Yojson.Safe.to_string input)
   | _ -> Alcotest.fail "expected tool block"
 ;;
@@ -271,7 +271,7 @@ let test_finalize_text_only () =
   Alcotest.(check string) "model" "model" resp.model;
   Alcotest.(check int) "one content" 1 (List.length resp.content);
   match resp.content with
-  | [ Types.Text "hello" ] -> ()
+  | [ Llm_provider.Types.Text "hello" ] -> ()
   | _ -> Alcotest.fail "expected Text hello"
 ;;
 
@@ -294,7 +294,7 @@ let test_finalize_with_tool_use () =
        { index = 0; delta = Types.InputJsonDelta {|{"path":"/tmp"}|} });
   let resp = finalize_ok acc in
   match resp.content with
-  | [ Types.ToolUse { id; name; _ } ] ->
+  | [ Llm_provider.Types.ToolUse { id; name; _ } ] ->
     Alcotest.(check string) "tool id" "tu_1" id;
     Alcotest.(check string) "tool name" "read" name
   | _ -> Alcotest.fail "expected ToolUse"
@@ -314,7 +314,7 @@ let test_finalize_with_thinking () =
     (Types.ContentBlockDelta { index = 0; delta = Types.ThinkingDelta "I think..." });
   let resp = finalize_ok acc in
   match resp.content with
-  | [ Types.Thinking { content; _ } ] ->
+  | [ Llm_provider.Types.Thinking { content; _ } ] ->
     Alcotest.(check string) "thinking" "I think..." content
   | _ -> Alcotest.fail "expected Thinking block"
 ;;

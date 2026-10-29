@@ -7,7 +7,7 @@
 
 val messages_for_librarian
   :  Keeper_librarian.input
-  -> (Agent_core.Types.message list, string) result
+  -> (Llm_provider.Types.message list, string) result
 
 (** Every variable the [librarian] template is rendered with for a Memory
     pass, with the [continuity] range when one is attached: the input's own
@@ -38,7 +38,7 @@ type preflight_selection =
 val preflight_slots
   :  requirement:Agent_core.Exact_output.output_requirement
   -> selected_slots:Runtime_exact_output_registry.selected_slot list
-  -> messages:Agent_core.Types.message list
+  -> messages:Llm_provider.Types.message list
   -> (preflight_selection, extraction_error) result
 (** The pre-flight over the ladder: the selected slots whose request projected
     and the slots this run is without (id and typed admission cause). The execution
@@ -510,7 +510,7 @@ module For_testing : sig
     -> base_path:string
     -> keeper_id:string
     -> selected_input:Keeper_librarian.input
-    -> messages:Agent_core.Types.message list
+    -> messages:Llm_provider.Types.message list
     -> unit
     -> ( (accepted * Yojson.Safe.t) * served_slot
        , classified_error )

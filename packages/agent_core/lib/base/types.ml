@@ -10,6 +10,41 @@
 include Llm_provider.Types
 
 (* ================================================================ *)
+(* History content (RFC-0476 D5)                                    *)
+(* ================================================================ *)
+
+type media_source = History.media_source =
+  | Stored of History.stored
+  | Url of string
+  | File_id of string
+
+let pp_media_source = History.pp_media_source
+let show_media_source = History.show_media_source
+
+type content_block = media_source content_block_with
+
+let pp_content_block = History.pp_content_block
+let show_content_block = History.show_content_block
+
+type message = media_source message_with
+
+let pp_message = History.pp_message
+let show_message = History.show_message
+
+module Message_value = struct
+  type t = message
+
+  let equal = Message_value_with.equal
+
+  let hash =
+    Message_value_with.hash ~source_hint:(function
+      | Stored stored -> Message_value_with.string_hint stored.History.sha256
+      | Url url -> Message_value_with.string_hint url
+      | File_id file_id -> Message_value_with.string_hint file_id)
+  ;;
+end
+
+(* ================================================================ *)
 (* tool_choice JSON parsing -- depends on AGENT_CORE Error module           *)
 (* ================================================================ *)
 

@@ -260,7 +260,7 @@ default = "antigravity.gemini"
 
 let keeper_response_text (result : Runtime_agent.run_result) =
   result.response.content
-  |> List.filter_map (function Agent_core.Types.Text text -> Some text | _ -> None)
+  |> List.filter_map (function Llm_provider.Types.Text text -> Some text | _ -> None)
   |> String.concat ""
 ;;
 
@@ -461,7 +461,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                     Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "fixture-trace-no-completed-turn" }) ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-fixture"
-                      ~base_path
+                      ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
                       (* A trace with no completed turn: the range is the whole
                          history, which the prompt checks below read. *)
 
@@ -593,7 +593,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "antigravity-fixture" }) ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                         ~runtime_id:"antigravity.gemini"
                         ~keeper_name:"antigravity-fixture"
-                        ~base_path
+                        ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
                         ~goal:"Call masc_probe once"
                         ~system_prompt:"pre-dispatch fixture system prompt"
                         ~tools:[ tool ]
@@ -643,7 +643,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
                       (match Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "antigravity-fixture" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
-                          ~base_path ~goal:"Resume the approved call"
+                          ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path) ~goal:"Resume the approved call"
                           ~official_client_continuation:gate_checkpoint
                           ~system_prompt:"changed core instructions" ~tools:[tool] ~agent_core_tools:[tool]
                           ~initial_messages:large_history ~hooks ~context:(Agent_core.Context.create ())
@@ -663,7 +663,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       let run_context ?official_client_composed_context ?(hooks = hooks) ~goal (system_prompt, initial_messages) =
                         match Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "antigravity-fixture" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
-                          ~base_path ~goal ?official_client_composed_context
+                          ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path) ~goal ?official_client_composed_context
                           ~system_prompt ~tools:[tool] ~agent_core_tools:[tool]
                           ~initial_messages ~hooks ~context:(Agent_core.Context.create ())
                           ~sw ~net:(Eio.Stdenv.net env) () with
@@ -751,7 +751,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       (match Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "antigravity-fixture" }) ~raw_trace:None
                           ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
-                          ~base_path ~goal:"A blank effective prompt must not run"
+                          ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path) ~goal:"A blank effective prompt must not run"
                           ~system_prompt:"nonblank raw system" ~tools:[tool] ~agent_core_tools:[tool]
                           ~initial_messages:(snd unchanged) ~hooks:blank_hooks
                           ~context:(Agent_core.Context.create ()) ~sw ~net:(Eio.Stdenv.net env) () with
@@ -997,7 +997,7 @@ let test_blank_success_requires_fresh_conversation () =
                     Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "antigravity-fixture" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-fixture"
-                      ~base_path
+                      ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
                       ~goal:"Return a non-empty completion"
                       ~system_prompt:"pre-dispatch fixture system prompt"
                       ~agent_core_tools:[]
@@ -2087,7 +2087,7 @@ let test_operator_interrupt_preserves_previous_native_settlement () =
                       ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-fixture"
-                      ~base_path
+                      ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
                       ~goal
                       ~system_prompt:"pre-dispatch fixture system prompt"
                       ~agent_core_tools:[]

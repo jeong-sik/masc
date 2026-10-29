@@ -443,7 +443,7 @@ let test_a_named_tool_becomes_callable_in_the_running_agent () =
   Eio_main.run
   @@ fun env ->
   let agent =
-    Agent_core.Agent.create
+    Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Agent_core.Types.default_config ~model:"test-model")
       ~net:env#net
       ()
@@ -467,7 +467,7 @@ let test_a_named_tool_becomes_callable_in_the_running_agent () =
 
 let test_an_already_callable_tool_is_not_reported_missing () =
   Eio_main.run @@ fun env ->
-  let agent = Agent_core.Agent.create
+  let agent = Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Agent_core.Types.default_config ~model:"test-model") ~net:env#net () in
   let existing = List.hd (offered ["plan", "Record the execution plan"]) |> build in
   Agent_core.Agent.extend_tools agent [existing];
@@ -489,7 +489,7 @@ let test_a_name_that_is_not_offered_is_refused () =
   Eio_main.run
   @@ fun env ->
   let agent =
-    Agent_core.Agent.create
+    Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Agent_core.Types.default_config ~model:"test-model")
       ~net:env#net
       ()
@@ -514,7 +514,7 @@ let test_the_names_that_exist_are_loaded_and_the_rest_reported () =
   Eio_main.run
   @@ fun env ->
   let agent =
-    Agent_core.Agent.create
+    Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Agent_core.Types.default_config ~model:"test-model")
       ~net:env#net
       ()
@@ -574,7 +574,7 @@ let test_a_long_summary_is_cut_without_breaking_a_character () =
   Eio_main.run
   @@ fun env ->
   let agent =
-    Agent_core.Agent.create
+    Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Agent_core.Types.default_config ~model:"test-model")
       ~net:env#net
       ()
@@ -611,7 +611,7 @@ let with_placement offering f =
   Eio_main.run
   @@ fun env ->
   let agent =
-    Agent_core.Agent.create
+    Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Agent_core.Types.default_config ~model:"test-model")
       ~net:env#net
       ()
@@ -750,7 +750,7 @@ let test_a_loaded_tool_takes_the_slot_the_next_turn_places_it_in () =
   let agent_cell = ref None in
   let this_turn = placed ~agent_cell [ called "atlassian_confluence_search" ] in
   let agent =
-    Agent_core.Agent.create
+    Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Agent_core.Types.default_config ~model:"test-model")
       ~tools:(array_of this_turn)
       ~net:env#net
@@ -802,7 +802,7 @@ let test_naming_a_held_tool_records_no_load () =
     | None -> fail "an attached service was offered and produced no placement"
   in
   let agent =
-    Agent_core.Agent.create
+    Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Agent_core.Types.default_config ~model:"test-model")
       ~tools:
         (this_turn.Keeper_identity_tool_search.tool
@@ -829,7 +829,7 @@ let test_a_carried_tool_can_still_be_named () =
   Eio_main.run
   @@ fun env ->
   let agent =
-    Agent_core.Agent.create
+    Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~config:(Agent_core.Types.default_config ~model:"test-model")
       ~net:env#net
       ()
@@ -1083,7 +1083,7 @@ let with_receipt_fixture ?(task = Some (task_id "task-901")) ?current_task_id of
   let context = Agent_core.Context.create () in
   let receipts = make_receipts ?task ?current_task_id ~context offering in
   let agent =
-    Agent_core.Agent.create
+    Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
       ~context
       ~config:(Agent_core.Types.default_config ~model:"test-model")
       ~net:env#net
@@ -1332,7 +1332,7 @@ let test_load_survives_purge_checkpoint_and_resume () =
       |> require_placement
     in
     let resumed =
-      (Agent_core.Agent.resume
+      (Agent_core.Agent.resume ~media_store:(Agent_core.History.Memory_store.create ())
         ~net:env#net
         ~checkpoint
         ~context:fresh_context
@@ -1388,7 +1388,7 @@ let test_runtime_attempt_keeps_the_expanded_tool_set () =
     execute p.tool (names_input [ "atlassian_jira_search" ]) |> loaded_output |> ignore;
     let tools = Keeper_agent_tool_surface.on_the_wire
         ~agent_cell:(ref (Some agent)) ~built:[ p.tool ] in
-    let replacement = Agent_core.Agent.create ~net:env#net ~context ~tools
+    let replacement = Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~context ~tools
         ~config:(Agent_core.Types.default_config ~model:"another-runtime") () in
     let tool = match Agent_core.Tool_set.find "atlassian_jira_search" (Agent_core.Agent.tools replacement) with
       | Some tool -> tool
@@ -1494,7 +1494,7 @@ let test_scoped_dispatch_survives_loading_and_preparation_refusal_keeps_receipt 
   let offering = offered [ "prepared", "Prepared fixture"; "unavailable", "Unavailable fixture" ] in
   let context = Agent_core.Context.create () in
   let receipts = make_receipts ~task:(task_id "task-901") ~context offering in
-  let agent = Agent_core.Agent.create ~context
+  let agent = Agent_core.Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~context
       ~config:(Agent_core.Types.default_config ~model:"test-model") ~net:env#net () in
   let ordinary_calls = ref 0 and prepared_calls = ref [] and live = ref false in
   let output text = Ok { Agent_core.Types.content = text; content_blocks = None; _meta = None } in
@@ -1538,7 +1538,7 @@ let test_scoped_dispatch_survives_loading_and_preparation_refusal_keeps_receipt 
     [ "atlassian_prepared"; "atlassian_unavailable" ] (Load_receipts.pending_names receipts);
   let options = Agent_core.Agent.options agent in
   let calls = List.map (fun (id, name) ->
-    Agent_core.Types.ToolUse {id; name; input = `Assoc []})
+    Llm_provider.Types.ToolUse {id; name; input = `Assoc []})
       [ "prepared-dispatch", "atlassian_prepared"; "unavailable-preparation", "atlassian_unavailable" ] in
   let rows =
     Agent_core.Agent_tools.execute_tools ~context

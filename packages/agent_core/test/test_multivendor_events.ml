@@ -30,7 +30,7 @@ let stub_api_response : Types.api_response =
   { id = "msg_test"
   ; model = "any-model"
   ; stop_reason = Types.EndTurn
-  ; content = [ Types.Text "done" ]
+  ; content = [ Llm_provider.Types.Text "done" ]
   ; usage = None
   ; telemetry = None
   }

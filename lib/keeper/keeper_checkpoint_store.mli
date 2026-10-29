@@ -39,6 +39,21 @@ val delete_agent_core_history_files :
   snapshot_ids:string list ->
   history_delete_result list
 
+(** What {!delete_all_agent_core_history_files} did: how many archive entries
+    it removed, and each one still there with why. *)
+type history_cleared =
+  { removed : int
+  ; left : string list
+  }
+
+(** Delete every AGENT_CORE history archive entry of [session_dir]. A purge
+    calls it once the purged checkpoint is installed: the entries are heads
+    of the checkpoint before it, so while one is there the object sweep keeps
+    the content the purge removed (RFC-0476 §3.3). The next save archives
+    again. [Error] when [session_dir] cannot be listed. *)
+val delete_all_agent_core_history_files :
+  session_dir:string -> (history_cleared, string) result
+
 (** Relation between an incoming checkpoint and the current known high
     watermark for the same canonical AGENT_CORE checkpoint path. *)
 type save_agent_core_relation = [ `Cold | `Forward | `Equal ]

@@ -274,6 +274,29 @@ let delete_agent_core_history_files ~(session_dir : string) ~(snapshot_ids : str
     snapshot_ids
 ;;
 
+type history_cleared =
+  { removed : int
+  ; left : string list
+  }
+
+let delete_all_agent_core_history_files ~session_dir =
+  match list_agent_core_history_files ~session_dir with
+  | exception Sys_error detail -> Error detail
+  | snapshot_ids ->
+    Ok
+      (List.fold_left
+         (fun cleared -> function
+            | History_deleted _ -> { cleared with removed = cleared.removed + 1 }
+            | History_missing _ -> cleared
+            | History_refused snapshot_id ->
+              { cleared with left = (snapshot_id ^ ": not a history archive name") :: cleared.left }
+            | History_removal_failed snapshot_id ->
+              { cleared with left = (snapshot_id ^ ": removal failed") :: cleared.left })
+         { removed = 0; left = [] }
+         (delete_agent_core_history_files ~session_dir ~snapshot_ids)
+       |> fun cleared -> { cleared with left = List.rev cleared.left })
+;;
+
 type checkpoint_read_failure =
   | Os_error of Unix.error
   | Changed_while_read

@@ -103,6 +103,13 @@ The objects are named by their digest, so copying one that is already there
 writes the same bytes. Copying `<trace>.json` alone is not a rollback: a
 head reads only with its objects.
 
+An apply also deletes the session's history archive entries
+(`agent-core-snapshot-*.json`). They are heads of the checkpoint before the
+purge, and while one is there the startup object sweep keeps the content the
+purge removed (RFC-0476 §3.3). The backup holds only the canonical head and
+its objects, so a rollback does not bring the archive entries back; the
+dashboard's checkpoint list fills again as the keeper saves.
+
 ## What the tool refuses (and what to do)
 
 | Refusal | Why | What to do |

@@ -91,6 +91,33 @@ let await_observation t =
   let* settled=await_settled t in
   let* observed,_=observe_settled t settled in Ok observed
 
+type progress =
+  | Awaiting_settlement of { stdout : P.extent; stderr : P.extent }
+  | Physically_settled of observation
+  | Publication_known of P.Sha256.t
+type snapshot = { record : R.record; progress : progress }
+let snapshot_with_hook ~after_original t =
+  let* record=L.observe_original t.owner |> Result.map_error (fun e -> Launch_error e) in
+  after_original ();
+  let* progress=match Eio.Promise.peek t.result with
+    | Some (Error e) -> Error e
+    | Some (Ok receipt) -> Ok (Publication_known receipt.sha256)
+    | None ->
+      let* ()=t.availability in
+      match Eio.Promise.peek t.done_ with
+      | Some (Error e) -> Error e
+      | Some (Ok settled) ->
+        Ok (Physically_settled {settled;status=status record settled P.Result_pending})
+      | None ->
+        let extent stream capture =
+          let* captured=capture in
+          O.extent captured |> Result.map_error (fun cause -> Output_error {stream;cause}) in
+        let* stdout=extent P.Stdout t.stdout in
+        let* stderr=extent P.Stderr t.stderr in
+        Ok (Awaiting_settlement {stdout;stderr}) in
+  Ok {record;progress}
+let snapshot t = snapshot_with_hook ~after_original:(fun () -> ()) t
+
 let result_leaf=Endpoint_job_result.leaf
 let receipt_io f = try Ok (f ()) with
   | Eio.Io _ | Unix.Unix_error _ | Sys_error _ | Invalid_argument _ -> Error Receipt_storage_unavailable
@@ -449,4 +476,5 @@ module For_testing = struct
       ~after_spawn ~before_result_publish ~after_result_publish ~sw ~fs ~cgroup_parent_path ~execution intent =
     launch_with_hook ~before_result_read ~on_result_read_busy ~after_spawn ~before_result_publish
       ~after_result_publish ~sw ~fs ~cgroup_parent_path ~execution intent
+  let snapshot = snapshot_with_hook
 end

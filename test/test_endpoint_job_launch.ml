@@ -538,6 +538,9 @@ let supervisor_reports_capture_failure_before_blocked_child_exit = fixture (fun 
     (match S.await_result owner with
      | Error (S.Output_error {stream=P.Stdout;cause=O.Publication_failed _}) -> ()
      | Error _ | Ok _ -> Alcotest.fail "result observer waited for a child blocked on failed output");
+    (match S.snapshot owner with
+     | Error (S.Output_error {stream=P.Stdout;cause=O.Publication_failed _}) -> ()
+     | Error _ | Ok _ -> Alcotest.fail "status observation hid failed output behind pending success");
     let _,next=prepare store fixture "07" "exit 8" in
     let other=Eio.Switch.run (fun next_sw ->
       supervised ~sw:next_sw ~env fixture next |> S.await_settled |> supervise) in
@@ -745,6 +748,106 @@ let result_owner_teardown_settles_external_observers = fixture (fun ~env ~sw:_ ~
   match S.await_result original with
   | Error S.Interrupted | Error (S.Output_error {cause=O.Interrupted;_}) -> ()
   | Error _ | Ok _ -> Alcotest.fail "owner teardown left a result observer waiting or invented readiness")
+
+let snapshot_does_not_wait_for_a_blocked_original = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let fifo=Filename.concat fixture.work "control" in
+    Unix.mkfifo fifo 0o600;Unix.chown fifo fixture.uid fixture.execution.payload_gid;
+    let binding,permit=prepare store fixture "05" "exec /bin/cat control" in
+    let original=supervised ~sw ~env fixture permit in
+    let pending ()=let observed=S.snapshot original |> supervise in
+      check "snapshot retains the same original source without a process wait"
+        (R.binding observed.record=binding && R.launch_state observed.record=R.Requested (id "06"));
+      match observed.progress with
+      | S.Awaiting_settlement {stdout=P.Growing 0L;stderr=P.Growing 0L} -> ()
+      | Awaiting_settlement _ | Physically_settled _ | Publication_known _ ->
+        Alcotest.fail "blocked original became physical or complete settlement" in
+    pending ();
+    let _,next=prepare store fixture "07" "printf independent; exit 8" in
+    ignore (Eio.Switch.run (fun next_sw -> supervised ~sw:next_sw ~env fixture next |> S.await_result |> supervise));
+    pending ();
+    ignore (S.cancel original |> supervise);
+    let receipt=S.await_result original |> supervise in
+    let observed=S.snapshot original |> supervise in
+    match observed.progress with
+    | S.Publication_known actual -> check "snapshot shares the exact original publication" (actual=receipt.sha256)
+    | Awaiting_settlement _ | Physically_settled _ -> Alcotest.fail "snapshot lost published original result"))
+
+let snapshot_keeps_settlement_publication_and_current_source_distinct = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+    let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+    Fun.protect ~finally:unblock (fun () ->
+      let binding,permit=prepare store fixture "05" "printf original; exit 7" in
+      let original=supervised ~sw ~env fixture permit ~before_result_publish:(fun () ->
+        Eio.Promise.resolve signal ();Eio.Promise.await resume) in
+      Eio.Promise.await entered;
+      let observed=S.snapshot original |> supervise in
+      (match observed.progress with
+       | S.Physically_settled {status=P.Status {phase=P.Termination_observed (P.Exited 7);
+           result=P.Result_pending;stdout=P.Sealed _;stderr=P.Sealed _;_};_} -> ()
+       | Physically_settled _ | Awaiting_settlement _ | Publication_known _ ->
+         Alcotest.fail "unpublished settlement waited or claimed a complete result");
+      check "snapshot never publishes the pending receipt" (not (Sys.file_exists (leaf fixture binding S.result_leaf)));
+      unblock ();
+      let receipt=S.await_result original |> supervise in
+      let current=S.cancel original |> supervise in
+      let observed=S.snapshot original |> supervise in
+      check "snapshot separately refreshes later original cancellation"
+        (R.cancellation_state observed.record=R.Cancellation_requested && R.revision observed.record=R.revision current);
+      (match observed.progress with
+       | S.Publication_known actual -> check "current cancellation never rewrites the historical publication"
+           (actual=receipt.sha256 && receipt.sha256=digest receipt.content)
+       | Awaiting_settlement _ | Physically_settled _ -> Alcotest.fail "fresh source lost original publication");
+      let storage=R.open_storage ~sw current |> registry in
+      let restored=D.load ~sw ~storage ~expected_sha256:(Some receipt.sha256) |> Result.map_error D.error_to_string |> require in
+      match D.inspect restored |> Result.map_error D.error_to_string |> require with
+      | P.Status {cancel_requested=true;result=P.Result_ready hash;_} ->
+        check "fresh result authority requires actual original readback" (hash=receipt.sha256)
+      | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "fresh original readback lost current source")))
+
+let snapshot_missing_authority_does_not_poison_or_cancel_original = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let fifo=Filename.concat fixture.work "control" in
+    Unix.mkfifo fifo 0o600;Unix.chown fifo fixture.uid fixture.execution.payload_gid;
+    let binding,permit=prepare store fixture "05" "exec /bin/cat control" in
+    let original=supervised ~sw ~env fixture permit in
+    let claim=Filename.concat fixture.registry_path (P.Id.to_string binding.operation_id ^ ".claim.json") in
+    Unix.rename claim (claim ^ ".evidence");
+    (match S.snapshot original with
+     | Error (S.Launch_error (L.Registry_error R.Missing_original)) -> ()
+     | Error _ | Ok _ -> Alcotest.fail "missing source became a pending or complete original snapshot");
+    Unix.rename (claim ^ ".evidence") claim;
+    let observed=S.snapshot original |> supervise in
+    (match observed.progress with
+     | S.Awaiting_settlement _ -> ()
+     | Physically_settled _ | Publication_known _ -> Alcotest.fail "failed observer cancelled its original job");
+    check "failed snapshot never records implicit cancellation" (R.cancellation_state observed.record=R.No_cancellation);
+    ignore (S.cancel original |> supervise);ignore (S.await_result original |> supervise)))
+
+let snapshot_observer_cancel_leaves_original_alive = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let fifo=Filename.concat fixture.work "control" in
+    Unix.mkfifo fifo 0o600;Unix.chown fifo fixture.uid fixture.execution.payload_gid;
+    let _,permit=prepare store fixture "05" "exec /bin/cat control" in
+    let original=supervised ~sw ~env fixture permit in
+    let entered,signal=Eio.Promise.create () in
+    let cancelled=ref false in
+    Eio.Fiber.first
+      (fun () -> try ignore (S.For_testing.snapshot original ~after_original:(fun () ->
+          Eio.Promise.resolve signal ();Eio.Fiber.await_cancel ()) |> supervise);
+        Alcotest.fail "paused snapshot returned without its original source observation"
+        with Eio.Cancel.Cancelled _ as ex -> cancelled:=true;raise ex)
+      (fun () -> Eio.Promise.await entered;
+        let _,next=prepare store fixture "07" "printf independent; exit 8" in
+        ignore (Eio.Switch.run (fun next_sw -> supervised ~sw:next_sw ~env fixture next |> S.await_result |> supervise)));
+    check "snapshot observer cancellation propagates" !cancelled;
+    let observed=S.snapshot original |> supervise in
+    (match observed.progress with
+     | S.Awaiting_settlement _ -> ()
+     | Physically_settled _ | Publication_known _ -> Alcotest.fail "cancelled snapshot stopped the original");
+    check "cancelled observer has no operation cancellation authority" (R.cancellation_state observed.record=R.No_cancellation);
+    ignore (S.cancel original |> supervise);ignore (S.await_result original |> supervise)))
 
 let block_activation fixture binding =
   let path=leaf fixture binding L.activation_leaf in
@@ -1442,6 +1545,10 @@ let () =
       "held cleanup missing original authority never signals",held_cleanup_missing_authority_does_not_signal;
       "held cancellation waits for a contended original lease",held_cancel_waits_for_a_contended_original;
       "held result observer cancellation preserves cleanup and publication",held_result_observer_cancel_preserves_cleanup_publication;
-      "silent actual payload or raw exit cannot invent non-start",empty_output_or_bootstrap_code_cannot_invent_nonstart] in
+      "silent actual payload or raw exit cannot invent non-start",empty_output_or_bootstrap_code_cannot_invent_nonstart;
+      "snapshot never waits for a blocked original process",snapshot_does_not_wait_for_a_blocked_original;
+      "snapshot distinguishes pending physical settlement and original publication",snapshot_keeps_settlement_publication_and_current_source_distinct;
+      "missing snapshot authority neither poisons nor cancels the original",snapshot_missing_authority_does_not_poison_or_cancel_original;
+      "snapshot observer cancellation leaves original and other jobs alive",snapshot_observer_cancel_leaves_original_alive] in
   Alcotest.run "Endpoint job launch" ["original supervisor",List.map
     (fun (name,test) -> Alcotest.test_case name `Quick test) cases]

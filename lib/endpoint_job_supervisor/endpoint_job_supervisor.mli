@@ -113,6 +113,26 @@ val await_result : t -> (result_receipt,error) result
     Repeated observers share the same original immutable receipt. Restart
     readback/reconciliation and durable host consumption/Release remain separate
     obligations; this API grants neither cleanup nor recovered kernel authority. *)
+type progress =
+  | Awaiting_settlement of { stdout : P.extent; stderr : P.extent }
+  | Physically_settled of observation
+  | Publication_known of P.Sha256.t
+type snapshot = private { record : R.record; progress : progress }
+val snapshot : t -> (snapshot,error) result
+(** Refresh this owner's exact original source and inspect already available
+    collector/settlement/publication state. Never wait for process exit, input,
+    pipe EOF, seals or publication. Short original registry I/O remains
+    cancellable and nonwaiting on exclusive authority; its error affects only
+    this observation. Awaiting_settlement makes no Running/exec claim.
+
+    Publication_known carries the historical immutable receipt digest from
+    [await_result], not a fresh Result_ready status, file-integrity proof or
+    consumption evidence. [record] may show later cancellation without
+    rewriting that receipt. A service must
+    reopen through Endpoint_job_result before making a fresh complete-result
+    claim. Source validation or capture failure never becomes pending success.
+    This API creates no polling loop; event-driven callers await [await_result]
+    independently of status requests. *)
 val read_output : t -> stream:P.stream -> offset:int64 -> max_bytes:int -> (O.chunk,error) result
 val cancel : t -> (R.record,error) result
 val await_quiescent : t -> (G.exit_observation,error) result
@@ -123,6 +143,9 @@ module For_testing : sig
     | Observe_original | Open_storage | Reopen_stdout | Reopen_stderr
     | Validate_stdout | Validate_stderr | Refresh_after_publication
     | Cancel_held_original
+  val snapshot : after_original:(unit -> unit) -> t -> (snapshot,error) result
+  (** Interleave after the actual original source read, outside its read lock.
+      Cancelling this observer cannot cancel the job or publication. *)
   val launch_effect_workspace :
     ?before_result_read:(result_read -> unit) ->
     ?on_result_read_busy:(result_read -> unit) ->

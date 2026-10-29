@@ -266,6 +266,8 @@ class SyntheticTests(unittest.TestCase):
             ('--synthetic', '5', 'some.memory-current.json'),
             ('--synthetic', '0'),
             ('--synthetic', '5', '--claim-bytes', '10'),
+            # The path does not exist: the usage error has to come before the file is read.
+            ('--synthetic', '5', '--turn-input-file', '/nonexistent/turn-input.txt'),
             ('--key-shape', 'memory-id', 'some.memory-current.json'),
             (),
         )
@@ -274,6 +276,24 @@ class SyntheticTests(unittest.TestCase):
                 with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
                     self.run_main(*arguments)
                 self.assertEqual(caught.exception.code, 2)
+
+    def test_a_synthetic_run_refuses_a_turn_input_file_before_it_reads_or_sends_anything(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'turn-input.txt'
+            path.write_text('a turn input that belongs to a Keeper', encoding='utf-8')
+            sent: list[dict[str, object]] = []
+
+            def post(request: dict[str, object], _timeout: float) -> tuple[int, dict[str, object], float]:
+                sent.append(request)
+                return 200, {'model': 'jev-test', 'usage': {'input_tokens': 1}, 'answers': {}}, 0.01
+
+            err = io.StringIO()
+            arguments = ['probe', '--synthetic', '5', '--turn-input-file', str(path), '--send']
+            with patch.object(probe, 'post', post), patch.object(sys, 'argv', arguments), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as caught:
+                probe.main()
+        self.assertEqual(caught.exception.code, 2)
+        self.assertEqual(sent, [])
+        self.assertIn('--turn-input-file', err.getvalue())
 
 
 class RepeatReportTests(unittest.TestCase):

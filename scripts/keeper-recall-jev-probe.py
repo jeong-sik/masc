@@ -33,9 +33,10 @@ candidates whose claims are filler text of ``--claim-bytes`` bytes. Nothing
 from a Keeper is sent, so only ``--send`` is needed. ``--key-shape`` picks the
 question id: ``digest12``, the first 12 hex digits of the claim digest that
 layer 0 used, or ``memory-id``, the 71-character ``sha256:`` id that
-``keeper_memory_recall_jev_codec`` sends. It is how a request shape that has
-never reached Jev (long keys with a colon, more than 56 questions) is tried
-without real memory.
+``keeper_memory_recall_jev_codec`` sends. It tries a request shape without real
+memory, such as the long keys with a colon and the more than 56 questions the
+codec builds. A synthetic run reads no file: ``--turn-input-file`` is refused
+with it, because a turn input is not filler and no allowance covers it.
 
 Usage:
     python3 -I scripts/keeper-recall-jev-probe.py <keeper>.memory-current.json
@@ -469,6 +470,8 @@ def main() -> int:
             parser.error(f"--synthetic must be between 1 and {SYNTHETIC_MAX_COUNT}")
         if args.claim_bytes < SYNTHETIC_HEAD_BYTES:
             parser.error(f"--claim-bytes must be at least {SYNTHETIC_HEAD_BYTES}, or the claims would not differ")
+        if args.turn_input_file:
+            parser.error("--synthetic takes no --turn-input-file: a synthetic run sends no file content")
         candidates = synthetic_candidates(args.synthetic, args.claim_bytes, args.key_shape or "digest12")
     else:
         if not args.memory_current:

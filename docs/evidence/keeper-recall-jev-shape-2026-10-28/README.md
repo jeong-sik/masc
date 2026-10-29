@@ -25,7 +25,7 @@
 
 ## 무엇을 했나
 
-- `scripts/keeper-recall-jev-probe.py` 의 합성 모드(`--synthetic`, `--claim-bytes`, `--key-shape`)로 후보를 만들어 보냈다. 후보는 채움 문장이고 Keeper 의 데이터는 나가지 않는다(출력의 `synthetic filler only`). 질문은 층 0 에서 잰 두 선택지 모양이다.
+- `scripts/keeper-recall-jev-probe.py` 의 합성 모드(`--synthetic`, `--claim-bytes`, `--key-shape`)로 후보를 만들어 보냈다. 후보는 채움 문장이고 Keeper 의 데이터는 나가지 않는다(출력의 `synthetic filler only`). 합성 모드는 파일을 읽지 않는다. `--turn-input-file` 을 함께 쓰면 파일을 읽기 전에 사용법 오류로 멈춘다. 질문은 층 0 에서 잰 두 선택지 모양이다.
 - 운영자가 자기 셸에서 직접 실행했다. 2026-10-28 16:08Z 이후이고 정확한 시각은 기록하지 않았다. 명령:
 
   ```bash

@@ -33,7 +33,19 @@ val create
 (** [None] means no Memory snapshot was present when the batch began. Reject
     duplicate identities rather than choosing one payload for an identity. *)
 
+val create_over
+  :  keeper_id:Keeper_identity.Keeper_id.t
+  -> turn_ref:Ids.Turn_ref.t
+  -> current:Keeper_librarian.current_selection option
+  -> (t, error) result
+(** A plan that starts from the facts a batch was captured with, for a caller
+    that no longer has the stored snapshot: a restarted floor chain rebuilds its
+    plan from the facts its first step retained. [None] means the batch began
+    with no facts. Reject duplicate identities as {!create} does. The plan has
+    no stored snapshot to report: {!initial_snapshot} is [None]. *)
+
 val initial_snapshot : t -> Keeper_memory_os_current.t option
+(** The stored snapshot a plan made by {!create} started from. *)
 val current : t -> Keeper_librarian.current_selection option
 (** Input for the next inference. [None] means no initial snapshot and no
     accepted step; an accepted step yielding no facts is [Some {facts=[]}]. *)

@@ -12,8 +12,9 @@ type wait = Submit.wait = Capacity | Worker_pending | Worker_unknown | Worker_un
   | Missing_after_dispatch | Journal_recheck
 type call = expected:Durable.destination -> original:Owner.retained -> arguments:Yojson.Safe.t ->
   (Mcp_protocol.Mcp_types.tool_result,Submit.call_error) result
+type answer = {raw:Yojson.Safe.t;proposal:Memory_runtime.durable_step_proposal}
 type outcome = Pending of wait * Owner.retained
-  | Answered of Memory_runtime.durable_step_proposal * Owner.retained
+  | Answered of answer * Owner.retained
   | Refused of Exact.final * Owner.retained
 let io work = Systhread_host.run work
 let rejected value = Result.map_error (fun detail -> Rejected detail) value
@@ -43,7 +44,7 @@ let schema_of step =
   match exact.Exact.schema with
   | Some schema -> Ok schema
   | None -> Error (Rejected "Original floor step request has no output schema")
-type terminal = Answer of Memory_runtime.durable_step_proposal * Owner.retained
+type terminal = Answer of answer * Owner.retained
   | Refusal of Exact.final * Owner.retained
 let refused final record = match final with
   | Exact.Outcome_unknown -> Pending (Worker_unknown,record)
@@ -73,14 +74,15 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~step ~(call:call
     let* ()=io (fun () -> Step.confirm_final ~store step final) |> rejected in
     match final with
     | Exact.Call_final (Exact.Answered {output;_}) ->
-      let* proposal=rejected (Step.validate_proposal step (Exact.checked_json output)) in
-      Ok (Answer (proposal,record))
+      let raw=Exact.checked_json output in
+      let* proposal=rejected (Step.validate_proposal step raw) in
+      Ok (Answer ({raw;proposal},record))
     | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
     | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok (Refusal (final,record)) in
   let* result=Submit.resume ~store ~label:"Floor step" ~original ~request:exact ~schema ~prepare ~call ~terminal in
   match result with
   | Submit.Awaiting (wait,record) -> Ok (Pending (wait,record))
-  | Final (Answer (proposal,record)) -> Ok (Answered (proposal,record))
+  | Final (Answer (answer,record)) -> Ok (Answered (answer,record))
   | Final (Refusal (final,record)) -> Ok (refused final record)
   (* A retained answer ([Judged]) or refusal ([Rejected]) runs [terminal] again
      above, so what is left here are the phases no step writes: its Memory

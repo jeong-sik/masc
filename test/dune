@@ -2230,6 +2230,14 @@
  (modules exact_output_fixture)
  (libraries masc_test_deps unix))
 
+; The durable message floor's fixture: the configured Runtime, the Python worker
+; and the host Exact HTTP, with only the provider's HTTP server substituted.
+(library
+ (name librarian_floor_fixture)
+ (wrapped false)
+ (modules librarian_floor_fixture)
+ (libraries alcotest masc_test_deps masc.server exact_output_fixture mcp_protocol masc.masc_random_id astring))
+
 ; No client-side gate stands between the composed request and the peer: a
 ; large body reaches the real HTTP peer, and only the peer's refusal moves the
 ; lane to its next candidate.
@@ -4770,6 +4778,7 @@
 (include stanzas/test_keeper_librarian_durable_consumer.inc)
 (include stanzas/test_keeper_librarian_floor_step_request.inc)
 (include stanzas/test_keeper_librarian_floor_step_owner.inc)
+(include stanzas/test_keeper_librarian_floor_chain.inc)
 (include stanzas/test_librarian_replay_cli.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_gate_auto_judge_labels.inc)

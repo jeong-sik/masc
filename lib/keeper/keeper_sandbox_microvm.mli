@@ -388,7 +388,9 @@ val remove_apple_work_volume_trim :
 (** Delete the stable helper using the removal budget, then prove its absence
     using actual complete canonical CLI capture and the shared strict all-row
     inventory decoder under the I/O budget. [run] supplies only the delete
-    effect, never absence authority. Shared by boot cleanup and keeper teardown. *)
+    effect, never absence authority. The name is shared across workspaces;
+    callers must establish ownership separately before using this low-level
+    operation. Keeper boot and teardown do not use it. *)
 
 type discard_read_failure =
   | Discard_backend_unsupported of Keeper_microvm_backend.t
@@ -439,7 +441,9 @@ val reclaim_apple_work_volume :
     permits one tune2fs helper, bracketed by strict absence checks, including
     protected cleanup on cancellation. A helper's status is retained and its
     subsequent superblock reading is separate; exit0 never guesses a set bit.
-    [Error] refuses a guest mount when helper absence cannot be proved. *)
+    [Error] refuses a guest mount when helper absence cannot be proved.
+    This low-level operation does not establish workspace or helper ownership;
+    Keeper boot does not call it while those identities are unverified. *)
 
 val volume_repair_guest_root : string
 (** [/masc-repair]: where {!apple_volume_repair_argv} mounts the volume. *)
@@ -498,7 +502,8 @@ val repair_apple_volume :
     {!apple_volume_repair_argv} through [run_helper], which has no timeout.
     The switch release removes the helper and proves its absence after
     success, failure or cancellation. [Error] means a stale helper could not
-    be removed, so the helper never started. *)
+    be removed, so the helper never started. This low-level operation does not
+    establish workspace or helper ownership. *)
 
 val keeper_work_root : keeper_name:string -> string
 (** [<work root>/<sanitized keeper>]: what the shim jails requests under. *)
@@ -591,9 +596,10 @@ val ensure_work_volume_for
     measurement). Apple's is a sparse virtio-blk image, so a guest
     [rm -rf _build] frees nothing on the host until the blocks are
     discarded. The disk accepts discard, but a keeper guest cannot issue it
-    (its capability set is empty); {!apple_work_volume_trim_argv} trims the
-    work volume at boot and sets its ext4 discard default, so later deletes
-    there return their blocks. The build volume gets neither. A Keeper's
+    (its capability set is empty). Boot does not currently run the discard
+    helper while workspace ownership is unverified, so deleted work blocks
+    may remain allocated on the host. The build volume gets no discard
+    configuration. A Keeper's
     [_build] is placed on a separate volume apart from {!work_volume_guest_root}.
     Its name does not establish exclusive ownership: deleting it may affect
     another workspace or an active build even if the output is derived. *)

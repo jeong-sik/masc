@@ -158,6 +158,9 @@ let provider root args =
   | ["list"; "--all"; "--format"; "json"] ->
     if Sys.file_exists (file "inventory-fails-after-run") && guest_rows () <> [] then exit 1;
     if Sys.file_exists (file "list-override") then print_string (read (file "list-override"))
+    else if Sys.file_exists (file "helper-after-run") && guest_rows () <> [] then
+      answer (`List (guest_rows () @
+        [`Assoc ["id", `String (Microvm.work_volume_trim_name ~keeper_name:keeper)]]))
     else answer (`List (guest_rows ()))
   | "image" :: "inspect" :: reference :: _ ->
     if Sys.file_exists (file "image-inspect-fails") then exit 1;
@@ -176,7 +179,8 @@ let provider root args =
     let name = List.hd (List.rev rest) in
     let bytes = Bytes.make 2048 '\000' in
     Bytes.set_uint16_le bytes (1024 + 0x38) 0xEF53;
-    Bytes.set_int32_le bytes (1024 + 0x100) 0x0400l;
+    Bytes.set_int32_le bytes (1024 + 0x100)
+      (if Sys.file_exists (file "discard-absent") then 0l else 0x0400l);
     write (file (name ^ ".img")) (Bytes.to_string bytes)
   | "run" :: rest ->
     if not (List.mem "-d" rest) then fail "discard-set volume must never start a helper";
@@ -200,6 +204,9 @@ let provider root args =
       flush stdout
     | None -> if List.mem "--probe" rest then (
       print_string (Exec_ssh_protocol.render_probe {name="masc-exec-shim"; version="3.0.0"; capabilities=[]; release=None; boot_id=None});
+      flush stdout)
+    else if List.mem "masc-mount-probe" rest then (
+      print_string "mounted\n";
       flush stdout)
     else if List.mem Microvm.shim_guest_path rest then (
       let header = read_exact Unix.stdin 8 in
@@ -236,6 +243,16 @@ let process_step root operation =
     | "attached" -> Turn.microvm_attached_endpoint ~config ~meta:(meta ()) ()
     | "prepare-identity" -> Result.bind (Turn.prepare_github_identity_secret_files ~timeout_sec:10. runtime)
         (fun _ -> Turn.microvm_remote_endpoint ~timeout_sec:10. runtime)
+    | "identity-helper-race" ->
+      Result.bind (Turn.prepare_github_identity_secret_files ~timeout_sec:10. runtime) (fun _ ->
+        let directory = value (Keeper_github_identity.ensure_config_dir ~config ~keeper_name:keeper) in
+        write (Filename.concat directory "hosts.yml")
+          "github.com:\n    user: fixture\n    oauth_token: second-fixture-token\n    git_protocol: https\n";
+        save_json (Filename.concat root "list-override")
+          (`List [json (Filename.concat root "guest.json");
+            `Assoc ["id", `String (Microvm.work_volume_trim_name ~keeper_name:keeper)]]);
+        Result.bind (Turn.prepare_github_identity_secret_files ~timeout_sec:10. runtime)
+          (fun _ -> Turn.microvm_remote_endpoint ~timeout_sec:10. runtime))
     | "turn" | "override" -> Turn.microvm_remote_endpoint ~timeout_sec:10. runtime
     | _ -> fail "unknown fixture step" in
   (match endpoint with
@@ -277,6 +294,18 @@ let step root operation =
       [|Sys.executable_name; "--step"; root; operation|] in
   ignore (In_channel.input_all input);
   Unix.close_process_in input
+
+let step_captured root operation =
+  let error_path = Filename.temp_file ~temp_dir:root "step-stderr-" ".txt" in
+  Fun.protect ~finally:(fun () -> Sys.remove error_path) (fun () ->
+    let output = Unix.openfile "/dev/null" [Unix.O_WRONLY] 0 in
+    let errors = Unix.openfile error_path [Unix.O_WRONLY; Unix.O_TRUNC] 0o600 in
+    let executable = Unix.realpath Sys.executable_name in
+    let pid = Fun.protect ~finally:(fun () -> Unix.close output; Unix.close errors) (fun () ->
+      Unix.create_process executable [|Sys.executable_name; "--step"; root; operation|]
+        Unix.stdin output errors) in
+    let _, status = Unix.waitpid [] pid in
+    status, read error_path)
 let entries root name = read (Filename.concat root name) |> String.split_on_char '\n'
   |> List.filter (fun line -> line <> "") |> List.map Yojson.Safe.from_string
 let calls root = entries root "calls" |> List.map (function
@@ -286,8 +315,41 @@ let boot root = check bool "cold process completed real boot path against provid
 let snapshot_path root = Keeper_microvm_github_identity.host_path ~base_path:root ~keeper_name:keeper ~backend ~network_mode
 let adoption_read = function
   | ["image"; "inspect"; "fixture:image"] -> true
+  | ["list"; "--all"; "--format"; "json"] -> true
   | ("inspect" | "exec") :: _ -> true
   | _ -> false
+
+let test_absent_discard_never_runs_the_legacy_helper () = with_fixture @@ fun root ->
+  write (Filename.concat root "discard-absent") "";
+  boot root;
+  let operations = calls root in
+  let runs = List.filter (function "run" :: _ -> true | _ -> false) operations in
+  check int "only the guest starts" 1 (List.length runs);
+  check bool "the run is the persistent guest" true
+    (List.for_all (function "run" :: "-d" :: _ -> true | _ -> false) runs);
+  let trim = Microvm.work_volume_trim_name ~keeper_name:keeper in
+  check bool "no name-scoped trim helper is deleted" false
+    (List.mem ["delete"; "--force"; trim] operations)
+
+let test_postboot_helper_refusal_preserves_the_new_guest () = with_fixture @@ fun root ->
+  let marker = Filename.concat root "helper-after-run" in
+  write marker "";
+  let status, stderr = step_captured root "turn" in
+  check bool "postboot helper refuses the first handoff" true (status = Unix.WEXITED 2);
+  check bool "the postboot helper gate supplied the refusal" true
+    (Astring.String.is_infix ~affix:"microvm_volume_helper_ownership_unverified" stderr);
+  let original = read (Filename.concat root "guest.json") in
+  let inode = (Unix.lstat (snapshot_path root)).st_ino in
+  check int "the guest was started once" 1 (count "run" root);
+  check int "no first handoff ran before refusal" 0 (List.length (entries root "requests"));
+  check int "the guest was not stopped" 0 (count "stop" root);
+  check int "the guest or helper was not deleted" 0 (count "delete" root);
+  Sys.remove marker;
+  check bool "a later process adopts after helper absence is observed" true
+    (step root "turn" = Unix.WEXITED 0);
+  check string "the same guest is retained" original (read (Filename.concat root "guest.json"));
+  check int "the same credential snapshot is retained" inode (Unix.lstat (snapshot_path root)).st_ino;
+  check int "the guest is not booted again" 1 (count "run" root)
 
 let test_fresh_process_adopts_without_boot_effects () = with_fixture @@ fun root ->
   boot root;
@@ -310,9 +372,12 @@ let test_wrapped_image_adopts_without_relabelling_or_boot_effects () = with_fixt
   wrapped_image root;
   boot root;
   let original = read (Filename.concat root "guest.json") in
-  let init = field "configuration" (Yojson.Safe.from_string original) |> field "initProcess" in
-  check string "explicit entrypoint replaces the image entrypoint" "tail" (text (field "executable" init));
-  check (list string) "explicit Keeper arguments replace image Cmd"
+  let config = field "configuration" (Yojson.Safe.from_string original) in
+  check string "provider identifies the actual image argument" "fixture:image"
+    (text (field "reference" (field "image" config)));
+  let init = field "initProcess" config in
+  check string "the requested entrypoint overrides the image" "tail" (text (field "executable" init));
+  check (list string) "image Cmd is replaced by explicit Keeper argv"
     ["-f"; "/dev/null"]
     (match field "arguments" init with `List values -> List.map text values | _ -> fail "missing init argv");
   let inode = (Unix.lstat (snapshot_path root)).st_ino in
@@ -330,6 +395,47 @@ let test_wrapped_image_adopts_without_relabelling_or_boot_effects () = with_fixt
 let replace key value = function
   | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
   | _ -> fail "fixture replacement requires an object"
+
+let test_helper_uncertainty_preserves_guest_on_adopt_and_replace () =
+  List.iter (fun needs_replace ->
+    List.iter (fun helper -> with_fixture (fun root ->
+      boot root;
+      let original = read (Filename.concat root "guest.json") in
+      let row = Yojson.Safe.from_string original in
+      let inode = (Unix.lstat (snapshot_path root)).st_ino in
+      if needs_replace then (
+        let config = field "configuration" row in
+        let changed = replace "configuration" (replace "labels" (`Assoc []) config) row in
+        save_json (Filename.concat root "inspect-override") (`List [changed]));
+      let expected_error = match helper with
+       | Some name ->
+         save_json (Filename.concat root "list-override")
+           (`List [row; `Assoc ["id", `String name]]);
+         "microvm_volume_helper_ownership_unverified"
+       | None ->
+         write (Filename.concat root "list-override") "[{}]";
+         "microvm_volume_helper_inventory_unverified" in
+      let before = List.length (calls root) in
+      let status, stderr = step_captured root "turn" in
+      check bool "helper presence or unknown inventory refuses the actual start" true
+        (status = Unix.WEXITED 2);
+      check bool "the helper gate supplied the refusal" true
+        (Astring.String.is_infix ~affix:expected_error stderr);
+      let after = calls root |> List.drop before in
+      check bool "the real helper inventory was requested" true
+        (List.mem ["list"; "--all"; "--format"; "json"] after);
+      check bool "refusal only reads provider state" true
+        (List.for_all (function ["list"; "--all"; "--format"; "json"] -> true
+          | ["image"; "inspect"; "fixture:image"] -> true
+          | "inspect" :: _ -> true | _ -> false) after);
+      check string "existing guest remains unchanged" original (read (Filename.concat root "guest.json"));
+      check int "existing credential snapshot remains" inode (Unix.lstat (snapshot_path root)).st_ino;
+      check int "no replacement boot" 1 (count "run" root);
+      check int "no guest stop" 0 (count "stop" root);
+      check int "no guest or helper deletion" 0 (count "delete" root)))
+      [ Some (Microvm.work_volume_trim_name ~keeper_name:keeper)
+      ; Some (Microvm.volume_repair_name ~keeper_name:keeper)
+      ; None ]) [ false; true ]
 
 let assert_wrapped_refusals_preserve_guest root original inode before =
   List.iter (fun () -> check bool "wrapped refusal repeats without replay" true
@@ -454,6 +560,23 @@ let test_identity_refresh_replaces_after_actual_absence () = with_fixture @@ fun
   check string "replacement mounts the refreshed immutable bytes" updated
     (read (Filename.concat (snapshot_path root) "hosts.yml"))
 
+let test_identity_refresh_preserves_guest_if_helper_appears () = with_fixture @@ fun root ->
+  ignore (configure_identity root "first-fixture-token");
+  boot root;
+  let original = read (Filename.concat root "guest.json") in
+  let inode = (Unix.lstat (snapshot_path root)).st_ino in
+  let status, stderr = step_captured root "identity-helper-race" in
+  check bool "refresh refuses a helper appearing after adoption" true (status = Unix.WEXITED 2);
+  check bool "the helper gate supplied the refresh refusal" true
+    (Astring.String.is_infix ~affix:"microvm_volume_helper_ownership_unverified" stderr);
+  check bool "fixture reached the second identity revision" true
+    (Sys.file_exists (Filename.concat root "list-override"));
+  check string "the old guest stays running" original (read (Filename.concat root "guest.json"));
+  check int "the old credential snapshot stays mounted" inode (Unix.lstat (snapshot_path root)).st_ino;
+  check int "refresh did not stop the guest" 0 (count "stop" root);
+  check int "refresh did not delete a guest or helper" 0 (count "delete" root);
+  check int "refresh did not start a replacement" 1 (count "run" root)
+
 let test_endpoint_uses_effective_network_override () = with_fixture @@ fun root ->
   check bool "runtime override reaches matching mounted snapshot" true (step root "override" = Unix.WEXITED 0);
   check bool "second process adopts override guest" true (step root "override" = Unix.WEXITED 0);
@@ -528,13 +651,17 @@ let () =
   | [_; "--step"; root; operation] -> process_step root operation
   | _ -> run "guest survival runtime against provider process fixture"
       ["process boundaries", [
+        test_case "absent discard never runs legacy helper" `Quick test_absent_discard_never_runs_the_legacy_helper;
+        test_case "postboot helper refusal preserves the new guest" `Quick test_postboot_helper_refusal_preserves_the_new_guest;
         test_case "uncertain postboot recovers without replay" `Quick test_uncertain_postboot_retains_guest_and_recovers_without_replay;
         test_case "unreadable inventory refuses boot" `Quick test_unreadable_inventory_never_authorizes_a_boot;
         test_case "unverified work mount blocks cold and warm handoff" `Quick test_unverified_work_mount_blocks_handoff;
         test_case "effective network override selects its mounted identity" `Quick test_endpoint_uses_effective_network_override;
         test_case "attached reader never rereads central identity" `Quick test_attached_reader_does_not_reread_central_identity;
         test_case "identity refresh follows actual guest absence" `Quick test_identity_refresh_replaces_after_actual_absence;
+        test_case "identity refresh preserves guest if helper appears" `Quick test_identity_refresh_preserves_guest_if_helper_appears;
         test_case "fresh process adopts without boot effects" `Quick test_fresh_process_adopts_without_boot_effects;
+        test_case "helper uncertainty preserves guest on adopt and replace" `Quick test_helper_uncertainty_preserves_guest_on_adopt_and_replace;
         test_case "wrapped image adopts without relabelling or boot effects" `Quick test_wrapped_image_adopts_without_relabelling_or_boot_effects;
         test_case "image prefix does not permit command tampering" `Quick test_image_prefix_does_not_permit_command_tampering;
         test_case "unavailable image metadata preserves wrapped guest" `Quick test_unavailable_image_metadata_preserves_wrapped_guest;

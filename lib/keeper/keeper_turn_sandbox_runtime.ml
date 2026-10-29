@@ -1044,42 +1044,6 @@ let prepare_microvm_shim_dir (t : t) ~backend =
   |> Result.map_error Keeper_microvm_shim_readiness.error_message
 ;;
 
-(** Observe the actual ext4 discard default before a new guest attaches its
-    volume. Only an absent default runs the tune2fs helper. Unreadable images
-    are reported without guessing a repair; helper cleanup must settle before
-    boot continues. Build deletion belongs to the guest's first handoff. *)
-let reclaim_work_volume_space ~backend ~keeper_name ~image ~volume_name ~timeout_sec =
-  match (backend : Keeper_microvm_backend.t) with
-  | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok ()
-  | Keeper_microvm_backend.Apple_container ->
-    (match
-       Keeper_sandbox_microvm.reclaim_apple_work_volume
-         ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
-         ~on_cleanup_error:(fun detail ->
-           Log.Keeper.warn "microvm work volume %s cleanup failed: %s" volume_name detail)
-         ~timeout_sec
-         ~remove_timeout_sec:(Env_config_sandbox.Runtime.microvm_remove_timeout_sec ())
-         ~keeper_name ~volume_name ~image
-     with
-     | Error _ as error -> error
-     | Ok Keeper_sandbox_microvm.Discard_already_set -> Ok ()
-     | Ok (Keeper_sandbox_microvm.Discard_unreadable failure) ->
-       Log.Keeper.warn "microvm work volume %s discard default unreadable: %s"
-         volume_name (Keeper_sandbox_microvm.discard_read_failure_message failure);
-       Ok ()
-     | Ok (Keeper_sandbox_microvm.Discard_helper_finished {status; output; after}) ->
-       (match status, after with
-        | Unix.WEXITED 0, Keeper_sandbox_microvm.Discard_default_set ->
-          Log.Keeper.info "microvm work volume %s discard default confirmed after helper" volume_name
-        | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _),
-          (Keeper_sandbox_microvm.Discard_default_set | Keeper_sandbox_microvm.Discard_default_absent
-           | Keeper_sandbox_microvm.Superblock_unreadable _) ->
-          Log.Keeper.warn "microvm work volume %s helper did not confirm discard readiness: %s (%s)"
-            volume_name (Keeper_sandbox_exec_failure.status_label status)
-            (Keeper_sandbox_runtime.docker_failure_output_for_log output));
-       Ok ())
-;;
-
 type microvm_guest_provisions =
   { work_volume_name : string
   ; build_volume_name : string option
@@ -1088,18 +1052,57 @@ type microvm_guest_provisions =
   ; shim_host_dir : string
   }
 
+(* Both legacy helper names are shared across workspaces. A complete listing
+   can show a helper is present, but cannot establish who owns it or stop an
+   older process from starting one after this observation. *)
+let ensure_apple_volume_helpers_absent ~keeper_name ~timeout_sec =
+  let module Inventory = Keeper_microvm_guest_inventory in
+  let unknown error =
+    Error ("microvm_volume_helper_inventory_unverified: " ^ Inventory.error_message error)
+  in
+  match Inventory.read_apple ~timeout_sec with
+  | Error error -> unknown error
+  | Ok inventory ->
+    let rec check = function
+      | [] -> Ok ()
+      | name :: rest ->
+        (match Inventory.presence ~guest_name:name inventory with
+         | Ok Inventory.Absent -> check rest
+         | Ok Inventory.Present ->
+           Error
+             (Printf.sprintf
+                "microvm_volume_helper_ownership_unverified: helper %s is present; its workspace owner is unknown"
+                name)
+         | Error error -> unknown error)
+    in
+    check [ Keeper_sandbox_microvm.work_volume_trim_name ~keeper_name
+          ; Keeper_sandbox_microvm.volume_repair_name ~keeper_name ]
+;;
+
 (** Everything a guest boot mounts besides config and identity, established
     before [container run] so a boot never starts without one of them. *)
 let microvm_guest_provisions (t : t) ~backend ~timeout_sec =
-  match microvm_work_volume ~backend ~keeper_name:t.meta.name ~timeout_sec with
-  | Error _ as err -> err
-  | Ok work_volume_name ->
-    (match microvm_build_volume ~backend ~keeper_name:t.meta.name ~timeout_sec with
+  (* Until helper and volume ownership are bound to a workspace, boot must
+     neither launch a name-scoped trim helper nor delete a possible peer's
+     helper. A present or unreadable helper inventory refuses provisioning.
+     The observation does not fence an older process from starting one later. *)
+  let helper_check = match (backend : Keeper_microvm_backend.t) with
+    | Keeper_microvm_backend.Apple_container ->
+      ensure_apple_volume_helpers_absent ~keeper_name:t.meta.name ~timeout_sec
+    | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok ()
+  in
+  match helper_check with
+  | Error _ as error -> error
+  | Ok () ->
+    (match microvm_work_volume ~backend ~keeper_name:t.meta.name ~timeout_sec with
      | Error _ as err -> err
-     | Ok build_volume_name ->
-       (match prepare_microvm_shim_dir t ~backend with
+     | Ok work_volume_name ->
+       (match microvm_build_volume ~backend ~keeper_name:t.meta.name ~timeout_sec with
         | Error _ as err -> err
-        | Ok shim_host_dir -> Ok { work_volume_name; build_volume_name; shim_host_dir }))
+        | Ok build_volume_name ->
+          (match prepare_microvm_shim_dir t ~backend with
+           | Error _ as err -> err
+           | Ok shim_host_dir -> Ok { work_volume_name; build_volume_name; shim_host_dir })))
 ;;
 
 (** Boot invariant (RFC-0052), fail-closed:
@@ -1161,6 +1164,9 @@ module For_testing_microvm = struct
   ;;
 
   let ensure_work_volume_mounted = ensure_microvm_work_volume_mounted
+
+  let provision_guest t ~backend ~timeout_sec =
+    microvm_guest_provisions t ~backend ~timeout_sec |> Result.map (fun _ -> ())
 end
 
 (** The keeper's root on the work volume, made inside the guest once it is
@@ -1606,12 +1612,7 @@ let start_process_bound_microvm_container ?timeout_sec (t : t) =
               ~name:t.meta.sandbox_image
               ~image
               ~timeout_sec:image_timeout)
-           (fun () ->
-             Result.bind (microvm_guest_provisions t ~backend ~timeout_sec:image_timeout)
-               (fun provisions ->
-                 Result.map (fun () -> provisions)
-                   (reclaim_work_volume_space ~backend ~keeper_name:t.meta.name ~image
-                      ~volume_name:provisions.work_volume_name ~timeout_sec:image_timeout)))
+           (fun () -> microvm_guest_provisions t ~backend ~timeout_sec:image_timeout)
        with
        | Error detail -> Error (Guest_provisions_unavailable detail)
        | Ok provisions ->
@@ -2048,6 +2049,8 @@ let with_apple_lifecycle_scope ~keeper_name ~unavailable callback =
 let prepare_apple_first_handoff ~timeout_sec (t : t) snapshot ~container_name =
   let open Result.Syntax in
   let backend = Keeper_microvm_backend.Apple_container in
+  let* () = ensure_apple_volume_helpers_absent ~keeper_name:t.meta.name ~timeout_sec
+    |> Result.map_error (fun detail -> Adopted_guest_volume_unverified detail) in
   let* () = Keeper_microvm_shim_readiness.verify ~base_path:t.config.base_path
       ~backend ~guest_name:container_name
     |> Result.map_error (fun error -> Guest_provisions_unavailable
@@ -2152,6 +2155,11 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
      | Ok None -> Error (Github_identity_invalid "validated guest identity is missing")
      | Error error -> Error (Guest_identity_store_unavailable error))
   | `Boot ->
+    (* Refuse before stopping or replacing any existing guest when a legacy
+       helper is present or its owner is unknown. Provisioning reads again
+       after teardown; neither read fences another process between them. *)
+    let* () = ensure_apple_volume_helpers_absent ~keeper_name:t.meta.name ~timeout_sec
+      |> Result.map_error (fun detail -> Guest_provisions_unavailable detail) in
     (* A stable name can now be absent after an external removal. Readiness
        belongs to the old guest and cannot authorize the new build volume. *)
     forget_microvm_work_root container_name;
@@ -2199,10 +2207,7 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
     else
       let* () = Keeper_sandbox_microvm.image_present_for backend ~name:t.meta.sandbox_image
           ~image ~timeout_sec |> Result.map_error (fun detail -> Guest_provisions_unavailable detail) in
-      let* provisions = microvm_guest_provisions t ~backend ~timeout_sec
-        |> Result.map_error (fun detail -> Guest_provisions_unavailable detail) in
-      let* () = reclaim_work_volume_space ~backend ~keeper_name:t.meta.name ~image
-          ~volume_name:provisions.work_volume_name ~timeout_sec
+      let* _provisions = microvm_guest_provisions t ~backend ~timeout_sec
         |> Result.map_error (fun detail -> Guest_provisions_unavailable detail) in
       let* gateway = ensure_policy_network backend ~keeper_name:t.meta.name t.network_mode
         |> Result.map_error (fun detail -> Policy_network_unavailable detail) in
@@ -2340,15 +2345,10 @@ let teardown_keeper_sandbox_by_name
       ?microvm_backend
       ()
   =
-  let trim_timeout_sec =
+  let helper_timeout_sec =
     match timeout_sec with
     | Some seconds -> seconds
     | None -> Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()
-  in
-  let trim_remove_timeout_sec =
-    match timeout_sec with
-    | Some seconds -> seconds
-    | None -> Env_config_sandbox.Runtime.microvm_remove_timeout_sec ()
   in
   let timeout_sec =
     Option.value
@@ -2395,12 +2395,10 @@ let teardown_keeper_sandbox_by_name
            network_mode, microvm_container_name ~config ~keeper_name ~network_mode)
            Keeper_types_profile_sandbox.all_network_modes in
        let perform release_identity =
-         let trim_cleanup = match microvm_backend with
+         let helper_observation = match microvm_backend with
            | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok ()
            | Keeper_microvm_backend.Apple_container ->
-             Keeper_sandbox_microvm.remove_apple_work_volume_trim
-               ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
-               ~timeout_sec:trim_timeout_sec ~remove_timeout_sec:trim_remove_timeout_sec ~keeper_name in
+             ensure_apple_volume_helpers_absent ~keeper_name ~timeout_sec:helper_timeout_sec in
          let guest_cleanup = List.fold_left (fun previous (network_mode, guest_name) ->
              let current = Result.bind
                  (stop_and_delete_microvm_container ~timeout_sec ~backend:microvm_backend guest_name)
@@ -2411,14 +2409,14 @@ let teardown_keeper_sandbox_by_name
              | Error _, Error detail ->
                Log.Keeper.warn "microvm teardown %s additional cleanup failed: %s" keeper_name detail;
                previous) (Ok ()) guests in
-         match guest_cleanup, trim_cleanup with
-         | (Error _ as error), Error trim_detail ->
+         match guest_cleanup, helper_observation with
+         | (Error _ as error), Error helper_detail ->
            Log.Keeper.warn
-             "microvm teardown %s: guest removal failed; helper cleanup also failed: %s"
-             keeper_name trim_detail;
+             "microvm teardown %s: guest removal failed; helper observation also failed: %s"
+             keeper_name helper_detail;
            error
          | (Error _ as error), Ok () -> error
-         | Ok (), trim_cleanup -> trim_cleanup in
+         | Ok (), helper_observation -> helper_observation in
        match microvm_backend with
        | Keeper_microvm_backend.Apple_container ->
          with_apple_lifecycle_scope ~keeper_name
@@ -2929,8 +2927,10 @@ let stop_container_for_github_identity_refresh ?timeout_sec t =
       with_apple_lifecycle_scope ~keeper_name:t.meta.name
         ~unavailable:(microvm_start_failure_message Runtime_context_unavailable)
         (fun ~fs ~scope ->
-          Result.bind (stop_and_delete_microvm_container ~timeout_sec ~backend (keeper_vm_name t))
-            (fun () ->
+          Result.bind (ensure_apple_volume_helpers_absent ~keeper_name:t.meta.name ~timeout_sec)
+            (fun () -> Result.bind
+              (stop_and_delete_microvm_container ~timeout_sec ~backend (keeper_vm_name t))
+              (fun () ->
               (* The guest is gone even if later snapshot cleanup cannot
                  settle. Do not retain Running authority for the next call. *)
               set_state t Not_started;
@@ -2940,7 +2940,7 @@ let stop_container_for_github_identity_refresh ?timeout_sec t =
                 ~network_mode:t.network_mode ~timeout_sec
               |> Result.map (function
                 | Keeper_microvm_github_identity.Removed | Keeper_microvm_github_identity.Already_absent -> ())
-              |> Result.map_error Keeper_microvm_github_identity.error_message))
+              |> Result.map_error Keeper_microvm_github_identity.error_message)))
     | Ok (Keeper_microvm_backend.Nerdctl_kata | Keeper_microvm_backend.Microsandbox) ->
     with_microvm_lifecycle_lock ~keeper_name:t.meta.name ~operation:"identity_refresh" (fun () ->
       let container_name = keeper_vm_name t in

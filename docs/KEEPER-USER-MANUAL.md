@@ -95,11 +95,11 @@ the requested plan and validating its immutable credential snapshot under
 `<base-path>/.masc/microvm/identity/apple_container/`. Unreadable facts
 or disagreement with the same plan refuse reuse and preserve the guest.
 
-Command comparison includes the image's OCI entrypoint. A read-only image
-inspection must match the guest's image descriptor and exact platform before
-its entrypoint is composed with the requested command. Missing or ambiguous
-image metadata refuses reuse; it never authorizes guest replacement. This
-keeps an unchanged guest reusable without changing its plan label.
+Apple boot overrides the image entrypoint with the requested executable. At
+reuse, read-only image inspection must match the guest's image descriptor and
+exact platform, and the actual command must match the requested command.
+Missing or ambiguous image metadata refuses reuse; it never authorizes guest
+replacement. An unchanged guest can keep its plan label.
 
 The shared exec shim configuration is initialized before endpoint admission.
 A missing or invalid installation is reported; repair it and restart the server
@@ -116,10 +116,20 @@ how to recover it. Neither result alone establishes that GitHub credentials are
 invalid. Admission refuses the guest in both cases.
 
 Sandbox status exposes the work volume's current discard default as `set`,
-`absent` or `unreadable`. A new boot runs the discard helper only when a fresh
-superblock read proves the default absent; an unreadable value never triggers
-a guessed repair. Build volumes are recreated on a new boot. Nerdctl/Kata
-retains its process ownership rules. See the
+`absent` or `unreadable`. While workspace ownership is unverified, a new boot
+does not automatically run the helper that changes the discard default. If
+the default is absent, deleting guest files may not immediately return host
+disk space. An Apple guest refuses a new boot or first process adoption when
+its name-scoped trim or repair helper is present or the helper inventory is
+unreadable; it preserves the helper. Cached endpoints and attached file reads
+do not repeat this check. Teardown also reports that observation without deleting a helper.
+This point-in-time check neither fences a later helper from another process
+nor proves volume ownership. Build volumes are recreated on a new boot.
+Nerdctl/Kata retains its process ownership rules. When available, use
+`container list --all --format json` and `container inspect <helper-name>` to
+read the helper's state and mounts and investigate its owner and other
+workspace users. Preserve the helper and volume if the inventory, ownership,
+or operation completion cannot be established. See the
 [guest survival RFC](rfc/RFC-keeper-guest-survives-restart.md) for the decisions.
 
 ### `mention_targets` is a list, and each entry is one name

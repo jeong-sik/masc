@@ -24239,7 +24239,7 @@ let main
     let preset_confirmation_changed = match reader with
       | Some (Preset_detail_scroll (_, Some confirmation)) ->
         preset_confirmation_needs_present state confirmation
-      | None | Some (Task_detail _ | Board_read _ | Message_scroll _
+      | None | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _
         | Schedule_detail_scroll _ | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _
         | Acting _ | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
         | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
@@ -26928,7 +26928,7 @@ and is loaded on demand through keeper_skill.
       in
       let preset_confirmation_wheel = match wheel_reader with
         | Some (Preset_detail_scroll _) -> true
-        | None | Some (Task_detail _ | Board_read _ | Message_scroll _
+        | None | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _
           | Schedule_detail_scroll _ | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _
           | Acting _ | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
           | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _

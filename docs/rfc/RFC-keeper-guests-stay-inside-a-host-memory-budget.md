@@ -17,7 +17,7 @@ related: ["0213", "0394", "0395", "0400", "0405", "0406", "0422", "keeper-guest-
 
 ## 0. 요약
 
-지금은 Keeper 마다 microVM 게스트가 하나 있고, 게스트는 Keeper 수명 동안 산다. 게스트 상한은 서버 환경변수 한 줄(`MASC_KEEPER_MICROVM_MEMORY=8g`)이다.
+지금은 Keeper 마다 microVM 게스트가 하나 있고, 게스트는 Keeper 수명 동안 산다. 게스트 상한은 runtime.toml 의 `[sandbox] microvm_memory` 한 줄이다.
 
 Apple 의 Virtualization.framework 는 게스트가 놓은 메모리를 호스트에 돌려주지 않는다. 그래서 게스트가 호스트에서 차지하는 메모리는 부팅 직후 약 290 MB 에서 시작해 파일 캐시로 상한까지 자란다. 지금 VM 프로세스 24개(Keeper 게스트 23개 포함)가 호스트 메모리 84.9 GiB(RAM 의 66%)를 잡고 있고, swap 은 96~97% 찼다.
 
@@ -37,7 +37,7 @@ VM 을 쓰는 Keeper 의 격리와 지금 인원은 그대로 둔다. 어디에 
 ### 1.1 지금 구조
 
 - `sandbox_profile = "microvm"` 인 Keeper 는 Apple `container` 게스트 하나를 Keeper 이름으로 띄운다(`masc-keeper-vm-<keeper>-...`, RFC-0405). 게스트는 턴이 아니라 Keeper 수명이고, 서버를 재시작해도 산다(#31340).
-- 게스트 상한은 서버 환경변수 `MASC_KEEPER_MICROVM_MEMORY=8g` 다. 코드 기본값은 2g 이다. `env_config_sandbox.ml` 주석에 따르면 2 GiB 게스트에서 빌드가 시간 초과이거나 exit 137 로 죽었다(2026-09-18 측정). Keeper TOML 의 `microvm_memory` 는 이 값을 Keeper 별로 덮어쓴다.
+- 게스트 상한은 runtime.toml 의 `[sandbox] microvm_memory` 다. 서버가 켜질 때 한 번 읽고, 서버를 부른 셸의 환경변수는 읽지 않는다. 코드 기본값은 2g 이다. `env_config_sandbox.ml` 주석에 따르면 2 GiB 게스트에서 빌드가 시간 초과이거나 exit 137 로 죽었다(2026-09-18 측정). Keeper TOML 의 `microvm_memory` 는 이 값을 Keeper 별로 덮어쓴다.
 - Apple 문서(`docs/technical-overview.md`, 1.3.1 태그와 main 이 같다)는 이렇게 적는다. "memory pages freed to the Linux operating system by processes running in the container's VM are not relinquished to the host." 줄이려면 "occasionally restart them" 하라고 한다.
 - container 1.3.1 에는 실행 중인 컨테이너의 메모리를 바꾸는 명령이 없다. `run -m` 은 만들 때만 적용되고, `container machine set memory=` 도 재시작 뒤에 적용된다.
 
@@ -112,7 +112,7 @@ VM 을 쓰는 Keeper 의 격리와 지금 인원은 그대로 둔다. 어디에 
 ### 3.2 Keeper 별 정책
 
 - Keeper 마다 다른 값은 Keeper TOML 에 둔다. 이미 있는 `microvm_memory`, `microvm_cpus` 에 셋을 더한다. `hibernate_after`(`"10m"` 같은 시간 또는 `"never"`), `hibernate_build_volume`(`"keep"` 또는 `"fresh"`), `hibernate_idle_procs`(그 Keeper 가 놀 때 게스트의 `numProcesses`, §3.3). 빌더는 `never` 와 `fresh` 로 시작하고, 가벼운 Keeper 는 측정 뒤 `10m` 으로 바꾼다.
-- 전체 환경변수 `MASC_KEEPER_MICROVM_MEMORY` 는 새 Keeper 의 기본값으로만 남긴다. 운영 값은 Keeper 별로 둔다.
+- 워크스페이스 기본값은 runtime.toml 의 `[sandbox] microvm_memory` 에만 둔다. 환경변수는 읽지 않는다. `masc restart` 는 부른 셸의 환경을 서버에 그대로 넘기는데, 옛 셸이 들고 있던 8g 가 서버로 들어가 게스트가 8 GiB 로 뜬 일이 2026-10-29 에 세 번 있었다. 운영 값은 Keeper 별로 둔다.
 - 크기 규칙: `상한 = ceil(AnonPages 최대치 × 1.5) + 캐시 여유 1 GiB`. AnonPages 최대치는 P0 의 27시간 측정에서 Keeper 별로 읽는다. 빌드하는 Keeper 는 측정이 빌드를 잡았는지 확인한다. 못 잡았으면 빌드 한 번을 돌려 잰다. 캐시 여유 1 GiB 는 가정이고, P2 에서 빌드 시간이 늘지 않는지로 확인한다. tmpfs(Shmem)를 쓰는 Keeper(지금 wkbl-front 1.04 GiB)는 그만큼 더한다.
 - 측정 전 처음 값은 가정이다. 가벼운 Keeper 2 GiB, 빌드하는 Keeper 6 GiB. 근거가 "2 GiB 에서 빌드가 실패했다"는 기록뿐이라 P0 결과로 바꾼다.
 - 크기를 바꾸면 계획 digest 가 달라져 그 Keeper 의 게스트가 다음 부팅에 교체된다. 교체는 그 Keeper 가 놀 때만 한다. 교체 때 게스트 안 프로세스와 빌드 볼륨은 사라지고, 작업 트리 볼륨은 남는다.
@@ -264,7 +264,7 @@ P0 의 sampler(부록 A)는 호스트 쪽 관측을 맡는다. P1 부터는 masc
 - 게스트 보고: `container stats --no-stream --format json` 의 `memoryUsageBytes`, `memoryLimitBytes`, `numProcesses`.
 - 게스트 안 구성: `container exec <게스트> cat /proc/meminfo` 의 MemTotal, MemFree, MemAvailable, Buffers, Cached, AnonPages.
 - 새 게스트: `container run -d --name mem-probe-20261027 -m 1g masc-sandbox:general sleep 120` 으로 띄워 3초와 18초 뒤 `footprint` 를 재고 `container stop`, `container rm` 으로 지웠다.
-- 서버 환경: masc 프로세스 환경에서 `MASC_KEEPER_MICROVM_MEMORY` 한 항목만 읽었다.
+- 서버 설정: runtime.toml 에서 `[sandbox] microvm_memory` 한 항목만 읽었다.
 - 활동 수: `system_log_2026-10-27.jsonl` 의 `tool_call tool=Execute` 줄에서 Keeper 이름과 시각을 뽑아 5·15·30분 창마다 서로 다른 Keeper 수를 셌다.
 - 턴 실패율(제공자 원인 제외): `keeper cycle FAILED` 줄을 Keeper 별로 세고 `dispatched=` 뒤 원인이 Provider 한도·오류·DNS·`auth status` 인 줄을 뺀다.
 - 27시간 sampler: `.tmp/keeper-vm-memory/sample.sh` 가 1분마다 호스트 swap·load·압축 메모리, masc RSS, `container stats`, 2분마다 게스트 `/proc/meminfo` 를 `.tmp/keeper-vm-memory/samples-20261027.jsonl` 에 쌓는다. `samples-20261027.stop` 파일을 만들면 멈춘다.

@@ -27,8 +27,15 @@ type reload_class =
   | Next_turn
   | Process_restart
 
+(** How a row is fed. [Toml_and_env key]: the TOML key seeds the variable, and a
+    variable set in the process environment is a caller override that wins.
+    [Toml_only key]: the TOML key is the only input and the process environment
+    is never read, so the shell that started the server cannot change what the
+    file says; [env_name] is then only the key the boot load stores the value
+    under. [Env_only]: no TOML key. *)
 type exposure =
   | Toml_and_env of string
+  | Toml_only of string
   | Env_only
 
 (** How {!effective_value} reads a row: [Reader] renders the owning typed
@@ -79,6 +86,10 @@ val toml_env_mappings : (string * string) list
 
 val toml_key_opt : setting -> string option
 val find_by_toml_key : string -> setting option
+
+val reads_process_env : setting -> bool
+(** [false] only for a [Toml_only] row: the process environment does not feed
+    it, so a variable of the same name is not a caller override. *)
 
 val provider_default_display : string
 (** Rendering of a setting left unset so the selected runtime keeps its

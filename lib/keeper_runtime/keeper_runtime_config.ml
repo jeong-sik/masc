@@ -9,6 +9,19 @@ let key_to_env = Keeper_runtime_setting_registry.toml_env_mappings
 let env_is_set env_lookup env_name =
   Option.is_some (env_lookup env_name)
 
+(* Store keys of the rows whose TOML key is their only input. A variable of the
+   same name in the process environment is not a caller override for them. *)
+let file_only_env_names =
+  List.filter_map
+    (fun (row : Keeper_runtime_setting_registry.setting) ->
+       if Keeper_runtime_setting_registry.reads_process_env row
+       then None
+       else Some row.env_name)
+    Keeper_runtime_setting_registry.toml_settings
+
+let env_preempts env_lookup env_name =
+  (not (List.mem env_name file_only_env_names)) && env_is_set env_lookup env_name
+
 let resolved_config_root ~base_path =
   let inputs = Config_dir_resolver.inputs_from_env () in
   let resolution =
@@ -53,16 +66,18 @@ let value_to_string = function
 (** Resolve a single TOML key to its boot-override value. Returns
     [Some (env_name, value)] when the key is present in the doc and the
     corresponding env var is unset (so the TOML value would apply).
-    Returns [None] when the env var is already set (caller override wins)
-    or the key is absent / unsupported.
+    Returns [None] when the env var is already set (caller override wins;
+    a [Toml_only] row has no such override) or the key is absent /
+    unsupported.
 
     This is the single precedence rule shared by the pure preview
     ([resolve_overrides]) and the effectful apply path ([apply_one]):
-    env var > TOML > hardcoded default. *)
+    env var > TOML > hardcoded default, with the env var left out for
+    [Toml_only] rows. *)
 let resolve_one
     ?(env_lookup = Env_config_core.raw_value_opt)
     (doc : Keeper_toml_loader.toml_doc) (toml_key, env_name) =
-  if env_is_set env_lookup env_name then
+  if env_preempts env_lookup env_name then
     (* Caller env override — leave alone. *)
     None
   else
@@ -390,7 +405,16 @@ let configured_value doc (row : Keeper_runtime_setting_registry.setting) =
   | None -> None
 ;;
 
-let effective_source env_name = Config_boot_overrides.source env_name
+(* A [Toml_only] row ignores the process environment, so the layer in effect is
+   the file's value or the default whatever the shell exported. *)
+let effective_source (row : Keeper_runtime_setting_registry.setting) =
+  if Keeper_runtime_setting_registry.reads_process_env row
+  then Config_boot_overrides.source row.env_name
+  else (
+    match Config_boot_overrides.get_opt row.env_name with
+    | Some _ -> Config_boot_overrides.Boot_override
+    | None -> Config_boot_overrides.Default)
+;;
 
 (* The panel's label for the layer in effect; a boot override is the
    runtime file's value, so it reads "toml". *)
@@ -401,7 +425,7 @@ let effective_source_label = function
 ;;
 
 let application_status doc (row : Keeper_runtime_setting_registry.setting) =
-  match configured_value doc row, effective_source row.env_name with
+  match configured_value doc row, effective_source row with
   | Some _, Config_boot_overrides.Env -> "preempted_by_env"
   | Some configured, Config_boot_overrides.Boot_override ->
     (match toml_value_opt row.env_name with
@@ -419,7 +443,8 @@ let application_status doc (row : Keeper_runtime_setting_registry.setting) =
   | None, (Config_boot_overrides.Env | Config_boot_overrides.Default) ->
     (match row.exposure with
      | Keeper_runtime_setting_registry.Env_only -> "environment_only"
-     | Keeper_runtime_setting_registry.Toml_and_env _ -> "not_configured")
+     | Keeper_runtime_setting_registry.Toml_and_env _
+     | Keeper_runtime_setting_registry.Toml_only _ -> "not_configured")
 ;;
 
 (** The value the row's runtime consumer reads, from the accessor the
@@ -440,7 +465,7 @@ let settings_projection_to_yojson doc =
   in
   let project (row : Keeper_runtime_setting_registry.setting) =
     let configured_value = configured_value doc row in
-    let source = effective_source_label (effective_source row.env_name) in
+    let source = effective_source_label (effective_source row) in
     let effective_value = effective_setting_value row in
     let application_status = application_status doc row in
     `Assoc
@@ -481,7 +506,7 @@ let overlay_application_to_yojson doc =
     Keeper_runtime_setting_registry.toml_settings
     |> List.filter (fun row ->
       Option.is_some (configured_value doc row)
-      || effective_source row.env_name = Config_boot_overrides.Boot_override)
+      || effective_source row = Config_boot_overrides.Boot_override)
   in
   let classified =
     List.map

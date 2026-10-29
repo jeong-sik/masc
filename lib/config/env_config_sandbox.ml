@@ -232,33 +232,43 @@ module Runtime = struct
      killed (exit 137). The defaults stay what guests booted with until now;
      a keeper that builds names its own size, or the workspace raises these
      in runtime.toml ([sandbox]). *)
-  let microvm_memory_env = "MASC_KEEPER_MICROVM_MEMORY"
+  let microvm_memory_key = "MASC_KEEPER_MICROVM_MEMORY"
   let microvm_memory_default = "2g"
-  let microvm_cpus_env = "MASC_KEEPER_MICROVM_CPUS"
+  let microvm_cpus_key = "MASC_KEEPER_MICROVM_CPUS"
   let microvm_cpus_default = 4
 
-  (* Blank is unset, as it is for [get_int]. A value that is set and does not
+  (* The workspace size is read from the boot override store, where the
+     [sandbox] table of runtime.toml leaves it, and never from the process
+     environment. [masc restart] gives the server the environment of the shell
+     that ran it, so a variable read here let that shell, not the file, decide
+     the size of every guest. The keys keep their old names only because the
+     store is keyed by them.
+
+     Blank is unset, as it is for [get_int]. A value that is set and does not
      parse is refused rather than read as the default: the operator asked for
-     a size, and booting on another one would say nothing. *)
-  let configured_guest_dimension env_name ~default parse =
+     a size, and booting on another one would say nothing. The refusal names
+     the runtime.toml key. *)
+  let configured_guest_dimension ~key ~toml_key ~default parse =
     let raw =
-      match raw_value_opt env_name with
+      match Config_boot_overrides.get_opt key with
       | Some value when String.trim value <> "" -> value
       | Some _ | None -> default
     in
-    parse raw |> Result.map_error (fun detail -> env_name ^ ": " ^ detail)
+    parse raw |> Result.map_error (fun detail -> toml_key ^ ": " ^ detail)
   ;;
 
   let microvm_memory () =
     configured_guest_dimension
-      microvm_memory_env
+      ~key:microvm_memory_key
+      ~toml_key:"sandbox.microvm_memory"
       ~default:microvm_memory_default
       Keeper_microvm_guest_size.memory_of_string
   ;;
 
   let microvm_cpus () =
     configured_guest_dimension
-      microvm_cpus_env
+      ~key:microvm_cpus_key
+      ~toml_key:"sandbox.microvm_cpus"
       ~default:(string_of_int microvm_cpus_default)
       Keeper_microvm_guest_size.cpus_of_string
   ;;

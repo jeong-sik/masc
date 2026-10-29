@@ -20,8 +20,14 @@ type reload_class =
   | Next_turn
   | Process_restart
 
+(* [Toml_and_env]: the TOML key seeds the variable, and a variable set in the
+   process environment is a caller override that wins. [Toml_only]: the TOML key
+   is the only input and the process environment is not read, so the shell that
+   started the server cannot change what the file says; [env_name] is then only
+   the key the boot load stores the value under. [Env_only]: no TOML key. *)
 type exposure =
   | Toml_and_env of string
+  | Toml_only of string
   | Env_only
 
 (* How the operator surface reads the value a runtime consumer sees. A
@@ -701,11 +707,14 @@ let all =
       ~category:Turn
       "Maximum durable queue selections admitted into one turn; the rest stay pending for a later turn (#29365)"
   ; (* The workspace default for a microVM guest's size. A keeper's own
-       [microvm_memory] / [microvm_cpus] wins per dimension. Read at each
-       guest start, and a running guest booted with another size is replaced
-       at the keeper's next turn rather than adopted. *)
+       [microvm_memory] / [microvm_cpus] wins per dimension. runtime.toml is
+       the only input and the process environment is not read: [masc restart]
+       hands the server the environment of whichever shell ran it, and a shell
+       opened before its rc file changed carried an old size into the server
+       three times on 2026-10-29. The file is read once at server start, so a
+       change takes a restart; a running guest booted with another size is
+       replaced at the keeper's next turn rather than adopted. *)
     setting
-      ~reload_class:Next_turn
       ~effective:
         (Reader
            (fun () ->
@@ -713,7 +722,7 @@ let all =
               | Ok memory -> Keeper_microvm_guest_size.memory_argv memory
               | Error detail -> raise (Env_config_core.Config_error detail))))
       ~env_name:"MASC_KEEPER_MICROVM_MEMORY"
-      ~exposure:(Toml_and_env "sandbox.microvm_memory")
+      ~exposure:(Toml_only "sandbox.microvm_memory")
       ~value_kind:String
       ~default:Env_config_sandbox.Runtime.microvm_memory_default
       ~consumers:
@@ -724,7 +733,6 @@ let all =
       "MicroVM guest memory: a whole number followed by m or g"
   ; setting
       ~range:(int_range ~min:1 ())
-      ~reload_class:Next_turn
       ~effective:
         (Reader
            (fun () ->
@@ -732,7 +740,7 @@ let all =
               | Ok cpus -> display_int (Keeper_microvm_guest_size.cpus_count cpus)
               | Error detail -> raise (Env_config_core.Config_error detail))))
       ~env_name:"MASC_KEEPER_MICROVM_CPUS"
-      ~exposure:(Toml_and_env "sandbox.microvm_cpus")
+      ~exposure:(Toml_only "sandbox.microvm_cpus")
       ~value_kind:Integer
       ~default:(string_of_int Env_config_sandbox.Runtime.microvm_cpus_default)
       ~consumers:
@@ -911,8 +919,14 @@ let all =
 
 let toml_key_opt setting =
   match setting.exposure with
-  | Toml_and_env key -> Some key
+  | Toml_and_env key | Toml_only key -> Some key
   | Env_only -> None
+;;
+
+let reads_process_env setting =
+  match setting.exposure with
+  | Toml_and_env _ | Env_only -> true
+  | Toml_only _ -> false
 ;;
 
 let toml_settings = List.filter (fun row -> Option.is_some (toml_key_opt row)) all
@@ -1067,7 +1081,12 @@ let setting_to_yojson row =
   `Assoc
     [ "key", (match toml_key_opt row with Some value -> `String value | None -> `Null)
     ; "env", `String row.env_name
-    ; "exposure", `String (match row.exposure with Toml_and_env _ -> "toml_and_env" | Env_only -> "env_only")
+    ; ( "exposure"
+      , `String
+          (match row.exposure with
+           | Toml_and_env _ -> "toml_and_env"
+           | Toml_only _ -> "toml_only"
+           | Env_only -> "env_only") )
     ; "type", `String (value_kind_label row.value_kind)
     ; "range", range_to_yojson row.value_range
     ; "default", `String row.default_display

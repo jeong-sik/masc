@@ -132,7 +132,8 @@ let test_web_search_credentials_are_registered_env_only () =
     | Some row ->
       (match row.exposure with
        | Keeper_runtime_setting_registry.Env_only -> ()
-       | Keeper_runtime_setting_registry.Toml_and_env key ->
+       | Keeper_runtime_setting_registry.Toml_and_env key
+       | Keeper_runtime_setting_registry.Toml_only key ->
          failf "%s leaked a TOML key: %s" env_name key);
       check string
         (env_name ^ " category")

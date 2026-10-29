@@ -127,18 +127,17 @@ module Runtime : sig
       a size. The registry row displays these rather than restating them. *)
 
   val microvm_memory : unit -> (Keeper_microvm_guest_size.memory, string) result
-  (** The workspace's guest memory: [MASC_KEEPER_MICROVM_MEMORY], which
-      [runtime.toml] [sandbox.microvm_memory] seeds, else
-      {!microvm_memory_default}. Blank counts as unset. A set value that does
-      not parse is [Error] naming the variable, never the default. The guest
-      holds this allocation for its whole keeper lifetime -- size it for the
-      heaviest build the keeper runs, not the average turn. *)
+  (** The workspace's guest memory: [runtime.toml] [sandbox.microvm_memory],
+      else {!microvm_memory_default}. The process environment is not read.
+      Blank counts as unset. A set value that does not parse is [Error] naming
+      the key, never the default. The guest holds this allocation for its
+      whole keeper lifetime -- size it for the heaviest build the keeper runs,
+      not the average turn. *)
 
   val microvm_cpus : unit -> (Keeper_microvm_guest_size.cpus, string) result
-  (** The workspace's guest CPU count: [MASC_KEEPER_MICROVM_CPUS], which
-      [runtime.toml] [sandbox.microvm_cpus] seeds, else
-      {!microvm_cpus_default}. Same blank and refusal rules as
-      {!microvm_memory}. *)
+  (** The workspace's guest CPU count: [runtime.toml] [sandbox.microvm_cpus],
+      else {!microvm_cpus_default}. The process environment is not read. Same
+      blank and refusal rules as {!microvm_memory}. *)
 
   val microvm_guest_size :
     memory:Keeper_microvm_guest_size.memory option ->

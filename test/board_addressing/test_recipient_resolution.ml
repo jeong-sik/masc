@@ -83,6 +83,9 @@ let test_candidate_shape () =
   check name_or_none "plain name" (Some "alice") (shape "alice");
   check name_or_none "case is preserved" (Some "MiXeD-Agent") (shape "MiXeD-Agent");
   check name_or_none "digits, underscore and hyphen" (Some "a_1-b") (shape "a_1-b");
+  (* Real stored names start with a digit: a commit hash after an [@]. *)
+  check name_or_none "starts with a digit" (Some "1e9fb53c9b") (shape "1e9fb53c9b");
+  check name_or_none "only digits" (Some "9") (shape "9");
   check name_or_none "empty" None (shape "");
   check name_or_none "npm scope" None (shape "types/node");
   check name_or_none "parent directory" None (shape "../x");
@@ -129,14 +132,62 @@ let test_candidate_cannot_leave_a_directory () =
   (* Strings of length 1 to 5 over the three name characters: 3 + 9 + 27 + 81 + 243. *)
   check int "every name made of name characters was accepted" 363 !accepted
 
+(* Every byte, alone, first, last and inside a name. A name character is an
+   ASCII letter, a digit, an underscore or a hyphen, and nothing else is: the
+   exhaustive walk above uses ten characters, and this one covers the other
+   246. A byte that is checked only on its own can hide in a name that is
+   checked at one end, such as a trailing newline. *)
+let test_candidate_accepts_exactly_the_name_characters () =
+  let is_name_character = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> true
+    | _ -> false
+  in
+  for code = 0 to 255 do
+    let byte = String.make 1 (Char.chr code) in
+    List.iter
+      (fun (place, name) ->
+         check bool
+           (Printf.sprintf "byte %d %s" code place)
+           (is_name_character (Char.chr code))
+           (Option.is_some (Candidate.of_string name)))
+      [ "alone", byte; "first", byte ^ "a"; "last", "a" ^ byte; "inside", "a" ^ byte ^ "a" ]
+  done
+
 let test_resolve_sorts_the_answers () =
   check_resolve "a Keeper name" ~recipients:[ "alice" ] ~unresolved:[] [ "alice" ];
   check_resolve "an alias" ~recipients:[ "alice" ] ~unresolved:[] [ "al" ];
   check_resolve "a name nobody declared" ~recipients:[] ~unresolved:[ "check" ] [ "check" ];
   check_resolve "no candidates" ~recipients:[] ~unresolved:[] [];
+  (* [resolve] has no length rule. A name no Keeper can have is asked like any
+     other and comes back unresolved. What a lookup does with a name it cannot
+     hold is the lookup's business (RFC section 3.1). *)
   let long = String.make 300 'a' in
-  check_resolve "a name too long for any Keeper is prose" ~recipients:[]
-    ~unresolved:[ long ] [ long ]
+  let declared, asked = recording registry in
+  check_resolve ~declared "a name longer than any Keeper name" ~recipients:[]
+    ~unresolved:[ long ] [ long ];
+  check strings "the long name reached the declaration" [ long ] (asked ())
+
+(* The caller's [equal] decides which recipients are one. Here two spellings of a
+   Keeper come back from the declaration, and only the caller's equality knows
+   they are the same one. *)
+let test_resolve_merges_with_the_callers_equality () =
+  let declared candidate =
+    match Candidate.to_string candidate with
+    | "first" -> Ok (Some "Alice")
+    | "second" -> Ok (Some "alice")
+    | _ -> Ok None
+  in
+  let same_ignoring_case left right =
+    String.equal (String.lowercase_ascii left) (String.lowercase_ascii right)
+  in
+  match
+    Recipient_resolution.resolve ~equal:same_ignoring_case ~declared
+      (List.map candidate_exn [ "first"; "second" ])
+  with
+  | Ok { Recipient_resolution.recipients; unresolved } ->
+    check strings "one recipient, the first spelling" [ "Alice" ] recipients;
+    check strings "nothing unresolved" [] unresolved
+  | Error _ -> fail "the lookup failed"
 
 (* The samples are in neither ascending nor descending order, so a sort cannot
    pass for "the order written". *)
@@ -158,7 +209,13 @@ let test_resolve_merges_duplicates () =
   check_resolve "a recipient written again after another one" ~recipients:[ "alice"; "bob" ]
     ~unresolved:[] [ "alice"; "bob"; "al" ];
   check_resolve "an unknown name written again after another one" ~recipients:[]
-    ~unresolved:[ "check"; "lint" ] [ "check"; "lint"; "check" ]
+    ~unresolved:[ "check"; "lint" ] [ "check"; "lint"; "check" ];
+  (* The same spelling twice never reaches the merge, because each spelling is
+     asked once. A second spelling of the middle recipient does. *)
+  check_resolve "a second spelling of a recipient in the middle"
+    ~recipients:[ "alice"; "bob"; "carol" ] ~unresolved:[] [ "alice"; "bob"; "carol"; "BOB" ];
+  check_resolve "a second spelling of the recipient just before"
+    ~recipients:[ "alice"; "bob" ] ~unresolved:[] [ "alice"; "bob"; "Bob" ]
 
 let test_resolve_case () =
   check_resolve "the declaration folds case, so two spellings are one recipient"
@@ -187,6 +244,12 @@ let test_resolve_failure () =
   check_failure ~declared "an unreadable Keeper is a failure, not prose"
     (Unreadable "erin") [ "alice"; "erin"; "bob"; "check" ];
   check strings "nothing is asked after the failure" [ "alice"; "erin" ] (asked ());
+  let declared, asked = recording unreadable in
+  check_failure ~declared "the first name fails" (Unreadable "erin") [ "erin"; "alice" ];
+  check strings "only the first name was asked" [ "erin" ] (asked ());
+  let declared, asked = recording unreadable in
+  check_failure ~declared "the last name fails" (Unreadable "erin") [ "alice"; "bob"; "erin" ];
+  check strings "every name up to the last was asked" [ "alice"; "bob"; "erin" ] (asked ());
   let declared, asked = recording registry in
   check_resolve ~declared "no candidates ask nothing" ~recipients:[] ~unresolved:[] [];
   check strings "nothing was asked" [] (asked ())
@@ -234,11 +297,15 @@ let () =
     [ ( "candidate",
         [ test_case "shape" `Quick test_candidate_shape;
           test_case "cannot leave a directory" `Quick
-            test_candidate_cannot_leave_a_directory ] );
+            test_candidate_cannot_leave_a_directory;
+          test_case "accepts exactly the name characters" `Quick
+            test_candidate_accepts_exactly_the_name_characters ] );
       ( "resolve",
         [ test_case "sorts the answers" `Quick test_resolve_sorts_the_answers;
           test_case "order" `Quick test_resolve_order;
           test_case "merges duplicates" `Quick test_resolve_merges_duplicates;
+          test_case "merges with the caller's equality" `Quick
+            test_resolve_merges_with_the_callers_equality;
           test_case "case" `Quick test_resolve_case;
           test_case "asks once per spelling" `Quick test_resolve_asks_once_per_spelling;
           test_case "failure" `Quick test_resolve_failure ] );

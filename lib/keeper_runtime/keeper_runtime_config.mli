@@ -12,6 +12,10 @@
       2. TOML value from [<resolved config root>/runtime.toml]
       3. Hardcoded default in the owning [Env_config_*] reader.
 
+    A row the registry declares [Toml_only] has no step 1: the process
+    environment is not read for it, so the shell that started the server
+    cannot change what the file says.
+
     The TOML loader runs at server startup, after OCaml module initialization.
     It stores boot defaults in a process-local override table; TOML-backed
     readers resolve that table when called instead of caching module-load
@@ -28,7 +32,8 @@
 
     Process-level env vars set by the caller take precedence — the TOML
     value is only applied when the env var is unset. This preserves the
-    CI/test workflow of overriding via env.
+    CI/test workflow of overriding via env. A [Toml_only] row is applied
+    whatever the environment holds.
 
     Returns [Ok num_overrides] (count of TOML keys actually applied,
     excluding those preempted by existing env vars), or [Error msg] on

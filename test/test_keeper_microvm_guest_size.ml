@@ -163,8 +163,19 @@ let test_an_unreadable_default_refuses_only_who_leans_on_it () =
       (contains detail "memory default unreadable" && contains detail "cpu default unreadable")
 ;;
 
-(* The workspace default as the boot reads it. runtime.toml reaches it through
-   the same variable, so this is also what a [sandbox] table sets. *)
+(* The workspace default as the boot reads it: from the store that the
+   [sandbox] table of runtime.toml leaves its values in, and from nowhere
+   else. [None] clears the entry. *)
+let with_boot_override key value f =
+  let previous = Config_boot_overrides.get_opt key in
+  let put = function
+    | Some stored -> Config_boot_overrides.set key stored
+    | None -> Config_boot_overrides.clear key
+  in
+  put value;
+  Fun.protect ~finally:(fun () -> put previous) f
+;;
+
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -174,8 +185,8 @@ let with_env name value f =
 ;;
 
 let test_the_workspace_default_is_typed_and_refuses_a_bad_value () =
-  with_env "MASC_KEEPER_MICROVM_MEMORY" "" @@ fun () ->
-  with_env "MASC_KEEPER_MICROVM_CPUS" "" @@ fun () ->
+  with_boot_override "MASC_KEEPER_MICROVM_MEMORY" None @@ fun () ->
+  with_boot_override "MASC_KEEPER_MICROVM_CPUS" None @@ fun () ->
   (match Sandbox_runtime.microvm_guest_size ~memory:None ~cpus:None with
    | Ok resolved ->
      check size_testable "unset is the built-in size"
@@ -184,22 +195,54 @@ let test_the_workspace_default_is_typed_and_refuses_a_bad_value () =
           ~cpus:Sandbox_runtime.microvm_cpus_default)
        resolved
    | Error detail -> fail detail);
-  with_env "MASC_KEEPER_MICROVM_MEMORY" "12g" (fun () ->
+  with_boot_override "MASC_KEEPER_MICROVM_MEMORY" (Some "12g") (fun () ->
     match Sandbox_runtime.microvm_memory () with
-    | Ok memory -> check int "the variable's size" 12288 (Size.memory_mib memory)
+    | Ok memory -> check int "the file's size" 12288 (Size.memory_mib memory)
     | Error detail -> fail detail);
-  with_env "MASC_KEEPER_MICROVM_MEMORY" "12" (fun () ->
+  with_boot_override "MASC_KEEPER_MICROVM_MEMORY" (Some "12") (fun () ->
     match Sandbox_runtime.microvm_memory () with
     | Ok memory -> failf "a bare number was read as %s" (Size.memory_argv memory)
     | Error detail ->
-      check bool "the refusal names the variable" true
-        (contains detail "MASC_KEEPER_MICROVM_MEMORY"));
-  with_env "MASC_KEEPER_MICROVM_CPUS" "0" (fun () ->
+      check bool "the refusal names the key" true
+        (contains detail "sandbox.microvm_memory"));
+  with_boot_override "MASC_KEEPER_MICROVM_CPUS" (Some "0") (fun () ->
     match Sandbox_runtime.microvm_cpus () with
     | Ok cpus -> failf "0 CPUs was read as %d" (Size.cpus_count cpus)
     | Error detail ->
-      check bool "the refusal names the variable" true
-        (contains detail "MASC_KEEPER_MICROVM_CPUS"))
+      check bool "the refusal names the key" true
+        (contains detail "sandbox.microvm_cpus"))
+;;
+
+(* [masc restart] gives the server the environment of whichever shell ran it.
+   A shell opened before its rc file changed still held the old size, and the
+   server preferred it to runtime.toml: 8g guests instead of 2g, three times on
+   2026-10-29. The size has one input, the file. *)
+let test_the_process_environment_does_not_set_the_workspace_size () =
+  with_env "MASC_KEEPER_MICROVM_MEMORY" "8g" @@ fun () ->
+  with_env "MASC_KEEPER_MICROVM_CPUS" "9" @@ fun () ->
+  with_boot_override "MASC_KEEPER_MICROVM_MEMORY" None @@ fun () ->
+  with_boot_override "MASC_KEEPER_MICROVM_CPUS" None @@ fun () ->
+  let default_memory_mib =
+    Size.memory_mib (memory_exn Sandbox_runtime.microvm_memory_default)
+  in
+  (match Sandbox_runtime.microvm_memory () with
+   | Ok memory ->
+     check int "no file value: the default, not the variable" default_memory_mib
+       (Size.memory_mib memory)
+   | Error detail -> fail detail);
+  (match Sandbox_runtime.microvm_cpus () with
+   | Ok cpus ->
+     check int "no file value: the default, not the variable"
+       Sandbox_runtime.microvm_cpus_default (Size.cpus_count cpus)
+   | Error detail -> fail detail);
+  with_boot_override "MASC_KEEPER_MICROVM_MEMORY" (Some "3g") (fun () ->
+    match Sandbox_runtime.microvm_memory () with
+    | Ok memory -> check int "the file's value, not the variable" 3072 (Size.memory_mib memory)
+    | Error detail -> fail detail);
+  with_boot_override "MASC_KEEPER_MICROVM_CPUS" (Some "6") (fun () ->
+    match Sandbox_runtime.microvm_cpus () with
+    | Ok cpus -> check int "the file's value, not the variable" 6 (Size.cpus_count cpus)
+    | Error detail -> fail detail)
 ;;
 
 (* ── runtime.toml ───────────────────────────────────────────────────── *)
@@ -221,6 +264,41 @@ let test_runtime_toml_sandbox_table_seeds_the_variables () =
   let zero_cpus = parse_or_fail "[sandbox]\nmicrovm_cpus = 0\n" in
   check bool "zero CPUs fails validation" false
     (Keeper_runtime_config.validation_report_is_valid (Keeper_runtime_config.validate_doc zero_cpus))
+;;
+
+(* A variable the caller exported preempts every row it names, except a row the
+   file alone feeds. *)
+let test_the_loader_applies_a_file_only_row_whatever_the_environment_holds () =
+  let doc =
+    parse_or_fail
+      "[sandbox]\nmicrovm_memory = \"2g\"\nmicrovm_cpus = 6\nmicrovm_dns = \"1.1.1.1\"\n"
+  in
+  let _count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:(fun _ -> Some "from the shell") doc
+  in
+  check (option string) "memory is the file's" (Some "2g")
+    (List.assoc_opt "MASC_KEEPER_MICROVM_MEMORY" overrides);
+  check (option string) "cpus is the file's" (Some "6")
+    (List.assoc_opt "MASC_KEEPER_MICROVM_CPUS" overrides);
+  check (option string) "a row the environment may preempt still defers" None
+    (List.assoc_opt "MASC_KEEPER_MICROVM_DNS" overrides)
+;;
+
+let test_the_operator_surface_does_not_blame_the_environment_for_a_file_only_row () =
+  let open Yojson.Safe.Util in
+  with_env "MASC_KEEPER_MICROVM_MEMORY" "8g" @@ fun () ->
+  with_boot_override "MASC_KEEPER_MICROVM_MEMORY" None @@ fun () ->
+  let row =
+    Keeper_runtime_config.settings_projection_to_yojson
+      (parse_or_fail "[sandbox]\nmicrovm_memory = \"2g\"\n")
+    |> to_list
+    |> List.find (fun row ->
+      String.equal (row |> member "env" |> to_string) "MASC_KEEPER_MICROVM_MEMORY")
+  in
+  check string "the shell's variable is not the layer in effect" "default"
+    (row |> member "source" |> to_string);
+  check string "the file waits for a restart, it is not preempted" "pending_restart"
+    (row |> member "application_status" |> to_string)
 ;;
 
 (* ── the keeper TOML ────────────────────────────────────────────────── *)
@@ -405,10 +483,16 @@ let () =
             test_an_unreadable_default_refuses_only_who_leans_on_it
         ; test_case "the workspace default is typed" `Quick
             test_the_workspace_default_is_typed_and_refuses_a_bad_value
+        ; test_case "the process environment does not set it" `Quick
+            test_the_process_environment_does_not_set_the_workspace_size
         ] )
     ; ( "runtime_toml"
       , [ test_case "[sandbox] seeds the variables" `Quick
             test_runtime_toml_sandbox_table_seeds_the_variables
+        ; test_case "a file-only row is applied whatever the environment holds" `Quick
+            test_the_loader_applies_a_file_only_row_whatever_the_environment_holds
+        ; test_case "the operator surface does not blame the environment" `Quick
+            test_the_operator_surface_does_not_blame_the_environment_for_a_file_only_row
         ] )
     ; ( "keeper_toml"
       , [ test_case "a keeper names its own size" `Quick test_a_keeper_names_its_own_size

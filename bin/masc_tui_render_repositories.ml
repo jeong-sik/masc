@@ -313,6 +313,85 @@ let render_repository_list (state : state) =
         List.iter c.push detail
       end)
 
+type repository_changes_geometry =
+  { rcg_context_lines : string list
+  ; rcg_header : bool
+  ; rcg_error_rows : int
+  ; rcg_list_height : int
+  }
+
+(* Selection context costs rows before the list. At short heights it is
+   folded as a unit, so a partial context never makes a checkout claim and a
+   selected file always has a row. Keys and drawing ask this same geometry
+   for the cursor they are about to select. *)
+let repository_changes_geometry (state : state) ~cols ~budget ~cursor =
+  let budget = max 1 budget in
+  let path = Option.bind state.repository_changes (fun snapshot ->
+    List.nth_opt snapshot.rcs_changes cursor |> Option.map (fun row -> row.rc_path)) in
+  let context_lines = build_change_context_lines ~cols (resolve_change_context state ~path_opt:path) in
+  let error_rows =
+    match state.repository_changes_error with
+    | None -> 0
+    | Some _ when budget >= 3 -> 2
+    | Some _ when budget >= 2 -> 1
+    | Some _ -> 0 in
+  let header = budget - error_rows >= 3 in
+  let header_rows = if header then 2 else 0 in
+  let context_lines =
+    if 2 * List.length context_lines <= budget - error_rows - header_rows - 1
+    then context_lines else [] in
+  let list_height = max 1
+      (budget - error_rows - header_rows - (2 * List.length context_lines)) in
+  { rcg_context_lines = context_lines; rcg_header = header;
+    rcg_error_rows = error_rows; rcg_list_height = list_height }
+
+let repository_changes_content_height state ~cols ~budget ~cursor =
+  (repository_changes_geometry state ~cols ~budget ~cursor).rcg_list_height
+
+let repository_changes_context_visible state ~cols ~budget ~cursor =
+  (repository_changes_geometry state ~cols ~budget ~cursor).rcg_context_lines <> []
+
+type repository_change_authority =
+  { rca_scope : acting_pane_scope
+  ; rca_repository : Tui_decode.repository_change_scope option
+  ; rca_surface : string
+  ; rca_rows : int
+  ; rca_cols : int
+  ; rca_path : string
+  ; rca_context : change_context
+  }
+
+(* The candidate names the full related record, not just the visible text.
+   The caller publishes it only when this exact frame is presented. *)
+let repository_changes_authority state ~surface_key ~terminal_rows ~cols =
+  let rows = surface_body_rows state ~terminal_rows in
+  let path =
+    match state.repository_changes_open, surface_key, state.repository_changes_diff_path with
+    | true, "repository-changes", None
+      when repository_changes_context_visible state ~cols
+          ~budget:(max 1 (rows - Masc_tui_frame.chrome_rows))
+          ~cursor:state.repository_changes_cursor ->
+        Option.bind state.repository_changes (fun snapshot ->
+          List.nth_opt snapshot.rcs_changes state.repository_changes_cursor
+          |> Option.map (fun row -> row.rc_path))
+    | true, "repository-changes-diff", Some path
+      when repository_changes_diff_context_visible state ~terminal_rows ~cols ~path -> Some path
+    | (true | false), _, _ -> None in
+  Option.map (fun path ->
+    { rca_scope = state.workspace_authority, state.workspace_read_authority
+    ; rca_repository = state.repository_changes_scope
+    ; rca_surface = surface_key; rca_rows = terminal_rows; rca_cols = cols
+    ; rca_path = path
+    ; rca_context = resolve_change_context state ~path_opt:(Some path) }) path
+
+let same_repository_change_authority left right =
+  same_acting_pane_scope left.rca_scope right.rca_scope
+  && left.rca_repository = right.rca_repository
+  && String.equal left.rca_surface right.rca_surface
+  && left.rca_rows = right.rca_rows && left.rca_cols = right.rca_cols
+  && String.equal left.rca_path right.rca_path
+  && left.rca_context = right.rca_context
+
 let render_repository_changes (state : state) =
   match state.repository_changes_diff_path with
   | Some path -> render_repository_changes_diff state ~path
@@ -341,39 +420,34 @@ let render_repository_changes (state : state) =
       let title =
         detail_heading ~cols ~lead:(Lead_text " MASC Git Changes — ")
           ~id:scope_name
-          ~after:(Printf.sprintf " (%d)" (List.length changes))
+          ~after:(Printf.sprintf " (%d)%s" (List.length changes)
+            (if Option.is_some state.repository_changes_error then " · read failed" else ""))
           ~tail:(connection_badge state)
       in
-      let selected_path =
-        match List.nth_opt changes state.repository_changes_cursor with
-        | Some row -> Some row.rc_path
-        | None -> None
-      in
-      let change_ctx = resolve_change_context state ~path_opt:selected_path in
-      let context_lines = build_change_context_lines change_ctx in
+      let recorded_changes = current_keeper_chat_file_changes state in
       surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repository-changes"
         ~title ~hints:Masc_tui_keys.footer_hints_git_changes
         ~body:(fun ~budget c ->
+          let geometry = repository_changes_geometry state ~cols ~budget
+              ~cursor:state.repository_changes_cursor in
           List.iter
             (fun ctx_line ->
               c.push ctx_line;
               c.push_divider ())
-            context_lines;
-          c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf "  %-18s %s" "State" "Path");
-          c.push_divider ();
-          (match state.repository_changes_error with
-           | None -> ()
-           | Some detail ->
+            geometry.rcg_context_lines;
+          if geometry.rcg_header then begin
+            c.push_styled ~style:(Theme.recede ())
+              (Printf.sprintf "  %-18s %s" "State" "Path");
+            c.push_divider ()
+          end;
+          (match state.repository_changes_error, geometry.rcg_error_rows with
+           | None, _ -> ()
+           | Some detail, rows when rows > 0 ->
                c.push_styled ~style:(Theme.bad ())
                  ("  " ^ Keeper_chat.terminal_safe_text detail);
-               c.push_divider ());
-          let fixed =
-            2
-            + (List.length context_lines * 2)
-            + if Option.is_some state.repository_changes_error then 2 else 0
-          in
-          let room = max 1 (budget - fixed) in
+               if rows = 2 then c.push_divider ()
+           | Some _, _ -> ());
+          let room = geometry.rcg_list_height in
           if changes = [] then
             c.push_styled ~style:(Theme.recede ())
               (match state.repository_changes, state.repository_changes_error with
@@ -381,18 +455,25 @@ let render_repository_changes (state : state) =
                | Some _, None -> "  (working tree clean)"
                | _, Some _ -> "  (Git changes unavailable)")
           else
-            let changes_window = Rows.of_list ~first:state.repository_changes_scroll ~height:room changes in
+            let max_scroll = max 0 (List.length changes - room) in
+            let scroll = max 0 (min state.repository_changes_scroll max_scroll) in
+            let scroll =
+              match List.nth_opt changes state.repository_changes_cursor with
+              | None -> scroll
+              | Some _ -> Masc_tui_scroll.ensure_visible
+                  ~cursor:state.repository_changes_cursor ~height:room scroll in
+            let changes_window = Rows.of_list ~first:scroll ~height:room changes in
             for i = 0 to room - 1 do
-              let idx = state.repository_changes_scroll + i in
+              let idx = scroll + i in
               match Rows.at changes_window idx with
               | None -> c.push_empty ()
               | Some row ->
                   let attr =
-                    match state.msg_file_changes with
-                    | Some snap ->
+                    match recorded_changes, geometry.rcg_context_lines with
+                    | Some snap, _ :: _ ->
                         (match
                            List.find_opt
-                             (file_change_matches_path row.rc_path)
+                             (file_change_matches_path ~scope:state.repository_changes_scope row.rc_path)
                              snap.Masc.Tui_decode.fcs_changes
                          with
                          | Some fc ->
@@ -401,16 +482,27 @@ let render_repository_changes (state : state) =
                                | Some tid -> tid
                                | None -> fc.fc_keeper
                              in
-                             " [" ^ t ^ "]"
+                             " [record:" ^ t ^ "]"
                          | None -> "")
-                    | None -> ""
+                    | Some _, [] | None, _ -> ""
+                  in
+                  let path = Terminal_text.single_line row.rc_path in
+                  let path_cells = Message_layout.display_width path in
+                  let available = max 1 (framed_inner_width cols - 21) in
+                  (* A partial record label can look like a different task.
+                     Drop it when it would crowd out the path; the selected
+                     record still has its own context above the list. *)
+                  let attr =
+                    if Message_layout.display_width attr + min 8 path_cells <= available
+                    then attr else ""
                   in
                   let line =
-                    Printf.sprintf "  %-18s %s%s"
+                    Printf.sprintf "%s%-18s %s%s"
+                      (if geometry.rcg_error_rows = 0 && Option.is_some state.repository_changes_error
+                       then "! " else "  ")
                       (repository_change_status row)
                       (Message_layout.truncate_middle
-                         (max 8 (framed_inner_width cols - 21 - Message_layout.display_width attr))
-                         (Terminal_text.single_line row.rc_path))
+                         (max 1 (available - Message_layout.display_width attr)) path)
                       attr
                   in
                   if idx = state.repository_changes_cursor then c.push_selected line

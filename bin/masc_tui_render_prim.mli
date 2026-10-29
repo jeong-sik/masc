@@ -53,6 +53,7 @@ type change_context = {
   ctx_turn : int option;
   ctx_comment : string option;
   ctx_pr : Masc_tui_pr_ref.t option;
+  ctx_pr_slug : string option;
 }
 
 type context_pane_body =
@@ -606,12 +607,22 @@ val repository_change_status : Masc.Tui_decode.repository_change -> string
 
 val box_line_span : Buffer.t -> int -> Span.t -> unit
 
-val file_change_matches_path : string -> Masc.Tui_decode.file_change -> bool
+val file_change_matches_path :
+  scope:Masc.Tui_decode.repository_change_scope option ->
+  string -> Masc.Tui_decode.file_change -> bool
+(** A file attribution requires the same repository identity and relative
+    path. Project, bundle and absolute paths do not establish that match. *)
 
 val resolve_change_context :
   Masc_tui_types.state -> path_opt:string option -> change_context
 
-val build_change_context_lines : change_context -> string list
+val build_change_context_lines : cols:int -> change_context -> string list
+
+val repository_changes_diff_context_visible :
+  Masc_tui_types.state -> terminal_rows:int -> cols:int -> path:string -> bool
+
+val repository_changes_diff_page_rows :
+  Masc_tui_types.state -> terminal_rows:int -> cols:int -> path:string -> int
 
 val tree_diff_gutter : Masc.Tui_decode.git_diff_row -> string
 (** Literal old/new coordinates and change marker; its measured width is shared

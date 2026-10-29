@@ -17,6 +17,241 @@ let identity base_path : Tui_decode.server_identity =
   ; sid_scheduler = None
   }
 
+let test_chat_file_observation_retains_its_read_epoch () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"chat-files" ~local_base_path:"/workspace/a"
+      ~port:8935 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match;
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_file_changes_keeper <- Some "alpha";
+  state.repository_changes_scope <- Some (Tui_decode.Repository_change_repository "repo");
+  state.keepers <- [Tui_decode.{ k_origin=Persisted_keeper; k_name="alpha";
+    k_paused=false; k_identity=Error "not observed";
+    k_activity=Some { k_current_task_id=Some "task-current"; k_total_turns=0;
+      k_total_tokens=0; k_total_cost_usd=Keeper_cost_coverage.empty;
+      k_last_turn_ts=""; k_last_proactive_outcome=None } }];
+  let change : Tui_decode.file_change =
+    { fc_at=1.; fc_keeper="alpha"; fc_turn=None; fc_task_id=Some "task-original";
+      fc_execution_id=None; fc_line_evidence=None;
+      fc_location=Fc_in_repo {repo_id="repo";relative_path="original.ml"};
+      fc_kind=Fc_written {content=""}; fc_succeeded=true } in
+  let foreign = {change with fc_task_id=Some "task-foreign";
+    fc_location=Fc_in_repo {repo_id="other-repo";relative_path="original.ml"}} in
+  let snapshot : Tui_decode.file_change_snapshot =
+    { fcs_keeper="alpha"; fcs_window_hours=24.; fcs_calls_in_window=2;
+      fcs_changes=[foreign;change]; fcs_over_budget=0; fcs_malformed=0 } in
+  let observe () = keeper_chat_file_changes
+      ~scope:(state.workspace_authority, state.workspace_read_authority) snapshot in
+  let original = observe () in
+  state.msg_file_changes <- Some original;
+  let context path = Masc_tui_render_prim.resolve_change_context state ~path_opt:(Some path) in
+  let assert_no_attribution label path =
+    let context = context path in
+    Alcotest.(check (option string)) (label ^ " keeper") None context.ctx_keeper;
+    Alcotest.(check (option string)) (label ^ " task") None context.ctx_task_id in
+  Alcotest.(check (option string)) "current file uses its recorded task"
+    (Some "task-original") (context "original.ml").ctx_task_id;
+  Alcotest.(check bool) "related record does not claim the same checkout" true
+    (List.exists (String.equal "  Checkout unverified")
+      (Masc_tui_render_prim.build_change_context_lines ~cols:80 (context "original.ml")));
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let previous_reserved = !(Masc_tui_render_prim.acting_pane_reserved_cols) in
+  let size value = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some value)) in
+  Fun.protect ~finally:(fun () -> size previous_size;
+      Masc_tui_render_prim.acting_pane_reserved_cols := previous_reserved) (fun () ->
+    size (32, 50);
+    Masc_tui_render_prim.acting_pane_reserved_cols := 0;
+    let screen frame = frame.Masc_tui_frame_presenter.lines
+      |> List.map Masc_tui_theme.strip_sgr |> String.concat "\n" in
+    let frame, _ = Masc_tui_render_prim.render_repository_changes_diff state ~path:"original.ml" in
+    let has screen text = Astring.String.is_infix ~affix:text screen in
+    let diff_screen = screen frame in
+    Alcotest.(check bool) "narrow diff shows the related record and the checkout limit" true
+      (has diff_screen "Record: Keeper: alpha" && has diff_screen "Task: task-original"
+       && has diff_screen "Checkout unverified");
+    state.repository_changes <- Some Tui_decode.{
+      rcs_scope=Repository_change_repository "repo"; rcs_total=1;
+      rcs_changes=[{rc_path="original.ml";rc_staged=false;rc_unstaged=true;
+        rc_untracked=false;rc_conflicted=false}]};
+    let frame, _ = Masc_tui_render_repositories.render_repository_changes state in
+    let narrow = screen frame in
+    Alcotest.(check bool) "narrow changes list keeps the record context without a cut label" true
+      (has narrow "Record: Keeper: alpha" && has narrow "Task: task-original"
+       && has narrow "Checkout unverified" && not (has narrow "[record:"));
+    size (32, 80);
+    let frame, _ = Masc_tui_render_repositories.render_repository_changes state in
+    Alcotest.(check bool) "wide changes list labels the related record" true
+      (has (screen frame) "[record:task-original]");
+    size (14, 80);
+    state.repository_changes_diff_error <- Some "fixture read failed";
+    let frame, _ = Masc_tui_render_prim.render_repository_changes_diff state ~path:"original.ml" in
+    Alcotest.(check bool) "short diff retains its error, back hint, and footer" true
+      (has (screen frame) "fixture read failed" && has (screen frame) "esc back to files");
+    Alcotest.(check bool) "hidden diff context cannot authorize a related action" false
+      (Masc_tui_render_prim.repository_changes_diff_context_visible state
+        ~terminal_rows:13 ~cols:80 ~path:"original.ml");
+    state.repository_changes_diff_error <- None;
+    let long_keeper = "keeper-with-a-very-long-identity" in
+    let long_task = "task-0123456789-abcdefghijklmnopqrstuvwxyz" in
+    state.msg_file_changes_keeper <- Some long_keeper;
+    state.msg_file_changes <- Some (keeper_chat_file_changes
+      ~scope:(state.workspace_authority,state.workspace_read_authority)
+      {snapshot with fcs_keeper=long_keeper;
+        fcs_changes=[{change with fc_keeper=long_keeper;fc_task_id=Some long_task}]});
+    let long_lines = Masc_tui_render_prim.build_change_context_lines ~cols:25 (context "original.ml") in
+    let joined = List.map String.trim long_lines |> String.concat "" in
+    Alcotest.(check bool) "narrow context preserves the complete Keeper and task identities" true
+      (has joined long_keeper && has joined long_task
+       && List.for_all (fun line -> Masc_tui_message_layout.display_width line <= 23) long_lines);
+    Alcotest.(check bool) "a tall narrow diff exposes the complete related context" true
+      (Masc_tui_render_prim.repository_changes_diff_context_visible state
+        ~terminal_rows:41 ~cols:25 ~path:"original.ml");
+    let foreign_pr = { (context "original.ml") with
+      ctx_pr=Some (Masc_tui_pr_ref.Pull_url {slug="other/repository";number=42});
+      ctx_pr_slug=Some "other/repository" } in
+    let pr_lines = Masc_tui_render_prim.build_change_context_lines ~cols:25 foreign_pr in
+    let pr_text = List.map String.trim pr_lines |> String.concat "" in
+    Alcotest.(check bool) "the full PR repository is visible even after wrapping" true
+      (has pr_text "other/repository#42");
+    let task title : Tui_decode.task =
+      {id=long_task;title;status=Masc_domain.Todo;priority=0;goal_ids=[]} in
+    state.tasks <- [task "https://github.com/other/repository/pull/42"];
+    Alcotest.(check (option string)) "an explicit PR retains its own repository" (Some "other/repository")
+      (context "original.ml").ctx_pr_slug;
+    let repository remote : Tui_decode.repository =
+      {rp_id="repo";rp_name="repo";rp_codebase=None;rp_url=remote;rp_local_path="/repo";
+       rp_resolved_local_path="/repo";rp_default_branch="main";
+       rp_status=Unrecognised_repository_status "fixture";rp_keepers=[];rp_auto_sync=false} in
+    let set_remote remote = state.repositories <- Some Tui_decode.{
+      rs_repositories=[repository remote];rs_total=1} in
+    state.tasks <- [task "PR-42"];
+    state.repository_changes_open <- true;
+    set_remote "https://github.com/first/repository";
+    Alcotest.(check (option string)) "a PR token uses its selected repository" (Some "first/repository")
+      (context "original.ml").ctx_pr_slug;
+    let candidate () = Masc_tui_render_repositories.repository_changes_authority state
+        ~surface_key:"repository-changes" ~terminal_rows:31 ~cols:80 in
+    let first_pr = candidate () in
+    set_remote "https://github.com/second/repository";
+    let second_pr = candidate () in
+    Alcotest.(check bool) "same-number PRs in different repositories change authority" true
+      (Option.is_some first_pr && Option.is_some second_pr
+       && not (Option.equal Masc_tui_render_repositories.same_repository_change_authority first_pr second_pr));
+    state.tasks <- [];
+    state.repositories <- None;
+    state.repository_changes_open <- false;
+    state.msg_file_changes_keeper <- Some "alpha";
+    state.msg_file_changes <- Some original;
+    let previous_view = state.view and previous_open = state.repository_changes_open in
+    state.view <- Repositories;
+    state.repository_changes_open <- true;
+    let paths = List.init 12 (fun n -> Printf.sprintf "file-%02d.ml" n) in
+    let changes = List.map (fun path -> Tui_decode.{rc_path=path; rc_staged=false;
+      rc_unstaged=true;rc_untracked=false;rc_conflicted=false}) paths in
+    state.repository_changes <- Some Tui_decode.{rcs_scope=Repository_change_repository "repo";
+      rcs_changes=changes;rcs_total=List.length changes};
+    let records = paths |> List.filteri (fun n _ -> n mod 2 = 0)
+      |> List.map (fun path -> {change with fc_location=Fc_in_repo {repo_id="repo";relative_path=path}}) in
+    state.msg_file_changes <- Some (keeper_chat_file_changes
+      ~scope:(state.workspace_authority,state.workspace_read_authority)
+      {snapshot with fcs_changes=records});
+    size (32, 80);
+    state.repository_changes_cursor <- 0;
+    let authority () = Masc_tui_render_repositories.repository_changes_authority state
+        ~surface_key:"repository-changes" ~terminal_rows:31 ~cols:80 in
+    let first = authority () in
+    Alcotest.(check bool) "a visible selected record has presentation authority" true (Option.is_some first);
+    state.repository_changes_cursor <- 2;
+    let next = authority () in
+    Alcotest.(check bool) "a cursor change retires the previously presented file" false
+      (Option.equal Masc_tui_render_repositories.same_repository_change_authority first next);
+    let original_read_authority = state.workspace_read_authority in
+    state.workspace_read_authority <- ref ();
+    Alcotest.(check bool) "a retired workspace read cannot authorize its record" true
+      (Option.is_none (authority ()));
+    state.workspace_read_authority <- original_read_authority;
+    Alcotest.(check bool) "a short list does not authorize folded record context" true
+      (Option.is_none (Masc_tui_render_repositories.repository_changes_authority state
+        ~surface_key:"repository-changes" ~terminal_rows:10 ~cols:80));
+    let draw () = let frame, _ = Masc_tui_render_repositories.render_repository_changes state in screen frame in
+    List.iter (fun (terminal_rows, error) ->
+      size (terminal_rows, 80);
+      state.repository_changes_error <- error;
+      let body_rows = surface_body_rows state ~terminal_rows:(terminal_rows - 1) in
+      let budget = max 1 (body_rows - Masc_tui_frame.chrome_rows) in
+      state.repository_changes_cursor <- 11;
+      state.repository_changes_scroll <- 0;
+      Alcotest.(check bool) "resize keeps the selected file visible without another key" true
+        (has (draw ()) "file-11.ml");
+      state.repository_changes_scroll <- 0;
+      List.iteri (fun cursor path ->
+        let height = Masc_tui_render_repositories.repository_changes_content_height state ~cols:80 ~budget ~cursor in
+        state.repository_changes_cursor <- cursor;
+        state.repository_changes_scroll <- Masc_tui_scroll.ensure_visible
+          ~cursor ~height state.repository_changes_scroll;
+        Alcotest.(check bool) ("moving to " ^ path ^ " keeps it visible") true (has (draw ()) path)) paths)
+      [18, None; 11, Some "read failed"];
+    state.view <- previous_view;
+    state.repository_changes_open <- previous_open;
+    state.repository_changes_error <- None;
+    state.msg_file_changes <- Some original);
+  assert_no_attribution "unmatched file" "other.ml";
+  let absolute = {change with fc_location=Fc_at_absolute_path {path="/elsewhere/original.ml"}} in
+  Alcotest.(check bool) "absolute basename cannot authorize a repository match" false
+    (Masc_tui_render_prim.file_change_matches_path
+      ~scope:state.repository_changes_scope "original.ml" absolute);
+  state.repository_changes_scope <- Some Tui_decode.Repository_change_project;
+  assert_no_attribution "project scope without repository identity" "original.ml";
+  state.repository_changes_scope <- Some (Tui_decode.Repository_change_repository "repo");
+  Alcotest.(check bool) "confirmed observation is available for attribution" true
+    (Option.is_some (current_keeper_chat_file_changes state));
+  let Workspace_authority generation = state.workspace_authority in
+  state.workspace_authority <- Workspace_authority (generation + 1);
+  Alcotest.(check bool) "a different workspace retires the original reading" true
+    (keeper_chat_file_changes_stale state original);
+  state.workspace_authority <- Workspace_authority (generation + 2);
+  Alcotest.(check bool) "returning to A does not revive A's old epoch" true
+    (keeper_chat_file_changes_stale state original);
+  let original = observe () in
+  state.msg_file_changes <- Some original;
+  let index = keeper_chat_file_changes_index state in
+  state.msg_file_changes_loading <- true;
+  Alcotest.(check bool) "an in-flight refresh does not claim current attribution" true
+    (Option.is_none (current_keeper_chat_file_changes state));
+  assert_no_attribution "refreshing file" "original.ml";
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "health unavailable";
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "the original snapshot and index remain together" true
+    (Option.exists (fun retained -> retained == original) state.msg_file_changes
+     && keeper_chat_file_changes_index state == index);
+  Alcotest.(check bool) "unconfirmed workspace makes the retained observation stale" true
+    (keeper_chat_file_changes_stale state original
+     && Option.is_none (current_keeper_chat_file_changes state));
+  assert_no_attribution "unconfirmed file" "original.ml";
+  state.workspace_identity <- Workspace_identity_match;
+  Alcotest.(check bool) "reconfirming health does not refresh the old file reading" true
+    (keeper_chat_file_changes_stale state original);
+  let fresh = observe () in
+  state.msg_file_changes <- Some fresh;
+  Alcotest.(check bool) "a successful successor reading restores attribution" true
+    (not (keeper_chat_file_changes_stale state fresh)
+     && Option.is_some (current_keeper_chat_file_changes state));
+  Alcotest.(check (option string)) "successor restores the original file task"
+    (Some "task-original") (context "original.ml").ctx_task_id;
+  state.msg_file_changes <- Some (keeper_chat_file_changes
+    ~scope:(state.workspace_authority, state.workspace_read_authority)
+    {snapshot with fcs_changes=[{change with fc_task_id=None}]});
+  Alcotest.(check (option string)) "missing file task is not the Keeper's current task" None
+    (context "original.ml").ctx_task_id;
+  state.msg_file_changes <- Some fresh;
+  state.msg_file_changes_error <- Some "refresh failed";
+  Alcotest.(check bool) "a failed refresh retains but marks the observation stale" true
+    (keeper_chat_file_changes_stale state fresh
+     && Option.is_none (current_keeper_chat_file_changes state))
+
 let test_same_endpoint_restart_replaces_a_with_b () =
   let current = ref None in
   let apply reading =
@@ -5320,6 +5555,8 @@ let () =
             test_request_authority_requires_complete_current_identity
         ; Alcotest.test_case "same endpoint replaces A with B" `Quick
             test_same_endpoint_restart_replaces_a_with_b
+        ; Alcotest.test_case "chat file observation retains its read epoch" `Quick
+            test_chat_file_observation_retains_its_read_epoch
         ; Alcotest.test_case "failed probe is unread, not stale" `Quick
             test_failed_probe_is_unread_not_stale
         ; Alcotest.test_case "canonical aliases match" `Quick

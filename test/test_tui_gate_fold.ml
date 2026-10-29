@@ -155,7 +155,31 @@ let test_narrow_chat_notice_has_no_old_row_action () =
       check bool "the folded Gate row has an action" true (has_action (Render.chat_row_actions ()));
       set_size (30, 20);
       ignore (Render.render_keeper_message state);
-      check bool "the narrow notice has no retained row action" false (has_action (Render.chat_row_actions ())))
+      check bool "the narrow notice has no retained row action" false (has_action (Render.chat_row_actions ()));
+      state.msg_tool_visibility <- Types.Tools_results;
+      let rec first_supported height =
+        if height > 30 then fail "no supported height for the Gate fixture";
+        set_size (height, 100);
+        let frame, _ = Render.render_keeper_message state in
+        if List.exists (fun line -> contains line "Keeper chat needs a larger terminal")
+             frame.Masc_tui_frame_presenter.lines
+        then first_supported (height + 1)
+        else height
+      in
+      let minimum = first_supported 11 in
+      set_size (30, 100);
+      ignore (Render.render_keeper_message state);
+      check bool "the supported results view has a folded action" true
+        (has_action (Render.chat_row_actions ()));
+      state.keeper_calls_keeper <- Some "k";
+      state.keeper_calls_error <- Some "test refresh failure";
+      set_size (minimum, 100);
+      let frame, _ = Render.render_keeper_message state in
+      check bool "warning rows make an insufficient-height viewport show a notice" true
+        (List.exists (fun line -> contains line "Keeper chat needs a larger terminal")
+          frame.Masc_tui_frame_presenter.lines);
+      check bool "the notice retires the previous Gate action" false
+        (has_action (Render.chat_row_actions ())))
 
 (* #32956: the turn that received the replay failed after the model answered.
    The run is not folded: the failed step stays its own row so it is seen. *)

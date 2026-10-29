@@ -922,9 +922,8 @@ let origin_display_to_string = function
 ;;
 
 (* Name only modes the operator expanded; the resting chat needs no badges. *)
-let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
-  let parts =
-    List.filter_map Fun.id
+let chat_visibility_parts ~memory ~reasoning ~tools ~origin =
+  List.filter_map Fun.id
       [ (match memory with
          | Memory_hidden -> None
          | Memory_summary -> Some "journal:summary"
@@ -942,8 +941,10 @@ let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
          | Tools_results -> Some "tools:results"
          | Tools_full -> Some "tools:full")
       ]
-  in
-  String.concat " " parts
+;;
+
+let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
+  String.concat " " (chat_visibility_parts ~memory ~reasoning ~tools ~origin)
 ;;
 
 let next_reasoning_visibility = function
@@ -8401,6 +8402,18 @@ type acting_pane_read = {
   apr_snapshot : Tui_decode.file_change_snapshot;
 }
 
+(* The index is a projection of this exact snapshot, never a separate
+   mutable cache. The scope belongs to the read that produced both. *)
+type keeper_chat_file_changes = {
+  kcf_scope : acting_pane_scope;
+  kcf_snapshot : Tui_decode.file_change_snapshot;
+  kcf_index : Masc_tui_keeper_chat_diff.index;
+}
+
+let keeper_chat_file_changes ~scope snapshot =
+  { kcf_scope = scope; kcf_snapshot = snapshot;
+    kcf_index = Masc_tui_keeper_chat_diff.index snapshot.Tui_decode.fcs_changes }
+
 (* A file row owns the fetched snapshot that produced it. Every Activity
    frame also belongs to the workspace in which it was drawn. *)
 type acting_pane_file_source = {
@@ -10396,9 +10409,8 @@ type state = {
      Changes surface and follows its own keeper selection; sharing it would
      make visiting one surface change what the other says. The canonical
      execution index is prepared once when a stamped snapshot arrives. *)
-  mutable msg_file_changes: Tui_decode.file_change_snapshot option;
+  mutable msg_file_changes: keeper_chat_file_changes option;
   mutable msg_file_changes_keeper: string option;
-  mutable msg_file_change_index: Masc_tui_keeper_chat_diff.index;
   mutable msg_file_changes_loading: bool;
   mutable msg_file_changes_refresh_pending: bool;
   mutable msg_file_changes_error: string option;
@@ -12012,6 +12024,37 @@ let resource_share_uncertain state (report : Masc_tui_resource_catalog.report) =
   | Some workspace ->
     List.mem (workspace, report.id) state.resource_share_uncertain_ids
     || known_resource_share_entries state ~origin:workspace ~artifact_id:report.id <> []
+
+let keeper_chat_file_changes_index state =
+  match state.msg_file_changes with
+  | Some observation -> observation.kcf_index
+  | None -> Masc_tui_keeper_chat_diff.empty
+
+let keeper_chat_file_changes_stale state observation =
+  not (server_authority_ready state
+       && Option.is_none state.msg_file_changes_error
+       && (match state.msg_file_changes_keeper with
+           | Some keeper -> String.equal keeper observation.kcf_snapshot.Tui_decode.fcs_keeper
+           | None -> false)
+       && same_acting_pane_scope observation.kcf_scope
+            (state.workspace_authority, state.workspace_read_authority))
+
+(* Other surfaces must not present an old chat observation as current
+   attribution while it is being rechecked or after its read epoch retired. *)
+let current_keeper_chat_file_changes state =
+  match state.msg_file_changes with
+  | Some observation when not state.msg_file_changes_loading
+                          && not (keeper_chat_file_changes_stale state observation) ->
+      Some observation.kcf_snapshot
+  | Some _ | None -> None
+
+let keeper_chat_file_change_gaps observation =
+  let snapshot = observation.kcf_snapshot and index = observation.kcf_index in
+  [ snapshot.Tui_decode.fcs_over_budget, "oversized"
+  ; snapshot.fcs_malformed, "malformed"
+  ; Masc_tui_keeper_chat_diff.missing_execution_ids index, "no exec id"
+  ; Masc_tui_keeper_chat_diff.ambiguous_execution_ids index, "duplicate ids" ]
+  |> List.filter (fun (count, _) -> count <> 0)
 
 let code_draft_address state =
   match state.server_identity, Masc_tui_fetched.current_key state.code_file with
@@ -17763,7 +17806,6 @@ let create_state
   msg_loaded_dropped = 0;
   msg_file_changes = None;
   msg_file_changes_keeper = None;
-  msg_file_change_index = Masc_tui_keeper_chat_diff.empty;
   msg_file_changes_loading = false;
   msg_file_changes_refresh_pending = false;
   msg_file_changes_error = None;
@@ -22672,16 +22714,87 @@ type keeper_message_status_frame =
   ; kmsf_activity_rows : Masc_tui_answering.chat_activity_row list
   ; kmsf_interrupt_rows : string list
   ; kmsf_schedule_rows : (chat_schedule_proximity * string) list
+  ; kmsf_evidence_rows : string list
+  ; kmsf_title_suffix : string
   }
+
+(* Warnings have counted rows. A complete reading stays in the title when it
+   fits with the Keeper's name; otherwise its modes and reading get rows too.
+   The renderer and every viewport consumer use this same width and list. *)
+let keeper_message_evidence_layout state ~terminal_cols =
+  match state.view, state.msg_target_keeper_name with
+  | Keepers Keeper_message, Some keeper_name ->
+      let file_title, file_rows =
+        if state.msg_tool_visibility <> Tools_full then None, []
+        else if not (Option.equal String.equal state.msg_file_changes_keeper (Some keeper_name))
+        then None, ["diffs pending"]
+        else match state.msg_file_changes with
+          | Some observation ->
+              let stale = keeper_chat_file_changes_stale state observation in
+              let freshness =
+                if stale && state.msg_file_changes_loading then ["diffs stale loading"]
+                else if stale then ["diffs stale"]
+                else if state.msg_file_changes_loading then ["diffs loading"]
+                else [] in
+              let gaps = keeper_chat_file_change_gaps observation in
+              if freshness = [] && gaps = [] && Option.is_none state.msg_file_changes_error
+              then Some (Printf.sprintf "diffs %.0fh" observation.kcf_snapshot.fcs_window_hours), []
+              else None,
+                (freshness
+                 @ (if Option.is_some state.msg_file_changes_error then ["diffs refresh failed"] else [])
+                 @ (match gaps with
+                    | [] -> []
+                    | gaps -> "diffs partial" :: List.map
+                        (fun (count, short_label) -> Printf.sprintf "%s: %d" short_label count) gaps))
+          | None when state.msg_file_changes_loading -> None, ["diffs loading"]
+          | None when Option.is_some state.msg_file_changes_error -> None, ["diffs unavailable"]
+          | None -> None, ["diffs pending"] in
+      let call_rows =
+        match state.msg_tool_visibility, state.keeper_calls_error with
+        | (Tools_results | Tools_full), Some _ when state.keeper_calls_keeper = Some keeper_name ->
+            (match state.keeper_calls with
+             | Some snapshot when String.equal snapshot.Tui_decode.kcs_keeper keeper_name ->
+                 ["results stale/failed"]
+             | Some _ | None -> ["results unavailable"])
+        | (Tools_compact | Tools_results | Tools_full), _ -> [] in
+      let modes = chat_visibility_parts ~memory:state.msg_memory_visibility
+          ~reasoning:state.msg_reasoning_visibility ~tools:state.msg_tool_visibility
+          ~origin:state.msg_origin_display in
+      let summary = String.concat " · "
+          (List.filter (fun part -> not (String.equal part ""))
+             [String.concat " " modes; Option.value ~default:"" file_title]) in
+      let keeper = Masc_tui_keeper_chat_projection.terminal_safe_text keeper_name in
+      let title = Printf.sprintf " Keepers ▸ %s ▸ chat" keeper in
+      let chat_cols = Masc_tui_roster_pane.content_cols
+          ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
+      let inner = Masc_tui_frame.inner_width ~cols:chat_cols in
+      let title_cells = Masc_tui_message_layout.display_width title
+          + (if String.equal summary "" then 0
+             else 2 + Masc_tui_message_layout.display_width summary) in
+      let warnings = file_rows @ call_rows in
+      if warnings = [] && title_cells <= inner then [], summary
+      else
+        let lines = ("Keeper: " ^ keeper) ::
+          (modes @ Option.to_list file_title @ warnings) in
+        List.concat_map
+          (Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (inner - 2))) lines, ""
+  | (Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
+    | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
+    | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs
+    | Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
+              | Keeper_message | Keeper_runtime_pick)), (Some _ | None) -> [], ""
 
 (* These are the same original rows used by the budget and the draw. The
    frame is local to that synchronous call, never a state or worker cache. *)
-let keeper_message_status_frame ?(schedule_budget = 1) state ~now =
+let keeper_message_status_frame ?(schedule_budget = 1) ?(terminal_cols = max_int) state ~now =
+  let evidence_rows, title_suffix = keeper_message_evidence_layout state ~terminal_cols in
   { kmsf_source = keeper_message_status_source state ~now
   ; kmsf_inflight_rows = keeper_message_inflight_rows state ~now
   ; kmsf_activity_rows = keeper_message_activity_rows state
   ; kmsf_interrupt_rows = keeper_observed_interrupt_rows state
   ; kmsf_schedule_rows = keeper_message_schedule_rows state ~now ~max_rows:schedule_budget
+  ; kmsf_evidence_rows = evidence_rows
+  ; kmsf_title_suffix = title_suffix
   }
 
 let keeper_message_status_rows ?status_frame ?scroll (state : state) =
@@ -22698,6 +22811,7 @@ let keeper_message_status_rows ?status_frame ?scroll (state : state) =
   + List.length status_frame.kmsf_activity_rows
   + List.length status_frame.kmsf_interrupt_rows
   + List.length status_frame.kmsf_schedule_rows
+  + List.length status_frame.kmsf_evidence_rows
   + unavailable_target
   + (match status_frame.kmsf_source with
      | No_message_status -> 0
@@ -22731,8 +22845,8 @@ let keeper_message_status_rows ?status_frame ?scroll (state : state) =
   + (if keeper_message_reading_back ?scroll state then 1 else 0)
   + composer_extra_rows state
 
-let keeper_message_frame_for_viewport ?scroll state ~now ~terminal_rows =
-  let frame = keeper_message_status_frame ~schedule_budget:0 state ~now in
+let keeper_message_frame_for_viewport ?scroll state ~now ~terminal_rows ~terminal_cols =
+  let frame = keeper_message_status_frame ~schedule_budget:0 ~terminal_cols state ~now in
   let status_rows = keeper_message_status_rows ~status_frame:frame ?scroll state
     + (if keeper_message_reading_back ?scroll state then 0 else 1) in
   (* Keep the existing three-row transcript minimum; extra schedule rows are
@@ -22744,7 +22858,8 @@ let keeper_message_frame_for_viewport ?scroll state ~now ~terminal_rows =
 let keeper_message_command_window ?status_frame ?scroll state ~terminal_rows ~terminal_cols =
   let status_frame = Some (match status_frame with
     | Some frame -> frame
-    | None -> keeper_message_frame_for_viewport ?scroll state ~now:(Unix.gettimeofday ()) ~terminal_rows) in
+    | None -> keeper_message_frame_for_viewport ?scroll state ~now:(Unix.gettimeofday ())
+                ~terminal_rows ~terminal_cols) in
   match state.view, state.keeper_message_focus, state.voice_capture,
         state.msg_recall_replaces with
   | Keepers Keeper_message, Right_pane, None, None

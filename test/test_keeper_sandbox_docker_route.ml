@@ -687,9 +687,45 @@ let check_typed_validation_error needle raw =
   Alcotest.(check bool) "validation error surfaced" true
     (response_mentions raw "error" needle)
 
+(* A Remote_ssh caller resolves its endpoint from the keeper's declaration
+   before the turn factory's profile is compared, so the Remote_ssh cases of
+   the drift test need a declaration and an endpoint to resolve. The endpoint
+   table comes from the typed record, as in test_keeper_ssh_secret_policy. *)
+let declare_ssh_endpoint ~(config : Workspace.config) ~keeper_name =
+  let config_dir =
+    Filename.concat (Filename.concat config.base_path Common.masc_dirname) "config"
+  in
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  ensure_dir keepers_dir;
+  write_file
+    (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+    "[keeper]\n\
+     instructions = \"factory profile drift test\"\n\
+     sandbox_profile = \"remote_ssh\"\n\
+     remote_endpoint = \"fixture\"\n";
+  write_file
+    (Filename.concat config_dir "runtime.toml")
+    (Exec_ssh_endpoint.to_toml
+       Exec_ssh_endpoint.
+         { name = "fixture"
+         ; host = "fixture.invalid"
+         ; user = "masc"
+         ; port = default_port
+         ; identity_file = default_identity_file ~name:"fixture"
+         ; known_hosts_file = default_known_hosts_file ~name:"fixture"
+         ; remote_root = "/srv/masc/playground"
+         ; connect_timeout_sec = 1
+         ; max_concurrent_sessions = 2
+         ; env_allowlist = [ "LANG" ]
+         ; capabilities = []
+         ; private_home = false
+         ; allowed_paths = []
+         })
+
 let test_execute_rejects_factory_profile_drift_in_every_direction () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta:docker ~playground:_ ->
+  declare_ssh_endpoint ~config ~keeper_name:docker.name;
   let microvm =
     { docker with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm }
   in

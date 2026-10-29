@@ -9208,6 +9208,11 @@ type state = {
   mutable runtime_model_jump: string option;
 
   mutable runtime_account_form: Masc_tui_runtime_account_form.t option;
+  (* The [m] form on the runtime.toml pane, which sets memory recall in
+     [\[typesafeai\]]. It holds the text it was opened on and takes every key
+     while it is open. Unlike the two forms above it has no save of its own:
+     Enter hands its text to the pane's raw-edit save, the one [e] ends in. *)
+  mutable memory_recall_form: Masc_tui_memory_recall_form.t option;
   (* A source section requested by another surface while runtime.toml is
      loading. The jump is consumed only after the same server-owned source
      lands, so Lanes never needs a second config writer or a guessed path. *)
@@ -14021,6 +14026,7 @@ type text_input_target =
   | Text_runtime_param
   | Text_runtime_model_form
   | Text_runtime_account_form
+  | Text_memory_recall_form
   | Text_voice_wizard
   | Text_palette
   | Text_row_search
@@ -14098,6 +14104,13 @@ let text_input_target (state : state) ~compact_viewport =
     state.view = Config && state.config_pane = Config_runtime
     && Option.is_some state.runtime_account_form && not compact_viewport
   then Some Text_runtime_account_form
+  (* The recall form draws on the same pane and takes the same keys; it is
+     not text, but a letter reaching a global shortcut under it would leave
+     the pane with the form still open. *)
+  else if
+    state.view = Config && state.config_pane = Config_runtime
+    && Option.is_some state.memory_recall_form && not compact_viewport
+  then Some Text_memory_recall_form
   else if state.view = Config && state.config_pane = Config_models
     && Option.is_some state.runtime_model_form && not compact_viewport
   then Some Text_runtime_model_form
@@ -14168,7 +14181,7 @@ let quit_key_allowed_for = function
   | Some
       ( Text_collab_form | Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_resource_save | Text_runtime_lane_name | Text_runtime_param
-      | Text_runtime_account_form | Text_runtime_model_form
+      | Text_runtime_account_form | Text_memory_recall_form | Text_runtime_model_form
       | Text_voice_wizard | Text_palette | Text_row_search
       | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
       | Text_identity_app_form | Text_identity_filter | Text_github_token
@@ -17079,6 +17092,7 @@ let create_state
   runtime_config_status_open = false;
   runtime_config_status_scroll = 0;
   runtime_account_form = None;
+  memory_recall_form = None;
   runtime_model_form = None;
   runtime_form_saves = Runtime_form_saves.empty;
   runtime_form_save_focus = None;

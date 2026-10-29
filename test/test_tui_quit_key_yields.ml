@@ -14,6 +14,7 @@ let every_text_target =
   ; ("runtime param", Text_runtime_param)
   ; ("runtime model form", Text_runtime_model_form)
   ; ("runtime account form", Text_runtime_account_form)
+  ; ("memory recall form", Text_memory_recall_form)
   ; ("voice wizard", Text_voice_wizard)
   ; ("command palette", Text_palette)
   ; ("row search", Text_row_search)
@@ -52,9 +53,9 @@ let test_with_no_field_open_the_quit_key_is_a_quit_key () =
    before it goes on measuring all of them rather than a subset someone
    trimmed. *)
 let test_the_list_covers_every_target_this_build_has () =
-  Alcotest.(check int) "fields counted" 20 (List.length every_text_target);
+  Alcotest.(check int) "fields counted" 21 (List.length every_text_target);
   let spelled = List.map fst every_text_target in
-  Alcotest.(check int) "and none of them is listed twice" 20
+  Alcotest.(check int) "and none of them is listed twice" 21
     (List.length (List.sort_uniq String.compare spelled))
 
 let () =

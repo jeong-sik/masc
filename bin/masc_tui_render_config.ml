@@ -1609,6 +1609,7 @@ let config_heading_rows ~cols (state : state) =
   + List.length (config_metadata_summary state) + 1
   + List.length (runtime_config_edit_lines ~cols state)
   + (if Option.is_none state.runtime_account_form
+        && Option.is_none state.memory_recall_form
         && Option.is_some state.runtime_config_view_error then 1 else 0)
 
 (* The source rows the frame shows, and the height the cursor keeps itself
@@ -2125,6 +2126,8 @@ let render_config (state : state) =
        | Some form when Masc_tui_runtime_account_form.is_saved form ->
          Masc_tui_keys.footer_hints_runtime_account_saved ()
        | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ()
+       | None when Option.is_some state.memory_recall_form ->
+         Masc_tui_keys.footer_hints_memory_recall_form ()
        | None -> Masc_tui_keys.footer_hints_config ~lang:state.ui_language ~pane:state.config_pane)
     ~body:(fun ~budget:_ c ->
       List.iter (c.push_styled ~style:(Theme.recede ()))
@@ -2149,6 +2152,15 @@ let render_config (state : state) =
              does. *)
           if Masc_tui_runtime_account_form.is_saved form then
             c.push ("  " ^ Masc_tui_keys.footer_hints_runtime_account_saved ())
+      | None ->
+      match state.memory_recall_form with
+      | Some form ->
+          (* Same place and same reason as the account form: the form is
+             opened on the file, and what it saves is that file with three
+             keys of [typesafeai] set. *)
+          List.iter c.push
+            (Masc_tui_memory_recall_form.rows ~width:(framed_inner_width cols)
+               ~height:content_height form)
       | None ->
       (match state.runtime_config_view_error with
        | Some detail ->

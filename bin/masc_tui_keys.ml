@@ -112,6 +112,8 @@ let config_bindings =
       ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
   ; b ~ko:"계정 추가" Act "a" "add account"
       ~help:"runtime.toml: declare an account by copying a provider", Some [ Config_runtime ]
+  ; b ~ko:"기억 판정" Act "m" "recall"
+      ~help:"runtime.toml: choose which keepers memory recall asks Jev about", Some [ Config_runtime ]
   ; b ~ko:"조각" Act "a" "fragments"
       ~help:"prompts: show or hide internal fragments", Some [ Config_prompts ]
   ; b ~ko:"키퍼 목소리" Act "a" "keeper voices"
@@ -1454,6 +1456,24 @@ let runtime_account_form_bindings =
 
 let footer_hints_runtime_account_form () =
   hints_of_bindings runtime_account_form_bindings
+
+(* The recall form takes every key while it is open, so the pane's row --
+   [e], [r], [Tab], [q] -- would name keys the form reads as its own. The row
+   names only what the form reads. *)
+let memory_recall_form_bindings =
+  [ b ~ko:"행" Navigate "\xe2\x86\x91/\xe2\x86\x93" "row"
+      ~help:"between the range row and the keeper rows"
+  ; b ~ko:"범위" Navigate "\xe2\x86\x90/\xe2\x86\x92" "range"
+      ~help:"on the range row: off, picked keepers only, or every keeper"
+  ; b ~ko:"고르기" Act "Space" "pick"
+      ~help:"on a keeper row, pick or drop that keeper; on the range row, the next range"
+  ; b ~ko:"저장" Act "Enter" "save"
+      ~help:"write the choice into runtime.toml through the preview and save [e] uses"
+  ; b ~ko:"취소" Act "Esc" "cancel" ~help:"close the form; nothing is written"
+  ]
+
+let footer_hints_memory_recall_form () =
+  hints_of_bindings memory_recall_form_bindings
 
 (* After a save the form shows the sign-in command and types nothing, so
    [y] copies it as it does in the link and browser views. *)

@@ -14164,6 +14164,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.runtime_config_jump_section <- None;
   state.runtime_config_status_open <- false;
   state.runtime_account_form <- None;
+  state.memory_recall_form <- None;
   state.runtime_model_jump <- None;
 
   state.presets_snapshot <- None;
@@ -25441,16 +25442,22 @@ let main
           (Edit.failed detail session);
         report_action state "error" (detail ^ "; draft retained")
   in
+  (* The document an edit of runtime.toml starts from: the retained draft when
+     there is one, else the file as the pane last read it. *)
+  let runtime_config_working_session reading =
+    let module Edit = Masc_tui_runtime_config_edit in
+    match Masc_tui_types.runtime_config_edit_session state with
+    | Some edit -> edit.rce_session
+    | None -> Edit.open_document ?read_generation:state.runtime_config_observed_generation
+        { path = reading.rcv_path;
+        source_text = reading.rcv_source_text; source_revision = reading.rcv_metadata.source_revision }
+  in
   let handle_runtime_config_edit () =
     let module Edit = Masc_tui_runtime_config_edit in
     match Masc_tui_types.runtime_config_workspace state, state.runtime_config_view with
     | None, _ | _, None -> report_action state "error" "config identity not loaded yet; r to reload"
     | Some workspace, Some reading ->
-      let session = match Masc_tui_types.runtime_config_edit_session state with
-        | Some edit -> edit.rce_session
-        | None -> Edit.open_document ?read_generation:state.runtime_config_observed_generation
-            { path = reading.rcv_path;
-            source_text = reading.rcv_source_text; source_revision = reading.rcv_metadata.source_revision } in
+      let session = runtime_config_working_session reading in
       (match Masc_tui_editor.roundtrip ~restore:restore_terminal
           ~reenter:reenter_terminal ~suffix:".toml" session.text with
        | Error abort -> report_editor_abort state ~action:"runtime.toml"
@@ -25529,6 +25536,49 @@ let main
       with
       | Ok form -> state.runtime_form_save_focus <- None; state.runtime_account_form <- Some form
       | Error reason -> report_action state "error" reason)
+  in
+  (* [m] on the runtime.toml pane opens the recall form on the document an
+     edit would start from, so a hand edit that is not saved yet is neither
+     dropped nor written over. A save that is still out is not checked here:
+     [begin_runtime_form_save] refuses a second one with its own reason when
+     Enter reaches it, and the choice stays as a retained draft. *)
+  let handle_memory_recall_form_open () =
+    match Masc_tui_types.runtime_config_workspace state, state.runtime_config_view with
+    | None, _ | _, None -> report_action state "error" "config identity not loaded yet; r to reload"
+    | Some _, Some reading ->
+      let session = runtime_config_working_session reading in
+      (match
+         Masc_tui_memory_recall_form.open_on ~source_revision:session.base.source_revision
+           ~keepers:(List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers)
+           session.text
+       with
+       | Ok form -> state.memory_recall_form <- Some form
+       | Error reason -> report_action state "error" reason)
+  in
+  (* Enter on the recall form. Its text is the document it was opened on, so
+     it goes to the save only while the pane's document is still that one;
+     laid over another revision it would carry a choice made against a file
+     it is not. The save is the raw edit's: the same preview, revision check
+     and conflict handling as [e]. *)
+  let submit_memory_recall_form form =
+    let module Edit = Masc_tui_runtime_config_edit in
+    let refuse reason =
+      state.memory_recall_form <- Some (Masc_tui_memory_recall_form.refused form reason) in
+    match Masc_tui_types.runtime_config_workspace state, state.runtime_config_view with
+    | None, _ | _, None -> refuse "config identity not loaded yet; r to reload"
+    | Some workspace, Some reading ->
+      let session = runtime_config_working_session reading in
+      if not (Option.equal String.equal (Masc_tui_memory_recall_form.source_revision form)
+                (Some session.base.source_revision))
+      then refuse "runtime.toml 이 폼을 연 뒤에 바뀌었어요. Esc 로 닫고 m 으로 다시 열어 주세요"
+      else (
+        match Masc_tui_memory_recall_form.text_on form with
+        | Error form -> state.memory_recall_form <- Some form
+        | Ok text ->
+          state.memory_recall_form <- None;
+          if String.equal text session.text
+          then report_action state "system" "바뀐 게 없어요. 파일에 쓰지 않았어요"
+          else save_runtime_config_edit_session ~workspace (Edit.edit text session))
   in
   let open_runtime_model_settings runtime_id =
     state.runtime_model_form <- None;
@@ -27750,6 +27800,9 @@ and is loaded on demand through keeper_skill.
                     Option.map (fun form -> Masc_tui_runtime_account_form.paste form text)
                       state.runtime_account_form
                 end
+            (* The recall form has no text field: a paste is dropped, not read as
+               keys. *)
+            | Some Text_memory_recall_form -> ()
             | Some Text_voice_wizard ->
                 Option.iter
                   (fun session ->
@@ -29482,6 +29535,14 @@ and is loaded on demand through keeper_skill.
                       ~started_ns:(Mtime_clock.elapsed_ns ()) with
                    | Ok request -> launch_runtime_form_save state ~mailbox:async_messages request
                    | Error detail -> state.runtime_model_form <- Some (Masc_tui_model_form.refused form detail)))
+       | Some k
+         when text_input_target state ~compact_viewport = Some Text_memory_recall_form ->
+           (match state.memory_recall_form with
+            | None -> ()
+            | Some form -> match Masc_tui_memory_recall_form.key form k with
+              | Masc_tui_memory_recall_form.Editing form -> state.memory_recall_form <- Some form
+              | Masc_tui_memory_recall_form.Cancelled -> state.memory_recall_form <- None
+              | Masc_tui_memory_recall_form.Submitted form -> submit_memory_recall_form form)
        | Some k
          when text_input_target state ~compact_viewport = Some Text_runtime_account_form ->
            (match state.runtime_account_form with
@@ -32477,7 +32538,7 @@ and is loaded on demand through keeper_skill.
                    (Text_collab_form | Text_account_login | Text_browser_url
                    | Text_ask_answer | Text_fusion_launch | Text_preset_name | Text_resource_save
                    | Text_runtime_lane_name | Text_runtime_param
-                   | Text_runtime_model_form | Text_runtime_account_form
+                   | Text_runtime_model_form | Text_runtime_account_form | Text_memory_recall_form
                    | Text_voice_wizard | Text_palette | Text_row_search
                    | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
                    | Text_identity_app_form | Text_identity_filter
@@ -35584,6 +35645,13 @@ and is loaded on demand through keeper_skill.
            handle_model_form_open Masc_tui_model_form.Copy ()
        | Some "m" when state.view = Config && state.config_pane = Config_models ->
            handle_config_models_open_source ()
+       (* [m] on the runtime.toml pane: memory recall. Above the chat arm below,
+          which takes [m] on every surface that names a Keeper. The status
+          reading hides the source, so it does not open there. *)
+       | Some ("m" | "M")
+         when state.view = Config && state.config_pane = Config_runtime
+              && not state.runtime_config_status_open ->
+           handle_memory_recall_form_open ()
 | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat from every row that names a Keeper. Standalone Lanes carry
               no Keeper identity; Keeper chat is owned by the Keepers surface.

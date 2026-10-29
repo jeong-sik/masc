@@ -4,6 +4,8 @@
    because the bytes of runtime.toml are what the feature produces. *)
 
 module F = Masc_tui_memory_recall_form
+module Standing = Masc.Keeper_memory_recall_standing
+module Reading = Masc.Tui_decode_memory_recall
 
 let probe = "[models.probe]\napi-name = \"probe\"\n"
 let entries names =
@@ -543,6 +545,164 @@ let test_rows_are_drawn_at_any_size () =
     [ []; [ "right" ]; [ "right"; "right" ]; [ "right"; "down"; "down"; "down"; " " ] ]
 ;;
 
+(* The server's reading is drawn beside the choice and is not part of it. *)
+let reading ?(lane = Ok ()) keepers = { Reading.mrr_lane = lane; mrr_keepers = keepers }
+
+let listed_a_form () = edited (opened probe) [ "right"; "down"; " " ]
+
+let test_the_server_reading_is_display_only () =
+  let bare = listed_a_form () in
+  let judged_a = F.with_server bare (F.Server_read (reading [ "a", Standing.Judged ])) in
+  let refused_a =
+    F.with_server
+      bare
+      (F.Server_read (reading [ "a", Standing.Not_judged Standing.Recall_not_switched_on ]))
+  in
+  List.iter
+    (fun (label, form) ->
+       Alcotest.(check string) (label ^ ": what it writes") (text_of bare) (text_of form);
+       Alcotest.(check bool)
+         (label ^ ": what it would change")
+         true
+         (F.change bare = F.change form))
+    [ "judged", judged_a; "not judged", refused_a ];
+  Alcotest.(check bool) "the two readings are drawn apart" true
+    (F.rows ~width:100 ~height:30 judged_a <> F.rows ~width:100 ~height:30 refused_a)
+;;
+
+(* A Keeper the file lists and the server does not reach is the sign of a file
+   the server has not loaded, so it says why. One nobody picked does not: it is
+   the usual case. *)
+let test_only_a_picked_keeper_the_server_does_not_reach_says_why () =
+  let rows_with word_for_b =
+    let form =
+      F.with_server
+        (listed_a_form ())
+        (F.Server_read (reading [ "a", Standing.Judged; "b", word_for_b ]))
+    in
+    F.rows ~width:100 ~height:30 form
+  in
+  Alcotest.(check bool)
+    "b was not picked: the reason it is not judged changes nothing"
+    true
+    (rows_with (Standing.Not_judged Standing.Keeper_excluded)
+     = rows_with (Standing.Not_judged Standing.Recall_not_switched_on));
+  Alcotest.(check bool)
+    "b was not picked and the server judges it: that is drawn"
+    true
+    (rows_with Standing.Judged <> rows_with (Standing.Not_judged Standing.Keeper_excluded));
+  let picked_b_rows word_for_b =
+    let form =
+      F.with_server
+        (edited (opened probe) [ "right"; "down"; "down"; " " ])
+        (F.Server_read (reading [ "b", word_for_b ]))
+    in
+    F.rows ~width:100 ~height:30 form
+  in
+  Alcotest.(check bool)
+    "b was picked: judged, and each reason it is not, are drawn apart"
+    true
+    (let judged = picked_b_rows Standing.Judged in
+     List.for_all
+       (fun reason -> picked_b_rows (Standing.Not_judged reason) <> judged)
+       Standing.all_reasons)
+;;
+
+(* The environment switch is asked before the gate, so one Keeper that names it
+   names it for the whole server, and the line under the heading says so. The
+   Keeper in the reading is not picked and says nothing for itself, so the line
+   is what differs. *)
+let test_the_environment_switch_is_told_on_the_server_line () =
+  let rows_with reason =
+    F.rows
+      ~width:100
+      ~height:30
+      (F.with_server
+         (listed_a_form ())
+         (F.Server_read (reading [ "b", Standing.Not_judged reason ])))
+  in
+  Alcotest.(check bool)
+    "the switch is not told like any other reason"
+    true
+    (rows_with Standing.Environment_switch_off <> rows_with Standing.Recall_not_switched_on)
+;;
+
+(* Both readings judge two Keepers, so the line under the heading is the same;
+   what differs is the row that carries the mark. *)
+let test_a_judged_keeper_is_marked_on_its_own_row () =
+  let rows_with names =
+    F.rows
+      ~width:100
+      ~height:30
+      (F.with_server
+         (listed_a_form ())
+         (F.Server_read (reading (List.map (fun name -> name, Standing.Judged) names))))
+  in
+  Alcotest.(check bool)
+    "the mark follows the Keeper"
+    true
+    (rows_with [ "a"; "b" ] <> rows_with [ "a"; "c" ])
+;;
+
+let test_each_state_of_the_server_reading_is_drawn_apart () =
+  let rows_with server =
+    F.rows ~width:100 ~height:30 (F.with_server (listed_a_form ()) server)
+  in
+  let states =
+    [ "unread", F.Server_unread
+    ; "unavailable", F.Server_unavailable "connection refused"
+    ; "armed", F.Server_read (reading [ "a", Standing.Judged ])
+    ; "no key", F.Server_read (reading ~lane:(Error Standing.No_armed_destination) [])
+    ; "lane off", F.Server_read (reading ~lane:(Error Standing.Lane_disabled) [])
+    ; ( "environment switch off"
+      , F.Server_read (reading [ "a", Standing.Not_judged Standing.Environment_switch_off ]) )
+    ]
+  in
+  List.iteri
+    (fun i (left_label, left) ->
+       List.iteri
+         (fun j (right_label, right) ->
+            if i < j
+            then
+              Alcotest.(check bool)
+                (left_label ^ " and " ^ right_label ^ " are drawn apart")
+                true
+                (rows_with left <> rows_with right))
+         states)
+    states
+;;
+
+let test_the_server_reading_cannot_colour_the_pane_or_overflow () =
+  let hostile = "x\027[31my" in
+  let form =
+    F.with_server
+      (listed_a_form ())
+      (F.Server_unavailable (hostile ^ String.make 400 'z'))
+  in
+  List.iter
+    (fun width ->
+       List.iter
+         (fun height ->
+            let rows = F.rows ~width ~height form in
+            List.iter
+              (fun row ->
+                 Alcotest.(check bool) "no escape byte in a row" false (String.contains row '\027'))
+              rows;
+            Alcotest.(check bool)
+              (Printf.sprintf "%d rows in a pane of %d x %d" (List.length rows) width height)
+              true
+              (List.length rows <= height))
+         [ 14; 30 ])
+    [ 60; 100 ]
+;;
+
+let test_a_reading_that_names_other_keepers_changes_nothing_for_the_roster () =
+  let form =
+    F.with_server (listed_a_form ()) (F.Server_read (reading [ "stranger", Standing.Judged ]))
+  in
+  Alcotest.(check string) "the choice is written as before" (text_of (listed_a_form ())) (text_of form)
+;;
+
 let () =
   Alcotest.run
     "tui memory recall form"
@@ -606,6 +766,21 @@ let () =
             test_a_stopped_keeper_is_drawn_apart_from_a_running_one
         ; Alcotest.test_case "the rows fit the height they are given" `Quick
             test_the_rows_fit_the_height_they_are_given
+        ] )
+    ; ( "the server's reading"
+      , [ Alcotest.test_case "it is display only" `Quick test_the_server_reading_is_display_only
+        ; Alcotest.test_case "only a picked keeper the server does not reach says why" `Quick
+            test_only_a_picked_keeper_the_server_does_not_reach_says_why
+        ; Alcotest.test_case "the environment switch is told on the server line" `Quick
+            test_the_environment_switch_is_told_on_the_server_line
+        ; Alcotest.test_case "a judged keeper is marked on its own row" `Quick
+            test_a_judged_keeper_is_marked_on_its_own_row
+        ; Alcotest.test_case "each state of the reading is drawn apart" `Quick
+            test_each_state_of_the_server_reading_is_drawn_apart
+        ; Alcotest.test_case "it cannot colour the pane or overflow" `Quick
+            test_the_server_reading_cannot_colour_the_pane_or_overflow
+        ; Alcotest.test_case "a reading that names other keepers changes nothing" `Quick
+            test_a_reading_that_names_other_keepers_changes_nothing_for_the_roster
         ] )
     ]
 ;;

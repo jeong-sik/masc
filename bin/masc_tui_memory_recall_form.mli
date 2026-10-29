@@ -30,6 +30,16 @@ type roster_entry =
   ; presence : presence
   }
 
+(** What the server says about the recall gate now, drawn beside the choice.
+    It is display only: it changes neither what the form writes nor what
+    {!change} says. It is the server's gate as loaded, so a file edited on
+    disk and not loaded shows as a picked Keeper the server does not reach. *)
+type server =
+  | Server_unread  (** Asked, not answered yet. *)
+  | Server_unavailable of string
+      (** The answer could not be read; the reason, as the loader worded it. *)
+  | Server_read of Masc.Tui_decode_memory_recall.memory_recall_reading
+
 type t
 
 val open_on : ?source_revision:string -> keepers:roster_entry list -> string -> (t, string) result
@@ -39,6 +49,10 @@ val open_on : ?source_revision:string -> keepers:roster_entry list -> string -> 
     the form starts with that list picked, so switching recall back on
     restores it. [Error] says why there is nothing to edit: the file does not
     parse as a runtime configuration. *)
+
+val with_server : t -> server -> t
+(** The form with the server's answer. The pane gives it when the answer
+    arrives, for the form it was asked for. *)
 
 val source_revision : t -> string option
 (** The revision the form was opened on. Editing a draft never advances it;

@@ -9357,6 +9357,10 @@ type state = {
      while it is open. Unlike the two forms above it has no save of its own:
      Enter hands its text to the pane's raw-edit save, the one [e] ends in. *)
   mutable memory_recall_form: Masc_tui_memory_recall_form.t option;
+  (* Which open of that form the server's reading of the recall gate was asked
+     for. An answer that carries another number belongs to a form the operator
+     already left. *)
+  mutable memory_recall_standing_generation: int;
   (* A source section requested by another surface while runtime.toml is
      loading. The jump is consumed only after the same server-owned source
      lands, so Lanes never needs a second config writer or a guessed path. *)
@@ -17539,6 +17543,7 @@ let create_state
   runtime_config_status_scroll = 0;
   runtime_account_form = None;
   memory_recall_form = None;
+  memory_recall_standing_generation = 0;
   runtime_model_form = None;
   runtime_form_saves = Runtime_form_saves.empty;
   runtime_form_save_focus = None;

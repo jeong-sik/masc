@@ -417,6 +417,10 @@ type async_msg =
   | Fusion_launch_options_loaded of
       int * (Masc.Tui_decode_fusion.fusion_launch_options, string) result
   | Fusion_launched of int * (string, string) result
+  (* Carries the generation of the form that asked: the answer to a read the
+     operator already left must not land on another form. *)
+  | Memory_recall_standing_loaded of
+      int * (Masc.Tui_decode_memory_recall.memory_recall_reading, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
   | Memory_loaded of (Masc.Tui_decode_memory_health.memory_health_snapshot, string) result
@@ -943,6 +947,7 @@ let rec workspace_message_is_read = function
   | Fusion_detail_loaded _
   | Fusion_historical_detail_loaded _
   | Fusion_launch_options_loaded _
+  | Memory_recall_standing_loaded _
   | Repositories_loaded _
   | Workspace_activity_loaded _
   | Memory_loaded _
@@ -1137,7 +1142,8 @@ let rec message_matches_share_input ~resource_read ~recovery_loaded = function
   | Clients_loaded _ | Lane_runs_loaded _ | Lane_run_detail_loaded _
   | Measurement_artifact_loaded _ | Verification_loaded _ | Harness_loaded _
   | Fusion_runs_loaded _ | Fusion_detail_loaded _ | Fusion_historical_detail_loaded _
-  | Fusion_launch_options_loaded _ | Fusion_launched _ | Repositories_loaded _
+  | Fusion_launch_options_loaded _ | Fusion_launched _ | Memory_recall_standing_loaded _
+  | Repositories_loaded _
   | Workspace_activity_loaded _ | Memory_loaded _ | Memory_input_loaded _
   | Memory_facts_loaded _ | Repository_changes_loaded _ | Repository_changes_diff_loaded _
   | File_changes_loaded _ | Keeper_chat_file_changes_loaded _ | Git_diff_loaded _
@@ -1250,6 +1256,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Harness_loaded _ | Fusion_runs_loaded (_, _)
     | Fusion_detail_loaded (_, _, _) | Fusion_historical_detail_loaded (_, _, _)
     | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _)
+    | Memory_recall_standing_loaded (_, _)
     | Repositories_loaded _ | Workspace_activity_loaded (_, _) | Memory_loaded _
     | Memory_input_loaded (_, _) | Memory_facts_loaded (_, _)
     | Repository_changes_loaded (_, _) | Repository_changes_diff_loaded (_, _)
@@ -1388,6 +1395,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Harness_loaded _ | Fusion_runs_loaded (_, _)
   | Fusion_detail_loaded (_, _, _) | Fusion_historical_detail_loaded (_, _, _)
   | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _)
+  | Memory_recall_standing_loaded (_, _)
   | Repositories_loaded _ | Workspace_activity_loaded (_, _) | Memory_loaded _
   | Memory_input_loaded (_, _) | Memory_facts_loaded (_, _)
   | Repository_changes_loaded (_, _) | Repository_changes_diff_loaded (_, _)

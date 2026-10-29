@@ -2005,7 +2005,7 @@
  (name masc_tui_memory_recall_form)
  (wrapped false)
  (modules masc_tui_memory_recall_form)
- (libraries masc.runtime masc.runtime_toml_namespace masc.toml_line_editor
+ (libraries masc masc.runtime masc.runtime_toml_namespace masc.toml_line_editor
   masc_tui_ansi masc_tui_message_layout))
 
 (library

@@ -1,4 +1,6 @@
 module Terminal_text = Masc_tui_ansi.Terminal_text
+module Standing = Masc.Keeper_memory_recall_standing
+module Reading = Masc.Tui_decode_memory_recall
 
 type mode =
   | Off
@@ -14,6 +16,11 @@ type roster_entry =
   { name : string
   ; presence : presence
   }
+
+type server =
+  | Server_unread
+  | Server_unavailable of string
+  | Server_read of Reading.memory_recall_reading
 
 (* A row of the Keeper list. [known] is false for a name the file lists that
    the TUI's roster does not have: a misspelt or retired name reaches nobody
@@ -42,6 +49,7 @@ type t =
   ; picked : string list
   ; cursor : int
   ; error : string option
+  ; server : server
   }
 
 type outcome =
@@ -166,8 +174,11 @@ let open_on ?source_revision ~keepers text =
             ; picked
             ; cursor = 0
             ; error = None
+            ; server = Server_unread
             }))
 ;;
+
+let with_server t server = { t with server }
 
 let next_mode = function
   | Off -> Listed
@@ -394,6 +405,82 @@ let wrapped ~width ~lead text =
   | first :: rest -> (lead ^ first) :: List.map (fun row -> indent ^ row) rest
 ;;
 
+(* Exhaustive on purpose: a seventh reason stops the build here. *)
+let reason_label = function
+  | Standing.Environment_switch_off -> "환경 스위치가 꺼져 있어요"
+  | Standing.Recall_not_switched_on -> "스위치가 꺼져 있거나 범위 밖이에요"
+  | Standing.Keeper_excluded -> "제외 목록에 있어요"
+  | Standing.Lane_disabled -> "Jev 길이 꺼져 있어요"
+  | Standing.No_armed_destination -> "Jev 키가 없어요"
+  | Standing.Refused_by_another_gate -> "다른 게이트의 이유로 닫혀 있어요"
+;;
+
+let judged_now (_, standing) =
+  match standing with
+  | Standing.Judged -> true
+  | Standing.Not_judged _ -> false
+;;
+
+let environment_switch_is_off (reading : Reading.memory_recall_reading) =
+  List.exists
+    (fun (_, standing) ->
+       match standing with
+       | Standing.Not_judged Standing.Environment_switch_off -> true
+       | Standing.Judged
+       | Standing.Not_judged
+           ( Standing.Recall_not_switched_on | Standing.Keeper_excluded
+           | Standing.Lane_disabled | Standing.No_armed_destination
+           | Standing.Refused_by_another_gate ) -> false)
+    reading.Reading.mrr_keepers
+;;
+
+(* The reason an answer could not be read comes from the loader and may be a
+   server's error body. It takes a few rows at most, so it cannot push the
+   range row and the Keeper list off the pane. *)
+let server_rows_limit = 3
+
+let capped ~limit rows =
+  if List.length rows <= limit
+  then rows
+  else
+    List.filteri (fun index _ -> index < limit) rows
+    |> List.mapi (fun index row -> if index = limit - 1 then row ^ " …" else row)
+;;
+
+(* What the server says about the gate as a whole. The environment switch is
+   asked before the gate, so one Keeper that names it names it for all. *)
+let server_line = function
+  | Server_unread -> "서버 · 지금 상태를 읽는 중이에요"
+  | Server_unavailable detail -> "서버 · 지금 상태를 읽지 못했어요 · " ^ detail
+  | Server_read reading ->
+    if environment_switch_is_off reading
+    then "서버 · 환경 스위치(MASC_KEEPER_MEMORY_OS_RECALL)가 꺼져 있어서 판정 대상이 없어요"
+    else (
+      match reading.Reading.mrr_lane with
+      | Error reason -> "서버 · " ^ reason_label reason
+      | Ok () ->
+        Printf.sprintf
+          "서버 · Jev 키 있음 · 지금 판정 대상 %d명"
+          (List.length (List.filter judged_now reading.Reading.mrr_keepers)))
+;;
+
+(* A Keeper the server judges says so. One that is picked and not judged says
+   why not: the file lists it and the server does not reach it, which is what
+   a file the server has not loaded looks like. A Keeper that is neither
+   picked nor judged is the usual case and says nothing. *)
+let standing_suffix t entry =
+  match t.server with
+  | Server_unread | Server_unavailable _ -> ""
+  | Server_read reading ->
+    (match List.assoc_opt entry.keeper.name reading.Reading.mrr_keepers with
+     | None -> ""
+     | Some Standing.Judged -> "  (지금 판정 대상)"
+     | Some (Standing.Not_judged reason) ->
+       if List.mem entry.keeper.name t.picked
+       then "  (지금은 아니에요 · " ^ reason_label reason ^ ")"
+       else "")
+;;
+
 let entry_suffix entry =
   (if entry.known then "" else "  (키퍼 목록에 없어요)")
   ^ (match entry.keeper.presence with
@@ -456,6 +543,9 @@ let window ~room ~cursor rows =
 let rows ~width ~height t =
   let mark index = if t.cursor = index then ">" else " " in
   let intro_rows = wrapped ~width ~lead:hint_lead intro in
+  let server_rows =
+    capped ~limit:server_rows_limit (wrapped ~width ~lead:hint_lead (server_line t.server))
+  in
   let range_row = Printf.sprintf "  %s %s  \xe2\x80\xb9 %s \xe2\x80\xba" (mark 0) range_label (mode_label t.mode) in
   let summary_rows = wrapped ~width ~lead:hint_lead ("저장하면 · " ^ summary_text t) in
   let note_rows =
@@ -478,15 +568,17 @@ let rows ~width ~height t =
         List.mapi
           (fun index entry ->
              Printf.sprintf
-               "    %s [%s] %s%s"
+               "    %s [%s] %s%s%s"
                (mark (index + 1))
                (if List.mem entry.keeper.name t.picked then "x" else " ")
                (Terminal_text.single_line entry.keeper.name)
-               (entry_suffix entry))
+               (entry_suffix entry)
+               (standing_suffix t entry))
           t.entries
       in
       let fixed =
         List.length intro_rows
+        + List.length server_rows
         + 1
         + List.length summary_rows
         + List.length note_rows
@@ -502,5 +594,5 @@ let rows ~width ~height t =
         visible
         @ [ Printf.sprintf "      … 위 %d명 · 아래 %d명 (↑/↓ 로 움직여요)" above below ]
   in
-  intro_rows @ [ range_row ] @ keeper_rows @ summary_rows @ note_rows @ error_rows @ [ "" ]
+  intro_rows @ server_rows @ [ range_row ] @ keeper_rows @ summary_rows @ note_rows @ error_rows @ [ "" ]
 ;;

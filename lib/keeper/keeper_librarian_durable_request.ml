@@ -4,6 +4,8 @@ module Runtime = Keeper_librarian_runtime
 module Owner = Lane_addon_tool_request_owner
 module Exact = Lane_addon_exact
 module Progress = Lane_addon_request_progress
+module Final = Keeper_librarian_original_final
+module Question = Keeper_librarian_durable_question
 let ( let* ) = Result.bind
 let ( let+ ) result f = Result.map f result
 let require condition detail = if condition then Ok () else Error detail
@@ -15,9 +17,6 @@ let text = function `String value -> Ok value | _ -> Error "Original history req
 let nonblank json = let* value=text json in
   let+ ()=require (String.trim value<>"") "Original history identity is blank" in value
 let integer = function `Int value -> Ok value | _ -> Error "Original history request expects an integer"
-let boolean = function `Bool value -> Ok value | _ -> Error "Original history request expects a boolean"
-let optional encode = Option.fold ~none:`Null ~some:encode
-let option decode = function `Null -> Ok None | json -> let+ value=decode json in Some value
 let parse bytes = try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail
 let equal left right detail =
   let* left=Lane_addon_action.canonical left in
@@ -133,49 +132,11 @@ let destination_of_json json =
     | Manual _ -> Error "Original history requires a configured installation" in
   let+ ()=require (actual_package=package_id && actual_tool=tool) "Original history package/tool differs" in
   {installation_id;package_id=actual_package;tool=actual_tool;source_revision;configuration_revision}
-let prompt_json (p:Prompt_registry.prompt_resolution) = `Assoc [
-  "effective",`String p.effective;"source",`String (Prompt_registry.prompt_source_to_string p.source);
-  "file_value",optional (fun text -> `String text) p.file_value;
-  "override_value",optional (fun text -> `String text) p.override_value;
-  "file_path",optional (fun text -> `String text) p.file_path;
-  "file_exists",`Bool p.file_exists;"has_override",`Bool p.has_override]
-let prompt_of_json json =
-  let* f=fields ["effective";"source";"file_value";"override_value";"file_path";"file_exists";"has_override"] json in
-  let* effective=text (value "effective" f) in
-  let* source=text (value "source" f) in
-  let* source=match source with "file" -> Ok Prompt_registry.File | "override" -> Ok Prompt_registry.Override
-    | "missing" -> Ok Prompt_registry.Missing | _ -> Error "Unknown original history prompt source" in
-  let* file_value=option text (value "file_value" f) in
-  let* override_value=option text (value "override_value" f) in
-  let* file_path=option text (value "file_path" f) in
-  let* file_exists=boolean (value "file_exists" f) in
-  let+ has_override=boolean (value "has_override" f) in
-  {Prompt_registry.effective;source;file_value;override_value;file_path;file_exists;has_override}
-(* The substitutions and the rendered prompt repeat the input, so they are
-   rendered again on restore; the digest names the prompt the host was sent. *)
-let preparation_json (p:Runtime.durable_preparation) = `Assoc [
-  "parsing_now",`Float p.parsing_now;
-  "policy",`Assoc ["facts_max_bytes",`Int p.policy.facts_max_bytes;"category_cap",`Int p.policy.category_cap;
-    "facts_per_category_cap",`Int p.policy.facts_per_category_cap];
-  "rule_prompt",prompt_json p.rule_prompt;"prompt",prompt_json p.prompt;
-  "rendered_prompt_sha256",`String (hash p.rendered_prompt);"output_schema",p.output_schema]
+let preparation_json = Question.to_json
 let preparation_of_json ~source_input json =
-  let* f=fields ["parsing_now";"policy";"rule_prompt";"prompt";"rendered_prompt_sha256";"output_schema"] json in
-  let* parsing_now=match value "parsing_now" f with
-    | `Float time when Float.is_finite time -> Ok time | `Int time -> Ok (float_of_int time)
-    | _ -> Error "Original history parse time is not finite" in
-  let* limits=fields ["facts_max_bytes";"category_cap";"facts_per_category_cap"] (value "policy" f) in
-  let* facts_max_bytes=integer (value "facts_max_bytes" limits) in
-  let* category_cap=integer (value "category_cap" limits) in
-  let* facts_per_category_cap=integer (value "facts_per_category_cap" limits) in
-  let policy : Runtime.durable_policy = {facts_max_bytes;category_cap;facts_per_category_cap} in
-  let* rule_prompt=prompt_of_json (value "rule_prompt" f) in
-  let* prompt=prompt_of_json (value "prompt" f) in
-  let* rendered_prompt_sha256=text (value "rendered_prompt_sha256" f) in
-  let* p=Runtime.restore_durable_preparation ~source_input ~parsing_now ~policy ~rule_prompt ~prompt
-    ~output_schema:(value "output_schema" f) in
-  let+ ()=require (String.equal (hash p.rendered_prompt) rendered_prompt_sha256)
-    "Original history prompt differs from the one its host request named" in p
+  let* ({Question.parsing_now;policy;rule_prompt;prompt;output_schema;_} as frozen)=Question.of_json json in
+  let* p=Runtime.restore_durable_preparation ~source_input ~parsing_now ~policy ~rule_prompt ~prompt ~output_schema in
+  let+ ()=Question.rendered_matches frozen p in p
 
 type predecessor = {request_id:string;request_digest:string}
 (* [digest] names the canonical bytes of [to_json]: the record's digest for a
@@ -315,10 +276,7 @@ let observe_record_owner ~base_path ~keepers_dir (record:Owner.retained) =
     "Original history host record belongs to another scope" in
   let* current=observe_owner ~base_path ~keepers_dir ~keeper_id:original.keeper_id in
   let+ ()=owner_matches_json current (value "owner" f) in current
-let request capture = Exact.request_of_json (`Assoc ["kind",`String "exact_output";
-  "request_id",`String capture.id;"output",`String "durable";
-  "messages",`List [`Assoc ["role",`String "user";"text",`String capture.preparation.rendered_prompt]];
-  "schema",capture.preparation.output_schema])
+let request capture = Question.request ~request_id:capture.id capture.preparation
 let confirm_owner capture =
   let* current=observe_owner ~base_path:capture.owner.workspace.path ~keepers_dir:capture.owner.keepers.path
     ~keeper_id:capture.owner.keeper_id in
@@ -326,67 +284,12 @@ let confirm_owner capture =
 let host_proof_target capture =
   let* ()=confirm_owner capture in
   let* exact=request capture in
-  let* schema=Option.to_result ~none:"Original history request lacks its schema" exact.Exact.schema in
-  let* installation=Owner.installation_of_id capture.destination.installation_id in
-  let+ declaration_id=match installation with Owner.Configuration id -> Ok id
-    | Manual _ -> Error "Original history requires a configured host installation" in
-  exact,schema,declaration_id
+  Final.target ~installation_id:capture.destination.installation_id exact
 let refusal_evidence ~store capture final =
-  match final with
-  | Exact.Call_final (Exact.Input_refused (Input_capacity | Context_overflow | Request_body_refused)) ->
-    let* exact,schema,declaration_id=host_proof_target capture in
-    let* observed=Exact.observe_retained ~store ~declaration_id ~schema exact in
-    (match observed with
-     | Exact.Retained_absent ->
-       (* The worker's frame refusal: no provider or slot ran, so the final
-          alone is the whole evidence. *)
-       Ok (if Exact.refused_before_host final
-           then Keeper_exact_walk_failure.of_input_refusal Keeper_librarian_input_refusal.Request_body_refused
-           else Keeper_exact_walk_failure.empty)
-     | Retained_open -> Ok Keeper_exact_walk_failure.empty
-     | Retained_terminal _ ->
-       let* latest=Exact.read_latest_original_execution ~store ~declaration_id ~schema exact in
-       (match latest with
-        | Exact.Completed_latest {execution={outcome=Exact.Call_ended actual;receipt;_};_}
-          when Yojson.Safe.equal (Exact.final_to_json (Exact.Call_final actual)) (Exact.final_to_json final) ->
-          (* The same bar admission's size check sets: a named input refusal
-             from every visit, with no independent failure mixed in. A
-             timeout or a bad request is not evidence about reading less. *)
-          let evidence=Keeper_exact_walk_receipt.failure_evidence receipt in
-          Ok (if Keeper_exact_walk_failure.refuses_input_capacity evidence
-                 && not evidence.size_independent_execution_failure
-              then evidence else Keeper_exact_walk_failure.empty)
-        | Completed_latest {execution={outcome=Exact.Call_ended _ | Call_refused _;_};_}
-        | No_completed_latest -> Ok Keeper_exact_walk_failure.empty))
-  | Exact.Call_final (Answered _ | Invalid_output _ | Output_limit_reached _ | Input_refused Invalid_request)
-  | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok Keeper_exact_walk_failure.empty
+  Final.refusal_evidence ~store ~target:(fun () -> host_proof_target capture) final
 let confirm_final ~store capture final =
-  let* exact,schema,declaration_id=host_proof_target capture in
-  let* observed=Exact.observe_retained ~store ~declaration_id ~schema exact in
-  match observed with
-  | Exact.Retained_absent ->
-    (* addons/exact_worker.py [submit] writes the refusal before the
-       [store.write accepted] line, so the host never retains this request.
-       The worker's deployed behavior is what makes this final the only one
-       taken without a host terminal. *)
-    if Exact.refused_before_host final then Ok ()
-    else Error "Original history host terminal is absent"
-  | Retained_open -> Error "Original history host terminal is unresolved"
-  | Retained_terminal actual ->
-  let* ()=equal (Exact.final_to_json (Exact.delivered actual)) (Exact.final_to_json final)
-    "Original history final differs from the actual host terminal" in
-  match final with
-  | Exact.Call_final expected ->
-    let* latest=Exact.read_latest_original_execution ~store ~declaration_id ~schema exact in
-    (match latest with
-     | Exact.No_completed_latest -> Error "Original history latest host execution proof is incomplete"
-     | Completed_latest {attempt_ordinal;execution={outcome=Exact.Call_ended actual;_}} ->
-       let* ()=require (attempt_ordinal>0) "Original history host attempt ordinal is invalid" in
-       equal (Exact.final_to_json (Exact.Call_final expected)) (Exact.final_to_json (Exact.Call_final actual))
-         "Original history final differs from its latest completed host execution"
-     | Completed_latest {execution={outcome=Exact.Call_refused _;_};_} ->
-       Error "Original history refused host execution cannot confirm a call result")
-  | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused -> Ok ()
+  let* target=host_proof_target capture in
+  Final.confirm_final ~store target final
 let validate_proposal capture output =
   Runtime.validate_durable_proposal capture.preparation output |> Result.map_error (function
     | Runtime.Preparation_invalid detail -> detail

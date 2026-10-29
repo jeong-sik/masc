@@ -411,6 +411,9 @@ type durable_step_preparation = {
       (** [preparation.source_input] is the question's input with its working
           context cleared, as the Runtime floor clears it. *)
 }
+val durable_step_source_input : Keeper_librarian.input -> Keeper_librarian.input
+(** The input a step's preparation holds for a floor question's input: the
+    Runtime floor's volatile Memory pass reads it with its working context cleared. *)
 val prepare_durable_step : now:float -> context:durable_step_context -> Keeper_librarian.input ->
   (durable_step_preparation, string) result
 (** Resolve the policy and both prompt assets once, on the caller fiber, for one

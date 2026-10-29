@@ -17,6 +17,9 @@ val base_path : owner -> string
 val keepers_dir : owner -> string
 val runtime_keepers_dir : owner -> string
 val owner_to_json : owner -> Yojson.Safe.t
+val owner_of_json : Yojson.Safe.t -> (owner, string) result
+(** Strict decode of {!owner_to_json}. The owner it names is not observed live;
+    {!owner_matches_json} compares it with the live one. *)
 val owner_matches_json : owner -> Yojson.Safe.t -> (unit, string) result
 val fresh_request_id : owner -> string
 val scope_of_request_id : string -> (string, string) result
@@ -35,6 +38,9 @@ type destination = {
 }
 val package_id : string
 val tool : string
+val destination_json : destination -> Yojson.Safe.t
+val destination_of_json : Yojson.Safe.t -> (destination, string) result
+(** Field-exact. Requires a configured installation and this tool's package and tool. *)
 type t
 type predecessor = {request_id:string;request_digest:string}
 val predecessor : t -> predecessor option

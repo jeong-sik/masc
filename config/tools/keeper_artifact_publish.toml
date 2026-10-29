@@ -3,9 +3,16 @@ name = "keeper_artifact_publish"
 description = """
 Publish a standalone report, document or self-contained interactive HTML result \
 to the dashboard Artifacts library. Saves exact content and returns a durable \
-open link. Include that link when reporting the result. To revise a published \
-artifact, supply its id and expected_revision together; previous versions remain \
-readable. HTML can use inline JavaScript/CSS and embedded images, but cannot \
+open link. Include that link when reporting the result. An artifact is one \
+document with a revision history. A later version of the same document (a v2, a \
+new date, a re-measurement, a corrected draft) is a new revision of it: supply \
+the id from the earlier publish result together with expected_revision, the \
+revision that result reported. Each revision keeps its own title and summary, so \
+a new date or version can go in the title while the id stays. A different \
+subject is a new artifact without id. Previous revisions remain readable. When \
+the id is not at hand, keeper_artifact_draft find lists candidate ids and current \
+revisions by title, summary, author, Task and Goal. When the revision has moved, \
+the error reports the current revision. HTML can use inline JavaScript/CSS and embedded images, but cannot \
 access the dashboard or its credentials; external subresource loads and fetch \
 requests are blocked. Author \
 is the current Keeper. This tool does not post another chat or Board message."""
@@ -15,7 +22,7 @@ additional_properties = false
 name = "title"
 type = "string"
 required = true
-description = "Human-readable document title."
+description = "Human-readable title of this revision. A new date or version can appear here; the artifact keeps its id."
 
 [[params]]
 name = "summary"
@@ -33,18 +40,18 @@ required = true
 name = "content"
 type = "string"
 required = true
-description = "Complete Markdown or self-contained HTML source, preserved exactly."
+description = "Complete Markdown or self-contained HTML source text, preserved exactly. The text itself, not a file path."
 
 [[params]]
 name = "id"
 type = "string"
-description = "Existing artifact id when publishing a new revision. Omit for a new document."
+description = "Id of the artifact being revised, from an earlier publish result or keeper_artifact_draft find. Omit for a new document."
 
 [[params]]
 name = "expected_revision"
 type = "integer"
 minimum = 1
-description = "Expected current revision. Required together with id for an update."
+description = "Current revision number, as reported by the earlier publish result or find. Required together with id for an update."
 
 [[params]]
 name = "task_id"

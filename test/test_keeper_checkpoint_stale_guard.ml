@@ -2675,7 +2675,7 @@ let test_history_link_keeps_transaction_until_cancelled_job_finishes () =
     ~snapshot_id:(Keeper_checkpoint_store.agent_core_history_snapshot_id_of_checkpoint (checkpoint 1)) in
   let turn path =
     match Agent_core.Checkpoint_objects.head_of_string (Fs_compat.load_file path) with
-    | Ok head -> head.checkpoint.turn_count
+    | Ok head -> head.header.turn_count
     | Error _ -> fail "checkpoint bytes were corrupted"
   in
   let caller_thread = Thread.id (Thread.self ()) in
@@ -3080,6 +3080,90 @@ let test_a_persisted_snapshot_loads_back () =
     same_history "and holds the same history" value
       (Keeper_checkpoint_store.exact_snapshot_checkpoint loaded)
 
+(* [count] turns closed through the store, one save each. *)
+let close_turns_through_the_store ~session_dir ~session_id count =
+  let rec close index (checkpoint : Agent_core.Checkpoint.t) =
+    if index > count
+    then checkpoint
+    else (
+      let next =
+        { checkpoint with
+          turn_count = checkpoint.turn_count + 1
+        ; messages =
+            checkpoint.messages
+            @ [ Agent_core.Types.user_msg (Printf.sprintf "ask %d" index)
+              ; Agent_core.Types.assistant_msg (Printf.sprintf "answer %d" index)
+              ]
+        }
+      in
+      save_ok ~session_dir next (Printf.sprintf "closing turn %d" index);
+      close (index + 1) next)
+  in
+  close 1 { (make_checkpoint ~session_id ~turn_count:0 ~marker:"start") with messages = [] }
+
+let bundles_behind_the_last_segment ~session_dir path =
+  match (head_at path).history.segment with
+  | None -> fail "a segment's worth of closed turns makes a segment"
+  | Some segment ->
+    (match
+       Keeper_checkpoint_object_store.read ~session_dir segment.segment
+     with
+     | Ok (Some bytes) ->
+       (match Agent_core.Checkpoint_objects.segment_of_string ~digest:segment.segment bytes with
+        | Ok segment -> List.map (fun (turn : Agent_core.Checkpoint_objects.turn) -> turn.bundle) segment.segment_turns
+        | Error error -> fail (Agent_core.Checkpoint_objects.load_error_to_string error))
+     | Ok None | Error _ -> fail "the last segment is not stored")
+
+(* A backup reaches the objects behind the last segment too, so a copy of it
+   over the session dir reads back. *)
+let test_a_backup_holds_the_segments () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let session_id = "sess-segment-backup" in
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let root = Filename.dirname session_dir in
+  let source =
+    close_turns_through_the_store ~session_dir ~session_id
+      (Agent_core.Checkpoint_objects.turns_per_segment + 3)
+  in
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id in
+  let backup_dir = Filename.concat root "segment-backup" in
+  (match
+     Keeper_checkpoint_store.back_up_canonical ~session_dir ~session_id ~ownership_root:root
+       ~backup_dir ~content:(content_digest_of_head (Fs_compat.load_file path))
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Keeper_checkpoint_store.backup_error_to_string error));
+  let objects = Filename.concat session_dir Keeper_checkpoint_object_store.dirname in
+  Unix.rename objects (objects ^ ".moved");
+  save_ok ~session_dir (make_checkpoint ~session_id ~turn_count:500 ~marker:"after the backup") "a later save";
+  copy_tree ~from:backup_dir ~into:session_dir;
+  same_history "the copied backup reads back through its segments" source
+    (stored_value ~session_dir ~session_id)
+
+(* A bundle lost behind the last segment of a head this process only parsed
+   cannot be written again in its place; the next save does not keep the
+   segment and writes its messages again, and the head it writes reads
+   back. *)
+let test_a_bundle_lost_behind_a_segment_is_written_again () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let session_id = "sess-segment-lost" in
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let closed =
+    close_turns_through_the_store ~session_dir ~session_id
+      (Agent_core.Checkpoint_objects.turns_per_segment + 1)
+  in
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id in
+  let lost = List.nth (bundles_behind_the_last_segment ~session_dir path) 2 in
+  replace_with_a_copy path;
+  Unix.unlink (Keeper_checkpoint_object_store.path ~session_dir lost);
+  let next = one_more_message closed "after the loss" in
+  save_ok ~session_dir next "save after a bundle behind the segment was lost";
+  same_history "the saved head reads back" next (decode_head_files ~session_dir path)
+
 let () =
   run "Keeper_checkpoint_store checkpoint watermark (RFC-0225 §3.2)"
     [
@@ -3231,6 +3315,9 @@ let () =
             test_a_failed_object_write_keeps_the_previous_head;
           test_case "a persisted snapshot loads back" `Quick
             test_a_persisted_snapshot_loads_back;
+          test_case "a backup holds the segments" `Quick test_a_backup_holds_the_segments;
+          test_case "a bundle lost behind a segment is written again" `Quick
+            test_a_bundle_lost_behind_a_segment_is_written_again;
           test_case "one keeper name in two workspaces keeps both values" `Quick
             test_one_keeper_name_in_two_workspaces_keeps_both_values;
         ] );

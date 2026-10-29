@@ -46,50 +46,126 @@ type turn =
   ; chain : chain
   }
 
+(* The last turn segment, the messages the segments up to it hold and the
+   chain over them. *)
+type segment_ref =
+  { segment : digest
+  ; segment_messages : int
+  ; segment_chain : chain
+  }
+
 type history =
-  { turns : turn list
+  { segment : segment_ref option
+  ; turns : turn list
   ; open_messages : digest list
   }
 
+type segment =
+  { previous : digest option
+  ; segment_turns : turn list
+  }
+
+type header =
+  { session_id : string
+  ; turn_count : int
+  }
+
+type header_objects =
+  { system_prompt : digest
+  ; tools : digest
+  }
+
 type head =
-  { checkpoint : Checkpoint_types.t
+  { header : header
+  ; header_json : Yojson.Safe.t
+  ; header_objects : header_objects
   ; history : history
   }
 
+(* Closed turns a head names itself; with this many, the oldest of them
+   become one segment. *)
+let turns_per_segment = 64
+
 let message_count history =
-  List.fold_left (fun total turn -> total + turn.messages) 0 history.turns
+  (match history.segment with
+   | None -> 0
+   | Some segment -> segment.segment_messages)
+  + List.fold_left (fun total (turn : turn) -> total + turn.messages) 0 history.turns
   + List.length history.open_messages
 ;;
 
-let history_objects history =
-  List.map (fun turn -> turn.bundle) history.turns @ history.open_messages
+let head_objects head =
+  [ head.header_objects.system_prompt; head.header_objects.tools ]
+  @ (match head.history.segment with
+     | None -> []
+     | Some segment -> [ segment.segment ])
+  @ List.map (fun (turn : turn) -> turn.bundle) head.history.turns
+  @ head.history.open_messages
+;;
+
+let segment_objects segment =
+  Option.to_list segment.previous @ List.map (fun (turn : turn) -> turn.bundle) segment.segment_turns
 ;;
 
 let head_format = "masc.checkpoint.head"
 
-let header_json ~before_messages ~after_messages =
-  `Assoc (before_messages @ ((Checkpoint_codec.messages_field, `List []) :: after_messages))
+(* The two header fields a head keeps as objects: large, and the same from
+   one save to the next. *)
+let system_prompt_field = "system_prompt"
+let tools_field = "tools"
+let is_object_field (name, (_ : Yojson.Safe.t)) =
+  String.equal name system_prompt_field || String.equal name tools_field
+;;
+
+(* The header as a head writes it, every field but the messages and the two
+   object fields, with an empty message list; and those two fields' values. *)
+let split_header ~before_messages ~after_messages =
+  let fields = before_messages @ after_messages in
+  match List.assoc_opt system_prompt_field fields, List.assoc_opt tools_field fields with
+  | Some system_prompt, Some tools ->
+    let keep field = not (is_object_field field) in
+    Ok
+      ( `Assoc
+          (List.filter keep before_messages
+           @ ((Checkpoint_codec.messages_field, `List []) :: List.filter keep after_messages))
+      , system_prompt
+      , tools )
+  | None, (Some _ | None) | Some _, None ->
+    Error
+      (Error.Serialization
+         (JsonParseError { detail = "checkpoint header has no system_prompt or tools field" }))
+;;
+
+let header_objects_json header_objects =
+  `Assoc
+    [ system_prompt_field, `String header_objects.system_prompt
+    ; tools_field, `String header_objects.tools
+    ]
+;;
+
+let content_header_bytes ~header_json ~header_objects =
+  Yojson.Safe.to_string
+    (`Assoc [ "checkpoint", header_json; "header_objects", header_objects_json header_objects ])
 ;;
 
 let history_chain history =
   let closed =
-    match List.rev history.turns with
-    | [] -> chain_start
-    | last :: _ -> last.chain
+    match List.rev history.turns, history.segment with
+    | (last : turn) :: _, (Some _ | None) -> last.chain
+    | [], Some segment -> segment.segment_chain
+    | [], None -> chain_start
   in
   List.fold_left chain_step closed history.open_messages
 ;;
 
 let head_content_digest head =
-  let before_messages, after_messages =
-    Checkpoint_codec.checkpoint_fields_around_messages head.checkpoint
-  in
   content_digest_of
-    ~header_bytes:(Yojson.Safe.to_string (header_json ~before_messages ~after_messages))
+    ~header_bytes:
+      (content_header_bytes ~header_json:head.header_json ~header_objects:head.header_objects)
     ~chain:(history_chain head.history)
 ;;
 
-let turn_to_json turn =
+let turn_to_json (turn : turn) =
   `Assoc
     [ "bundle", `String turn.bundle
     ; "messages", `Int turn.messages
@@ -99,8 +175,37 @@ let turn_to_json turn =
 
 let history_to_json history =
   `Assoc
-    [ "turns", `List (List.map turn_to_json history.turns)
+    [ ( "segment"
+      , match history.segment with
+        | None -> `Null
+        | Some segment ->
+          `Assoc
+            [ "segment", `String segment.segment
+            ; "messages", `Int segment.segment_messages
+            ; "chain", `String segment.segment_chain
+            ] )
+    ; "turns", `List (List.map turn_to_json history.turns)
     ; "open", `List (List.map (fun digest -> `String digest) history.open_messages)
+    ]
+;;
+
+let segment_bytes segment =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ ( "previous"
+         , match segment.previous with
+           | None -> `Null
+           | Some digest -> `String digest )
+       ; "turns", `List (List.map turn_to_json segment.segment_turns)
+       ])
+;;
+
+let head_json head =
+  `Assoc
+    [ "format", `String head_format
+    ; "checkpoint", head.header_json
+    ; "header_objects", header_objects_json head.header_objects
+    ; "history", history_to_json head.history
     ]
 ;;
 
@@ -193,13 +298,6 @@ type plan =
   ; decoded : Checkpoint_types.t
   }
 
-let head_json ~header history =
-  `Assoc
-    [ "format", `String head_format
-    ; "checkpoint", header
-    ; "history", history_to_json history
-    ]
-;;
 
 module Digest_set = Set.Make (String)
 
@@ -250,7 +348,7 @@ let entries_and_chains memo (messages : Types.message array) =
    before it. A kept turn whose bundle is [absent] gets its bundle back from
    those messages, as an object to write. Answers the kept turns, those
    objects and how many messages the kept turns hold. *)
-let kept_turns ~absent (entries : entry array) (chains : chain array) previous_turns =
+let kept_turns ~absent ~from (entries : entry array) (chains : chain array) previous_turns =
   let length = Array.length entries in
   let rec keep rev_kept rev_objects covered = function
     | [] -> List.rev rev_kept, List.rev rev_objects, covered
@@ -266,7 +364,7 @@ let kept_turns ~absent (entries : entry array) (chains : chain array) previous_t
         else keep (turn :: rev_kept) rev_objects through turns
       else List.rev rev_kept, List.rev rev_objects, covered
   in
-  keep [] [] 0 previous_turns
+  keep [] [] from previous_turns
 ;;
 
 let unwritten_open_objects ~previous_open entries =
@@ -298,44 +396,126 @@ let remember_plan memo ~shared (messages : Types.message array) (entries : entry
   memo.last <- Some { last_messages = messages; last_entries = entries; last_chains = chains }
 ;;
 
+let rec take n = function
+  | [] -> []
+  | turn :: rest -> if n = 0 then [] else turn :: take (n - 1) rest
+;;
+
+let rec drop n = function
+  | [] -> []
+  | _ :: rest as turns -> if n = 0 then turns else drop (n - 1) rest
+;;
+
+(* While [turns_per_segment] closed turns are left, the oldest of them become
+   a segment naming the one before it. *)
+let rec pack segment turns rev_objects =
+  if List.length turns < turns_per_segment
+  then segment, turns, List.rev rev_objects
+  else (
+    let packed = take turns_per_segment turns in
+    let bytes =
+      segment_bytes
+        { previous = Option.map (fun (segment : segment_ref) -> segment.segment) segment
+        ; segment_turns = packed
+        }
+    in
+    let digest = digest_of_bytes bytes in
+    let before, chain =
+      match segment with
+      | None -> 0, chain_start
+      | Some segment -> segment.segment_messages, segment.segment_chain
+    in
+    let segment =
+      { segment = digest
+      ; segment_messages =
+          List.fold_left (fun total (turn : turn) -> total + turn.messages) before packed
+      ; segment_chain = List.fold_left (fun (_ : chain) (turn : turn) -> turn.chain) chain packed
+      }
+    in
+    pack (Some segment) (drop turns_per_segment turns) ((digest, bytes) :: rev_objects))
+;;
+
+let object_of_json json =
+  let bytes = Yojson.Safe.to_string json in
+  digest_of_bytes bytes, bytes
+;;
+
 let plan_save memo ?previous ?(absent = []) boundary (cp : Checkpoint_types.t) =
   let* (before_messages, after_messages), decoded_header =
     Checkpoint_codec.validated_fields_around_messages cp
   in
+  let* header_json, system_prompt_json, tools_json =
+    split_header ~before_messages ~after_messages
+  in
   let messages = Array.of_list cp.messages in
   let* shared, entries, chains = entries_and_chains memo messages in
   let absent = Digest_set.of_list absent in
-  let previous_turns, previous_open =
-    match previous with
-    | None -> [], []
-    | Some previous ->
-      ( previous.turns
-      , List.filter (fun digest -> not (Digest_set.mem digest absent)) previous.open_messages )
+  let present digest = not (Digest_set.mem digest absent) in
+  let ((system_prompt, _) as system_prompt_object) = object_of_json system_prompt_json in
+  let ((tools, _) as tools_object) = object_of_json tools_json in
+  let header_objects = { system_prompt; tools } in
+  (* A header object the previous head names, and the store holds, stays. *)
+  let header_writes =
+    List.filter_map
+      (fun (((digest, _) as written), named) ->
+         match previous with
+         | Some previous when String.equal (named previous.header_objects) digest && present digest ->
+           None
+         | Some _ | None -> Some written)
+      [ system_prompt_object, (fun objects -> objects.system_prompt)
+      ; tools_object, (fun objects -> objects.tools)
+      ]
   in
-  let kept, restored, covered = kept_turns ~absent entries chains previous_turns in
   let length = Array.length entries in
+  (* The previous segments stay when the chain where they end is the new
+     messages' there; the turns after them can stay only then. *)
+  let kept_segment, from, previous_turns, previous_open =
+    match previous with
+    | None -> None, 0, [], []
+    | Some previous ->
+      let previous_open = List.filter present previous.history.open_messages in
+      (match previous.history.segment with
+       | None -> None, 0, previous.history.turns, previous_open
+       | Some segment
+         when present segment.segment
+              && segment.segment_messages <= length
+              && String.equal chains.(segment.segment_messages) segment.segment_chain ->
+         Some segment, segment.segment_messages, previous.history.turns, previous_open
+       | Some _ -> None, 0, [], previous_open)
+  in
+  let kept, restored, covered = kept_turns ~absent ~from entries chains previous_turns in
   let rest = Array.to_list (Array.sub entries covered (length - covered)) in
-  let history, objects =
+  let closed, open_messages, written =
     match boundary, rest with
-    | Turn_closes, [] -> { turns = kept; open_messages = [] }, restored
+    | Turn_closes, [] -> kept, [], []
     | Turn_closes, (_ :: _ as closing) ->
       let bytes = bundle_bytes closing in
       let bundle = digest_of_bytes bytes in
-      ( { turns = kept @ [ { bundle; messages = List.length closing; chain = chains.(length) } ]
-        ; open_messages = []
-        }
-      , restored @ [ bundle, bytes ] )
+      ( kept @ [ { bundle; messages = List.length closing; chain = chains.(length) } ]
+      , []
+      , [ bundle, bytes ] )
     | Turn_continues, open_entries ->
-      ( { turns = kept; open_messages = List.map (fun entry -> entry.digest) open_entries }
-      , restored @ unwritten_open_objects ~previous_open open_entries )
+      ( kept
+      , List.map (fun entry -> entry.digest) open_entries
+      , unwritten_open_objects ~previous_open open_entries )
   in
+  let segment, turns, segments = pack kept_segment closed [] in
   remember_plan memo ~shared messages entries chains;
-  let header = header_json ~before_messages ~after_messages in
+  let head =
+    { header = { session_id = decoded_header.session_id; turn_count = decoded_header.turn_count }
+    ; header_json
+    ; header_objects
+    ; history = { segment; turns; open_messages }
+    }
+  in
   Ok
-    { objects
-    ; head_bytes = Yojson.Safe.to_string (head_json ~header history)
-    ; head = { checkpoint = decoded_header; history }
-    ; content = content_digest_of ~header_bytes:(Yojson.Safe.to_string header) ~chain:chains.(length)
+    { objects = header_writes @ restored @ segments @ written
+    ; head_bytes = Yojson.Safe.to_string (head_json head)
+    ; head
+    ; content =
+        content_digest_of
+          ~header_bytes:(content_header_bytes ~header_json ~header_objects)
+          ~chain:chains.(length)
     ; decoded =
         { decoded_header with
           messages = Array.to_list (Array.map (fun (entry : entry) -> entry.decoded) entries)
@@ -347,11 +527,17 @@ let content_digest memo (cp : Checkpoint_types.t) =
   let* (before_messages, after_messages), _decoded_header =
     Checkpoint_codec.validated_fields_around_messages cp
   in
+  let* header_json, system_prompt_json, tools_json =
+    split_header ~before_messages ~after_messages
+  in
   let messages = Array.of_list cp.messages in
   let* (_ : int), (_ : entry array), chains = entries_and_chains memo messages in
+  let header_objects =
+    { system_prompt = fst (object_of_json system_prompt_json); tools = fst (object_of_json tools_json) }
+  in
   Ok
     (content_digest_of
-       ~header_bytes:(Yojson.Safe.to_string (header_json ~before_messages ~after_messages))
+       ~header_bytes:(content_header_bytes ~header_json ~header_objects)
        ~chain:chains.(Array.length messages))
 ;;
 
@@ -381,6 +567,14 @@ type load_error =
       { digest : digest
       ; detail : string
       }
+  | Segment_invalid of
+      { segment : digest
+      ; detail : string
+      }
+  | Header_object_invalid of
+      { digest : digest
+      ; detail : string
+      }
 
 let load_error_to_string = function
   | Head_invalid detail -> "checkpoint head is invalid: " ^ detail
@@ -396,6 +590,10 @@ let load_error_to_string = function
     Printf.sprintf "checkpoint bundle %s does not match its turn: %s" bundle detail
   | Message_invalid { digest; detail } ->
     Printf.sprintf "checkpoint message %s is invalid: %s" digest detail
+  | Segment_invalid { segment; detail } ->
+    Printf.sprintf "checkpoint turn segment %s is invalid: %s" segment detail
+  | Header_object_invalid { digest; detail } ->
+    Printf.sprintf "checkpoint header object %s is invalid: %s" digest detail
 ;;
 
 (* Exactly the listed fields, each once, in any order. *)
@@ -452,22 +650,89 @@ let turn_of_json = function
     Error "turn must be an object"
 ;;
 
+let open_of_json ~what fields =
+  Result.bind
+    (list_field ~what fields "open")
+    (map_result (function
+       | `String digest -> digest_of_hex digest
+       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
+         Error (what ^ ".open holds a value that is not a digest")))
+;;
+
+let segment_ref_of_json = function
+  | `Null -> Ok None
+  | `Assoc fields ->
+    let what = "history.segment" in
+    let* () = exact_fields ~what [ "segment"; "messages"; "chain" ] fields in
+    let* segment = Result.bind (string_field ~what fields "segment") digest_of_hex in
+    let* segment_messages = int_field ~what fields "messages" in
+    let* segment_chain = Result.bind (string_field ~what fields "chain") chain_of_hex in
+    if segment_messages < turns_per_segment
+    then Error "history.segment holds fewer messages than one segment has turns"
+    else Ok (Some { segment; segment_messages; segment_chain })
+  | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    Error "history.segment must be null or an object"
+;;
+
+(* A head names fewer closed turns than a segment holds: a save packs the
+   rest into segments. *)
 let history_of_json = function
   | `Assoc fields ->
     let what = "history" in
-    let* () = exact_fields ~what [ "turns"; "open" ] fields in
-    let* turns = Result.bind (list_field ~what fields "turns") (map_result turn_of_json) in
-    let* open_messages =
-      Result.bind
-        (list_field ~what fields "open")
-        (map_result (function
-           | `String digest -> digest_of_hex digest
-           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
-             Error "history.open holds a value that is not a digest"))
+    let* () = exact_fields ~what [ "segment"; "turns"; "open" ] fields in
+    let* segment =
+      match List.assoc_opt "segment" fields with
+      | Some segment -> segment_ref_of_json segment
+      | None -> Error "history.segment is missing"
     in
-    Ok { turns; open_messages }
+    let* turns = Result.bind (list_field ~what fields "turns") (map_result turn_of_json) in
+    let* open_messages = open_of_json ~what fields in
+    if List.length turns >= turns_per_segment
+    then Error (Printf.sprintf "history.turns holds %d turns, a segment's worth or more" (List.length turns))
+    else Ok { segment; turns; open_messages }
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
     Error "history must be an object"
+;;
+
+let header_objects_of_json = function
+  | `Assoc fields ->
+    let what = "head.header_objects" in
+    let* () = exact_fields ~what [ system_prompt_field; tools_field ] fields in
+    let* system_prompt = Result.bind (string_field ~what fields system_prompt_field) digest_of_hex in
+    let* tools = Result.bind (string_field ~what fields tools_field) digest_of_hex in
+    Ok { system_prompt; tools }
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    Error "head.header_objects must be an object"
+;;
+
+let segment_of_string ~digest bytes =
+  let invalid detail = Error (Segment_invalid { segment = digest; detail }) in
+  match Yojson.Safe.from_string bytes with
+  | exception Yojson.Json_error detail -> invalid ("not JSON: " ^ detail)
+  | `Assoc fields ->
+    let what = "segment" in
+    (match
+       let* () = exact_fields ~what [ "previous"; "turns" ] fields in
+       let* previous =
+         match List.assoc_opt "previous" fields with
+         | None -> Error "segment.previous is missing"
+         | Some `Null -> Ok None
+         | Some (`String previous) -> Result.map Option.some (digest_of_hex previous)
+         | Some (`Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) ->
+           Error "segment.previous must be null or a digest"
+       in
+       let* segment_turns = Result.bind (list_field ~what fields "turns") (map_result turn_of_json) in
+       if List.length segment_turns <> turns_per_segment
+       then
+         Error
+           (Printf.sprintf "segment holds %d turns, not %d" (List.length segment_turns)
+              turns_per_segment)
+       else Ok { previous; segment_turns }
+     with
+     | Ok segment -> Ok segment
+     | Error detail -> invalid detail)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    invalid "segment must be an object"
 ;;
 
 (* The [checkpoint_version] a document names: a head's in its checkpoint
@@ -480,28 +745,55 @@ let named_version fields json =
   | true, None | false, (Some _ | None) -> Checkpoint_codec.checkpoint_json_version json
 ;;
 
+(* The full checkpoint header: the head's fields with the two object fields
+   put back. The decoder reads fields by name. *)
+let full_header_json ~header_fields ~system_prompt ~tools =
+  `Assoc (header_fields @ [ system_prompt_field, system_prompt; tools_field, tools ])
+;;
+
 let head_of_fields fields =
   let invalid detail = Error (Head_invalid detail) in
   let what = "head" in
-  match exact_fields ~what [ "format"; "checkpoint"; "history" ] fields with
+  match exact_fields ~what [ "format"; "checkpoint"; "header_objects"; "history" ] fields with
   | Error detail -> invalid detail
   | Ok () ->
-    (match string_field ~what fields "format" with
-     | Error detail -> invalid detail
-     | Ok format when not (String.equal format head_format) ->
+    (match
+       ( string_field ~what fields "format"
+       , List.assoc_opt "checkpoint" fields
+       , List.assoc_opt "header_objects" fields
+       , List.assoc_opt "history" fields )
+     with
+     | Error detail, _, _, _ -> invalid detail
+     | Ok format, _, _, _ when not (String.equal format head_format) ->
        invalid (Printf.sprintf "head.format is %S, expected %S" format head_format)
-     | Ok _ ->
-       (match List.assoc_opt "checkpoint" fields, List.assoc_opt "history" fields with
-        | None, _ -> invalid "head.checkpoint is missing"
-        | _, None -> invalid "head.history is missing"
-        | Some checkpoint_json, Some history_json ->
-          (match Checkpoint_codec.of_json checkpoint_json, history_of_json history_json with
-           | Error error, _ -> Error (Checkpoint_invalid error)
-           | Ok _, Error detail -> invalid detail
-           | Ok checkpoint, Ok history ->
+     | Ok _, None, _, _ | Ok _, _, None, _ | Ok _, _, _, None -> invalid "a head field is missing"
+     | Ok _, Some header_json, Some objects_json, Some history_json ->
+       (match header_json with
+        | `Assoc header_fields when List.exists is_object_field header_fields ->
+          invalid "head.checkpoint holds a field the head keeps as an object"
+        | `Assoc header_fields ->
+          (* The object fields' values are not here; placeholders let the
+             codec check every other field. *)
+          (match
+             ( Checkpoint_codec.of_json
+                 (full_header_json ~header_fields ~system_prompt:`Null ~tools:(`List []))
+             , header_objects_of_json objects_json
+             , history_of_json history_json )
+           with
+           | Error error, _, _ -> Error (Checkpoint_invalid error)
+           | Ok _, Error detail, _ | Ok _, Ok _, Error detail -> invalid detail
+           | Ok checkpoint, Ok header_objects, Ok history ->
              (match checkpoint.messages with
-              | [] -> Ok { checkpoint; history }
-              | _ :: _ -> invalid "head.checkpoint.messages must be empty"))))
+              | [] ->
+                Ok
+                  { header = { session_id = checkpoint.session_id; turn_count = checkpoint.turn_count }
+                  ; header_json
+                  ; header_objects
+                  ; history
+                  }
+              | _ :: _ -> invalid "head.checkpoint.messages must be empty"))
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+          invalid "head.checkpoint must be an object"))
 ;;
 
 let head_of_string text =
@@ -594,21 +886,41 @@ let bundle_entries ~bundle bytes =
 
 let load memo ~read_object head =
   let next = Entries.create 0 in
+  let header_object digest =
+    let* bytes = read_checked ~read_object digest in
+    match Yojson.Safe.from_string bytes with
+    | exception Yojson.Json_error detail ->
+      Error (Header_object_invalid { digest; detail = "not JSON: " ^ detail })
+    | json -> Ok json
+  in
+  let* system_prompt = header_object head.header_objects.system_prompt in
+  let* tools = header_object head.header_objects.tools in
+  (* The segments' turns, oldest first, read from the last segment back. *)
+  let rec segment_turns later = function
+    | None -> Ok later
+    | Some digest ->
+      let* bytes = read_checked ~read_object digest in
+      let* segment = segment_of_string ~digest bytes in
+      segment_turns (segment.segment_turns @ later) segment.previous
+  in
+  let* older_turns =
+    segment_turns [] (Option.map (fun (segment : segment_ref) -> segment.segment) head.history.segment)
+  in
   (* Each message's entry with the chain through it, newest first: the turns'
      values come from checking them against the head, the open messages'
      from stepping on. *)
-  let rec load_turns chain rev_loaded = function
-    | [] -> Ok (chain, rev_loaded)
-    | turn :: turns ->
+  let rec load_turns chain count rev_loaded = function
+    | [] -> Ok (chain, count, rev_loaded)
+    | (turn : turn) :: turns ->
       let* bytes = read_checked ~read_object turn.bundle in
       let* entries = bundle_entries ~bundle:turn.bundle bytes in
-      let count = List.length entries in
-      if count <> turn.messages
+      let held = List.length entries in
+      if held <> turn.messages
       then
         Error
           (Turn_mismatch
              { bundle = turn.bundle
-             ; detail = Printf.sprintf "it holds %d messages, the turn names %d" count turn.messages
+             ; detail = Printf.sprintf "it holds %d messages, the turn names %d" held turn.messages
              })
       else (
         let chain, rev_loaded =
@@ -620,9 +932,23 @@ let load memo ~read_object head =
         in
         if not (String.equal chain turn.chain)
         then Error (Turn_mismatch { bundle = turn.bundle; detail = "its messages give another chain" })
-        else load_turns chain rev_loaded turns)
+        else load_turns chain (count + held) rev_loaded turns)
   in
-  let* chain, rev_loaded = load_turns chain_start [] head.history.turns in
+  let* chain, count, rev_loaded = load_turns chain_start 0 [] older_turns in
+  let* () =
+    match head.history.segment with
+    | None -> Ok ()
+    | Some segment ->
+      if count = segment.segment_messages && String.equal chain segment.segment_chain
+      then Ok ()
+      else
+        Error
+          (Segment_invalid
+             { segment = segment.segment
+             ; detail = "its turns give another message count or chain than the head names"
+             })
+  in
+  let* chain, (_ : int), rev_loaded = load_turns chain count rev_loaded head.history.turns in
   let* (_ : chain), rev_loaded =
     List.fold_left
       (fun acc digest ->
@@ -634,6 +960,14 @@ let load memo ~read_object head =
       (Ok (chain, rev_loaded))
       head.history.open_messages
   in
+  let* header =
+    match head.header_json with
+    | `Assoc header_fields ->
+      Checkpoint_codec.of_json (full_header_json ~header_fields ~system_prompt ~tools)
+      |> Result.map_error (fun error -> Checkpoint_invalid error)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error (Head_invalid "head.checkpoint must be an object")
+  in
   let loaded = Array.of_list (List.rev rev_loaded) in
   let entries = Array.map fst loaded in
   let chains = Array.make (Array.length loaded + 1) chain_start in
@@ -642,5 +976,5 @@ let load memo ~read_object head =
   let messages = Array.map (fun (entry : entry) -> entry.decoded) entries in
   memo.entries <- next;
   memo.last <- Some { last_messages = messages; last_entries = entries; last_chains = chains };
-  Ok { head.checkpoint with messages = Array.to_list messages }
+  Ok { header with messages = Array.to_list messages }
 ;;

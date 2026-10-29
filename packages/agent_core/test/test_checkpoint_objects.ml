@@ -67,7 +67,17 @@ let same_messages label expected (actual : Checkpoint.t) =
     (List.equal Types.Message_value.equal expected actual.messages)
 ;;
 
-let object_count (plan : O.plan) = List.length plan.objects
+(* The objects a plan writes for its messages: not the header objects, which
+   a first save writes and a save with the same header does not. *)
+let object_count (plan : O.plan) =
+  List.length
+    (List.filter
+       (fun ((digest : O.digest), _) ->
+          not
+            (String.equal (digest :> string) (plan.head.header_objects.system_prompt :> string)
+             || String.equal (digest :> string) (plan.head.header_objects.tools :> string)))
+       plan.objects)
+;;
 
 (* The head and objects a save plans give back the checkpoint, and the head
    bytes decode to the head the plan holds. *)
@@ -82,7 +92,7 @@ let test_a_saved_checkpoint_loads_back () =
   write store closed_plan;
   Alcotest.(check int) "a closed turn is one bundle" 1 (object_count closed_plan);
   (* The blob sweep and an operator read a bundle as JSON lines. *)
-  let _, bundle = List.hd closed_plan.objects in
+  let bundle = List.assoc (List.hd closed_plan.head.history.turns).bundle closed_plan.objects in
   let lines = String.split_on_char '\n' bundle |> List.filter (fun line -> line <> "") in
   Alcotest.(check int) "a bundle is its header and one line per message" 5 (List.length lines);
   List.iter (fun line -> ignore (Yojson.Safe.from_string line : Yojson.Safe.t)) lines;
@@ -97,17 +107,17 @@ let test_a_save_writes_only_what_is_new () =
   let store = store () in
   let first = plan_ok memo O.Turn_closes (checkpoint (turn 1)) in
   write store first;
-  let second = plan_ok memo ~previous:first.head.history O.Turn_closes (checkpoint (turn 1 @ turn 2)) in
+  let second = plan_ok memo ~previous:first.head O.Turn_closes (checkpoint (turn 1 @ turn 2)) in
   write store second;
   Alcotest.(check int) "only the new turn's bundle is written" 1 (object_count second);
   Alcotest.(check int) "the first turn is kept" 2 (List.length second.head.history.turns);
   Alcotest.(check bool) "the kept turn is the same turn" true
     (List.hd second.head.history.turns = List.hd first.head.history.turns);
-  let growing = plan_ok memo ~previous:second.head.history O.Turn_continues (checkpoint (turn 1 @ turn 2 @ [ user "ask 3" ])) in
+  let growing = plan_ok memo ~previous:second.head O.Turn_continues (checkpoint (turn 1 @ turn 2 @ [ user "ask 3" ])) in
   write store growing;
   Alcotest.(check int) "one open message" 1 (object_count growing);
   let grown =
-    plan_ok memo ~previous:growing.head.history O.Turn_continues
+    plan_ok memo ~previous:growing.head O.Turn_continues
       (checkpoint (turn 1 @ turn 2 @ turn 3))
   in
   write store grown;
@@ -122,10 +132,10 @@ let test_a_changed_turn_is_written_again () =
   let store = store () in
   let first = plan_ok memo O.Turn_closes (checkpoint (turn 1)) in
   write store first;
-  let second = plan_ok memo ~previous:first.head.history O.Turn_closes (checkpoint (turn 1 @ turn 2)) in
+  let second = plan_ok memo ~previous:first.head O.Turn_closes (checkpoint (turn 1 @ turn 2)) in
   write store second;
   let edited = [ user "ask 1"; assistant "edited answer" ] @ turn 2 in
-  let replanned = plan_ok memo ~previous:second.head.history O.Turn_continues (checkpoint edited) in
+  let replanned = plan_ok memo ~previous:second.head O.Turn_continues (checkpoint edited) in
   write store replanned;
   Alcotest.(check int) "no turn is kept" 0 (List.length replanned.head.history.turns);
   Alcotest.(check int) "every message is open" 4 (List.length replanned.head.history.open_messages);
@@ -136,7 +146,7 @@ let test_a_changed_turn_is_written_again () =
 let test_a_turn_names_the_chain_of_its_prefix () =
   let memo = O.create_memo () in
   let first = plan_ok memo O.Turn_closes (checkpoint (turn 1)) in
-  let second = plan_ok memo ~previous:first.head.history O.Turn_closes (checkpoint (turn 1 @ turn 2)) in
+  let second = plan_ok memo ~previous:first.head O.Turn_closes (checkpoint (turn 1 @ turn 2)) in
   let open_plan = plan_ok (O.create_memo ()) O.Turn_continues (checkpoint (turn 1 @ turn 2)) in
   let from_scratch =
     List.fold_left O.chain_step O.chain_start open_plan.head.history.open_messages
@@ -152,12 +162,12 @@ let test_a_loaded_checkpoint_saves_unchanged () =
   let memo = O.create_memo () in
   let first = plan_ok memo O.Turn_closes (checkpoint (turn 1)) in
   write store first;
-  let continued = plan_ok memo ~previous:first.head.history O.Turn_continues (checkpoint (turn 1 @ [ user "ask 2" ])) in
+  let continued = plan_ok memo ~previous:first.head O.Turn_continues (checkpoint (turn 1 @ [ user "ask 2" ])) in
   write store continued;
   let head = Result.get_ok (O.head_of_string continued.head_bytes) in
   let load_memo = O.create_memo () in
   let loaded = Result.get_ok (O.load load_memo ~read_object:(read store) head) in
-  let again = plan_ok load_memo ~previous:head.history O.Turn_continues loaded in
+  let again = plan_ok load_memo ~previous:head O.Turn_continues loaded in
   Alcotest.(check int) "nothing to write" 0 (object_count again);
   Alcotest.(check string) "the same head bytes" continued.head_bytes again.head_bytes
 ;;
@@ -171,74 +181,69 @@ let load_error store head_bytes =
      | Error error -> Some error)
 ;;
 
+(* [head_bytes] with its top-level fields changed by [edit]. *)
+let with_head_edited head_bytes edit =
+  match Yojson.Safe.from_string head_bytes with
+  | `Assoc fields -> Yojson.Safe.to_string (`Assoc (List.map edit fields))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    Alcotest.fail "a head must be an object"
+;;
+
+(* [head_bytes] with its one closed turn's fields changed by [edit]. A head of
+   another shape fails the test rather than passing through unchanged. *)
+let with_turn_edited head_bytes edit =
+  let edit_history = function
+    | `Assoc history ->
+      `Assoc
+        (List.map
+           (fun (field, value) ->
+              match field, value with
+              | "turns", `List [ `Assoc turn ] -> field, `List [ `Assoc (List.map edit turn) ]
+              | "turns", (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) ->
+                Alcotest.fail "the head must name exactly one closed turn"
+              | _, (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) ->
+                field, value)
+           history)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Alcotest.fail "head.history must be an object"
+  in
+  with_head_edited head_bytes (fun (name, value) ->
+    if String.equal name "history" then name, edit_history value else name, value)
+;;
+
+let set_field name replacement (field, value) =
+  if String.equal field name then field, replacement else field, value
+;;
+
 let test_a_load_refuses_what_it_cannot_prove () =
   let plan = plan_ok (O.create_memo ()) O.Turn_closes (checkpoint (turn 1)) in
-  let bundle, bytes = List.hd plan.objects in
+  let bundle = (List.hd plan.head.history.turns).bundle in
   let key = (bundle :> string) in
-  (match load_error (store ()) plan.head_bytes with
-   | Some (O.Object_missing _) -> ()
+  let bytes = List.assoc bundle plan.objects in
+  let full () =
+    let objects = store () in
+    write objects plan;
+    objects
+  in
+  let without_bundle = full () in
+  Hashtbl.remove without_bundle key;
+  (match load_error without_bundle plan.head_bytes with
+   | Some (O.Object_missing missing) when String.equal (missing :> string) key -> ()
    | Some _ | None -> Alcotest.fail "a missing bundle must be Object_missing");
-  let corrupt = store () in
+  let corrupt = full () in
   Hashtbl.replace corrupt key (bytes ^ " ");
   (match load_error corrupt plan.head_bytes with
    | Some (O.Object_digest_mismatch _) -> ()
    | Some _ | None -> Alcotest.fail "changed bytes must be Object_digest_mismatch");
   (* The bundle is intact but the head names another message count for it. *)
-  let intact = store () in
-  Hashtbl.replace intact key bytes;
-  let miscounted =
-    Yojson.Safe.to_string
-      (match Yojson.Safe.from_string plan.head_bytes with
-       | `Assoc fields ->
-         `Assoc
-           (List.map
-              (fun (name, value) ->
-                 match name, value with
-                 | "history", `Assoc [ ("turns", `List [ `Assoc turn ]); open_field ] ->
-                   ( name
-                   , `Assoc
-                       [ ( "turns"
-                         , `List
-                             [ `Assoc
-                                 (List.map
-                                    (fun (field, field_value) ->
-                                       if String.equal field "messages" then field, `Int 3 else field, field_value)
-                                    turn) ] )
-                       ; open_field ] )
-                 | _ -> name, value)
-              fields)
-       | json -> json)
-  in
-  (match load_error intact miscounted with
+  (match load_error (full ()) (with_turn_edited plan.head_bytes (set_field "messages" (`Int 3))) with
    | Some (O.Turn_mismatch _) -> ()
    | Some _ | None -> Alcotest.fail "a turn that names another count must be Turn_mismatch");
   (* The head names another chain for an intact bundle. *)
-  let rechained =
-    Yojson.Safe.to_string
-      (match Yojson.Safe.from_string plan.head_bytes with
-       | `Assoc fields ->
-         `Assoc
-           (List.map
-              (fun (name, value) ->
-                 match name, value with
-                 | "history", `Assoc [ ("turns", `List [ `Assoc turn ]); open_field ] ->
-                   ( name
-                   , `Assoc
-                       [ ( "turns"
-                         , `List
-                             [ `Assoc
-                                 (List.map
-                                    (fun (field, field_value) ->
-                                       if String.equal field "chain"
-                                       then field, `String (O.chain_start :> string)
-                                       else field, field_value)
-                                    turn) ] )
-                       ; open_field ] )
-                 | _ -> name, value)
-              fields)
-       | json -> json)
-  in
-  (match load_error intact rechained with
+  (match
+     load_error (full ())
+       (with_turn_edited plan.head_bytes (set_field "chain" (`String (O.chain_start :> string))))
+   with
    | Some (O.Turn_mismatch _) -> ()
    | Some _ | None -> Alcotest.fail "a turn that names another chain must be Turn_mismatch");
   (* A bundle stored under its own digest whose header names a digest its
@@ -250,33 +255,11 @@ let test_a_load_refuses_what_it_cannot_prove () =
     ^ "\n" ^ body
   in
   let lying_digest = O.digest_of_bytes lying in
-  let lying_store = store () in
+  let lying_store = full () in
   Hashtbl.replace lying_store (lying_digest :> string) lying;
   let lying_head =
-    Yojson.Safe.to_string
-      (match Yojson.Safe.from_string plan.head_bytes with
-       | `Assoc fields ->
-         `Assoc
-           (List.map
-              (fun (name, value) ->
-                 match name, value with
-                 | "history", `Assoc [ ("turns", `List [ `Assoc turn ]); open_field ] ->
-                   ( name
-                   , `Assoc
-                       [ ( "turns"
-                         , `List
-                             [ `Assoc
-                                 (List.map
-                                    (fun (field, field_value) ->
-                                       match field with
-                                       | "bundle" -> field, `String (lying_digest :> string)
-                                       | "messages" -> field, `Int 1
-                                       | _ -> field, field_value)
-                                    turn) ] )
-                       ; open_field ] )
-                 | _ -> name, value)
-              fields)
-       | json -> json)
+    with_turn_edited plan.head_bytes (fun field ->
+      set_field "messages" (`Int 1) (set_field "bundle" (`String (lying_digest :> string)) field))
   in
   (match load_error lying_store lying_head with
    | Some (O.Bundle_invalid _) -> ()
@@ -288,48 +271,36 @@ let test_a_load_refuses_what_it_cannot_prove () =
     | _ -> Alcotest.fail "expected a header and two message lines"
   in
   let unseparated_digest = O.digest_of_bytes unseparated in
-  let unseparated_store = store () in
+  let unseparated_store = full () in
   Hashtbl.replace unseparated_store (unseparated_digest :> string) unseparated;
-  let unseparated_head =
-    Yojson.Safe.to_string
-      (match Yojson.Safe.from_string plan.head_bytes with
-       | `Assoc fields ->
-         `Assoc
-           (List.map
-              (fun (name, value) ->
-                 match name, value with
-                 | "history", `Assoc [ ("turns", `List [ `Assoc turn ]); open_field ] ->
-                   ( name
-                   , `Assoc
-                       [ ( "turns"
-                         , `List
-                             [ `Assoc
-                                 (List.map
-                                    (fun (field, field_value) ->
-                                       if String.equal field "bundle"
-                                       then field, `String (unseparated_digest :> string)
-                                       else field, field_value)
-                                    turn) ] )
-                       ; open_field ] )
-                 | _ -> name, value)
-              fields)
-       | json -> json)
-  in
-  (match load_error unseparated_store unseparated_head with
+  (match
+     load_error unseparated_store
+       (with_turn_edited plan.head_bytes (set_field "bundle" (`String (unseparated_digest :> string))))
+   with
    | Some (O.Bundle_invalid _) -> ()
    | Some _ | None -> Alcotest.fail "a message that does not end its line must be Bundle_invalid");
-  let with_messages =
-    Yojson.Safe.to_string
-      (match Yojson.Safe.from_string plan.head_bytes with
-       | `Assoc fields ->
-         `Assoc
-           (List.map
-              (fun (name, value) ->
-                 if String.equal name "format" then name, `String "another.format" else name, value)
-              fields)
-       | json -> json)
-  in
-  match load_error (store ()) with_messages with
+  (* A header object whose bytes are not JSON, stored under their digest. *)
+  let broken_tools = "not json" in
+  let broken_digest = O.digest_of_bytes broken_tools in
+  let broken_store = full () in
+  Hashtbl.replace broken_store (broken_digest :> string) broken_tools;
+  (match
+     load_error broken_store
+       (with_head_edited plan.head_bytes (fun (name, value) ->
+          if String.equal name "header_objects"
+          then (
+            match value with
+            | `Assoc objects -> name, `Assoc (List.map (set_field "tools" (`String (broken_digest :> string))) objects)
+            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+              Alcotest.fail "head.header_objects must be an object")
+          else name, value))
+   with
+   | Some (O.Header_object_invalid _) -> ()
+   | Some _ | None -> Alcotest.fail "a header object that is not JSON must be Header_object_invalid");
+  match
+    load_error (full ())
+      (with_head_edited plan.head_bytes (set_field "format" (`String "another.format")))
+  with
   | Some (O.Head_invalid _) -> ()
   | Some _ | None -> Alcotest.fail "a head of another format must be Head_invalid"
 ;;
@@ -356,7 +327,7 @@ let test_one_content_digest_for_every_layout () =
   let layouts =
     [ "all open", plan_ok (O.create_memo ()) O.Turn_continues value
     ; "one bundle", plan_ok (O.create_memo ()) O.Turn_closes value
-    ; "a bundle then open", plan_ok memo ~previous:first.head.history O.Turn_continues value
+    ; "a bundle then open", plan_ok memo ~previous:first.head O.Turn_continues value
     ]
   in
   List.iter
@@ -468,7 +439,7 @@ let test_a_memo_gives_the_plan_a_fresh_memo_gives () =
       (List.map (fun ((digest : O.digest), bytes) -> (digest :> string), bytes) actual.objects)
   in
   let rec step index previous messages =
-    if index < 60 then (
+    if index < 300 then (
       let messages =
         match changes.(Random.State.int random (Array.length changes)), messages with
         | `Edit, _ :: _ ->
@@ -499,9 +470,145 @@ let test_a_memo_gives_the_plan_a_fresh_memo_gives () =
              | Error error -> Alcotest.fail (O.load_error_to_string error)))
         else planned.decoded.messages
       in
-      step (index + 1) (Some planned.head.history) messages)
+      step (index + 1) (Some planned.head) messages)
   in
   step 0 None []
+;;
+
+(* [count] turns closed one save at a time, each save naming the head before
+   it, with every plan's objects written to [store]. *)
+let close_turns ~store ~memo count =
+  let rec close index previous messages plans =
+    if index > count
+    then List.rev plans, messages
+    else (
+      let messages = messages @ turn index in
+      let plan = plan_ok ?previous memo O.Turn_closes (checkpoint messages) in
+      write store plan;
+      close (index + 1) (Some plan.head) plan.decoded.messages (plan :: plans))
+  in
+  close 1 None [] []
+;;
+
+(* However many turns close, a head names fewer than a segment's worth of
+   them; the rest are segments, each written once, and the history loads
+   back whole. *)
+let test_a_head_names_fewer_turns_than_a_segment () =
+  let store = store () in
+  let plans, messages = close_turns ~store ~memo:(O.create_memo ()) 200 in
+  List.iter
+    (fun (plan : O.plan) ->
+       Alcotest.(check bool) "the head names fewer turns than a segment holds" true
+         (List.length plan.head.history.turns < O.turns_per_segment))
+    plans;
+  let last = List.nth plans (List.length plans - 1) in
+  (match last.head.history.segment with
+   | Some segment ->
+     Alcotest.(check int) "the segments hold the turns before the head's"
+       (List.length (turn 1) * (200 / O.turns_per_segment * O.turns_per_segment))
+       segment.segment_messages
+   | None -> Alcotest.fail "200 closed turns make segments");
+  let largest = List.fold_left (fun size (plan : O.plan) -> max size (String.length plan.head_bytes)) 0 plans in
+  let at_capacity = String.length (List.nth plans (O.turns_per_segment - 2)).head_bytes in
+  Alcotest.(check bool)
+    (Printf.sprintf "no head is larger than one with %d turns and a segment (%d, %d)"
+       (O.turns_per_segment - 1) largest at_capacity)
+    true
+    (largest <= at_capacity + 512);
+  same_messages "the history loads back through its segments" messages (load_ok store last);
+  (* The head names another message count for its last segment. *)
+  let miscounted =
+    with_head_edited last.head_bytes (fun (name, value) ->
+      if String.equal name "history"
+      then (
+        match value with
+        | `Assoc history ->
+          ( name
+          , `Assoc
+              (List.map
+                 (fun (field, field_value) ->
+                    match field, field_value with
+                    | "segment", `Assoc segment ->
+                      ( field
+                      , `Assoc
+                          (List.map
+                             (fun (key, key_value) ->
+                                match key, key_value with
+                                | "messages", `Int count -> key, `Int (count + 2)
+                                | _, (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) ->
+                                  key, key_value)
+                             segment) )
+                    | _, (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) ->
+                      field, field_value)
+                 history) )
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+          Alcotest.fail "head.history must be an object")
+      else name, value)
+  in
+  match load_error store miscounted with
+  | Some (O.Segment_invalid _) -> ()
+  | Some _ | None -> Alcotest.fail "a segment the head miscounts must be Segment_invalid"
+;;
+
+(* A save writes a header object only when it differs from the previous
+   head's. *)
+let test_a_header_object_is_written_when_it_changes () =
+  let memo = O.create_memo () in
+  let first = plan_ok memo O.Turn_closes (checkpoint (turn 1)) in
+  let header_digests (plan : O.plan) =
+    [ (plan.head.header_objects.system_prompt :> string); (plan.head.header_objects.tools :> string) ]
+  in
+  let written (plan : O.plan) = List.map (fun ((digest : O.digest), _) -> (digest :> string)) plan.objects in
+  Alcotest.(check bool) "a first save writes both" true
+    (List.for_all (fun digest -> List.mem digest (written first)) (header_digests first));
+  let same = plan_ok memo ~previous:first.head O.Turn_closes (checkpoint (turn 1 @ turn 2)) in
+  Alcotest.(check bool) "an unchanged header writes neither" false
+    (List.exists (fun digest -> List.mem digest (written same)) (header_digests same));
+  let reprompted =
+    plan_ok memo ~previous:same.head O.Turn_closes
+      { (checkpoint (turn 1 @ turn 2)) with system_prompt = Some "be thorough" }
+  in
+  Alcotest.(check bool) "a new system prompt is written" true
+    (List.mem (reprompted.head.header_objects.system_prompt :> string) (written reprompted));
+  Alcotest.(check bool) "the same tools are not" false
+    (List.mem (reprompted.head.header_objects.tools :> string) (written reprompted))
+;;
+
+(* A change inside a segment drops that segment and everything after it:
+   their messages are written again. *)
+let test_an_edit_inside_a_segment_writes_it_again () =
+  let store = store () in
+  let memo = O.create_memo () in
+  let plans, messages = close_turns ~store ~memo (O.turns_per_segment + 6) in
+  let last = List.nth plans (List.length plans - 1) in
+  let edited = List.mapi (fun index message -> if index = 5 then assistant "edited" else message) messages in
+  let replanned = plan_ok memo ~previous:last.head O.Turn_closes (checkpoint edited) in
+  Alcotest.(check bool) "no segment is kept" true (Option.is_none replanned.head.history.segment);
+  Alcotest.(check int) "every message is one closed turn" 1 (List.length replanned.head.history.turns);
+  write store replanned;
+  same_messages "the edited history loads back" edited (load_ok store replanned)
+;;
+
+(* A segment the store lost is not kept: the save writes its messages again,
+   and the head it plans loads without it. *)
+let test_an_absent_segment_is_not_kept () =
+  let store = store () in
+  let memo = O.create_memo () in
+  let plans, messages = close_turns ~store ~memo (O.turns_per_segment + 2) in
+  let last = List.nth plans (List.length plans - 1) in
+  let segment =
+    match last.head.history.segment with
+    | Some segment -> segment.segment
+    | None -> Alcotest.fail "a segment's worth of turns makes a segment"
+  in
+  Hashtbl.remove store (segment :> string);
+  let grown = messages @ turn 99 in
+  let replanned = plan_ok memo ~previous:last.head ~absent:[ segment ] O.Turn_closes (checkpoint grown) in
+  Alcotest.(check bool) "the lost segment is not named" false
+    (List.mem (segment :> string)
+       (List.map (fun (digest : O.digest) -> (digest :> string)) (O.head_objects replanned.head)));
+  write store replanned;
+  same_messages "the history loads back" grown (load_ok store replanned)
 ;;
 
 (* A later binary's head reads as its version even when its shape is not this
@@ -551,21 +658,25 @@ let test_an_absent_object_is_written_again () =
   let first = plan_ok memo O.Turn_closes (checkpoint (turn 1)) in
   write store first;
   let messages = turn 1 @ [ user "ask 2" ] in
-  let second = plan_ok memo ~previous:first.head.history O.Turn_continues (checkpoint messages) in
+  let second = plan_ok memo ~previous:first.head O.Turn_continues (checkpoint messages) in
   write store second;
   let bundle = (List.hd second.head.history.turns).bundle in
   let open_message = List.hd second.head.history.open_messages in
-  Alcotest.(check (list string)) "the head names its bundle and its open message"
-    [ (bundle :> string); (open_message :> string) ]
-    (List.map (fun (digest : O.digest) -> (digest :> string)) (O.history_objects second.head.history));
+  Alcotest.(check (list string)) "the head names its header objects, its bundle and its open message"
+    [ (second.head.header_objects.system_prompt :> string)
+    ; (second.head.header_objects.tools :> string)
+    ; (bundle :> string)
+    ; (open_message :> string)
+    ]
+    (List.map (fun (digest : O.digest) -> (digest :> string)) (O.head_objects second.head));
   Hashtbl.remove store (bundle :> string);
   Hashtbl.remove store (open_message :> string);
   let unchanged =
-    plan_ok memo ~previous:second.head.history O.Turn_continues (checkpoint messages)
+    plan_ok memo ~previous:second.head O.Turn_continues (checkpoint messages)
   in
   Alcotest.(check int) "a save that trusts the head writes nothing" 0 (object_count unchanged);
   let third =
-    plan_ok memo ~previous:second.head.history ~absent:[ bundle; open_message ] O.Turn_continues
+    plan_ok memo ~previous:second.head ~absent:[ bundle; open_message ] O.Turn_continues
       (checkpoint messages)
   in
   Alcotest.(check (list string)) "the absent bundle and message are written again"
@@ -595,6 +706,13 @@ let () =
             test_a_rich_checkpoint_keeps_its_digest_and_bytes
         ; Alcotest.test_case "a memo gives the plan a fresh memo gives" `Quick
             test_a_memo_gives_the_plan_a_fresh_memo_gives
+        ; Alcotest.test_case "a head names fewer turns than a segment" `Quick
+            test_a_head_names_fewer_turns_than_a_segment
+        ; Alcotest.test_case "a header object is written when it changes" `Quick
+            test_a_header_object_is_written_when_it_changes
+        ; Alcotest.test_case "an edit inside a segment writes it again" `Quick
+            test_an_edit_inside_a_segment_writes_it_again
+        ; Alcotest.test_case "an absent segment is not kept" `Quick test_an_absent_segment_is_not_kept
         ] )
     ; ( "refusals"
       , [ Alcotest.test_case "a load refuses what it cannot prove" `Quick

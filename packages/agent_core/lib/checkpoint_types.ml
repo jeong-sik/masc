@@ -1,6 +1,6 @@
 open Types
 
-let checkpoint_version = 17
+let checkpoint_version = 18
 
 type t =
   { version : int

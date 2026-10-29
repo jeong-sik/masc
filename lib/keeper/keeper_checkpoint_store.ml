@@ -343,7 +343,9 @@ let classify_objects_error : Objects.load_error -> checkpoint_load_error = funct
     | Objects.Object_digest_mismatch _
     | Objects.Bundle_invalid _
     | Objects.Turn_mismatch _
-    | Objects.Message_invalid _ ) as error -> Objects_invalid error
+    | Objects.Message_invalid _
+    | Objects.Segment_invalid _
+    | Objects.Header_object_invalid _ ) as error -> Objects_invalid error
 
 (* Both checkpoint reads take their bytes through
    [Fs_compat.load_owned_regular_file]: the read runs on a system thread when
@@ -435,7 +437,7 @@ type canonical_summary =
   ; summary_session_id : string
   ; summary_turn_count : int
   ; summary_message_count : int
-  ; summary_history : Objects.history
+  ; summary_head : Objects.head
   ; summary_objects : head_objects
   }
 
@@ -535,10 +537,10 @@ let cached_summary ~canonical_path =
 
 let summary_of_head ~identity ~objects (head : Objects.head) =
   { identity
-  ; summary_session_id = head.checkpoint.session_id
-  ; summary_turn_count = head.checkpoint.turn_count
+  ; summary_session_id = head.header.session_id
+  ; summary_turn_count = head.header.turn_count
   ; summary_message_count = Objects.message_count head.history
-  ; summary_history = head.history
+  ; summary_head = head
   ; summary_objects = objects
   }
 
@@ -1096,14 +1098,14 @@ let load_canonical_bytes_strict path =
 type known_canonical =
   { known_session_id : string
   ; known_turn_count : int
-  ; known_history : Objects.history
+  ; known_head : Objects.head
   ; known_objects : head_objects
   }
 
 let known_of_summary summary =
   { known_session_id = summary.summary_session_id
   ; known_turn_count = summary.summary_turn_count
-  ; known_history = summary.summary_history
+  ; known_head = summary.summary_head
   ; known_objects = summary.summary_objects
   }
 
@@ -1132,17 +1134,59 @@ let known_canonical ~canonical_path
          ~canonical_path ~identity_before:(Some identity) ~objects:Objects_unchecked head;
        Ok (Some (known_of_summary summary)))
 
+(* The segments before [head]'s last one and every segment's bundles, read
+   from the last segment back, or the first segment that could not be read
+   whole. *)
+type segment_walk =
+  | Segments_reached of Objects.digest list
+  | Segment_unreachable of
+      { digest : Objects.digest
+      ; detail : string
+      }
+
+let walk_segments ~session_dir (head : Objects.head) =
+  let rec walk reached = function
+    | None -> Segments_reached (List.rev reached)
+    | Some digest ->
+      let unreachable detail = Segment_unreachable { digest; detail } in
+      (match Keeper_checkpoint_object_store.read ~session_dir digest with
+       | Error detail -> unreachable detail
+       | Ok None -> unreachable "missing"
+       | Ok (Some bytes)
+         when not (String.equal (Objects.digest_of_bytes bytes :> string) (digest :> string)) ->
+         unreachable "its bytes have another digest"
+       | Ok (Some bytes) ->
+         (match Objects.segment_of_string ~digest bytes with
+          | Error error -> unreachable (Objects.load_error_to_string error)
+          | Ok segment ->
+            walk (List.rev_append (Objects.segment_objects segment) reached) segment.previous))
+  in
+  walk [] (Option.map (fun (segment : Objects.segment_ref) -> segment.segment) head.history.segment)
+
 (* The objects the canonical names that the session does not hold. A head
    this process has seen whole names none; one only parsed is checked file
    by file, so the save that follows writes the missing ones again instead
-   of naming them once more. *)
+   of naming them once more. An object missing behind the last segment
+   cannot be written again in its place, so that segment is reported absent
+   and the save does not keep it. *)
 let absent_objects ~session_dir (known : known_canonical) =
   match known.known_objects with
   | Objects_seen -> []
   | Objects_unchecked ->
-    List.filter
-      (fun digest -> not (Keeper_checkpoint_object_store.present ~session_dir digest))
-      (Objects.history_objects known.known_history)
+    let head = known.known_head in
+    let missing digests =
+      List.filter
+        (fun digest -> not (Keeper_checkpoint_object_store.present ~session_dir digest))
+        digests
+    in
+    let named = missing (Objects.head_objects head) in
+    (match head.history.segment, walk_segments ~session_dir head with
+     | None, (Segments_reached _ | Segment_unreachable _) -> named
+     | Some last, Segment_unreachable _ -> last.segment :: named
+     | Some last, Segments_reached reached ->
+       (match missing reached with
+        | [] -> named
+        | _ :: _ -> last.segment :: named))
 
 (* ── Judging and removing an undecodable canonical ([masc_keeper_clear]) ─
    A canonical no turn can decode fails every turn (#37089), and nothing the
@@ -1205,7 +1249,9 @@ let judge_canonical ~(session_dir : string) ~(session_id : string) : canonical_j
             | Objects.Object_digest_mismatch _
             | Objects.Bundle_invalid _
             | Objects.Turn_mismatch _
-            | Objects.Message_invalid _ ) as error) ->
+            | Objects.Message_invalid _
+            | Objects.Segment_invalid _
+            | Objects.Header_object_invalid _ ) as error) ->
          (match classify_objects_error error with
           | Superseded_version { expected; got } -> Judged_superseded { expected; got }
           | Newer_version { expected; got } -> Judged_newer { expected; got }
@@ -1573,7 +1619,7 @@ let canonical_source_locked
   | Error error -> Error (Ref_read_failed error)
   | Ok None -> Ok Source_absent
   | Ok (Some ((_ : canonical_identity), head)) ->
-    (match Keeper_id.Trace_id.of_string head.checkpoint.session_id with
+    (match Keeper_id.Trace_id.of_string head.header.session_id with
      | Error reason -> Error (Ref_identity_invalid (Session_id_invalid reason))
      | Ok trace_id when not (Keeper_id.Trace_id.equal trace_id expected_session_id) ->
        Error (Ref_session_mismatch { expected = expected_session_id; actual = trace_id })
@@ -1581,7 +1627,7 @@ let canonical_source_locked
        (match
           Keeper_checkpoint_ref.of_persisted
             ~trace_id
-            ~turn_count:head.checkpoint.turn_count
+            ~turn_count:head.header.turn_count
             ~sha256:(Objects.head_content_digest head :> string)
         with
         | Error error -> Error (Ref_identity_invalid (Ref_create_failed error))
@@ -1778,7 +1824,7 @@ let plan_for_session ~session_dir ~boundary (checkpoint : Agent_core.Checkpoint.
       | Ok known -> known
       | Error (_ : checkpoint_load_error) -> None)
   in
-  let previous = Option.map (fun known -> known.known_history) known in
+  let previous = Option.map (fun known -> known.known_head) known in
   let absent = Option.fold ~none:[] ~some:(absent_objects ~session_dir) known in
   offload_checkpoint_cpu (fun () ->
     Objects.plan_save (Objects.create_memo ()) ?previous ~absent boundary checkpoint)
@@ -2350,7 +2396,11 @@ let back_up_canonical ~session_dir ~session_id ~ownership_root ~backup_dir ~cont
          then Error (Backup_content_changed { expected = content; actual })
          else (
            (* The objects first, then the head that names them. *)
-           match copy_objects 0 (Objects.history_objects head.history) with
+           match walk_segments ~session_dir head with
+           | Segment_unreachable { digest; detail } ->
+             Error (Backup_object_unreadable { digest = (digest :> string); detail })
+           | Segments_reached reached ->
+           match copy_objects 0 (Objects.head_objects head @ reached) with
            | Error _ as error -> error
            | Ok object_bytes ->
              let backup_head = agent_core_checkpoint_path ~session_dir:backup_dir ~session_id in
@@ -2501,7 +2551,7 @@ let save_agent_core_classified_typed
              })
       | Ok existing ->
         let known = Option.map (fun known -> known.known_turn_count) existing in
-        let previous = Option.map (fun known -> known.known_history) existing in
+        let previous = Option.map (fun known -> known.known_head) existing in
         let absent = Option.fold ~none:[] ~some:(absent_objects ~session_dir) existing in
         let ownership_root = Filename.dirname session_dir in
         let memo =

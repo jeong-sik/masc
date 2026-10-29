@@ -10899,7 +10899,7 @@ let clear_current_recall_edit (state : state) =
 
 (* The draft and the line set aside while walking recall are one workspace
    owned value. Saving either without the other loses the operator's text. *)
-let save_message_draft ?workspace (state : state) =
+let save_message_draft_snapshot ?workspace (state : state) ~text =
   match state.msg_target_keeper_name with
   | None -> ()
   | Some keeper_name ->
@@ -10908,7 +10908,7 @@ let save_message_draft ?workspace (state : state) =
         | None -> chat_input_workspace state in
       let key = workspace, keeper_name in
       let others = List.remove_assoc key state.msg_drafts in
-      let draft = { kcd_text = Masc_tui_message_input.contents state.msg_input;
+      let draft = { kcd_text = text;
         kcd_attachments = state.msg_attachments;
         kcd_references = state.msg_references;
         kcd_since = state.msg_attachments_since;
@@ -10917,6 +10917,10 @@ let save_message_draft ?workspace (state : state) =
         if String.equal draft.kcd_text "" && draft.kcd_attachments = []
            && draft.kcd_references = [] && Option.is_none draft.kcd_recall then others
         else (key, draft) :: others
+
+let save_message_draft ?workspace (state : state) =
+  save_message_draft_snapshot ?workspace state
+    ~text:(Masc_tui_message_input.contents state.msg_input)
 
 let restore_message_draft (state : state) keeper_name =
   Masc_tui_message_input.clear state.msg_input;

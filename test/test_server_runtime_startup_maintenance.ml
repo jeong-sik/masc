@@ -323,11 +323,24 @@ let test_unknown_memory_recall_keepers_come_from_declarations () =
          (SM.unknown_memory_recall_keepers ~keepers_dir:root |> Result.get_ok);
        publish
          (Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers ("alpha", [ "beta" ])));
+       Alcotest.(check (list string)) "every listed keeper is declared" []
+         (SM.unknown_memory_recall_keepers ~keepers_dir:root |> Result.get_ok);
        let missing = Filename.concat root "missing" in
        Alcotest.(check bool)
          "an unreadable directory cannot accuse every listed keeper"
          true
-         (Result.is_error (SM.unknown_memory_recall_keepers ~keepers_dir:missing)))
+         (Result.is_error (SM.unknown_memory_recall_keepers ~keepers_dir:missing));
+       (* Nothing is listed, so there is nothing to check and the directory is
+          not read: a base path without keepers is not told about a key it
+          never set. *)
+       List.iter
+         (fun (label, memory_recall) ->
+            publish memory_recall;
+            Alcotest.(check (list string)) label []
+              (SM.unknown_memory_recall_keepers ~keepers_dir:missing |> Result.get_ok))
+         [ "recall is off", Runtime_schema.Memory_recall_off
+         ; "recall covers every keeper", Runtime_schema.Memory_recall_on Runtime_schema.All_keepers
+         ])
 
 let () =
   Alcotest.run "server_runtime_startup_maintenance"

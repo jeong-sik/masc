@@ -66,7 +66,8 @@ val unknown_memory_recall_keepers :
   keepers_dir:string -> (string list, string) result
 (** The names in [\[typesafeai\].memory_recall_keepers] that
     {!declared_keeper_names} does not list, or the declaration-directory read
-    failure. *)
+    failure. When no name is listed the directory is not read: the answer is
+    [Ok []] whatever the directory is. *)
 
 val report_unknown_memory_recall_keepers : base_path:string -> unit
 (** One warning per name {!unknown_memory_recall_keepers} finds, or one

@@ -111,8 +111,9 @@ val unknown_excluded_keepers : known:string list -> string list
 
 val unknown_memory_recall_keepers : known:string list -> string list
 (** The names in [\[typesafeai\] memory_recall_keepers] that are not in
-    [known]: each limits recall to nobody by that name and is reported at
-    boot. Empty when recall is off or covers every keeper. *)
+    [known], in the order written and each once: each limits recall to nobody
+    by that name and is reported at boot. Empty when recall is off or covers
+    every keeper. *)
 
 type readiness =
   | Off

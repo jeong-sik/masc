@@ -2779,6 +2779,32 @@ let test_replay_preserves_unavailable_and_local_capacity () =
     (Gate.failure_kind result = Some Gate.Input_capacity_exceeded)
 ;;
 
+(* A recorded authority is read back as it was written, whichever reason the
+   gate had. The match names every constructor, so a new reason does not
+   compile here until it is in the list below it. *)
+let test_replay_authority_round_trips_every_unavailable_reason () =
+  let module Config = Masc.Typesafeai_config in
+  let (_ : Config.unavailable_reason -> unit) = function
+    | Config.Lane_disabled | Config.No_armed_destination | Config.Absorb_gate_disabled
+    | Config.Board_attention_disabled | Config.Context_review_disabled
+    | Config.Skill_applicability_disabled | Config.Librarian_preflight_disabled
+    | Config.Workspace_memory_selection_disabled | Config.Memory_recall_disabled
+    | Config.Keeper_excluded -> () in
+  List.iter (fun reason ->
+    let authority = Gate.Gate_unavailable reason in
+    match Gate.replay_authority_of_yojson (Gate.replay_authority_to_yojson authority) with
+    | Ok decoded ->
+      Alcotest.(check bool) (Config.unavailable_reason_to_string reason ^ " is read back") true
+        (decoded = authority)
+    | Error detail ->
+      Alcotest.failf "%s is not read back: %s" (Config.unavailable_reason_to_string reason) detail)
+    [ Config.Lane_disabled; Config.No_armed_destination; Config.Absorb_gate_disabled
+    ; Config.Board_attention_disabled; Config.Context_review_disabled
+    ; Config.Skill_applicability_disabled; Config.Librarian_preflight_disabled
+    ; Config.Workspace_memory_selection_disabled; Config.Memory_recall_disabled
+    ; Config.Keeper_excluded ]
+;;
+
 let () =
   Alcotest.run
     "keeper_librarian_absorb_gate"
@@ -2791,7 +2817,9 @@ let () =
         ; Alcotest.test_case "incomplete and rebound originals refuse" `Quick test_replay_refuses_incomplete_or_rebound_originals
         ; Alcotest.test_case "only canonical typed raw responses restore" `Quick test_replay_strict_raw_response_codec
         ; Alcotest.test_case "original failed and partial outcomes survive" `Quick test_replay_preserves_original_failed_and_partial_results
-        ; Alcotest.test_case "captured unavailability and local capacity survive" `Quick test_replay_preserves_unavailable_and_local_capacity ] )
+        ; Alcotest.test_case "captured unavailability and local capacity survive" `Quick test_replay_preserves_unavailable_and_local_capacity
+        ; Alcotest.test_case "every unavailable reason is read back" `Quick
+            test_replay_authority_round_trips_every_unavailable_reason ] )
     ; ( "statements"
       , [ Alcotest.test_case "the cut matches the golden" `Quick test_statements_match_the_golden ] )
     ; ( "judgment"

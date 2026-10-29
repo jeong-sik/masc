@@ -170,13 +170,18 @@ let unknown_excluded_keepers ~known =
 
 (* The same for the keepers memory recall is limited to: a misspelt name
    limits recall to nobody by that name. Switched off, or for every keeper,
-   there is no name to check. *)
+   there is no name to check. A name written twice is reported once. *)
 let unknown_memory_recall_keepers ~known =
   match (policy ()).Runtime_schema.memory_recall with
   | Runtime_schema.Memory_recall_off
   | Runtime_schema.Memory_recall_on Runtime_schema.All_keepers -> []
   | Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (first, rest)) ->
-    List.filter (fun name -> not (List.mem name known)) (first :: rest)
+    List.fold_left
+      (fun unknown name ->
+         if List.mem name known || List.mem name unknown then unknown else name :: unknown)
+      []
+      (first :: rest)
+    |> List.rev
 ;;
 
 type readiness =

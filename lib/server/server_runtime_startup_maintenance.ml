@@ -200,9 +200,16 @@ let report_unknown_typesafeai_exclusions ~base_path =
    misspelt name limits recall to nobody by that name, and the keepers that
    are named right still get it. *)
 let unknown_memory_recall_keepers ~keepers_dir =
-  Result.map
-    (fun known -> Typesafeai_config.unknown_memory_recall_keepers ~known)
-    (declared_keeper_names ~keepers_dir)
+  (* With an empty roster every listed name is unknown, so an empty answer
+     means no name is listed: recall is off or covers every keeper. Then there
+     is nothing to check and the directory is not read, so a base path without
+     keepers does not warn about a key nobody set. *)
+  match Typesafeai_config.unknown_memory_recall_keepers ~known:[] with
+  | [] -> Ok []
+  | _ :: _ ->
+    Result.map
+      (fun known -> Typesafeai_config.unknown_memory_recall_keepers ~known)
+      (declared_keeper_names ~keepers_dir)
 ;;
 
 let report_unknown_memory_recall_keepers ~base_path =

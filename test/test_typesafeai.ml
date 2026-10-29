@@ -711,6 +711,9 @@ let test_unknown_memory_recall_keepers_are_named () =
   Alcotest.(check (list string)) "the names that are no keeper, in order" [ "wonchik"; "gooyangbong" ]
     (unknown (Runtime_schema.Memory_recall_on
       (Runtime_schema.Listed_keepers ("wonchik", [ "won-chik"; "gooyangbong" ]))));
+  Alcotest.(check (list string)) "a name written twice is reported once" [ "wonchik" ]
+    (unknown (Runtime_schema.Memory_recall_on
+      (Runtime_schema.Listed_keepers ("wonchik", [ "won-chik"; "wonchik" ]))));
   Alcotest.(check (list string)) "every name right" []
     (unknown (Runtime_schema.Memory_recall_on
       (Runtime_schema.Listed_keepers ("won-chik", [ "goo-yang-bong" ]))));

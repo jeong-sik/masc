@@ -130,7 +130,7 @@ val resolve :
 
 후보는 글에서 나온 아무 문자열인데, Keeper 메타 파일 이름은 이름 뒤에 접미사를 붙인 것이다 (`lib/core/keeper_runtime_root_entry.ml:21`). 그래서 이름 모양이 아닌 토큰은 후보가 되지 않는다. `Candidate.of_string` 은 ASCII 영문자·숫자·`_`·`-` 로만 된 이름을 받고, 길이는 정하지 않는다 (`Board_addressing.is_routable_target`). 경로 구분자나 `..` 이 든 토큰(`types/node`, `../x`)과 `alice's` 같은 토큰은 `None` 이어서 `declared` 에 닿지 않고 `unresolved` 에도 나오지 않는다.
 
-이름 모양은 필요 조건이다. Keeper 이름 규칙(`Keeper_name.of_string`, `lib/keeper_registry/keeper_id.ml:17`, 128자까지)은 L2 의 조회가 파일 경로를 만들기 전에 거치고, 이 규칙에 맞지 않는 후보에는 조회 실패가 아니라 `None` 을 돌려준다. 지금은 이 규칙을 거치지 않는 길이 있다. 브로드캐스트의 `resolve_broadcast_mention_target`(`lib/server/server_bootstrap_loops.ml:158`)이 `@이름` 에서 나온 값을 `read_effective_meta` 에 그대로 넘기고, 그 함수는 이름으로 바로 파일 경로를 만든다 (`keeper_meta_path`, `lib/keeper/keeper_types_profile.ml:772`). 이름 뒤에 `.json` 이 붙으므로 이름이 251자 이상이면 파일 이름이 한도(255바이트)를 넘어서 파일 열기가 `ENAMETOOLONG` 으로 실패한다. 브로드캐스트에서 이 실패는 `Deferred Target_state_unavailable` 이고 쓰기 오류가 아니다. L2 가 같은 길을 그대로 쓰면 D5 때문에 이 실패가 쓰기 오류가 되므로, L2 는 경로를 만들기 전에 위 이름 규칙을 거친다. board 글은 지금 64자를 넘는 이름을 대상으로 보지 않아서(`Agent_id`) 이런 글도 그냥 쓰인다.
+이름 모양은 필요 조건이다. Keeper 이름 규칙(`Keeper_name.of_string`, `lib/keeper_registry/keeper_id.ml:17`, 128자까지)은 L2c 의 조회가 파일 경로를 만들기 전에 거치고, 이 규칙에 맞지 않는 후보에는 조회 실패가 아니라 `None` 을 돌려준다. 지금은 이 규칙을 거치지 않는 길이 있다. 브로드캐스트의 `resolve_broadcast_mention_target`(`lib/server/server_bootstrap_loops.ml:158`)이 `@이름` 에서 나온 값을 `read_effective_meta` 에 그대로 넘기고, 그 함수는 이름으로 바로 파일 경로를 만든다 (`keeper_meta_path`, `lib/keeper/keeper_types_profile.ml:772`). 이름 뒤에 `.json` 이 붙으므로 이름이 251자 이상이면 파일 이름이 한도(255바이트)를 넘어서 파일 열기가 `ENAMETOOLONG` 으로 실패한다. 브로드캐스트에서 이 실패는 `Deferred Target_state_unavailable` 이고 쓰기 오류가 아니다. L2c 가 같은 길을 그대로 쓰면 D5 때문에 이 실패가 쓰기 오류가 되므로, L2c 는 경로를 만들기 전에 위 이름 규칙을 거친다. board 글은 지금 64자를 넘는 이름을 대상으로 보지 않아서(`Agent_id`) 이런 글도 그냥 쓰인다.
 
 `Keeper_id.t` 는 공백을 없애고 소문자로 바꿀 뿐 문자를 거르지 않는다 (`lib/keeper/keeper_identity.ml:42`). 그래서 타입이 위 제한을 대신하지 않는다.
 
@@ -214,13 +214,13 @@ val resolve :
 | L3 | 브로드캐스트 쓰기와 알림이 `resolution` 을 쓰고, 전달은 정해 둔 받는 사람으로 Keeper 를 찾는다. `Board_addressing.routing_target` 을 지운다. 지우기 전에 후보 추출이 선택자 옆의 `@이름` 을 놓치지 않는지 시험한다 (§3.4). 재생 도구에 저장된 메시지를 더한다 (§7) |
 | L4 | gRPC `mentions` 를 후보로 바로 넘기고, 선언에 없는 이름은 오류로 돌려준다 (D3) |
 
-이 문서에서 L2 라고만 쓰면 L2a·L2b·L2c 를 함께 가리킨다. 각 층은 자기 시험을 가진다. 저장 형식은 L2b 의 댓글 `audience` 한 칸만 바뀌고, 그 칸이 없는 옛 댓글도 읽히므로 마이그레이션이 없다. 층을 합칠지는 구현 때 크기를 보고 정한다. 어느 쪽이든 층마다 임시 호환 코드를 만들지 않는다.
+각 층은 자기 시험을 가진다. 저장 형식은 L2b 의 댓글 `audience` 한 칸만 바뀌고, 그 칸이 없는 옛 댓글도 읽히므로 마이그레이션이 없다. 층을 합칠지는 구현 때 크기를 보고 정한다. 어느 쪽이든 층마다 임시 호환 코드를 만들지 않는다.
 
 ## 7. 검증
 
 - 재생: `tools/recipient_replay --keepers <Keeper 설정 폴더> --posts <board_posts.jsonl>` 가 저장된 board 글에 새 규칙을 돌려서 받는 사람이 바뀌는 글을 모두 나열한다. 이름을 뽑는 문법과 후보·분류는 쓰기 경로가 쓸 코드 그대로이고, 선언만 Keeper 설정의 `mention_targets` 에서 읽는다. 쓰기 경로의 조회는 저장된 Keeper 메타를 읽으므로 둘은 다른 읽기다. 기대는 `check`·`runtest`·`all` 과 사람·계정 이름이 받는 사람에서 빠지고, 선언된 Keeper 앞으로 쓴 글은 그대로인 것이다. 빠지는 글은 하나씩 눈으로 확인한다. 시스템 글은 쓰기 경로가 대상을 읽지 않으므로 돌리지 않고 따로 센다. 글 줄은 서버가 글을 읽는 디코더(`Board_votes_json.post_of_yojson`)로 읽는다. 서버가 읽지 못하는 줄은 읽지 못한 줄로 세고 종료 코드가 1 이 된다.
 - 재생 결과(2026-10-29): 대상 지정 글 686개 중 시스템 글 16개를 빼고 670개를 돌렸다. 501개는 그대로이고, 109개는 받는 사람이 비고, 60개는 받는 사람이 줄어든다. 글에서 다시 뽑은 Keeper 가 기록과 다른 글은 0개이고, 조회가 실패한 글도 0개다. 재생은 이름으로 지정받는 Keeper 만 견준다. 받는 사람이 빈 글이 `Discoverable` 이 되어 주의 판단 후보가 되는 것은 견주지 않는다 (§3.3). 도구는 board 글만 돌린다. 메시지는 L3 에서 더한다. 위 숫자는 읽지 못한 줄이 0개이고 종료 코드가 0 인 실행의 것이다. 읽지 못한 줄이 있어 종료 코드가 1 인 실행의 숫자는 이 문서에 옮기지 않는다.
-- 시험: 선언된 이름, 별칭, 같은 별칭을 Keeper 둘이 쓰는 설정, 모르는 이름, 코드 조각 안의 이름, 이름이 섞인 글, 이름 모양이 아닌 토큰(`types/node`, `../x`. 후보가 되지 않아 `declared` 에 닿지 않는다), `@@` 선택자 옆의 `@이름`, 대소문자(`@Alice` 가 Keeper `alice` 에 맞고 `unresolved` 에는 쓴 철자로 나온다), 메타를 못 읽는 Keeper 가 있는 설정(쓰기가 오류로 끝나고 저장되지 않는다), Keeper 이름보다 긴 이름(129자 이상이고, 이름 뒤에 `.json` 이 붙어 파일 이름이 한도를 넘는 251자 이상을 포함한다. 쓰기가 오류로 끝나지 않고 `unresolved` 로 나온다. L2). `Keeper_id` 는 소문자로 바꾸고, board 의 `Agent_id` 는 대소문자를 구분한다.
+- 시험: 선언된 이름, 별칭, 같은 별칭을 Keeper 둘이 쓰는 설정, 모르는 이름, 코드 조각 안의 이름, 이름이 섞인 글, 이름 모양이 아닌 토큰(`types/node`, `../x`. 후보가 되지 않아 `declared` 에 닿지 않는다), `@@` 선택자 옆의 `@이름`, 대소문자(`@Alice` 가 Keeper `alice` 에 맞고 `unresolved` 에는 쓴 철자로 나온다), 메타를 못 읽는 Keeper 가 있는 설정(쓰기가 오류로 끝나고 저장되지 않는다), Keeper 이름보다 긴 이름(129자 이상이고, 이름 뒤에 `.json` 이 붙어 파일 이름이 한도를 넘는 251자 이상을 포함한다. 쓰기가 오류로 끝나지 않고 `unresolved` 로 나온다. L2c). `Keeper_id` 는 소문자로 바꾸고, board 의 `Agent_id` 는 대소문자를 구분한다.
 - 응답: 선언에 없는 이름이 `unresolved` 로 나온다. 조회가 실패하면 쓰기가 오류로 끝난다 (D5). gRPC 는 선언에 없는 이름도 오류다 (D3).
 - 재생 도구는 일회용으로 두지 않고 저장소에 둔다. 출력에 글 제목이 들어가므로 결과 목록은 저장소에 넣지 않는다.
 

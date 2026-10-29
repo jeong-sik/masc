@@ -26,9 +26,9 @@ related: []
 3. 선언에 없는 이름은 글 속 말이다. 거절하지 않는다. 쓴 사람에게는 응답의 `unresolved` 로 알려 준다. (§3.3)
 4. 해석은 한 곳에서 하고, board·브로드캐스트·알림은 해석된 결과를 타입으로 받는다. 글을 다시 읽지 않는다. (§3.4)
 
-D1·D2 는 2026-10-29 에 정했다. 열린 결정은 D3, D4, D5 다. (§8)
+결정 D1~D5 는 2026-10-29 에 정했다. (§8)
 
-이 RFC 는 코드를 바꾸지 않는다. 구현은 RFC 가 `Active` 가 된 뒤 스택으로 나누어 올린다. (§6)
+이 RFC 는 코드를 바꾸지 않는다. 구현은 스택으로 나누어 올리고, 첫 층이 main 에 들어가면 status 를 `Active` 로 바꾼다. (§6)
 
 ## 1. 문제
 
@@ -125,7 +125,7 @@ val resolve :
 
 후보는 공백을 없애고 소문자로 바꿔서 Keeper 이름과 별칭에 맞춰 본다. 별칭 조회가 지금도 이렇게 맞춘다 (`lib/keeper/keeper_meta_store.ml:439`). `@Alice` 와 `@alice` 는 같은 후보로 맞고, `unresolved` 에는 쓴 철자 그대로 나온다.
 
-`None`(선언에 없음)과 `Error`(조회 실패)를 섞지 않는다. 지금 브로드캐스트도 둘을 나눈다. 선언 없음은 `Rejected Target_not_configured`, 조회 실패는 `Deferred Target_state_unavailable` 이다 (`lib/server/server_bootstrap_loops.ml:202`). 조회 실패를 글 속 말로 바꾸면 설정 오류가 조용히 사라진다. 쓰기에서 조회 실패를 어떻게 다룰지는 D5 다.
+`None`(선언에 없음)과 `Error`(조회 실패)를 섞지 않는다. 지금 브로드캐스트도 둘을 나눈다. 선언 없음은 `Rejected Target_not_configured`, 조회 실패는 `Deferred Target_state_unavailable` 이다 (`lib/server/server_bootstrap_loops.ml:202`). 조회 실패를 글 속 말로 바꾸면 설정 오류가 조용히 사라진다. 쓰기에서 조회가 실패하면 쓰기를 오류로 돌려주고 아무것도 저장하지 않는다 (D5).
 
 ### 3.2 선언의 출처
 
@@ -157,7 +157,7 @@ val resolve :
 - 브로드캐스트 전달: 쓸 때 정한 Keeper 를 깨운다. 한 번에 한 명만 깨우므로 `recipients` 의 첫 번째다. 지금은 `routing_target` 이 고른 이름 하나를 쓴다 (`lib/board_addressing/board_addressing.ml:177`). 전달할 때 별칭을 다시 찾지 않는다. 글 속 말 때문에 `Rejected` 가 되는 일이 없어진다. 쓴 뒤 전달 전에 그 Keeper 의 메타가 없어졌으면 지금처럼 `Rejected Target_not_configured`, 읽지 못하면 `Deferred Target_state_unavailable` 이다 (`lib/server/server_bootstrap_loops.ml:202`). 응답의 `ok:false` 와 `mention_delivery` 로 나온다 (`lib/workspace/workspace_broadcast.ml:198`). 별칭이 바뀐 것은 전달에 영향이 없다.
 - 알림: 알림에 쓰는 이름도 `recipient` 에서 온다. PR #46755 의 문자 규칙(`is_routable_selector`, `is_routable_target`, `lib/board_addressing/board_addressing.ml:164`)은 이름이 파일 경로가 되기 전에 경로 구분자와 점을 막는다. L3 에서 `routing_target` 을 지운 뒤에도 이 막음은 남아야 한다. 자리가 `declared` 로 옮겨 간다 (§3.1).
 - gRPC: `mentions` 필드를 글로 바꾸지 않고 후보로 바로 넘긴다. 선언에 없는 이름은 호출한 쪽이 명시한 값이 틀린 것이므로 오류로 돌려준다 (D3).
-- Keeper 주의 판단: D4 로 남긴다.
+- Keeper 주의 판단: 신호에 실려 온 기록된 `audience` 를 쓴다. 제목과 본문에서 다시 계산하지 않는다 (D4).
 
 `@@all` 같은 선택자는 후보가 아니다. board 에서는 `parse` 가 `Broadcast_all` 로 따로 내고 audience 는 `Broadcast` 다 (`lib/board/board_audience.ml:122`). 이 길은 그대로 둔다. 브로드캐스트에서는 지금 `routing_target` 이 선택자 이름도 받는 사람으로 돌려주어 전달이 `all` 이라는 Keeper 를 찾는다. `lib/workspace/workspace_broadcast.ml` 에 `all` 을 따로 다루는 곳은 없다. `routing_target` 은 선택자 옆에 쓴 `@이름` 을 놓치지 않으려고 만든 함수이므로(PR #46755), L3 에서 대신할 후보 추출도 그 성질을 지킨다. 선택자를 후보에서 어떻게 빼는지는 L3 전에 정한다. (§9)
 
@@ -173,7 +173,7 @@ val resolve :
 
 - 후보를 만드는 문법: `Board_addressing`. 지금 그대로 둔다.
 - 해석: 선언 조회를 인자로 받는 새 모듈. 위치는 L1 에서 정한다.
-- 해석을 부르는 곳은 쓰는 쪽(board 쓰기, 브로드캐스트 쓰기)이다. Keeper 쪽은 D4 를 따른다.
+- 해석을 부르는 곳은 쓰는 쪽(board 쓰기, 브로드캐스트 쓰기)이다. Keeper 쪽은 해석하지 않고 기록된 `audience` 를 쓴다 (D4).
 
 ## 5. 대안
 
@@ -186,22 +186,22 @@ val resolve :
 
 ## 6. 구현 순서
 
-코드는 이 RFC 가 `Active` 가 된 뒤에 올린다. 스택으로 나눈다.
+코드는 스택으로 나누어 올린다. 첫 층이 main 에 들어가면 status 를 `Draft` 에서 `Active` 로 바꾼다. `Active` 는 spec 이 머지됐고 구현이 진행 중인 RFC 라는 뜻이다 (`docs/rfc/README.md`).
 
 | 층 | 내용 |
 |---|---|
 | L1 | 타입과 `resolve`, 순수 시험. 선언은 인자로 받는다. 이름이 경로가 되기 전의 막음을 `declared` 에 둔다 (§3.1). PR 본문에 재생 스크립트 경로와 빠지는 글 목록의 위치를 적는다 (§7) |
-| L2 | board 쓰기 경로가 `resolution` 으로 `audience` 를 정하고 응답에 `unresolved` 를 싣는다. 조회 함수는 서버 시작점에서 넘긴다. Keeper 쪽은 D4 에 따라 고친다. 시작하기 전에 §9 의 `classify` 재계산 이유를 확인한다 |
+| L2 | board 쓰기 경로가 `resolution` 으로 `audience` 를 정하고 응답에 `unresolved` 를 싣는다. 조회 함수는 서버 시작점에서 넘긴다. Keeper 쪽은 기록된 `audience` 를 쓰게 고친다 (D4). 시작하기 전에 §9 의 `classify` 재계산 이유를 확인한다 |
 | L3 | 브로드캐스트 쓰기와 알림이 `resolution` 을 쓰고, 전달은 정해 둔 받는 사람으로 Keeper 를 찾는다. `Board_addressing.routing_target` 을 지운다. 지우기 전에 후보 추출이 선택자 옆의 `@이름` 을 놓치지 않는지 시험한다 (§3.4) |
-| L4 | gRPC `mentions` 를 후보로 바로 넘긴다 |
+| L4 | gRPC `mentions` 를 후보로 바로 넘기고, 선언에 없는 이름은 오류로 돌려준다 (D3) |
 
-각 층은 자기 시험을 가진다. 저장 형식이 바뀌지 않아서 마이그레이션이 없다.
+각 층은 자기 시험을 가진다. 저장 형식이 바뀌지 않아서 마이그레이션이 없다. 층을 합칠지는 구현 때 크기를 보고 정한다. 어느 쪽이든 층마다 임시 호환 코드를 만들지 않는다.
 
 ## 7. 검증
 
 - 재생: 저장된 board 글과 메시지에 새 규칙을 돌려서 결과가 바뀌는 글을 모두 나열한다. 기대는 `check`·`runtest`·`all` 65개와 사람·계정 약 74개가 받는 사람에서 빠지고, 선언된 Keeper 앞으로 쓴 글은 그대로인 것이다. 빠지는 글은 하나씩 눈으로 확인한다.
-- 시험: 선언된 이름, 별칭, 같은 별칭을 Keeper 둘이 쓰는 설정, 모르는 이름, 코드 조각 안의 이름, 이름이 섞인 글, 경로 구분자나 `..` 이 든 후보(`types/node`, `../x`. 파일을 열지 않는다), `@@` 선택자 옆의 `@이름`, 대소문자(`@Alice` 가 Keeper `alice` 에 맞고 `unresolved` 에는 쓴 철자로 나온다). `Keeper_id` 는 소문자로 바꾸고, board 의 `Agent_id` 는 대소문자를 구분한다.
-- 응답: 선언에 없는 이름이 `unresolved` 로 나온다. 조회 실패는 D5 에서 정한 대로 나온다.
+- 시험: 선언된 이름, 별칭, 같은 별칭을 Keeper 둘이 쓰는 설정, 모르는 이름, 코드 조각 안의 이름, 이름이 섞인 글, 경로 구분자나 `..` 이 든 후보(`types/node`, `../x`. 파일을 열지 않는다), `@@` 선택자 옆의 `@이름`, 대소문자(`@Alice` 가 Keeper `alice` 에 맞고 `unresolved` 에는 쓴 철자로 나온다), 메타를 못 읽는 Keeper 가 있는 설정(쓰기가 오류로 끝나고 저장되지 않는다). `Keeper_id` 는 소문자로 바꾸고, board 의 `Agent_id` 는 대소문자를 구분한다.
+- 응답: 선언에 없는 이름이 `unresolved` 로 나온다. 조회가 실패하면 쓰기가 오류로 끝난다 (D5). gRPC 는 선언에 없는 이름도 오류다 (D3).
 - 재생 스크립트는 일회용으로 두지 않고 L1 과 함께 저장소에 남긴다.
 
 ## 8. 결정
@@ -212,13 +212,11 @@ D1. 선언에 없는 `@이름` 은 글 속 말이다. 받지 않은 안: 대상 
 
 D2. 사람과 계정 이름은 Keeper 별칭 `mention_targets` 로 선언한다. 새 필드와 새 파일은 없다. 별칭 하나는 Keeper 한 명만 가리키므로(§3.2) 여럿이 나눠 쓰는 계정은 선언하지 않는다. 받지 않은 안: 사람 목록을 설정에 새로 둔다.
 
-### 열린 것
+D3. gRPC `mentions` 에서 선언에 없는 이름은 오류로 돌려준다. 명시한 값은 후보가 아니라 주장이다. 받지 않은 안: 글 속 말로 둔다.
 
-D3. gRPC `mentions` 에서 선언에 없는 이름. **오류로 돌려준다**(명시한 값은 후보가 아니라 주장이다) / 글 속 말로 둔다.
+D4. Keeper 쪽은 기록된 `audience` 를 쓴다. 글을 쓸 때 `audience` 가 정해져 기록되고(`lib/board_types/board_types.ml:224`), `Board_dispatch` 는 이를 붙인 신호(`addressed_board_signal`, `lib/board/board_dispatch.ml:99`)를 내보낸다. 그런데 Keeper 쪽 `classify`(`lib/keeper/keeper_board_audience.ml:42`)는 audience 가 없는 `board_signal` 의 제목과 본문에서 audience 를 다시 계산한다. 해석을 쓸 때 한 번만 하면 선언이 바뀌어도 쓸 때와 읽을 때 결과가 어긋나지 않는다. 받지 않은 안: Keeper 쪽도 선언 조회를 받아 다시 계산한다. 구조는 그대로지만 결과가 어긋날 수 있다.
 
-D4. Keeper 쪽 해석 시점. 글을 쓸 때 `audience` 가 정해져 기록되고(`lib/board_types/board_types.ml:224`), `Board_dispatch` 는 이를 붙인 신호(`addressed_board_signal`, `lib/board/board_dispatch.ml:99`)를 내보낸다. 그런데 Keeper 쪽 `classify`(`lib/keeper/keeper_board_audience.ml:42`)는 audience 가 없는 `board_signal` 의 제목과 본문에서 audience 를 다시 계산한다. **Keeper 가 기록된 `audience` 를 쓰게 한다**(해석을 쓸 때 한 번만 한다. 선언이 바뀌어도 쓸 때와 읽을 때 결과가 어긋나지 않는다) / Keeper 쪽도 선언 조회를 받아 다시 계산한다(구조는 그대로지만 결과가 어긋날 수 있다).
-
-D5. 조회가 실패했을 때 쓰기(§3.1). **쓰기를 오류로 돌려준다**(받는 사람을 모른 채 기록하면 나중에 고칠 수 없다) / 글은 저장하고 받는 사람 없음으로 기록한 뒤 응답에 실패를 싣는다. Keeper 이름과 정확히 같은 이름은 그 Keeper 한 명의 메타만 읽는다. 그 밖의 이름은 모든 Keeper 의 메타를 읽고, 하나라도 못 읽으면 조회 전체가 실패한다 (`lib/keeper/keeper_meta_store.ml:439` 의 `collect`). 첫 안이면 메타 하나가 깨진 동안 Keeper 이름이 아닌 `@이름` 이 든 글을 쓰지 못한다.
+D5. 선언 조회가 실패하면 쓰기를 오류로 돌려주고 아무것도 저장하지 않는다 (§3.1). 받는 사람을 모른 채 기록하면 나중에 고칠 수 없다. 받지 않은 안: 글은 저장하고 받는 사람 없음으로 기록한 뒤 응답에 실패를 싣는다. 이 결정에는 대가가 있다. Keeper 이름과 정확히 같은 이름은 그 Keeper 한 명의 메타만 읽는다. 그 밖의 이름은 모든 Keeper 의 메타를 읽고, 하나라도 못 읽으면 조회 전체가 실패한다 (`lib/keeper/keeper_meta_store.ml:439` 의 `collect`). 그래서 메타 하나가 깨진 동안 Keeper 이름이 아닌 `@이름` 이 든 글을 쓰지 못한다.
 
 ## 9. 확인하지 못한 것
 
@@ -228,4 +226,4 @@ D5. 조회가 실패했을 때 쓰기(§3.1). **쓰기를 오류로 돌려준다
 - 별칭 조회 비용. 지금은 모든 Keeper 의 메타를 읽는다. board 쓰기마다 부를 때 얼마나 드는지 재지 않았다.
 - 65개 글과 사람·계정 약 74개 글이 board 목록·검색과 사람이 보는 화면(운영자 받은편지 등)에서 보이는지. 이 RFC 가 다루는 것은 Keeper 의 주의 판단 경로다. L2 전에 §7 재생으로 확인한다.
 - 브로드캐스트에서 `@@all` 이 지금 거절되는지. §1.1 의 `all` 3개가 `@all` 인지 `@@all` 인지 가르지 못했다.
-- 이 문서의 코드 위치는 `origin/main` `c2a74339c34` 기준이다.
+- 이 문서의 코드 위치는 `origin/main` `51fd971c9ed` 기준이다.

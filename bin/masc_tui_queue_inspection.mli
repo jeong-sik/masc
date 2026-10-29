@@ -1,5 +1,5 @@
 (** One explicit snapshot of the server inbox; never a claim of delivery. *)
-type action = Inspect | Pause | Resume | Clear | Cancel of string | Move_to_end of string | Edit of string * string
+type action = Inspect | Pause | Resume | Clear | Cancel of string | Move_to_end of string | Run_next of string | Edit of string * string
   | Cancel_event of string * int64 * string
   | Prioritize_event of string * int64 * Keeper_event_queue.urgency
   | Inspect_peers of unit ref
@@ -25,7 +25,18 @@ val read_peer_page :
 (** Ask for one server page; there may be additional queued operations. *)
 val peer_lines : peer_snapshot -> string list
 val parse : string -> (action, string) result
-val waiting_lines : now:float -> Yojson.Safe.t -> (string list, string) result
-val operation_lines : Yojson.Safe.t -> (string list, string) result
+type item_id =
+  | Local_message of string | Server_message of string | Running_message of string
+  | Event of string * int64 | Schedule of string * string
+type item = { id : item_id option; text : string }
+type observation = {
+  waiting : (item list, string) result;
+  operations : (item list, string) result;
+}
+(** A failed source is distinct from an observed empty source. An event ID
+    addresses one exact pending incarnation; a grouped row exposes members
+    only when all of their exact addresses are available and distinct. *)
+val waiting_items : now:float -> Yojson.Safe.t -> (item list, string) result
+val operation_items : Yojson.Safe.t -> (item list, string) result
 val edited_input : message:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
 val next_sequence : Yojson.Safe.t -> (string option, string) result

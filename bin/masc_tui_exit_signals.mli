@@ -26,11 +26,14 @@ val request_terminate : t -> signal:string -> unit
 
 val terminate_signal : t -> string option
 (** The name of the signal that requested the terminate, or [None] when none
-    did. Read after {!poll} returns [Quit] to tell a terminate from a second
-    Ctrl-C. *)
+    did. Read after {!poll} returns [Quit] to record the cause. *)
 
 val request_interrupt : t -> unit
 (** SIGINT: asks the loop what a Ctrl-C means this time. One atomic store. *)
+
+val interrupt_pending : t -> bool
+(** Observe an interrupt without consuming it, including immediately after
+    frame output when deciding whether a confirmation can become active. *)
 
 val withdraw_interrupt : t -> unit
 (** Any deliberate input: a standing Ctrl-C no longer counts toward a double
@@ -40,19 +43,11 @@ type verdict =
   | Continue
   | Interrupt_armed
       (** A first Ctrl-C: tell the operator what a second one will do. *)
+  | Interrupt_again
+      (** A second Ctrl-C; the caller still checks the displayed confirmation. *)
   | Quit
-      (** A terminate request, or a second Ctrl-C while the first still
-          stands. *)
+      (** An explicit terminate request. *)
 
 val poll : t -> verdict
 (** Once per loop pass. Consumes an interrupt request and arms the next one;
     a terminate request outranks both and is never consumed. *)
-
-val quit_notice : key:string -> waiting:int -> string
-(** What the first quit key -- [q], or Ctrl-C -- says it will do.
-
-    A message sent while a turn is running waits in this process until that
-    turn settles; it is not at the server yet. Quitting drops it, and nothing
-    brings it back on the next launch. So a notice with [waiting] above zero
-    names how many a second press drops. Continuous voice mode with
-    send_on_stop queues a sentence this way each time one ends mid-turn. *)

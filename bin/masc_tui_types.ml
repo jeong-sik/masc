@@ -8299,6 +8299,28 @@ type keeper_composer_draft = {
   kcd_since : image_observation option;
 }
 
+type quit_inflight_phase =
+  | Quit_preflight of Masc_tui_keeper_chat_queue.item
+  | Quit_streaming
+  | Quit_reconciling
+
+(* Exit authority captures the immutable values that can change what a quit
+   would discard. The composer already provides an edit revision; the other
+   collections are replaced, not mutated, when their contents change. *)
+type quit_arm = {
+  qa_confirmation : Masc_tui_action_notice.quit_confirmation;
+  qa_composer_revision : Masc_tui_message_input.revision;
+  qa_attachments : Masc_tui_keeper_chat_projection.attachment list;
+  qa_references : Masc_tui_keeper_chat_projection.image_reference list;
+  qa_drafts : ((workspace_input_identity option * string) * keeper_composer_draft) list;
+  qa_queue : Masc_tui_keeper_chat_queue.t;
+  qa_suspended : (workspace_input_identity option * suspended_keeper_input) list;
+  qa_inflight : (Masc_tui_keeper_chat_projection.request * quit_inflight_phase) list;
+  qa_code_drafts : Masc_tui_code_draft.t list;
+  qa_target : string option;
+  qa_workspace : workspace_authority;
+}
+
 (* Home links identify destinations, never an inferred approval target. The
    approval/agenda screens still own the exact request and its decision. *)
 type home_request =
@@ -8593,6 +8615,32 @@ type resource_share_request = {
   share_target : bool;
 }
 
+type queue_panel_notice = Queue_info of string | Queue_error of string
+type queue_panel_receipt =
+  | Queue_action_receipt of queue_panel_notice
+  | Queue_read_receipt of string
+type queue_panel_reading = Queue_loading | Queue_current | Queue_unavailable
+
+type queue_panel = {
+  qp_keeper : string;
+  qp_reading : queue_panel_reading;
+  qp_observation : Masc_tui_queue_inspection.observation option;
+  qp_notice : queue_panel_notice option;
+  qp_receipt : queue_panel_receipt option;
+  qp_selected : Masc_tui_queue_inspection.item_id option;
+  qp_scroll : int;
+  qp_detail : Masc_tui_queue_inspection.item_id option;
+  qp_detail_scroll : int;
+  qp_refresh_after_priority : bool;
+}
+
+type queue_panel_owner = {
+  qo_workspace : workspace_authority;
+  qo_read_authority : unit ref;
+  qo_keeper : string;
+  qo_detail : Masc_tui_queue_inspection.item_id option;
+}
+
 type state = {
   observation_instance : Masc_tui_observation_origin.instance;
   mutable ui_language : ui_language;
@@ -8699,6 +8747,7 @@ type state = {
   mutable keeper_queue_inflight : string list;
   mutable keeper_queue_readings : string list;
   mutable keeper_queue_inspections : (string * unit ref) list;
+  mutable queue_panel : queue_panel option;
   (* Exact requests awaiting admission and accepted requests awaiting their
      ordered run-next call. No priority intent is inferred from queue text. *)
   mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request list;
@@ -9281,7 +9330,7 @@ type state = {
   mutable voice_floor: float option;
   (* A top-level [q] arms exit instead of ending the TUI immediately. The next
      unrelated input clears it; a second [q] exits. *)
-  mutable quit_armed: bool;
+  mutable quit_armed: quit_arm option;
   (* What the last key the operator pressed actually did, and the clock
      reading it was set at. The session log is drawn by Metrics alone, so the
      operator who pressed [a] on Workspace could not read there whether the
@@ -9289,7 +9338,7 @@ type state = {
      until the next input or for [last_action_window_s], whichever comes
      first: an outcome that stayed would go on claiming a keypress the
      operator has moved past. *)
-  mutable last_action: (string * float) option;
+  mutable last_action: Masc_tui_action_notice.t;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
      fleet's own reading of what is missing, as the fleet stream (RFC-0477)
@@ -10395,6 +10444,217 @@ let dismiss_latest_preset_save_receipt (state : state) =
   in
   state.preset_save_receipts <- hide state.preset_save_receipts
 
+let set_last_action (state : state) action =
+  state.last_action <- Masc_tui_action_notice.set_ordinary state.last_action action
+
+let quit_inflight_snapshot (state : state) =
+  List.map (fun (entry : inflight) ->
+      let phase = match entry.phase with
+        | Turn_preflight item -> Quit_preflight item
+        | Turn_streaming -> Quit_streaming
+        | Turn_reconciling -> Quit_reconciling in
+      entry.sent_request, phase) state.msg_inflight
+
+let quit_arm_matches (state : state) arm =
+  Masc_tui_message_input.has_revision state.msg_input arm.qa_composer_revision
+  && state.msg_attachments == arm.qa_attachments
+  && state.msg_references == arm.qa_references
+  && state.msg_drafts == arm.qa_drafts
+  && state.msg_queued == arm.qa_queue
+  && state.suspended_keeper_inputs == arm.qa_suspended
+  && List.equal (fun (left, left_phase) (right, right_phase) ->
+       left == right &&
+       match left_phase, right_phase with
+       | Quit_preflight left, Quit_preflight right -> left == right
+       | Quit_streaming, Quit_streaming | Quit_reconciling, Quit_reconciling -> true
+       | Quit_preflight _, (Quit_streaming | Quit_reconciling)
+       | Quit_streaming, (Quit_preflight _ | Quit_reconciling)
+       | Quit_reconciling, (Quit_preflight _ | Quit_streaming) -> false)
+       arm.qa_inflight (quit_inflight_snapshot state)
+  && state.code_drafts == arm.qa_code_drafts
+  && state.msg_target_keeper_name = arm.qa_target
+  && state.workspace_authority = arm.qa_workspace
+
+let current_quit_confirmation (state : state) ~now =
+  match state.quit_armed,
+        Masc_tui_action_notice.ordinary_visible state.last_action
+          ~now ~window:last_action_window_s with
+  | Some arm, Some ordinary
+    when quit_arm_matches state arm
+         && not (Masc_tui_action_notice.csi_active state.last_action)
+         && Option.is_none (Masc_tui_action_notice.rejection state.last_action
+               ~now ~window:last_action_window_s)
+         && ordinary == Masc_tui_action_notice.quit_ordinary arm.qa_confirmation ->
+      Some arm.qa_confirmation
+  | (Some _ | None), (Some _ | None) -> None
+
+let queue_panel_items (state : state) (panel : queue_panel) =
+  let module Inbox = Masc_tui_queue_inspection in
+  let local = Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
+      ~keeper_name:panel.qp_keeper in
+  let local_items = List.map (fun (item : Masc_tui_keeper_chat_queue.item) ->
+    let request = item.request in
+    let attachments = match request.attachments with
+      | [] -> ""
+      | values -> "\n\nAttachments:\n" ^ String.concat "\n" (List.map
+          (fun (attachment : Masc_tui_keeper_chat_projection.attachment) ->
+            Printf.sprintf "%s · %s · %d bytes · id %s"
+              (Masc.Tui_terminal_text.sanitize_terminal_text attachment.name)
+              (Masc.Tui_terminal_text.sanitize_terminal_text attachment.mime_type)
+              attachment.size (Masc.Tui_terminal_text.sanitize_terminal_text attachment.attachment_id)) values) in
+    let references = match request.references with
+      | [] -> ""
+      | values -> "\n\nImage references:\n" ^ String.concat "\n" (List.map (function
+          | Masc_tui_keeper_chat_projection.Ref_url value ->
+            "URL: " ^ Masc.Tui_terminal_text.sanitize_terminal_text value
+          | Ref_file_id value -> "File: " ^ Masc.Tui_terminal_text.sanitize_terminal_text value) values) in
+    {Inbox.id=Some (Local_message item.request.request_id);
+     text="  " ^ Masc.Tui_terminal_text.sanitize_terminal_lines request.message ^ attachments ^ references}) local in
+  let local_header = {Inbox.id=None; text=Printf.sprintf "Local unsent messages · %d" (List.length local)} in
+  let source label = function
+    | Ok items -> items
+    | Error detail -> [{Inbox.id=None; text=label ^ " unavailable: " ^ detail}] in
+  let observed = match panel.qp_observation with
+    | None -> []
+    | Some observation -> source "Inventory" observation.waiting
+      @ source "Server queue" observation.operations in
+  let with_schedule_name (item : Inbox.item) =
+    match item.id, state.keeper_schedules with
+    | Some (Schedule (id, instance)), Some (keeper, snapshot)
+      when String.equal keeper panel.qp_keeper && Option.is_none snapshot.scs_read_error ->
+      (match List.find_opt (fun (row : schedule_row) ->
+         String.equal row.sch_schedule_id id && String.equal row.sch_schedule_instance_id instance)
+         snapshot.scs_rows with
+       | Some row ->
+         (match row.sch_payload_summary with
+          | Some title ->
+            {item with text=Masc.Tui_terminal_text.sanitize_terminal_text title ^ " · " ^ item.text
+              ^ "\nName observed at " ^ Masc.Tui_terminal_text.sanitize_terminal_text snapshot.scs_observed_at_iso}
+          | None -> item)
+       | None -> item)
+    | Some (Local_message _ | Server_message _ | Running_message _ | Event _ | Schedule _), _
+    | None, _ -> item in
+  local_header :: local_items @ List.map with_schedule_name observed
+
+let queue_panel_owner state panel =
+  {qo_workspace=state.workspace_authority; qo_read_authority=state.workspace_read_authority;
+   qo_keeper=panel.qp_keeper; qo_detail=panel.qp_detail}
+
+let same_queue_panel_owner left right =
+  left.qo_workspace = right.qo_workspace
+  && left.qo_read_authority == right.qo_read_authority
+  && String.equal left.qo_keeper right.qo_keeper
+  && left.qo_detail = right.qo_detail
+
+type queue_panel_detail_reading =
+  | Queue_detail_none
+  | Queue_detail_loading
+  | Queue_detail_unavailable of string option
+  | Queue_detail_missing
+  | Queue_detail_ready of Masc_tui_queue_inspection.item_id * Masc_tui_queue_inspection.item
+
+let queue_panel_detail_reading ~items (panel : queue_panel) =
+  let module Inbox = Masc_tui_queue_inspection in
+  let find id =
+    match List.find_opt (fun (item : Inbox.item) -> item.id = Some id) items with
+    | Some item -> Queue_detail_ready (id, item)
+    | None -> Queue_detail_missing in
+  let from_source id source =
+    match panel.qp_reading with
+     | Queue_loading -> Queue_detail_loading
+     | Queue_unavailable ->
+       let reason = match panel.qp_notice with
+         | Some (Queue_info detail | Queue_error detail) -> Some detail
+         | None -> None in
+       Queue_detail_unavailable reason
+     | Queue_current ->
+       (match panel.qp_observation with
+        | None -> Queue_detail_unavailable None
+        | Some observation ->
+          (match source observation with
+           | Ok _ -> find id
+           | Error detail -> Queue_detail_unavailable (Some detail))) in
+  match panel.qp_detail with
+  | None -> Queue_detail_none
+  | Some (Local_message _ as id) -> find id
+  | Some (Server_message _ as id) ->
+    from_source id (fun (observation : Inbox.observation) -> observation.operations)
+  | Some (Running_message _ | Event _ | Schedule _ as id) ->
+    from_source id (fun (observation : Inbox.observation) -> observation.waiting)
+
+let update_queue_panel (state : state) ~keeper_name update =
+  match state.queue_panel with
+  | Some panel when String.equal panel.qp_keeper keeper_name ->
+    state.queue_panel <- Some (update panel)
+  | Some _ | None -> ()
+
+let queue_panel_selected_index ~items panel =
+  Option.bind panel.qp_selected (fun id ->
+    List.find_index (fun (item : Masc_tui_queue_inspection.item) -> item.id = Some id) items)
+
+let queue_panel_selected_id ~items panel =
+  match queue_panel_selected_index ~items panel with
+  | Some _ -> panel.qp_selected
+  | None -> None
+
+let reconcile_queue_panel_selection ~items panel =
+  {panel with qp_selected=queue_panel_selected_id ~items panel}
+
+let withdraw_queue_panel_server_selection panel =
+  match panel.qp_selected with
+  | Some (Masc_tui_queue_inspection.Local_message _) | None -> panel
+  | Some (Masc_tui_queue_inspection.Server_message _ | Running_message _ | Event _ | Schedule _) ->
+    {panel with qp_selected=None}
+
+let queue_panel_selection_note ~items panel =
+  match queue_panel_selected_id ~items panel with
+  | Some (Masc_tui_queue_inspection.Server_message _) ->
+      Some "Message priority does not interrupt the current turn"
+  | Some (Masc_tui_queue_inspection.Event _) ->
+      Some "Event urgency is not exact ordering"
+  | Some (Masc_tui_queue_inspection.Local_message _ | Running_message _ | Schedule _)
+  | None -> None
+
+let queue_panel_fixed_rows ~items panel =
+  1 + (match panel.qp_receipt with Some _ -> 1 | None -> 0)
+    + (match queue_panel_selection_note ~items panel with Some _ -> 1 | None -> 0)
+
+let queue_panel_scroll ~items ~height panel =
+  let count = List.length items in
+  let scroll = Masc_tui_scroll.normalize ~count ~height panel.qp_scroll in
+  match queue_panel_selected_index ~items panel with
+  | Some cursor when height > 0 -> Masc_tui_scroll.ensure_visible ~cursor ~height scroll
+  | Some _ | None -> scroll
+
+let queue_panel_move ~items ~budget ~direction panel =
+  let height = max 0 (budget - queue_panel_fixed_rows ~items panel) in
+  if height = 0 then panel
+  else
+    let count = List.length items in
+    let scroll = queue_panel_scroll ~items ~height panel in
+    let choices = items |> List.mapi (fun index (item : Masc_tui_queue_inspection.item) ->
+      Option.map (fun id -> index, id) item.id) |> List.filter_map Fun.id in
+    let ordered = match direction with `Down -> choices | `Up -> List.rev choices in
+    let selected = queue_panel_selected_index ~items panel in
+    let target = match selected with
+      | Some cursor ->
+        List.find_opt (fun (index, _) ->
+          match direction with `Down -> index > cursor | `Up -> index < cursor) ordered
+      | None ->
+        List.find_opt (fun (index, _) -> index >= scroll && index - scroll < height) ordered in
+    match target, selected with
+    | Some (_, id), _ ->
+      let next = {panel with qp_selected=Some id; qp_scroll=scroll} in
+      let next_height = max 0 (budget - queue_panel_fixed_rows ~items next) in
+      if next_height = 0 then {panel with qp_scroll=scroll}
+      else {next with qp_scroll=queue_panel_scroll ~items ~height:next_height next}
+    | None, Some _ -> {panel with qp_scroll=scroll}
+    | None, None ->
+      let next_scroll = match direction with
+        | `Down -> Masc_tui_scroll.down ~count ~height scroll
+        | `Up -> Masc_tui_scroll.up ~count ~height scroll in
+      {panel with qp_selected=None; qp_scroll=next_scroll}
+
 (* A local draft survives peer reconfirmation but never a workspace/draft
    replacement. Peer images retain the exact reading that acquired them.
    Completion, retirement and footer projection use this same admission. *)
@@ -10672,10 +10932,10 @@ let ask_submit_is_armed (state : state) =
   | Ask_answering _, None, None -> false
 
 let retire_armed_ask_submit_notice (state : state) =
-  match state.last_action with
+  match Masc_tui_action_notice.ordinary state.last_action with
   | Some (text, _)
     when String.starts_with ~prefix:armed_ask_submit_notice_prefix text ->
-      state.last_action <- None
+      set_last_action state None
   | Some _ | None -> ()
 
 let disarm_ask_submit (state : state) =
@@ -12832,6 +13092,14 @@ let suspend_workspace_readings state =
   state.board_list_reported_error <- None;
   retire_keeper_message_search state;
   state.workspace_read_authority <- ref ();
+  state.queue_panel <- Option.map (fun panel ->
+    {panel with qp_reading=Queue_unavailable; qp_observation=None;
+      qp_selected=None; qp_detail=None; qp_detail_scroll=0; qp_scroll=0;
+      qp_receipt=(match panel.qp_receipt with
+        | Some (Queue_action_receipt _) as receipt -> receipt
+        | Some (Queue_read_receipt _) | None -> None);
+      qp_notice=Some (Queue_info "Workspace unconfirmed; any receipt is from the previous observation")})
+      state.queue_panel;
   (* Retired completions cannot release these slots. Keep observations and
      explicit audit intent for a confirmed read in the successor epoch. *)
   List.iter (fun (keeper_name, mode) ->
@@ -12859,9 +13127,16 @@ let suspend_workspace_readings state =
   state.detail_reads <- [];
   suspend_keeper_deletions_read state;
   suspend_voice_wizard_read state;
-  state.keeper_queue_inflight <- List.filter
-    (fun keeper -> not (List.mem keeper state.keeper_queue_readings)) state.keeper_queue_inflight;
-  state.keeper_queue_readings <- [];
+  (* A pure inspection is retired with this read authority. A mutation whose
+     receipt already arrived still owns its follow-up observation until its
+     completion arrives; releasing its slot here would let that late result
+     clear a newer request for the same Keeper. Its reading phase does not
+     block a separate run-next mutation. *)
+  let inspection keeper = List.mem_assoc keeper state.keeper_queue_inspections in
+  state.keeper_queue_inflight <- List.filter (fun keeper -> not (inspection keeper))
+      state.keeper_queue_inflight;
+  state.keeper_queue_readings <- List.filter (fun keeper -> not (inspection keeper))
+      state.keeper_queue_readings;
   List.iter (fun ((view : Masc_tui_account_login.t), generation, action) ->
     if view.generation = generation then begin
       state.account_login_read_resume <- (view, generation, action)
@@ -13663,6 +13938,7 @@ let text_input_target (state : state) ~compact_viewport =
      | Some _ | None -> None)
   else if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
   else if state.keeper_deletions_open then None
+  else if Option.is_some state.queue_panel then None
   else if state.view = Resources && Option.is_some state.resource_save_prompt then Some Text_resource_save
   (* A drop reason takes every key on the goal detail it was opened on, so
      its letters never reach the lifecycle keys under it. *)
@@ -14747,6 +15023,7 @@ let withdraw_keeper_chat_requests (state : state) =
   state.keeper_queue_inflight <- [];
   state.keeper_queue_readings <- [];
   state.keeper_queue_inspections <- [];
+  state.queue_panel <- None;
   state.keeper_run_next_pending <- [];
   state.keeper_run_next_ready <- [];
   state.keeper_run_next_inflight <- [];
@@ -14930,8 +15207,8 @@ let send_disposition state ~keeper_name : send_disposition =
          (fun entry -> entry.sent_request)
          (blocking_inflight_for_keeper state keeper_name))
     ~waiting:
-      (* The line a new one for this keeper would join (last waiting [Next], never
-         a steer). Present it as "the keeper is spoken for" so Enter queues onto
+      (* The most recently submitted waiting [Next], never a steer, is the
+         line a new one for this keeper would join. Present it as "the keeper is spoken for" so Enter queues onto
          it instead of dispatching past a line the operator has not finished. *)
       (Option.map
          (fun (item : Masc_tui_keeper_chat_queue.item) ->
@@ -16255,6 +16532,7 @@ let modal_owns_keys (state : state) =
   || Option.is_some (current_chat_call_reader state)
   || Option.is_some (current_detail_reading state)
   || state.help_open || state.keeper_deletions_open || state.agenda_open
+  || Option.is_some state.queue_panel
   || state.context_inspector_open || state.about_open
   || state.repository_changes_open
   || (state.view = Lanes && Option.is_some state.exact_activity_open)
@@ -16342,6 +16620,7 @@ let close_key_modals (state : state) =
   state.chat_call_reader <- None;
   state.help_open <- false;
   state.help_scroll <- 0;
+  state.queue_panel <- None;
   close_detail_reading state;
   state.about_open <- false;
   state.keeper_deletions_open <- false;
@@ -16464,6 +16743,7 @@ let create_state
   keeper_queue_inflight = [];
   keeper_queue_readings = [];
   keeper_queue_inspections = [];
+  queue_panel = None;
   keeper_run_next_pending = [];
   keeper_run_next_ready = [];
   keeper_priority_controls = [];
@@ -16746,8 +17026,8 @@ let create_state
   voice_capture_withdrawn = false;
   voice_continuous = None;
   voice_floor = None;
-  quit_armed = false;
-  last_action = None;
+  quit_armed = None;
+  last_action = Masc_tui_action_notice.empty;
   fleet_stream_reader = Fleet_stream_idle;
   connection_status = Disconnected;
   http_refresh_started_ns = None;
@@ -18161,7 +18441,9 @@ type clamped_scroll =
      the drawing instead, which is the one thing the renderer must not do. *)
   | Patch_modal_scroll of int * int
   | Link_modal_scroll of int
-  | Play_invite_scroll of int
+  | Play_invite_scroll of Masc_tui_play_card.t * int
+  | Queue_panel_presented of queue_panel_owner
+  | Help_presented
   (* The voice pane and its wizard lay out lines out of two HTTP reads and the
      probe's answers, so their count exists only once the frame is drawn. Both
      drew every line into a fixed budget with no offset, and whatever fell past
@@ -18180,6 +18462,52 @@ type clamped_scroll =
      the stored value past it until the frame says where it drew from. *)
   | Context_inspector_scroll of int
   | Context_inspector_response_scroll of int
+
+let play_card_of_reader = function
+  | Some (Play_invite_scroll (card, _)) -> Some card
+  | Some (Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+         | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
+         | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
+         | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
+         | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
+         | System_log_detail_scroll _ | Planning_confirmation_scroll _
+         | Planning_detail_scroll _ | Lane_run_detail_scroll _ | Changes_diff_scroll _
+         | Repository_changes_diff_scroll _ | Resource_scroll _ | Metrics_scroll _
+         | Approval_detail_scroll _ | Patch_modal_scroll _ | Link_modal_scroll _
+         | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
+         | Context_inspector_scroll _ | Context_inspector_response_scroll _ | Queue_panel_presented _
+         | Help_presented)
+  | None -> None
+
+let queue_owner_of_reader = function
+  | Some (Queue_panel_presented owner) -> Some owner
+  | Some (Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+         | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
+         | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
+         | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
+         | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
+         | System_log_detail_scroll _ | Planning_confirmation_scroll _
+         | Planning_detail_scroll _ | Lane_run_detail_scroll _ | Changes_diff_scroll _
+         | Repository_changes_diff_scroll _ | Resource_scroll _ | Metrics_scroll _
+         | Approval_detail_scroll _ | Patch_modal_scroll _ | Link_modal_scroll _
+         | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
+         | Context_inspector_scroll _ | Context_inspector_response_scroll _ | Help_presented)
+  | None -> None
+
+let help_is_presented = function
+  | Some Help_presented -> true
+  | Some (Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+         | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
+         | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
+         | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
+         | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
+         | System_log_detail_scroll _ | Planning_confirmation_scroll _
+         | Planning_detail_scroll _ | Lane_run_detail_scroll _ | Changes_diff_scroll _
+         | Repository_changes_diff_scroll _ | Resource_scroll _ | Metrics_scroll _
+         | Approval_detail_scroll _ | Patch_modal_scroll _ | Link_modal_scroll _
+         | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
+         | Context_inspector_scroll _ | Context_inspector_response_scroll _ | Queue_panel_presented _)
+  | None -> false
 
 (* What End names on a surface whose rows the drawing counts: a row past any
    real end, so the frame's own clamp reports the last one back. The keypress
@@ -18244,7 +18572,11 @@ let apply_clamped_scroll (state : state) = function
       state.patch_modal_scroll <- vertical;
       state.patch_modal_hscroll <- horizontal
   | Link_modal_scroll value -> state.link_modal_scroll <- value
-  | Play_invite_scroll value -> state.play_invite_scroll <- value
+  | Play_invite_scroll (card, value) ->
+      (match play_card_shown state with
+       | Some current when current == card -> state.play_invite_scroll <- value
+       | Some _ | None -> ())
+  | Queue_panel_presented _ | Help_presented -> ()
   | Voice_scroll value -> state.config_scroll <- value
   | Preset_detail_scroll (value, _) -> state.config_scroll <- value
   | Keeper_list_scroll value -> state.keeper_list_scroll <- value

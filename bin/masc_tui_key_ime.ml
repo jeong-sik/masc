@@ -134,3 +134,8 @@ let latin_keys name =
   | Some codepoint when codepoint >= jongseong_first && codepoint <= jongseong_last ->
       Some (List.nth jong_keys (codepoint - jongseong_first))
   | Some _ -> None
+
+let single_latin_key name =
+  match latin_keys name with
+  | Some [key] -> Some key
+  | Some ([] | _ :: _ :: _) | None -> None

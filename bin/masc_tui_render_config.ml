@@ -312,9 +312,9 @@ let render_runtime_params (state : state) =
                (String.concat " · " edit.rpe_choices)
            | Friendly_value ->
              ui_text state ~ko:"입력하여 교체 · Enter 적용 · Esc 취소" ~en:"type to replace · Enter apply · Esc cancel")));
-  box_bottom buf cols;
+  let recovery_in_slot = recovery_box_bottom state buf ~cols in
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
+    (footer_line ~recovery_in_slot state ~max_cells:cols
        ~hints:
          (match state.runtime_param_edit with
           | Some edit
@@ -643,9 +643,9 @@ let render_prompt_registry (state : state) =
     ~selected:(match selected with
       | None -> ui_text state ~ko:"선택 없음" ~en:"No selection"
       | Some row -> row.Tui_decode.pr_key);
-  box_bottom buf cols;
+  let recovery_in_slot = recovery_box_bottom state buf ~cols in
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
+    (footer_line ~recovery_in_slot state ~max_cells:cols
        ~hints:(Masc_tui_keys.footer_hints_config ~lang:state.ui_language ~pane:Config_prompts));
   finish_surface state ~surface_key:"prompts" ~rows:terminal_rows ~cols buf
 
@@ -712,9 +712,9 @@ let render_runtime_prompt_assets (state : state) =
     ~selected:(match selected with
       | None -> ui_text state ~ko:"선택 없음" ~en:"No selection"
       | Some asset -> asset.Tui_decode.pra_path);
-  box_bottom buf cols;
+  let recovery_in_slot = recovery_box_bottom state buf ~cols in
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
+    (footer_line ~recovery_in_slot state ~max_cells:cols
        ~hints:(Masc_tui_keys.footer_hints_prompt_assets ~lang:state.ui_language));
   finish_surface state ~surface_key:"prompt-runtime-assets" ~rows:terminal_rows ~cols buf
 ;;
@@ -1075,9 +1075,9 @@ let render_presets (state : state) =
             | Some (Restore_armed _ | Delete_armed _) | None ->
               ui_text state ~ko:"  Enter:저장  Esc:취소" ~en:"  Enter:save  Esc:cancel") ^ Ansi.reset))
    | None -> ());
-  box_bottom buf cols;
+  let recovery_in_slot = recovery_box_bottom state buf ~cols in
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
+    (footer_line ~recovery_in_slot state ~max_cells:cols
        ~hints:(match state.preset_save_draft with
          | Some _ ->
            ui_text state
@@ -1236,9 +1236,9 @@ let render_themes (state : state) =
        Printf.sprintf (if state.ui_language = Lang_ko then "  %s · Enter:다른 테마 선택  x:터미널 색상 · %s"
                        else "  %s · Enter:pick another  x:follow terminal · %s")
          (Terminal_text.single_line name) lang_toggle);
-  box_bottom buf cols;
+  let recovery_in_slot = recovery_box_bottom state buf ~cols in
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
+    (footer_line ~recovery_in_slot state ~max_cells:cols
        ~hints:(Masc_tui_keys.footer_hints_config ~lang:state.ui_language ~pane:state.config_pane));
   finish_surface state ~surface_key:"themes" ~rows:terminal_rows ~cols buf
 
@@ -1479,9 +1479,9 @@ let render_config_models (state : state) =
                then box_line_styled buf cols ~style:(Ansi.bold ^ Theme.info ()) line
                else box_line_styled buf cols ~style:(Theme.recede ()) line))
            detail));
-  box_bottom buf cols;
+  let recovery_in_slot = recovery_box_bottom state buf ~cols in
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
+    (footer_line ~recovery_in_slot state ~max_cells:cols
        ~hints:(Masc_tui_keys.footer_hints_config ~lang:state.ui_language ~pane:Config_models));
   finish_surface state ~surface_key:"config_models" ~rows:terminal_rows ~cols buf
 
@@ -1689,8 +1689,8 @@ let finish_voice_surface (state : state) ~terminal_rows ~cols ~head ~body ~hints
   for _ = drawn + 1 to height do
     box_empty buf cols
   done;
-  box_bottom buf cols;
-  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
+  let recovery_in_slot = recovery_box_bottom state buf ~cols in
+  Buffer.add_string buf (footer_line ~recovery_in_slot state ~max_cells:cols ~hints);
   finish_surface state ~clamped:(Voice_scroll scroll) ~surface_key:"voice"
     ~rows:terminal_rows ~cols buf
 ;;

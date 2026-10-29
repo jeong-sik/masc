@@ -975,7 +975,7 @@ let test_keeper_preference_failures_are_retained_by_kind () =
   complete old_id order_old (Masc_tui_config.Preference_unconfirmed "write failed");
   Alcotest.(check bool) "order failure retained" true
     (Option.is_some state.keeper_list_order_save_error);
-  state.last_action <- None;
+  state.last_action <- Masc_tui_action_notice.empty;
   let view_id = submit view in
   complete view_id view Masc_tui_config.Preference_saved;
   Alcotest.(check bool) "unrelated view success and new input keep the order warning" true

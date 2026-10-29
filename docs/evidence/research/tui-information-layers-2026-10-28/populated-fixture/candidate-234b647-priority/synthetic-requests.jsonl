@@ -1,0 +1,3 @@
+{"path": "/api/v1/keepers/turn/run-next", "body": {"name": "fixture", "request_id": "fixture-b", "interrupt_token": null}, "order": ["fixture-b", "fixture-a", "fixture-c"]}
+{"path": "/api/v1/keepers/fixture/chat/operations/fixture-b/move-to-end", "body": {}, "order": ["fixture-a", "fixture-c", "fixture-b"]}
+{"path": "/api/v1/keepers/turn/run-next", "body": {"name": "fixture", "request_id": "fixture-b", "interrupt_token": null}, "order": ["fixture-b", "fixture-a", "fixture-c"]}

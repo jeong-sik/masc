@@ -647,12 +647,8 @@ type drawn = Surface_drawn | Overlay_drawn
 
 (* One pure frame choice owns overlay priority for both drawing and the
    application's preparation of state tied to an actually visible surface. *)
-let frame_choice (state : state) ~terminal_rows =
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  if Render_schedule.Viewport.requires_compact_frame ~rows then `Too_small rows
-  else match play_card_shown state with
-  | Some card -> `Play_card card
-  | None -> match state.account_login with
+let frame_choice_after_play (state : state) =
+  match state.account_login with
   | Some view -> `Account_login view
   | None when state.palette_open -> `Palette
   | None -> match state.collab with
@@ -672,15 +668,34 @@ let frame_choice (state : state) ~terminal_rows =
       else if state.context_inspector_open then `Context
       else if state.keeper_deletions_open then `Keeper_deletions
       else if state.help_open then `Help
-      else if state.agenda_open then `Agenda
-      else if state.answering_open then `Answering
-      else if state.patch_modal_open then `Patch
-      else if state.link_modal_open then `Link
-      else match state.client_detail with
-        | Some client -> `Client_detail client
-        | None -> `Surface
+      else match state.queue_panel with
+      | Some panel -> `Queue panel
+      | None ->
+        if state.agenda_open then `Agenda
+        else if state.answering_open then `Answering
+        else if state.patch_modal_open then `Patch
+        else if state.link_modal_open then `Link
+        else match state.client_detail with
+          | Some client -> `Client_detail client
+          | None -> `Surface
 
-let render ~home (state : state) =
+let frame_choice (state : state) ~terminal_rows =
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  if Render_schedule.Viewport.requires_compact_frame ~rows then `Too_small rows
+  else match play_card_shown state with
+  | Some card -> `Play_card card
+  | None -> frame_choice_after_play state
+
+let queue_below_play state ~terminal_rows =
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  if Render_schedule.Viewport.requires_compact_frame ~rows then None
+  else match frame_choice_after_play state with
+    | `Queue panel -> Some panel
+    | `Account_login _ | `Palette | `Collab _ | `Lane_addons _ | `Detail_reading _
+    | `About | `Context | `Keeper_deletions | `Help | `Agenda | `Answering
+    | `Patch | `Link | `Client_detail _ | `Surface -> None
+
+let render ~home ~compact_recovery_notice (state : state) =
   (* Marks number the targets of this frame alone. *)
   Masc_tui_hit.reset press_marks;
   (* So do the panes: a frame that ends without recording any, the
@@ -701,8 +716,9 @@ let render ~home (state : state) =
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
   match frame_choice state ~terminal_rows with
-  | `Too_small rows ->
-    let frame, clamped = render_terminal_too_small state ~rows ~cols in
+  | `Too_small _ ->
+    let frame, clamped = render_terminal_too_small state
+        ~recovery_notice:compact_recovery_notice ~rows:terminal_rows ~cols in
     (frame, clamped, None, Overlay_drawn)
   | `Play_card card ->
     let frame, clamped = render_play_card state card in
@@ -729,6 +745,9 @@ let render ~home (state : state) =
     let frame, clamped = render_agenda state in (frame, clamped, None, Overlay_drawn)
   | `Answering ->
     let frame, clamped = render_answering state in (frame, clamped, None, Overlay_drawn)
+  | `Queue panel ->
+    let frame, clamped = Masc_tui_render_overlays.render_queue_panel state panel in
+    (frame, clamped, None, Overlay_drawn)
   | `Patch ->
     let frame, clamped = render_patch_modal state in (frame, clamped, None, Overlay_drawn)
   | `Link ->

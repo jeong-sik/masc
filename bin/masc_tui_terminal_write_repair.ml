@@ -6,6 +6,7 @@ module Render_schedule = Masc_tui_render_schedule
 let frame_damaged = Atomic.make false
 
 let note () = Atomic.set frame_damaged true
+let damage_pending () = Atomic.get frame_damaged
 
 let request_repaint render_schedule =
   if Atomic.get frame_damaged then

@@ -1,0 +1,24 @@
+ 대시보드  작업  ▸키퍼  사용량  보드  워크스페이스  시스템
+
+  Keepers ▸ fixture ▸ chat
+ ──────────────────────────────────────────────────────────────────────────────
+
+ ›  테스트 결과도 알려 줘
+
+ ●  빌드 결과는 아직 확인되지 않았습니다.
+
+ ›  이 대화는 비교용 가상 내용입니다.
+
+ ●  확인했습니다. 선택한 요청의 상태를 확인하세요.
+
+ ✗  HTTP 503 refused Child read
+ ○  0 observed · provider completeness unknown · liveness unknown
+ ✗  HTTP 503 refused native-task read
+   Job · 조회 실패 · F9
+ ──────────────────────────────────────────────────────────────────────────────
+   현재 작업 확인 불가
+   Memory load failed · /errors
+   > HELP-234B-MARKER
+
+ 아직 시작하지 않음  Context unavailable
+  TUI 234b647 ≠ server fixture (generations differ)  ?:help

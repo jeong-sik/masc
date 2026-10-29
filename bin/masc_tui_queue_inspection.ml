@@ -1,4 +1,4 @@
-type action = Inspect | Pause | Resume | Clear | Cancel of string | Move_to_end of string | Edit of string * string
+type action = Inspect | Pause | Resume | Clear | Cancel of string | Move_to_end of string | Run_next of string | Edit of string * string
   | Cancel_event of string * int64 * string
   | Prioritize_event of string * int64 * Keeper_event_queue.urgency
   | Inspect_peers of unit ref
@@ -10,6 +10,15 @@ type peer_relation = {
   reply_to : string option;
 }
 type peer_snapshot = { queued_count : int; relations : peer_relation list }
+
+type item_id =
+  | Local_message of string | Server_message of string | Running_message of string
+  | Event of string * int64 | Schedule of string * string
+type item = { id : item_id option; text : string }
+type observation = {
+  waiting : (item list, string) result;
+  operations : (item list, string) result;
+}
 open Result.Syntax
 let split text =
   let text = String.trim text in
@@ -100,14 +109,7 @@ let peer_lines snapshot =
       (Option.fold ~none:"" ~some:(fun keeper -> " · reply route " ^ safe keeper) relation.reply_to))
     snapshot.relations in
   scope :: ("First page only; more queued requests may exist. Running and completed requests are not listed." :: lines)
-(* The snapshot used to print one row per pending stimulus as
-   "source: what — next_action" plus a 64-hex address, in queue order, with no
-   clock: 31 occurrences of one schedule were 62 lines that read the same. The
-   row now opens with when the thing arrived, names its lifecycle, and
-   a schedule's pending occurrences -- one row from the server since the
-   inventory groups them -- show their count and the span of their due
-   instants. The exact address stays on its own line because it is the
-   argument /queue cancel-event and priority-event take. *)
+
 let clock_text at =
   let time = Unix.localtime at in
   Printf.sprintf "%02d:%02d" time.Unix.tm_hour time.Unix.tm_min
@@ -195,15 +197,8 @@ let describe_row ~now row =
     | Settling -> " · settling"
     | Terminal -> " · terminal"
     | Unavailable -> " · unavailable" in
-  let address = match detail with
-    | `Assoc fields -> (match List.assoc_opt "source_ref" fields, List.assoc_opt "source_incarnation" fields with
-        | Some (`String reference), Some (`String incarnation) ->
-          let more = if count > 1 then Printf.sprintf " \xc2\xb7 +%d more" (count - 1) else "" in
-          "\n         event " ^ safe reference ^ " " ^ safe incarnation ^ more
-        | Some _, Some _ | Some _, None | None, Some _ | None, None -> "")
-    | _ -> "" in
   Ok { source; count; phase;
-       line = Printf.sprintf "  %s%s%s%s%s" clock (safe what) span timing address }
+       line = Printf.sprintf "  %s%s%s%s" clock (safe what) span timing }
 
 let inventory_counts described =
     let count_phase matches =
@@ -221,54 +216,164 @@ let inventory_counts described =
       |> List.cons (Printf.sprintf "%d pending" pending)
       |> String.concat " · "
 
-let waiting_lines ~now json =
+let first_line text =
+  match String.index_opt text '\n' with
+  | None -> text
+  | Some index -> String.sub text 0 index
+
+let inventory_item row described =
+  let detail = match row with
+    | `Assoc fields -> (match List.assoc_opt "detail" fields with
+        | Some (`Assoc fields) -> fields | Some _ | None -> [])
+    | _ -> [] in
+  let text key = match List.assoc_opt key detail with
+    | Some (`String value) when value <> "" -> Some value
+    | Some _ | None -> None in
+  let id = match described.source with
+    | Inventory.Event_queue_pending ->
+      (match described.phase with
+       | Pending when described.count = 1 ->
+         (match text "source_ref", text "source_incarnation" with
+          | Some reference, Some incarnation ->
+            (match Int64.of_string_opt incarnation with
+             | Some revision when revision >= 0L -> Some (Event (reference, revision))
+             | Some _ | None -> None)
+          | Some _, None | None, Some _ | None, None -> None)
+       | Pending | Running | Scheduled _ | Due _ | Settling | Terminal | Unavailable -> None)
+    | Inventory.Chat_operation_running ->
+      Option.map (fun id -> Running_message id) (text "operation_id")
+    | Inventory.Schedule_waiting ->
+      (match text "schedule_id", text "schedule_instance_id" with
+       | Some id, Some instance -> Some (Schedule (id, instance))
+       | Some _, None | None, Some _ | None, None -> None)
+    | Inventory.Chat_operation_queued | Inventory.Hitl_pending | Inventory.Fusion_running
+    | Inventory.Owner_shutdown | Inventory.Operator_pending_confirm | Inventory.Read_error -> None in
+  { id; text = first_line described.line }
+
+let inventory_items row described =
+  let summary = inventory_item row described in
+  let members = match described.source with
+    | Inventory.Event_queue_pending when described.count > 1 ->
+      (match row with
+       | `Assoc fields ->
+         (match List.assoc_opt "detail" fields with
+          | Some (`Assoc detail) ->
+            (match List.assoc_opt "group_members" detail with
+             | Some (`List members) -> Some members
+             | Some _ | None -> None)
+          | Some _ | None -> None)
+       | _ -> None)
+    | Inventory.Event_queue_pending | Inventory.Chat_operation_queued
+    | Inventory.Chat_operation_running | Inventory.Hitl_pending | Inventory.Fusion_running
+    | Inventory.Schedule_waiting | Inventory.Owner_shutdown
+    | Inventory.Operator_pending_confirm | Inventory.Read_error -> None in
+  match members with
+  | None ->
+    (match described.source with
+     | Inventory.Event_queue_pending when described.count > 1 ->
+       [summary; {id=None; text="  Individual event identities are unavailable"}]
+     | Inventory.Event_queue_pending | Inventory.Chat_operation_queued
+     | Inventory.Chat_operation_running | Inventory.Hitl_pending | Inventory.Fusion_running
+     | Inventory.Schedule_waiting | Inventory.Owner_shutdown
+     | Inventory.Operator_pending_confirm | Inventory.Read_error -> [summary])
+  | Some values ->
+    let parse_member = function
+      | `Assoc fields ->
+        (match List.assoc_opt "source_ref" fields, List.assoc_opt "source_incarnation" fields with
+         | Some (`String reference), Some (`String incarnation) when reference <> "" ->
+           (match Int64.of_string_opt incarnation with
+            | Some revision when revision >= 0L ->
+              (match optional_timestamp "due_at_unix" (`Assoc fields) with
+               | Ok due -> Some (reference, revision, due)
+               | Error _ -> None)
+            | Some _ | None -> None)
+         | Some _, Some _ | Some _, None | None, Some _ | None, None -> None)
+      | _ -> None in
+    let addresses = List.filter_map parse_member values in
+    let identities = List.map (fun (reference, revision, _) -> reference, revision) addresses in
+    if List.length values <> described.count || List.length addresses <> described.count
+       || List.length (List.sort_uniq compare identities) <> described.count then
+      [summary; {id=None; text="  Group member identities unavailable; refresh before changing them"}]
+    else summary :: List.mapi (fun index (reference, revision, due) ->
+      {id=Some (Event (reference, revision));
+       text=Printf.sprintf "    occurrence %d/%d%s · %s"
+         (index + 1) described.count
+         (Option.fold ~none:"" ~some:(fun at -> " · due " ^ Masc_domain.iso8601_of_unix_seconds at) due)
+         (first_line described.line)}) addresses
+
+let waiting_items ~now json =
   let* keepers = list "keepers" json in
   let* global_rows = list "global_waiting_on" json in
-  let* global = map_result (describe_row ~now) global_rows in
+  let describe rows = map_result (fun row ->
+    let* described = describe_row ~now row in
+    Ok (described, inventory_items row described)) rows in
+  let* global = describe global_rows in
   let* groups = map_result (fun keeper ->
     let* state = string "state" keeper in
     let* paused = field "paused" keeper in
     let* consumption = match paused with
-      | `Bool true -> Ok "paused"
-      | `Bool false -> Ok "open"
-      | `Null -> Ok "unknown"
+      | `Bool true -> Ok "paused" | `Bool false -> Ok "open" | `Null -> Ok "unknown"
       | _ -> Error "Queue paused field must be boolean or null" in
     let* rows = list "waiting_on" keeper in
-    let* described = map_result (describe_row ~now) rows in
-    let counts = inventory_counts described in
-    let header =
-      Printf.sprintf "Queue consumption: %s; inventory: %s \xc2\xb7 %s in %d %s"
-        consumption (safe state) counts (List.length described)
-        (if List.length described = 1 then "group" else "groups") in
-    (* The autonomous lane is what drains the event queue, and it does not
-       run while an operator chat holds the turn slot. Said once, above the
-       rows it explains, only when both are on the screen. *)
+    let* rows = describe rows in
+    let described = List.map fst rows in
+    let header = {id=None; text=Printf.sprintf "Queue %s · %s · %s"
+      consumption (safe state) (inventory_counts described)} in
     let has_events = List.exists (fun row -> row.source = Inventory.Event_queue_pending) described in
-    let blocker =
-      let chat_running = List.exists (fun row -> row.source = Inventory.Chat_operation_running) described in
-      if has_events && chat_running then
-        [ "  autonomous turn: waits while the chat operation holds the turn slot" ]
-      else [] in
-    let event_note = if has_events then
-        [ "  pending events are unacknowledged; they may already be in the current turn" ]
-      else [] in
-    Ok (header :: blocker @ event_note @ List.map (fun row -> row.line) described)) keepers in
-  let global_lines = match global with
+    let chat_running = List.exists (fun row -> row.source = Inventory.Chat_operation_running) described in
+    let notes =
+      (if has_events && chat_running then
+         [{id=None; text="Events wait while the current chat holds the turn"}] else []) @
+      (if has_events then
+         [{id=None; text="Pending events may already be in the current turn"}] else []) in
+    Ok (header :: notes @ List.concat_map snd rows)) keepers in
+  let global_items = match global with
     | [] -> []
-    | rows -> ("Workspace inventory: " ^ inventory_counts rows)
-        :: List.map (fun row -> row.line) rows in
-  Ok (global_lines @ List.concat groups)
-let operation_lines json =
+    | rows -> {id=None; text="Workspace inventory · " ^ inventory_counts (List.map fst rows)}
+      :: List.concat_map (fun (_, items) -> List.map (fun item -> {item with id=None}) items) rows in
+  Ok (global_items @ List.concat groups)
+
+let operation_items json =
   let* operations = list "operations" json in
-  let* lines = map_result (fun operation ->
+  let module Input = Masc.Keeper_multimodal_input in
+  let media kind (block : Input.user_media_block) =
+    Printf.sprintf "%s: %s · %s · id %s" kind (safe block.name)
+      (safe block.mime_type) (safe block.attachment_id) in
+  let content = function
+    | Input.User_text text -> "text: " ^ Masc.Tui_terminal_text.sanitize_terminal_lines text
+    | User_image (Attached block) -> media "image" block
+    | User_image (Url_ref reference) -> "image URL: " ^ safe reference.value
+    | User_image (File_id_ref reference) -> "image file: " ^ safe reference.value
+    | User_document block -> media "document" block
+    | User_audio block -> media "audio" block in
+  let* rows = map_result (fun operation ->
     let* id = string "operation_id" operation in
+    let* id = Keeper_chat_operation.Operation_id.of_string id in
     let* source = field "source" operation in
     let* source = Masc.Keeper_chat_operation_payload.source_of_json source in
     let* input = field "input" operation in
     let* input = Masc.Keeper_chat_operation_payload.input_of_json input in
-    Ok (Printf.sprintf "  %s [%s / %s]\n    %s" (safe id) (safe (Keeper_continuation_channel.describe source.continuation_channel))
-      (safe source.submitted_by) (safe input.message))) operations in
-  Ok ((Printf.sprintf "Server queued messages: %d" (List.length operations)) :: lines)
+    let blocks = match input.user_blocks with
+      | [] -> ""
+      | blocks -> "\n\nInput blocks:\n" ^ String.concat "\n" (List.map content blocks) in
+    let attachments = match input.attachments with
+      | [] -> ""
+      | attachments ->
+        "\n\nAttachments:\n" ^ String.concat "\n" (List.map
+          (fun (attachment : Masc.Keeper_chat_store.attachment) ->
+            Printf.sprintf "%s · %s · %d bytes · id %s" (safe attachment.name)
+              (safe attachment.mime_type) attachment.size (safe attachment.id)) attachments) in
+    Ok {id=Some (Server_message (Keeper_chat_operation.Operation_id.to_string id));
+        text=Printf.sprintf "  %s · %s: %s%s%s"
+          (safe (Keeper_continuation_channel.describe source.continuation_channel))
+          (safe source.submitted_by) (Masc.Tui_terminal_text.sanitize_terminal_lines input.message)
+          blocks attachments}) operations in
+  let ids = List.filter_map (fun item -> match item.id with
+    | Some (Server_message id) -> Some id
+    | Some (Local_message _ | Running_message _ | Event _ | Schedule _) | None -> None) rows in
+  if List.length (List.sort_uniq String.compare ids) <> List.length ids then
+    Error "Server queue changed while reading pages; refresh to try again"
+  else Ok ({id=None; text=Printf.sprintf "Server queued messages · %d" (List.length rows)} :: rows)
 let edited_input ~message operation =
   let* input = field "input" operation in
   let* input = Masc.Keeper_chat_operation_payload.input_of_json input in

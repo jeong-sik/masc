@@ -28,7 +28,7 @@ let action_message =
 let action_state view =
   let state = Masc_tui_types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- view;
-  state.last_action <- Some (action_message, Unix.gettimeofday ());
+  Masc_tui_types.set_last_action state (Some (action_message, Unix.gettimeofday ()));
   state
 
 let render_action state width =
@@ -49,7 +49,7 @@ let test_action_text_is_not_dropped_as_a_key () =
          (Masc_tui_footer.prepare_hints (Masc_tui_keys.footer_hints view)));
     check_bool "a clipped diagnosis is explicit" true (contains ~needle:"…" row);
     check_string "rendering keeps the complete outcome in state" action_message
-      (Option.get state.last_action |> fst);
+      (Option.get (Masc_tui_action_notice.ordinary state.last_action) |> fst);
     check_at_most_cells "the action respects the existing cell budget" 98 (String.trim row);
     check_one_line "action footer stays one line" row;
     let narrow = render_action state 60 in
@@ -280,21 +280,21 @@ let test_armed_ask_submit_notice_retires_when_answering_is_cleared () =
   let ask = { Masc.Tui_decode_asks.ak_asker = Ask_keeper "alpha"; ak_id = "ask-1" } in
   state.ask_answer_mode <- Masc_tui_types.Ask_answering { aam_ask = ask };
   state.pending_ask_submit <- Some ask;
-  state.last_action <- Some (notice, Unix.gettimeofday ());
+  Masc_tui_types.set_last_action state (Some (notice, Unix.gettimeofday ()));
   check_bool "armed confirmation notice renders while ask submit is armed" true
     (contains ~needle:notice (render_action state 140));
   Masc_tui_home.clear_ask_answering state;
   check_bool "clearing ask answering retires the armed notice from state" true
-    (Option.is_none state.last_action);
+    (Option.is_none (Masc_tui_action_notice.ordinary state.last_action));
   check_bool "withdrawn ask answering no longer draws confirmation hint" false
     (contains ~needle:notice (render_action state 140));
   (* Even if a caller leaves the notice tuple in last_action while ask submit
      is disarmed, footer_line must not draw the obsolete confirmation hint. *)
-  state.last_action <- Some (notice, Unix.gettimeofday ());
+  Masc_tui_types.set_last_action state (Some (notice, Unix.gettimeofday ()));
   check_bool "disarmed state suppresses stale ask confirmation notice" false
     (contains ~needle:notice (render_action state 140));
   let unrelated = "Cannot answer: workspace identity is unverified; draft retained" in
-  state.last_action <- Some (unrelated, Unix.gettimeofday ());
+  Masc_tui_types.set_last_action state (Some (unrelated, Unix.gettimeofday ()));
   Masc_tui_home.clear_ask_answering state;
   check_bool "clearing ask answering preserves unrelated action notices" true
     (contains ~needle:unrelated (render_action state 140))

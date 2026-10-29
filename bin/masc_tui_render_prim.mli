@@ -151,9 +151,15 @@ val search_marker_styled : Masc_tui_types.state -> string
     the query is being typed, dim once settled -- or [""] when there is no
     query. *)
 
+type recovery_row = {
+  recovery_text : string;
+  recovery_quit : Masc_tui_action_notice.quit_confirmation option;
+}
+
 val footer_line :
   ?status:Masc_tui_footer.status_item list ->
   ?position:string ->
+  ?recovery_in_slot:recovery_row option ->
   Masc_tui_types.state -> max_cells:int -> hints:string -> string
 (** [position] is where a scrolling surface stands in what it is scrolling.
     It is separate from [hints] because the fitter gives up key items from
@@ -207,10 +213,20 @@ type acting_pane_footer =
     These frames draw no agenda row, so the footer is drawn here. What waits
     on the operator is on the surface strip, which they draw like every
     other frame. *)
+val recovery_slot : Masc_tui_types.state -> max_cells:int -> recovery_row option
+(** A complete CSI, quit, or rejection notice that fits a dedicated row, already
+    marked for presentation evidence where applicable. *)
+
+val recovery_box_bottom : Masc_tui_types.state -> Buffer.t -> cols:int -> recovery_row option
+(** Draw the existing borderless bottom row, replacing it with a complete
+    recovery notice when one fits. The result is the same selection passed to
+    {!footer_line} to avoid duplicating it. *)
+
 val finish_frame_beside_acting_pane :
   Masc_tui_types.state ->
   ?clamped:Masc_tui_types.clamped_scroll ->
   ?roster:Masc_tui_pane_selection.roster_split ->
+  ?recovery_in_slot:recovery_row option ->
   surface_key:string ->
   cursor:Frame_presenter.cursor ->
   rows:int ->
@@ -284,7 +300,8 @@ val surface_chrome :
   body:(budget:int -> chrome_body -> unit) ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 (** [sidebar] reserves its width from [cols] and draws beside the body,
-    above the full-width footer. The body must wrap for the remaining width. *)
+    above the full-width footer. The body must wrap for the remaining width.
+    A complete recovery notice may use the existing bottom row. *)
 
 val connection_badge : Masc_tui_types.state -> string
 

@@ -1796,7 +1796,41 @@ hands back the line that is waiting rather than stepping over it into what was
 already delivered. The draft is put aside on the first step back and returned
 on the way forward past the newest.
 
-`/queue` reads the selected Keeper's server inventory. Its counts separate
+`Ctrl-T` or `/queue` opens the selected Keeper's queue in a separate panel,
+leaving the chat and draft in place. Use Up/Down to select an item, Enter to
+read its identity and available detail (including queued message text and
+attachment information), Page Up/Down to browse
+the list, `r` to refresh, `?` for help, and Esc to return. Closing help returns
+to the same queue panel and selection. A selected local message can be
+moved first or last among that Keeper's unsent messages with `n` or `l`;
+existing edit, admission and retained-input holds still apply. Moving it first
+does not claim it is ahead of messages already accepted by the server.
+Enter and queue changes use the selected item the terminal last displayed.
+Changes also require a current queue read and server authority. The selection mark and
+some item text must fit; if the terminal is too narrow, enlarge it before
+opening detail or changing the queue. If the selection or its content changes
+before the next frame, review the updated row before retrying. A partially
+shortened row can still be used.
+
+For an accepted server message, `n` requests the next position and `l` moves it
+to the end. The server authorizes changes to the operator's own messages. A
+next request does not interrupt the current turn. For a pending event, `n` and
+`l` set immediate and low urgency respectively; urgency is not an exact queue
+position. A grouped event exposes individual occurrences only when every exact
+member address is available. Running work and future scheduled jobs can be
+inspected, but this panel cannot run a future job before its due time.
+Server message pages can change while they are being read; duplicate identities
+are reported as an unavailable read, and an undetected concurrent move can
+still make the displayed order incomplete. Refresh before acting when in doubt.
+An open server detail reports loading or source failure instead of presenting
+an older body as current; local detail remains independent of server reads.
+
+When a command-only queue panel is visible over chat, an individual two-set
+Hangul key can also activate its corresponding Latin shortcut. A composed
+syllable is not replayed as multiple queue actions; chat and text fields keep
+their original input.
+
+The panel reads the selected Keeper's server inventory. Its counts separate
 pending inputs, running work, future schedules, due schedules and unavailable
 sources. An aggregated chat row counts every queued request. Future schedules
 show their due instant instead of treating their creation age as waiting time.
@@ -1898,7 +1932,10 @@ source is prepared from its original bytes before terminal handoff; leaving
 that conversation, replacing the request or entering another key, paste or mouse
 gesture retires its pending open. Already buffered input, a paste still arriving
 or an incomplete terminal/UTF-8 sequence also keeps the terminal
-in chat; run `/music midi` again when ready to enter the editor. The
+from handing off to the editor; run `/music midi` again when ready. The reader
+treats undecoded terminal input conservatively, so even a terminal protocol
+reply can cancel a pending open, including during a screen transition. The chat
+and bounded session event history record the cancellation. The
 original attachment stays unchanged, and saved projects use the workspace's
 music project directory. The phrase editor's first audio Space opens instrument/preset selection;
 `i` changes it. For imported MIDI, the SoundFont choice captures the configured
@@ -3086,7 +3123,8 @@ existing name and preserves the declaration; a reconfiguration response is
 reported as reconfiguration rather than opening a first-assignment composer.
 
 `p` opens requests, `;`
-opens Agenda, and `m` opens Usage. Work retains Goal observations, task lists,
+opens Agenda, and `m` opens Usage. `?` opens Help over Agenda; Esc returns to
+Agenda. Work retains Goal observations, task lists,
 and verification evidence; Usage retains quota and telemetry detail. Home shows
 only a brief task-flow reading, with no duplicated tables or quota graphs.
 

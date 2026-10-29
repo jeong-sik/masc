@@ -80,12 +80,19 @@ val render_answering :
   Masc_tui_types.state ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
+val render_queue_panel :
+  Masc_tui_types.state -> Masc_tui_types.queue_panel ->
+  Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
+
+val queue_panel_detail_viewport : Masc_tui_types.state -> Masc_tui_types.queue_panel -> int * int
+
 val render_agenda :
   Masc_tui_types.state ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
 val render_terminal_too_small :
   Masc_tui_types.state ->
+  recovery_notice:string option ->
   rows:int ->
   cols:int ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option

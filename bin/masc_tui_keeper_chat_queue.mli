@@ -119,6 +119,15 @@ val holds : t -> request_id:string -> bool
 val find : t -> request_id:string -> item option
 (** Exact pending item, for intent-aware recall/edit behavior. *)
 
+val move_to_end : t -> keeper_name:string -> request_id:string -> (t, string) result
+(** Move an ordinary unsent item behind the same Keeper's waiting items,
+    retaining other Keepers' slots and the item's submission identity. A steer
+    retains its causal precedence and cannot be moved. *)
+
+val move_to_front : t -> keeper_name:string -> request_id:string -> (t, string) result
+(** Move an ordinary unsent item ahead of the same Keeper's ordinary input.
+    Steers remain ahead, and the ordinary dispatch admission rules still apply. *)
+
 val replace_request :
   t -> request_id:string -> Chat.request -> (t, string) result
 (** Edit a pending request in place while preserving intent, causal parent,
@@ -126,8 +135,9 @@ val replace_request :
     must retain the same request_id. *)
 
 val join_target : t -> keeper_name:string -> item option
-(** The waiting next-turn line a newly typed line for this Keeper would join,
-    or [None] when there is nothing to join.
+(** The most recently submitted waiting next-turn line a newly typed line for
+    this Keeper would join, or [None] when there is nothing to join. Reordering
+    dispatch must not change which original submission receives a joined line.
 
     The last one in dispatch order, so a third line joins the result of the
     first two rather than reaching past them. A steer is never returned: it

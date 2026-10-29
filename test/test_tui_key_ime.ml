@@ -165,6 +165,13 @@ let test_keys_the_layout_cannot_spell () =
         (Masc_tui_key_ime.latin_keys name))
     cases
 
+let test_single_command_does_not_replay_compound_input () =
+  let cases =
+    [ "ㅓ", Some "j"; "ㅏ", Some "k"; "ㅜ", Some "n"; "ㅣ", Some "l"
+    ; "ㄱ", Some "r"; "ㅟ", None; "눈", None; "n", None; "한글", None ] in
+  List.iter (fun (input, expected) ->
+    check (option string) input expected (Masc_tui_key_ime.single_latin_key input)) cases
+
 let () =
   Alcotest.run "test_tui_key_ime"
     [ ( "the two-set layout"
@@ -178,6 +185,8 @@ let () =
         ] )
     ; ( "not ours"
       , [ test_case "what the layout cannot spell passes through" `Quick
-            test_keys_the_layout_cannot_spell ] )
+            test_keys_the_layout_cannot_spell
+        ; test_case "a panel command is never replayed from compound input" `Quick
+            test_single_command_does_not_replay_compound_input ] )
     ]
 ;;

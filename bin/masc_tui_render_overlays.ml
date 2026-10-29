@@ -691,7 +691,7 @@ let render_play_card (state : state) card =
   let window_rows, window_cols = Masc_tui_ansi.get_terminal_size () in
   surface_chrome
     ~overflow:(Scrolled { scroll = state.play_invite_scroll;
-                          report = (fun scroll -> Play_invite_scroll scroll) })
+                          report = (fun scroll -> Play_invite_scroll (card, scroll)) })
     state ~terminal_rows ~cols ~surface_key:"play-invite"
     ~frame:Chrome_overlay
     ~title:(screen_title " MASC Play invite")
@@ -774,7 +774,7 @@ let render_help (state : state) =
     Masc_tui_help.sheet ~header ~cols
       (help_lines ~width:(Masc_tui_help.line_cells ~cols) state)
   in
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"help"
+  surface_chrome ~overflow:(Self_scrolled (fun () -> Help_presented)) state ~terminal_rows ~cols ~surface_key:"help"
     ~frame:Chrome_overlay
     (* The title says what state the sheet is in; the keys that change it are
        the footer's, which draws h and Esc on this overlay and never drops Esc.
@@ -858,6 +858,118 @@ let answering_selected_target (state : state) ~lines =
     match List.nth_opt lines state.answering_cursor with
     | Some line -> line.Masc_tui_answering.target
     | None -> None
+
+let queue_panel_item_identity = function
+  | Masc_tui_queue_inspection.Local_message id -> "Local message: " ^ id
+  | Server_message id -> "Queued message: " ^ id
+  | Running_message id -> "Running message: " ^ id
+  | Event (reference, revision) ->
+    Printf.sprintf "Event: %s · incarnation %Ld" reference revision
+  | Schedule (id, instance) -> "Schedule: " ^ id ^ " · instance " ^ instance
+
+let queue_panel_detail_lines state (panel : queue_panel) ~cols =
+  let reading = queue_panel_detail_reading ~items:(queue_panel_items state panel) panel in
+  let content = match reading with
+    | Queue_detail_ready (id, item) ->
+      queue_panel_item_identity id ^ "\n\n" ^ item.text
+    | Queue_detail_loading -> "Queue request in progress. The current server item is unavailable until it finishes."
+    | Queue_detail_unavailable reason ->
+      "This server item is unavailable in the current queue observation. Return to the list and refresh."
+      ^ Option.fold ~none:"" ~some:(fun detail -> "\n\n" ^ detail) reason
+    | Queue_detail_missing -> "This item is no longer in the current queue. Return to the list and refresh."
+    | Queue_detail_none -> "No item is selected." in
+  Message_layout.wrap_body ~max_cells:(max 1 (framed_inner_width cols - 2))
+    ~sanitize:Terminal_text.single_line content
+
+let queue_panel_detail_viewport state panel =
+  let terminal_rows, cols = get_terminal_size () in
+  let count = List.length (queue_panel_detail_lines state panel ~cols) in
+  let budget = surface_chrome_budget state ~terminal_rows in
+  let height = if count > budget then max 0 (budget - 1) else budget in
+  count, height
+
+let render_queue_panel (state : state) (panel : queue_panel) =
+  let terminal_rows, cols = get_terminal_size () in
+  let title label = screen_title label ^ "  " ^ Terminal_text.single_line panel.qp_keeper in
+  let owner () = Queue_panel_presented (queue_panel_owner state panel) in
+  if Option.is_some panel.qp_detail then
+    let lines = queue_panel_detail_lines state panel ~cols in
+    surface_chrome ~overflow:(Self_scrolled owner) state ~terminal_rows ~cols
+      ~surface_key:"keeper-queue-detail" ~frame:Chrome_overlay
+      ~title:(title " MASC Queue item")
+      ~hints:"↑/↓:scroll  PgUp/PgDn:page  Esc:return  ?:help"
+      ~body:(fun ~budget c ->
+        let count = List.length lines in
+        let height = if count > budget then max 0 (budget - 1) else budget in
+        let scroll = Masc_tui_scroll.normalize ~count ~height panel.qp_detail_scroll in
+        List.iteri (fun index line ->
+          if index >= scroll && index < scroll + height then c.push ("  " ^ line)) lines;
+        Option.iter c.push (overlay_window_row ~scroll ~height count))
+  else
+  let items = queue_panel_items state panel in
+  let status = if not (server_authority_ready state) then
+    "Workspace unconfirmed; any receipt is from the previous observation"
+  else match panel.qp_reading, panel.qp_notice with
+    | Queue_loading, _ -> "Reading or sending…"
+    | (Queue_current | Queue_unavailable), Some (Queue_info text | Queue_error text) -> Terminal_text.single_line text
+    | Queue_current, None ->
+      (match panel.qp_observation with
+       | Some {waiting=Ok _; operations=Ok _} -> "Queue read · r refreshes"
+       | Some {waiting=Ok _; operations=Error _} -> "Inventory read · server messages unavailable"
+       | Some {waiting=Error _; operations=Ok _} -> "Server messages read · inventory unavailable"
+       | Some {waiting=Error _; operations=Error _} -> "Both server reads unavailable · r retries"
+       | None -> "Queue observation unavailable · r retries")
+    | Queue_unavailable, None -> "Snapshot unavailable · r retries" in
+  let hints = match queue_panel_selected_id ~items panel with
+    | Some (Masc_tui_queue_inspection.Local_message _) ->
+      "↑/↓:select  Enter:read  n:first locally  l:last locally  r:refresh  Esc:close"
+    | Some (Masc_tui_queue_inspection.Server_message _) ->
+      "↑/↓:select  Enter:read  n:run next  l:move last  r:refresh  Esc:close"
+    | Some (Masc_tui_queue_inspection.Event _) ->
+      "↑/↓:select  Enter:read  n:immediate priority  l:low priority  r:refresh  Esc:close"
+    | Some (Masc_tui_queue_inspection.Running_message _ | Schedule _) | None ->
+      "↑/↓:select  Enter:read  PgUp/PgDn:page  r:refresh  Esc:close" in
+  surface_chrome ~overflow:(Self_scrolled owner) state ~terminal_rows ~cols
+    ~surface_key:"keeper-queue" ~frame:Chrome_overlay
+    ~title:(title " MASC Queue")
+    ~hints:(hints ^ "  ?:help")
+    ~body:(fun ~budget c ->
+      if budget > 0 then c.push ("  " ^ status);
+      (match panel.qp_receipt with
+       | Some (Queue_action_receipt (Queue_info text) | Queue_read_receipt text) when budget > 1 ->
+         c.push ("  " ^ Terminal_text.single_line text)
+       | Some (Queue_action_receipt (Queue_error text)) when budget > 1 ->
+         c.push ("  " ^ Theme.warn () ^ Terminal_text.single_line text ^ Ansi.reset)
+       | Some (Queue_action_receipt (Queue_info _ | Queue_error _) | Queue_read_receipt _)
+       | None -> ());
+      let note_row = 1 + (match panel.qp_receipt with Some _ -> 1 | None -> 0) in
+      (match queue_panel_selection_note ~items panel with
+       | Some note when budget > note_row -> c.push ("  " ^ note)
+       | Some _ | None -> ());
+      let height = max 0 (budget - queue_panel_fixed_rows ~items panel) in
+      let scroll = queue_panel_scroll ~items ~height panel in
+      let selected_index = queue_panel_selected_index ~items panel in
+      List.iteri (fun index (item : Masc_tui_queue_inspection.item) ->
+        if index >= scroll && index < scroll + height then begin
+          let selected = selected_index = Some index in
+          let marker = if selected then "› " else "  " in
+          let text = match String.index_opt item.text '\n' with
+            | None -> item.text
+            | Some index -> String.sub item.text 0 index in
+          let text = Terminal_text.single_line text in
+          let text = if Message_layout.display_width (String.trim text) = 0 then
+              Option.fold ~none:text ~some:(fun id ->
+                Terminal_text.single_line (queue_panel_item_identity id)) item.id
+            else text in
+          let row = marker ^ (if selected then Theme.info () else "") ^ text ^ Ansi.reset in
+          let row = if selected && queue_selection_visible
+              ~inner_width:(framed_inner_width cols) ~marker ~text then
+              match queue_selection_for_item state panel item with
+              | Some authority -> pressable (Press_queue_selected authority) row
+              | None -> row
+            else row in
+          c.push row
+        end) items)
 
 (* The answering overlay, through the overlay contract. Drawn by hand, a short
    list closed the box right under the preview panel, so the footer stood on
@@ -994,7 +1106,7 @@ let render_agenda (state : state) =
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"agenda"
     ~frame:Chrome_overlay
     ~title:(screen_title " MASC Agenda")
-    ~hints
+    ~hints:(hints ^ "  ?:help")
     (* [agenda_viewport] rather than the budget it is derived from: the
        keypress bounds the cursor against that pair. *)
     ~body:(fun ~budget:_ c ->
@@ -1014,7 +1126,7 @@ let render_agenda (state : state) =
       Option.iter c.push (overlay_window_row ~scroll ~height count))
 ;;
 
-let render_terminal_too_small state ~rows ~cols =
+let render_terminal_too_small state ~recovery_notice ~rows ~cols =
   (* The hint names physical terminal rows, whereas the guard receives the
      body after navigation, agenda, and composer allocation. At the minimum
      body size the composer can be absent; evaluate its policy at the proposed
@@ -1027,13 +1139,97 @@ let render_terminal_too_small state ~rows ~cols =
     navigation_rows + surface_rows
     + Masc_tui_composer.rows_for ~terminal_rows:surface_rows
   in
+  let recovery_notice = Option.map (fun text ->
+      let short = Masc_tui_action_notice.csi_recovery_text in
+      if Message_layout.display_width text > cols
+         && Message_layout.display_width short <= cols then short else text)
+      recovery_notice in
+  let now = Unix.gettimeofday () in
+  let window = Masc_tui_types.last_action_window_s in
+  let ordinary =
+    Masc_tui_action_notice.ordinary_visible state.last_action
+      ~now ~window in
+  let ordinary_text = Option.bind ordinary (fun ((text, _) as ordinary) ->
+      let text = Terminal_text.single_line text in
+      match state.quit_armed with
+      | Some arm when ordinary == Masc_tui_action_notice.quit_ordinary arm.qa_confirmation ->
+          (match current_quit_confirmation state ~now with
+           | Some confirmation ->
+               Some (if Message_layout.display_width text <= cols then
+                   pressable (Press_quit_confirmation confirmation) text
+                 else "Resize to confirm quit")
+           | None when Masc_tui_action_notice.csi_active state.last_action
+                       || Option.is_some (Masc_tui_action_notice.rejection state.last_action
+                            ~now ~window) -> None
+           | None -> Some "Quit changed; retry")
+      | Some _ | None -> Some text) in
+  let rejection =
+    match recovery_notice, ordinary_text with
+    | Some _, _ | None, Some _ -> None
+    | None, None ->
+        (match Masc_tui_action_notice.rejection state.last_action ~now ~window with
+         | Some notice when
+             Message_layout.display_width (Masc_tui_action_notice.rejection_text notice) <= cols ->
+             Some notice
+         | Some _ | None -> None) in
+  let notice = match recovery_notice, rejection with
+    | Some text, _ -> Some (text, None)
+    | None, Some notice -> Some (Masc_tui_action_notice.rejection_text notice, Some notice)
+    | None, None -> Option.map (fun text -> text, None) ordinary_text in
+  let resize_hint =
+    Printf.sprintf "terminal too small -- resize to at least %d rows; q: quit"
+      minimum_terminal_rows in
   let buf = Buffer.create 64 in
-  Buffer.add_string buf
-    (fit_width
-       (Printf.sprintf "terminal too small -- resize to at least %d rows; q: quit"
-          minimum_terminal_rows)
-       cols);
-  Buffer.add_char buf '\n';
+  let rendered (text, marked) =
+    match marked with
+    | Some notice -> pressable (Press_input_rejection notice) text
+    | None -> text in
+  (* A compact frame normally spends only two rows. A third lets an existing
+     confirmation stay visible while the recovery notice gets its own row. *)
+  let extra_recovery =
+    if rows < 3 then None
+    else match recovery_notice with
+      | Some _ ->
+          let text = Masc_tui_action_notice.csi_recovery_text in
+          if Message_layout.display_width text <= cols then Some text else None
+      | None when Masc_tui_action_notice.csi_active state.last_action -> None
+      | None ->
+          (match Masc_tui_action_notice.rejection state.last_action ~now ~window with
+           | Some notice when
+               Message_layout.display_width (Masc_tui_action_notice.rejection_text notice) <= cols ->
+               Some (pressable (Press_input_rejection notice)
+                       (Masc_tui_action_notice.rejection_text notice))
+           | Some _ | None -> None) in
+  let extra_ordinary = match ordinary_text, recovery_notice with
+    | Some _, Some _ when Masc_tui_action_notice.ordinary_is_csi state.last_action -> None
+    | Some text, (Some _ | None) -> Some text
+    | None, (Some _ | None) -> None in
+  let extra_rejection = match extra_recovery, recovery_notice with
+    | Some _, Some _ when rows >= 3 + (if Option.is_some extra_ordinary then 1 else 0) ->
+        (match Masc_tui_action_notice.rejection state.last_action ~now ~window with
+         | Some notice when
+             Message_layout.display_width (Masc_tui_action_notice.rejection_text notice) <= cols ->
+             Some (pressable (Press_input_rejection notice)
+                     (Masc_tui_action_notice.rejection_text notice))
+         | Some _ | None -> None)
+    | (Some _ | None), (Some _ | None) -> None in
+  let add_row text =
+    Buffer.add_string buf (fit_width text cols);
+    Buffer.add_char buf '\n' in
+  (match extra_recovery with
+   | Some text ->
+       add_row resize_hint;
+       Option.iter (fun ordinary -> add_row (rendered (ordinary, None))) extra_ordinary;
+       add_row text;
+       Option.iter add_row extra_rejection
+   | None ->
+       let first = match notice with
+         | Some notice when rows <= 1 -> rendered notice
+         | Some _ | None -> resize_hint in
+       add_row first;
+       (match notice with
+        | Some notice when rows > 1 -> add_row (rendered notice)
+        | Some _ | None -> ()));
   finish_terminal_too_small_frame ~cursor:Frame_presenter.Hidden ~rows ~cols
     buf
 

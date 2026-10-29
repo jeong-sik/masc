@@ -101,7 +101,7 @@ let queue_help =
   { word = "queue"
   ; aliases = []
   ; args = "[pause|resume|clear|cancel ID|last ID|edit ID message]"
-  ; summary = "inspect local/server waiting work and manage queued messages"
+  ; summary = "open the queue panel or manage waiting work"
   }
 
 (* Every slash word this build knows, said once. [help_lines] and the

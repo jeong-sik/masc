@@ -236,7 +236,8 @@ type async_msg =
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_resume_confirmed of string * int * resume_confirmation
-  | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list * (string list, string) result, string) result
+  | Keeper_queue_action_received of string * string list
+  | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list * (Masc_tui_queue_inspection.observation, string) result, string) result
   | Lane_addons_loaded of int * Masc_tui_lane_addons.read_target * (lane_addons_reply, lane_addons_failure) result
   | Lane_application_loaded of Masc_tui_lane_application.ticket
       * (Masc_tui_lane_addons.configuration, string) result
@@ -883,9 +884,10 @@ let rec workspace_message_is_read = function
   | Workspace_scoped (_, _, message)
   | Chat_command_read_completed (_, message) -> workspace_message_is_read message
   | Workspace_operation _ -> false
+  | Keeper_queue_action_received _ -> false
   | Keeper_queue_loaded (_, _, action, _) ->
     (match action with Masc_tui_queue_inspection.Inspect | Inspect_peers _ -> true
-     | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+     | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
      | Cancel_event _ | Prioritize_event _ -> false)
   (* A room read is retired with its reading and released by
      [suspend_workspace_readings]; a send or leave keeps its receipt. *)
@@ -1124,7 +1126,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Chat_command_read_completed (_, _) | Workspace_identity_unconfirmed _
     | Schedule_form_authority_refused _ | Lane_package_catalog_loaded (_, _, _)
     | Lane_package_preview_loaded (_, _, _)
-    | Keeper_queue_resume_confirmed (_, _, _) | Keeper_queue_loaded (_, _, _, _)
+    | Keeper_queue_resume_confirmed (_, _, _) | Keeper_queue_action_received _ | Keeper_queue_loaded (_, _, _, _)
     | Lane_addons_loaded (_, _, _) | Lane_application_loaded (_, _)
     | Lane_subscriptions_loaded (_, Error _)
     | Lane_declaration_loaded (_, _, _, _, _)
@@ -1264,7 +1266,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Chat_command_read_completed (_, _) | Workspace_identity_unconfirmed _
   | Schedule_form_authority_refused _ | Lane_package_catalog_loaded (_, _, _)
   | Lane_package_preview_loaded (_, _, _)
-  | Keeper_queue_resume_confirmed (_, _, _)
+  | Keeper_queue_resume_confirmed (_, _, _) | Keeper_queue_action_received _
   | Keeper_queue_loaded (_, _, _, Error _)
   | Lane_addons_loaded (_, _, (Error _ | Ok { lar_snapshot = None; _ }))
   | Lane_application_loaded (_, _)

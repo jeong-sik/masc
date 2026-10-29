@@ -41,6 +41,7 @@ module Board_detail = Masc_tui_board_detail
 module Board_hearth = Masc_tui_board_hearth
 module Board_composer = Masc_tui_board_composer
 module Frame_presenter = Masc_tui_frame_presenter
+module Presented = Masc_tui_presented
 module Approval_authority = Masc_tui_approval_authority
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_history = Masc_tui_keeper_chat_history
@@ -1342,7 +1343,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
      picked up something the operator did not mean to send. *)
   | "esc" when Option.is_some state.voice_capture ->
     request_voice_stop state Masc.Voice_bridge.Discard;
-    state.last_action <- Some ("voice: discarding", Unix.gettimeofday ());
+    set_last_action state (Some ("voice: discarding", Unix.gettimeofday ()));
     true
   | "esc" when Option.is_some state.msg_recall_replaces ->
     forget_recall state;
@@ -1491,10 +1492,8 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       (* Ctrl-R cycles the presentation only; transcript bytes stay intact. *)
       let visibility = next_reasoning_visibility state.msg_reasoning_visibility in
       state.msg_reasoning_visibility <- visibility;
-      state.last_action <-
-        Some
-          ( "reasoning " ^ reasoning_visibility_to_string visibility
-          , Unix.gettimeofday () );
+      set_last_action state (Some ( "reasoning " ^ reasoning_visibility_to_string visibility
+          , Unix.gettimeofday () ));
       true
     end else if c = Some 4 then begin
       (* Ctrl-D walks summary, results, and full per-call detail without
@@ -1502,10 +1501,8 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       let visibility = toggle_tool_visibility state.msg_tool_visibility in
       state.msg_tool_visibility <- visibility;
       if visibility <> Tools_compact then load_tool_changes ();
-      state.last_action <-
-        Some
-          ( "tool calls " ^ tool_visibility_to_string visibility
-          , Unix.gettimeofday () );
+      set_last_action state (Some ( "tool calls " ^ tool_visibility_to_string visibility
+          , Unix.gettimeofday () ));
       true
     end else if c = Some (Char.code Masc_tui_keys.expand_turn_key.[0]) then begin
       (* Ctrl-S folds the turn dashboard back to its progress line. Folded is
@@ -1515,10 +1512,8 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          not see a row appear has no other way to tell the key landed. *)
       state.msg_turn_folded <- not state.msg_turn_folded;
       if not state.msg_turn_folded then load_preparation ();
-      state.last_action <-
-        Some
-          ( (if state.msg_turn_folded then "turn folded" else "turn expanded")
-          , Unix.gettimeofday () );
+      set_last_action state (Some ( (if state.msg_turn_folded then "turn folded" else "turn expanded")
+          , Unix.gettimeofday () ));
       true
     end else if c = Some 6 then begin
       (* Ctrl-F starts with the clock-free gutter, then adds an inline clock,
@@ -8774,15 +8769,28 @@ let add_auto_priority_request state (request : Keeper_chat.request) =
       List.remove_assoc keeper_name state.keeper_auto_priority_requests
 ;;
 
+let keeper_queue_change_inflight state keeper_name =
+  List.mem keeper_name state.keeper_queue_inflight
+  && not (List.mem keeper_name state.keeper_queue_readings)
+;;
+
 let launch_keeper_run_next ?(automatic = false) state ~mailbox request =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
-  if List.exists (fun (inflight : Keeper_chat.request) ->
+  if keeper_queue_change_inflight state request.Keeper_chat.keeper_name then begin
+    if not (List.exists (Keeper_chat.same_request_identity request) state.keeper_run_next_ready) then
+      state.keeper_run_next_ready <- state.keeper_run_next_ready @ [request]
+  end else if List.exists (fun (inflight : Keeper_chat.request) ->
        String.equal inflight.keeper_name request.Keeper_chat.keeper_name)
        state.keeper_run_next_inflight then ()
   else begin
     let keeper_name = request.Keeper_chat.keeper_name in
     let request_id = request.Keeper_chat.request_id in
+    update_queue_panel state ~keeper_name (fun panel ->
+      {panel with qp_reading=(match panel.qp_reading with
+          | Queue_loading -> Queue_loading | Queue_current | Queue_unavailable -> Queue_unavailable);
+        qp_refresh_after_priority=true;
+        qp_notice=Some (Queue_info "A message priority update is in progress")});
     state.keeper_run_next_inflight <- request :: state.keeper_run_next_inflight;
     state.keeper_run_next_receipts <- List.filter (fun (old, _) ->
       not (Keeper_chat.same_request_identity old request)) state.keeper_run_next_receipts;
@@ -8813,8 +8821,11 @@ let launch_keeper_run_next ?(automatic = false) state ~mailbox request =
   end
 ;;
 
-let rec dispatch_ready_run_next state ~mailbox keeper_name =
-  if List.exists (fun (request : Keeper_chat.request) ->
+let dispatch_ready_run_next state ~mailbox keeper_name =
+  if not (server_authority_ready state)
+     || keeper_queue_change_inflight state keeper_name
+     || List.mem_assoc keeper_name state.keeper_chat_control_pending
+     || List.exists (fun (request : Keeper_chat.request) ->
        String.equal request.keeper_name keeper_name)
        state.keeper_run_next_inflight then ()
   else
@@ -8826,15 +8837,12 @@ let rec dispatch_ready_run_next state ~mailbox keeper_name =
       state.keeper_run_next_ready <- List.filter (fun item ->
         not (Keeper_chat.same_request_identity item request))
         state.keeper_run_next_ready;
-      (* Later ordinary Interactive sends advance the admission generation.
-         Explicit Esc/pause/resume already removed superseded ready requests. *)
-      if not (List.mem_assoc keeper_name state.keeper_chat_control_pending)
-      then
-        let automatic = List.mem request.request_id
-          (Option.value ~default:[]
-             (List.assoc_opt keeper_name state.keeper_auto_priority_requests)) in
-        launch_keeper_run_next ~automatic state ~mailbox request
-      else dispatch_ready_run_next state ~mailbox keeper_name
+      (* A control keeps preserved requests in [ready] until its outcome is
+         known; an actual pause/resume clears superseded requests itself. *)
+      let automatic = List.mem request.request_id
+        (Option.value ~default:[]
+           (List.assoc_opt keeper_name state.keeper_auto_priority_requests)) in
+      launch_keeper_run_next ~automatic state ~mailbox request
 ;;
 
 (* Fetch the runtime catalogue and assignments for the picker. *)
@@ -9912,21 +9920,34 @@ let settle_retired_queue_inspections state =
       state.keeper_queue_inspections in
   state.keeper_queue_inspections <- current;
   List.iter (fun (keeper_name, _) ->
-    chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_failure
-      (Printf.sprintf "/queue for %s was interrupted by workspace reconnection; retry after reconnecting"
-         keeper_name)) retired
+    let detail = Printf.sprintf "/queue for %s was interrupted by workspace reconnection; retry after reconnecting"
+      keeper_name in
+    match state.queue_panel with
+    | Some panel when String.equal panel.qp_keeper keeper_name ->
+      state.queue_panel <- Some {panel with qp_reading=Queue_unavailable;
+        qp_notice=Some (Queue_error detail)}
+    | Some _ | None -> chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_failure detail) retired
 
 let launch_keeper_queue state ~mailbox ~keeper_name action =
   let module Inbox = Masc_tui_queue_inspection in
-  let report ~kind detail =
+  let panel_notice ~failure text =
     match action with
     | Inbox.Inspect_peers token ->
-        ignore (finish_keeper_peer_reading state ~keeper_name ~token (Error detail))
-    | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+      ignore (finish_keeper_peer_reading state ~keeper_name ~token (Error text))
+    | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
     | Cancel_event _ | Prioritize_event _ ->
-        chat_notice state ~keeper_name:(Some keeper_name) ~kind detail in
+      (match state.queue_panel with
+       | Some panel when String.equal panel.qp_keeper keeper_name ->
+         let outcome = if failure then Queue_error text else Queue_info text in
+         state.queue_panel <- Some
+           (if action = Masc_tui_queue_inspection.Inspect then
+              {panel with qp_reading=Queue_unavailable; qp_notice=Some outcome}
+            else {panel with qp_reading=Queue_unavailable; qp_receipt=Some (Queue_action_receipt outcome)})
+       | Some _ | None ->
+         chat_notice state ~keeper_name:(Some keeper_name)
+           ~kind:(if failure then Notice_failure else Notice_reply) text) in
   if not (server_authority_ready state) then
-    report ~kind:Notice_failure
+    panel_notice ~failure:true
       "/queue request was not sent while workspace identity is unconfirmed; retry after reconnecting"
   else begin
   let enqueue_async = workspace_enqueue state in
@@ -9937,18 +9958,36 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
        && (match action with
            | Inbox.Inspect_peers token -> reading == state.workspace_read_authority
                && keeper_peer_read_current state ~keeper_name ~token
-           | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+           | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
            | Cancel_event _ | Prioritize_event _ -> true) then Ok ()
     else Error "Workspace changed; the remaining queue requests were not sent" in
   let get_json ~host ~port ~path =
     Result.bind (check_authority ()) (fun () -> Masc_tui_http.get_json ~host ~port ~path) in
   let post_json ~host ~port ~path ~body =
     Result.bind (check_authority ()) (fun () -> Masc_tui_http.post_json ~host ~port ~path ~body) in
-  if (match action with Inbox.Inspect_peers _ -> false
-      | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+  let priority_inflight = List.exists (fun (request : Keeper_chat.request) ->
+    String.equal request.keeper_name keeper_name) state.keeper_run_next_inflight in
+  if action = Inbox.Inspect && priority_inflight then
+    (match state.queue_panel with
+     | Some panel when String.equal panel.qp_keeper keeper_name ->
+       state.queue_panel <- Some {panel with qp_reading=Queue_loading; qp_refresh_after_priority=true;
+         qp_notice=Some (Queue_info "Waiting for the priority update before reading")}
+     | Some _ | None -> ())
+  else if (match action with Inbox.Run_next _ | Inbox.Move_to_end _ -> true
+    | Inspect | Inspect_peers _ | Pause | Resume | Clear | Cancel _ | Edit _ | Cancel_event _
+    | Prioritize_event _ -> false)
+    && run_next_busy_for state keeper_name then
+    panel_notice ~failure:false "Another message priority change is pending; wait and refresh"
+  else if (match action with Inbox.Inspect_peers _ -> false
+      | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
       | Cancel_event _ | Prioritize_event _ -> List.mem keeper_name state.keeper_queue_inflight) then
-    report ~kind:Notice_reply
-      "A queue request is pending; wait for its result before the next change"
+    (match state.queue_panel with
+     | Some panel when String.equal panel.qp_keeper keeper_name ->
+       state.queue_panel <- Some {panel with qp_reading=Queue_loading;
+         qp_refresh_after_priority=(panel.qp_refresh_after_priority || action = Inbox.Inspect);
+         qp_notice=Some (Queue_info "A queue request is already pending")}
+     | Some _ | None -> panel_notice ~failure:false
+         "A queue request is pending; wait for its result before the next change")
   else begin
   let local_resume = action = Inbox.Resume
     && state.workspace_identity = Workspace_identity_match
@@ -9963,14 +10002,16 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
          (keeper_name, state.workspace_read_authority)
          :: List.filter (fun (keeper, _) -> keeper <> keeper_name) state.keeper_queue_inspections
    | Inspect_peers _ -> ()
-   | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+   | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
    | Cancel_event _ | Prioritize_event _ ->
-       state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight);
+       state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight;
+       state.keeper_queue_inspections <- List.filter
+         (fun (keeper, _) -> keeper <> keeper_name) state.keeper_queue_inspections);
   let control_generation = match action with
     | Inbox.Pause | Inbox.Resume ->
         Some (begin_keeper_chat_control ~preserve_input_holds:local_resume
                 ~preserve_priority_requests:local_resume state keeper_name)
-    | Inbox.Inspect | Inbox.Inspect_peers _ | Inbox.Cancel _ | Inbox.Move_to_end _ | Inbox.Edit (_, _)
+    | Inbox.Inspect | Inbox.Inspect_peers _ | Inbox.Cancel _ | Inbox.Move_to_end _ | Inbox.Run_next _ | Inbox.Edit (_, _)
     | Inbox.Cancel_event (_, _, _) | Inbox.Prioritize_event (_, _, _)
     | Inbox.Clear -> None in
   (* The lines /queue clear asks the server to cancel. Read here, on the fiber
@@ -9982,7 +10023,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
         | Cancel_on_server -> Some request
         | Drop_from_local_queue | Withdraw_before_post | Leave_waiting -> None)
         (keeper_message_waiting_positions state ~keeper_name)
-    | Inbox.Inspect | Inbox.Inspect_peers _ | Inbox.Pause | Inbox.Resume | Inbox.Cancel _ | Inbox.Move_to_end _
+    | Inbox.Inspect | Inbox.Inspect_peers _ | Inbox.Pause | Inbox.Resume | Inbox.Cancel _ | Inbox.Move_to_end _ | Inbox.Run_next _
     | Inbox.Edit _ | Inbox.Cancel_event _ | Inbox.Prioritize_event _ -> [] in
   let check_control () =
     Result.bind (check_authority ()) (fun () ->
@@ -9998,12 +10039,6 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
   let operation_path id =
     root ^ "/chat/operations/" ^ Masc_tui_http.percent_encode_path_segment id in
   let cancel_suffix = "cancel" in
-  let local_lines () =
-    let pending = Chat_queue.waiting_for_keeper state.msg_queued ~keeper_name in
-    (Printf.sprintf "Local unsent messages: %d (same Keeper input joins: %s)"
-       (List.length pending) (if state.coalesce_queued_input then "on" else "off"))
-    :: List.map (fun (item : Chat_queue.item) ->
-         Printf.sprintf "  %s\n    %s" item.request.request_id item.request.message) pending in
   let perform () =
     let open Result.Syntax in
     let* () = check_control () in
@@ -10039,7 +10074,10 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
               control_generation in
         if not owner_paused then begin
           confirm Owner_already_active;
-          Ok ["Server confirmed the Keeper is active"]
+          (* This is a read, not a POST receipt. The read-scoped confirmation
+             above owns it; the operation completion must not promote it
+             across a withdrawn workspace read authority. *)
+          Ok []
         end else
         let* status, body = Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
           ~action:verb ~operator_operation_id ~expected_workspace in
@@ -10056,7 +10094,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
             :: ("operator_operation_id", `String operator_operation_id) :: fields
           | Inbox.Prioritize_event (_, _, urgency) ->
             ("action", `String "reprioritize") :: ("urgency", `String (Keeper_event_queue.urgency_to_string urgency)) :: fields
-          | Inspect | Inspect_peers _ | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _ -> assert false in
+          | Inspect | Inspect_peers _ | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _ -> assert false in
         let* _ = post_json ~host ~port ~path:(root ^ "/events/operator")
           ~body:(Yojson.Safe.to_string (`Assoc fields)) in
         Ok ["Server confirmed event update: " ^ reference]
@@ -10066,7 +10104,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
            id. "Not sent" is this client declining to send. "Not confirmed"
            is a refusal or an answer that never arrived, and the snapshot
            read below shows which lines are still queued. *)
-        Ok (List.map (fun (request : Keeper_chat.request) ->
+        let receipts = List.map (fun (request : Keeper_chat.request) ->
           let id = request.request_id in
           match check_authority () with
           | Error detail -> "Cancel not sent for " ^ id ^ ": " ^ detail
@@ -10076,7 +10114,12 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
                      ~body:(Yojson.Safe.to_string (`Assoc [])) with
              | Ok _ -> "Server confirmed cancel: " ^ id
              | Error detail -> "Cancel not confirmed for " ^ id ^ ": " ^ detail))
-          clear_targets)
+          clear_targets in
+        Ok (match receipts with [] -> ["No server messages were selected for cancellation"] | _ -> receipts)
+      | Inbox.Run_next id ->
+        let* () = check_control () in
+        let* detail = Masc_tui_http.post_keeper_run_next ~host ~port ~keeper_name ~request_id:id () in
+        Ok [detail]
       | Inbox.Cancel id | Inbox.Move_to_end id | Inbox.Edit (id, _) ->
         let path = operation_path id in
         let* suffix, body = match action with
@@ -10086,45 +10129,63 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
             let* operation = get_json ~host ~port ~path in
             let* input = Inbox.edited_input ~message operation in
             Ok ("edit", `Assoc ["input", input])
-          | Inbox.Inspect | Inbox.Inspect_peers _ | Inbox.Pause | Inbox.Resume | Inbox.Clear | Inbox.Cancel_event _ | Inbox.Prioritize_event _ -> assert false in
+          | Inbox.Inspect | Inbox.Inspect_peers _ | Inbox.Pause | Inbox.Resume | Inbox.Clear | Inbox.Run_next _ | Inbox.Cancel_event _ | Inbox.Prioritize_event _ -> assert false in
         let* _ = post_json ~host ~port ~path:(path ^ "/" ^ suffix)
           ~body:(Yojson.Safe.to_string body) in
         Ok ["Server confirmed " ^ suffix ^ ": " ^ id] in
+    (* Publish the mutation receipt before the follow-up reads, so another
+       priority request does not wait on inventory pagination. *)
+    (match action with
+     | Inbox.Inspect | Inbox.Inspect_peers _ -> ()
+     | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
+     | Cancel_event _ | Prioritize_event _ ->
+         enqueue_async mailbox (Keeper_queue_action_received (keeper_name, receipt)));
     (* Keep each failed read visible beside any successful mutation receipt. *)
+    let observe () =
     let waiting = match action with
       | Inbox.Inspect_peers _ -> Ok []
-      | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+      | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
       | Cancel_event _ | Prioritize_event _ ->
           get_json ~host ~port ~path:(root ^ "/waiting-inventory")
-          |> fun result -> Result.bind result (Inbox.waiting_lines ~now:(Unix.gettimeofday ())) in
-    let rec read_messages after_sequence reversed_pages =
+          |> fun result -> Result.bind result (Inbox.waiting_items ~now:(Unix.gettimeofday ())) in
+    let module Operation_ids = Set.Make(String) in
+    let rec read_messages after_sequence seen reversed_pages =
       let suffix = Option.fold ~none:"" ~some:(fun value -> "&after_sequence=" ^ value) after_sequence in
       let* page = get_json ~host ~port ~path:(root ^ "/chat/operations?state=queued" ^ suffix) in
       let* next = Inbox.next_sequence page in
+      let* items = Inbox.operation_items page in
+      let* seen = List.fold_left (fun seen (item : Inbox.item) ->
+        let* seen = seen in
+        match item.id with
+        | Some (Inbox.Server_message id) ->
+          if Operation_ids.mem id seen then Error "Server queue changed while reading pages; refresh to try again"
+          else Ok (Operation_ids.add id seen)
+        | Some (Local_message _ | Running_message _ | Event _ | Schedule _) | None -> Ok seen)
+          (Ok seen) items in
+      let rows = List.filter (fun (item : Inbox.item) -> Option.is_some item.id) items in
       match next, after_sequence with
       | Some next, Some previous when Int64.of_string next <= Int64.of_string previous ->
         Error "Queue pagination did not advance"
-      | Some next, _ -> read_messages (Some next) (page :: reversed_pages)
+      | Some next, _ -> read_messages (Some next) seen (rows :: reversed_pages)
       | None, _ ->
-        let operations = List.concat_map (function
-          | `Assoc fields -> (match List.assoc_opt "operations" fields with Some (`List values) -> values | _ -> [])
-          | _ -> []) (List.rev reversed_pages) in
-        Inbox.operation_lines (`Assoc ["operations", `List operations]) in
+        let operations = List.concat (List.rev (rows :: reversed_pages)) in
+        Ok ({Inbox.id=None; text=Printf.sprintf "Server queued messages · %d" (List.length operations)} :: operations) in
     let operations = match action with
       | Inbox.Inspect_peers _ ->
           Inbox.read_peer_page ~keeper_name ~read_page:(fun () ->
             get_json ~host ~port ~path:(root ^ "/chat/operations?state=queued"))
-          |> Result.map Inbox.peer_lines
-      | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
-      | Cancel_event _ | Prioritize_event _ -> read_messages None [] in
-    let lines = function Ok lines -> lines | Error detail -> ["Read unavailable: " ^ detail] in
-    (match action with
-     | Inbox.Inspect_peers _ -> Ok (receipt, operations)
-     | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
-     | Cancel_event _ | Prioritize_event _ -> Ok (receipt, Ok (lines waiting @ lines operations))) in
+          |> Result.map (fun snapshot ->
+            List.map (fun text -> {Inbox.id=None; text}) (Inbox.peer_lines snapshot))
+      | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
+      | Cancel_event _ | Prioritize_event _ -> read_messages None Operation_ids.empty [] in
+    Ok {Inbox.waiting; operations} in
+    let observation = try observe () with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn) in
+    Ok (receipt, observation) in
   let read = match action with
     | Inbox.Inspect_peers _ -> capture_workspace_json_read state perform
-    | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+    | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
     | Cancel_event _ | Prioritize_event _ -> perform in
   let run () =
     let result = try read () with
@@ -10140,15 +10201,150 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
       [Printf.sprintf "Cancelling %d in the server queue…" (List.length clear_targets)] in
   (match action with
    | Inbox.Inspect_peers _ -> ()
-   | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
+   | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
    | Cancel_event _ | Prioritize_event _ ->
-       chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
-         (String.concat "\n" (local_lines () @ cancelling @ ["Reading server queue…"])));
+       (match state.queue_panel with
+        | Some panel when String.equal panel.qp_keeper keeper_name ->
+          state.queue_panel <- Some {panel with qp_reading=Queue_loading;
+            qp_notice=Some (Queue_info (if action = Inbox.Inspect then "Reading queue…" else "Sending queue change…"))}
+        | Some _ | None ->
+          if action <> Inbox.Inspect then
+            chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
+              (String.concat " · " (cancelling @ ["Sending queue change…"]))));
   match Eio_context.get_switch_opt () with
   | Some sw -> fork_workspace_job state ~sw run
   | None -> enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, action, Error "Eio switch is unavailable"))
   end
   end
+;;
+
+let open_keeper_queue_panel state ~mailbox ~keeper_name =
+  state.queue_panel <- Some
+    { qp_keeper=keeper_name; qp_reading=Queue_unavailable;
+      qp_observation=None; qp_notice=None; qp_receipt=None; qp_selected=None; qp_scroll=0;
+      qp_detail=None; qp_detail_scroll=0; qp_refresh_after_priority=false };
+  launch_keeper_queue state ~mailbox ~keeper_name Masc_tui_queue_inspection.Inspect
+;;
+
+let refresh_queue_after_priority state ~mailbox ~keeper_name =
+  match state.queue_panel with
+  | Some panel when String.equal panel.qp_keeper keeper_name
+      && panel.qp_refresh_after_priority
+      && server_authority_ready state
+      && not (List.mem keeper_name state.keeper_queue_inflight)
+      && not (List.exists (fun (request : Keeper_chat.request) ->
+           String.equal request.keeper_name keeper_name) state.keeper_run_next_inflight) ->
+    state.queue_panel <- Some {panel with qp_refresh_after_priority=false};
+    launch_keeper_queue state ~mailbox ~keeper_name Masc_tui_queue_inspection.Inspect
+  | Some _ | None -> ()
+;;
+
+let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel : queue_panel) key =
+  let module Inbox = Masc_tui_queue_inspection in
+  let update f = update_queue_panel state ~keeper_name:panel.qp_keeper f in
+  let notice ?(failure=false) text = update (fun panel ->
+    {panel with qp_notice=Some (if failure then Queue_error text else Queue_info text)}) in
+  let items () = queue_panel_items state panel in
+  let move direction =
+    let rows = items () in
+    let terminal_rows, _ = get_terminal_size () in
+    let budget = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+    update (queue_panel_move ~items:rows ~budget ~direction) in
+  let selected () = queue_panel_selected_id ~items:(items ()) panel in
+  let act command =
+    let terminal_rows, _ = get_terminal_size () in
+    if Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows <= queue_panel_fixed_rows ~items:(items ()) panel then ()
+    else if panel.qp_reading = Queue_loading then notice "Wait for the current queue request"
+    else if panel.qp_reading <> Queue_current || not (server_authority_ready state) then
+      notice ~failure:true "Queue observation is unavailable; refresh before changing it"
+    else if Option.is_none (selected ()) then notice "Select a waiting item with ↑/↓"
+    else match Option.bind (presented_queue_selection presented_presses)
+        (resolve_queue_selection ~require_action_ready:true ~state ~panel ~items:(items ())) with
+    | None -> notice ~failure:true "Queue selection changed or has not been shown; review the selected row and retry"
+    | Some (Inbox.Local_message id) ->
+      if List.exists (fun (name, _, intervention) ->
+        String.equal name panel.qp_keeper && match intervention with
+        | Retained_before_dispatch -> true
+        | Retained_after_stop | Awaiting_control _ -> false) state.keeper_interactive_waiting then
+        notice "Unsent input is retained after a failed preflight; resume it before reordering"
+      else (match command with
+       | `Last ->
+         (match Chat_queue.move_to_end state.msg_queued ~keeper_name:panel.qp_keeper ~request_id:id with
+          | Error detail -> notice ~failure:true detail
+          | Ok queue -> state.msg_queued <- queue; notice "Unsent message moved to the end")
+       | `Next ->
+         (match Chat_queue.move_to_front state.msg_queued ~keeper_name:panel.qp_keeper ~request_id:id with
+          | Error detail -> notice ~failure:true detail
+          | Ok queue ->
+            state.msg_queued <- queue;
+            notice "Moved first locally; sending still follows admission and any holds";
+            drain_queued_message state ~base_path ~mailbox))
+    | Some (Inbox.Server_message id) ->
+      if run_next_busy_for state panel.qp_keeper then
+        notice "Another message priority change is pending; wait and refresh"
+      else launch_keeper_queue state ~mailbox ~keeper_name:panel.qp_keeper
+          (match command with `Next -> Inbox.Run_next id | `Last -> Inbox.Move_to_end id)
+    | Some (Inbox.Event (reference, incarnation)) ->
+      let urgency = match command with `Next -> Keeper_event_queue.Immediate | `Last -> Low in
+      launch_keeper_queue state ~mailbox ~keeper_name:panel.qp_keeper
+        (Inbox.Prioritize_event (reference, incarnation, urgency))
+    | Some (Inbox.Running_message _) -> notice "This message is already running"
+    | Some (Inbox.Schedule _) -> notice "A scheduled job runs at its due time; this queue cannot run it early" in
+  if key = "?" then begin
+    state.help_open <- true;
+    state.help_scroll <- 0
+  end else if Option.is_some panel.qp_detail then
+    let count, height = Masc_tui_render_overlays.queue_panel_detail_viewport state panel in
+    (match key with
+     | "esc" | "\r" | "\n" | "enter" -> update (fun panel -> {panel with qp_detail=None})
+     | "j" | "down" -> update (fun panel -> {panel with qp_detail_scroll=
+         Masc_tui_scroll.down ~count ~height panel.qp_detail_scroll})
+     | "k" | "up" -> update (fun panel -> {panel with qp_detail_scroll=
+         Masc_tui_scroll.up ~count ~height panel.qp_detail_scroll})
+     | "pagedown" -> update (fun panel -> {panel with qp_detail_scroll=
+         Masc_tui_scroll.page_down ~count ~height panel.qp_detail_scroll})
+     | "pageup" -> update (fun panel -> {panel with qp_detail_scroll=
+         Masc_tui_scroll.page_up ~count ~height panel.qp_detail_scroll})
+     | "home" -> update (fun panel -> {panel with qp_detail_scroll=0})
+     | "end" -> update (fun panel -> {panel with qp_detail_scroll=Masc_tui_scroll.maximum ~count ~height})
+     | _ -> ())
+  else match key with
+  | "esc" -> state.queue_panel <- None
+  | "j" | "down" -> move `Down
+  | "k" | "up" -> move `Up
+  | "\r" | "\n" | "enter" ->
+    (match selected () with
+     | None -> notice "Select an item with ↑/↓"
+     | Some _ ->
+       (match Option.bind (presented_queue_selection presented_presses)
+                (resolve_queue_selection ~require_action_ready:false ~state ~panel ~items:(items ())) with
+        | Some id -> update (fun panel -> {panel with qp_detail=Some id; qp_detail_scroll=0})
+        | None -> notice ~failure:true "Queue selection changed or has not been shown; review the selected row and retry"))
+  | "pageup" | "pagedown" | "home" | "end" ->
+    let terminal_rows, _ = get_terminal_size () in
+    let budget = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+    let rows = items () in
+    let count = List.length rows in
+    update (fun panel ->
+      let old_height = max 0 (budget - queue_panel_fixed_rows ~items:rows panel) in
+      let old_scroll = queue_panel_scroll ~items:rows ~height:old_height panel in
+      let panel = {panel with qp_selected=None} in
+      let height = max 1 (budget - queue_panel_fixed_rows ~items:rows panel) in
+      let scroll = (match key with
+        | "pageup" ->
+          Masc_tui_scroll.page_up ~count ~height:(max 1 old_height) old_scroll
+          |> Masc_tui_scroll.normalize ~count ~height
+        | "pagedown" ->
+          Masc_tui_scroll.page_down ~count ~height:(max 1 old_height) old_scroll
+          |> Masc_tui_scroll.normalize ~count ~height
+        | "home" -> 0
+        | "end" -> Masc_tui_scroll.maximum ~count ~height
+        | _ -> old_scroll) in
+      {panel with qp_scroll=scroll})
+  | "r" -> launch_keeper_queue state ~mailbox ~keeper_name:panel.qp_keeper Inbox.Inspect
+  | "n" -> act `Next
+  | "l" -> act `Last
+  | _ -> ()
 ;;
 
 (* Ctrl-V. A terminal never delivers a pasted image: bracketed paste carries
@@ -10530,7 +10726,7 @@ let handle_collab_action state ~mailbox view action =
   let owner = Masc_tui_collab.owner view in
   match action with
   | Masc_tui_collab.Stay -> ()
-  | Close -> state.collab <- None; state.quit_armed <- false
+  | Close -> state.collab <- None; state.quit_armed <- None
   | Watch Masc.Machine_lane.Msx -> open_msx_spectator state ~mailbox
   | Watch Masc.Machine_lane.Dos -> open_dos_screen state ~mailbox
   | Game_menu -> open_msx_screen state ~mailbox
@@ -11523,8 +11719,11 @@ let listen_newest_media ?(destination=Listen_player) state ~mailbox =
 
 let withdraw_pending_music_editor state =
   withdraw_chat_music_editor state |> Option.iter (fun request ->
+    let message =
+      "/music midi: opening cancelled while terminal input was pending; run /music midi again when ready" in
     chat_notice state ~keeper_name:(Some request.lr_keeper) ~kind:Notice_reply
-      "/music midi: opening cancelled by newer input; run /music midi again when ready")
+      message;
+    report_action state "system" message)
 
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
@@ -12355,6 +12554,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
        | _, Error detail -> notice ~kind:Notice_failure detail
        | _, Ok (Masc_tui_queue_inspection.Inspect_peers _) ->
          assert false (* [parse] never creates a roster read. *)
+       | Some keeper_name, Ok Masc_tui_queue_inspection.Inspect ->
+         open_keeper_queue_panel state ~mailbox ~keeper_name
        | Some keeper_name, Ok Masc_tui_queue_inspection.Clear ->
          (* The part that needs no server. A line that exists only in this
             client is withdrawn here, so it is gone even when the queue request
@@ -12389,10 +12590,10 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
          drain_queued_message state ~base_path ~mailbox;
          launch_keeper_queue state ~mailbox ~keeper_name Masc_tui_queue_inspection.Clear
        | Some keeper_name,
-         Ok ((Masc_tui_queue_inspection.Inspect | Pause | Resume | Cancel _
-             | Move_to_end _ | Edit _ | Cancel_event _ | Prioritize_event _) as action) ->
+         Ok ((Masc_tui_queue_inspection.Pause | Resume | Cancel _
+             | Move_to_end _ | Run_next _ | Edit _ | Cancel_event _ | Prioritize_event _) as action) ->
          let local_id = match action with
-           | Masc_tui_queue_inspection.Cancel id | Move_to_end id | Edit (id, _) -> Some id
+           | Masc_tui_queue_inspection.Cancel id | Move_to_end id | Run_next id | Edit (id, _) -> Some id
            | Inspect | Inspect_peers _ | Pause | Resume | Clear | Cancel_event _ | Prioritize_event _ -> None in
          match Option.bind local_id (fun id -> Chat_queue.find state.msg_queued ~request_id:id) with
          | Some item when item.request.keeper_name <> keeper_name ->
@@ -12411,7 +12612,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
                | Error detail -> notice ~kind:Notice_failure detail
                | Ok queue -> state.msg_queued <- queue; update_queued_history_text state request;
                    notice ~kind:Notice_reply ("Updated unsent message " ^ id))
-            | Move_to_end _ -> notice ~kind:Notice_failure "Local input is already joined in submission order"
+            | Move_to_end _ -> notice ~kind:Notice_failure "Open the queue panel to reorder local input"
+            | Run_next _ -> notice ~kind:Notice_failure "Open the queue panel to prioritize local input"
             | Inspect | Inspect_peers _ | Pause | Resume | Clear | Cancel_event _ | Prioritize_event _ -> assert false)
          | None -> launch_keeper_queue state ~mailbox ~keeper_name action)
   | Masc_tui_command.Run_next
@@ -14716,6 +14918,12 @@ let resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mai
     |> List.sort_uniq String.compare
     |> List.iter (fun keeper_name ->
          launch_waiting_keeper_input state ~mailbox ~keeper_name);
+    state.keeper_run_next_ready
+    |> List.map (fun (request : Keeper_chat.request) -> request.keeper_name)
+    |> List.sort_uniq String.compare
+    |> List.iter (dispatch_ready_run_next state ~mailbox);
+    Option.iter (fun panel -> refresh_queue_after_priority state ~mailbox ~keeper_name:panel.qp_keeper)
+      state.queue_panel;
     drain_queued_message state ~base_path ~mailbox
   end
 
@@ -15397,6 +15605,7 @@ let apply_ui_language state ~base_path lang =
 
 let press_marked_target state ~base_path ~mailbox (target : press_target) =
   match target with
+  | Press_input_rejection _ | Press_quit_confirmation _ -> ()
   | Press_surface surface ->
       if surface <> state.view then goto_surface state ~mailbox surface
   | Press_ring_edge Ring_before -> cycle_surface state ~mailbox ~backwards:true
@@ -15425,6 +15634,23 @@ let press_marked_target state ~base_path ~mailbox (target : press_target) =
   | Press_context_tab tab ->
       if tab <> state.context_inspector_tab then
         enter_context_inspector_tab state tab
+  | Press_queue_selected presented ->
+      let terminal_rows, _ = get_terminal_size () in
+      let panel = match Masc_tui_render.frame_choice state ~terminal_rows with
+       | `Queue panel -> Some panel
+       | `Play_card _ -> Masc_tui_render.queue_below_play state ~terminal_rows
+       | `Surface | `Too_small _ | `Account_login _ | `Palette
+       | `Collab _ | `Lane_addons _ | `Detail_reading _ | `About | `Context
+       | `Keeper_deletions | `Help | `Agenda | `Answering | `Patch | `Link
+       | `Client_detail _ -> None in
+      (match panel with
+       | Some panel ->
+         (match resolve_queue_selection ~require_action_ready:false ~state ~panel
+                  ~items:(queue_panel_items state panel) presented with
+          | Some id -> update_queue_panel state ~keeper_name:panel.qp_keeper (fun panel ->
+              {panel with qp_detail=Some id; qp_detail_scroll=0})
+          | None -> ())
+       | None -> ())
   (* The row is found by name in the roster as it is now. A first press
      chooses it and a press on the chosen row opens it, as Enter does; a
      Keeper that left the roster after the frame was drawn is not pressed. *)
@@ -17983,7 +18209,7 @@ let handle_keeper_action state ~base_path ~mailbox action =
 let report_voice_failure state ~keeper error =
   chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_failure
     ("voice failed: " ^ error);
-  state.last_action <- Some ("voice failed: " ^ error, Unix.gettimeofday ())
+  set_last_action state (Some ("voice failed: " ^ error, Unix.gettimeofday ()))
 
 (* One microphone capture, off the input loop.
 
@@ -18118,7 +18344,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Some _ ->
            state.voice_continuous <- None;
            state.voice_floor <- None;
-           state.last_action <- Some ("voice: continuous off", Unix.gettimeofday ())
+           set_last_action state (Some ("voice: continuous off", Unix.gettimeofday ()))
        | None ->
       (* One capture at a time: a second microphone would contend for the same
          input device and the two transcripts would race into one draft.
@@ -18129,7 +18355,7 @@ let handle_composer_key state ~base_path ~mailbox key =
       (match state.voice_capture with
        | Some _ ->
            request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
-           state.last_action <- Some ("voice: stopping", Unix.gettimeofday ())
+           set_last_action state (Some ("voice: stopping", Unix.gettimeofday ()))
        | None -> launch_voice_capture state ~mailbox ~keeper:keeper_name));
       true
   | Composer.Toggle_continuous keeper_name ->
@@ -18137,7 +18363,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Some _ ->
            state.voice_continuous <- None;
            state.voice_floor <- None;
-           state.last_action <- Some ("voice: continuous off", Unix.gettimeofday ())
+           set_last_action state (Some ("voice: continuous off", Unix.gettimeofday ()))
        | None when Option.is_some state.voice_capture ->
            (* A manual or withdrawn capture still owns the microphone. The
               noise-floor probe must wait for its completion too. *)
@@ -18145,13 +18371,13 @@ let handle_composer_key state ~base_path ~mailbox key =
              if state.voice_capture_withdrawn
              then "voice: discarding previous capture"
              else "voice: recording in progress" in
-           state.last_action <- Some (notice, Unix.gettimeofday ())
+           set_last_action state (Some (notice, Unix.gettimeofday ()))
        | None ->
            (* Request one room probe in the asynchronous session, then reuse
               its floor between utterances. Turning the mode off drops it. *)
            state.voice_continuous <- Some keeper_name;
            state.voice_floor <- None;
-           state.last_action <- Some ("voice: continuous on", Unix.gettimeofday ());
+           set_last_action state (Some ("voice: continuous on", Unix.gettimeofday ()));
            if state.voice_capture = None
            then launch_voice_capture ~calibrate:true state ~mailbox ~keeper:keeper_name);
       true
@@ -18162,7 +18388,7 @@ let handle_composer_key state ~base_path ~mailbox key =
       (match state.voice_capture with
        | Some _ ->
            request_voice_stop state Masc.Voice_bridge.Discard;
-           state.last_action <- Some ("voice: discarding", Unix.gettimeofday ())
+           set_last_action state (Some ("voice: discarding", Unix.gettimeofday ()))
        | None ->
            save_message_draft state;
            state.composer_focused <- false;
@@ -18289,8 +18515,7 @@ let handle_composer_key state ~base_path ~mailbox key =
                    ~inspect_queue:(fun () ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->
-                         launch_keeper_queue state ~mailbox ~keeper_name
-                           Masc_tui_queue_inspection.Inspect
+                         open_keeper_queue_panel state ~mailbox ~keeper_name
                      | None -> ())
           ~load_preparation:(fun () -> launch_selected_preparation_operation_read state ~mailbox)
           ~load_tool_changes:(fun () ->
@@ -18531,6 +18756,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Chat_command_read_completed (_, _) | Workspace_identity_unconfirmed _
         | Schedule_form_authority_refused _ | Lane_package_catalog_loaded (_, _, _)
         | Lane_package_preview_loaded (_, _, _) | Keeper_queue_resume_confirmed (_, _, _)
+        | Keeper_queue_action_received _
         | Keeper_queue_loaded (_, _, _, _) | Lane_addons_loaded (_, _, _)
         | Lane_application_loaded (_, _) | Lane_subscriptions_loaded (_, _)
         | Lane_declaration_loaded (_, _, _, _, _) | Keeper_deletions_loaded (_, _)
@@ -18664,44 +18890,102 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
       if finish_keeper_chat_control state keeper_name ~generation then begin
         (match confirmation with
          | Owner_resumed -> clear_keeper_priority_requests state keeper_name
-         | Owner_already_active -> ());
+         | Owner_already_active ->
+           (match state.queue_panel with
+            | Some panel when String.equal panel.qp_keeper keeper_name ->
+              state.queue_panel <- Some {panel with qp_receipt=Some (Queue_read_receipt "Keeper is active; retained input released")}
+            | Some _ | None ->
+              chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
+                "Keeper is active; retained input released"));
         release_retained_keeper_input state keeper_name;
-        launch_waiting_keeper_input state ~mailbox ~keeper_name
+        launch_waiting_keeper_input state ~mailbox ~keeper_name;
+        dispatch_ready_run_next state ~mailbox keeper_name
       end
-  | Keeper_queue_loaded (keeper_name, control_generation, action, result) ->
-      (match action with
-       | Masc_tui_queue_inspection.Inspect_peers token ->
-           let observation = match result with
-             | Error reason -> Error reason
-             | Ok (_, observation) -> observation in
-           ignore (finish_keeper_peer_reading state ~keeper_name ~token observation)
-       | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
-       | Cancel_event _ | Prioritize_event _ ->
-           Option.iter (fun generation -> settle_keeper_priority_control state keeper_name
-             ~generation ~outcome:(match result with
-               | Ok _ -> Priority_superseded | Error _ -> Priority_unconfirmed)) control_generation;
-           Option.iter (fun generation ->
-             ignore (finish_keeper_chat_control state keeper_name ~generation : bool))
-             control_generation;
-           state.keeper_queue_inflight <- List.filter ((<>) keeper_name) state.keeper_queue_inflight;
-           state.keeper_queue_readings <- List.filter ((<>) keeper_name) state.keeper_queue_readings;
-           state.keeper_queue_inspections <- List.filter
-             (fun (keeper, _) -> keeper <> keeper_name) state.keeper_queue_inspections;
-           launch_keeper_turns_load state ~mailbox;
-           let kind, lines = match result with
-             | Error detail -> Notice_failure, [detail]
-             | Ok (receipt, observation) ->
-                 let lines = match observation with
-                   | Ok lines -> receipt @ lines
-                   | Error detail -> receipt @ ["Read unavailable: " ^ detail] in
-                 Notice_reply,
-                 ("Queue snapshot (refresh with /queue)" :: lines @
-                  [Masc_tui_command.usage Masc_tui_command.queue_help;
-                   "Events: /queue cancel-event REF INCARNATION reason · /queue priority-event REF INCARNATION immediate|normal|low";
-                   "Enter queues your line in arrival order; Esc stops the current turn and pauses queue consumption."])
-           in
-           chat_notice state ~keeper_name:(Some keeper_name) ~kind (String.concat "\n" lines);
-           drain_queued_message state ~base_path ~mailbox)
+  | Keeper_queue_action_received (keeper_name, receipt) ->
+      if not (List.mem keeper_name state.keeper_queue_readings) then
+        state.keeper_queue_readings <- keeper_name :: state.keeper_queue_readings;
+      (match state.queue_panel with
+       | Some panel when String.equal panel.qp_keeper keeper_name ->
+         state.queue_panel <- Some
+           {panel with qp_receipt=(if receipt = [] then panel.qp_receipt
+             else Some (Queue_action_receipt (Queue_info (String.concat " · " receipt))));
+             qp_notice=(if server_authority_ready state then
+                 Some (Queue_info "Refreshing the queue after the change") else panel.qp_notice)}
+       | Some _ | None ->
+         if receipt <> [] then chat_notice state ~keeper_name:(Some keeper_name)
+           ~kind:Notice_reply (String.concat " · " receipt));
+      dispatch_ready_run_next state ~mailbox keeper_name
+  | Keeper_queue_loaded (keeper_name, _, Masc_tui_queue_inspection.Inspect_peers token, result) ->
+      let observation = match result with
+        | Error reason -> Error reason
+        | Ok (_, Error reason) -> Error reason
+        | Ok (_, Ok observation) ->
+            Result.map (List.map (fun (item : Masc_tui_queue_inspection.item) -> item.text))
+              observation.operations in
+      ignore (finish_keeper_peer_reading state ~keeper_name ~token observation)
+  | Keeper_queue_loaded (keeper_name, control_generation,
+      ((Masc_tui_queue_inspection.Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _
+       | Run_next _ | Edit _ | Cancel_event _ | Prioritize_event _) as action), result) ->
+      Option.iter (fun generation -> settle_keeper_priority_control state keeper_name
+        ~generation ~outcome:(match result with
+          | Ok ([], _) when action = Masc_tui_queue_inspection.Resume -> Priority_unconfirmed
+          | Ok _ -> Priority_superseded | Error _ -> Priority_unconfirmed)) control_generation;
+      Option.iter (fun generation ->
+        ignore (finish_keeper_chat_control state keeper_name ~generation : bool))
+        control_generation;
+      state.keeper_queue_inflight <- List.filter ((<>) keeper_name) state.keeper_queue_inflight;
+      state.keeper_queue_readings <- List.filter ((<>) keeper_name) state.keeper_queue_readings;
+      state.keeper_queue_inspections <- List.filter
+        (fun (keeper, _) -> keeper <> keeper_name) state.keeper_queue_inspections;
+      launch_keeper_turns_load state ~mailbox;
+      (match state.queue_panel with
+       | Some panel when String.equal panel.qp_keeper keeper_name ->
+         let panel = (match result with
+          | Error detail ->
+            let panel = withdraw_queue_panel_server_selection panel in
+            if action = Masc_tui_queue_inspection.Inspect then
+              {panel with qp_reading=Queue_unavailable; qp_notice=Some (Queue_error detail)}
+            else {panel with qp_reading=Queue_unavailable; qp_notice=None;
+              qp_receipt=Some (Queue_action_receipt (Queue_error detail))}
+          | Ok (receipt, Error detail) ->
+            let panel = withdraw_queue_panel_server_selection panel in
+            let receipt = if action = Masc_tui_queue_inspection.Inspect || receipt = [] then panel.qp_receipt
+              else Some (Queue_action_receipt (Queue_info (String.concat " · " receipt))) in
+            {panel with qp_reading=Queue_unavailable; qp_notice=Some (Queue_error ("Read unavailable: " ^ detail));
+              qp_receipt=receipt}
+          | Ok (receipt, Ok observation) ->
+            let receipt = if action = Masc_tui_queue_inspection.Inspect || receipt = [] then panel.qp_receipt
+              else Some (Queue_action_receipt (Queue_info (String.concat " · " receipt))) in
+            let panel = {panel with qp_observation=Some observation;
+              qp_reading=(if panel.qp_refresh_after_priority then Queue_unavailable else Queue_current);
+              qp_notice=(if panel.qp_refresh_after_priority then
+                  Some (Queue_info "Priority changed while reading; refreshing after it settles")
+                else None);
+              qp_receipt=receipt} in
+            reconcile_queue_panel_selection ~items:(queue_panel_items state panel) panel) in
+         state.queue_panel <- Some panel
+       | Some _ | None ->
+         if action <> Masc_tui_queue_inspection.Inspect then begin
+           let lines = match result with
+             | Error detail -> [detail]
+             | Ok (_, Error detail) -> ["Read unavailable: " ^ detail]
+             | Ok (_, Ok observation) ->
+               let source = function
+                 | Ok _ -> []
+                 | Error detail -> ["Read unavailable: " ^ detail] in
+               source observation.waiting @ source observation.operations in
+           if lines <> [] then
+             chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_failure (String.concat "\n" lines)
+         end);
+      if List.exists (fun (request : Keeper_chat.request) ->
+          String.equal request.keeper_name keeper_name) state.keeper_run_next_ready then begin
+        update_queue_panel state ~keeper_name (fun panel ->
+          {panel with qp_reading=Queue_unavailable;
+            qp_notice=Some (Queue_info "Another priority change may follow; refresh after it finishes")});
+        dispatch_ready_run_next state ~mailbox keeper_name
+      end;
+      refresh_queue_after_priority state ~mailbox ~keeper_name;
+      drain_queued_message state ~base_path ~mailbox
   | Lane_application_loaded (ticket,result) ->
       map_lane_addons state (fun view ->
         Masc_tui_lane_addons.finish_application_read view ticket result)
@@ -18947,7 +19231,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         then Masc_tui_message_input.append state.msg_input " ";
         Masc_tui_message_input.append state.msg_input text;
         save_message_draft state;
-        state.last_action <- Some ("voice: " ^ text, Unix.gettimeofday ());
+        set_last_action state (Some ("voice: " ^ text, Unix.gettimeofday ()));
         (* [voice.stt].send_on_stop: the operator who says a sentence and
            stops the capture has finished the sentence, and the Enter that
            follows says nothing the stop did not. Off by default, because the
@@ -18995,7 +19279,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            not. *)
         chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_reply
           ("voice: " ^ reason);
-        state.last_action <- Some ("voice: " ^ reason, Unix.gettimeofday ()))
+        set_last_action state (Some ("voice: " ^ reason, Unix.gettimeofday ())))
   | Voice_discarded { keeper; reason } ->
       (match settle_voice_capture state ~keeper with
        | None | Some Voice_withdrawn -> ()
@@ -19009,7 +19293,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            heard" went looking for a microphone fault that was not there. *)
         chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_reply
           ("voice: " ^ reason);
-        state.last_action <- Some ("voice: " ^ reason, Unix.gettimeofday ()))
+        set_last_action state (Some ("voice: " ^ reason, Unix.gettimeofday ())))
   | Voice_failed { keeper; error } ->
       (match settle_voice_capture state ~keeper with
        | None | Some Voice_withdrawn -> ()
@@ -19891,7 +20175,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
       (match message, state.goal_confirmation with
        | Goal_confirmation_submitted _, Goal_confirmation.Submitting (_, read) ->
            state.goal_confirmation <- Goal_confirmation.Inspecting read
-       | Runtime_form_save_changed _, _ | Keeper_settings_save_changed _, _ -> ()
+       | Runtime_form_save_changed _, _ | Keeper_settings_save_changed _, _
+       | Keeper_queue_action_received _, _ -> ()
        | (Goal_confirmation_submitted _, Goal_confirmation.Inspecting _)
        | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_calibrated _ | Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | ( Keeper_logs_loaded _ | Keeper_execute_loaded _) | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Listen_prepared _ | Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( (Board_vote_done _ | Artifact_check_changed _) | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( (Verification_evidence_loaded (_, _) | Verification_evidence_exported _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( (Resources_listed _ | Artifact_checks_loaded _) | ( Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_exported _ | Resource_share_changed _ | Resource_read (_, _) | Resource_diagram_ready _ | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | ( Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
       match result with
@@ -21857,7 +22142,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                   ("다음 순서 확인 불가: " ^ detail)
             | (Run_next_untracked | Run_next_retired), _
             | Run_next_received, Ok _ -> ());
-           dispatch_ready_run_next state ~mailbox request.Keeper_chat.keeper_name)
+           dispatch_ready_run_next state ~mailbox request.Keeper_chat.keeper_name;
+           refresh_queue_after_priority state ~mailbox ~keeper_name:request.keeper_name)
   | Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, result) ->
       settle_keeper_priority_control state keeper_name ~generation ~outcome:(match result with
         | Ok (Masc_tui_interrupt_signal.Signalled _ | Pending_admission_paused) -> Priority_superseded
@@ -23188,32 +23474,65 @@ let copy_reference_to_terminal render_schedule reference =
   request_console_write_repair render_schedule
 
 let session_quit_notice (state : state) ~key =
-  let waiting = Masc_tui_keeper_chat_queue.length state.msg_queued in
-  let drafts, unconfirmed_save =
-    List.fold_left
-      (fun (count, unconfirmed) draft ->
-        let unresolved =
-          match Masc_tui_code_draft.phase draft with
-          | Masc_tui_code_draft.Saving _
-          | Masc_tui_code_draft.Needs_review (Masc_tui_code_draft.Uncertain _, _) -> true
-          | Masc_tui_code_draft.Editable | Masc_tui_code_draft.Rejected _
-          | Masc_tui_code_draft.Needs_review (Masc_tui_code_draft.Conflict _, _) -> false
-        in
-        count + 1, unconfirmed || unresolved)
-      (0, false) state.code_drafts
-  in
-  match drafts with
-  | 0 -> Masc_tui_exit_signals.quit_notice ~key ~waiting
-  | count ->
-      (* Put consequences before instructions: the footer can truncate the
-         notice. A submitted save may still commit after this process exits. *)
-      let queued =
-        if waiting = 0 then "" else Printf.sprintf " + %d queued" waiting
-      in
-      let pending = if unconfirmed_save then "; save unconfirmed" else "" in
-      Printf.sprintf
-        "%s: lose %d Code draft(s)%s%s · press again to quit; any other key stays"
-        key count queued pending
+  let queued =
+    List.fold_left (fun count (_, held) ->
+        count + Masc_tui_keeper_chat_queue.length held.ski_queue)
+      (Masc_tui_keeper_chat_queue.length state.msg_queued) state.suspended_keeper_inputs in
+  let waiting, sending = List.fold_left (fun (waiting, sending) (entry : inflight) ->
+      match entry.phase with
+      | Turn_preflight _ -> waiting + 1, sending
+      | Turn_streaming | Turn_reconciling -> waiting, sending + 1)
+      (queued, 0) state.msg_inflight in
+  let unconfirmed_save = List.exists (fun draft ->
+      match Masc_tui_code_draft.phase draft with
+      | Masc_tui_code_draft.Saving _
+      | Masc_tui_code_draft.Needs_review (Masc_tui_code_draft.Uncertain _, _) -> true
+      | Masc_tui_code_draft.Editable | Masc_tui_code_draft.Rejected _
+      | Masc_tui_code_draft.Needs_review (Masc_tui_code_draft.Conflict _, _) -> false)
+      state.code_drafts in
+  let chat_draft = not (keeper_message_draft_empty state) || state.msg_drafts <> [] in
+  let loss = match chat_draft, state.code_drafts <> [] with
+    | true, true -> "chat/Code/other drafts"
+    | true, false -> "chat/other drafts"
+    | false, true -> "Code/other drafts"
+    | false, false -> "unsaved work" in
+  let details = if waiting > 0 then Printf.sprintf " +%d unsent" waiting else "" in
+  let pending = match sending > 0, unconfirmed_save with
+    | true, true -> "; send/save may run"
+    | true, false -> "; send may run"
+    | false, true -> "; save may run"
+    | false, false -> "" in
+  Printf.sprintf "Quit loses %s%s%s; %s again" loss details pending key
+
+let arm_session_quit (state : state) ~kind ~key =
+  match Masc_tui_ansi.probe_terminal_size () with
+  | Some (rows, cols) when rows > 0 && cols > 0 ->
+      report_action state "system" (session_quit_notice state ~key);
+      state.quit_armed <- Option.map (fun ordinary ->
+      { qa_confirmation = Masc_tui_action_notice.arm_quit ~kind ~ordinary;
+        qa_composer_revision = Masc_tui_message_input.revision state.msg_input;
+        qa_attachments = state.msg_attachments;
+        qa_references = state.msg_references;
+        qa_drafts = state.msg_drafts;
+        qa_queue = state.msg_queued;
+        qa_suspended = state.suspended_keeper_inputs;
+        qa_inflight = quit_inflight_snapshot state;
+        qa_code_drafts = state.code_drafts;
+        qa_target = state.msg_target_keeper_name;
+        qa_workspace = state.workspace_authority })
+        (Masc_tui_action_notice.ordinary state.last_action)
+  | None | Some (_, _) ->
+      state.quit_armed <- None;
+      report_action state "error"
+        "Cannot confirm quit: terminal size unavailable; resize or reconnect"
+
+let withdraw_session_quit (state : state) =
+  (match state.quit_armed, Masc_tui_action_notice.ordinary state.last_action with
+   | Some arm, Some ordinary
+     when ordinary == Masc_tui_action_notice.quit_ordinary arm.qa_confirmation ->
+       set_last_action state None
+   | (Some _ | None), (Some _ | None) -> ());
+  state.quit_armed <- None
 
 (* One enable/disable pair for SGR mouse reports. Without tracking the
    terminal keeps the wheel for its own scrollback -- which scrolls past the
@@ -23568,23 +23887,12 @@ let main
         (Terminal_profile.synchronized_output terminal_profile)
       ()
   in
-  (* An approval effect belongs to the row the terminal last accepted, not to
-     the mutable list that an async refresh may install before the next key.
-     This is committed only after [Frame_presenter.present] reports output. *)
-  let presented_approval = ref None in
-  (* Where each pressable text sits on the frame the terminal last accepted.
-     A press is read against this, never against a frame still being drawn:
-     the same rule the approval row above follows. *)
-  let presented_presses = ref Masc_tui_hit.no_zones in
-  (* Where each pane of that frame sits. A press is placed in one of these,
-     and a drag after it selects only inside it. *)
-  let presented_panes = ref Masc_tui_pane_selection.no_panes in
-  (* The left button's gesture from its press to its release. While it
-     selects, every frame is drawn with the selection over it. *)
+  (* All interaction evidence is committed together after terminal output. *)
+  let presented = ref (Presented.initial ~approval:None
+      ~presses:Masc_tui_hit.no_zones ~panes:Masc_tui_pane_selection.no_panes
+      ~reader:None) in
+  (* The left button's gesture from press to release. *)
   let pointer_gesture = ref Masc_tui_pane_selection.Idle in
-  (* Which reader that frame drew, as it reported it. A wheel notch not over
-     the Activity pane moves this reader. *)
-  let presented_reader = ref None in
   let terminal_title = Terminal_title.create () in
   let resize_requested = Atomic.make false in
 
@@ -23775,7 +24083,7 @@ let main
   let last_loop_at_ns = ref (Mtime_clock.elapsed_ns ()) in
   let presented_surface_reference () =
     match state.view with
-    | Approvals -> Option.bind !presented_approval approval_row_reference
+    | Approvals -> Option.bind (!presented).approval approval_row_reference
     | Overview | Acting | Metrics | Keepers _ | Lanes | Clients | Board | Planning
     | Schedules
     | Memory | Verification | Harness | Fusion | Repositories | Changes | Connectors
@@ -23835,7 +24143,7 @@ let main
   in
   let answer_presented_approval decision =
     match
-      Approval_authority.resolve ~presented:!presented_approval
+      Approval_authority.resolve ~presented:(!presented).approval
         ~current:(Masc_tui_approvals_model.approval_items state) decision
     with
     | Some { Approval_authority.row = Masc_tui_approvals_model.Operator_row approval; decision } ->
@@ -23855,24 +24163,67 @@ let main
         report_action state "system"
           "Approval list changed; review the updated row before deciding"
   in
-  let commit_presented_approval approval =
-    presented_approval := approval
+  let last_visible_rejection () =
+    match state.image_open || state.msx_open,
+          Frame_presenter.presented_rows frame_presenter with
+    | true, (Some _ | None) -> None
+    | false, None -> None
+    | false, Some rows ->
+        let _, cols = Masc_tui_ansi.get_terminal_size () in
+        presented_input_rejection ~rows:(List.length rows) ~cols (!presented).presses
   in
-  let present_frame frame approval presses panes ~write ~flush reader =
+  let last_visible_quit () =
+    match state.image_open || state.msx_open,
+          Frame_presenter.presented_rows frame_presenter,
+          Masc_tui_ansi.probe_terminal_size () with
+    | false, Some rows, Some (physical_rows, physical_cols)
+      when not (Terminal_write_repair.damage_pending ())
+           && not (Atomic.get resize_requested)
+           && (physical_rows, physical_cols) = Masc_tui_ansi.get_terminal_size () ->
+        presented_quit_confirmation ~rows:(List.length rows)
+          ~cols:physical_cols (!presented).presses
+    | (true | false), (Some _ | None), (Some _ | None) -> None
+  in
+  let present_frame frame approval presses panes ~input_pending ~write ~flush reader =
+    let damaged = Terminal_write_repair.consume_damage () in
+    let candidate_rejection = presented_input_rejection
+        ~rows:(max 1 frame.Frame_presenter.terminal_rows)
+        ~cols:(max 1 frame.Frame_presenter.terminal_cols) presses in
+    let rejection_changed = not (Option.equal Masc_tui_action_notice.same_rejection
+        (last_visible_rejection ()) candidate_rejection) in
+    let previous_quit = if damaged then None else last_visible_quit () in
+    let candidate_quit = presented_quit_confirmation
+        ~rows:(max 1 frame.Frame_presenter.terminal_rows)
+        ~cols:(max 1 frame.Frame_presenter.terminal_cols) presses in
+    let quit_changed = not (Option.equal Masc_tui_action_notice.same_quit
+        previous_quit candidate_quit) in
+    let owned_reader reader =
+      Option.is_some (queue_owner_of_reader reader)
+      || Option.is_some (play_card_of_reader reader)
+      || help_is_presented reader in
+    let owner_changed =
+      queue_selection_authority_changed ~presented:(!presented).presses ~candidate:presses
+      || queue_owner_authority_changed ~presented:(queue_owner_of_reader (!presented).reader)
+           ~candidate:(queue_owner_of_reader reader)
+      || play_owner_authority_changed ~presented:(play_card_of_reader (!presented).reader)
+           ~candidate:(play_card_of_reader reader)
+      || Bool.not (Bool.equal (help_is_presented (!presented).reader) (help_is_presented reader))
+      || ((damaged || Option.is_none (Frame_presenter.presented_rows frame_presenter))
+          && (owned_reader (!presented).reader || owned_reader reader))
+    in
     let frame =
       match !pointer_gesture with
-      | Masc_tui_pane_selection.Selecting selection ->
+      | Masc_tui_pane_selection.Selecting selection when not owner_changed ->
           { frame with
             Frame_presenter.lines =
               Masc_tui_pane_selection.highlight selection frame.Frame_presenter.lines }
-      | Masc_tui_pane_selection.Idle | Masc_tui_pane_selection.Pressed _
-      | Masc_tui_pane_selection.Drag_without_pane -> frame
+      | Masc_tui_pane_selection.Selecting _ | Masc_tui_pane_selection.Idle
+      | Masc_tui_pane_selection.Pressed _ | Masc_tui_pane_selection.Drag_without_pane -> frame
     in
-    let damaged = Terminal_write_repair.consume_damage () in
-    let authority_changed =
+    let presentation_changed = owner_changed || rejection_changed in
+    let authority_changed = presentation_changed || quit_changed ||
       Approval_authority.authority_changed
-        ~presented:!presented_approval ~candidate:approval
-    in
+        ~presented:(!presented).approval ~candidate:approval in
     let preset_confirmation_changed = match reader with
       | Some (Preset_detail_scroll (_, Some confirmation)) ->
         preset_confirmation_needs_present state confirmation
@@ -23887,17 +24238,16 @@ let main
         | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _ | Patch_modal_scroll _
         | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _
         | Preset_detail_scroll (_, None) | Keeper_list_scroll _ | Context_inspector_scroll _
-        | Context_inspector_response_scroll _) -> false in
-    (* A selected row's hidden token/call id can change while its clipped
-       terminal text stays byte-identical. Only that authority transition
-       forces a full presentation; ordinary async row updates stay
-       differential. *)
+        | Context_inspector_response_scroll _ | Queue_panel_presented _ | Help_presented) -> false in
+    (* Approval identity, Help ownership, Queue ownership or selection, and the Play card can
+       change while clipped terminal text stays byte-identical. Those changes
+       force presentation; ordinary async updates stay differential. *)
     match
       Frame_presenter.present frame_presenter
         ~invalidate_before:(damaged || authority_changed || preset_confirmation_changed)
         ~write ~flush frame
     with
-    | Frame_presenter.Presented _ as presented ->
+    | Frame_presenter.Presented _ as frame_result ->
         state.frames_presented <- state.frames_presented + 1;
         (match reader with
          | Some (Planning_confirmation_scroll (_, Some confirmation)) ->
@@ -23921,16 +24271,25 @@ let main
          | Some (Patch_modal_scroll (_, _)) | Some (Link_modal_scroll _)
          | Some (Play_invite_scroll _) | Some (Voice_scroll _) | Some (Preset_detail_scroll _)
          | Some (Keeper_list_scroll _) | Some (Context_inspector_scroll _)
-         | Some (Context_inspector_response_scroll _) -> ());
-        commit_presented_approval approval;
-        presented_presses := presses;
-        presented_panes := panes;
-        presented_reader := reader;
-        (* The frame's pictures go over it once it is on the terminal: sent
-           again after a full redraw, whose clear took them, and put back
-           from the pixels the terminal holds over a row the frame erased
-           and wrote. *)
-        Masc_tui_portrait_view.flush presented ~write:write_to_terminal
+         | Some (Context_inspector_response_scroll _) | Some (Queue_panel_presented _)
+         | Some Help_presented -> ());
+        (* Include picture writes in the post-output input observation. *)
+        Masc_tui_portrait_view.flush frame_result ~write:write_to_terminal;
+        if owner_changed then pointer_gesture := Masc_tui_pane_selection.Idle;
+        let input_pending = input_pending () in
+        presented := Presented.presented !presented ~approval ~presses ~panes ~reader
+            ~owner_changed ~input_pending;
+        state.quit_armed <- Option.map (fun arm ->
+            let was_visible = Option.exists (fun previous ->
+                Masc_tui_action_notice.same_quit previous arm.qa_confirmation) previous_quit in
+            { arm with qa_confirmation =
+                Masc_tui_action_notice.quit_presented arm.qa_confirmation
+                  ~visible:candidate_quit ~was_visible
+                  ~input_pending:(input_pending || Masc_tui_exit_signals.interrupt_pending exit_signals) })
+            state.quit_armed;
+        Option.iter (fun notice ->
+          state.last_action <- Masc_tui_action_notice.presented state.last_action notice
+              ~at:(Unix.gettimeofday ()) ~input_pending) candidate_rejection
     | Frame_presenter.Unchanged as unchanged ->
         (* Same text, but a picture may have moved on a step. *)
         Masc_tui_portrait_view.flush unchanged ~write:write_to_terminal
@@ -23993,6 +24352,10 @@ let main
      loop turn, so the sequence reaches the dispatch in the order it was
      typed. *)
   let hangul_latin_queue : string Queue.t = Queue.create () in
+  let input_unsettled () =
+    not (Queue.is_empty hangul_latin_queue)
+    || input_reader_has_unsettled_input input_reader
+  in
   (* Palette and graphics share one bounded startup probe because both replies
      arrive on the key stream. The probe removes only replies to these exact
      questions and puts every other consumed byte back into this same reader.
@@ -25518,8 +25881,12 @@ and is loaded on demand through keeper_skill.
               | Some signal -> Masc_tui_exit_reason.Terminate signal
               | None -> Masc_tui_exit_reason.Interrupt);
            raise Break
-       | Masc_tui_exit_signals.Interrupt_armed ->
-           state.quit_armed <- false;
+       | (Masc_tui_exit_signals.Interrupt_armed
+         | Masc_tui_exit_signals.Interrupt_again) as interrupt ->
+           (match paste_phase input_reader, input_holds_incomplete_sequence input_reader with
+            | No_paste, false -> ()
+            | No_paste, true | Pasting _, (true | false) | Draining_tail _, (true | false) ->
+                withdraw_session_quit state);
            (match paste_phase input_reader,
                   input_holds_incomplete_sequence input_reader with
             | Draining_tail tail, _
@@ -25534,11 +25901,16 @@ and is loaded on demand through keeper_skill.
                    from the operator's Ctrl-G. This is a force unlock for a
                    stream the operator has observed stop, not an automatic
                    declaration that all paste bytes have arrived. *)
+                let recovery_was_rejected =
+                  (!presented).recovery = Presented.Rejected_recovery in
                 abandon_draining input_reader;
+                presented := Presented.clear_recovery !presented;
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 skip_input_after_interrupt := true;
                 report_action state "system"
-                  "Paste input unlocked; confirm only after the terminal stops";
+                  (if recovery_was_rejected then
+                     "Paste input unlocked; recovered paste was not applied"
+                   else "Paste input unlocked; confirm only after the terminal stops");
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None
             | Pasting paste, _ when not (cancel_armed paste) ->
@@ -25582,8 +25954,28 @@ and is loaded on demand through keeper_skill.
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None
             | No_paste, false ->
-                report_action state "system"
-                  (session_quit_notice state ~key:"Ctrl-C");
+                let confirmed = match interrupt, state.quit_armed,
+                    current_quit_confirmation state ~now:(Unix.gettimeofday ()) with
+                  | Masc_tui_exit_signals.Interrupt_again, Some arm, Some current ->
+                      Masc_tui_action_notice.same_quit arm.qa_confirmation current
+                      && quit_arm_matches state arm
+                      && not (input_unsettled ())
+                      && Masc_tui_action_notice.quit_authorized current
+                           ~kind:Masc_tui_action_notice.Interrupt
+                           ~currently_visible:(last_visible_quit ())
+                           ~ordinary_before:(Masc_tui_action_notice.ordinary state.last_action)
+                           ~now:(Unix.gettimeofday ()) ~window:last_action_window_s
+                  | (Masc_tui_exit_signals.Interrupt_armed | Masc_tui_exit_signals.Interrupt_again),
+                    (Some _ | None), (Some _ | None) -> false
+                  | (Masc_tui_exit_signals.Continue | Masc_tui_exit_signals.Quit),
+                    (Some _ | None), (Some _ | None) -> false in
+                if confirmed then begin
+                  note_exit_reason Masc_tui_exit_reason.Interrupt;
+                  raise Break
+                end;
+                arm_session_quit state ~kind:Masc_tui_action_notice.Interrupt ~key:"Ctrl-C";
+                if Option.is_none state.quit_armed then
+                  Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None)
        | Masc_tui_exit_signals.Continue -> None
@@ -25594,6 +25986,30 @@ and is loaded on demand through keeper_skill.
       let drain_deadline_ns =
         Int64.add (Mtime_clock.elapsed_ns ()) async_drain_budget_ns
       in
+      (* Input may cancel a pending MIDI handoff even when it will later be
+         rejected; this lets the existing editor owner yield without replay. *)
+      if not (input_unsettled ()) && Option.is_none interrupted_paste then
+        presented := Presented.after_input !presented ~input_pending:false;
+      let input_barrier_held () = match (!presented).barrier with
+        | Presented.Open -> false | Presented.Held _ -> true in
+      let frame_unavailable () =
+        not state.image_open && not state.msx_open
+        && Option.is_none (Frame_presenter.presented_rows frame_presenter) in
+      let help_is_current () =
+        let terminal_rows, _ = get_terminal_size () in
+        match Masc_tui_render.frame_choice state ~terminal_rows with
+        | `Help -> true
+        | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
+        | `Lane_addons _ | `Detail_reading _ | `About | `Context | `Keeper_deletions
+        | `Queue _ | `Agenda | `Answering | `Patch | `Link | `Client_detail _
+        | `Surface -> false in
+      let input_not_yet_admissible () =
+        input_barrier_held () || frame_unavailable ()
+        || (not state.image_open && not state.msx_open
+            && help_is_presented (!presented).reader <> help_is_current ()) in
+      (* A rejected event cancels any signal confirmation above. MIDI
+         withdrawal and async results after this point produce newer notices. *)
+      let ordinary_before_input = Masc_tui_action_notice.ordinary state.last_action in
       let retire_music_editor_for_input () =
         if Option.is_some interrupted_paste || input_reader_has_started_input input_reader then
           withdraw_pending_music_editor state
@@ -25609,15 +26025,15 @@ and is loaded on demand through keeper_skill.
       prepare_resource_diagrams state ~mailbox:async_messages;
       prepare_inspected_frame state ~mailbox:async_messages;
       (match state.lane_addons with
-       | Some view when view.editor_ready -> handle_lane_document_editor ()
+       | Some view when view.editor_ready && not (input_not_yet_admissible ()) -> handle_lane_document_editor ()
        | Some _ | None -> ());
       continue_keeper_settings_editor ~input_pending:(
-        Option.is_some interrupted_paste
+        input_not_yet_admissible () || Option.is_some interrupted_paste
         || input_reader_has_ready_input input_reader
         || input_holds_incomplete_sequence input_reader
         || match paste_phase input_reader with No_paste -> false | Pasting _ | Draining_tail _ -> true);
       let code_navigation_input_pending =
-        Option.is_some interrupted_paste
+        input_not_yet_admissible () || Option.is_some interrupted_paste
         || input_reader_has_ready_input input_reader
         || input_holds_incomplete_sequence input_reader
         || match paste_phase input_reader with No_paste -> false | Pasting _ | Draining_tail _ -> true
@@ -25707,6 +26123,7 @@ and is loaded on demand through keeper_skill.
         | Draining_tail _ -> true
         | No_paste | Pasting _ -> false
       in
+      let barrier_before_read = (!presented).barrier in
       let input =
         match interrupted_paste with
         | Some paste -> Some (Pasted paste)
@@ -25723,121 +26140,6 @@ and is loaded on demand through keeper_skill.
             Option.iter (observe_input_received input_reader) input;
             input)
       in
-      let input = match input with
-        | Some (Mouse_wheel (direction, _, _))
-            when Option.is_some (current_code_hover state) ->
-            Some (Key (match direction with
-              | Masc.Tui_mouse_protocol.Wheel_up -> "up"
-              | Masc.Tui_mouse_protocol.Wheel_down -> "down"))
-        | Some (Mouse_left_press _ | Key ("tab" | "shift-tab" | "\t"))
-            when Option.is_some (current_code_hover state) ->
-            state.code_hover <- None; input
-        | Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
-               | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _)
-        | None -> input in
-      (* A queued action retires a deferred return before any handler changes
-         its reading. Repeated B shares its pending request; protocol replies
-         and idle cadence are observations rather than operator actions. *)
-      (match input with
-       | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _) ->
-           Code_results.retire_lsp_input state
-       | Some (Graphics_reply _) | None -> ());
-      (match input with
-       | Some (Key "B") when state.view = Code -> ()
-       | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _) ->
-           state.code_navigation <- None
-       | Some (Graphics_reply _) | None -> ());
-      let input =
-        if recovered_paste_send_locked state then
-          match input with
-          | Some (Key "\007")
-            when paste_phase input_reader = No_paste
-                 && (state.view = Keepers Keeper_message || state.composer_focused) ->
-              discard_recovered_paste_lock state;
-              report_action state "system" "Recovered draft confirmed; Enter may send";
-              (* The key is consumed here, so the [Input] request that follows
-                 every other key never fires. Without this the lock is gone
-                 but nothing is drawn: the operator sees no answer to Ctrl-G. *)
-              Render_schedule.request render_schedule Render_schedule.Input;
-              None
-          | (Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
-                  | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _)
-            | None) as other -> other
-        else input
-      in
-      (* The footer's notice answers the last key. The next input is a new
-         key, so the notice goes before anything handles it: it takes the
-         room the key hints need, and a notice left standing after the
-         operator moved on hid the hints of the screen they moved to. A key
-         that has something to say sets its own. *)
-      if Option.is_some input then state.last_action <- None;
-      (* Further operator input owns focus. A pending creation may finish and
-         refresh its metadata, but cannot jump over the next gesture/draft. *)
-      (match input with
-       | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _) ->
-           state.keeper_creation_focus <- None;
-           withdraw_pending_music_editor state
-       | Some (Graphics_reply _) | None -> ());
-      Option.iter
-        (fun _ ->
-          report_action state "system"
-            "Incomplete paste restored; wait for marker or Ctrl-C, then Ctrl-G enables Enter")
-        interrupted_paste;
-      if guarding_before_read && paste_phase input_reader = No_paste then begin
-        report_action state "system" "Paste tail ended; review the draft before sending";
-        (* The tail's end marker is swallowed and returns no input, so no
-           [Input] request draws this; ask for the frame as the other
-           recovery notices do. *)
-        Render_schedule.request render_schedule Render_schedule.Background
-      end;
-      (match paste_phase input_reader with
-       | Pasting _ when not !paste_pause_notified ->
-           paste_pause_notified := true;
-           report_action state "system"
-             "Paste in progress; Ctrl-C twice restores, third unlocks if stuck";
-           Render_schedule.request render_schedule Render_schedule.Background
-       | Pasting _ -> ()
-       | No_paste | Draining_tail _ -> paste_pause_notified := false);
-      (match paste_phase input_reader with
-       | Pasting paste when cancel_armed paste
-                     && paste_can_recover input_reader paste
-                     && not !paste_quiet_notified ->
-           paste_quiet_notified := true;
-           report_action state "system"
-             "Paste quiet; Ctrl-C again restores the draft if the end marker was lost";
-           Render_schedule.request render_schedule Render_schedule.Background
-       | Pasting paste when not (paste_can_recover input_reader paste) ->
-           paste_quiet_notified := false
-       | Pasting _ -> ()
-       | No_paste | Draining_tail _ -> paste_quiet_notified := false);
-      (match input_holds_incomplete_sequence input_reader, !csi_pause_notice with
-       | true, None ->
-           report_action state "system"
-             "Terminal sequence incomplete; Ctrl-C cancels it";
-           csi_pause_notice := state.last_action;
-           Render_schedule.request render_schedule Render_schedule.Background
-       | true, Some _ | false, None -> ()
-       | false, Some shown ->
-           (* The hold is over, so its notice is no longer true. Only that
-              notice is taken down: one set since (the Ctrl-C outcome, a key's
-              answer) stays for its own window. *)
-           (match state.last_action with
-            | Some current when current == shown ->
-                state.last_action <- None;
-                Render_schedule.request render_schedule Render_schedule.Background
-            | Some _ | None -> ());
-           csi_pause_notice := None);
-      (match paste_phase input_reader with
-       | Draining_tail tail when paste_can_recover input_reader tail
-                     && not !paste_guard_idle_notified ->
-           paste_guard_idle_notified := true;
-           report_action state "system"
-             "Paste tail quiet; Ctrl-C unlocks input if the end marker was lost";
-           Render_schedule.request render_schedule Render_schedule.Background
-       | Draining_tail tail when not (paste_can_recover input_reader tail) ->
-           paste_guard_idle_notified := false
-       | Draining_tail _ -> ()
-       | No_paste | Pasting _ -> paste_guard_idle_notified := false);
       (* SIGWINCH can arrive while [read_input] is waiting. Consume it before
          this input sees the old frame; the next loop would be one key too
          late. *)
@@ -25864,6 +26166,268 @@ and is loaded on demand through keeper_skill.
            if state.image_open && not state.msx_open then
              Option.iter (draw_inspected_image state) state.image_inspection
        | Render_schedule.Terminal_size_cache.Unchanged _ -> ());
+      (* Decide from the hold captured before reading: the final event is
+         rejected even when reading it emptied the last input buffer. *)
+      let rejected, rejected_paste, was_reported, paste_was_reported =
+        match barrier_before_read, input with
+        | Presented.Held flags, Some event when is_operator_input event ->
+            let paste = match event with
+              | Pasted _ -> true
+              | Key _ | Graphics_reply _ | Mouse_left_press _ | Mouse_left_drag _
+              | Mouse_left_release _ | Mouse_wheel _ -> false in
+            true, paste, flags.rejected_input, flags.rejected_paste
+        | (Presented.Open | Presented.Held _), (Some _ | None) -> false, false, false, false
+      in
+      if rejected then begin
+        presented := Presented.reject !presented ~paste:rejected_paste;
+        if rejected_paste && Option.is_some interrupted_paste then
+          presented := Presented.reject_recovery !presented;
+        if rejected_paste && not paste_was_reported then
+          report_input_rejection state Masc_tui_action_notice.Paste_rejected
+            "Paste was not applied during the screen transition; paste it again"
+        else if not was_reported then
+          report_input_rejection state Masc_tui_action_notice.Input_rejected
+            "Input was not applied during the screen transition; review and retry";
+        Render_schedule.request render_schedule Render_schedule.Background
+      end;
+      let input = if rejected then None else input in
+      presented := Presented.after_input !presented ~input_pending:(input_unsettled ());
+      (* A resize or invalidation can leave no accepted frame even when no
+         transition barrier is active. Reject that operator input before any
+         hidden handler can consume it; protocol replies still reach their owner. *)
+      let unpresented_decision = match input with
+        | None -> Presented.Accept_input
+        | Some event ->
+            let kind = match event with
+              | Key _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _
+              | Mouse_wheel _ -> Presented.Action
+              | Pasted _ -> Presented.Paste
+              | Graphics_reply _ -> Presented.Protocol in
+            Presented.decide_unpresented_input
+              ~frame_presented:(Option.is_some (Frame_presenter.presented_rows frame_presenter))
+              ~external_surface:(state.image_open || state.msx_open) kind in
+      (match unpresented_decision with
+       | Presented.Reject_paste when Option.is_some interrupted_paste ->
+           presented := Presented.reject_recovery !presented
+       | Presented.Accept_input | Presented.Reject_action | Presented.Reject_paste -> ());
+      let input = match unpresented_decision with
+        | Presented.Accept_input -> input
+        | Presented.Reject_action | Presented.Reject_paste ->
+            pointer_gesture := Masc_tui_pane_selection.Idle;
+            None in
+      (* Help can open over any surface and close before the replacement is
+         painted. Neither transition may send its input to a hidden owner. *)
+      let presented_help = help_is_presented (!presented).reader in
+      let current_help = help_is_current () in
+      let help_decision = match input with
+        | None -> Presented.Accept_input
+        | Some event ->
+            let kind = match event with
+              | Key _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _
+              | Mouse_wheel _ -> Presented.Action
+              | Pasted _ -> Presented.Paste
+              | Graphics_reply _ -> Presented.Protocol in
+            Presented.decide_help_input ~external_surface:(state.image_open || state.msx_open)
+              ~presented_help ~current_help kind in
+      (match help_decision with
+       | Presented.Reject_paste when Option.is_some interrupted_paste ->
+           presented := Presented.reject_recovery !presented
+       | Presented.Accept_input | Presented.Reject_action | Presented.Reject_paste -> ());
+      let input = match help_decision with
+        | Presented.Accept_input -> input
+        | Presented.Reject_action | Presented.Reject_paste ->
+            pointer_gesture := Masc_tui_pane_selection.Idle;
+            None in
+      (* A rejected gesture has no target, but it still interrupts any armed
+         confirmation. Never send its key or payload to another surface. *)
+      let decision_rejected = function
+        | Presented.Accept_input -> false
+        | Presented.Reject_action | Presented.Reject_paste -> true in
+      let rejected_operator_input = rejected || decision_rejected unpresented_decision
+        || decision_rejected help_decision in
+      let help_owns_input = presented_help && current_help
+        && not state.image_open && not state.msx_open in
+      if rejected_operator_input then begin
+        Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+        (* The read may have consumed its final byte, so neither the pre- nor
+           post-drain readiness check can witness this rejected gesture. *)
+        withdraw_pending_music_editor state
+      end;
+      let input = match input with
+        | Some (Mouse_wheel (direction, _, _))
+            when not help_owns_input && Option.is_some (current_code_hover state) ->
+            Some (Key (match direction with
+              | Masc.Tui_mouse_protocol.Wheel_up -> "up"
+              | Masc.Tui_mouse_protocol.Wheel_down -> "down"))
+        | Some (Mouse_left_press _ | Key ("tab" | "shift-tab" | "\t"))
+            when not help_owns_input && Option.is_some (current_code_hover state) ->
+            state.code_hover <- None; input
+        | Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
+               | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _)
+        | None -> input in
+      (* A queued action retires a deferred return before any handler changes
+         its reading. Repeated B shares its pending request; protocol replies
+         and idle cadence are observations rather than operator actions. *)
+      (match input with
+       | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _) ->
+           Code_results.retire_lsp_input state
+       | Some (Graphics_reply _) | None -> ());
+      (match input with
+       | Some (Key "B") when state.view = Code -> ()
+       | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _) ->
+           state.code_navigation <- None
+       | Some (Graphics_reply _) | None -> ());
+      let input =
+        if not help_owns_input && recovered_paste_send_locked state then
+          match input with
+          | Some (Key "\007")
+            when paste_phase input_reader = No_paste
+                 && (state.view = Keepers Keeper_message || state.composer_focused) ->
+              discard_recovered_paste_lock state;
+              report_action state "system" "Recovered draft confirmed; Enter may send";
+              (* The key is consumed here, so the [Input] request that follows
+                 every other key never fires. Without this the lock is gone
+                 but nothing is drawn: the operator sees no answer to Ctrl-G. *)
+              Render_schedule.request render_schedule Render_schedule.Input;
+              None
+          | (Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
+                  | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _)
+            | None) as other -> other
+        else input
+      in
+      (* The footer's notice answers the last key. The next input is a new
+         key, so the notice goes before anything handles it: it takes the
+         room the key hints need, and a notice left standing after the
+         operator moved on hid the hints of the screen they moved to. A key
+         that has something to say sets its own. A rejected gesture cancels
+         ordinary confirmations too, but cannot acknowledge a rejection. *)
+      let quit_before_input =
+        match current_quit_confirmation state ~now:(Unix.gettimeofday ()) with
+        | Some confirmation
+          when Masc_tui_action_notice.quit_authorized confirmation
+              ~kind:Masc_tui_action_notice.Quit_key
+              ~currently_visible:(last_visible_quit ())
+              ~ordinary_before:(Masc_tui_action_notice.ordinary state.last_action)
+              ~now:(Unix.gettimeofday ()) ~window:last_action_window_s -> Some confirmation
+        | Some _ | None -> None in
+      state.last_action <-
+        if rejected_operator_input then
+          Masc_tui_action_notice.after_rejected_input state.last_action
+            ~ordinary_before:ordinary_before_input
+            ~currently_visible:(last_visible_rejection ())
+            ~now:(Unix.gettimeofday ()) ~window:last_action_window_s
+        else
+          Masc_tui_action_notice.after_input state.last_action
+            ~input_seen:(Option.is_some input)
+            ~operator_input:(Option.exists is_operator_input input)
+            ~currently_visible:(last_visible_rejection ())
+            ~now:(Unix.gettimeofday ()) ~window:last_action_window_s;
+      state.last_action <- Masc_tui_action_notice.after_drain state.last_action
+          ~at:(Unix.gettimeofday ()) ~input_pending:(input_unsettled ())
+          ~currently_visible:(last_visible_rejection ());
+      (* Further operator input owns focus. A pending creation may finish and
+         refresh its metadata, but cannot jump over the next gesture/draft. *)
+      (match input with
+       | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _) ->
+           state.keeper_creation_focus <- None;
+           withdraw_pending_music_editor state
+       | Some (Graphics_reply _) | None -> ());
+      Option.iter
+        (fun _ ->
+          if not rejected_operator_input
+             && Option.is_none state.queue_panel && Option.is_none (play_card_shown state)
+             && Option.is_none (queue_owner_of_reader (!presented).reader)
+             && Option.is_none (play_card_of_reader (!presented).reader)
+             && not (Frame_presenter.last_frame_is_compact frame_presenter) then
+            report_action state "system"
+              "Recovered paste received; check its destination and wait for marker or Ctrl-C")
+        interrupted_paste;
+      if guarding_before_read && paste_phase input_reader = No_paste then begin
+        let recovery_was_rejected =
+          (!presented).recovery = Presented.Rejected_recovery in
+        presented := Presented.clear_recovery !presented;
+        report_action state "system"
+          (if recovery_was_rejected then "Paste tail ended; the recovered paste was not applied"
+           else "Paste tail ended; check its destination before continuing");
+        (* The tail's end marker is swallowed and returns no input, so no
+           [Input] request draws this; ask for the frame as the other
+           recovery notices do. *)
+        Render_schedule.request render_schedule Render_schedule.Background
+      end;
+      (match paste_phase input_reader with
+       | Pasting _ when not !paste_pause_notified ->
+           paste_pause_notified := true;
+           report_action state "system"
+             (if input_barrier_held () then
+                "Paste in progress during a screen transition; Ctrl-C can cancel if stuck"
+              else "Paste in progress; Ctrl-C twice recovers, third unlocks if stuck");
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Pasting _ -> ()
+       | No_paste | Draining_tail _ -> paste_pause_notified := false);
+      (match paste_phase input_reader with
+       | Pasting paste when cancel_armed paste
+                     && paste_can_recover input_reader paste
+                     && not !paste_quiet_notified ->
+           paste_quiet_notified := true;
+           report_action state "system"
+             (if input_barrier_held () then
+                "Paste quiet; Ctrl-C again recovers it, but it will not be applied on this screen"
+              else "Paste quiet; Ctrl-C again recovers it if the end marker was lost");
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Pasting paste when not (paste_can_recover input_reader paste) ->
+           paste_quiet_notified := false
+       | Pasting _ -> ()
+       | No_paste | Draining_tail _ -> paste_quiet_notified := false);
+      (match input_holds_incomplete_sequence input_reader, !csi_pause_notice with
+       | true, None ->
+           report_action state "system"
+             "Terminal sequence incomplete; Ctrl-C cancels it";
+           csi_pause_notice := Masc_tui_action_notice.ordinary state.last_action;
+           state.last_action <- Masc_tui_action_notice.start_csi state.last_action;
+           Render_schedule.request render_schedule Render_schedule.Background
+       | true, Some _ | false, None -> ()
+       | false, Some shown ->
+           (* The hold is over, so its notice is no longer true. Only that
+              notice is taken down: one set since (the Ctrl-C outcome, a key's
+              answer) stays for its own window. *)
+           state.last_action <- Masc_tui_action_notice.end_csi state.last_action;
+           (match Masc_tui_action_notice.ordinary state.last_action with
+            | Some current when current == shown ->
+                set_last_action state None;
+                Render_schedule.request render_schedule Render_schedule.Background
+            | Some _ | None -> ());
+           csi_pause_notice := None);
+      (match paste_phase input_reader with
+       | Draining_tail tail when paste_can_recover input_reader tail
+                     && not !paste_guard_idle_notified ->
+           paste_guard_idle_notified := true;
+           report_action state "system"
+             "Paste tail quiet; Ctrl-C unlocks input if the end marker was lost";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Draining_tail tail when not (paste_can_recover input_reader tail) ->
+           paste_guard_idle_notified := false
+       | Draining_tail _ -> ()
+       | No_paste | Pasting _ -> paste_guard_idle_notified := false);
+      (match unpresented_decision with
+       | Presented.Accept_input -> ()
+       | Presented.Reject_action ->
+           report_input_rejection state Masc_tui_action_notice.Input_rejected
+             "Screen not yet displayed; input was not applied, review and retry";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Presented.Reject_paste ->
+           report_input_rejection state Masc_tui_action_notice.Paste_rejected
+             "Screen not yet displayed; paste was not applied, paste it again";
+           Render_schedule.request render_schedule Render_schedule.Background);
+      (match help_decision with
+       | Presented.Accept_input -> ()
+       | Presented.Reject_action ->
+           report_input_rejection state Masc_tui_action_notice.Input_rejected
+             "Screen transition: input was not applied; review and retry";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Presented.Reject_paste ->
+           report_input_rejection state Masc_tui_action_notice.Paste_rejected
+             "Paste was not applied on this screen; retry in a text field";
+           Render_schedule.request render_schedule Render_schedule.Background);
       reconcile_chat_focus ();
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
          armed state outlives the moment it was meant for, and a Ctrl-C typed
@@ -26273,7 +26837,7 @@ and is loaded on demand through keeper_skill.
         match input with
         | Some (Mouse_left_press (row, column)) when pointer_on_frame ->
             pointer_gesture :=
-              Masc_tui_pane_selection.press !presented_panes ~row ~column;
+              Masc_tui_pane_selection.press (!presented).panes ~row ~column;
             Masc_tui_pane_selection.Nothing
         | Some (Mouse_left_drag (row, column)) when pointer_on_frame ->
             pointer_gesture :=
@@ -26327,6 +26891,12 @@ and is loaded on demand through keeper_skill.
                        "line"))
            | None -> ())
        | Masc_tui_pane_selection.Click _ | Masc_tui_pane_selection.Nothing -> ());
+      let presented_play = play_card_of_reader (!presented).reader in
+      let presented_queue = queue_owner_of_reader (!presented).reader in
+      let play_was_presented = Option.is_some presented_play in
+      let play_wheel_available =
+        if not play_was_presented then true
+        else play_card_matches ~presented:presented_play ~current:(play_card_shown state) in
       (* Where a notch leaves the reader on screen, when it is the reader's:
          not over the Activity pane, which keeps the wheel it had. The frame
          names the reader; the notch moves it from where it is now. *)
@@ -26337,8 +26907,9 @@ and is loaded on demand through keeper_skill.
                && (not state.image_open) && (not state.msx_open)
                && Option.is_none msx_key
                && (not compact_viewport)
+               && play_wheel_available
                && acting_pane_hit state ~row ~column = Pane_miss ->
-            Option.bind !presented_reader (fun reader ->
+            Option.bind (!presented).reader (fun reader ->
                 reader_after_wheel (clamped_scroll_now state reader) direction)
         | Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
                | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _)
@@ -26356,12 +26927,17 @@ and is loaded on demand through keeper_skill.
           | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
           | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _ | Patch_modal_scroll _
           | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _ | Keeper_list_scroll _
-          | Context_inspector_scroll _ | Context_inspector_response_scroll _) -> false in
+          | Context_inspector_scroll _ | Context_inspector_response_scroll _
+          | Queue_panel_presented _ | Help_presented) -> false in
       let key =
         if dismissed_image || Option.is_some msx_key || gesture_cancelled then None
         else
           match input with
           | Some (Key name) -> Some name
+          | Some (Mouse_wheel (direction, _, _)) when help_owns_input ->
+              Some (match direction with
+                | Masc.Tui_mouse_protocol.Wheel_up -> "up"
+                | Masc.Tui_mouse_protocol.Wheel_down -> "down")
           (* A notch over the pane is the pane's and never becomes a key; a
              notch that moves the reader on screen is not one either; a notch
              anywhere else is the key it always was. *)
@@ -26397,8 +26973,17 @@ and is loaded on demand through keeper_skill.
                 (task_inspection_source reader.tci_original))
             | None -> Option.fold ~none:false ~some:editing (current_detail_reading state) in
       let text_target =
-        if not compact_viewport && reading_search_editing then Some Text_row_search
+        if help_owns_input then None
+        else if not compact_viewport && reading_search_editing then Some Text_row_search
         else text_input_target state ~compact_viewport in
+      let play_shown = play_card_shown state in
+      let rows, _ = get_terminal_size () in
+      let beneath = Masc_tui_render.queue_below_play state ~terminal_rows:rows in
+      let queue_play_owner = queue_play_input_owner ~play_presented:presented_play
+          ~play_shown ~compact:compact_viewport ~state ~beneath ~presented_queue in
+      let presented_queue_input = match queue_play_owner with
+        | Queue_input panel -> Some panel
+        | Play_input | Wait_for_frame | Other_input -> None in
       let key =
         (* The terminal hands this loop the character an input method produced,
            not the key the operator pressed. In Korean mode a [j] arrives as
@@ -26427,14 +27012,35 @@ and is loaded on demand through keeper_skill.
                (fun view -> not (Masc_tui_lane_addons.text_entry_open view))
                state.lane_addons
         in
-        match key with
-        | Some name when command_reading -> (
+        (* These panels own the visible keys even when a chat composer is
+           underneath them. Translate only a single two-set key here: replaying
+           a composed syllable could submit several queue priority changes. *)
+        let single_panel_command =
+          Option.is_none text_target && not compact_viewport
+          && (match key with
+              | Some name when String.length name > 1 ->
+                  let rows, _ = get_terminal_size () in
+                  if help_owns_input || Option.is_some presented_queue_input then true
+                  else (match Masc_tui_render.frame_choice state ~terminal_rows:rows with
+                   | `Queue _ -> true
+                   | `Agenda | `Answering | `Help -> not command_reading
+                   | `Too_small _ | `Play_card _ | `Account_login _ | `Palette
+                   | `Collab _ | `Lane_addons _ | `Detail_reading _ | `About
+                   | `Context | `Keeper_deletions | `Patch | `Link
+                   | `Client_detail _ | `Surface -> false)
+              | Some _ | None -> false)
+        in
+        match queue_play_owner, key with
+        | Wait_for_frame, _ -> key
+        | (Queue_input _ | Play_input | Other_input), Some name when single_panel_command ->
+            Some (Option.value ~default:name (Masc_tui_key_ime.single_latin_key name))
+        | (Queue_input _ | Play_input | Other_input), Some name when command_reading -> (
             match Masc_tui_key_ime.latin_keys name with
             | Some (first :: rest) ->
                 List.iter (fun latin_key -> Queue.add latin_key hangul_latin_queue) rest;
                 Some first
             | Some [] | None -> Some name)
-        | Some _ | None -> key
+        | (Queue_input _ | Play_input | Other_input), (Some _ | None) -> key
       in
       let insert_reading_search document insert text =
         if not compact_viewport then begin
@@ -26472,7 +27078,8 @@ and is loaded on demand through keeper_skill.
       let pressed =
         match click with
         | Some (row, column) when Option.is_none text_target ->
-            Masc_tui_hit.target_at !presented_presses ~row ~column
+            Masc_tui_hit.filter press_is_interactive (!presented).presses
+            |> Masc_tui_hit.target_at ~row ~column
         | Some _ | None -> None
       in
       (* The Activity pane row a click landed on. *)
@@ -26484,11 +27091,26 @@ and is loaded on demand through keeper_skill.
             | Pane_miss -> None)
         | None -> None
       in
+      let reject_recovered_paste () =
+        presented := Presented.reject_recovery !presented;
+        report_input_rejection state Masc_tui_action_notice.Paste_rejected
+          "Recovered paste was not applied; paste it again after the screen transition"
+      in
       (match input with
-       (* The invite card owns every key, and a paste is keys. One that reached
-          the composer under the card would put the link [y] just copied into a
-          draft that goes to a Keeper on the next Enter. It is first, above the
-          overlays the card is drawn over. *)
+       (* A paste belongs to the frame the terminal actually accepted. The
+          invite response can arrive before that card is painted: in that
+          interval a visible reader must keep its input. Once the card was
+          presented, its scroll report identifies it above the reader. *)
+       | Some (Pasted _) when play_was_presented || Option.is_some presented_queue ->
+           if recovered_paste then reject_recovered_paste ()
+           else report_input_rejection state Masc_tui_action_notice.Paste_rejected "Paste was not applied on this screen; retry in a text field"
+       | Some (Pasted _) when compact_viewport ->
+           if recovered_paste then reject_recovered_paste ()
+           else report_input_rejection state Masc_tui_action_notice.Paste_rejected "Paste was not applied on this screen; retry in a text field"
+       | Some (Pasted _) when Option.is_some beneath && Option.is_none presented_queue
+           && queue_play_owner = Wait_for_frame ->
+           if recovered_paste then reject_recovered_paste ()
+           else report_input_rejection state Masc_tui_action_notice.Paste_rejected "Screen transition: paste was not applied; retry"
        | Some (Pasted paste) when Option.is_some (current_board_reader state) ->
            let reader=state.board_reader in
            insert_reading_search (Masc_tui_board_reader.document reader)
@@ -26516,7 +27138,6 @@ and is loaded on demand through keeper_skill.
                  (Masc_tui_detail_reading.search_insert ~width ~height ~text reading)) paste.Masc_tui_paste.text)
              (current_detail_reading state)
        | Some (Pasted _) when state.msx_open -> ()
-       | Some (Pasted _) when Option.is_some (Masc_tui_types.play_card_shown state) -> ()
        | Some (Pasted paste) when Option.is_some state.collab ->
            (* The whole Collab overlay owns paste. Only its visible form may
               receive text; browsing, confirmation and compact frames never
@@ -26707,6 +27328,9 @@ and is loaded on demand through keeper_skill.
               editor, so text and dropped images cannot change the draft
               behind it. *)
            ()
+       | Some (Pasted _) when Option.is_some state.queue_panel ->
+           if recovered_paste then reject_recovered_paste ()
+           else report_input_rejection state Masc_tui_action_notice.Paste_rejected "Paste was not applied on this screen; retry in a text field"
        | Some (Pasted _)
          when state.view = Keepers Keeper_message
               && not (keeper_message_input_supported state) ->
@@ -26737,12 +27361,18 @@ and is loaded on demand through keeper_skill.
             | Some _ | None ->
                 handle_paste ~protect_recovered:recovered_paste state
                   ~base_path ~mailbox:async_messages ~paste)
+       | Some (Mouse_left_release _ | Mouse_wheel _) when help_owns_input -> ()
+       | Some (Mouse_left_release _) when (play_was_presented || Option.is_some presented_queue)
+           && queue_play_owner = Wait_for_frame -> ()
+       | Some (Mouse_left_release _) when Option.is_some presented_queue ->
+           Option.iter (press_marked_target state ~base_path ~mailbox:async_messages) pressed
        | Some (Mouse_left_release _) when Option.is_some pressed ->
            Option.iter
              (press_marked_target state ~base_path ~mailbox:async_messages)
              pressed
        | Some (Mouse_wheel _) when Option.is_some wheel_reader ->
            Option.iter (apply_clamped_scroll state) wheel_reader
+       | Some (Mouse_wheel _) when queue_play_owner = Wait_for_frame -> ()
        (* The wheel over the Activity pane scrolls the pane. The pane is drawn
           under no modal (render reserves it no columns while one is up), so
           the hit test alone says whether the notch is the pane's. *)
@@ -26837,23 +27467,47 @@ and is loaded on demand through keeper_skill.
        | Some (Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _)
        | Some (Mouse_wheel _)
        | None -> ());
+      (* A Help key interrupts a pending confirmation; it cannot confirm an
+         action belonging to the surface the sheet covers. *)
+      let confirmation_key = if help_owns_input then None else key in
       let quit_key =
-        match key with
+        match confirmation_key with
         | Some k ->
             (* On a viewport too small to draw them, no field is taking keys:
                the compact fallback further down owns every remaining one, so
                yielding there would leave the operator on a terminal they
                cannot read with no way out but Ctrl-C. *)
-            (not state.about_open)
-            && Option.is_none state.collab
+            (compact_viewport || not state.about_open)
+            && (compact_viewport || Option.is_none state.collab)
+            && (compact_viewport || Option.is_none state.queue_panel)
             && (compact_viewport
                || quit_key_allowed_for text_target)
             && Render_schedule.Input_shortcut.is_quit ~message_mode k
         | None -> false
       in
+      let handle_quit_key () =
+        let confirmed = match quit_before_input, state.quit_armed with
+          | Some before, Some arm ->
+              Masc_tui_action_notice.same_quit before arm.qa_confirmation
+              && quit_arm_matches state arm
+              && Option.exists (Masc_tui_action_notice.same_quit before) (last_visible_quit ())
+              && (match Masc_tui_action_notice.ordinary state.last_action with
+                  | None -> true
+                  | Some ordinary -> ordinary == Masc_tui_action_notice.quit_ordinary before)
+              && Unix.gettimeofday () -. snd (Masc_tui_action_notice.quit_ordinary before)
+                 <= last_action_window_s
+              && not (Masc_tui_exit_signals.interrupt_pending exit_signals)
+          | (Some _ | None), (Some _ | None) -> false in
+        if confirmed then begin
+          note_exit_reason Masc_tui_exit_reason.Quit_key;
+          raise Break
+        end else begin
+          arm_session_quit state ~kind:Masc_tui_action_notice.Quit_key ~key:"q"
+        end in
+      let input_seen = Option.is_some input || rejected_operator_input in
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
          a mouse report, or any other key means the operator stayed. *)
-      if Option.is_some input && not quit_key then state.quit_armed <- false;
+      if input_seen && not quit_key then withdraw_session_quit state;
       (* An armed shutdown expires on the next unrelated input. Otherwise it
          waits indefinitely and a later press of the same key -- after the
          cursor has moved, after a refresh -- submits work the operator armed
@@ -26869,13 +27523,13 @@ and is loaded on demand through keeper_skill.
          least of all across a resize the operator cannot see it through. *)
       let cancelled second_press =
         Masc_tui_keys.cancels_two_press
-          ~input_seen:(Option.is_some input) ~key ~second_press
+          ~input_seen ~key:confirmation_key ~second_press
       in
       (* A view change that no key caused, such as a dispatched task opening
          its surface, leaves the presets pane without passing through the
          Config arm below. A delete cannot be put back, so the first input
          seen anywhere else ends the arm. *)
-      if state.view <> Config && Option.is_some input then state.preset_armed <- None;
+      if state.view <> Config && input_seen then state.preset_armed <- None;
       (match state.view with
        | Approvals ->
            if cancelled [ "y"; "Y"; "n"; "N" ] then
@@ -26951,7 +27605,7 @@ and is loaded on demand through keeper_skill.
             match
               Masc_tui_connector_unbind.read_offer_input offer
                 ~frames_presented:state.frames_presented
-                ~input_seen:(Option.is_some input) ~key
+                ~input_seen ~key:confirmation_key
             with
             | Masc_tui_connector_unbind.Offer_waits -> None
             | Masc_tui_connector_unbind.Offer_accepted -> Some offer
@@ -26972,6 +27626,8 @@ and is loaded on demand through keeper_skill.
       let composer_claimed =
         Option.is_none state.account_login && Option.is_none state.lane_addons &&
         (not compact_viewport)
+        && (match queue_play_owner with Wait_for_frame -> false
+            | Queue_input _ | Play_input | Other_input -> true)
         (* Surface inspection and Dashboard Keeper selection precede an
            unfocused composer's entry key. A focused composer still owns
            every typed character, including i. *)
@@ -27052,6 +27708,58 @@ and is loaded on demand through keeper_skill.
            (* Handed to the terminal, the button's release never comes here. *)
            pointer_gesture := Masc_tui_pane_selection.Idle;
            Render_schedule.request render_schedule Render_schedule.Force
+       (* The compact fallback, including after invalidation, owns keys before
+          every hidden modal. Its advertised quit key remains available. *)
+       | Some _ when compact_viewport ->
+           if quit_key && Option.is_some (Frame_presenter.presented_rows frame_presenter)
+           then handle_quit_key ()
+       | Some k when help_owns_input && k = "h" ->
+           (* Session toggle; the persistent form is [tui].hints_visible in
+              runtime.toml, named on the help sheet itself. *)
+           state.hints_visible <- not state.hints_visible
+       | Some k when help_owns_input ->
+           (match k with
+            | "?" | "esc" ->
+                state.help_open <- false;
+                state.help_scroll <- 0
+            | "j" | "down" | "k" | "up" | "pageup" | "pagedown" ->
+                (* Bounded against the sheet the frame draws, which folds to
+                   two columns on a wide terminal and so holds half the rows
+                   the lines were written as. A page moves by the viewport
+                   height the sheet itself claims, so one press lands the
+                   reader where the last visible line was the first. *)
+                let count, height = Masc_tui_render.help_viewport state in
+                let step =
+                  match k with
+                  | "pageup" | "pagedown" -> max 1 height
+                  | _ -> 1
+                in
+                let move =
+                  match k with
+                  | "j" | "down" | "pagedown" -> Masc_tui_scroll.down
+                  | _ -> Masc_tui_scroll.up
+                in
+                (* [down]/[up] move by one; the page keys repeat the single
+                   step so the bound stays the scroll module's, not a
+                   re-derived one. *)
+                let rec repeat n scroll =
+                  if n <= 0 then scroll else repeat (n - 1) (move ~count ~height scroll)
+                in
+                state.help_scroll <- repeat step state.help_scroll
+            | "g" -> state.help_scroll <- 0
+            | "G" ->
+              let count, height = Masc_tui_render.help_viewport state in
+              state.help_scroll <- Masc_tui_scroll.maximum ~count ~height
+            | _ -> ())
+       (* A Play card can arrive after the last Queue frame, or close before
+          its replacement frame. The last accepted owner keeps the keys until
+          the terminal accepts the next frame. *)
+       | Some _ when queue_play_owner = Wait_for_frame ->
+           report_input_rejection state Masc_tui_action_notice.Input_rejected "Screen transition: input was not applied; review and retry"
+       | Some k when Option.is_some presented_queue_input ->
+           Option.iter (fun panel ->
+             handle_queue_panel_key state ~base_path ~mailbox:async_messages
+               ~presented_presses:(!presented).presses panel k) presented_queue_input
        (* The invite card holds the only copy of a link, so it takes every key and
           closes on the operator's own: Esc or q, after which /play link brings
           it back. Enter does not close it, so a second Enter, pressed while
@@ -27061,11 +27769,11 @@ and is loaded on demand through keeper_skill.
           only the mouse to copy the link with, and this is a screen worth
           copying from. *)
        | Some k
-         when Option.is_some (Masc_tui_types.play_card_shown state)
+         when not compact_viewport && Option.is_some (Masc_tui_types.play_card_shown state)
               && not (String.equal k toggle_mouse_tracking_key) ->
            (match k, Masc_tui_types.play_card_shown state with
             | ("esc" | "q" | "Q"), Some _ ->
-                state.quit_armed <- false;
+                state.quit_armed <- None;
                 state.play_invite <- { state.play_invite with shown_name = None }
             | ("y" | "Y"), Some card ->
                 copy_reference_to_terminal render_schedule
@@ -27099,7 +27807,7 @@ and is loaded on demand through keeper_skill.
             | Some session ->
               let set session = Masc_tui_types.put_machine_activity state session in
               (match key with
-               | "esc" | "q" | "Q" -> state.machine_activity_open <- None; state.quit_armed <- false
+               | "esc" | "q" | "Q" -> state.machine_activity_open <- None; state.quit_armed <- None
                | "?" -> state.help_open <- true; state.help_scroll <- 0
                | " " | "space" -> if not compact_viewport then set (Masc_tui_machine_activity.toggle session)
                | "s" | "S" -> if not compact_viewport then launch_machine_activity_save state ~mailbox:async_messages session
@@ -27119,7 +27827,7 @@ and is loaded on demand through keeper_skill.
             | Some session ->
               let set session = Masc_tui_types.put_exact_activity state session in
               (match key with
-               | "esc" | "q" | "Q" -> state.exact_activity_open <- None; state.quit_armed <- false
+               | "esc" | "q" | "Q" -> state.exact_activity_open <- None; state.quit_armed <- None
                | "?" -> state.help_open <- true; state.help_scroll <- 0
                | " " | "space" -> if not compact_viewport then set (Masc_tui_exact_activity.toggle session)
                | "s" | "S" -> if not compact_viewport then launch_exact_activity_save state ~mailbox:async_messages session
@@ -27922,12 +28630,12 @@ and is loaded on demand through keeper_skill.
        | Some "esc" when state.about_open ->
            state.about_open <- false;
            state.emblem_frame <- -1;
-           state.quit_armed <- false
+           state.quit_armed <- None
        | Some _ when state.about_open
                      && Masc_tui_emblem_screen.drawn () = Masc_tui_emblem_screen.Moving
                      && state.emblem_frame < Masc_tui_emblem_screen.final_frame ->
            state.emblem_frame <- Masc_tui_emblem_screen.final_frame;
-           state.quit_armed <- false;
+           state.quit_armed <- None;
            Render_schedule.request render_schedule Render_schedule.Force
        (* [quit_key] is already false while anything is taking typed text, the
           row search and the Board draft among them, so this asks nothing more
@@ -27935,15 +28643,7 @@ and is loaded on demand through keeper_skill.
           viewport override them, which is how a [q] typed into a narrow
           screen's row search armed the exit. *)
        | Some _ when quit_key ->
-           if state.quit_armed then begin
-             note_exit_reason Masc_tui_exit_reason.Quit_key;
-             raise Break
-           end
-           else begin
-             state.quit_armed <- true;
-             report_action state "system"
-               (session_quit_notice state ~key:"q")
-           end
+           handle_quit_key ()
        (* Also above the modals: the roster is chrome around whatever is
           showing, and reclaiming its columns should not depend on which
           surface is up. *)
@@ -27970,10 +28670,12 @@ and is loaded on demand through keeper_skill.
            (match toggle_acting_pane state with
             | Error reason -> report_action state "system" reason
             | Ok _ -> Render_schedule.request render_schedule Render_schedule.Force)
-       (* The compact fallback owns every remaining key. Put this before every
-          modal and surface branch: those states are hidden, and a question,
-          search cursor, or draft must not move behind the fallback. *)
-       | Some _ when compact_viewport -> ()
+       | Some k when (let terminal_rows, _ = get_terminal_size () in
+             match Masc_tui_render.frame_choice state ~terminal_rows with
+             | `Queue _ -> true | _ -> false) ->
+           Option.iter (fun panel ->
+             handle_queue_panel_key state ~base_path ~mailbox:async_messages
+               ~presented_presses:(!presented).presses panel k) state.queue_panel
        (* The Activity pane holds these keys while its cursor is up. Above
           the surfaces on purpose: a [j] here must not also move the list
           beside the pane. Any other key reaches the surface unchanged. *)
@@ -28582,44 +29284,6 @@ and is loaded on demand through keeper_skill.
             | Some snapshot ->
                 state.client_detail <- List.nth_opt snapshot.Masc.Tui_decode.cls_clients state.clients_surface_cursor;
                 state.client_detail_scroll <- 0)
-       | Some k when state.help_open && k = "h" ->
-           (* Session toggle; the persistent form is [tui].hints_visible in
-              runtime.toml, named on the help sheet itself. *)
-           state.hints_visible <- not state.hints_visible
-       | Some k when state.help_open ->
-           (match k with
-            | "?" | "esc" ->
-                state.help_open <- false;
-                state.help_scroll <- 0
-            | "j" | "down" | "k" | "up" | "pageup" | "pagedown" ->
-                (* Bounded against the sheet the frame draws, which folds to
-                   two columns on a wide terminal and so holds half the rows
-                   the lines were written as. A page moves by the viewport
-                   height the sheet itself claims, so one press lands the
-                   reader where the last visible line was the first. *)
-                let count, height = Masc_tui_render.help_viewport state in
-                let step =
-                  match k with
-                  | "pageup" | "pagedown" -> max 1 height
-                  | _ -> 1
-                in
-                let move =
-                  match k with
-                  | "j" | "down" | "pagedown" -> Masc_tui_scroll.down
-                  | _ -> Masc_tui_scroll.up
-                in
-                (* [down]/[up] move by one; the page keys repeat the single
-                   step so the bound stays the scroll module's, not a
-                   re-derived one. *)
-                let rec repeat n scroll =
-                  if n <= 0 then scroll else repeat (n - 1) (move ~count ~height scroll)
-                in
-                state.help_scroll <- repeat step state.help_scroll
-            | "g" -> state.help_scroll <- 0
-            | "G" ->
-              let count, height = Masc_tui_render.help_viewport state in
-              state.help_scroll <- Masc_tui_scroll.maximum ~count ~height
-            | _ -> ())
        (* Modal for the same reason the help sheet is: a panel that is
           answering "what is coming" should not have a surface binding fire
           underneath it. *)
@@ -28627,6 +29291,9 @@ and is loaded on demand through keeper_skill.
            let close () = close_agenda state in
            (match k with
             | ";" | "esc" -> close ()
+            | "?" ->
+                state.help_open <- true;
+                state.help_scroll <- 0
             | "pageup" | "pagedown" | "home" | "end" | "g" | "G" ->
                 let count, height = Masc_tui_render.agenda_viewport state in
                 let scroll = Masc_tui_render.agenda_scroll_position state in
@@ -30707,7 +31374,7 @@ and is loaded on demand through keeper_skill.
            Render_schedule.request render_schedule Render_schedule.Force
        | Some "R" when state.view = Approvals ->
            (match
-              Approval_authority.resolve ~presented:!presented_approval
+              Approval_authority.resolve ~presented:(!presented).approval
                 ~current:(Masc_tui_approvals_model.approval_items state) Confirm
             with
             | Some { Approval_authority.row = Masc_tui_approvals_model.Gate_row pending; _ } ->
@@ -31212,8 +31879,7 @@ and is loaded on demand through keeper_skill.
                    ~inspect_queue:(fun () ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->
-                         launch_keeper_queue state ~mailbox:async_messages
-                           ~keeper_name Masc_tui_queue_inspection.Inspect
+                         open_keeper_queue_panel state ~mailbox:async_messages ~keeper_name
                      | None -> ())
                    ~load_preparation:(fun () -> launch_selected_preparation_operation_read state ~mailbox:async_messages)
                    ~load_tool_changes:(fun () ->
@@ -31232,28 +31898,24 @@ and is loaded on demand through keeper_skill.
                      (* The same toggle the composer row carries. *)
                      | Some _ ->
                          request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
-                         state.last_action <-
-                           Some ("voice: stopping", Unix.gettimeofday ())
+                         set_last_action state (Some ("voice: stopping", Unix.gettimeofday ()))
                      | None -> ())
                    ~toggle_voice_continuous:(fun () ->
                      match state.voice_continuous, state.msg_target_keeper_name with
                      | Some _, _ ->
                          state.voice_continuous <- None;
                          state.voice_floor <- None;
-                         state.last_action <-
-                           Some ("voice: continuous off", Unix.gettimeofday ())
+                         set_last_action state (Some ("voice: continuous off", Unix.gettimeofday ()))
                      | None, Some _ when Option.is_some state.voice_capture ->
                          let notice =
                            if state.voice_capture_withdrawn
                            then "voice: discarding previous capture"
                            else "voice: recording in progress" in
-                         state.last_action <-
-                           Some (notice, Unix.gettimeofday ())
+                         set_last_action state (Some (notice, Unix.gettimeofday ()))
                      | None, Some keeper ->
                          state.voice_continuous <- Some keeper;
                          state.voice_floor <- None;
-                         state.last_action <-
-                           Some ("voice: continuous on", Unix.gettimeofday ());
+                         set_last_action state (Some ("voice: continuous on", Unix.gettimeofday ()));
                          if state.voice_capture = None
                          then
                            launch_voice_capture ~calibrate:true state ~mailbox:async_messages ~keeper
@@ -35164,9 +35826,45 @@ and is loaded on demand through keeper_skill.
         Render_schedule.request render_schedule Render_schedule.Background
       end;
 
+      (* A confirmation sees the event just handled in its old phase. Only
+         after that event is finished may a drained confirmation become ready. *)
+      state.quit_armed <- Option.map (fun arm ->
+          { arm with qa_confirmation =
+              Masc_tui_action_notice.quit_after_drain arm.qa_confirmation
+                ~currently_visible:(last_visible_quit ())
+                ~input_pending:(input_unsettled ()
+                  || Masc_tui_exit_signals.interrupt_pending exit_signals) }) state.quit_armed;
+      (match state.quit_armed with
+       | Some arm when Option.is_none (current_quit_confirmation state ~now:(Unix.gettimeofday ())) ->
+           let kind = Masc_tui_action_notice.quit_kind arm.qa_confirmation in
+           withdraw_session_quit state;
+           (match kind with
+            | Masc_tui_action_notice.Interrupt -> Masc_tui_exit_signals.withdraw_interrupt exit_signals
+            | Masc_tui_action_notice.Quit_key -> ())
+       | Some _ | None -> ());
+      let ready_input = input_reader_has_ready_input input_reader || not (Queue.is_empty hangul_latin_queue) in
+      (* An incomplete sequence with no ready bytes must not starve recovery
+         frames. A post-presentation hold keeps its eventual tail quarantined. *)
+      let transition_input_pending = ready_input || Option.is_some interrupted_paste in
+      let terminal_rows, _ = get_terminal_size () in
+      let frame_choice = Masc_tui_render.frame_choice state ~terminal_rows in
+      let owned_frame = match frame_choice with
+        | `Queue _ | `Play_card _ | `Help -> true
+        | `Too_small _ | `Account_login _ | `Palette | `Collab _ | `Lane_addons _
+        | `Detail_reading _ | `About | `Context | `Keeper_deletions
+        | `Agenda | `Answering | `Patch | `Link | `Client_detail _ | `Surface -> false in
+      let compact_recovery = match frame_choice with
+        | `Too_small _ -> not ready_input
+        | `Queue _ | `Play_card _ | `Account_login _ | `Palette | `Collab _ | `Lane_addons _
+        | `Detail_reading _ | `About | `Context | `Keeper_deletions | `Help
+        | `Agenda | `Answering | `Patch | `Link | `Client_detail _ | `Surface -> false in
+      let defer_owned_frame = transition_input_pending && not compact_recovery
+        && (owned_frame || Option.is_some (queue_owner_of_reader (!presented).reader)
+            || Option.is_some (play_card_of_reader (!presented).reader)
+            || help_is_presented (!presented).reader) in
       (match
          Render_schedule.take
-           ~input_pending:(input_reader_has_ready_input input_reader)
+           ~input_pending:ready_input
            render_schedule
            ~now_ns:(Mtime_clock.elapsed_ns ())
        with
@@ -35182,6 +35880,8 @@ and is loaded on demand through keeper_skill.
            Masc_tui_portrait_view.begin_frame ();
            Masc_tui_message_layout.begin_frame ();
            Masc_tui_portrait_view.flush Frame_presenter.Unchanged ~write:write_to_terminal
+       | Render_schedule.Render when defer_owned_frame ->
+           Render_schedule.request render_schedule Render_schedule.Background
        | Render_schedule.Render ->
            (* Keys and async updates can change the pane reservation after
               the interaction snapshot. Store the focus the next frame shows. *)
@@ -35232,9 +35932,13 @@ and is loaded on demand through keeper_skill.
                       state.home_decision_scroll <- first;
                       Masc_tui_frame_timing.finish_stage ~name:"home.selection" selection_started
                   | Overview, `Detail_reading _ -> ()
-                  | (Overview, (`Palette | (`Link | (`Help | (`About | (`Play_card _ | (`Client_detail _ | (`Account_login _ | (`Keeper_deletions | (`Agenda | (`Too_small _ | (`Collab _ | (`Context | (`Lane_addons _ | (`Answering | `Patch)))))))))))))))
+                  | (Overview, (`Palette | (`Link | (`Help | (`About | (`Play_card _ | (`Client_detail _ | (`Account_login _ | (`Keeper_deletions | (`Agenda | (`Too_small _ | (`Collab _ | (`Context | (`Lane_addons _ | (`Answering | (`Queue _ | `Patch))))))))))))))))
                   | ((Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | (System_logs | Keepers _))))))))))))))))))))), _) -> ());
-                 render ~home state)
+                 let compact_recovery_notice =
+                   if input_holds_incomplete_sequence input_reader then
+                     Some "Terminal sequence incomplete; Ctrl-C cancels it"
+                   else None in
+                 render ~home ~compact_recovery_notice state)
            in
            (* The frame is what the operator will act on next, so the scroll it
               had to clamp is the scroll the next keypress moves from. Applied
@@ -35249,7 +35953,7 @@ and is loaded on demand through keeper_skill.
            Masc_tui_frame_timing.time_present
              ~tag:frame.Frame_presenter.surface_key
              ~write:(output_string stdout) ~flush:(fun () -> flush stdout)
-             (present_frame frame approval presses panes clamped)
+             (present_frame frame approval presses panes ~input_pending:input_unsettled clamped)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

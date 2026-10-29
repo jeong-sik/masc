@@ -715,7 +715,7 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
     A conflict notice is the exception: it is rendered in front of the hints
     ({!leads_the_row}) rather than left in the tail, so it outlives the keys
     instead of going before them. *)
-let line ?literal_prefix ?action_text ?position ?(status = []) ?port ~dim ~reset
+let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = []) ?port ~dim ~reset
     ~max_cells ~hints () =
   let hints = prepare_hints hints in
   let statuses =
@@ -727,6 +727,18 @@ let line ?literal_prefix ?action_text ?position ?(status = []) ?port ~dim ~reset
     drawable_conflicts ?literal_prefix ~max_cells:(max 0 max_cells) ~hints
       (ordered_conflicts conflicts)
   in
+  (* The caller offers a preferred action only after resolving priority. It
+     replaces the fallback here only when it fits whole. The marker is added
+     after fitting so a clipped marker cannot count as complete evidence. *)
+  let action_text = match preferred_action with
+    | None -> action_text
+    | Some (text, mark) ->
+        let prefix = String.concat "  " (Option.to_list literal_prefix @ [text]) in
+        (match fit_with_conflicts ~literal_prefix:prefix ?position ~mark_omission:false
+                 ~max_cells:(max 0 max_cells) ~conflicts ~hints
+                 ~omissions:omission_order statuses with
+         | Some _ -> Some (mark text)
+         | None -> action_text) in
   let fitted =
     fit_body ?literal_prefix ?action_text ?position ~max_cells:(max 0 max_cells)
       ~conflicts ~hints ~omissions:omission_order statuses

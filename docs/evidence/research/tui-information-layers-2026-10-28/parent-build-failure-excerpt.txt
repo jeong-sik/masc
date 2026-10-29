@@ -1,0 +1,19 @@
+File "bin/masc_tui_render_overlays.ml", lines 938-943, characters 6-29:
+938 | ......(match panel.qp_receipt with
+939 |        | Some (Queue_action_receipt (Queue_info text) | Queue_read_receipt text) when budget > 2 ->
+940 |          c.push ("  " ^ Terminal_text.single_line text)
+941 |        | Some (Queue_action_receipt (Queue_error text)) when budget > 2 ->
+942 |          c.push ("  " ^ Theme.warn () ^ Terminal_text.single_line text ^ Ansi.reset)
+943 |        | Some _ | None -> ()).
+Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+  It will remain exhaustive when constructors are added to type Masc_tui_types.queue_panel_receipt.
+
+File "bin/masc_tui_render_overlays.ml", lines 938-943, characters 6-29:
+938 | ......(match panel.qp_receipt with
+939 |        | Some (Queue_action_receipt (Queue_info text) | Queue_read_receipt text) when budget > 2 ->
+940 |          c.push ("  " ^ Terminal_text.single_line text)
+941 |        | Some (Queue_action_receipt (Queue_error text)) when budget > 2 ->
+942 |          c.push ("  " ^ Theme.warn () ^ Terminal_text.single_line text ^ Ansi.reset)
+943 |        | Some _ | None -> ()).
+Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+  It will remain exhaustive when constructors are added to type Masc_tui_types.queue_panel_notice.

@@ -28,33 +28,21 @@ let terminate_signal t =
   | "" -> None
   | signal -> Some signal
 let request_interrupt t = Atomic.set t.interrupt_requested true
+let interrupt_pending t = Atomic.get t.interrupt_requested
 let withdraw_interrupt t = Atomic.set t.interrupt_armed false
 
 type verdict =
   | Continue
   | Interrupt_armed
+  | Interrupt_again
   | Quit
 
 let poll t =
   if Atomic.get t.terminate_requested then Quit
   else if Atomic.exchange t.interrupt_requested false then
-    if Atomic.get t.interrupt_armed then Quit
+    if Atomic.get t.interrupt_armed then Interrupt_again
     else begin
       Atomic.set t.interrupt_armed true;
       Interrupt_armed
     end
   else Continue
-
-(* The count comes first: a narrow footer cuts a notice short, and a count
-   after "press again to quit" was cut off at 100 columns. *)
-let quit_notice ~key ~waiting =
-  match waiting with
-  | 0 -> Printf.sprintf "%s: press again to quit, or any other key to stay" key
-  | 1 ->
-    Printf.sprintf
-      "%s: 1 unsent message is dropped if you press again to quit, or any other key to stay"
-      key
-  | n ->
-    Printf.sprintf
-      "%s: %d unsent messages are dropped if you press again to quit, or any other key to stay"
-      key n

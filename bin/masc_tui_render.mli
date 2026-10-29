@@ -167,11 +167,17 @@ val frame_choice :
   | `Detail_reading of Masc_tui_detail_reading.t
   | `About | `Palette | `Context | `Keeper_deletions | `Help
   | `Agenda | `Answering | `Patch | `Link
+  | `Queue of Masc_tui_types.queue_panel
   | `Client_detail of Masc.Tui_decode.client_row | `Surface ]
 (** The visible surface or overlay, also used before preparing Home focus. *)
 
+val queue_below_play : Masc_tui_types.state -> terminal_rows:int -> Masc_tui_types.queue_panel option
+(** The Queue that would own input with Play omitted, respecting the same
+    compact and overlay priority as [frame_choice]. *)
+
 val render :
   home:Masc_tui_home.prepared Lazy.t ->
+  compact_recovery_notice:string option ->
   Masc_tui_types.state ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option *
   Masc_tui_approvals_model.approval_row option *

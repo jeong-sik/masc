@@ -165,6 +165,47 @@ let find queue ~request_id =
     queue.items
 ;;
 
+type queue_position = Front | End
+
+let move queue ~keeper_name ~request_id position =
+  match find queue ~request_id with
+  | None -> Error "Local queue changed; refresh and select again"
+  | Some item when not (String.equal (item_keeper item) keeper_name) ->
+    Error "That message belongs to another Keeper"
+  | Some item ->
+    (match item.intent with
+    | Steer_after_interrupt -> Error "A steer retains its place ahead of ordinary messages"
+    | Next ->
+    let same_keeper = waiting_for_keeper queue ~keeper_name in
+    let others = List.filter (fun current ->
+      not (String.equal current.request.Chat.request_id request_id)) same_keeper in
+    let reordered = match position with
+      | End -> others @ [item]
+      | Front ->
+        let steers, ordinary = List.partition (fun current ->
+          match current.intent with Steer_after_interrupt -> true | Next -> false) others in
+        steers @ (item :: ordinary) in
+    let rec rebuild pending = function
+      | [] ->
+        (match pending with [] -> Ok [] | _ :: _ -> Error "Local queue changed")
+      | current :: rest when String.equal (item_keeper current) keeper_name ->
+        (match pending with
+         | [] -> Error "Local queue changed"
+         | replacement :: remaining ->
+           Result.map (fun tail -> replacement :: tail) (rebuild remaining rest))
+      | current :: rest -> Result.map (fun tail -> current :: tail) (rebuild pending rest)
+    in
+    Result.map (fun items -> {queue with items}) (rebuild reordered queue.items))
+;;
+
+let move_to_end queue ~keeper_name ~request_id =
+  move queue ~keeper_name ~request_id End
+;;
+
+let move_to_front queue ~keeper_name ~request_id =
+  move queue ~keeper_name ~request_id Front
+;;
+
 let replace_request queue ~request_id request =
   if not (String.equal request.Chat.request_id request_id)
   then Error "queue replacement must preserve request_id"
@@ -181,9 +222,10 @@ let replace_request queue ~request_id request =
 
 let join_target queue ~keeper_name =
   waiting_for_keeper queue ~keeper_name
-  |> List.rev
-  |> List.find_opt (fun item ->
-         match item.intent with
-         | Next -> true
-         | Steer_after_interrupt -> false)
+  |> List.fold_left (fun newest item ->
+       match item.intent, newest with
+       | Steer_after_interrupt, _ -> newest
+       | Next, None -> Some item
+       | Next, Some current when item.submission_seq > current.submission_seq -> Some item
+       | Next, Some _ -> newest) None
 ;;

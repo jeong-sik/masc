@@ -653,6 +653,15 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       (* Exactly one of path/artifact per config/tools/keeper_image_read.toml.
          No required params; a missing path must refuse without falling over. *)
       `Assoc [ ("path", `String "samples/tool-matrix-missing-image.png") ]
+  | "keeper_artifact_draft" ->
+      (* Only action is required per config/tools/keeper_artifact_draft.toml.
+         Opening an artifact the fresh workspace does not have must refuse
+         without falling over. *)
+      `Assoc
+        [
+          ("action", `String "open");
+          ("artifact_id", `String "tool-matrix-missing-artifact");
+        ]
   | other -> failwith ("missing keeper arguments contract for " ^ other)
 
 (* Every keeper tool here may either do the work or refuse it when called with

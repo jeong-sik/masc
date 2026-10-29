@@ -13,10 +13,15 @@ let reason_of_word ~field word =
   | None -> Error (Printf.sprintf "%s: unknown word %S" field word)
 ;;
 
+(* The lane is told by its own reasons only. *)
 let lane_of_word word =
   if String.equal word Standing.lane_armed_word
   then Ok (Ok ())
-  else Result.map (fun reason -> Error reason) (reason_of_word ~field:"lane" word)
+  else
+    let* reason = reason_of_word ~field:"lane" word in
+    if Standing.is_lane_reason reason
+    then Ok (Error reason)
+    else Error (Printf.sprintf "lane: %S is not a reason of the lane" word)
 ;;
 
 let standing_of_word word =

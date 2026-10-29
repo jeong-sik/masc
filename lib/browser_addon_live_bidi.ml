@@ -249,8 +249,8 @@ let run_with ~before_command_validation ~env ~owner ~directory work =
                    | Ok () -> ()
                    | Error detail ->
                      Log.Server.warn "browser Add-on Firefox result of command %s was not delivered: %s" command.id detail);
-                  (match result with Error (Peer.Outcome_unknown detail) -> Error detail
-                    | Ok _|Error (Before_effect _|Partial_failure _) -> Ok ()) in
+                  (match result with Error (Peer.Outcome_unknown detail | Peer.Observed_failure {disposition=Peer.Uncertain;message=detail;_}) -> Error detail
+                    | Ok _|Error (Before_effect _|Partial_failure _|Observed_failure {disposition=Not_started;_}) -> Ok ()) in
                 if Browser_addon_owner.is_retired owner then Ok () else serve () in
               let result=Eio.Fiber.first serve (fun () ->
                 Eio.Fiber.first

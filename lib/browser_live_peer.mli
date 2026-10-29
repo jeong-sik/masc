@@ -1,8 +1,10 @@
 (** What a live connection's peer receives and answers, whichever browser it
     drives: the WebDriver BiDi peer and the ego lite peer decode the same
-    verbs from the MASC poll wire and fail in the same three ways. *)
+    verbs from the MASC poll wire and share the same failure dispositions. *)
 
 type partial_failure = { tab_id : int; message : string; receipt : Yojson.Safe.t }
+type disposition = Not_started | Uncertain
+
 type failure =
   | Before_effect of string
   | Partial_failure of partial_failure
@@ -13,6 +15,12 @@ type failure =
           connection remains usable and [tab_id] remains owned by it; inspect
           this tab, never replay the step. *)
   | Outcome_unknown of string
+  | Observed_failure of { disposition : disposition; message : string; receipt : Yojson.Safe.t }
+      (** Validated browser observations from a failed step. [disposition] is
+          derived from workflow progress, never from native diagnostic flags.
+          [Not_started] marks [effectPhase] as [not_started]; [Uncertain]
+          makes no phase claim. Connection handling belongs to the host.
+          [receipt] preserves native diagnostics but never authorizes replay. *)
 
 (** Native host verbs, decoded once from the MASC poll wire. *)
 type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act

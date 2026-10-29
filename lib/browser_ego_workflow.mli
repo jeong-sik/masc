@@ -3,15 +3,30 @@
     never executes it. Ego owns locator/actionability/waits. *)
 val script : string
 
+type evaluation_timeout = {
+  timeout_ms : float;
+  execution_stopped : bool;
+  may_have_late_effects : bool;
+  page_responsive : bool;
+}
+type native_error = Evaluation_timed_out of evaluation_timeout
+(** Native SDK evaluation diagnostics, preserved as observations. Stopped
+    execution may still have late effects; these fields never authorize replay,
+    release held input, or prove that an action did not start. *)
+
 type outcome =
   | Completed of { reply : Yojson.Safe.t; input : Browser_ego_release.settled }
   | Stopped of { receipt : Yojson.Safe.t; message : string;
-      effect_started : bool; completed_effect : bool; input : Browser_ego_release.t }
+      effect_started : bool; completed_effect : bool; input : Browser_ego_release.t;
+      native_error : native_error option }
 
 (** Validates step indices/methods, native observation receipt types,
     saving-Fetch provenance/download ID/filename against the exact request,
     progress/effect flags and final snapshot
-    fields against the exact request. A malformed post-execution reply is
+    fields against the exact request, including the SDK's optional
+    [failure.nativeError] evaluation-timeout code, nonnegative finite timeout and
+    boolean observations. The public receipt retains the SDK field names.
+    A malformed post-execution reply is
     unknown, never a proof that no effect started.
 
     The release state is derived from the answers the SDK declared for the

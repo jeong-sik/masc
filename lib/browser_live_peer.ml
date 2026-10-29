@@ -1,5 +1,7 @@
 type partial_failure = { tab_id : int; message : string; receipt : Yojson.Safe.t }
+type disposition = Not_started | Uncertain
 type failure = Before_effect of string | Partial_failure of partial_failure | Outcome_unknown of string
+  | Observed_failure of { disposition : disposition; message : string; receipt : Yojson.Safe.t }
 type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
   | Page_goto | Page_context | Page_snapshot | Page_downloads | Page_native_workflow
 [@@deriving enumerate]
@@ -33,3 +35,6 @@ let payload = function
   | Error (Partial_failure {message;receipt;_}) -> `Assoc ["ok",`Bool false;"error",`String message;
       "effectPhase",`String "partial";"data",receipt]
   | Error (Outcome_unknown detail) -> `Assoc ["ok",`Bool false;"error",`String detail]
+  | Error (Observed_failure {disposition;message;receipt}) ->
+    let phase = match disposition with Not_started -> ["effectPhase",`String "not_started"] | Uncertain -> [] in
+    `Assoc (["ok",`Bool false;"error",`String message;"data",receipt] @ phase)

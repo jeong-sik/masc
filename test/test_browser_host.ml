@@ -203,7 +203,7 @@ let test_partial_tab_failure_keeps_connection_but_unknown_stops_it () =
   check bool "host continues after confirmed partial failure" true (Host.bidi_connection_can_continue partial);
   let tab_id = match partial with
     | Error (Peer.Partial_failure {tab_id;_}) -> tab_id
-    | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _) -> fail "missing created-tab receipt" in
+    | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _ | Peer.Observed_failure _) -> fail "missing created-tab receipt" in
   check bool "same peer can list tabs" true (Result.is_ok (Peer.dispatch peer ~verb:Peer.Tabs_list (obj [])));
   check bool "same peer can read the created tab" true
     (Result.is_ok (Peer.dispatch peer ~verb:Peer.Page_read (obj ["tabId",`Int tab_id])));
@@ -213,7 +213,15 @@ let test_partial_tab_failure_keeps_connection_but_unknown_stops_it () =
     ~command:(fun _ _ -> Error (Peer.Unanswered "lost reply")) in
   let unknown = Peer.dispatch unanswered ~verb:Peer.Page_act
     (obj ["action",`String "open_tab";"url",`String "https://example.test/"]) in
-  check bool "host stops after a dispatched unanswered command" false (Host.bidi_connection_can_continue unknown)
+  check bool "host stops after a dispatched unanswered command" false (Host.bidi_connection_can_continue unknown);
+  let diagnostic=Error (Peer.Observed_failure {disposition=Peer.Uncertain;message="native diagnostic";
+    receipt=obj ["executionStopped",`Bool true;"mayHaveLateEffects",`Bool true]}) in
+  check bool "native diagnostic does not authorize continuing an unknown connection" false
+    (Host.bidi_connection_can_continue diagnostic);
+  let not_started=Error (Peer.Observed_failure {disposition=Peer.Not_started;message="initial URL failed";
+    receipt=obj ["executionStopped",`Bool false;"mayHaveLateEffects",`Bool true]}) in
+  check bool "workflow progress keeps a pre-effect diagnostic connection usable" true
+    (Host.bidi_connection_can_continue not_started)
 ;;
 
 let () =

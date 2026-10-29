@@ -725,7 +725,7 @@ let finish_space t keep =
 
 let finish t = finish_space t [] |> Result.map (fun _ -> ()) |> Result.map_error (function
   | Live.Before_effect detail|Outcome_unknown detail -> detail
-  | Partial_failure {message;_} -> message)
+  | Partial_failure {message;_}|Observed_failure {message;_} -> message)
 
 let label_of t id = match List.find_opt (fun (_, known) -> known = id) t.pages with
   | Some (Managed label, _) -> Ok label
@@ -1722,12 +1722,17 @@ let workflow ?actor t args =
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error (unknown "workflow receipt is not an object") in
     match outcome with
     | Browser_ego_workflow.Completed {reply=value;input=_} -> receipt_of value
-    | Browser_ego_workflow.Stopped {receipt=value;message=detail;effect_started;completed_effect;input=_} ->
+    | Browser_ego_workflow.Stopped {receipt=value;message=detail;effect_started;completed_effect;input=_;native_error} ->
       let message=head detail ^ "; read the same tab before continuing; never replay the workflow" in
       if completed_effect then
         let* receipt=receipt_of value in Error (Live.Partial_failure {tab_id=request.tab_id;receipt;message})
-      else if effect_started then Error (Live.Outcome_unknown message)
-      else Error (Live.Before_effect message)
+      else match native_error with
+        | Some _ ->
+          let* receipt=receipt_of value in
+          let disposition=if effect_started then Live.Uncertain else Live.Not_started in
+          Error (Live.Observed_failure {disposition;message;receipt})
+        | None -> if effect_started then Error (Live.Outcome_unknown message)
+          else Error (Live.Before_effect message)
 
 let dispatch_raw ?actor t ~verb args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in
@@ -1770,4 +1775,6 @@ let dispatch ?command_id ?actor t ~verb args =
   | Error detail -> Error (Live.Before_effect detail)
   | Ok (Ok value) -> Ok (annotate value)
   | Ok (Error (Live.Partial_failure partial)) -> Error (Live.Partial_failure {partial with receipt=annotate partial.receipt})
+  | Ok (Error (Live.Observed_failure observed)) ->
+    Error (Live.Observed_failure {observed with receipt=annotate observed.receipt})
   | Ok (Error (Live.Before_effect _|Outcome_unknown _) as failure) -> failure

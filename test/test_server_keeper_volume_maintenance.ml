@@ -1,184 +1,163 @@
 open Alcotest
 open Masc
+
 module Fs = Keeper_volume_filesystem
 module Watch = Keeper_volume_filesystem_watch
-module Repair = Keeper_volume_repair
 module Sweep = Server_keeper_volume_maintenance
 
-(* RFC keeper-volume-filesystem-repair §3.3: when the sweep starts a repair.
-   The marks are process-wide, so every case uses its own volume name. *)
-
-let receipt =
-  Repair.repair
-    ~now:(fun () -> 0.)
-    ~repair_id:"repair-1"
-    ~helper:(Error "no helper image")
-    ~backup_exists:(fun ~path:_ -> false)
-    ~teardown:(fun () -> Ok ())
-    ~read_image:(fun ~path:_ -> Ok Fs.Clean)
-    ~clone:(fun ~source:_ ~target:_ -> Ok ())
-    ~keeper:"k"
-    ~volume:{ Watch.name = "masc-keeper-work-k"; kind = Watch.Work }
-    ~image:"/images/work.img"
+let inspect_json ~volume =
+  `List
+    [ `Assoc
+        [ "id", `String volume
+        ; ( "configuration"
+          , `Assoc
+              [ "name", `String volume
+              ; "format", `String "ext4"
+              ; "source", `String ("/images/" ^ volume ^ ".img")
+              ] )
+        ]
+    ]
 ;;
 
-type counts =
-  { mutable lane : int
-  ; mutable finished : int
-  ; mutable refused : int
-  }
+let inspect ~volume = Ok (inspect_json ~volume)
+let damaged = Fs.Errors_recorded { count = 1; first = None; last = None }
 
-let counts () = { lane = 0; finished = 0; refused = 0 }
-let run_now ~on_error:_ run = run ()
-
-let schedule counts ?(fork = run_now) ?(backup_exists = fun ~path:_ -> false) ~lane volume =
-  Sweep.schedule_repair
-    ~fork
-    ~backup_exists
-    ~run_in_lane:(fun () ->
-      counts.lane <- counts.lane + 1;
-      lane ())
-    ~on_finished:(fun _ -> counts.finished <- counts.finished + 1)
-    ~on_lane_error:(fun _ -> counts.refused <- counts.refused + 1)
-    ~volume
+(* This is the same sweep entrypoint used by [start]. Its injected effects
+   are inspection, reading, Board publication and warning only. *)
+let run_sweep ~notices ~read_image ~post ~warn_uncertain volumes =
+  Sweep.sweep ~notices ~now:(fun () -> 0.) ~inspect ~read_image ~post
+    ~warn_uncertain ~volumes:(fun () -> volumes)
 ;;
 
-let ran () = Ok (`Ran receipt)
-
-(* A repair that ran, whatever its outcome short of finding the operator's
-   backup, is not run again until a clean read ends the episode: a repeat
-   would remove the Keeper's guests on every idle pulse. *)
-let test_a_repair_runs_once_per_episode () =
-  let c = counts () in
-  let volume = "schedule-once" in
-  schedule c ~lane:ran volume;
-  schedule c ~lane:ran volume;
-  check int "one repair in the episode" 1 c.lane;
-  check int "its result was handled" 1 c.finished;
-  Sweep.end_episode volume;
-  schedule c ~lane:ran volume;
-  check int "a new episode repairs again" 2 c.lane
-;;
-
-(* A repair that stopped at the operator's backup tried nothing. The Board
-   tells the operator to remove that backup, so its removal, not the end of
-   the episode, lets the next pulse repair. *)
-let test_a_found_backup_waits_for_its_removal () =
-  let c = counts () in
-  let volume = "schedule-backup" in
-  let backup = Repair.backup_path ~image:receipt.image in
-  let present = ref true in
-  let backup_exists ~path = String.equal path backup && !present in
-  let found () = Ok (`Ran { receipt with Repair.outcome = Repair.Backup_present }) in
-  schedule c ~backup_exists ~lane:found volume;
-  schedule c ~backup_exists ~lane:found volume;
-  check int "no lane while that backup exists" 1 c.lane;
-  check int "its result was handled once" 1 c.finished;
-  present := false;
-  schedule c ~backup_exists ~lane:ran volume;
-  check int "repaired once the backup is gone" 2 c.lane;
-  schedule c ~backup_exists ~lane:ran volume;
-  check int "that repair is the episode's one" 2 c.lane;
-  let cleaned = "schedule-backup-clean" in
-  present := true;
-  schedule c ~backup_exists ~lane:found cleaned;
-  Sweep.end_episode cleaned;
-  schedule c ~backup_exists ~lane:ran cleaned;
-  check int "a clean read also ends the wait" 4 c.lane
-;;
-
-let test_a_busy_keeper_is_tried_again () =
-  let c = counts () in
-  let volume = "schedule-busy" in
-  let busy () = Ok (`Busy Keeper_owner.Admission_paused) in
-  schedule c ~lane:busy volume;
-  schedule c ~lane:busy volume;
-  check int "tried on each pulse" 2 c.lane;
-  check int "nothing finished" 0 c.finished
-;;
-
-let test_a_refused_lane_is_reported_and_tried_again () =
-  let c = counts () in
-  let volume = "schedule-refused" in
-  let refused () =
-    Error (Keeper_owner_registry.Command_lookup_failed (Keeper_owner_registry.Owner_not_found "k"))
+let test_damage_reaches_board_and_status () =
+  let notices = Sweep.create_notice_ledger () in
+  let volumes =
+    [ "keeper", { Watch.name = "repair-hold-work"; kind = Watch.Work }
+    ; "keeper", { Watch.name = "repair-hold-build"; kind = Watch.Build }
+    ]
   in
-  schedule c ~lane:refused volume;
-  schedule c ~lane:refused volume;
-  check int "tried on each pulse" 2 c.lane;
-  check int "each refusal reported" 2 c.refused
-;;
-
-(* While a repair waits for or holds the lane, the next pulse starts no
-   second one, and a clean read does not clear its mark. *)
-let test_a_running_repair_is_not_started_twice () =
-  let c = counts () in
-  let volume = "schedule-running" in
-  let pending = ref [] in
-  let defer ~on_error:_ run = pending := run :: !pending in
-  schedule c ~fork:defer ~lane:ran volume;
-  schedule c ~fork:defer ~lane:ran volume;
-  check int "one fiber" 1 (List.length !pending);
-  Sweep.end_episode volume;
-  schedule c ~fork:defer ~lane:ran volume;
-  check int "still one fiber" 1 (List.length !pending);
-  List.iter (fun run -> run ()) !pending;
-  schedule c ~lane:ran volume;
-  check int "the episode's one repair ran" 1 c.lane
-;;
-
-let test_a_crashed_repair_is_tried_again () =
-  let c = counts () in
-  let volume = "schedule-crashed" in
-  let catching ~on_error run =
-    try run () with
-    | Failure _ -> on_error ()
+  let posts = ref [] in
+  let warnings = ref [] in
+  let state = ref damaged in
+  let read_image ~path:_ = Ok !state in
+  let post ~keeper_name ~volume ~content ~meta_json =
+    posts := (keeper_name, volume, content, meta_json) :: !posts;
+    Ok ()
   in
-  let crash () = failwith "lane callback raised" in
-  schedule c ~fork:catching ~lane:crash volume;
-  schedule c ~fork:catching ~lane:crash volume;
-  check int "tried again after the crash" 2 c.lane
+  let warn_uncertain ~keeper_name ~volume ~observed_at:_ ~detail =
+    warnings := (keeper_name, volume, detail) :: !warnings
+  in
+  let sweep () = run_sweep ~notices ~read_image ~post ~warn_uncertain volumes in
+  sweep ();
+  sweep ();
+  check int "one Board write per damaged volume" 2 (List.length !posts);
+  check int "no unknown notices" 0 (List.length !warnings);
+  List.iter
+    (fun (keeper, volume, content, meta) ->
+       check string "notice keeper" "keeper" keeper;
+       check bool "notice describes paused repair" true
+         (Astring.String.is_infix ~affix:"does not start automatic" content);
+       check bool "notice names its volume" true
+         (Yojson.Safe.Util.member "volume" meta = `String volume);
+       match Watch.latest ~volume with
+       | Some { result = Ok { state; _ }; _ } ->
+         check bool "damage retained for status" true (state = damaged)
+       | Some _ | None -> fail "the damaged observation was not retained")
+    !posts;
+  state := Fs.Clean;
+  sweep ();
+  state := damaged;
+  sweep ();
+  check int "a clean read ends a recorded episode" 4 (List.length !posts)
 ;;
 
-let observation ~volume result = { Watch.volume; observed_at = 0.; result }
+let test_unknown_notice_is_not_replayed_or_forgotten () =
+  let notices = Sweep.create_notice_ledger () in
+  let volume = { Watch.name = "repair-hold-unknown"; kind = Watch.Work } in
+  let reads = ref [ Ok damaged; Error (Fs.Unreadable "unreadable"); Ok Fs.Clean; Ok damaged ] in
+  let read_image ~path:_ =
+    match !reads with
+    | reading :: rest -> reads := rest; reading
+    | [] -> fail "too many reads"
+  in
+  let posts = ref 0 in
+  let warnings = ref 0 in
+  let post ~keeper_name:_ ~volume:_ ~content:_ ~meta_json:_ =
+    incr posts;
+    Error "publication outcome unknown"
+  in
+  let warn_uncertain ~keeper_name:_ ~volume:_ ~observed_at:_ ~detail:_ = incr warnings in
+  run_sweep ~notices ~read_image ~post ~warn_uncertain [ "keeper", volume ];
+  run_sweep ~notices ~read_image ~post ~warn_uncertain [];
+  for _ = 1 to 3 do
+    run_sweep ~notices ~read_image ~post ~warn_uncertain [ "keeper", volume ]
+  done;
+  check int "a new damage episode is not suppressed" 2 !posts;
+  check int "unknown writes remain visible without a listed volume or after clean" 6 !warnings
+;;
 
-let test_the_observation_decides_what_to_do () =
-  let volume = { Watch.name = "act-on"; kind = Watch.Work } in
-  let scheduled = ref [] in
-  let record ~(volume : Watch.volume) ~image = scheduled := (volume.name, image) :: !scheduled in
-  let damaged = Fs.Errors_recorded { count = 1; first = None; last = None } in
-  Sweep.act_on
-    ~schedule:record
-    ~volume
-    (observation ~volume:volume.name (Ok { Watch.source = "/images/act-on.img"; state = damaged }));
-  check (list (pair string string)) "damage schedules a repair of that image" [ "act-on", "/images/act-on.img" ] !scheduled;
-  Sweep.act_on
-    ~schedule:record
-    ~volume
-    (observation ~volume:volume.name (Error (Watch.Inspect_refused "XPC timeout")));
-  check int "a failed read schedules nothing" 1 (List.length !scheduled);
-  (* A clean read ends the episode, so the next damage is repaired again. *)
-  let c = counts () in
-  schedule c ~lane:ran volume.name;
-  Sweep.act_on
-    ~schedule:record
-    ~volume
-    (observation ~volume:volume.name (Ok { Watch.source = "/images/act-on.img"; state = Fs.Clean }));
-  schedule c ~lane:ran volume.name;
-  check int "repaired again after a clean read" 2 c.lane
+let test_interrupted_post_and_reentrant_sweep_do_not_replay () =
+  let notices = Sweep.create_notice_ledger () in
+  let volume = { Watch.name = "repair-hold-interrupted"; kind = Watch.Work } in
+  let posts = ref 0 in
+  let warnings = ref 0 in
+  let read_image ~path:_ = Ok damaged in
+  let reenter = ref (fun () -> ()) in
+  let post ~keeper_name:_ ~volume:_ ~content:_ ~meta_json:_ =
+    incr posts;
+    (!reenter) ();
+    raise (Eio.Cancel.Cancelled (Failure "after Board write"))
+  in
+  let warn_uncertain ~keeper_name:_ ~volume:_ ~observed_at:_ ~detail:_ = incr warnings in
+  let sweep () = run_sweep ~notices ~read_image ~post ~warn_uncertain [ "keeper", volume ] in
+  reenter := sweep;
+  (match sweep () with
+   | () -> fail "cancellation was swallowed"
+   | exception Eio.Cancel.Cancelled _ -> ());
+  sweep ();
+  check int "neither a reentrant sweep nor cancellation replays the write" 1 !posts;
+  check int "interruption and the next pulse report uncertainty" 2 !warnings
+;;
+
+let test_failed_post_does_not_stop_other_volumes () =
+  let notices = Sweep.create_notice_ledger () in
+  let broken = { Watch.name = "repair-hold-throws"; kind = Watch.Work } in
+  let next = { Watch.name = "repair-hold-after-throws"; kind = Watch.Build } in
+  let posts = ref [] in
+  let warnings = ref 0 in
+  let read_image ~path:_ = Ok damaged in
+  let post ~keeper_name:_ ~volume ~content:_ ~meta_json:_ =
+    posts := volume :: !posts;
+    if String.equal volume broken.name then failwith "after Board write" else Ok ()
+  in
+  let warn_uncertain ~keeper_name:_ ~volume:_ ~observed_at:_ ~detail:_ = incr warnings in
+  let sweep () =
+    run_sweep ~notices ~read_image ~post ~warn_uncertain
+      [ "keeper", broken; "keeper", next ]
+  in
+  sweep ();
+  sweep ();
+  check (list string) "failure does not replay or stop the next volume"
+    [ next.name; broken.name ] !posts;
+  check int "the unresolved first notice is warned on both pulses" 2 !warnings;
+  match Watch.latest ~volume:next.name with
+  | Some { result = Ok { state; _ }; _ } ->
+    check bool "the second volume was observed" true (state = damaged)
+  | Some _ | None -> fail "the second volume was not observed"
 ;;
 
 let () =
   run
     "server_keeper_volume_maintenance"
-    [ ( "schedule"
-      , [ test_case "once per episode" `Quick test_a_repair_runs_once_per_episode
-        ; test_case "found backup waits for its removal" `Quick test_a_found_backup_waits_for_its_removal
-        ; test_case "busy keeper tried again" `Quick test_a_busy_keeper_is_tried_again
-        ; test_case "refused lane tried again" `Quick test_a_refused_lane_is_reported_and_tried_again
-        ; test_case "running repair not started twice" `Quick test_a_running_repair_is_not_started_twice
-        ; test_case "crashed repair tried again" `Quick test_a_crashed_repair_is_tried_again
-        ; test_case "observation decides" `Quick test_the_observation_decides_what_to_do
+    [ ( "sweep"
+      , [ test_case "damage reaches Board and status" `Quick
+            test_damage_reaches_board_and_status
+        ; test_case "unknown notice is retained" `Quick
+            test_unknown_notice_is_not_replayed_or_forgotten
+        ; test_case "interrupted and reentrant publication" `Quick
+            test_interrupted_post_and_reentrant_sweep_do_not_replay
+        ; test_case "one post exception does not stop the sweep" `Quick
+            test_failed_post_does_not_stop_other_volumes
         ] )
     ]
 ;;

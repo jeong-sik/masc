@@ -1187,7 +1187,7 @@ let respond_and_drive_upgrade
 (** Handle an HTTP/1.1 [GET /ws] upgrade on the main HTTP origin using
     the shared MCP session protocol.  Requires the Gluten [upgrade]
     capability, threaded from the route via
-    {!Http_server_eio.Router.ws_get}.  Returns [Ok ()] on a successful
+    {!Server_route.ws_get}.  Returns [Ok ()] on a successful
     101 + drive, [Error msg] on handshake failure.
 
     @param on_message Callback for incoming text messages.

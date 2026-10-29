@@ -290,7 +290,7 @@ val upgrade_connection :
 (** Handles an HTTP/1.1 [GET /ws] upgrade on the main HTTP origin using the
     shared MCP session protocol ([mcp_websocket_handler]) and attachment
     ({!respond_and_drive_upgrade}).  [upgrade] is the Gluten capability
-    threaded from the route via {!Http_server_eio.Router.ws_get}.  When [sw]
+    threaded from the route via {!Server_route.ws_get}.  When [sw]
     and [clock] are provided, forks the protocol-level heartbeat on a
     per-connection switch (a child of [sw]) and closes the session after a
     configurable number of missed pongs. [runtime_authority] is the canonical

@@ -801,53 +801,11 @@ module Router = struct
       router.log.entries
     |> List.rev
 
-  (* The functions below record [Route_access.Unclassified]. They stay until the
-     last layer of the typed-route-auth stack moves every registration to
-     [Server_route] and deletes them (docs/rfc/RFC-typed-route-auth.md). *)
-  let add ~path ~methods ~handler router =
-    add_kind Exact ~access:Route_access.Unclassified ~path ~methods
-      ~handler:(Plain handler) router
-
-  let get path handler routes =
-    add ~path ~methods:[`GET] ~handler routes
-
-  let post path handler routes =
-    add ~path ~methods:[`POST] ~handler routes
-
-  let any path handler routes =
-    add ~path ~methods:[`GET; `POST; `PUT; `DELETE; `OPTIONS] ~handler routes
-
-  (** Register a WebSocket-upgrade route.  The handler additionally
-      receives the Gluten [upgrade] capability so it can drive the
-      post-101 connection.  RFC-0281. *)
-  let ws_get path handler router =
-    add_kind Exact ~access:Route_access.Unclassified ~path ~methods:[`GET]
-      ~handler:(Ws handler) router
-
-  (** Match by prefix: path field is treated as a prefix, not exact match.
-      The suffix (path after the prefix) is available via [Request.path]. *)
-  let prefix_get prefix handler routes =
-    add_kind Prefix ~access:Route_access.Unclassified ~path:prefix
-      ~methods:[`GET] ~handler:(Plain handler) routes
-
-  let prefix_post prefix handler routes =
-    add_kind Prefix ~access:Route_access.Unclassified ~path:prefix
-      ~methods:[`POST] ~handler:(Plain handler) routes
-
-  let prefix_delete prefix handler routes =
-    add_kind Prefix ~access:Route_access.Unclassified ~path:prefix
-      ~methods:[`DELETE] ~handler:(Plain handler) routes
-
-  let prefix_put prefix handler routes =
-    add_kind Prefix ~access:Route_access.Unclassified ~path:prefix
-      ~methods:[`PUT] ~handler:(Plain handler) routes
-
-  (* Typed registration. The only way to give a route an access other than
-     [Route_access.Unclassified] is [Make_typed]: it applies the wrapper that
-     goes with the kind to the handler and records the kind in the same call, so
-     a route cannot say [Permission] and run a handler that checks nothing.
-     [add_kind], the function that takes the access and the handler as separate
-     arguments, is not exported. *)
+  (* Typed registration. [Make_typed] is the only way to register a route: it
+     applies the wrapper that goes with the kind to the handler and records the
+     kind in the same call, so a route cannot say [Permission] and run a handler
+     that checks nothing. [add_kind], the function that takes the access and the
+     handler as separate arguments, is not exported. *)
   module type Wrappers = sig
     type state
 

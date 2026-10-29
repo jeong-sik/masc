@@ -7,7 +7,6 @@ type self_authenticated_reason =
   | Subpath_dispatch
 
 type t =
-  | Unclassified
   | Always_public
   | Public_read
   | Read_auth
@@ -33,7 +32,6 @@ let to_json t =
     kind name [ "permission", `String (Masc_domain.permission_to_string p) ]
   in
   match t with
-  | Unclassified -> kind "unclassified" []
   | Always_public -> kind "always_public" []
   | Public_read -> kind "public_read" []
   | Read_auth -> kind "read_auth" []

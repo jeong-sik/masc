@@ -18,9 +18,13 @@ let fresh_test_base_path () =
 
 let () = Random.self_init ()
 
+(* The clock of the running test, for the lock probes below. *)
+let clock = ref None
+
 let started ~lookup f () =
   Eio_main.run
   @@ fun env ->
+  clock := Some (Eio.Stdenv.clock env);
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
@@ -145,6 +149,19 @@ let test_a_comment_resolves_the_same_way =
     check (list string) "the undeclared name is reported" [ "check" ] unresolved)
 ;;
 
+(* Whether any file the Board keeps under its data directory holds [marker].
+   A refused write leaves nothing in memory and nothing on disk. *)
+let persisted_text_contains marker =
+  let dir = Filename.dirname (Board.persist_path ()) in
+  Sys.file_exists dir
+  && Array.exists
+       (fun name ->
+          let path = Filename.concat dir name in
+          (not (Sys.is_directory path))
+          && contains ~sub:marker (In_channel.with_open_bin path In_channel.input_all))
+       (Sys.readdir dir)
+;;
+
 (* A lookup that cannot answer refuses the write: recording "no recipient" for
    a name that may be declared would lose the address for good. *)
 let test_a_lookup_failure_refuses_the_write_and_stores_nothing =
@@ -155,18 +172,19 @@ let test_a_lookup_failure_refuses_the_write_and_stores_nothing =
       else Ok None)
   in
   started ~lookup:failing (fun () ->
-    (match write "@broken look" with
+    (match write "@broken look zzmarker-create" with
      | Error (Board.Recipient_lookup_failed detail) ->
        check bool "the error says what is broken" true (contains ~sub:"broken" detail)
      | Ok _ -> fail "the write must be refused"
      | Error error -> fail (Board.show_board_error error));
     check int "nothing was stored" 0 (List.length (Board_dispatch.list_posts ()));
+    check bool "nothing reached the disk" false (persisted_text_contains "zzmarker-create");
     let post, _ = get (write "original text, no address") in
     (match
        Board_dispatch.update_post_with_unresolved
          ~post_id:(post_id post)
          ~editor:"writer"
-         ~content:"edited, now @broken"
+         ~content:"edited, now @broken zzmarker-edit"
          ()
      with
      | Error (Board.Recipient_lookup_failed _) -> ()
@@ -174,11 +192,12 @@ let test_a_lookup_failure_refuses_the_write_and_stores_nothing =
      | Error error -> fail (Board.show_board_error error));
     let unchanged = get (Board_dispatch.get_post ~post_id:(post_id post)) in
     check string "the post is as it was" "original text, no address" unchanged.body;
+    check bool "the edit reached no disk" false (persisted_text_contains "zzmarker-edit");
     (match
        Board_dispatch.add_comment_with_unresolved
          ~post_id:(post_id post)
          ~author:"other"
-         ~content:"@broken ping"
+         ~content:"@broken ping zzmarker-comment"
          ()
      with
      | Error (Board.Recipient_lookup_failed _) -> ()
@@ -188,7 +207,8 @@ let test_a_lookup_failure_refuses_the_write_and_stores_nothing =
       int
       "no comment was stored"
       0
-      (List.length (get (Board_dispatch.get_comments ~post_id:(post_id post)))))
+      (List.length (get (Board_dispatch.get_comments ~post_id:(post_id post))));
+    check bool "the comment reached no disk" false (persisted_text_contains "zzmarker-comment"))
 ;;
 
 (* Platform code decides whom a system post reaches. Its text is evidence, so a
@@ -210,7 +230,8 @@ let test_a_system_post_never_asks_the_lookup =
 ;;
 
 (* The lookup answers once per write, and the signal carries that answer. A
-   dispatcher that asked again to build the signal would get "undeclared". *)
+   dispatcher that asked again to build the signal would get "undeclared", and
+   one that read the text again would get the alias as it was written. *)
 let test_the_write_asks_once_and_the_signal_carries_that_answer =
   let armed = ref false in
   let asked = ref 0 in
@@ -220,7 +241,7 @@ let test_the_write_asks_once_and_the_signal_carries_that_answer =
       if !armed
       then (
         armed := false;
-        Ok (Some (agent (String.lowercase_ascii (spelled candidate)))))
+        declared_from table candidate)
       else Ok None)
   in
   started ~lookup:one_shot (fun () ->
@@ -237,7 +258,7 @@ let test_the_write_asks_once_and_the_signal_carries_that_answer =
       asked := 0
     in
     armed := true;
-    let post, _ = get (write "@alice hello") in
+    let post, _ = get (write "@a-team hello") in
     expect_once ~step:"create";
     check (list string) "create: the record agrees" [ "alice" ] (target_names post.audience);
     armed := true;
@@ -246,7 +267,7 @@ let test_the_write_asks_once_and_the_signal_carries_that_answer =
         (Board_dispatch.update_post_with_unresolved
            ~post_id:(post_id post)
            ~editor:"writer"
-           ~content:"@alice again, edited"
+           ~content:"@a-team again, edited"
            ())
     in
     expect_once ~step:"edit";
@@ -257,7 +278,7 @@ let test_the_write_asks_once_and_the_signal_carries_that_answer =
         (Board_dispatch.add_comment_with_unresolved
            ~post_id:(post_id post)
            ~author:"other"
-           ~content:"@alice ping"
+           ~content:"@a-team ping"
            ())
     in
     expect_once ~step:"comment";
@@ -301,28 +322,36 @@ let test_a_per_write_lookup_starts_once_for_each_write =
     check int "a text with no name starts nothing" 2 !starts)
 ;;
 
-(* Whether a reader that arrives now has to wait for the store lock.  The read
-   is started first and a sibling that only yields once is the other side of the
-   race, so a lock nobody holds lets the read finish first. *)
-let a_read_would_wait () =
-  Eio.Fiber.first
-    (fun () ->
-       ignore (Board_dispatch.list_posts ());
-       false)
-    (fun () ->
-       Eio.Fiber.yield ();
-       true)
+(* Whether an operation that starts now has to wait for a Board lock: one that
+   has not finished after this long is waiting.  A free lock lets it finish in
+   milliseconds, however often it stops for the disk on the way. *)
+let would_wait operation =
+  match !clock with
+  | None -> fail "the lock probes need the clock of a running test"
+  | Some clock ->
+    Eio.Fiber.first
+      (fun () ->
+         operation ();
+         false)
+      (fun () ->
+         Eio.Time.sleep clock 0.3;
+         true)
 ;;
 
-(* Raising here ends the write that holds the lock, so a lookup that runs under
-   the lock fails the test instead of leaving it waiting on that lock. *)
-let require_the_store_lock_is_free () =
-  if a_read_would_wait () then fail "the lookup ran while the store lock was held"
+(* A reader waits for the store lock and a writer for the persistence lock.
+   Raising here ends the write that holds the lock, so a lookup that runs under
+   a lock fails the test instead of leaving it waiting on that lock. *)
+let require_no_lock_is_held () =
+  if would_wait (fun () -> ignore (Board_dispatch.list_posts ()))
+  then fail "the lookup ran while the store lock was held";
+  if would_wait (fun () -> ignore (write "lock probe"))
+  then fail "the lookup ran while the persistence lock was held"
 ;;
 
-(* The lookup reads the disk.  An edit asks it before it takes the locks, so no
-   reader waits behind the disk. *)
-let test_an_edit_asks_the_lookup_before_it_takes_the_locks =
+(* The lookup reads the disk.  A write asks it before it takes any lock, so no
+   reader or writer waits behind the disk, whether the write creates a post,
+   comments or edits. *)
+let test_no_write_asks_the_lookup_while_a_lock_is_held =
   let armed = ref false in
   let asked = ref 0 in
   let lookup =
@@ -330,20 +359,28 @@ let test_an_edit_asks_the_lookup_before_it_takes_the_locks =
       if !armed
       then (
         incr asked;
-        require_the_store_lock_is_free ());
+        require_no_lock_is_held ());
       declared_from table candidate)
   in
   started ~lookup (fun () ->
     let post, _ = get (write "first") in
     armed := true;
+    ignore (get (write "@alice a new post"));
+    ignore
+      (get
+         (Board_dispatch.add_comment_with_unresolved
+            ~post_id:(post_id post)
+            ~author:"other"
+            ~content:"@bob a comment"
+            ()));
     ignore
       (get
          (Board_dispatch.update_post_with_unresolved
             ~post_id:(post_id post)
             ~editor:"writer"
-            ~content:"@alice and @bob"
+            ~content:"@alice an edit"
             ()));
-    check bool "the lookup was asked" true (!asked > 0))
+    check int "each of the three writes asked the lookup once" 3 !asked)
 ;;
 
 (* Only the owner's edit is worked out before the locks.  Somebody else's edit
@@ -385,7 +422,7 @@ let test_an_edit_works_out_again_when_the_post_changed_during_the_lookup =
         incr alice_asked;
         if !alice_asked = 1
         then (
-          require_the_store_lock_is_free ();
+          require_no_lock_is_held ();
           !during_the_lookup ()));
       declared_from table candidate)
   in
@@ -416,6 +453,79 @@ let test_an_edit_works_out_again_when_the_post_changed_during_the_lookup =
       (target_names edited.audience);
     let stored = get (Board_dispatch.get_post ~post_id:(post_id post)) in
     check string "the stored text is the edit's" "@alice @bob" stored.body)
+;;
+
+(* An edit that leaves the text alone does not address anybody anew.  The
+   recorded audience stays what it was written as and the lookup is not asked,
+   so a declaration that changed since then does not rewrite it. *)
+let test_an_edit_that_leaves_the_text_alone_keeps_the_recorded_audience =
+  let current = ref table in
+  let asked = ref 0 in
+  let lookup =
+    Recipient_lookup.make (fun candidate ->
+      incr asked;
+      declared_from !current candidate)
+  in
+  started ~lookup (fun () ->
+    let post, _ = get (write ~visibility:Board.Public "@alice same text") in
+    check (list string) "declared when written" [ "alice" ] (target_names post.audience);
+    current := [ "bob", "bob" ];
+    asked := 0;
+    let edited, unresolved =
+      get
+        (Board_dispatch.update_post_with_unresolved
+           ~post_id:(post_id post)
+           ~editor:"writer"
+           ~content:"@alice same text"
+           ())
+    in
+    check (list string) "the recorded audience stays" [ "alice" ] (target_names edited.audience);
+    check (list string) "nothing is reported again" [] unresolved;
+    check int "the lookup was not asked" 0 !asked)
+;;
+
+(* A comment replaces the post record and leaves what the edit's early work read
+   alone, so the edit does not ask again. *)
+let test_a_comment_during_the_lookup_does_not_make_the_edit_ask_again =
+  let alice_asked = ref 0 in
+  let during_the_lookup = ref (fun () -> ()) in
+  let lookup =
+    Recipient_lookup.make (fun candidate ->
+      if String.equal (spelled candidate) "alice"
+      then (
+        incr alice_asked;
+        if !alice_asked = 1 then !during_the_lookup ());
+      declared_from table candidate)
+  in
+  started ~lookup (fun () ->
+    let post, _ = get (write ~visibility:Board.Public "first") in
+    during_the_lookup :=
+      (fun () ->
+         ignore
+           (get
+              (Board_dispatch.add_comment_with_unresolved
+                 ~post_id:(post_id post)
+                 ~author:"other"
+                 ~content:"a plain comment"
+                 ())));
+    let edited, _ =
+      get
+        (Board_dispatch.update_post_with_unresolved
+           ~post_id:(post_id post)
+           ~editor:"writer"
+           ~content:"@alice edited"
+           ())
+    in
+    check int "alice was asked once" 1 !alice_asked;
+    check (list string) "the edit recorded its address" [ "alice" ] (target_names edited.audience))
+;;
+
+(* The targets are stored in name order, not in the order they were written, so
+   the same names make the same record. *)
+let test_targets_are_stored_in_name_order =
+  started ~lookup:(declaring table) (fun () ->
+    let post, _ = get (write "@bob and then @alice") in
+    check (list string) "name order" [ "alice"; "bob" ] (target_names post.audience))
 ;;
 
 (* A read can start the backend before the server does. That backend has no
@@ -466,6 +576,38 @@ let test_the_post_tool_answers_with_the_unresolved_names =
     | None -> fail "the response must still read back as a post")
 ;;
 
+(* The comment and the edit tool answer like the post tool does. *)
+let test_the_comment_and_edit_tools_answer_with_the_unresolved_names =
+  started ~lookup:(declaring table) (fun () ->
+    let post, _ = get (write "first") in
+    let call name args =
+      Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name (`Assoc args)
+    in
+    let unresolved_names result =
+      Yojson.Safe.Util.(Tool_result.data result |> member "unresolved" |> to_list |> List.map to_string)
+    in
+    let commented =
+      call
+        "masc_board_comment"
+        [ "post_id", `String (post_id post)
+        ; "author", `String "other"
+        ; "content", `String "@alice and @check"
+        ]
+    in
+    check bool "the comment tool succeeded" true (Tool_result.is_success commented);
+    check (list string) "the comment response lists the undeclared name" [ "check" ] (unresolved_names commented);
+    let edited =
+      call
+        "masc_board_post_update"
+        [ "post_id", `String (post_id post)
+        ; "author", `String "writer"
+        ; "content", `String "@bob and @param"
+        ]
+    in
+    check bool "the edit tool succeeded" true (Tool_result.is_success edited);
+    check (list string) "the edit response lists the undeclared name" [ "param" ] (unresolved_names edited))
+;;
+
 let () =
   run
     "Board recipient resolution"
@@ -507,9 +649,9 @@ let () =
             `Quick
             test_a_per_write_lookup_starts_once_for_each_write
         ; test_case
-            "an edit asks the lookup before it takes the locks"
+            "no write asks the lookup while a lock is held"
             `Quick
-            test_an_edit_asks_the_lookup_before_it_takes_the_locks
+            test_no_write_asks_the_lookup_while_a_lock_is_held
         ; test_case
             "an edit by somebody else asks the lookup nothing"
             `Quick
@@ -518,6 +660,18 @@ let () =
             "an edit works out again when the post changed during the lookup"
             `Quick
             test_an_edit_works_out_again_when_the_post_changed_during_the_lookup
+        ; test_case
+            "an edit that leaves the text alone keeps the recorded audience"
+            `Quick
+            test_an_edit_that_leaves_the_text_alone_keeps_the_recorded_audience
+        ; test_case
+            "a comment during the lookup does not make the edit ask again"
+            `Quick
+            test_a_comment_during_the_lookup_does_not_make_the_edit_ask_again
+        ; test_case
+            "targets are stored in name order"
+            `Quick
+            test_targets_are_stored_in_name_order
         ] )
     ; ( "backend"
       , [ test_case
@@ -534,6 +688,10 @@ let () =
             "the post tool answers with the unresolved names"
             `Quick
             test_the_post_tool_answers_with_the_unresolved_names
+        ; test_case
+            "the comment and edit tools answer with the unresolved names"
+            `Quick
+            test_the_comment_and_edit_tools_answer_with_the_unresolved_names
         ] )
     ]
 ;;

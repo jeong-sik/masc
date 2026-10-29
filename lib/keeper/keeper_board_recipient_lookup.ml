@@ -24,6 +24,16 @@ let recipient id =
          (Board.show_board_error error))
 ;;
 
+(* The settings are read from disk.  A read that raises is a failed lookup, so
+   the write ends with an error the author gets instead of an exception. *)
+let reading read =
+  match read () with
+  | result -> result
+  | exception Sys_error detail -> Error detail
+  | exception Unix.Unix_error (cause, call, path) ->
+    Error (Printf.sprintf "%s %s: %s" call path (Unix.error_message cause))
+;;
+
 (* [all_metas] is every Keeper's settings, read the first time a name needs
    them and then kept for the rest of the write. *)
 let declared ~config ~all_metas candidate =
@@ -40,10 +50,17 @@ let declared ~config ~all_metas candidate =
        let failed detail =
          Error (Printf.sprintf "cannot resolve @%s: %s" written detail)
        in
-       (match Keeper_meta_store.read_effective_meta config name with
+       (* A file this build cannot read is not "no such Keeper": taking it for
+          one would turn the address into prose without a word to the author. *)
+       (match
+          reading (fun () -> Keeper_meta_store.read_effective_meta_presence config name)
+        with
         | Error detail -> failed detail
-        | Ok (Some meta) when answers meta id -> recipient id
-        | Ok (Some _ | None) ->
+        | Ok (Keeper_meta_store.Meta_not_current detail) ->
+          failed
+            (Printf.sprintf "Keeper %s has settings this build cannot read: %s" name detail)
+        | Ok (Keeper_meta_store.Meta_present meta) when answers meta id -> recipient id
+        | Ok (Keeper_meta_store.Meta_present _ | Keeper_meta_store.Meta_absent) ->
           (match Lazy.force all_metas with
            | Error detail -> failed detail
            | Ok metas ->
@@ -60,6 +77,12 @@ let declared ~config ~all_metas candidate =
 let make ~base_path =
   Recipient_lookup.make_per_write (fun () ->
     let config = Workspace.default_config base_path in
-    let all_metas = lazy (Keeper_meta_store.persisted_effective_metas config) in
+    let all_metas =
+      lazy
+        (reading (fun () ->
+           Keeper_meta_store.persisted_effective_metas
+             ~on_undecodable:Keeper_meta_store.Fail_on_undecodable_meta
+             config))
+    in
     declared ~config ~all_metas)
 ;;

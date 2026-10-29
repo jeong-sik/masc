@@ -257,6 +257,56 @@ let test_an_unreadable_setting_fails_an_alias_lookup_only config =
   expect_error "an alias scan reads the broken one" ~mentioning:[ "@someone"; "broken" ] (ask config "someone")
 ;;
 
+(* A Keeper's own name is declared by that Keeper whoever else lists it, as the
+   broadcast path reads it.  Two other Keepers listing the same name do not make
+   it a collision. *)
+let test_an_own_name_wins_over_aliases_that_collide config =
+  register_keeper config "x";
+  register_keeper config ~mention_targets:[ "z"; "x" ] "z";
+  register_keeper config ~mention_targets:[ "w"; "x" ] "w";
+  expect_ok "own name" ([ "x" ], []) (ask config "x");
+  (* With no Keeper of that name, the same two claims are a collision. *)
+  register_keeper config ~mention_targets:[ "z2"; "y" ] "z2";
+  register_keeper config ~mention_targets:[ "w2"; "y" ] "w2";
+  expect_error "two aliases and no own name" ~mentioning:[ "@y"; "z2"; "w2" ] (ask config "y")
+;;
+
+(* A file at a Keeper's path that this build does not decode as the current
+   schema reads as no Keeper in other readers.  Here it fails the lookup, for
+   its own name and for any name a scan has to reach it for: taking it for "no
+   such Keeper" would turn the address into prose without a word to the author. *)
+let test_a_keeper_file_this_build_cannot_read_fails_the_lookup config =
+  register_keeper config "alice";
+  Out_channel.with_open_text (Keeper_types_profile.keeper_meta_path config "stale") (fun oc ->
+    output_string oc "{ \"unexpected\": true }");
+  expect_ok "a healthy Keeper's own name reads that Keeper alone" ([ "alice" ], []) (ask config "alice");
+  expect_error "its own name" ~mentioning:[ "@stale"; "stale" ] (ask config "stale");
+  expect_error "a scan reaches it" ~mentioning:[ "@someone"; "stale" ] (ask config "someone")
+;;
+
+(* The settings are read from disk.  A base path that cannot hold them makes the
+   read raise; that is a failed lookup, not an exception through the write. *)
+let test_a_read_that_raises_fails_the_lookup () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let file = Filename.temp_file "keeper-recipient-lookup" "" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove file with Sys_error _ -> ())
+    (fun () ->
+       (* A directory cannot be made under a regular file. *)
+       let config = Workspace.default_config (Filename.concat file "base") in
+       match ask config "someone" with
+       | Error _ -> ()
+       | Ok (recipients, unresolved) ->
+         fail
+           (Printf.sprintf
+              "expected a failure, got %s / %s"
+              (String.concat "," recipients)
+              (String.concat "," unresolved))
+       | exception exn -> fail ("the lookup raised " ^ Printexc.to_string exn))
+;;
+
 (* The broadcast path finds a Keeper by alias with
    [persisted_keeper_for_mention_target].  It shares its scan with the lookup,
    so what it answers is pinned here: one claim finds the Keeper, no claim finds
@@ -324,6 +374,12 @@ let () =
             (with_workspace test_two_keepers_claiming_one_alias_fail_the_lookup)
         ; test_case "an unreadable setting fails an alias lookup only" `Quick
             (with_workspace test_an_unreadable_setting_fails_an_alias_lookup_only)
+        ; test_case "an own name wins over aliases that collide" `Quick
+            (with_workspace test_an_own_name_wins_over_aliases_that_collide)
+        ; test_case "a Keeper file this build cannot read fails the lookup" `Quick
+            (with_workspace test_a_keeper_file_this_build_cannot_read_fails_the_lookup)
+        ; test_case "a read that raises fails the lookup" `Quick
+            test_a_read_that_raises_fails_the_lookup
         ; test_case "the alias scan the broadcast path uses answers as before" `Quick
             (with_workspace test_the_alias_scan_the_broadcast_path_uses_answers_as_before)
         ; test_case "a Keeper name too long for a Board identity fails the lookup" `Quick

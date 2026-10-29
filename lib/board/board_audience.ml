@@ -47,6 +47,8 @@ let address_of_text ~lookup content =
     (match Recipient_lookup.resolve lookup candidates with
      | Error detail -> Error (Recipient_lookup_failed detail)
      | Ok { Recipient_lookup.recipients; unresolved } ->
+       (* The targets are stored in name order, not in the order they were
+          written, so the same names always make the same record. *)
        (match List.sort_uniq compare_agent_id recipients with
         | [] -> Ok (No_explicit_address, unresolved)
         | _ :: _ as recipients -> Ok (Explicit_targets recipients, unresolved)))

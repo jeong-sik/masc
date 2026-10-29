@@ -1034,6 +1034,8 @@ let handle_board_close_post ~agent_name req reqd body_str =
            | Board_types.Invalid_id _ | Board_types.Post_not_found _
            | Board_types.Comment_not_found _ | Board_types.Io_error _ | Board_types.Already_voted _
            | Board_types.Already_exists _ | Board_types.Unauthorized _
+           (* Closing reads no text, so the recipient lookup never runs here;
+              the arm only keeps the match complete. *)
            | Board_types.Recipient_lookup_failed _ -> `Not_found
          in
          respond_error ~status ~request:req reqd

@@ -23,4 +23,7 @@ val make : base_path:string -> Recipient_lookup.t
       claiming one alias, fails the lookup.  The detail names the Keeper or the
       alias, and the write is refused.
     - A name the Board cannot hold as an identity (longer than 64 bytes) fails
-      the lookup the same way. *)
+      the lookup the same way.
+    - A Keeper file this build cannot decode as the current schema fails the
+      lookup too, whether the name is that Keeper's or a scan reaches it, and so
+      does a read that raises: neither is taken for "no such Keeper". *)

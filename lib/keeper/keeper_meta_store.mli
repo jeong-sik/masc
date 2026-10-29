@@ -91,10 +91,20 @@ val retained_keeper_names_read_only_result :
 val persisted_keeper_names : Workspace.config -> string list
 
 
+(** What to do with a file at a Keeper's path that this binary cannot decode
+    as the current schema ({!meta_presence}'s [Meta_not_current]). *)
+type undecodable_meta =
+  | Skip_undecodable_meta
+      (** Read it as no Keeper, as {!read_meta_file_path} does. *)
+  | Fail_on_undecodable_meta
+      (** Make it the error, for a reader that must not take "cannot read" for
+          "no such Keeper". *)
+
 (** Every persisted Keeper's TOML-overlaid metadata with its canonical
     filename, in name order. The first Keeper that cannot be read is the
     error. *)
 val persisted_effective_metas :
+  on_undecodable:undecodable_meta ->
   Workspace.config ->
   ((string * Keeper_meta_contract.keeper_meta) list, string) result
 

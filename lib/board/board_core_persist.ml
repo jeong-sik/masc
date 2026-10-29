@@ -906,9 +906,10 @@ let create_post_once_by_fusion_run_id
    Normalization and the audience depend on the existing post's [post_kind],
    [visibility] and [meta_json], and the audience asks the recipient lookup,
    which reads Keeper settings from disk. They are worked out before the locks
-   on the post as it stands. Under the locks that result is used only if the
-   post is still the same record in the table; otherwise it is worked out
-   again there, so no write is based on a post it did not see. *)
+   on the post as it stands. Under the locks that result is used only if what
+   it was worked out from is unchanged; otherwise it is worked out again
+   there, so no write is based on a post it did not see. An edit that leaves
+   the text alone keeps the recorded audience. *)
 let update_post_with_outcome
       store
       ~lookup
@@ -950,15 +951,36 @@ let update_post_with_outcome
       | Ok (normalized_title, normalized_body, _kind, normalized_meta) ->
         if String.length normalized_body = 0
         then Error (Validation_error "Content cannot be empty")
-        else
-          Board_audience.audience_for_post
-            ~lookup
-            ~post_kind:existing.post_kind
-            ~visibility:existing.visibility
-            ~title:normalized_title
-            ~content:normalized_body
-          |> Result.map (fun (audience, unresolved) ->
-            normalized_title, normalized_body, normalized_meta, audience, unresolved)
+        else (
+          match existing.audience with
+          | Some recorded
+            when String.equal existing.title normalized_title
+                 && String.equal existing.body normalized_body ->
+            (* The text is the one the recorded audience was worked out from.
+               An edit that leaves it alone does not address anybody anew, so
+               the audience stays as written and the lookup is not asked: a
+               declaration that changed since then does not rewrite it. *)
+            Ok (normalized_title, normalized_body, normalized_meta, recorded, [])
+          | Some _ | None ->
+            Board_audience.audience_for_post
+              ~lookup
+              ~post_kind:existing.post_kind
+              ~visibility:existing.visibility
+              ~title:normalized_title
+              ~content:normalized_body
+            |> Result.map (fun (audience, unresolved) ->
+              normalized_title, normalized_body, normalized_meta, audience, unresolved))
+    in
+    (* What [plan] read from the post.  A vote or a comment replaces the record
+       and leaves these alone, so it does not spoil a plan; a write that changes
+       one of them does. *)
+    let same_plan_inputs (seen : post) (existing : post) =
+      seen.post_kind = existing.post_kind
+      && seen.visibility = existing.visibility
+      && seen.meta_json == existing.meta_json
+      && seen.audience == existing.audience
+      && String.equal seen.title existing.title
+      && String.equal seen.body existing.body
     in
     (* Only the owner's edit is worked out early. Anybody else's is refused
        under the locks and asks the lookup nothing. *)
@@ -1003,7 +1025,7 @@ let update_post_with_outcome
                preserved via [{ existing with }]. *)
             match
               (match planned with
-               | Some (seen, result) when seen == existing -> result
+               | Some (seen, result) when same_plan_inputs seen existing -> result
                | Some _ | None -> plan existing)
             with
             | Error error -> Error error

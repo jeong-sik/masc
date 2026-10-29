@@ -436,27 +436,36 @@ let persisted_keeper_names config =
 ;;
 
 
-let persisted_effective_metas config =
-  let read_effective keeper_name =
-    match
-      read_meta_file_path
-        (keeper_meta_path config keeper_name)
-    with
-    | Error _ as error -> error
-    | Ok None -> Ok None
-    | Ok (Some meta) ->
+type undecodable_meta =
+  | Skip_undecodable_meta
+  | Fail_on_undecodable_meta
+
+let persisted_effective_metas ~on_undecodable config =
+  let read_effective keeper_name : (meta_presence, string) result =
+    match read_meta_file_path_presence (keeper_meta_path config keeper_name) with
+    | Ok (Meta_present meta) ->
       Keeper_meta_contract.effective_meta_result
         ~base_path:config.Workspace.base_path
         meta
-      |> Result.map Option.some
+      |> Result.map (fun effective -> Meta_present effective)
+    | (Ok (Meta_absent | Meta_not_current _) | Error _) as other -> other
   in
   let rec collect metas = function
     | [] -> Ok (List.rev metas)
     | keeper_name :: rest ->
       (match read_effective keeper_name with
        | Error detail -> Error detail
-       | Ok None -> collect metas rest
-       | Ok (Some meta) -> collect ((keeper_name, meta) :: metas) rest)
+       | Ok Meta_absent -> collect metas rest
+       | Ok (Meta_not_current detail) ->
+         (match on_undecodable with
+          | Skip_undecodable_meta -> collect metas rest
+          | Fail_on_undecodable_meta ->
+            Error
+              (Printf.sprintf
+                 "Keeper %s has settings this build cannot read: %s"
+                 keeper_name
+                 detail))
+       | Ok (Meta_present meta) -> collect ((keeper_name, meta) :: metas) rest)
   in
   match persisted_keeper_names_result config with
   | Error _ as error -> error
@@ -490,8 +499,9 @@ let persisted_keeper_for_mention_target config ~mention_target =
   if Option.is_none (Keeper_identity.Keeper_id.of_string mention_target)
   then Ok None
   else
-    Result.bind (persisted_effective_metas config) (fun metas ->
-      keeper_for_mention_target_in metas ~mention_target)
+    Result.bind
+      (persisted_effective_metas ~on_undecodable:Skip_undecodable_meta config)
+      (fun metas -> keeper_for_mention_target_in metas ~mention_target)
 ;;
 
 let configured_keeper_names config =

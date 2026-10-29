@@ -226,7 +226,7 @@ let public_link () =
       check bool "an unowned error cannot mark sharing uncertain" false
         (Types.resource_share_uncertain s report);
       check bool "the real operation remains pending" true
-        (List.exists (fun pending -> pending.share_owner == request.share_owner) s.resource_share_pending);
+        (List.exists (fun pending -> pending.Types.share_owner == request.share_owner) s.resource_share_pending);
       check bool "settlement returns the current fixed report key" true
         (match Updates.share_changed s request ~result:(Ok (Types.Resource_share_applied false)) with
          | Some key -> Catalog.equal_key key older_key | None -> false);
@@ -284,7 +284,7 @@ let public_link () =
         | Ok request -> request | Error detail -> fail detail in
       check bool "an old owner cannot consume its successor" true
         (Option.is_none (Updates.share_changed s old_workspace_request ~result:(Error (Types.Resource_share_unknown "late")))
-         && List.exists (fun pending -> pending.share_owner == successor_request.share_owner) s.resource_share_pending);
+         && List.exists (fun pending -> pending.Types.share_owner == successor_request.share_owner) s.resource_share_pending);
       check bool "an old owner cannot taint a successor" false
         (Types.resource_share_uncertain s report);
       ignore (Updates.share_changed s successor_request ~result:(Ok (Types.Resource_share_applied false)));
@@ -445,7 +445,7 @@ let public_link () =
         (original.share_owner != successor.share_owner);
       ignore (Updates.share_changed parallel original ~result:(Error (Types.Resource_share_unknown "delayed")));
       check bool "the original outcome cannot consume the new workspace operation" true
-        (List.exists (fun pending -> pending.share_owner == successor.share_owner) parallel.resource_share_pending);
+        (List.exists (fun pending -> pending.Types.share_owner == successor.share_owner) parallel.resource_share_pending);
       check bool "the delayed outcome cannot taint the new workspace" false
         (Types.resource_share_uncertain parallel report);
       ignore (Updates.share_changed parallel successor ~result:(Ok (Types.Resource_share_applied false)));

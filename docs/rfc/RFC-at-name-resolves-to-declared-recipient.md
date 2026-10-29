@@ -65,7 +65,7 @@ board 글(`board_posts.jsonl`, 6,779개):
 | 진입 | 확인하는 곳 | 기준 | 모르는 이름이면 |
 |---|---|---|---|
 | board 글·댓글 | `Board_audience.explicit_address_of_text` (`lib/board/board_audience.ml:36`) | `Agent_id.parse`. 영문자·숫자·`.`·`_`·`-` 1~64자, 콜론 하나. 등록부는 보지 않는다 | `targets` 글이 된다. 읽는 Keeper 가 자기 이름과 맞춰 보고 안 맞으면 조용히 버린다 |
-| 브로드캐스트(MCP·HTTP) | `resolve_broadcast_mention_target` (`lib/server/server_bootstrap_loops.ml:157`) | Keeper 메타데이터. 이름이 없으면 모든 Keeper 의 `mention_targets` 별칭을 훑는다 (`lib/keeper/keeper_meta_store.ml:439`) | `Rejected Target_not_configured`. 응답 `ok` 가 false 다 (`lib/workspace/workspace_broadcast.ml:198`) |
+| 브로드캐스트(MCP·HTTP) | `resolve_broadcast_mention_target` (`lib/server/server_bootstrap_loops.ml:157`) | Keeper 메타데이터. 이름이 없으면 모든 Keeper 의 `mention_targets` 별칭을 훑는다 (`lib/keeper/keeper_meta_store.ml:489`) | `Rejected Target_not_configured`. 응답 `ok` 가 false 다 (`lib/workspace/workspace_broadcast.ml:198`) |
 | gRPC `Broadcast` | `mentions` 필드를 `@이름 ` 글로 바꿔서 위 길로 보낸다 (`lib/server/masc_grpc_service.ml:81`) | 위와 같다 | 위와 같다. 대상이 둘 이상이면 저장하지 않고 거절한다 (`:64`) |
 
 첫 이름은 `Workspace_broadcast` 가 `Board_addressing.routing_target` 으로 고른다 (`lib/workspace/workspace_broadcast.ml:970`). board 도구의 알림도 같은 함수를 부른다 (`lib/mcp_tool_runtime_board.ml:253`).
@@ -134,7 +134,7 @@ val resolve :
 
 `Keeper_id.t` 는 공백을 없애고 소문자로 바꿀 뿐 문자를 거르지 않는다 (`lib/keeper/keeper_identity.ml:42`). 그래서 타입이 위 제한을 대신하지 않는다.
 
-`resolve` 는 철자를 바꾸지 않고 `declared` 에 넘긴다. 소문자로 바꿔서 Keeper 이름과 별칭에 맞춰 보는 일은 `declared` 가 한다. 별칭 조회가 지금도 이렇게 맞춘다 (`lib/keeper/keeper_meta_store.ml:439`). `@Alice` 와 `@alice` 는 `declared` 가 같은 이름(`alice`)으로 답하고 `resolve` 가 하나로 합친다. `unresolved` 에는 쓴 철자 그대로 나온다.
+`resolve` 는 철자를 바꾸지 않고 `declared` 에 넘긴다. 소문자로 바꿔서 Keeper 이름과 별칭에 맞춰 보는 일은 `declared` 가 한다. 별칭 조회가 지금도 이렇게 맞춘다 (`lib/keeper/keeper_meta_store.ml:466`). `@Alice` 와 `@alice` 는 `declared` 가 같은 이름(`alice`)으로 답하고 `resolve` 가 하나로 합친다. `unresolved` 에는 쓴 철자 그대로 나온다.
 
 `None`(선언에 없음)과 `Error`(조회 실패)를 섞지 않는다. 지금 브로드캐스트도 둘을 나눈다. 선언 없음은 `Rejected Target_not_configured`, 조회 실패는 `Deferred Target_state_unavailable` 이다 (`lib/server/server_bootstrap_loops.ml:202`). 조회 실패를 글 속 말로 바꾸면 설정 오류가 조용히 사라진다. 쓰기에서 조회가 실패하면 쓰기를 오류로 돌려주고 아무것도 저장하지 않는다 (D5).
 
@@ -148,7 +148,7 @@ val resolve :
 
 선언의 기준은 게시판이 글을 Keeper 에게 보낼 때 쓰는 기준과 같다. 라우터는 Keeper 가 `mention_targets` 를 가지면 그 목록만 주소로 보고, 가지지 않으면 Keeper 이름을 주소로 본다 (`Keeper_lane_mentions.effective_target_ids`). 그래서 `mention_targets` 를 가진 Keeper 가 자기 이름을 목록에 넣지 않았으면 그 이름은 선언이 아니다. 선언으로 치면 아무도 받지 않는 대상이 기록되고 쓴 사람은 그 사실을 알 수 없다. 이 이름은 글 속 말이고 `unresolved` 에 나온다. 별칭은 소문자로 맞춘 이름 그대로 기록한다. 브로드캐스트는 목록과 상관없이 Keeper 이름을 먼저 찾아서 이 기준과 다르다. 지금도 다르고 이 RFC 는 바꾸지 않는다. 2026-10-30 에 읽은 설정 41개는 모두 목록에 자기 이름이 있어서 이 차이로 달라지는 Keeper 는 없다.
 
-별칭 하나는 Keeper 한 명만 가리킨다. 같은 별칭을 둘 이상이 쓰면 지금도 조회가 오류로 끝난다 (`lib/keeper/keeper_meta_store.ml:439`, 오류 문구 `multiple persisted Keepers claim mention_target`). 그래서 `pangyo-preachers` 처럼 Keeper 여럿이 나눠 쓰는 계정은 별칭으로 선언할 수 없다. 이 RFC 는 이 규칙을 바꾸지 않는다.
+별칭 하나는 Keeper 한 명만 가리킨다. 같은 별칭을 둘 이상이 쓰면 지금도 조회가 오류로 끝난다 (`lib/keeper/keeper_meta_store.ml:466`, 오류 문구 `multiple persisted Keepers claim mention_target`). 그래서 `pangyo-preachers` 처럼 Keeper 여럿이 나눠 쓰는 계정은 별칭으로 선언할 수 없다. 이 RFC 는 이 규칙을 바꾸지 않는다.
 
 2026-10-29 에 읽은 Keeper 설정 41개는 모두 `mention_targets` 를 가진다. 36개는 자기 이름뿐이고, 5개(`geek-scout`, `jazz-developer`, `e-masc-the-leader`, `mad-scientist`, `rondo`)가 별칭을 더 가진다. `jeong-sik`, `pangyo-preachers`, `be-sleepers`, `anyang-keepers` 는 어디에도 선언돼 있지 않다.
 
@@ -245,7 +245,7 @@ D4. Keeper 쪽은 기록된 `audience` 를 쓴다. 글은 쓸 때 `audience` 가
 
 받지 않은 안: Keeper 쪽도 선언 조회를 받아 다시 계산한다. 구조는 그대로지만 결과가 어긋날 수 있다. 같은 이유로 댓글에 한해 스캔이 조회를 받아 다시 계산하는 안(저장하지 않는 쪽)도 받지 않았다.
 
-D5. 선언 조회가 실패하면 쓰기를 오류로 돌려주고 아무것도 저장하지 않는다 (§3.1). 받는 사람을 모른 채 기록하면 나중에 고칠 수 없다. 받지 않은 안: 글은 저장하고 받는 사람 없음으로 기록한 뒤 응답에 실패를 싣는다. 이 결정에는 대가가 있다. Keeper 이름과 정확히 같은 이름은 그 Keeper 한 명의 메타만 읽는다. 그 밖의 이름은 모든 Keeper 의 메타를 읽고, 하나라도 못 읽으면 조회 전체가 실패한다 (`lib/keeper/keeper_meta_store.ml:439` 의 `collect`). 그래서 메타 하나가 깨진 동안 Keeper 이름이 아닌 `@이름` 이 든 글을 쓰지 못한다. 읽는 시간은 Keeper 설정 41개를 둔 임시 폴더에서 쟀다(2026-10-30, 이 맥, 파일 캐시가 따뜻한 상태). Keeper 이름은 0.3ms, 그 밖의 이름은 하나에 4~5ms 이고, 모르는 이름 다섯 개가 든 글은 18.5ms 였다. 도는 서버에서는 재지 않았다.
+D5. 선언 조회가 실패하면 쓰기를 오류로 돌려주고 아무것도 저장하지 않는다 (§3.1). 받는 사람을 모른 채 기록하면 나중에 고칠 수 없다. 받지 않은 안: 글은 저장하고 받는 사람 없음으로 기록한 뒤 응답에 실패를 싣는다. 이 결정에는 대가가 있다. 자기 이름을 주소로 가진 Keeper 의 이름은 그 Keeper 한 명의 메타만 읽는다. 그 밖의 이름은 모든 Keeper 의 메타를 읽고, 하나라도 못 읽으면 조회 전체가 실패한다 (`lib/keeper/keeper_meta_store.ml:439` 의 `collect`). 그래서 메타 하나가 깨진 동안 Keeper 이름이 아닌 `@이름` 이 든 글을 쓰지 못한다. 모든 Keeper 의 메타는 쓰기 하나에 한 번만 읽는다. 읽는 시간은 Keeper 설정 41개를 둔 임시 폴더에서 쟀다(2026-10-30, 이 맥, 파일 캐시가 따뜻한 상태, 11번의 중앙값). 자기 이름 하나는 0.08ms, 다섯 개는 0.39ms 이다. 별칭 하나나 모르는 이름 하나는 3.3ms 이고, 모르는 이름이 다섯 개든 스무 개든 3.3~4.2ms 이다. 도는 서버에서는 재지 않았다.
 
 ## 9. 확인하지 못한 것
 

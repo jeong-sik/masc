@@ -1,6 +1,15 @@
 type action = Inspect | Pause | Resume | Clear | Cancel of string | Move_to_end of string | Edit of string * string
   | Cancel_event of string * int64 * string
   | Prioritize_event of string * int64 * Keeper_event_queue.urgency
+  | Inspect_peers of unit ref
+
+type peer_relation = {
+  operation_id : string;
+  sender : string;
+  recipient : string;
+  reply_to : string option;
+}
+type peer_snapshot = { queued_count : int; relations : peer_relation list }
 open Result.Syntax
 let split text =
   let text = String.trim text in
@@ -46,6 +55,51 @@ let rec map_result f = function
   | [] -> Ok []
   | x :: xs -> let* value = f x in let* rest = map_result f xs in Ok (value :: rest)
 let safe = Masc.Tui_terminal_text.sanitize_terminal_text
+
+module Operation_ids = Set.Make (String)
+
+let peer_snapshot ~keeper_name json =
+  let* operations = list "operations" json in
+  let* decoded = map_result (fun operation ->
+    let* id = string "operation_id" operation in
+    let* id = Keeper_chat_operation.Operation_id.of_string id in
+    let operation_id = Keeper_chat_operation.Operation_id.to_string id in
+    let* state = string "state" operation in
+    let* () = if String.equal state "Queued" then Ok ()
+      else Error "Queue response contains an operation that is not queued" in
+    let* source = field "source" operation in
+    let* source = Masc.Keeper_chat_operation_payload.source_of_json source in
+    let reply_to = match source.continuation_channel with
+      | Keeper_continuation_channel.Keeper { keeper_name } -> Some keeper_name
+      | Dashboard _ | Discord _ | Slack _ | Telegram _ | Imessage _ | Unrouted _ -> None in
+    Ok (operation_id, Option.map (fun sender ->
+      { operation_id;
+        sender = Masc.Keeper_identity.Keeper_id.to_string sender;
+        recipient = keeper_name; reply_to }) source.sender_keeper)) operations in
+  let rec unique seen relations = function
+    | [] -> Ok (List.rev relations)
+    | (id, relation) :: rest ->
+        if Operation_ids.mem id seen then
+          Error "Queue response contains a duplicate operation ID; reopen to read it again"
+        else
+          unique (Operation_ids.add id seen)
+            (match relation with Some value -> value :: relations | None -> relations) rest in
+  let* relations = unique Operation_ids.empty [] decoded in
+  Ok { queued_count = List.length operations; relations }
+
+let read_peer_page ~keeper_name ~read_page =
+  let* page = read_page () in
+  peer_snapshot ~keeper_name page
+
+let peer_lines snapshot =
+  let scope = Printf.sprintf "Observed %d queued requests on the first page; %d from Keepers"
+      snapshot.queued_count (List.length snapshot.relations) in
+  let lines = List.map (fun relation ->
+    Printf.sprintf "%s → %s · queued · %s%s"
+      (safe relation.sender) (safe relation.recipient) (safe relation.operation_id)
+      (Option.fold ~none:"" ~some:(fun keeper -> " · reply route " ^ safe keeper) relation.reply_to))
+    snapshot.relations in
+  scope :: ("First page only; more queued requests may exist. Running and completed requests are not listed." :: lines)
 (* The snapshot used to print one row per pending stimulus as
    "source: what — next_action" plus a 64-hex address, in queue order, with no
    clock: 31 occurrences of one schedule were 62 lines that read the same. The

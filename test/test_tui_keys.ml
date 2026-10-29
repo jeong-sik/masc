@@ -1108,6 +1108,47 @@ let test_keeper_preference_cancelled_submission_and_exit () =
            && Option.is_some pending_state.keeper_list_view_save_error
        | _ -> false))
 
+let test_keeper_peer_reading_keeps_its_target_and_epoch () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Keepers Keeper_list;
+  let old = begin_keeper_peer_reading state ~keeper_name:"alpha" in
+  let current = begin_keeper_peer_reading state ~keeper_name:"beta" in
+  Option.iter (update_detail_reading state) (current_detail_reading state);
+  Alcotest.(check bool) "editing the pending reader preserves request ownership" true
+    (keeper_peer_read_current state ~keeper_name:"beta" ~token:current);
+  Alcotest.(check bool) "an earlier target cannot replace the current read" false
+    (finish_keeper_peer_reading state ~keeper_name:"alpha" ~token:old (Ok ["old"]));
+  Alcotest.(check bool) "the matching target may settle" true
+    (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:current (Ok ["current"]));
+  Alcotest.(check bool) "a completed request cannot settle twice" false
+    (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:current (Ok ["duplicate"]));
+  Alcotest.(check bool) "a completed reader is visible in its workspace" true
+    (Option.is_some (current_detail_reading state));
+  Option.iter (update_detail_reading state) (current_detail_reading state);
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "a completed peer reader closes when workspace confirmation is lost" true
+    (Option.is_none (current_detail_reading state));
+  let closed = begin_keeper_peer_reading state ~keeper_name:"alpha" in
+  close_detail_reading state;
+  Alcotest.(check bool) "a closed reader sends no further page requests" false
+    (keeper_peer_read_current state ~keeper_name:"alpha" ~token:closed);
+  Alcotest.(check bool) "a closed reader is not reopened" false
+    (finish_keeper_peer_reading state ~keeper_name:"alpha" ~token:closed (Ok ["late"]));
+  let retired = begin_keeper_peer_reading state ~keeper_name:"alpha" in
+  state.workspace_read_authority <- ref ();
+  Alcotest.(check bool) "a retired epoch sends no further page requests" false
+    (keeper_peer_read_current state ~keeper_name:"alpha" ~token:retired);
+  Alcotest.(check bool) "a prior workspace reading cannot settle" false
+    (finish_keeper_peer_reading state ~keeper_name:"alpha" ~token:retired (Ok ["stale"]));
+  let owner = begin_keeper_peer_reading state ~keeper_name:"alpha" in
+  ignore (finish_keeper_peer_reading state ~keeper_name:"alpha" ~token:owner (Ok ["current"]));
+  open_detail_reading state
+    (Masc_tui_detail_reading.create_observation ~title:"Other"
+      [{ heading = "Other"; body = "Other reader" }]);
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "retiring a peer read does not close a replacement reader" true
+    (Option.is_some (current_detail_reading state))
+
 let test_keeper_list_search_and_mouse_share_order () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Keepers Keeper_list;
@@ -1930,6 +1971,8 @@ let () =
             test_keeper_preference_exit_keeps_drained_and_pending_failures
         ; Alcotest.test_case "Keeper preference cancellation retains its exit warning" `Quick
             test_keeper_preference_cancelled_submission_and_exit
+        ; Alcotest.test_case "Keeper relationships retain target and workspace authority" `Quick
+            test_keeper_peer_reading_keeps_its_target_and_epoch
         ; Alcotest.test_case "Keepers search and mouse share the ordered projection" `Quick
             test_keeper_list_search_and_mouse_share_order
         ; Alcotest.test_case "Keepers observation updates preserve the selected name" `Quick

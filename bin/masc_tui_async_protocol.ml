@@ -885,7 +885,7 @@ let rec workspace_message_is_read = function
   | Chat_command_read_completed (_, message) -> workspace_message_is_read message
   | Workspace_operation _ -> false
   | Keeper_queue_loaded (_, _, action, _) ->
-    (match action with Masc_tui_queue_inspection.Inspect -> true
+    (match action with Masc_tui_queue_inspection.Inspect | Inspect_peers _ -> true
      | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _
      | Cancel_event _ | Prioritize_event _ -> false)
   (* A room read is retired with its reading and released by

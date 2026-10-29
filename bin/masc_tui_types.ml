@@ -8565,6 +8565,11 @@ type state = {
   mutable task_inspection_reader : task_inspection_reader option;
   mutable ask_task_inspection : ask_task_inspection option;
   mutable detail_reading: (workspace_authority * surface * Masc_tui_detail_reading.t) option;
+  (* The roster's peer-queue read belongs to one reader and one workspace
+     observation epoch. A late answer must not reopen a closed reader. *)
+  (* The optional token exists only while the request is pending; the epoch
+     remains owned after completion until the reader closes or is replaced. *)
+  mutable keeper_peer_reading: (string * unit ref option * unit ref) option;
   mutable board_reader_owner: (workspace_authority * unit ref) option;
   mutable board_reader: Masc_tui_board_reader.t;
   mutable keeper_deletions_open: bool;
@@ -12641,6 +12646,9 @@ let suspend_verification_evidence_read state =
 
 let suspend_workspace_readings state =
   state.resource_diagrams <- None;
+  (match state.keeper_peer_reading with
+   | Some _ -> state.keeper_peer_reading <- None; state.detail_reading <- None
+   | None -> ());
   state.listen_request <- None;
   close_task_inspection state
     ~reason:(Masc_tui_original_task_read.Workspace_unconfirmed "Waiting for original workspace identity.");
@@ -16012,9 +16020,12 @@ let board_successor (state : state) =
         else Some (post.bp_id, successor))))
 
 let current_detail_reading (state : state) =
+  let peer_owner_current = match state.keeper_peer_reading with
+    | Some (_, _, epoch) -> epoch == state.workspace_read_authority
+    | None -> true in
   match state.detail_reading with
   | Some (authority, surface, reading)
-    when authority = state.workspace_authority && surface = state.view -> Some reading
+    when authority = state.workspace_authority && surface = state.view && peer_owner_current -> Some reading
   | Some _ | None -> None
 
 let current_board_reader (state : state) =
@@ -16031,12 +16042,49 @@ let current_board_reader (state : state) =
       | Error _ -> false) post.bp_attachments then Some state.board_reader else None
   | Some _,Some _,Some _ | None,_,_ | _,None,_ | _,_,None -> None
 
+let close_detail_reading (state : state) =
+  state.detail_reading <- None;
+  state.keeper_peer_reading <- None
+
 let reconcile_detail_reading (state : state) =
-  if Option.is_none (current_detail_reading state) then
-    state.detail_reading <- None
+  if Option.is_none (current_detail_reading state) then close_detail_reading state
 
 let open_detail_reading (state : state) reading =
+  state.keeper_peer_reading <- None;
   state.detail_reading <- Some (state.workspace_authority, state.view, reading)
+
+(* Scrolling or searching edits the same reader, preserving its owner. *)
+let update_detail_reading (state : state) reading =
+  state.detail_reading <- Option.map (fun (authority, surface, _) ->
+    (authority, surface, reading)) state.detail_reading
+
+let begin_keeper_peer_reading (state : state) ~keeper_name =
+  let token = ref () in
+  open_detail_reading state
+    (Masc_tui_detail_reading.create_observation ~title:("Keeper relationships · " ^ keeper_name)
+      [{ heading = "Queued requests"; body = "Loading this Keeper's queued requests…" }]);
+  state.keeper_peer_reading <- Some (keeper_name, Some token, state.workspace_read_authority);
+  token
+
+let keeper_peer_read_current (state : state) ~keeper_name ~token =
+  match state.keeper_peer_reading, current_detail_reading state with
+  | Some (name, Some current, authority), Some _ ->
+      String.equal name keeper_name && current == token
+      && authority == state.workspace_read_authority
+  | (Some _ | None), (Some _ | None) -> false
+
+let finish_keeper_peer_reading (state : state) ~keeper_name ~token result =
+  match current_detail_reading state with
+  | Some reading when keeper_peer_read_current state ~keeper_name ~token ->
+      let body = match result with
+        | Ok lines -> String.concat "\n" lines
+        | Error reason -> "Read unavailable: " ^ reason in
+      update_detail_reading state
+        (Masc_tui_detail_reading.replace ~title:("Keeper relationships · " ^ keeper_name)
+          [{ heading = "Queued requests"; body }] reading);
+      state.keeper_peer_reading <- Some (keeper_name, None, state.workspace_read_authority);
+      true
+  | Some _ | None -> false
 
 let modal_owns_keys (state : state) =
   Option.is_some (current_board_reader state)
@@ -16131,7 +16179,7 @@ let close_key_modals (state : state) =
   state.chat_call_reader <- None;
   state.help_open <- false;
   state.help_scroll <- 0;
-  state.detail_reading <- None;
+  close_detail_reading state;
   state.about_open <- false;
   state.keeper_deletions_open <- false;
   state.client_detail <- None;
@@ -16228,6 +16276,7 @@ let create_state
   task_inspection_reader = None;
   ask_task_inspection = None;
   detail_reading = None;
+  keeper_peer_reading = None;
   board_reader_owner = None;
   board_reader = Masc_tui_board_reader.initial;
   keeper_deletions_open = false;

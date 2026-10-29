@@ -2830,6 +2830,11 @@ are stored in `tui-keepers.toml` in the resolved config directory and restored
 on the next start; a failed or unconfirmed save is reported. `J` opens the
 selected Keeper's Automation tab and its own schedule list. A schedule mark in
 the roster is an observed waiting-inventory item, not a complete schedule count.
+`K` opens a read-only relationship view for the selected Keeper: each arrow
+comes from the recorded Keeper sender of a request queued for that recipient.
+The view reads the first server page; more queued requests may exist. It does
+not list running or completed requests, and an unrecognized sender is not
+guessed from the submitter's name. Esc closes the view.
 A delegate-result mark represents a queued terminal result; its sentence may
 name the other Keeper and outcome, but it is not an inventory of active delegations.
 The recent and oldest orders use the observed turn or waiting-inventory time;

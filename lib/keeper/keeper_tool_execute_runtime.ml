@@ -335,7 +335,11 @@ type dispatch_bundle =
   ; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile
   ; fields : (string * Yojson.Safe.t) list
   ; base_host_env : string array option
-  ; github_secret_files : unit -> (string list, string) result
+  ; github_secret_files :
+      unit ->
+      ( string list
+      , Keeper_turn_sandbox_runtime.github_identity_preparation_error )
+        result
   ; observed_github_secret_files : unit -> string list
   ; observe_route : unit -> Keeper_sandbox_shell_ir_target.observe_route
     (* Where this call can run boxed before the judge is asked (RFC-0422).
@@ -432,8 +436,23 @@ let handle_tool_execute_typed
           [ "shim_execution_evidence"
           , shim_execution_evidence_json (current_shim_receipts ()) ]
         in
-        let sandbox_profile, _ =
+        let sandbox_profile, effective_network =
           Keeper_sandbox_runner.effective_sandbox_profile ~meta
+        in
+        (* The conditions a result was produced under. A resolved route passes
+           its own frozen profile: this meta snapshot must not decide whether
+           a microVM backend applies to a route the factory already fixed. *)
+        let execution_condition_fields
+              ~(sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile)
+          =
+          [ "network_mode"
+          , `String
+              (Keeper_types_profile_sandbox.network_mode_to_string effective_network)
+          ]
+          @ (match sandbox_profile, meta.microvm_backend with
+             | Micro_vm, Some backend ->
+               [ "microvm_backend", `String (Keeper_microvm_backend.to_string backend) ]
+             | Micro_vm, None | Docker, _ | Remote_ssh, _ -> [])
         in
         let resolved_dispatch =
           match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
@@ -496,7 +515,7 @@ let handle_tool_execute_typed
                Ok
                  { sandbox = dispatch.target
                  ; sandbox_profile = Remote_ssh
-                 ; fields =
+                 ; fields = execution_condition_fields ~sandbox_profile:Remote_ssh @
                      [ "requested_sandbox", `String "remote_ssh"
                      ; "via", `String "remote_ssh"
                      ; "sandbox_profile", `String "remote_ssh"
@@ -519,7 +538,7 @@ let handle_tool_execute_typed
             Ok
               { sandbox = dispatch.target
               ; sandbox_profile = dispatch.sandbox_profile
-              ; fields =
+              ; fields = execution_condition_fields ~sandbox_profile:dispatch.sandbox_profile @
                   [ "requested_sandbox", `String label
                   ; "via", `String label
                   ; "sandbox_profile", `String label
@@ -546,6 +565,7 @@ let handle_tool_execute_typed
              (error_json
                 ~fields:
                   ([ "typed", `Bool true; "cmd", `String cmd ]
+                   @ execution_condition_fields ~sandbox_profile
                    @ model_location_fields
                    @ fields)
                 message)
@@ -633,6 +653,7 @@ let handle_tool_execute_typed
         in
         let typed_context_fields () =
           [ "typed", `Bool true; "cmd", `String cmd_for_log ]
+          @ sandbox_extra_fields
           @ dispatched_model_location_fields ()
         in
         let typed_error_json ~class_ ?(extra_fields = []) msg =
@@ -776,7 +797,16 @@ let handle_tool_execute_typed
                ~observed:dispatch_bundle.observed_github_secret_files
                ~prepare:dispatch_bundle.github_secret_files
            with
-           | Error err ->
+           | Error (Keeper_turn_sandbox_runtime.Sandbox_unavailable err) ->
+             authorized
+               (typed_error_json
+                  ~class_:Tool_result.Runtime_failure
+                  ~extra_fields:
+                    [ "code", `String "sandbox_guest_unavailable"
+                    ; "failure_stage", `String "sandbox_guest_prepare"
+                    ]
+                  ("Sandbox guest unavailable: " ^ err))
+           | Error (Keeper_turn_sandbox_runtime.Identity_unavailable err) ->
              authorized
                (typed_error_json
                   ~class_:Tool_result.Runtime_failure

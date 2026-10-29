@@ -194,6 +194,185 @@ Three facts about it keep diagnoses honest:
   `/home/keeper/repos/<repo>` or mounts host checkouts into the sandbox;
   the playground is the whole writable surface.
 
+## Sandbox capacity and topologies
+
+A profile selects an execution and isolation model, not a proof that its guest
+is healthy. The limits below are the current implementation defaults, not a
+recommended Keeper count. They are defined in
+`lib/config/env_config_sandbox.ml` and `lib/runtime/exec_ssh_endpoint.ml`; where
+this table and the code disagree, the code is right. There is no implemented
+global Keeper-count or host
+memory budget; the
+[host memory budget RFC](rfc/RFC-keeper-guests-stay-inside-a-host-memory-budget.md)
+is still a draft, including its hibernation design.
+
+| Profile / backend | Execution unit and current limits | Network and sharing boundary |
+|---|---|---|
+| `microvm` + `apple_container` | One persistent guest per Keeper. Defaults: 4 vCPUs and 2 GiB; `microvm_cpus` and `microvm_memory` override them per Keeper. Work/build volume defaults are sparse 256g/128g ceilings, not current host usage. | `none`, `inherit`, and `policy` are implemented. Each Keeper has its own VM; [policy egress](operations/egress-policy-runbook.md) uses a per-Keeper network and allowlist. |
+| `microvm` + `nerdctl_kata` | One guest per Keeper with the same CPU/memory settings. | `policy` is refused because its egress boundary is unmeasured. |
+| `microvm` + `microsandbox` | Backend adapters exist, but this is not a working boot lifecycle under MASC today. | `policy` is refused. Do not use it in a fleet example. |
+| `docker` | One persistent container per Keeper. Shared hardening defaults: 2 GiB memory, 128 pids, 245760 nofile, and 256m tmpfs. These are workspace settings, not per-Keeper TOML fields. | `none` and `inherit`; `policy` is refused. Each Keeper has its own container. |
+| `remote_ssh` | No guest is created by MASC and there is no per-Keeper CPU/memory limit. The endpoint defaults to 8 concurrent sessions, shared by every Keeper assigned to it. | Networking is the endpoint host's policy. Keepers on one endpoint share its Unix account and concurrency semaphore; their boundary is the per-Keeper directory jail, not an OS boundary. |
+
+For fleet capacity, add the configured ceilings of the guests that can be
+running together, then include shared SSH/container limits and the MASC server.
+Do not substitute sparse volume sizes or a guest's current `df` output for
+that worst-case memory sum.
+
+### One isolated Apple microVM Keeper
+
+The image name must exist in the workspace's admitted sandbox image catalog.
+
+```toml
+# <base>/.masc/config/keepers/builder.toml
+[keeper]
+activation_mode = "autonomous"
+sandbox_profile = "microvm"
+microvm_backend = "apple_container"
+sandbox_image = "ocaml"
+network_mode = "inherit"
+microvm_memory = "6g"
+microvm_cpus = 4
+instructions = "Build and review the current change; report exact evidence."
+```
+
+Give this Keeper its own GitHub identity through the device flow:
+
+```sh
+masc keeper-github login --keeper builder --base-path /srv/masc-workspace
+```
+
+For a guest that needs only selected destinations, replace `network_mode` with
+`"policy"` and declare its allowlist in the effective runtime TOML:
+
+```toml
+[egress.keepers.builder]
+allow = ["github.com", "api.github.com", "*.githubusercontent.com"]
+```
+
+A bare host admits port 443 and a wildcard does not include its apex. Other
+backends do not silently fall back to `inherit` when `policy` is unsupported;
+they refuse it.
+
+### One Docker Keeper
+
+```toml
+# <base>/.masc/config/keepers/reviewer.toml
+[keeper]
+activation_mode = "autonomous"
+sandbox_profile = "docker"
+sandbox_image = "ocaml"
+network_mode = "inherit"
+instructions = "Review the current diff and report exact evidence."
+```
+
+The Keeper reuses its own persistent container across turns. Its playground is
+a host directory mounted into that container. Memory/pids hardening is a
+shared workspace policy; `microvm_memory` and `microvm_cpus` do not apply.
+
+### Three Keepers on one SSH endpoint, including one container
+
+Declare the endpoint once:
+
+```toml
+# <base>/.masc/config/runtime.toml
+[exec.ssh.endpoints.team]
+host = "builder.example.net"
+user = "masc-exec"
+port = 22
+remote_root = "/srv/masc/playground"
+connect_timeout_sec = 10
+max_concurrent_sessions = 8
+env_allowlist = ["LANG"]
+capabilities = []
+private_home = false
+```
+
+Assign each Keeper its own root and GitHub identity below that endpoint:
+
+```toml
+# <base>/.masc/config/keepers/research-a.toml
+[keeper]
+activation_mode = "autonomous"
+sandbox_profile = "remote_ssh"
+remote_endpoint = "team"
+network_mode = "inherit"
+instructions = "Research assigned work and cite primary sources."
+```
+
+```toml
+# <base>/.masc/config/keepers/research-b.toml
+[keeper]
+activation_mode = "autonomous"
+sandbox_profile = "remote_ssh"
+remote_endpoint = "team"
+network_mode = "inherit"
+instructions = "Review assigned changes and cite exact evidence."
+```
+
+```toml
+# <base>/.masc/config/keepers/research-c.toml
+[keeper]
+activation_mode = "autonomous"
+sandbox_profile = "remote_ssh"
+remote_endpoint = "team"
+network_mode = "inherit"
+instructions = "Summarize current findings and preserve source links."
+```
+
+All three names share the endpoint's `max_concurrent_sessions`; it is not 8
+per Keeper. Provision each root and identity explicitly:
+
+```sh
+masc-exec-ssh-bootstrap \
+  --base-path /srv/masc-workspace \
+  --endpoint team \
+  --shim /opt/masc/masc-exec-shim \
+  --github-token-file research-a=/secure/tmp/research-a.token
+
+masc-exec-ssh-bootstrap \
+  --base-path /srv/masc-workspace \
+  --endpoint team \
+  --shim /opt/masc/masc-exec-shim \
+  --github-token-file research-b=/secure/tmp/research-b.token
+
+masc-exec-ssh-bootstrap \
+  --base-path /srv/masc-workspace \
+  --endpoint team \
+  --shim /opt/masc/masc-exec-shim \
+  --github-token-file research-c=/secure/tmp/research-c.token
+```
+
+The endpoint may be one operator-provisioned Linux container on this machine
+or another host. MASC connects to its SSH listener; it does not create,
+restart, or limit that container. Enforce its CPU, memory, swap, and pids
+limits in Docker/the container runtime. Keep `private_home = false` when the
+account is shared. The three Keepers have separate directory jails and GitHub
+configuration directories, but they share a kernel and Unix account, so this
+is a topology for one trust domain. Use separate endpoint declarations and
+Unix accounts when stronger neighbor isolation is required.
+
+A mixed fleet can therefore put isolated builders on per-Keeper microVMs and
+light Keepers from the same trust domain on that SSH container. This is a
+configuration choice, not an automatic placement or per-Keeper cgroup budget.
+
+### Read sandbox failures before changing credentials
+
+| Signal | What it means | First action |
+|---|---|---|
+| `sandbox_guest_unavailable`, including `microvm_work_volume_probe_unverified` | Guest start, adoption, replacement, or its execution transport failed. The command did not establish that its GitHub token was rejected. | Inspect the guest and transport. Do not re-login or repeatedly run `gh auth status`; that adds more exec requests to an already unhealthy lane. |
+| `github_identity_snapshot_unavailable` | The Keeper's GitHub identity is what failed: a direct refresh, snapshot, or revision check, or a guest or container start that refused the identity. | Inspect this Keeper's GitHub identity with `masc keeper-github status` or the GitHub tab. |
+| `remote_github_unreachable` | Keeper-scoped auth failed and the API did not answer; token validity is unproven. | Repair endpoint networking/DNS first, then re-check auth. |
+| `remote_github_identity_missing` | The API answered but this Keeper's scoped auth failed. | Re-provision that Keeper's identity; do not send tokens per tool call. |
+
+The Apple incident of 2026-10-28 to 2026-10-29,
+[#46602](https://github.com/jeong-sik/masc/issues/46602), is an example of the
+first class: a stalled runtime and global API-server lock blocked `exec` across
+guests, while MASC's old envelope made it look like a GitHub identity failure.
+See the [SSH endpoint runbook](operations/ssh-endpoints-runbook.md) and
+[egress runbook](operations/egress-policy-runbook.md) for transport and network
+diagnostics.
+
 ## Runtime assignment
 
 A Keeper does not name its model. `runtime.toml` does:

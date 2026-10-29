@@ -165,6 +165,185 @@ Auto Judge에서는 `file`, `uniq`, `git ls-remote`, `git cat-file`,
   만들어 주거나 호스트 체크아웃을 sandbox 에 mount 하는 장치는 존재하지
   않는다. playground 가 쓰기 가능한 표면의 전부다.
 
+## 샌드박스 용량과 배치 조합
+
+프로필은 실행 방식과 격리 방식을 고르는 설정입니다. 고른다고 해서 게스트가
+정상으로 떠 있다는 뜻은 아닙니다. 아래 숫자는 지금 구현된 기본값이고, 권장하는
+Keeper 수가 아닙니다. 기본값은 `lib/config/env_config_sandbox.ml`과
+`lib/runtime/exec_ssh_endpoint.ml`에 있고, 이 표와 코드가 다르면 코드가
+맞습니다. Keeper 전체 수나 호스트 메모리 총량을 제한하는 기능은 아직 없습니다.
+[호스트 메모리 예산 RFC](rfc/RFC-keeper-guests-stay-inside-a-host-memory-budget.md)와
+그 안의 hibernation 설계도 아직 초안입니다.
+
+| 프로필 / backend | 실행 단위와 지금 제한 | 네트워크와 공유 범위 |
+|---|---|---|
+| `microvm` + `apple_container` | Keeper마다 게스트가 하나씩 계속 떠 있습니다. 기본은 4 vCPU, 2 GiB이고 `microvm_cpus`, `microvm_memory`로 Keeper마다 바꿀 수 있습니다. work·build 볼륨 기본값 256g/128g는 늘어날 수 있는 최대 크기이고, 지금 호스트에서 차지하는 용량이 아닙니다. | `none`, `inherit`, `policy`를 지원합니다. Keeper마다 VM이 따로 있고, `policy`의 네트워크와 허용 목록(allowlist)도 Keeper별로 씁니다. 방법은 [egress 정책 runbook](operations/egress-policy-runbook.md)에 있습니다. |
+| `microvm` + `nerdctl_kata` | 같은 CPU·메모리 설정을 쓰는 Keeper별 게스트입니다. | 나가는 트래픽이 실제로 막히는지 확인하지 못해서 `policy`는 거부합니다. |
+| `microvm` + `microsandbox` | backend 어댑터는 있지만, MASC가 이 backend로 게스트를 끝까지 띄우고 정리하는 흐름은 아직 완성되지 않았습니다. | `policy`는 거부합니다. 여러 Keeper를 운영하는 구성의 예시로 쓰지 마세요. |
+| `docker` | Keeper마다 컨테이너가 하나씩 계속 떠 있습니다. 모든 컨테이너에 같은 기본 제한이 걸립니다(메모리 2 GiB, pids 128, nofile 245760, tmpfs 256m). Keeper TOML 필드가 아니라 workspace 공통 설정입니다. | `none`, `inherit`만 지원하고 `policy`는 거부합니다. 컨테이너는 Keeper마다 따로 있습니다. |
+| `remote_ssh` | MASC가 게스트를 만들지 않고, Keeper별 CPU·메모리 제한도 없습니다. endpoint 하나의 기본 동시 세션은 8개이고, 그 endpoint를 쓰는 모든 Keeper가 나눠 씁니다. | 네트워크는 endpoint 호스트의 정책을 따릅니다. 같은 endpoint의 Keeper는 Unix 계정과 동시 세션 한도를 함께 씁니다. Keeper를 가르는 건 자기 디렉터리 밖 경로를 쓰지 못하게 검사하는 jail뿐이고, OS가 격리해 주지는 않습니다. |
+
+전체 용량은 이렇게 계산합니다. 동시에 뜰 수 있는 게스트가 설정 최대치까지 쓴다고
+보고 모두 더한 다음, 공유하는 SSH·컨테이너 한도와 MASC 서버가 쓰는 만큼을
+더합니다. 볼륨 최대 크기나 게스트 안의 지금 `df` 사용량을 메모리 합계 대신
+쓰지 마세요.
+
+### Keeper 한 명에 Apple microVM 한 대
+
+sandbox 이미지 이름은 workspace의 허용 이미지 목록(admitted sandbox image
+catalog)에 있어야 합니다.
+
+```toml
+# <base>/.masc/config/keepers/builder.toml
+[keeper]
+activation_mode = "autonomous"
+sandbox_profile = "microvm"
+microvm_backend = "apple_container"
+sandbox_image = "ocaml"
+network_mode = "inherit"
+microvm_memory = "6g"
+microvm_cpus = 4
+instructions = "현재 변경을 빌드하고 검토하며 정확한 증거를 보고한다."
+```
+
+이 Keeper만 쓰는 GitHub 계정은 device code 방식으로 로그인합니다.
+
+```sh
+masc keeper-github login --keeper builder --base-path /srv/masc-workspace
+```
+
+특정 주소만 열고 싶으면 `network_mode`를 `"policy"`로 바꾸고, 실제 runtime TOML에
+허용 목록을 적습니다.
+
+```toml
+[egress.keepers.builder]
+allow = ["github.com", "api.github.com", "*.githubusercontent.com"]
+```
+
+호스트만 적으면 443 포트를 허용합니다. `*.githubusercontent.com` 같은 wildcard는
+`githubusercontent.com` 자체를 포함하지 않습니다. `policy`를 지원하지 않는
+backend는 `inherit`로 몰래 바꾸지 않고 요청을 거부합니다.
+
+### Keeper 한 명에 Docker 컨테이너 하나
+
+```toml
+# <base>/.masc/config/keepers/reviewer.toml
+[keeper]
+activation_mode = "autonomous"
+sandbox_profile = "docker"
+sandbox_image = "ocaml"
+network_mode = "inherit"
+instructions = "현재 diff를 검토하고 정확한 증거를 보고한다."
+```
+
+이 Keeper는 턴이 바뀌어도 자기 컨테이너를 계속 씁니다. playground는 컨테이너에
+마운트한 호스트 디렉터리입니다. 메모리·pids 제한은 workspace 공통 설정이라
+`microvm_memory`와 `microvm_cpus`는 적용되지 않습니다.
+
+### SSH endpoint 하나에 Keeper 셋 — 컨테이너 한 대도 가능
+
+endpoint는 한 번만 선언합니다.
+
+```toml
+# <base>/.masc/config/runtime.toml
+[exec.ssh.endpoints.team]
+host = "builder.example.net"
+user = "masc-exec"
+port = 22
+remote_root = "/srv/masc/playground"
+connect_timeout_sec = 10
+max_concurrent_sessions = 8
+env_allowlist = ["LANG"]
+capabilities = []
+private_home = false
+```
+
+Keeper마다 endpoint 아래에 자기만의 작업 디렉터리와 GitHub 설정을 둡니다.
+
+```toml
+# <base>/.masc/config/keepers/research-a.toml
+[keeper]
+activation_mode = "autonomous"
+sandbox_profile = "remote_ssh"
+remote_endpoint = "team"
+network_mode = "inherit"
+instructions = "배정된 작업을 조사하고 1차 출처를 인용한다."
+```
+
+```toml
+# <base>/.masc/config/keepers/research-b.toml
+[keeper]
+activation_mode = "autonomous"
+sandbox_profile = "remote_ssh"
+remote_endpoint = "team"
+network_mode = "inherit"
+instructions = "배정된 변경을 검토하고 정확한 증거를 인용한다."
+```
+
+```toml
+# <base>/.masc/config/keepers/research-c.toml
+[keeper]
+activation_mode = "autonomous"
+sandbox_profile = "remote_ssh"
+remote_endpoint = "team"
+network_mode = "inherit"
+instructions = "현재 조사 결과를 요약하고 출처 링크를 보존한다."
+```
+
+`max_concurrent_sessions = 8`은 Keeper마다 8개가 아니라, 셋이 함께 쓰는 전체
+한도입니다. 작업 디렉터리와 GitHub 계정은 아래 명령으로 Keeper마다 따로 만들어
+줍니다.
+
+```sh
+masc-exec-ssh-bootstrap \
+  --base-path /srv/masc-workspace \
+  --endpoint team \
+  --shim /opt/masc/masc-exec-shim \
+  --github-token-file research-a=/secure/tmp/research-a.token
+
+masc-exec-ssh-bootstrap \
+  --base-path /srv/masc-workspace \
+  --endpoint team \
+  --shim /opt/masc/masc-exec-shim \
+  --github-token-file research-b=/secure/tmp/research-b.token
+
+masc-exec-ssh-bootstrap \
+  --base-path /srv/masc-workspace \
+  --endpoint team \
+  --shim /opt/masc/masc-exec-shim \
+  --github-token-file research-c=/secure/tmp/research-c.token
+```
+
+endpoint는 운영자가 미리 만들어 둔 Linux 컨테이너 한 대여도 됩니다. 이 컴퓨터에
+있어도 되고 다른 호스트에 있어도 됩니다. MASC는 그 컨테이너의 SSH 포트에 접속할
+뿐, 컨테이너를 만들거나 다시 시작하거나 제한하지 않습니다. CPU·메모리·swap·pids
+상한은 Docker나 쓰고 있는 컨테이너 런타임에서 직접 거세요. 계정을 같이 쓰므로
+`private_home = false`는 그대로 둡니다.
+
+세 Keeper는 디렉터리 jail과 GitHub 설정 디렉터리를 각자 갖지만, 커널과 Unix
+계정은 함께 씁니다. 서로 믿을 수 있는 Keeper끼리 묶을 때 맞는 구성입니다. 다른
+Keeper와 더 확실히 떼어 놓아야 하면 endpoint와 Unix 계정을 따로 선언하세요.
+
+그래서 빌드를 하는 Keeper는 microVM으로 하나씩 떼어 놓고, 서로 믿을 수 있는
+가벼운 Keeper는 공유 SSH 컨테이너에 두는 식으로 섞어 쓸 수도 있습니다. 이 배치는
+운영자가 직접 고르는 설정입니다. 자동 배치나 Keeper별 cgroup 예산은 없습니다.
+
+### 자격증명을 바꾸기 전에 샌드박스 오류를 구분하세요
+
+| 신호 | 뜻 | 먼저 할 일 |
+|---|---|---|
+| `sandbox_guest_unavailable` (`microvm_work_volume_probe_unverified`가 들어 있는 경우 포함) | 게스트를 띄우거나, 떠 있는 게스트를 이어받거나, 교체하는 단계가 실패했습니다. 명령을 게스트로 보내는 연결(transport)이 실패한 경우도 같습니다. GitHub가 토큰을 거부했다는 증거는 아직 없습니다. | 게스트와 transport부터 확인하세요. 다시 로그인하거나 `gh auth status`를 반복하면, 이미 문제가 있는 게스트에 요청만 더 쌓입니다. |
+| `github_identity_snapshot_unavailable` | 이 Keeper의 GitHub 로그인 정보에서 문제가 생겼습니다. 로그인 정보를 갱신하거나, 스냅샷을 만들거나, revision을 검사하는 단계가 실패한 경우입니다. 게스트나 컨테이너를 띄우다가 로그인 정보가 올바르지 않아 멈춘 경우도 같습니다. | `masc keeper-github status`나 GitHub 탭에서 이 Keeper의 GitHub 계정을 확인하세요. |
+| `remote_github_unreachable` | 이 Keeper의 인증이 실패했고 GitHub API도 응답하지 않아서, 토큰이 유효한지 알 수 없습니다. | endpoint의 네트워크와 DNS부터 고친 뒤 인증을 다시 확인하세요. |
+| `remote_github_identity_missing` | API는 응답했지만 이 Keeper 전용 인증이 실패했습니다. | 이 Keeper의 GitHub 계정을 다시 설정하세요. 도구를 부를 때마다 토큰을 붙여 넣지 마세요. |
+
+2026-10-28부터 29일까지 이어진 Apple 장애
+[#46602](https://github.com/jeong-sik/masc/issues/46602)가 첫 번째 경우입니다.
+멈춘 runtime과 API 서버의 전역 락 때문에 여러 게스트의 `exec`가 막혔는데, 예전
+MASC 오류 메시지는 이를 GitHub 로그인 실패처럼 보여 줬습니다. transport와 네트워크
+문제를 확인하는 방법은 [SSH endpoint runbook](operations/ssh-endpoints-runbook.md)과
+[egress 정책 runbook](operations/egress-policy-runbook.md)에 있습니다.
+
 ## 런타임 배정
 
 Keeper 가 자기 모델을 정하지 않습니다. `runtime.toml` 이 정합니다.

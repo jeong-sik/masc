@@ -257,6 +257,21 @@ its own unix account and declare a separate endpoint per account.
 The endpoint's `max_concurrent_sessions` semaphore is also shared by every
 keeper pointed at it. Raising a keeper's throughput lowers its neighbours'.
 
+For example, `research-a`, `research-b`, and `research-c` may all select the
+same endpoint with `sandbox_profile = "remote_ssh"` and
+`remote_endpoint = "team"`. The default 8 sessions are shared across all
+three, not granted separately to each. Their work roots are
+`remote_root/research-a`, `remote_root/research-b`, and
+`remote_root/research-c`, with separate `.config/gh` directories, but the
+same Unix account and kernel. Keep `private_home = false` for this shared
+account and bootstrap each Keeper's root and token explicitly.
+
+That endpoint may be one operator-provisioned Linux container. MASC connects
+to its SSH listener but does not create, restart, or limit the container;
+enforce its CPU, memory, swap, and pids limits in the container runtime. The
+[Keeper manual's capacity and topology examples](../KEEPER-USER-MANUAL.md#sandbox-capacity-and-topologies)
+show the complete endpoint, three-Keeper TOML, and bootstrap sequence.
+
 Recreating the remote instance changes its host key. `StrictHostKeyChecking=yes`
 is enforced, so the pin at `.masc/ssh/known_hosts.d/<name>` must be verified out
 of band and rewritten before the endpoint answers again.
@@ -301,6 +316,7 @@ sentence saying so is not.
 
 | Error prefix | Meaning | Operator action |
 |---|---|---|
+| `sandbox_guest_unavailable` | A Docker/microVM guest could not be prepared, or its execution transport failed. It is not evidence that GitHub rejected the Keeper's token. | Inspect the guest, work-volume probe, and transport; do not re-login or repeatedly call `gh auth status`. Check `network_mode` and `microvm_backend` in the failure envelope. |
 | `remote_ssh_no_network_mode` | `remote_ssh` was combined with a Docker-only network mode. | Remove `network_mode`; endpoint networking is host policy. |
 | `remote_endpoint_requires_remote_ssh` | A non-SSH profile still has `remote_endpoint`. | Clear it with JSON `null` or select `remote_ssh`. |
 | `remote_ssh_runtime_config_missing` | Effective runtime TOML cannot be found. | Verify the base path and `.masc/config/runtime.toml`. |

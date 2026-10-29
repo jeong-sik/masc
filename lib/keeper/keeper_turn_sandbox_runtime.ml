@@ -1323,6 +1323,19 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~backend ~container_name =
          (Keeper_sandbox_runtime.docker_failure_output_for_log out))
 ;;
 
+(* Which side of a guest start a failure belongs to. The Keeper's GitHub
+   identity is at fault only when the start itself refused that identity or
+   a direct refresh, snapshot or revision check failed; every other cause is
+   the sandbox's. Callers branch on the constructor, never on the detail
+   text. *)
+type github_identity_preparation_error =
+  | Sandbox_unavailable of string
+  | Identity_unavailable of string
+
+let github_identity_preparation_error_message = function
+  | Sandbox_unavailable detail | Identity_unavailable detail -> detail
+;;
+
 (* Why a guest did not come up. A name the runtime refuses is not one of
    them: [Keeper_sandbox_container_name] builds only names every microVM
    runtime accepts. An arm that wraps what another step or the runtime's CLI
@@ -1430,6 +1443,32 @@ let microvm_start_failure_message failure =
          "boot %s: %s"
          (Keeper_sandbox_exec_failure.status_label status)
          (Keeper_sandbox_runtime.docker_failure_output_for_log output))
+;;
+
+(* Only a rejected GitHub identity is the Keeper's login at fault. Every
+   constructor is named, so a new failure has to choose a side here. *)
+let microvm_start_failure_cause failure =
+  let detail = microvm_start_failure_message failure in
+  match failure with
+  | Github_identity_invalid _ -> Identity_unavailable detail
+  | Backend_unresolved _
+  | Runtime_context_unavailable
+  | Guest_identity_store_unavailable _
+  | Guest_facts_refused _
+  | Image_unresolved _
+  | Guest_state_unreadable _
+  | Guest_size_invalid _
+  | Unadoptable_guest_not_removed _
+  | Previous_mode_guest_not_removed _
+  | Adopted_guest_volume_unverified _
+  | Guest_provisions_unavailable _
+  | Policy_network_unavailable _
+  | Network_unexpressible _
+  | Invalid_boot_plan _
+  | Constraints_unexpressible _
+  | Booted_guest_unusable _
+  | Booted_guest_state_unknown _
+  | Boot_command_failed _ -> Sandbox_unavailable detail
 ;;
 
 (* The same immutable request drives comparison and Boot argv. Volume names,
@@ -2331,7 +2370,7 @@ let start_microvm_container ?timeout_sec t =
     | Ok (Keeper_microvm_backend.Nerdctl_kata | Keeper_microvm_backend.Microsandbox) ->
       with_microvm_lifecycle_lock ~keeper_name:t.meta.name ~operation:"start_adopt"
         (fun () -> start_process_bound_microvm_container ?timeout_sec t) in
-  Result.map_error microvm_start_failure_message result
+  Result.map_error microvm_start_failure_cause result
 ;;
 
 (* Shutdown finalization retains the typed backend through registry removal.
@@ -2501,8 +2540,11 @@ let start_container ?timeout_sec (t : t) =
   if is_microvm t
   then start_microvm_container ?timeout_sec t
   else
+  (* Only the two refusals of the GitHub identity below blame the Keeper's
+     login; every other failure is the container's. *)
+  let sandbox_failed detail = Error (Sandbox_unavailable detail) in
   match t.image with
-  | Error error -> Error (image_unresolved_message error)
+  | Error error -> sandbox_failed (image_unresolved_message error)
   | Ok image ->
   let container_name = docker_container_name_for_image t ~image in
   let probe_state () =
@@ -2523,7 +2565,8 @@ let start_container ?timeout_sec (t : t) =
     with
     | Error err ->
       Error
-        ("docker_container_adopt_failed: github_identity_invalid: " ^ err)
+        (Identity_unavailable
+           ("docker_container_adopt_failed: github_identity_invalid: " ^ err))
     | Ok _has_git_wiring ->
       set_state t (Running { container_name });
       Ok container_name
@@ -2539,16 +2582,16 @@ let start_container ?timeout_sec (t : t) =
           ()
       with
       | Error failure ->
-        Error (Keeper_sandbox_runtime.image_preflight_start_error failure)
+        sandbox_failed (Keeper_sandbox_runtime.image_preflight_start_error failure)
       | Ok () ->
         match
           Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime_optional
             ?timeout_sec ()
         with
-        | Error _ as err -> err
+        | Error detail -> sandbox_failed detail
         | Ok seccomp_args ->
         match Keeper_sandbox_runtime.docker_network_args t.network_mode with
-        | Error msg -> Error msg
+        | Error msg -> sandbox_failed msg
         | Ok (network_args, network_label) ->
         (match
            Keeper_sandbox_runtime.docker_user_identity_mount_args
@@ -2556,7 +2599,7 @@ let start_container ?timeout_sec (t : t) =
              ~uid:t.uid
              ~gid:t.gid
          with
-         | Error _ as err -> err
+         | Error detail -> sandbox_failed detail
          | Ok identity_mounts ->
          (match
             Keeper_secret_projection.docker_args_for_keeper
@@ -2566,7 +2609,7 @@ let start_container ?timeout_sec (t : t) =
               ()
           with
           | Error err ->
-            Error ("docker_container_start_failed: secret_projection: " ^ err)
+            sandbox_failed ("docker_container_start_failed: secret_projection: " ^ err)
           | Ok secret_projection ->
            (match
               Keeper_github_identity.docker_args_persistent
@@ -2581,8 +2624,9 @@ let start_container ?timeout_sec (t : t) =
                 ~finally:secret_projection.cleanup
                 (fun () ->
                    Error
-                     ("docker_container_start_failed: github_identity_invalid: "
-                      ^ err))
+                     (Identity_unavailable
+                        ("docker_container_start_failed: github_identity_invalid: "
+                         ^ err)))
             | Ok github_identity_args ->
             Eio_guard.protect
               ~finally:secret_projection.cleanup
@@ -2657,7 +2701,7 @@ let start_container ?timeout_sec (t : t) =
                    let _rm_st, _rm_out =
                      run_argv_with_status ?timeout_sec rm_argv
                    in
-                   Error
+                   sandbox_failed
                      (Printf.sprintf
                         "docker_container_absent_after_run: docker run exited 0 \
                          and the daemon does not list %s"
@@ -2666,7 +2710,7 @@ let start_container ?timeout_sec (t : t) =
                    (* The daemon could not be asked. The container this run
                       made may be up, so it is not removed: the next start
                       probes the stable name again and adopts it. *)
-                   Error
+                   sandbox_failed
                      (Printf.sprintf
                         "docker_container_state_unknown_after_run: %s"
                         (Exec_policy.truncate_for_log probe_error)))
@@ -2682,7 +2726,7 @@ let start_container ?timeout_sec (t : t) =
                        ( Keeper_sandbox_runtime.Docker_container_stopped
                        | Keeper_sandbox_runtime.Docker_container_absent )
                    | Error _ ) as container_state ->
-                   Error
+                   sandbox_failed
                      (Keeper_sandbox_exec_failure.docker_run_failure_message
                         ~prefix:"docker_container_start_failed"
                         ~base_path_hash:
@@ -2700,7 +2744,7 @@ let start_container ?timeout_sec (t : t) =
   match probe_state () with
   | Ok Keeper_sandbox_runtime.Docker_container_running -> adopt_running ()
   | Error probe_error ->
-    Error
+    sandbox_failed
       (Printf.sprintf
          "docker_container_probe_failed: %s"
          (Exec_policy.truncate_for_log probe_error))
@@ -2723,7 +2767,7 @@ let start_container ?timeout_sec (t : t) =
       with
       | Ok () -> adopt_running ()
       | Error inspect_out ->
-        Error
+        sandbox_failed
           (Printf.sprintf
              "docker_container_start_failed: restarted %s but inspect cannot \
               see it: %s"
@@ -2738,7 +2782,7 @@ let start_container ?timeout_sec (t : t) =
   | Ok Keeper_sandbox_runtime.Docker_container_absent -> create ()
 ;;
 
-let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
+let ensure_started_with_cause ?(validate_running = false) ?timeout_sec (t : t) =
   match get_state t with
   | Running { container_name } ->
     if not validate_running
@@ -2752,6 +2796,13 @@ let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
         set_state t Not_started;
         start_container ?timeout_sec t)
   | Not_started -> start_container ?timeout_sec t
+;;
+
+(* The exec entrypoints report every start failure as one message. Only the
+   identity preparation reads which side failed. *)
+let ensure_started ?validate_running ?timeout_sec (t : t) =
+  Result.map_error github_identity_preparation_error_message
+    (ensure_started_with_cause ?validate_running ?timeout_sec t)
 ;;
 
 (* Endpoint admission reads the mounted identity and verifies the shared shim.
@@ -2809,7 +2860,9 @@ let microvm_remote_endpoint ?timeout_sec (t : t) =
       else
         Result.bind (microvm_backend_of t) (function
           | Keeper_microvm_backend.Apple_container ->
-            start_microvm_container ?timeout_sec t |> Result.map (fun _ -> ())
+            start_microvm_container ?timeout_sec t
+            |> Result.map (fun _ -> ())
+            |> Result.map_error github_identity_preparation_error_message
           | (Keeper_microvm_backend.Nerdctl_kata | Keeper_microvm_backend.Microsandbox) as backend ->
             match ensure_microvm_keeper_work_root ?timeout_sec t ~backend ~container_name with
             | Ok () ->
@@ -3006,7 +3059,7 @@ let prepare_github_identity_secret_files ?timeout_sec t =
       ~config:t.config
       ~keeper_name:t.meta.name
   with
-  | Error err -> Error ("github_app_token_refresh_failed: " ^ err)
+  | Error err -> Error (Identity_unavailable ("github_app_token_refresh_failed: " ^ err))
   | Ok
       ( Keeper_github_app_broker.No_app_identity
       | Keeper_github_app_broker.Fresh _
@@ -3025,9 +3078,9 @@ let prepare_github_identity_secret_files ?timeout_sec t =
       let snapshot_paths () =
         match (Atomic.get t.github_identity_snapshots).current with
         | Some _ -> Ok (github_identity_secret_files t)
-        | None -> Error "running container has no GitHub identity snapshot"
+        | None -> Error (Identity_unavailable "running container has no GitHub identity snapshot")
       in
-      match ensure_started ?timeout_sec t with
+      match ensure_started_with_cause ?timeout_sec t with
       | Error _ as error -> error
       | Ok _container_name ->
         (match snapshot_paths () with
@@ -3051,15 +3104,15 @@ let prepare_github_identity_secret_files ?timeout_sec t =
         ~config:t.config
         ~keeper_name:t.meta.name
     with
-    | Error _ as error -> error
+    | Error detail -> Error (Identity_unavailable detail)
     | Ok central_revision ->
       (match (Atomic.get t.github_identity_snapshots).current with
-       | None -> Error "running guest lost its validated identity binding"
+       | None -> Error (Identity_unavailable "running guest lost its validated identity binding")
        | Some snapshot when String.equal (identity_revision snapshot) central_revision ->
          Ok paths
        | Some _ ->
          (match stop_container_for_github_identity_refresh ?timeout_sec t with
-          | Error _ as error -> error
+          | Error detail -> Error (Sandbox_unavailable detail)
           | Ok () -> ensure_bound ())))
   else
     (* The persistent Docker container mounts the stable config directory
@@ -3068,7 +3121,7 @@ let prepare_github_identity_secret_files ?timeout_sec t =
        reaches the running container through the mount, with the derived
        gitconfig refreshed at adoption. An unconfigured keeper exposes no
        credential file. *)
-    match ensure_started ?timeout_sec t with
+    match ensure_started_with_cause ?timeout_sec t with
     | Error _ as error -> error
     | Ok _container_name ->
       (match
@@ -3076,7 +3129,7 @@ let prepare_github_identity_secret_files ?timeout_sec t =
            ~config:t.config
            ~keeper_name:t.meta.name
        with
-       | Error _ as error -> error
+       | Error detail -> Error (Identity_unavailable detail)
        | Ok None -> Ok []
        | Ok (Some dir) -> Ok [ Filename.concat dir "hosts.yml" ])
 ;;

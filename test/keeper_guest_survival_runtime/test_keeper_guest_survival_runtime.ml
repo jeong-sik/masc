@@ -239,19 +239,29 @@ let process_step root operation =
     |> Result.map_error Keeper_microvm_shim_readiness.error_message);
   let effective_network = if operation = "override" then Profile.Network_inherit else network_mode in
   let runtime = Turn.create ~config ~meta:(meta ()) ~image:(Ok "fixture:image") ~network_mode:effective_network () in
+  (* The error text names which side of the typed split failed, so a test
+     can tell a guest failure from an identity failure. *)
+  let prepare_identity () =
+    Turn.prepare_github_identity_secret_files ~timeout_sec:10. runtime
+    |> Result.map_error (fun error ->
+         let side = match error with
+           | Turn.Sandbox_unavailable _ -> "sandbox_unavailable"
+           | Turn.Identity_unavailable _ -> "identity_unavailable" in
+         side ^ ": " ^ Turn.github_identity_preparation_error_message error) in
   let endpoint = match operation with
     | "attached" -> Turn.microvm_attached_endpoint ~config ~meta:(meta ()) ()
-    | "prepare-identity" -> Result.bind (Turn.prepare_github_identity_secret_files ~timeout_sec:10. runtime)
+    | "prepare-identity" ->
+      Result.bind (prepare_identity ())
         (fun _ -> Turn.microvm_remote_endpoint ~timeout_sec:10. runtime)
     | "identity-helper-race" ->
-      Result.bind (Turn.prepare_github_identity_secret_files ~timeout_sec:10. runtime) (fun _ ->
+      Result.bind (prepare_identity ()) (fun _ ->
         let directory = value (Keeper_github_identity.ensure_config_dir ~config ~keeper_name:keeper) in
         write (Filename.concat directory "hosts.yml")
           "github.com:\n    user: fixture\n    oauth_token: second-fixture-token\n    git_protocol: https\n";
         save_json (Filename.concat root "list-override")
           (`List [json (Filename.concat root "guest.json");
             `Assoc ["id", `String (Microvm.work_volume_trim_name ~keeper_name:keeper)]]);
-        Result.bind (Turn.prepare_github_identity_secret_files ~timeout_sec:10. runtime)
+        Result.bind (prepare_identity ())
           (fun _ -> Turn.microvm_remote_endpoint ~timeout_sec:10. runtime))
     | "turn" | "override" -> Turn.microvm_remote_endpoint ~timeout_sec:10. runtime
     | _ -> fail "unknown fixture step" in
@@ -569,6 +579,9 @@ let test_identity_refresh_preserves_guest_if_helper_appears () = with_fixture @@
   check bool "refresh refuses a helper appearing after adoption" true (status = Unix.WEXITED 2);
   check bool "the helper gate supplied the refresh refusal" true
     (Astring.String.is_infix ~affix:"microvm_volume_helper_ownership_unverified" stderr);
+  check bool "the guest boundary reports it, not the identity" true
+    (Astring.String.is_infix ~affix:"sandbox_unavailable: " stderr
+     && not (Astring.String.is_infix ~affix:"identity_unavailable: " stderr));
   check bool "fixture reached the second identity revision" true
     (Sys.file_exists (Filename.concat root "list-override"));
   check string "the old guest stays running" original (read (Filename.concat root "guest.json"));
@@ -576,6 +589,16 @@ let test_identity_refresh_preserves_guest_if_helper_appears () = with_fixture @@
   check int "refresh did not stop the guest" 0 (count "stop" root);
   check int "refresh did not delete a guest or helper" 0 (count "delete" root);
   check int "refresh did not start a replacement" 1 (count "run" root)
+
+let test_boot_refused_for_unusable_identity_reports_the_identity () = with_fixture @@ fun root ->
+  let central, _ = configure_identity root "first-fixture-token" in
+  write (Filename.concat central "hosts.yml") "malformed: [central identity is unavailable";
+  let status, stderr = step_captured root "prepare-identity" in
+  check bool "a boot with an unusable identity is refused" true (status = Unix.WEXITED 2);
+  check bool "the identity reports it, not the guest boundary" true
+    (Astring.String.is_infix ~affix:"identity_unavailable: " stderr
+     && not (Astring.String.is_infix ~affix:"sandbox_unavailable: " stderr));
+  check int "no guest was started for it" 0 (count "run" root)
 
 let test_endpoint_uses_effective_network_override () = with_fixture @@ fun root ->
   check bool "runtime override reaches matching mounted snapshot" true (step root "override" = Unix.WEXITED 0);
@@ -660,6 +683,7 @@ let () =
         test_case "attached reader never rereads central identity" `Quick test_attached_reader_does_not_reread_central_identity;
         test_case "identity refresh follows actual guest absence" `Quick test_identity_refresh_replaces_after_actual_absence;
         test_case "identity refresh preserves guest if helper appears" `Quick test_identity_refresh_preserves_guest_if_helper_appears;
+        test_case "boot refused for an unusable identity names the identity" `Quick test_boot_refused_for_unusable_identity_reports_the_identity;
         test_case "fresh process adopts without boot effects" `Quick test_fresh_process_adopts_without_boot_effects;
         test_case "helper uncertainty preserves guest on adopt and replace" `Quick test_helper_uncertainty_preserves_guest_on_adopt_and_replace;
         test_case "wrapped image adopts without relabelling or boot effects" `Quick test_wrapped_image_adopts_without_relabelling_or_boot_effects;

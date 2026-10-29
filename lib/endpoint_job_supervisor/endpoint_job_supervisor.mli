@@ -19,10 +19,10 @@ type error =
   | Registry_cleanup_failed of File_lock_eio.durable_lock_error
   | Interrupted
   | Supervisor_failed
-  | Codec_error of P.codec_error
   | Publication_failed of Fs_compat.capability_write_error
   | Recovery_failed of string
   | Receipt_storage_unavailable
+  | Result_encoding_failed of Endpoint_job_result.error
 val error_to_string : error -> string
 type input_delivery =
   | Written of int64
@@ -81,7 +81,9 @@ val await_result : t -> (result_receipt,error) result
     physical/tree settlement, input delivery and both seals. It freezes the
     original admission/known launch, source revision/cancellation and raw gate
     observations in a private immutable receipt using canonical durable
-    exclusive publication. Only confirmed publication produces Result_ready
+    exclusive publication. The shared receipt codec includes a domain-separated
+    payload checksum for restart corruption detection, not authentication.
+    Only confirmed publication produces Result_ready
     with the digest of these exact receipt bytes. Both original streams are
     fully reopened/hashed outside metadata/registry locks and compared with the
     actual cached seals. Their retained attachments and the exact private

@@ -589,7 +589,12 @@ let test_the_recall_form_claims_only_on_the_runtime_pane () =
   let state = fresh_state () in
   let form =
     match
-      Masc_tui_memory_recall_form.open_on ~keepers:[ "alpha" ]
+      Masc_tui_memory_recall_form.open_on
+        ~keepers:
+          [ { Masc_tui_memory_recall_form.name = "alpha"
+            ; presence = Masc_tui_memory_recall_form.Unknown
+            }
+          ]
         "[models.probe]\napi-name = \"probe\"\n"
     with
     | Ok form -> form

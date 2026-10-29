@@ -5,24 +5,37 @@ type mode =
   | Listed
   | All
 
+type presence =
+  | Running
+  | Stopped
+  | Unknown
+
+type roster_entry =
+  { name : string
+  ; presence : presence
+  }
+
 (* A row of the Keeper list. [known] is false for a name the file lists that
    the TUI's roster does not have: a misspelt or retired name reaches nobody
    (boot reports it through [Typesafeai_config.unknown_memory_recall_keepers]),
    so the form keeps it in the list, marked, where it can be dropped. *)
 type entry =
-  { name : string
+  { keeper : roster_entry
   ; known : bool
   ; excluded : bool
   }
 
-(* [text] is the file the form was opened on and [initial] what
-   [Runtime_toml] read from it, so {!text_on} is a function of the form alone.
+(* [text] is the file the form was opened on, so {!text_on} is a function of
+   the form alone. [declared] is what its three keys say, switch and scope
+   apart; [initial] is what they come to for a keeper: off, or on for a scope.
    [picked] keeps the file's order and appends new picks, so a save that
-   changes one Keeper moves one line of the array. It is kept while the mode is
+   changes one Keeper moves one line of the array. It starts as the list the
+   file holds even when the switch is off, and it is kept while the mode is
    not [Listed]: switching back shows the same picks. *)
 type t =
   { source_revision : string option
   ; text : string
+  ; declared : Runtime_toml.memory_recall_declaration
   ; initial : Runtime_schema.memory_recall
   ; mode : mode
   ; entries : entry list
@@ -35,6 +48,20 @@ type outcome =
   | Editing of t
   | Cancelled
   | Submitted of t
+
+type detail =
+  { before : mode
+  ; after : mode
+  ; added : string list
+  ; dropped : string list
+  ; list_kept : int
+  ; list_removed : int
+  }
+
+type change =
+  | Unchanged
+  | Nobody_picked
+  | Changed of detail
 
 (* The table and keys [Runtime_toml.parse_typesafeai_memory_recall] reads. The
    edited text is read back with that parser before it is returned, so a
@@ -66,38 +93,80 @@ let without_repeats names =
     names
 ;;
 
+(* The Keepers a list names, in the order written, or none when the scope is
+   not a list. Whatever the switch says. *)
+let held_names (declared : Runtime_toml.memory_recall_declaration) =
+  match declared.Runtime_toml.scope with
+  | Some (Runtime_schema.Listed_keepers (first, rest)) -> without_repeats (first :: rest)
+  | Some Runtime_schema.All_keepers | None -> []
+;;
+
+(* What the three keys come to. [Runtime_toml.parse_string] refuses a switch
+   that is on without a scope, so the last case is not met after it succeeded;
+   it is an answer rather than a guess. *)
+let effective (declared : Runtime_toml.memory_recall_declaration) =
+  match declared.Runtime_toml.switch, declared.Runtime_toml.scope with
+  | false, (Some _ | None) -> Ok Runtime_schema.Memory_recall_off
+  | true, Some scope -> Ok (Runtime_schema.Memory_recall_on scope)
+  | true, None -> Error "memory_recall = true 인데 memory_recall_scope 가 없어요"
+;;
+
+let mode_of_recall = function
+  | Runtime_schema.Memory_recall_off -> Off
+  | Runtime_schema.Memory_recall_on Runtime_schema.All_keepers -> All
+  | Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers _) -> Listed
+;;
+
 let open_on ?source_revision ~keepers text =
-  match Runtime_toml.parse_string text with
-  | Error errors ->
+  let cannot_open errors =
     Error ("runtime.toml 을 읽지 못해서 폼을 열 수 없어요 · " ^ describe_errors errors)
+  in
+  match Runtime_toml.parse_string text with
+  | Error errors -> cannot_open errors
   | Ok config ->
-    let typesafeai = config.Runtime_schema.typesafeai in
-    let initial = typesafeai.Runtime_schema.memory_recall in
-    let mode, picked =
-      match initial with
-      | Runtime_schema.Memory_recall_off -> Off, []
-      | Runtime_schema.Memory_recall_on Runtime_schema.All_keepers -> All, []
-      | Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (first, rest)) ->
-        Listed, without_repeats (first :: rest)
-    in
-    let roster = List.sort_uniq String.compare keepers in
-    let entry ~known name =
-      { name
-      ; known
-      ; excluded = List.mem name typesafeai.Runtime_schema.excluded_keepers
-      }
-    in
-    let unknown = List.filter (fun name -> not (List.mem name roster)) picked in
-    Ok
-      { source_revision
-      ; text
-      ; initial
-      ; mode
-      ; entries = List.map (entry ~known:true) roster @ List.map (entry ~known:false) unknown
-      ; picked
-      ; cursor = 0
-      ; error = None
-      }
+    (match Runtime_toml.memory_recall_declaration_of_string text with
+     | Error errors -> cannot_open errors
+     | Ok declared ->
+       (match effective declared with
+        | Error reason -> Error ("runtime.toml 을 읽지 못해서 폼을 열 수 없어요 · " ^ reason)
+        | Ok initial ->
+          let excluded_keepers =
+            config.Runtime_schema.typesafeai.Runtime_schema.excluded_keepers
+          in
+          let picked = held_names declared in
+          let roster =
+            List.sort_uniq
+              (fun (left : roster_entry) (right : roster_entry) ->
+                 String.compare left.name right.name)
+              keepers
+          in
+          let unknown =
+            List.filter
+              (fun name ->
+                 not
+                   (List.exists
+                      (fun (keeper : roster_entry) -> String.equal keeper.name name)
+                      roster))
+              picked
+          in
+          let entry ~known (keeper : roster_entry) =
+            { keeper; known; excluded = List.mem keeper.name excluded_keepers }
+          in
+          Ok
+            { source_revision
+            ; text
+            ; declared
+            ; initial
+            ; mode = mode_of_recall initial
+            ; entries =
+                List.map (entry ~known:true) roster
+                @ List.map
+                    (fun name -> entry ~known:false { name; presence = Unknown })
+                    unknown
+            ; picked
+            ; cursor = 0
+            ; error = None
+            }))
 ;;
 
 let next_mode = function
@@ -134,10 +203,11 @@ let toggle t =
     match List.nth_opt t.entries (t.cursor - 1) with
     | None -> t
     | Some entry ->
+      let name = entry.keeper.name in
       let picked =
-        if List.mem entry.name t.picked
-        then List.filter (fun name -> not (String.equal name entry.name)) t.picked
-        else t.picked @ [ entry.name ]
+        if List.mem name t.picked
+        then List.filter (fun picked -> not (String.equal picked name)) t.picked
+        else t.picked @ [ name ]
       in
       { t with picked; error = None })
 ;;
@@ -162,44 +232,77 @@ let unchangeable =
   "[typesafeai] 가 폼으로 고칠 수 있는 모양이 아니에요. e 로 파일을 직접 고쳐 주세요."
 ;;
 
+(* What the form stands for, or [None] for [Listed] with nobody picked, which
+   is no choice to write. *)
 let chosen t =
   match t.mode with
-  | Off -> Ok Runtime_schema.Memory_recall_off
-  | All -> Ok (Runtime_schema.Memory_recall_on Runtime_schema.All_keepers)
+  | Off -> Some Runtime_schema.Memory_recall_off
+  | All -> Some (Runtime_schema.Memory_recall_on Runtime_schema.All_keepers)
   | Listed ->
     (match t.picked with
-     | [] -> Error nobody_picked
+     | [] -> None
      | first :: rest ->
-       Ok
+       Some
          (Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (first, rest))))
 ;;
 
 (* Which keepers a list names does not depend on the order it is written in
-   (the gate asks [List.mem]), so two lists are the same choice when they name
-   the same keepers. Picking a keeper off and on again moves it to the end of
-   [picked]; that is no change to the file. *)
+   (the gate asks [List.mem]), so two lists name the same keepers when they
+   hold the same names. Picking a keeper off and on again moves it to the end
+   of [picked]; that is no change to the file. *)
+let same_names left right =
+  List.equal
+    String.equal
+    (List.sort_uniq String.compare left)
+    (List.sort_uniq String.compare right)
+;;
+
 let same_choice left right =
   match left, right with
   | ( Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (left_first, left_rest))
     , Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (right_first, right_rest))
-    ) ->
-    List.equal
-      String.equal
-      (List.sort_uniq String.compare (left_first :: left_rest))
-      (List.sort_uniq String.compare (right_first :: right_rest))
+    ) -> same_names (left_first :: left_rest) (right_first :: right_rest)
   | ( ( Runtime_schema.Memory_recall_off
       | Runtime_schema.Memory_recall_on Runtime_schema.All_keepers
       | Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers _) )
     , _ ) -> Runtime_schema.equal_memory_recall left right
 ;;
 
+let change t =
+  match chosen t with
+  | None -> Nobody_picked
+  | Some chosen when same_choice chosen t.initial -> Unchanged
+  | Some _ ->
+    let held = held_names t.declared in
+    let picked = without_repeats t.picked in
+    let after = t.mode in
+    let listed_after = match after with Listed -> true | Off | All -> false in
+    Changed
+      { before = mode_of_recall t.initial
+      ; after
+      ; added =
+          (if listed_after
+           then List.filter (fun name -> not (List.mem name held)) picked
+           else [])
+      ; dropped =
+          (if listed_after
+           then List.filter (fun name -> not (List.mem name picked)) held
+           else [])
+      ; list_kept = (match after with Off -> List.length held | Listed | All -> 0)
+      ; list_removed = (match after with All -> List.length held | Listed | Off -> 0)
+      }
+;;
+
 (* Rewriting a key drops the comment on its line, so a key that already holds
-   what the choice needs is left alone: the switch when the file has it on, the
-   scope when it already names the same kind. Off writes the switch alone, so a
-   list the file keeps stays for the next time recall is switched on by hand.
-   [All] drops the list because the file refuses one next to scope "all". A
-   list that does change is written whole, and the comments inside it go. *)
-let write ~initial chosen text =
+   what the choice needs is left alone: the switch when the file has it on,
+   the scope when it already names the same kind, the list when it already
+   names the same keepers. A file that switched recall off by hand and kept
+   its list therefore gets the switch alone when recall is switched back on
+   over that list. Off writes the switch alone, so a list the file keeps stays
+   for the next time. [All] drops the list because the file refuses one next
+   to scope "all". A list that does change is written whole, and the comments
+   inside it go. *)
+let write ~(declared : Runtime_toml.memory_recall_declaration) chosen text =
   let set_switch value text =
     Toml_line_editor.edit_table_bool text ~path:table ~key:switch_key ~value
   in
@@ -217,35 +320,40 @@ let write ~initial chosen text =
         ~key:keepers_key
         ~values:names
   in
-  let switch_on_in_file, scope_in_file =
-    match initial with
-    | Runtime_schema.Memory_recall_off -> false, None
-    | Runtime_schema.Memory_recall_on Runtime_schema.All_keepers -> true, Some scope_all
-    | Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers _) ->
-      true, Some scope_listed
-  in
-  let turn_on text = if switch_on_in_file then text else set_switch true text in
-  let scope_is scope text =
-    if Option.equal String.equal scope_in_file (Some scope) then text else set_scope scope text
+  let turn_on text = if declared.Runtime_toml.switch then text else set_switch true text in
+  let held = held_names declared in
+  let scope_is_all, scope_is_listed =
+    match declared.Runtime_toml.scope with
+    | Some Runtime_schema.All_keepers -> true, false
+    | Some (Runtime_schema.Listed_keepers _) -> false, true
+    | None -> false, false
   in
   match chosen with
   | Runtime_schema.Memory_recall_off -> set_switch false text
   | Runtime_schema.Memory_recall_on Runtime_schema.All_keepers ->
-    text |> turn_on |> scope_is scope_all |> set_keepers []
+    let text = turn_on text in
+    let text = if scope_is_all then text else set_scope scope_all text in
+    if scope_is_listed then set_keepers [] text else text
   | Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (first, rest)) ->
-    text |> turn_on |> scope_is scope_listed |> set_keepers (first :: rest)
+    let names = first :: rest in
+    let text = turn_on text in
+    let text = if scope_is_listed then text else set_scope scope_listed text in
+    if scope_is_listed && same_names held names then text else set_keepers names text
 ;;
 
+(* The read-back asks [same_choice], as the decision above does: a list the
+   file keeps may name the choice's keepers in another order, or twice, and
+   the gate reads that as the same list. *)
 let text_on t =
   let refuse reason = Error { t with error = Some reason } in
   match chosen t with
-  | Error reason -> refuse reason
-  | Ok chosen when same_choice chosen t.initial -> Ok t.text
-  | Ok chosen ->
-    let edited = write ~initial:t.initial chosen t.text in
+  | None -> refuse nobody_picked
+  | Some chosen when same_choice chosen t.initial -> Ok t.text
+  | Some chosen ->
+    let edited = write ~declared:t.declared chosen t.text in
     (match Runtime_toml.parse_string edited with
      | Ok config
-       when Runtime_schema.equal_memory_recall
+       when same_choice
               config.Runtime_schema.typesafeai.Runtime_schema.memory_recall
               chosen -> Ok edited
      | Ok _ -> refuse unchangeable
@@ -288,7 +396,48 @@ let wrapped ~width ~lead text =
 
 let entry_suffix entry =
   (if entry.known then "" else "  (키퍼 목록에 없어요)")
+  ^ (match entry.keeper.presence with
+     | Stopped -> "  (멈춰 있어요)"
+     | Running | Unknown -> "")
   ^ if entry.excluded then "  (제외됨 · 보내지 않아요)" else ""
+;;
+
+(* The first few names, then how many more: a list of forty keepers is not a
+   row. *)
+let shown_names_limit = 4
+
+let names_text names =
+  let shown = List.filteri (fun index _ -> index < shown_names_limit) names in
+  let more = List.length names - List.length shown in
+  String.concat ", " (List.map Terminal_text.single_line shown)
+  ^ if more > 0 then Printf.sprintf " 외 %d명" more else ""
+;;
+
+let summary_text t =
+  match change t with
+  | Unchanged -> "바뀌는 것이 없어요"
+  | Nobody_picked -> "고른 키퍼가 없어요"
+  | Changed detail ->
+    let head =
+      if detail.before = detail.after
+      then mode_label detail.after
+      else mode_label detail.before ^ " → " ^ mode_label detail.after
+    in
+    let names sign = function
+      | [] -> []
+      | names -> [ sign ^ names_text names ]
+    in
+    let counted text = function
+      | 0 -> []
+      | count -> [ Printf.sprintf text count ]
+    in
+    String.concat
+      " · "
+      (head
+       :: (names "+" detail.added
+           @ names "-" detail.dropped
+           @ counted "파일의 목록 %d명은 남겨요" detail.list_kept
+           @ counted "파일의 목록 %d명은 지워요" detail.list_removed))
 ;;
 
 (* The slice of [rows] around [cursor] that fits [room], with how many rows
@@ -308,6 +457,7 @@ let rows ~width ~height t =
   let mark index = if t.cursor = index then ">" else " " in
   let intro_rows = wrapped ~width ~lead:hint_lead intro in
   let range_row = Printf.sprintf "  %s %s  \xe2\x80\xb9 %s \xe2\x80\xba" (mark 0) range_label (mode_label t.mode) in
+  let summary_rows = wrapped ~width ~lead:hint_lead ("저장하면 · " ^ summary_text t) in
   let note_rows =
     (match t.mode, t.entries with
      | All, _ -> wrapped ~width ~lead:hint_lead all_warning
@@ -330,13 +480,18 @@ let rows ~width ~height t =
              Printf.sprintf
                "    %s [%s] %s%s"
                (mark (index + 1))
-               (if List.mem entry.name t.picked then "x" else " ")
-               (Terminal_text.single_line entry.name)
+               (if List.mem entry.keeper.name t.picked then "x" else " ")
+               (Terminal_text.single_line entry.keeper.name)
                (entry_suffix entry))
           t.entries
       in
       let fixed =
-        List.length intro_rows + 1 + List.length note_rows + List.length error_rows + 1
+        List.length intro_rows
+        + 1
+        + List.length summary_rows
+        + List.length note_rows
+        + List.length error_rows
+        + 1
       in
       let visible, above, below =
         window ~room:(max 1 (height - fixed)) ~cursor:(max 0 (t.cursor - 1)) drawn
@@ -347,5 +502,5 @@ let rows ~width ~height t =
         visible
         @ [ Printf.sprintf "      … 위 %d명 · 아래 %d명 (↑/↓ 로 움직여요)" above below ]
   in
-  intro_rows @ [ range_row ] @ keeper_rows @ note_rows @ error_rows @ [ "" ]
+  intro_rows @ [ range_row ] @ keeper_rows @ summary_rows @ note_rows @ error_rows @ [ "" ]
 ;;

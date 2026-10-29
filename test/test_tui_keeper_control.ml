@@ -212,6 +212,22 @@ let test_registered_without_fiber_offers_boot () =
     [ Control.Boot; Control.Delete ]
     (Control.available r)
 
+(* The roster is the only witness that a fiber runs a keeper; a pause is the
+   metadata's, and does not stop the fiber. *)
+let test_runs_follows_the_roster_and_not_the_pause () =
+  let check label expected r =
+    Alcotest.(check (option bool)) label expected (Control.runs r)
+  in
+  check "roster not read" None (reading "analyst");
+  check "roster unreadable" None (reading ~liveness:(Control.Invalid "bad") "analyst");
+  check "absent from the roster" (Some false) (reading ~liveness:Control.Absent "analyst");
+  check "registered without a fiber" (Some false)
+    (reading ~liveness:(Control.Present (runtime ~keepalive_running:false "analyst")) "analyst");
+  check "a fiber runs it" (Some true)
+    (reading ~liveness:(Control.Present (runtime "analyst")) "analyst");
+  check "paused, and its fiber runs" (Some true)
+    (reading ~paused:true ~liveness:(Control.Present (runtime "analyst")) "analyst")
+
 let test_only_shutdown_confirms () =
   List.iter
     (fun (action, expected) ->
@@ -1309,6 +1325,8 @@ let () =
             test_pause_and_health_are_read_separately
         ; Alcotest.test_case "registered without a fiber offers boot" `Quick
             test_registered_without_fiber_offers_boot
+        ; Alcotest.test_case "runs follows the roster and not the pause" `Quick
+            test_runs_follows_the_roster_and_not_the_pause
         ] )
     ; ( "confirmation"
       , [ Alcotest.test_case "only shutdown confirms" `Quick

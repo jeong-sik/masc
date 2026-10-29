@@ -98,19 +98,24 @@ the chosen set changes.
 Config > runtime.toml, key `m`, opens a form for the same three keys. The
 range row chooses off, picked Keepers only, or every Keeper. In the picked
 range the form lists the Keepers the TUI knows, and a name the file lists that
-the TUI does not know stays in the list, marked. Space picks, Enter saves, Esc
-closes.
+the TUI does not know stays in the list, marked. A Keeper that is paused, or
+that no fiber runs (the roster lacks it, or holds it without a running
+keepalive), is marked too. Space picks, Enter saves, Esc closes. A line under
+the list says what saving would do, for example "off -> picked Keepers only",
+the Keepers added to or dropped from the list, or that nothing changes.
 
 - Enter hands the new runtime.toml text to the pane's raw-edit save, the one
   `e` ends in: the same preview, revision check and conflict handling. The form
   is refused when the file changed after it was opened.
 - The server republishes `[typesafeai]` when a save lands, so the change
   applies from the next model request. No restart.
-- Off writes only `memory_recall = false`, so a Keeper list in the file stays
-  for the next time recall is switched on by hand. Every Keeper removes the
-  list, which the file refuses next to scope `"all"`. The text is read back with
-  the loader before it is handed on; a `[typesafeai]` the line editor cannot
-  change (an inline table, for one) is refused and left for `e`.
+- Off writes only `memory_recall = false`, so a Keeper list in the file stays.
+  The next time the form opens on that file it starts in the off range with the
+  kept list picked, and choosing the picked range again writes the switch alone.
+  Every Keeper removes the list, which the file refuses next to scope `"all"`.
+  The text is read back with the loader before it is handed on; a
+  `[typesafeai]` the line editor cannot change (an inline table, for one) is
+  refused and left for `e`.
 - A form on a draft that is not saved yet starts from the draft, so a hand edit
   is neither dropped nor written over.
 - Every line outside the three keys stays as it was. A key that already holds

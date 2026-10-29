@@ -25780,9 +25780,24 @@ let main
     | None, _ | _, None -> report_action state "error" "config identity not loaded yet; r to reload"
     | Some _, Some reading ->
       let session = runtime_config_working_session reading in
+      let module Form = Masc_tui_memory_recall_form in
+      (* A paused Keeper, or one no fiber runs, is marked in the list. The
+         reading is the Keepers surface's own, so the two say the same. A
+         roster that could not be read says nothing: [Unknown] is not drawn. *)
+      let roster_entry (keeper : keeper) =
+        let reading = Masc_tui_types.keeper_reading state keeper in
+        { Form.name = keeper.k_name
+        ; presence =
+            (if reading.Masc_tui_keeper_control.paused then Form.Stopped
+             else
+               match Masc_tui_keeper_control.runs reading with
+               | Some true -> Form.Running
+               | Some false -> Form.Stopped
+               | None -> Form.Unknown) }
+      in
       (match
-         Masc_tui_memory_recall_form.open_on ~source_revision:session.base.source_revision
-           ~keepers:(List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers)
+         Form.open_on ~source_revision:session.base.source_revision
+           ~keepers:(List.map roster_entry state.keepers)
            session.text
        with
        | Ok form -> state.memory_recall_form <- Some form

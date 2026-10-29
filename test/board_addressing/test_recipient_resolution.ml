@@ -132,27 +132,40 @@ let test_candidate_cannot_leave_a_directory () =
   (* Strings of length 1 to 5 over the three name characters: 3 + 9 + 27 + 81 + 243. *)
   check int "every name made of name characters was accepted" 363 !accepted
 
-(* Every byte on its own. A name character is an ASCII letter, a digit, an
-   underscore or a hyphen, and nothing else is: the exhaustive walk above uses
-   ten characters, and this one covers the other 246. *)
+(* Every byte, alone, first, last and inside a name. A name character is an
+   ASCII letter, a digit, an underscore or a hyphen, and nothing else is: the
+   exhaustive walk above uses ten characters, and this one covers the other
+   246. A byte that is checked only on its own can hide in a name that is
+   checked at one end, such as a trailing newline. *)
 let test_candidate_accepts_exactly_the_name_characters () =
   let is_name_character = function
     | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> true
     | _ -> false
   in
   for code = 0 to 255 do
-    let name = String.make 1 (Char.chr code) in
-    check bool
-      (Printf.sprintf "byte %d on its own" code)
-      (is_name_character (Char.chr code))
-      (Option.is_some (Candidate.of_string name))
+    let byte = String.make 1 (Char.chr code) in
+    List.iter
+      (fun (place, name) ->
+         check bool
+           (Printf.sprintf "byte %d %s" code place)
+           (is_name_character (Char.chr code))
+           (Option.is_some (Candidate.of_string name)))
+      [ "alone", byte; "first", byte ^ "a"; "last", "a" ^ byte; "inside", "a" ^ byte ^ "a" ]
   done
 
 let test_resolve_sorts_the_answers () =
   check_resolve "a Keeper name" ~recipients:[ "alice" ] ~unresolved:[] [ "alice" ];
   check_resolve "an alias" ~recipients:[ "alice" ] ~unresolved:[] [ "al" ];
   check_resolve "a name nobody declared" ~recipients:[] ~unresolved:[ "check" ] [ "check" ];
-  check_resolve "no candidates" ~recipients:[] ~unresolved:[] []
+  check_resolve "no candidates" ~recipients:[] ~unresolved:[] [];
+  (* [resolve] has no length rule. A name no Keeper can have is asked like any
+     other and comes back unresolved. What a lookup does with a name it cannot
+     hold is the lookup's business (RFC section 3.1). *)
+  let long = String.make 300 'a' in
+  let declared, asked = recording registry in
+  check_resolve ~declared "a name longer than any Keeper name" ~recipients:[]
+    ~unresolved:[ long ] [ long ];
+  check strings "the long name reached the declaration" [ long ] (asked ())
 
 (* The caller's [equal] decides which recipients are one. Here two spellings of a
    Keeper come back from the declaration, and only the caller's equality knows
@@ -196,7 +209,11 @@ let test_resolve_merges_duplicates () =
   check_resolve "a recipient written again after another one" ~recipients:[ "alice"; "bob" ]
     ~unresolved:[] [ "alice"; "bob"; "al" ];
   check_resolve "an unknown name written again after another one" ~recipients:[]
-    ~unresolved:[ "check"; "lint" ] [ "check"; "lint"; "check" ]
+    ~unresolved:[ "check"; "lint" ] [ "check"; "lint"; "check" ];
+  check_resolve "a recipient written again after two others" ~recipients:[ "alice"; "bob"; "carol" ]
+    ~unresolved:[] [ "alice"; "bob"; "carol"; "bob" ];
+  check_resolve "a recipient written again right after itself" ~recipients:[ "alice"; "bob" ]
+    ~unresolved:[] [ "alice"; "bob"; "bob" ]
 
 let test_resolve_case () =
   check_resolve "the declaration folds case, so two spellings are one recipient"
@@ -225,6 +242,12 @@ let test_resolve_failure () =
   check_failure ~declared "an unreadable Keeper is a failure, not prose"
     (Unreadable "erin") [ "alice"; "erin"; "bob"; "check" ];
   check strings "nothing is asked after the failure" [ "alice"; "erin" ] (asked ());
+  let declared, asked = recording unreadable in
+  check_failure ~declared "the first name fails" (Unreadable "erin") [ "erin"; "alice" ];
+  check strings "only the first name was asked" [ "erin" ] (asked ());
+  let declared, asked = recording unreadable in
+  check_failure ~declared "the last name fails" (Unreadable "erin") [ "alice"; "bob"; "erin" ];
+  check strings "every name up to the last was asked" [ "alice"; "bob"; "erin" ] (asked ());
   let declared, asked = recording registry in
   check_resolve ~declared "no candidates ask nothing" ~recipients:[] ~unresolved:[] [];
   check strings "nothing was asked" [] (asked ())

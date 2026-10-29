@@ -20,11 +20,15 @@
    The verdict compares Keepers, not list entries. A recorded list that names
    one Keeper twice, by name and by alias, is [Unchanged].
 
+   A row is read with the decoder the server loads it with, so a row the server
+   would drop is a line this tool cannot read.
+
    Board posts are internal and the output carries their titles. It is for the
    operator's terminal and is not meant to be committed. The exit code is 1
    when a line of the posts file could not be read. It is 2 for a bad argument,
-   a file or folder that is missing, and Keeper settings that are absent or
-   unreadable. A run that exits 1 is not a source for the numbers in the RFC.
+   a file or folder that is missing, a posts file with no line in it, and
+   Keeper settings that are absent or unreadable. A run that exits 1 is not a
+   source for the numbers in the RFC.
 
    Usage:
      recipient_replay --keepers <dir of keeper .toml files> --posts <board_posts.jsonl> *)
@@ -101,63 +105,41 @@ let declared keepers candidate =
      | _ :: _ :: _ as claimants ->
        Error (Ambiguous_alias (wanted, List.map (fun keeper -> keeper.name) claimants)))
 
-type post_kind =
-  | Human_post
-  | Automation_post
-  | System_post
-
-(* The spelling lib/board/board_core_classify.ml stores. *)
-let post_kind_of_string = function
-  | "direct" -> Some Human_post
-  | "automation" -> Some Automation_post
-  | "system" -> Some System_post
-  | _ -> None
+module Board = Masc_board_handlers.Board
 
 type post =
   { id : string;
     author : string;
-    kind : post_kind;
+    system : bool;
     title : string;
     body : string;
     recorded : string list }
 
-(* The record shape is the one lib/board_types writes, with the four audience
-   kinds of lib/board/board_audience.ml. A line the replay cannot read is
-   counted, and the run exits with 1: invalid JSON, a missing field, a post
-   kind or an audience kind it does not know, or targets that are empty or not
-   a list of strings. Nothing is skipped quietly. *)
+(* The recorded addressees are the targets of a [Targets] audience. The other
+   audiences, and a row that records none, name no one. *)
+let recorded_targets (post : Board.post) =
+  match post.audience with
+  | Some (Board.Targets targets) -> List.map Board.Agent_id.to_string targets
+  | Some (Board.Broadcast | Board.Thread_participants | Board.Discoverable) | None -> []
+
+let post_of_board (post : Board.post) =
+  { id = Board.Post_id.to_string post.id;
+    author = Board.Agent_id.to_string post.author;
+    system =
+      (match post.post_kind with
+       | Board.System_post -> true
+       | Board.Human_post | Board.Automation_post -> false);
+    title = post.title;
+    body = post.body;
+    recorded = recorded_targets post }
+
+(* A line that is not JSON, or that the server's decoder drops, is not a post
+   this tool can read. It is counted and the run exits with 1. *)
 let post_of_line line =
   match Yojson.Safe.from_string line with
   | exception Yojson.Json_error _ -> None
   | json ->
-    (try
-       let open Yojson.Safe.Util in
-       let text key = to_string (member key json) in
-       let recorded =
-         match member "audience" json with
-         | `Null -> []
-         | `Assoc _ as audience ->
-           (match to_string (member "kind" audience) with
-            | "targets" ->
-              (match List.map to_string (to_list (member "targets" audience)) with
-               | [] -> raise (Type_error ("a targets audience names no one", audience))
-               | targets -> targets)
-            | "broadcast" | "thread_participants" | "discoverable" -> []
-            | kind -> raise (Type_error ("unknown audience kind " ^ kind, audience)))
-         | (`Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as other ->
-           raise (Type_error ("audience is not an object", other))
-       in
-       Option.map
-         (fun kind ->
-            { id = text "id";
-              author = text "author";
-              kind;
-              title = text "title";
-              body = text "body";
-              recorded })
-         (post_kind_of_string (text "post_kind"))
-     with
-     | Yojson.Safe.Util.Type_error _ -> None)
+    Option.map post_of_board (Masc_board_handlers.Board_votes_json.post_of_yojson json)
 
 (* What the board write path reads: the title and the body, one per line. *)
 let address_text post =
@@ -276,27 +258,24 @@ let print_ambiguous_aliases keepers =
 
 let read_lines path = In_channel.with_open_text path In_channel.input_lines
 
+let read_post_lines path =
+  match List.filter (fun line -> not (String.equal (String.trim line) "")) (read_lines path) with
+  | [] -> Error (Printf.sprintf "no posts in %s" path)
+  | lines -> Ok lines
+
 let run ~keepers_dir ~posts_file =
-  match read_keepers keepers_dir with
-  | Error detail ->
+  match read_keepers keepers_dir, read_post_lines posts_file with
+  | (Error detail, _) | (Ok _, Error detail) ->
     prerr_endline detail;
     2
-  | Ok keepers ->
-    let lines = List.filter (fun line -> not (String.equal (String.trim line) "")) (read_lines posts_file) in
+  | Ok keepers, Ok lines ->
     let posts = List.filter_map post_of_line lines in
     let unreadable = List.length lines - List.length posts in
     Printf.printf "# keepers=%d posts=%d unreadable_lines=%d\n" (List.length keepers)
       (List.length posts) unreadable;
     print_ambiguous_aliases keepers;
     let with_targets = List.filter (fun post -> post.recorded <> []) posts in
-    let system, addressed =
-      List.partition
-        (fun post ->
-           match post.kind with
-           | System_post -> true
-           | Human_post | Automation_post -> false)
-        with_targets
-    in
+    let system, addressed = List.partition (fun post -> post.system) with_targets in
     let replayed = List.map (replay keepers) addressed in
     List.iter (fun entry -> if entry.verdict <> Unchanged then print_replayed entry) replayed;
     let count verdict =

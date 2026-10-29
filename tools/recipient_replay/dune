@@ -1,4 +1,4 @@
 (executable
  (name main)
  (modules main)
- (libraries masc.board_addressing otoml yojson))
+ (libraries masc.board_addressing masc.board_handlers otoml yojson))

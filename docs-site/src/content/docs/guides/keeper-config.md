@@ -45,7 +45,7 @@ Injects the Workspace Wiki table of contents (one line per page: title, file, su
   ```
 
 ### 4. MicroVM Sandbox Guest DNS (`[sandbox] microvm_dns`)
-Sets the nameserver passed into microVM Keeper guests (`apple_container`, `microsandbox`, `nerdctl_kata`). Without it, a guest copies the host's first resolver from `/etc/resolv.conf`.
+Sets the nameserver passed into microVM Keeper guests that run on `apple_container` or `nerdctl_kata` with `network_mode = "inherit"`. Without it, the guest copies the host's first resolver from `/etc/resolv.conf`.
 
 - **TOML Setting**: `<base-path>/.masc/config/runtime.toml`
   ```toml

@@ -45,7 +45,7 @@ Keeper가 Gate 보호 대상 민감 도구를 호출했을 때 오퍼레이터�
   ```
 
 ### 4. MicroVM 샌드박스 게스트 DNS (`[sandbox] microvm_dns`)
-microVM Keeper 게스트(`apple_container`, `microsandbox`, `nerdctl_kata`)에 전달할 네임서버를 지정합니다. 지정하지 않으면 게스트는 호스트 `/etc/resolv.conf` 의 첫 번째 리졸버를 복사합니다.
+`network_mode = "inherit"` 로 도는 `apple_container`, `nerdctl_kata` microVM Keeper 게스트에 전달할 네임서버를 지정합니다. 지정하지 않으면 게스트는 호스트 `/etc/resolv.conf` 의 첫 번째 리졸버를 복사합니다.
 
 - **TOML 설정**: `<base-path>/.masc/config/runtime.toml`
   ```toml

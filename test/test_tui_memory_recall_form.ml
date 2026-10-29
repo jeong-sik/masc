@@ -165,6 +165,39 @@ let test_other_tables_and_comments_are_not_touched () =
     (recall_of written)
 ;;
 
+(* A rewrite drops the comment on the line, so a key that already holds what
+   the choice needs keeps its line. Only the list changes here, and the
+   comment on its line goes with the old value. *)
+let test_a_key_that_already_holds_the_value_keeps_its_comment () =
+  let text =
+    with_table
+      "memory_recall   =   true   # on\nmemory_recall_scope = \"listed\" # why\n\
+       memory_recall_keepers = [\"a\"] # who\n"
+  in
+  let form = edited (opened text) [ "down"; "down"; " " ] in
+  Alcotest.(check string)
+    "the switch and the scope lines are as they were"
+    (with_table
+       "memory_recall   =   true   # on\nmemory_recall_scope = \"listed\" # why\n\
+        memory_recall_keepers = [\n\
+       \  \"a\",\n\
+       \  \"b\",\n\
+        ]\n")
+    (text_of form)
+;;
+
+(* The gate asks whether a name is in the list, not where, so the same names
+   in another order leave the file alone. *)
+let test_the_same_keepers_in_another_order_write_nothing () =
+  let text =
+    with_table
+      "memory_recall = true\nmemory_recall_scope = \"listed\"\n\
+       memory_recall_keepers = [\"a\", \"b\"]\n"
+  in
+  let form = edited (opened text) [ "down"; " "; " " ] in
+  Alcotest.(check string) "a dropped and picked again" text (text_of form)
+;;
+
 (* The picks are the form's, not the range's: a visit to the other ranges and
    back shows the same list. *)
 let test_picks_survive_a_visit_to_the_other_ranges () =
@@ -299,6 +332,10 @@ let () =
             test_a_choice_the_file_already_has_writes_nothing
         ; Alcotest.test_case "picks are written in the order they were made" `Quick
             test_picks_are_written_in_the_order_they_were_made
+        ; Alcotest.test_case "a key that already holds the value keeps its comment" `Quick
+            test_a_key_that_already_holds_the_value_keeps_its_comment
+        ; Alcotest.test_case "the same keepers in another order write nothing" `Quick
+            test_the_same_keepers_in_another_order_write_nothing
         ; Alcotest.test_case "picks survive a visit to the other ranges" `Quick
             test_picks_survive_a_visit_to_the_other_ranges
         ; Alcotest.test_case "a pick made later goes after the file's own" `Quick

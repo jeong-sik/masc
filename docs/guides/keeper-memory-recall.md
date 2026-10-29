@@ -113,6 +113,12 @@ closes.
   change (an inline table, for one) is refused and left for `e`.
 - A form on a draft that is not saved yet starts from the draft, so a hand edit
   is neither dropped nor written over.
+- Every line outside the three keys stays as it was. A key that already holds
+  what the choice needs is not rewritten, and the same Keepers in another order
+  are the same choice. A list that changes is written whole, so the comments
+  inside it and on its line go. A key the file does not have yet is added at
+  the end of the table, below a comment that sits above the next table's header
+  (the line editor does this for every file it edits, issue #46797).
 
 ## Watch it
 

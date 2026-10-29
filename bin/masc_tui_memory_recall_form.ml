@@ -174,10 +174,32 @@ let chosen t =
          (Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (first, rest))))
 ;;
 
-(* Off writes the switch alone: a list the file keeps stays for the next time
-   recall is switched on by hand. [All] drops the list because the file
-   refuses one next to scope "all". *)
-let write chosen text =
+(* Which keepers a list names does not depend on the order it is written in
+   (the gate asks [List.mem]), so two lists are the same choice when they name
+   the same keepers. Picking a keeper off and on again moves it to the end of
+   [picked]; that is no change to the file. *)
+let same_choice left right =
+  match left, right with
+  | ( Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (left_first, left_rest))
+    , Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (right_first, right_rest))
+    ) ->
+    List.equal
+      String.equal
+      (List.sort_uniq String.compare (left_first :: left_rest))
+      (List.sort_uniq String.compare (right_first :: right_rest))
+  | ( ( Runtime_schema.Memory_recall_off
+      | Runtime_schema.Memory_recall_on Runtime_schema.All_keepers
+      | Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers _) )
+    , _ ) -> Runtime_schema.equal_memory_recall left right
+;;
+
+(* Rewriting a key drops the comment on its line, so a key that already holds
+   what the choice needs is left alone: the switch when the file has it on, the
+   scope when it already names the same kind. Off writes the switch alone, so a
+   list the file keeps stays for the next time recall is switched on by hand.
+   [All] drops the list because the file refuses one next to scope "all". A
+   list that does change is written whole, and the comments inside it go. *)
+let write ~initial chosen text =
   let set_switch value text =
     Toml_line_editor.edit_table_bool text ~path:table ~key:switch_key ~value
   in
@@ -195,21 +217,32 @@ let write chosen text =
         ~key:keepers_key
         ~values:names
   in
+  let switch_on_in_file, scope_in_file =
+    match initial with
+    | Runtime_schema.Memory_recall_off -> false, None
+    | Runtime_schema.Memory_recall_on Runtime_schema.All_keepers -> true, Some scope_all
+    | Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers _) ->
+      true, Some scope_listed
+  in
+  let turn_on text = if switch_on_in_file then text else set_switch true text in
+  let scope_is scope text =
+    if Option.equal String.equal scope_in_file (Some scope) then text else set_scope scope text
+  in
   match chosen with
   | Runtime_schema.Memory_recall_off -> set_switch false text
   | Runtime_schema.Memory_recall_on Runtime_schema.All_keepers ->
-    text |> set_switch true |> set_scope scope_all |> set_keepers []
+    text |> turn_on |> scope_is scope_all |> set_keepers []
   | Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (first, rest)) ->
-    text |> set_switch true |> set_scope scope_listed |> set_keepers (first :: rest)
+    text |> turn_on |> scope_is scope_listed |> set_keepers (first :: rest)
 ;;
 
 let text_on t =
   let refuse reason = Error { t with error = Some reason } in
   match chosen t with
   | Error reason -> refuse reason
-  | Ok chosen when Runtime_schema.equal_memory_recall chosen t.initial -> Ok t.text
+  | Ok chosen when same_choice chosen t.initial -> Ok t.text
   | Ok chosen ->
-    let edited = write chosen t.text in
+    let edited = write ~initial:t.initial chosen t.text in
     (match Runtime_toml.parse_string edited with
      | Ok config
        when Runtime_schema.equal_memory_recall

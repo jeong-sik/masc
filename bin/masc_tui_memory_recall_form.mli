@@ -48,9 +48,16 @@ val refused : t -> string -> t
 
 val text_on : t -> (string, t) result
 (** The text the form was opened on, with the form's choice written into
-    [\[typesafeai\]]. Comments and every other line stay as they were.
+    [\[typesafeai\]]. Every line outside the three keys stays as it was.
 
-    The text is unchanged when the choice is the one the file already had.
+    The text is unchanged when the choice is the one the file already had; a
+    list that names the same Keepers in another order is the same choice. A
+    key that already holds what the choice needs is not rewritten, because a
+    rewrite drops the comment on its line. A list that does change is written
+    whole, and the comments inside it go. A key the file does not have yet is
+    added at the end of the table's lines, after a comment that sits above
+    the next table's header ([Toml_line_editor] puts every new key there).
+
     Switching off writes only [memory_recall = false], so a Keeper list the
     file keeps stays there for the next time recall is switched on by hand.
     {!All} writes [memory_recall_scope = "all"] and drops the list, which the

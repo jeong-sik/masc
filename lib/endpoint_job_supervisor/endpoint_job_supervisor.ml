@@ -149,6 +149,7 @@ let verify_receipt ~sw ~storage ~root_stat ~content ~sha256 =
 type result_read =
   | Observe_original | Open_storage | Reopen_stdout | Reopen_stderr
   | Validate_stdout | Validate_stderr | Refresh_after_publication
+  | Cancel_held_original
 
 let validation_stage = function P.Stdout -> Validate_stdout | P.Stderr -> Validate_stderr
 let busy_stage ~default = function
@@ -164,7 +165,10 @@ let busy_stage ~default = function
    same lease only temporarily; do not settle the job-owned result on Busy.
    Retrying each read separately also avoids replaying the exclusive receipt
    publication when the final refresh is contended. Pace retries with the
-   existing file-lock interval and no timeout, while preserving cancellation. *)
+   existing file-lock interval and no timeout, while preserving cancellation.
+   The held-startup cancellation waits here too: its Busy comes from the
+   non-blocking lease before the body runs, so no claim was written and no
+   tree was killed, and every other cancellation error is returned unchanged. *)
 let await_result_read ~before_result_read ~on_result_read_busy stage f =
   before_result_read stage;
   let rec await () =
@@ -406,7 +410,10 @@ let supervise ~before_result_read ~on_result_read_busy ~before_result_publish ~a
             stop and complete original bytes; no effect is replayed. *)
          finish_raw (Error e);
          daemon (fun () ->
-           let stopped=let* _=cancel t in settle () in
+           let stopped=
+             let* _=await_result_read ~before_result_read ~on_result_read_busy
+               Cancel_held_original (fun () -> cancel t) in
+             settle () in
            publish stopped);
          watch_collectors ()));
   t
@@ -437,6 +444,7 @@ module For_testing = struct
   type nonrec result_read = result_read =
     | Observe_original | Open_storage | Reopen_stdout | Reopen_stderr
     | Validate_stdout | Validate_stderr | Refresh_after_publication
+    | Cancel_held_original
   let launch_effect_workspace ?(before_result_read=fun _ -> ()) ?(on_result_read_busy=fun _ -> ())
       ~after_spawn ~before_result_publish ~after_result_publish ~sw ~fs ~cgroup_parent_path ~execution intent =
     launch_with_hook ~before_result_read ~on_result_read_busy ~after_spawn ~before_result_publish

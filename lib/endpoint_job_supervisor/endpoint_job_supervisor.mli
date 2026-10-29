@@ -94,7 +94,9 @@ val await_result : t -> (result_receipt,error) result
     physical or proven non-start observation, never payload or Task/Goal success.
 
     A held startup automatically commits cancellation against its original
-    source before retiring/killing its original tree. Only actual quiescence,
+    source before retiring/killing its original tree. A Busy cancellation never
+    entered the lease body, so it is awaited like a contended read; any other
+    cancellation error is returned unchanged. Only actual quiescence,
     input settlement and both complete seals can produce a terminal receipt.
     Native rejection or a settled pre-activation gate with durable cancellation
     and empty actual output may prove Not_started; raw bootstrap status remains
@@ -120,6 +122,7 @@ module For_testing : sig
   type result_read =
     | Observe_original | Open_storage | Reopen_stdout | Reopen_stderr
     | Validate_stdout | Validate_stderr | Refresh_after_publication
+    | Cancel_held_original
   val launch_effect_workspace :
     ?before_result_read:(result_read -> unit) ->
     ?on_result_read_busy:(result_read -> unit) ->

@@ -88,6 +88,21 @@ let save_turns ?system_prompt ~root ~session_id ~marker turns =
   in
   save 1 None []
 
+(* [checkpoint] as an earlier binary wrote it: one whole document at the
+   version before this one. *)
+let earlier_document (checkpoint : Agent_core.Checkpoint.t) =
+  match Agent_core.Checkpoint.to_json checkpoint with
+  | `Assoc fields ->
+    Yojson.Safe.to_string
+      (`Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name "version"
+              then name, `Int (Agent_core.Checkpoint.checkpoint_version - 1)
+              else name, value)
+           fields))
+  | _ -> fail "a checkpoint document is an object"
+
 let canonical root session_id =
   Checkpoint.agent_core_checkpoint_path ~session_dir:(session_dir root session_id) ~session_id
 
@@ -179,6 +194,15 @@ let test_every_root_keeps_what_it_reaches () = with_root (fun root ->
     (Filename.concat (session_dir root main)
        (Checkpoint.agent_core_history_snapshot_id_of_checkpoint archived.decoded))
     archived.head_bytes;
+  (* The store links a history archive to the canonical it copies. *)
+  Unix.link (canonical root main)
+    (Filename.concat (session_dir root main)
+       (Checkpoint.agent_core_history_snapshot_id_of_checkpoint
+          { current.decoded with Agent_core.Checkpoint.created_at = 2000.0 }));
+  (* A retained checkpoint an earlier binary wrote as a whole document. *)
+  write
+    (List.fold_left Filename.concat (session_dir root main) [ Checkpoint.retained_dirname; "earlier.json" ])
+    (earlier_document archived.decoded);
   let accepted = save_turns ~root ~session_id:main ~marker:"accepted" 2 in
   write
     (List.fold_left Filename.concat (session_dir root main)
@@ -211,7 +235,7 @@ let test_every_root_keeps_what_it_reaches () = with_root (fun root ->
   write (Filename.concat (journal_inputs_dir root) ".DS_Store") "";
   let report = sweep root in
   check int "sessions with objects" 3 report.sessions;
-  check int "canonical, archive, retained, Gate and journal heads" 5 report.roots;
+  check int "canonical, two archives, retained, Gate and journal heads" 6 report.roots;
   check int "what no root reaches is removed" (List.length unreached) report.removed;
   check (list string) "no failures" [] report.failures;
   List.iter
@@ -230,15 +254,26 @@ let test_every_root_keeps_what_it_reaches () = with_root (fun root ->
 (* The store writes through a session root that is a link at the root's
    physical location; the sweep resolves the link as the store does. *)
 let test_a_linked_session_root_is_swept () = with_root (fun root ->
-  ignore (save_turns ~root ~session_id:"trace-linked" ~marker:"unnamed" 1 : O.plan);
+  let kept = save_turns ~root ~session_id:"trace-linked" ~marker:"kept" 2 in
+  write (canonical root "trace-linked") kept.head_bytes;
+  let orphan = save_turns ~system_prompt:"orphan prompt" ~root ~session_id:"trace-linked" ~marker:"unnamed" 1 in
   let configured = Masc.Keeper_fs.session_store_path_for_runtime_root root in
   let physical = Filename.concat root "physical-traces" in
   Unix.rename configured physical;
   Unix.symlink physical configured;
-  check bool "the objects are in the linked directory" true (object_files root "trace-linked" <> []);
   let report = sweep root in
   check int "the session behind the link" 1 report.sessions;
-  check (list string) "its unnamed objects are removed" [] (object_files root "trace-linked"))
+  check int "the canonical behind the link is a root" 1 report.roots;
+  (* The store reads the session at its physical place. *)
+  Unix.unlink configured;
+  Unix.rename physical configured;
+  loads root "trace-linked" kept;
+  check bool "the orphan's bundle is removed" false
+    (Sys.file_exists
+       (object_path root "trace-linked"
+          (match orphan.head.history.turns with
+           | [ turn ] -> turn.bundle
+           | _ -> fail "one closed turn"))))
 
 let test_an_earlier_version_is_not_a_root () = with_root (fun root ->
   let session_id = "trace-superseded" in
@@ -286,6 +321,13 @@ let test_a_journal_head_it_cannot_read_removes_nothing () = with_root (fun root 
     | Sweep.Root_unusable _ -> true
     | Sweep.Owner_stores_unreadable _ | Listing_failed _ | Root_unreadable _ | Segment_unreachable _ -> false))
 
+let test_a_retained_entry_that_is_not_a_directory_removes_nothing () = with_root (fun root ->
+  ignore (save_turns ~root ~session_id:"trace-refused" ~marker:"unnamed" 2 : O.plan);
+  write (Filename.concat (session_dir root "trace-refused") Checkpoint.retained_dirname) "not a directory";
+  refused root ~expect:(function
+    | Sweep.Listing_failed _ -> true
+    | Sweep.Owner_stores_unreadable _ | Root_unreadable _ | Root_unusable _ | Segment_unreachable _ -> false))
+
 let test_a_segment_it_cannot_follow_removes_nothing () = with_root (fun root ->
   let current = save_turns ~root ~session_id:"trace-refused" ~marker:"current" (O.turns_per_segment + 1) in
   write (canonical root "trace-refused") current.head_bytes;
@@ -319,6 +361,8 @@ let () =
             test_a_head_it_cannot_read_removes_nothing
         ; test_case "a journal head it cannot read removes nothing" `Quick
             test_a_journal_head_it_cannot_read_removes_nothing
+        ; test_case "a retained entry that is not a directory removes nothing" `Quick
+            test_a_retained_entry_that_is_not_a_directory_removes_nothing
         ; test_case "a segment it cannot follow removes nothing" `Quick
             test_a_segment_it_cannot_follow_removes_nothing
         ; test_case "an unread operation store removes nothing" `Quick

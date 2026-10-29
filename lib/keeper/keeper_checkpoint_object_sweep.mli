@@ -15,7 +15,8 @@
     it runs.
 
     Every root is read before anything is removed. A root that cannot be read
-    or decoded, a head of a later version, a segment that cannot be followed,
+    or decoded, an [accepted-checkpoints] entry that is not a directory, a head
+    of a later version, a segment that cannot be followed,
     or an operation store {!Keeper_retained_checkpoint_sweep.owner_records}
     cannot read stops the pass with nothing removed, because what that head or
     store names is unknown. Only entries named [objects/<aa>/<sha256>] for a

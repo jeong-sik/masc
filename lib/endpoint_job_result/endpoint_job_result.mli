@@ -25,9 +25,14 @@ type gate = { preparation : preparation; decision : G.decision; control : contro
 (** Failed is a broken private gate channel; its other gate fields may be cut
     short. Rejection and failure diagnostics are display evidence only; never parse them to infer
     exec, non-start, retry, signalling or cleanup permission. *)
+type child =
+  { physical_exit : P.exit_status; launch_id : P.Id.t; input : input_delivery; gate : gate }
+type process = Child of child | Not_created of { launch_id : P.Id.t option }
+(** Not_created carries no OS exit, gate or sent-input claim. None means that
+    protected cancellation preceded any launch intent; Some retains the exact
+    known launch whose unused permit was retired. A pure value grants no proof. *)
 val encode :
-  status:P.response -> physical_exit:P.exit_status -> launch_id:P.Id.t -> input:input_delivery -> gate:gate ->
-  (string,error) result
+  status:P.response -> process:process -> (string,error) result
 (** Pure structural encoding of a pending sealed physical or proven non-start observation with a
     domain-separated payload checksum. This grants no provenance, publication
     or readiness authority; the trusted producer must supply actual evidence. *)
@@ -49,10 +54,18 @@ val load :
     files and operation. Old-boot reads are permitted without process adoption.
     No publication, removal, host ACK or Release authority is granted. *)
 val sha256 : t -> P.Sha256.t
-val input_delivery : t -> input_delivery
-val gate : t -> gate
-val physical_exit : t -> P.exit_status
-(** Raw original OS status, including bootstrap exits for proven non-starts. *)
+val process : t -> process
+(** Raw original child evidence, including bootstrap exits, or explicit absence
+    of a created child. Never synthesize an exit or accepted input for absence. *)
+val publish_unlaunched :
+  sw:Eio.Switch.t -> proof:R.unlaunched -> (t,error) result
+(** Consume original opaque no-callback authority to publish and verify both
+    actual empty streams and an immutable complete non-start receipt. Input was
+    never sent and no OS child is invented. Reconcile only exact original bytes
+    after partial publication/lost reply, then fully load and revalidate before
+    returning readiness. No launch, host consumption, ACK or cleanup permission.
+    [sw] belongs to an independent publisher, never a status/control observer.
+    Publication cancellation preserves evidence and never resets the permit. *)
 val inspect : t -> (P.response,error) result
 (** Revalidate retained original receipt and output attachments, refresh only
     legitimate original source progress, then return Result_ready for the exact
@@ -62,6 +75,12 @@ val read_output :
 (** Read only the verified original sealed stream, revalidating original
     receipt/source/output attachment before and after the bounded range. *)
 module For_testing : sig
+  type publish_stage = Stdout_sealed | Stderr_sealed | Receipt_committed
+  val publish_unlaunched :
+    on_stage:(publish_stage -> unit) -> sw:Eio.Switch.t ->
+    proof:R.unlaunched -> (t,error) result
+  (** Interleave after actual completed stages, outside original job locks.
+      No injected result, seal, bytes or process authority. *)
   val load :
     after_receipt_read:(unit -> unit) -> before_ready:(unit -> unit) ->
     sw:Eio.Switch.t -> storage:R.storage -> expected_sha256:P.Sha256.t option -> (t,error) result

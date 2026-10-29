@@ -795,6 +795,85 @@ let test_uncertain_cancel_requires_resync_before_nonstart_proof launch_requested
         | R.Not_performed R.Launch_cancelled -> ()
         | Not_performed _ | Performed _ -> fail "retired original lost its cancellation authority")))
 
+let test_unlaunched_publication_finishes_entered_metadata normal_teardown =
+  fixture (fun ~env:_ ~sw ~root ~registry ~open_root:_ ->
+    let b=binding (id "05") in let original=admitted registry b in
+    let cancelled=R.request_cancel original ~confirmed_admission_id:(id "04") |> get in
+    let proof=R.settle_cancelled_admission ~sw cancelled |> get in
+    let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+    let teardown,begin_teardown=Eio.Promise.create () and cancellation,notice_cancel=Eio.Promise.create () in
+    let drained,finish_scope=Eio.Promise.create () in
+    let interrupted=ref None in
+    let path=Filename.concat (job_path root b) (R.evidence_leaf (R.Stream_data P.Stdout)) in
+    let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+    Fun.protect ~finally:unblock (fun () ->
+      Eio.Fiber.fork ~sw (fun () ->
+        let original_scope_result=match Eio.Switch.run (fun publisher_sw ->
+          Eio.Fiber.fork_daemon ~sw:publisher_sw (fun () ->
+            let fault=Recovery_test.before_parent_sync_dispatch ~before_sync:(fun () ->
+              check bool "actual immutable file exists before its real parent fsync" true (Sys.file_exists path);
+              Eio.Promise.resolve signal ();Eio.Promise.await resume) in
+            match Recovery_test.with_replace_dispatch_fault fault (fun () ->
+                R.publish_unlaunched ~sw:publisher_sw proof ~evidence:(R.Stream_data P.Stdout) ~content:"") with
+             | Ok () -> fail "cancelled entered publication returned success"
+             | Error error -> fail (R.error_to_string error)
+             | exception (Eio.Cancel.Cancelled reason as ex) -> interrupted:=Some reason;raise ex);
+          Eio.Fiber.fork_daemon ~sw:publisher_sw (fun () ->
+            try Eio.Fiber.await_cancel () with Eio.Cancel.Cancelled reason as ex ->
+              Eio.Promise.resolve notice_cancel reason;raise ex);
+          Eio.Promise.await teardown;
+          if not normal_teardown then Eio.Switch.fail publisher_sw Interrupted) with
+          | () -> normal_teardown
+          | exception Interrupted -> not normal_teardown in
+        Eio.Promise.resolve finish_scope original_scope_result);
+      Eio.Promise.await entered;
+      let inode=(Unix.lstat path).st_ino in
+      Eio.Promise.resolve begin_teardown ();
+      let original_reason=Eio.Promise.await cancellation in
+      check bool "owner scope cannot release while its actual metadata transaction is entered" true
+        (Eio.Promise.peek drained=None);
+      check bool "entered publication retains exclusive original authority through settlement" true
+        (R.refresh original=Error R.Busy);
+      let independent=admitted registry (binding (id "07")) in
+      ignore (R.with_launch ~sw (commit independent) (fun _ ~storage:_ -> ()) |> completed);
+      unblock ();
+      check bool "scope teardown preserves its original completion or failure" true (Eio.Promise.await drained);
+      check bool "publisher propagates the original cancellation rather than Fs recovery wrapping" true
+        (match !interrupted with Some reason -> reason==original_reason | None -> false);
+      check int "entered transaction leaves its original file inode" inode (Unix.lstat path).st_ino;
+      check string "entered transaction preserves its actual empty original bytes" ""
+        (In_channel.with_open_bin path In_channel.input_all);
+      check bool "cancelled metadata never invents a complete terminal receipt" false
+        (Sys.file_exists (Filename.concat (job_path root b) (R.evidence_leaf R.Terminal_receipt)));
+      R.publish_unlaunched ~sw proof ~evidence:(R.Stream_data P.Stdout) ~content:"" |> get;
+      check int "reconciliation retains the exact already published evidence" inode (Unix.lstat path).st_ino))
+
+let test_unlaunched_publication_preserves_actual_fs_failure () =
+  fixture (fun ~env:_ ~sw ~root ~registry ~open_root:_ ->
+    let b=binding (id "05") in let original=admitted registry b in
+    let cancelled=R.request_cancel original ~confirmed_admission_id:(id "04") |> get in
+    let proof=R.settle_cancelled_admission ~sw cancelled |> get in
+    let fault=Recovery_test.before_parent_sync_dispatch ~before_sync:(fun () ->
+      raise (Unix.Unix_error (Unix.EIO,"fsync","unlaunched parent"))) in
+    (match Recovery_test.with_replace_dispatch_fault fault (fun () ->
+        R.publish_unlaunched ~sw proof ~evidence:(R.Stream_data P.Stdout) ~content:"") with
+     | Error (R.Publication_failed failure) ->
+       check bool "actual failed parent sync retains the real created-file effect" true
+         (failure.target_effect=Fs_compat.Target_created);
+       (match failure.primary_failure with
+        | Fs_compat.Write_primary_failure failed ->
+          check bool "original Fs error remains at the actual parent sync boundary" true
+            (failed.stage=Fs_compat.Sync_parent)
+        | Fs_compat.Recovery_primary_failure _ | Fs_compat.Recovery_access_primary_failure _ ->
+          fail "publication failed outside the actual entered Fs writer")
+     | Error error -> fail (R.error_to_string error)
+     | Ok () -> fail "actual Fs failure became successful evidence publication");
+    let path=Filename.concat (job_path root b) (R.evidence_leaf (R.Stream_data P.Stdout)) in
+    check string "failed publication preserves the actual original evidence" ""
+      (In_channel.with_open_bin path In_channel.input_all);
+    let independent=admitted registry (binding (id "07")) in
+    ignore (R.with_launch ~sw (commit independent) (fun _ ~storage:_ -> ()) |> completed))
+
 let ()=run "endpoint job registry" ["original durable admission",[
   test_case "original admission is idempotent and survives reopen" `Quick test_original_admission_survives_reopen;
   test_case "base Inspect outer v1 is rejected before original decoding" `Quick
@@ -830,4 +909,10 @@ let ()=run "endpoint job registry" ["original durable admission",[
   test_case "uncertain cancelled admission requires actual resync before proof" `Quick
     (fun () -> test_uncertain_cancel_requires_resync_before_nonstart_proof false);
   test_case "uncertain cancelled launch requires actual resync before retirement" `Quick
-    (fun () -> test_uncertain_cancel_requires_resync_before_nonstart_proof true)]]
+    (fun () -> test_uncertain_cancel_requires_resync_before_nonstart_proof true);
+  test_case "normal publisher teardown finishes actual entered metadata" `Quick
+    (fun () -> test_unlaunched_publication_finishes_entered_metadata true);
+  test_case "cancelled publisher finishes actual entered metadata and preserves its cause" `Quick
+    (fun () -> test_unlaunched_publication_finishes_entered_metadata false);
+  test_case "unlaunched publication retains actual Fs failure evidence" `Quick
+    test_unlaunched_publication_preserves_actual_fs_failure]]

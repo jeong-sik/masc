@@ -52,6 +52,15 @@ val revalidate_sealed : t -> (seal, error) result
     snapshots and original source authority after the completed full-byte hash.
     This does not hash again or infer completion from EOF. Captures cannot turn
     a cached seal into this validation and return [Invalid_storage]. *)
+val seal_unlaunched :
+  sw:Eio.Switch.t -> proof:R.unlaunched ->
+  stream:P.stream -> (t,error) result
+(** Publish an actual empty immutable original stream and its canonical seal
+    only from opaque no-callback authority. No pipe or potential payload writer
+    exists for this proof; an empty preview or cancelled known ID cannot replace
+    it. Reconcile exact existing bytes without overwrite, then reopen/hash/sync
+    and revalidate the actual original files through the same sealed reader.
+    Readiness of a complete terminal result remains a separate obligation. *)
 type chunk = { data : string; extent : P.extent }
 val read : t -> offset:int64 -> max_bytes:int -> (chunk, error) result
 (** Read from the pinned original file descriptor within its observed prefix.

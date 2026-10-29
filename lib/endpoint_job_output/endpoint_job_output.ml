@@ -58,6 +58,12 @@ let offset value =
   if value<0L || value>Optint.Int63.to_int64 Optint.Int63.max_int then Error Offset_unavailable
   else Ok (Optint.Int63.of_int64 value)
 let tag = function P.Stdout -> "stdout" | P.Stderr -> "stderr"
+let encode_seal ~original ~stream (seal : seal) ~device ~inode =
+  let* original=P.request_to_json (P.Inspect original) |> Result.map_error (fun e -> Codec_error e) in
+  Ok (cpu (fun () -> Yojson.Safe.to_string (`Assoc ["version",`Int 1;"original",original;
+    "stream",`String (tag stream);"byte_length",`String (Int64.to_string seal.byte_length);
+    "sha256",`String (P.Sha256.to_string seal.sha256);"file_device",`String (Int64.to_string device);
+    "file_inode",`String (Int64.to_string inode)])))
 let extent t = match Atomic.get t.state with
   | Growing n -> Ok (P.Growing n)
   | Sealed seal -> Ok (P.Sealed {byte_length=seal.byte_length;sha256=seal.sha256})
@@ -95,7 +101,7 @@ let start_with_hook ~after_chunk ~on_metadata ~sw ~fs ~owner ~stream ~source =
   let* recovery=with_metadata owner on_metadata Open_recovery (fun () ->
     Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root:storage
     |> Result.map_error (fun e -> Recovery_failed (Fs_compat.Publication_recovery.registry_error_to_string e))) in
-  let leaf=tag stream ^ ".bin" in
+  let leaf=R.evidence_leaf (R.Stream_data stream) in
   let* ()=publish owner on_metadata recovery storage ~root_stat ~root_path stream ~leaf ~permissions:0o600 "" in
   let* expected=io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(storage / leaf)) in
   let* file=io (fun () -> Eio.Path.open_out ~sw ~create:`Never Eio.Path.(storage / leaf)) in
@@ -123,18 +129,15 @@ let start_with_hook ~after_chunk ~on_metadata ~sw ~fs ~owner ~stream ~source =
     let* ()=validate_attachment byte_length in
     let* ()=io (fun () -> Eio.File.sync file) in
     let* ()=validate_attachment byte_length in
-    let* original=P.request_to_json (P.Inspect (L.original owner)) |> Result.map_error (fun e -> Codec_error e) in
     let hash=cpu (fun () -> Agent_core_sha256.(to_hex (get context))) in
     let* sha256=P.Sha256.of_string hash |> Result.map_error (fun _ -> Capture_failed) in
-    let content=cpu (fun () -> Yojson.Safe.to_string (`Assoc ["version",`Int 1;"original",original;
-      "stream",`String (tag stream);"byte_length",`String (Int64.to_string byte_length);
-      "sha256",`String hash;"file_device",`String (Int64.to_string actual.dev);
-      "file_inode",`String (Int64.to_string actual.ino)])) in
+    let seal={byte_length;sha256} in
+    let* content=encode_seal ~original:(L.original owner) ~stream seal ~device:actual.dev ~inode:actual.ino in
     let* ()=validate_attachment byte_length in
     let* ()=publish owner on_metadata recovery storage ~root_stat ~root_path stream
-      ~leaf:(tag stream ^ ".seal.json") ~permissions:0o400 content in
+      ~leaf:(R.evidence_leaf (R.Stream_seal stream)) ~permissions:0o400 content in
     let* ()=validate_attachment byte_length in
-    Ok {byte_length;sha256} in
+    Ok seal in
   let buffer=Cstruct.create buffer_bytes in
   let rec capture byte_length context =
     match Eio.Flow.single_read source buffer with
@@ -223,7 +226,9 @@ let reopen_with_hook ~after_chunk ~after_stat ~sync_reader ~sw ~storage ~stream 
   Eio.Switch.check sw;
   let* known=R.refresh (R.storage_record storage) |> Result.map_error (fun e -> Registry_error e) in
   let* ()=match R.launch_state known with
-    | R.Requested _ -> Ok () | R.Not_requested -> Error Invalid_storage in
+    | R.Requested _ -> Ok ()
+    | R.Not_requested -> (match R.cancellation_state known with
+        | R.Cancellation_requested -> Ok () | R.No_cancellation -> Error Invalid_storage) in
   let directory=R.storage_path storage in
   let* root=io (fun () -> Eio.Path.stat ~follow:true directory) in
   let valid_root (stat : Eio.File.Stat.t) =
@@ -245,7 +250,7 @@ let reopen_with_hook ~after_chunk ~after_stat ~sync_reader ~sw ~storage ~stream 
     let* canonical=io (fun () -> Eio.Path.stat ~follow:false path) in
     if stable_stat before held && stable_stat before canonical then Ok (file,before)
     else Error Invalid_storage in
-  let* metadata,metadata_stat=open_private (tag stream ^ ".seal.json") 0o400 in
+  let* metadata,metadata_stat=open_private (R.evidence_leaf (R.Stream_seal stream)) 0o400 in
   let metadata_length=Optint.Int63.to_int64 metadata_stat.size in
   let* ()=if metadata_length>=0L && metadata_length<=Int64.of_int Sys.max_string_length
     then Ok () else Error Invalid_storage in
@@ -253,16 +258,16 @@ let reopen_with_hook ~after_chunk ~after_stat ~sync_reader ~sw ~storage ~stream 
   let* ()=io (fun () -> reader_pread_exact metadata ~file_offset:Optint.Int63.zero [content]) in
   let original=P.original ~binding:(R.binding known) ~admission_id:(R.admission_id known) in
   let* seal,device,inode=cpu (fun () -> decode_seal ~original ~stream (Cstruct.to_string content)) in
-  let* file,file_stat=open_private (tag stream ^ ".bin") 0o600 in
+  let* file,file_stat=open_private (R.evidence_leaf (R.Stream_data stream)) 0o600 in
   let* ()=if file_stat.dev=device && file_stat.ino=inode
       && Optint.Int63.to_int64 file_stat.size=seal.byte_length
     then Ok () else Error Invalid_storage in
   let validate () =
     let* current_root=io (fun () -> Eio.Path.stat ~follow:false directory) in
     let* held=io (fun () -> reader_stat file) in
-    let* canonical=io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(directory / (tag stream ^ ".bin"))) in
+    let* canonical=io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(directory / R.evidence_leaf (R.Stream_data stream))) in
     let* held_metadata=io (fun () -> reader_stat metadata) in
-    let* canonical_metadata=io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(directory / (tag stream ^ ".seal.json"))) in
+    let* canonical_metadata=io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(directory / R.evidence_leaf (R.Stream_seal stream))) in
     let* ()=if valid_root current_root && stable_stat file_stat held && stable_stat file_stat canonical
         && stable_stat metadata_stat held_metadata && stable_stat metadata_stat canonical_metadata
       then Ok () else Error Invalid_storage in
@@ -288,8 +293,8 @@ let reopen_with_hook ~after_chunk ~after_stat ~sync_reader ~sw ~storage ~stream 
     | Reopened reader ->
       let* synced=io (fun () -> sync_reader ~parent:directory ~leaf reader) in
       synced |> Result.map_error (fun _ -> Invalid_storage) in
-  let* ()=sync (tag stream ^ ".bin") file in
-  let* ()=sync (tag stream ^ ".seal.json") metadata in
+  let* ()=sync (R.evidence_leaf (R.Stream_data stream)) file in
+  let* ()=sync (R.evidence_leaf (R.Stream_seal stream)) metadata in
   let* ()=validate () in
   Eio.Switch.check sw;
   let done_,resolve=Eio.Promise.create () in Eio.Promise.resolve resolve (Ok seal);
@@ -304,6 +309,25 @@ let revalidate_sealed t =
   | Sealed seal,Some validate -> let* ()=validate () in Ok seal
   | Unavailable e,_ -> Error e
   | Growing _,_ | Sealed _,None -> Error Invalid_storage
+
+let seal_unlaunched ~sw ~proof ~stream =
+  Eio.Switch.check sw;
+  let storage=R.unlaunched_storage proof in
+  let record=R.storage_record storage in
+  let publish evidence content =
+    R.publish_unlaunched ~sw proof ~evidence ~content
+    |> Result.map_error (fun e -> Registry_error e) in
+  let* ()=publish (R.Stream_data stream) "" in
+  let* stat=io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(R.storage_path storage / R.evidence_leaf (R.Stream_data stream))) in
+  let* ()=if stat.kind=`Regular_file && stat.nlink=1L && stat.uid=Int64.of_int (Unix.geteuid ())
+      && stat.perm land 0o7777=0o600 && Optint.Int63.to_int64 stat.size=0L
+    then Ok () else Error Invalid_storage in
+  let* sha256=P.Sha256.of_string Agent_core_sha256.(to_hex (digest_string ""))
+    |> Result.map_error (fun _ -> Invalid_storage) in
+  let original=P.original ~binding:(R.binding record) ~admission_id:(R.admission_id record) in
+  let* content=encode_seal ~original ~stream {byte_length=0L;sha256} ~device:stat.dev ~inode:stat.ino in
+  let* ()=publish (R.Stream_seal stream) content in
+  reopen ~sw ~storage ~stream
 
 module For_testing = struct
   type nonrec metadata_operation = metadata_operation = Open_recovery | Publish of string

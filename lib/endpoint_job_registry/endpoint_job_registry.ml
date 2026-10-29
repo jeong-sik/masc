@@ -598,6 +598,104 @@ let retire_cancelled_launch_with_hook ~before_resync_parent ~after_retirement ~s
 let retire_cancelled_launch ~sw intent =
   retire_cancelled_launch_with_hook ~before_resync_parent:(fun () -> ()) ~after_retirement:(fun () -> ()) ~sw intent
 
+let verify_unlaunched_evidence ~sw ~parent ~leaf ~permissions ~controller_uid content =
+  let* opened=io (fun () -> Fs_compat.open_owned_reader ~sw ~parent ~leaf) in
+  let* reader=opened |> Result.map_error (fun e -> Authority_unavailable
+    (Fs_compat.owned_regular_file_read_error_to_string e)) in
+  let* initial=io (fun () -> Fs_compat.owned_reader_stat reader) in
+  let private_file (stat : Eio.File.Stat.t) =
+    stat.kind=`Regular_file && stat.nlink=1L && stat.uid=Int64.of_int controller_uid
+    && stat.perm land 0o7777=permissions
+    && Optint.Int63.to_int64 stat.size=Int64.of_int (String.length content) in
+  let* ()=if private_file initial then Ok () else corrupt "unlaunched evidence attachment" in
+  let validate () =
+    let* held=io (fun () -> Fs_compat.owned_reader_stat reader) in
+    let* named=io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(parent / leaf)) in
+    let stable (stat : Eio.File.Stat.t)={initial with atime=stat.atime}=stat in
+    if private_file held && private_file named && stable held && stable named
+      then Ok () else corrupt "unlaunched evidence changed" in
+  let* ()=validate () in
+  let buffer=Buffer.create (min 65536 (String.length content)) in
+  let rec read offset =
+    if offset=String.length content then Ok (Buffer.contents buffer) else
+    let* bytes=io (fun () -> Fs_compat.owned_reader_pread reader ~offset:(Int64.of_int offset)
+      ~length:(min 65536 (String.length content-offset))) in
+    let n=String.length bytes in
+    if n=0 then corrupt "unlaunched evidence truncated"
+    else (Buffer.add_string buffer bytes;read (offset+n)) in
+  let* actual=read 0 in
+  let* ()=if actual=content then Ok () else corrupt "unlaunched evidence conflict" in
+  let* synced=io (fun () -> Fs_compat.sync_owned_reader ~parent ~leaf reader) in
+  let* ()=synced |> Result.map_error (fun e -> Authority_unavailable
+    (Fs_compat.owned_regular_file_read_error_to_string e)) in
+  validate ()
+
+type evidence = Stream_data of P.stream | Stream_seal of P.stream | Terminal_receipt
+let evidence_leaf = function
+  | Stream_data P.Stdout -> "stdout.bin" | Stream_data P.Stderr -> "stderr.bin"
+  | Stream_seal P.Stdout -> "stdout.seal.json" | Stream_seal P.Stderr -> "stderr.seal.json"
+  | Terminal_receipt -> "terminal-result.json"
+let evidence_permissions = function Stream_data _ -> 0o600 | Stream_seal _ | Terminal_receipt -> 0o400
+let evidence_present parent evidence =
+  let* kind=io (fun () -> Eio.Path.kind ~follow:false Eio.Path.(parent / evidence_leaf evidence)) in
+  match kind with
+  | `Regular_file -> Ok true | `Not_found -> Ok false
+  | `Unknown | `Fifo | `Character_special | `Directory | `Block_device | `Symbolic_link | `Socket ->
+    corrupt "unlaunched evidence kind"
+let check_evidence_creation parent evidence =
+  let* present=evidence_present parent evidence in
+  if present then Ok () else
+  let* terminal=evidence_present parent Terminal_receipt in
+  let rec require = function
+    | [] -> Ok ()
+    | evidence::rest -> let* present=evidence_present parent evidence in
+      if present then require rest else corrupt "unlaunched evidence dependency missing" in
+  match evidence with
+  | Stream_data stream ->
+    let* sealed=evidence_present parent (Stream_seal stream) in
+    if terminal || sealed then corrupt "sealed original stream missing" else Ok ()
+  | Stream_seal stream ->
+    if terminal then corrupt "terminal original seal missing" else require [Stream_data stream]
+  | Terminal_receipt -> require [Stream_data P.Stdout;Stream_seal P.Stdout;Stream_data P.Stderr;Stream_seal P.Stderr]
+let publish_unlaunched ~sw proof ~evidence ~content =
+  Eio.Switch.check sw;
+  let original=proof.original_storage.record in
+  let registry=original.registry and binding=original.claim.binding in
+  let leaf=evidence_leaf evidence and permissions=evidence_permissions evidence in
+  let* ()=match evidence with
+    | Stream_data _ -> if String.length content=0 then Ok () else corrupt "unlaunched stream is not empty"
+    | Stream_seal _ | Terminal_receipt -> Ok () in
+  let result=locked registry binding (fun () ->
+    let* current=read_record registry binding in
+    let* ()=if same_original original current then Ok () else Error Stale_record in
+    let* ()=match current.claim.state with
+      | Cancel_requested _ -> Ok ()
+      | Preparing | Ready _ | Launch_requested _ -> Error Stale_record in
+    let* current=resync_cancel ~before_parent_sync:(fun () -> ()) current in
+    Eio.Switch.run (fun read_sw ->
+      let* parent=original_storage ~sw:read_sw current in
+      let* ()=check_evidence_creation parent evidence in
+      let* root=io (fun () -> Eio.Path.stat ~follow:true parent) in
+      let* target=Fs_compat.capability_publication_target
+          ~allowed_root_path:(job_path registry binding) ~allowed_root_device:root.dev ~allowed_root_inode:root.ino
+          ~parent_components:[] ~target_leaf:leaf ~permissions
+        |> Result.map_error (fun e -> Authority_unavailable
+          (Fs_compat.capability_publication_target_error_to_string e)) in
+      let* ()=Eio.Cancel.protect (fun () ->
+        let* recovery=Fs_compat.Publication_recovery.open_registry ~sw:read_sw ~fs:registry.fs ~registry_root:parent
+          |> Result.map_error (fun e -> Recovery_unavailable (Fs_compat.Publication_recovery.registry_error_to_string e)) in
+        in_recovery_lane recovery "unlaunched" (fun recovery ->
+          match Fs_compat.create_capability_file_exclusive ~recovery ~parent ~target content
+              |> Result.map_error (fun e -> Publication_failed e) with
+          | Ok () -> Ok ()
+          | Error e when already_exists e -> Ok ()
+          | Error e -> Error e)) in
+      let* ()=verify_unlaunched_evidence ~sw:read_sw ~parent ~leaf ~permissions ~controller_uid:registry.controller_uid content in
+      let* confirmed=read_record registry binding in
+      if same_original current confirmed then Ok () else Error Stale_record)) in
+  Eio.Fiber.check ();
+  result
+
 let with_launch_with_hook ~after_original ~sw (intent : launch_intent) perform =
   Eio.Switch.check sw;
   let original=intent.original in let registry=original.registry and binding=original.claim.binding in

@@ -7,9 +7,14 @@
     [evaluate], which the caller supplies. The caller wraps the client, writes
     its records around each call and maps the client's failure to
     {!attempt_failure}. This module catches no exception: a cancellation, or
-    anything [evaluate] raises, leaves {!run} unchanged and builds no status.
+    anything [evaluate] raises, comes out of {!run} and builds no status. When
+    requests fail with different exceptions at the same time, Eio raises them
+    together as [Eio.Exn.Multiple]. A [Cancelled] that [evaluate] raises for
+    question (b) with no cancelled context behind it comes out wrapped in one
+    more [Cancelled].
 
-    {!run} uses Eio fibers and has to run inside an Eio main loop. *)
+    {!run} uses Eio fibers and has to run inside an Eio main loop. [evaluate]
+    is called from several fibers at the same time and has to allow that. *)
 
 type attempt_failure =
   | Capacity_refused
@@ -51,11 +56,13 @@ val run :
     Otherwise:
     - the candidates are cut into pieces of at most [piece_bytes] of line
       bytes (default {!Keeper_memory_recall_candidates.state_bytes_per_piece});
-    - the request of every piece and question (b) go out at the same time;
-    - a piece that is refused for size is cut in two
-      ({!Keeper_memory_recall_candidates.split} at half its line bytes) and
-      the halves go out one after the other, front first, each by the same
-      rule. A request holding one candidate cannot be cut. It waits for
+    - the request of every piece and question (b) go out at the same time. An
+      exception on either side cancels the other;
+    - a piece that is refused for size is cut again
+      ({!Keeper_memory_recall_candidates.split} with half its line bytes as the
+      limit). That gives two pieces or more, because one big candidate can sit
+      alone. The new pieces go out one after the other, front first, each by
+      the same rule. A request holding one candidate cannot be cut. It waits for
       question (b): if the server took (b), the purpose fits and the candidate
       is [Too_large]. If (b) was refused for size too, the purpose alone is too
       big, so nothing else is sent and every candidate not yet decided is
@@ -69,5 +76,8 @@ val run :
       candidates, one request for each request of (a) that was answered, holding
       the candidates that request carried. Those are some of the candidates
       the server took, without the purpose, so the request is not expected to
-      be refused for size. It is never cut: a (c) request that fails, for any
-      reason, leaves its candidates [Time_unjudged]. *)
+      be refused for size. That is not certain: the question text of (c) is
+      longer than that of (a) for each candidate (RFC section 4.8 has the
+      measure). A (c) request is never cut.
+      When it fails, for any reason, its candidates are [Time_unjudged].
+      The (c) requests go out at the same time. *)

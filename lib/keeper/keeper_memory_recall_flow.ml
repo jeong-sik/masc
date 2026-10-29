@@ -71,16 +71,15 @@ let reason_for_a_lone_candidate turn_done =
   | Turn_taken _ -> J.Too_large
   | Turn_capacity_refused | Turn_not_taken -> J.Capacity
 
-(* A piece cut from a piece that was built already cannot fail to build: the
-   options are constants and its ids are some of the ids of the first piece,
-   which were checked. *)
-let rebuild_candidates ~purpose piece =
-  match Codec.candidate_request ~purpose piece with
+let impossible detail = invalid_arg ("Keeper_memory_recall_flow: " ^ detail)
+
+(* A request built after [run] has checked its inputs cannot fail to build:
+   the options are constants and the ids are some of the ids that were
+   checked. An error here is a bug in this module. *)
+let built = function
   | Ok request -> request
-  | Error (Codec.Duplicate_candidate_id id) ->
-    invalid_arg ("Keeper_memory_recall_flow: duplicate candidate " ^ id)
-  | Error (Codec.Choice_set_invalid detail) ->
-    invalid_arg ("Keeper_memory_recall_flow: " ^ detail)
+  | Error (Codec.Duplicate_candidate_id id) -> impossible ("duplicate candidate " ^ id)
+  | Error (Codec.Choice_set_invalid detail) -> impossible detail
 
 let rec resolve ~evaluate ~purpose ~turn_done ~request piece =
   match evaluate request with
@@ -97,13 +96,17 @@ let rec resolve ~evaluate ~purpose ~turn_done ~request piece =
   | Error Failed -> [ Unanswered_piece (undecided piece J.Provider_failed) ]
   | Error Capacity_refused ->
     (match Candidates.piece_candidates piece with
+     | [] -> impossible "a piece without candidates"
      | [ _ ] ->
        [ Unanswered_piece (undecided piece (reason_for_a_lone_candidate turn_done)) ]
-     | [] | _ :: _ :: _ -> in_order (resolve_half ~evaluate ~purpose ~turn_done) (halves piece))
+     | _ :: _ :: _ -> in_order (resolve_half ~evaluate ~purpose ~turn_done) (halves piece))
 
 and resolve_half ~evaluate ~purpose ~turn_done piece =
   if stopped turn_done then [ Unanswered_piece (undecided piece J.Capacity) ]
-  else resolve ~evaluate ~purpose ~turn_done ~request:(rebuild_candidates ~purpose piece) piece
+  else
+    resolve ~evaluate ~purpose ~turn_done
+      ~request:(built (Codec.candidate_request ~purpose piece))
+      piece
 
 let segment_results = function
   | Answered_piece { piece = _; results } -> results
@@ -131,42 +134,36 @@ let carried_pieces segments =
     segments
 
 let ask_time ~evaluate piece =
-  match Codec.time_request piece with
-  | Error (Codec.Duplicate_candidate_id id) ->
-    invalid_arg ("Keeper_memory_recall_flow: duplicate candidate " ^ id)
-  | Error (Codec.Choice_set_invalid detail) ->
-    invalid_arg ("Keeper_memory_recall_flow: " ^ detail)
-  | Ok request ->
-    (match evaluate request with
-     | Ok response ->
-       List.map (fun (id, answer) -> id, Codec.time_mark answer) (Codec.decode_time piece response)
-     | Error (Capacity_refused | Rate_limited | Invalid_response | Failed) ->
-       List.map (fun candidate -> Candidates.id candidate, J.Time_unjudged)
-         (Candidates.piece_candidates piece))
+  match evaluate (built (Codec.time_request piece)) with
+  | Ok response ->
+    List.map (fun (id, answer) -> id, Codec.time_mark answer) (Codec.decode_time piece response)
+  | Error (Capacity_refused | Rate_limited | Invalid_response | Failed) ->
+    List.map (fun candidate -> Candidates.id candidate, J.Time_unjudged)
+      (Candidates.piece_candidates piece)
 
 let ask_times ~evaluate segments =
   List.concat (Eio.Fiber.List.map (ask_time ~evaluate) (carried_pieces segments))
 
+(* Question (b) runs in a fiber of the switch and the requests of (a) in its
+   body. An exception on either side cancels the other, and a request of (a)
+   that waits for (b) does not wait forever when (b) raises. *)
 let judge ~evaluate ~purpose ~initial ~turn_request =
   let turn_done, resolve_turn = Eio.Promise.create () in
-  let segments, turn_outcome =
-    Eio.Fiber.pair
-      (fun () ->
-        List.concat
-          (Eio.Fiber.List.map
-             (fun (piece, request) -> resolve ~evaluate ~purpose ~turn_done ~request piece)
-             initial))
-      (fun () ->
-        let outcome = ask_turn ~evaluate turn_request in
-        Eio.Promise.resolve resolve_turn outcome;
-        outcome)
+  let segments =
+    Eio.Switch.run @@ fun sw ->
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Promise.resolve resolve_turn (ask_turn ~evaluate turn_request));
+    List.concat
+      (Eio.Fiber.List.map
+         (fun (piece, request) -> resolve ~evaluate ~purpose ~turn_done ~request piece)
+         initial)
   in
   let results = List.concat_map segment_results segments in
-  let turn = turn_answer_of turn_outcome in
+  let turn = turn_answer_of (Eio.Promise.await turn_done) in
   let marks = ask_times ~evaluate segments in
   match J.reduce ~candidates:results ~turn with
   | Some status -> { status; results; turn; marks }
-  | None -> invalid_arg "Keeper_memory_recall_flow: no result for a non-empty candidate list"
+  | None -> impossible "no result for a non-empty candidate list"
 
 let first_duplicate candidates =
   let rec go seen = function

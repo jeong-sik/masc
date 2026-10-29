@@ -25,6 +25,7 @@ type request =
   ; timeout_sec : float
   ; stdin_len : int64
   ; mode : mode
+  ; acceptance_frame : bool
   }
 
 type trailer =
@@ -93,6 +94,7 @@ let major_of_probe (p : probe) : (major, string) result =
 
 let observe_capability = "observe"
 let user_notif_capability = "user_notif"
+let request_acceptance_capability = "request_acceptance_frame"
 let github_token_env_names =
   [ "GH_TOKEN"
   ; "GITHUB_TOKEN"
@@ -123,6 +125,7 @@ let mode_of_string = function
 let shim_config_env_var = "MASC_EXEC_SHIM_CONFIG"
 
 let trailer_wrapper_key = "masc_exec_result"
+let acceptance_wrapper_key = "masc_request_accepted"
 
 let rs = '\x1e'
 
@@ -166,7 +169,8 @@ let json_of_request (r : request) : Yojson.Safe.t =
      ]
      @ (match r.v with
         | V2 -> []
-        | V3 -> [ "mode", `String (mode_to_string r.mode) ]))
+        | V3 -> [ "mode", `String (mode_to_string r.mode) ])
+     @ (if r.acceptance_frame then [ "acceptance_frame", `Bool true ] else []))
 
 (* A v2 shim has no box to build, so a v2 frame has no box to ask for. *)
 let asks_a_box_of_v2 (r : request) =
@@ -174,12 +178,22 @@ let asks_a_box_of_v2 (r : request) =
   | V2, (Observe | Guest_local) -> true
   | V2, Effect | V3, (Effect | Observe | Guest_local) -> false
 
+(* Only a v3 shim advertises [request_acceptance_capability], so a v2 frame
+   that asks for the frame asks a shim that cannot answer. *)
+let asks_acceptance_of_v2 (r : request) =
+  match r.v with
+  | V2 -> r.acceptance_frame
+  | V3 -> false
+
 let encode_request (r : request) ~stdin : (string, string) result =
   let stdin_bytes = String.length stdin in
   match classify_float r.timeout_sec with
   | FP_nan | FP_infinite ->
     transport_error "request timeout_sec is not finite (%F)" r.timeout_sec
-  | FP_normal | FP_subnormal | FP_zero -> if asks_a_box_of_v2 r then
+  | FP_normal | FP_subnormal | FP_zero -> if asks_acceptance_of_v2 r then
+      version_error
+        "a v2 frame cannot ask for the acceptance frame: the endpoint's shim speaks v2"
+    else if asks_a_box_of_v2 r then
       version_error
         "a v2 frame cannot ask for the %s box: the endpoint's shim speaks v2 and runs \
          every request unboxed"
@@ -366,13 +380,20 @@ let request_of_json (json : Yojson.Safe.t) : (request, string) result =
            "request field %S is %S; this build speaks effect, observe, guest_local"
            "mode" mode_text)
   in
+  (* Absent means no frame, which is every request an older host sends. *)
+  let* acceptance_frame =
+    match List.assoc_opt "acceptance_frame" fields with
+    | None -> Ok false
+    | Some json -> expect_bool ~what "acceptance_frame" json
+  in
   (match classify_float timeout_sec with
    | FP_nan | FP_infinite ->
      transport_error "request timeout_sec is not finite (%F)" timeout_sec
    | FP_normal | FP_subnormal | FP_zero -> if Int64.compare stdin_len 0L < 0 then
        transport_error "request stdin_len is negative (%Ld)" stdin_len
      else
-       Ok { v; argv; env; cwd; remote_root; timeout_sec; stdin_len; mode })
+       Ok { v; argv; env; cwd; remote_root; timeout_sec; stdin_len; mode
+          ; acceptance_frame })
 
 let decode_request (frame : string) : (request * string, string) result =
   let n = String.length frame in
@@ -536,6 +557,46 @@ let parse_execution_receipt tail =
        match List.assoc_opt "execution_receipt" wrapped with
        | None -> Ok None
        | Some json -> Result.map Option.some (execution_receipt_of_json json))
+
+(* --- request acceptance frame (RFC exec-shim-reports-request-acceptance) --- *)
+
+let render_acceptance_frame (v : major) : string =
+  Printf.sprintf "%c%s%c" rs
+    (Yojson.Safe.to_string
+       (`Assoc [ acceptance_wrapper_key, `Assoc [ "v", `Int (int_of_major v) ] ]))
+    rs
+
+type acceptance_head =
+  | Head_pending
+  | Head_payload
+  | Head_frame of { v : major; rest : string }
+
+(* A frame is a few dozen bytes. A head that has not closed within this many
+   bytes is payload that happens to start with a record separator. *)
+let acceptance_frame_max_bytes = 128
+
+let split_acceptance_head (head : string) : acceptance_head =
+  let n = String.length head in
+  if n = 0 then Head_pending
+  else if head.[0] <> rs then Head_payload
+  else
+    match String.index_from_opt head 1 rs with
+    | None -> if n >= acceptance_frame_max_bytes then Head_payload else Head_pending
+    | Some closing ->
+      let decoded =
+        let* json = parse_json ~what:"acceptance frame" (String.sub head 1 (closing - 1)) in
+        let* fields = expect_assoc ~what:"acceptance frame" json in
+        let* body =
+          member ~what:"acceptance frame" acceptance_wrapper_key fields
+          >>= expect_assoc ~what:"acceptance frame"
+        in
+        member ~what:"acceptance frame" "v" body
+        >>= expect_int ~what:"acceptance frame" "v"
+        >>= check_version ~what:"acceptance frame"
+      in
+      (match decoded with
+       | Ok v -> Head_frame { v; rest = String.sub head (closing + 1) (n - closing - 1) }
+       | Error _ -> Head_payload)
 
 (* --- shim probe --- *)
 

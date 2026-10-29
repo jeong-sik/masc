@@ -12,7 +12,8 @@ let req = Exec_ssh_protocol.{ v = Exec_ssh_protocol.newest
                             ; remote_root = "/srv/masc/playground"
                             ; timeout_sec = 300.0
                             ; stdin_len = 0L
-                            ; mode = Exec_ssh_protocol.Effect }
+                            ; mode = Exec_ssh_protocol.Effect
+                            ; acceptance_frame = false }
 
 let test_frame_roundtrip () =
   match Exec_ssh_protocol.encode_request req ~stdin:"" with
@@ -428,6 +429,69 @@ let test_execution_receipts_preserve_process_outcome () =
     [`Null; `Assoc []; `Assoc ["mode", `String "observe";
        "plan", `String "unrestricted"; "boundary", `String "sandbox_applied"]]
 
+(* --- request acceptance frame --- *)
+
+let test_acceptance_frame_is_opt_in_on_the_wire () =
+  let wire r =
+    match Exec_ssh_protocol.encode_request r ~stdin:"" with
+    | Ok framed -> framed
+    | Error e -> fail e
+  in
+  check bool "a request that does not ask carries no such field" false
+    (contains "acceptance_frame" (wire req));
+  let asking = { req with acceptance_frame = true } in
+  check bool "a request that asks says so" true
+    (contains "\"acceptance_frame\":true" (wire asking));
+  (match Exec_ssh_protocol.decode_request (wire asking) with
+   | Ok (r, _) -> check bool "the shim reads it back" true r.acceptance_frame
+   | Error e -> fail e);
+  (match Exec_ssh_protocol.decode_request (wire req) with
+   | Ok (r, _) -> check bool "an older host's request reads as not asking" false r.acceptance_frame
+   | Error e -> fail e);
+  match Exec_ssh_protocol.encode_request { asking with v = Exec_ssh_protocol.V2 } ~stdin:"" with
+  | Ok _ -> fail "a v2 frame asked for a frame its shim cannot write"
+  | Error e -> check bool "named version error" true (contains "remote_ssh_version_error" e)
+
+let test_acceptance_frame_roundtrip () =
+  let open Exec_ssh_protocol in
+  List.iter (fun v ->
+    let frame = render_acceptance_frame v in
+    check bool "delimited by record separators" true
+      (frame.[0] = '\x1e' && frame.[String.length frame - 1] = '\x1e');
+    check bool "the whole frame is a frame with nothing after it" true
+      (split_acceptance_head frame = Head_frame { v; rest = "" });
+    check bool "payload after the frame is kept, byte for byte" true
+      (split_acceptance_head (frame ^ "out\x1e\x00\xff")
+       = Head_frame { v; rest = "out\x1e\x00\xff" }))
+    majors
+
+(* Every prefix of a frame is held back; the frame is recognized at its closing
+   separator and not before. A shorter prefix released early would put frame
+   bytes into the payload stderr the model reads. *)
+let test_acceptance_frame_is_held_until_it_closes () =
+  let open Exec_ssh_protocol in
+  let frame = render_acceptance_frame newest in
+  for k = 0 to String.length frame - 1 do
+    check bool (Printf.sprintf "a %d-byte prefix is pending" k) true
+      (split_acceptance_head (String.sub frame 0 k) = Head_pending)
+  done
+
+let test_acceptance_head_that_is_not_a_frame_is_payload () =
+  let open Exec_ssh_protocol in
+  List.iter (fun (name, head) ->
+    check bool name true (split_acceptance_head head = Head_payload))
+    [ "ordinary output", "hello\n"
+    ; "a record separator in the middle only", "a\x1e{}\x1e"
+    ; "separators around something else", "\x1e{\"masc_exec_result\":{}}\x1e"
+    ; "separators around non-JSON", "\x1enot json\x1e"
+    ; "a frame of a major no build speaks",
+      "\x1e{\"masc_request_accepted\":{\"v\":99}}\x1e"
+    ; "a frame without a major", "\x1e{\"masc_request_accepted\":{}}\x1e"
+    ; "an opening separator that never closes within the bound",
+      "\x1e" ^ String.make acceptance_frame_max_bytes 'x' ];
+  check bool "an opening separator still short of the bound is pending" true
+    (split_acceptance_head ("\x1e" ^ String.make 10 'x') = Head_pending)
+
 let () =
   run "exec ssh protocol"
     [ "frame", [ test_case "roundtrip" `Quick test_frame_roundtrip
@@ -454,6 +518,13 @@ let () =
                  ; test_case "exclusivity violation is transport error" `Quick
                      test_trailer_exclusivity_violation_is_transport_error
                  ; test_case "signal vs exit" `Quick test_signal_vs_exit ]
+    ; "acceptance frame",
+      [ test_case "is opt in on the wire" `Quick test_acceptance_frame_is_opt_in_on_the_wire
+      ; test_case "roundtrip" `Quick test_acceptance_frame_roundtrip
+      ; test_case "is held until it closes" `Quick
+          test_acceptance_frame_is_held_until_it_closes
+      ; test_case "a head that is not a frame is payload" `Quick
+          test_acceptance_head_that_is_not_a_frame_is_payload ]
     ; "two majors", [ test_case "a v2 frame has no mode and means effect" `Quick
                         test_a_v2_frame_has_no_mode_and_means_effect
                     ; test_case "a v2 frame cannot carry a box" `Quick

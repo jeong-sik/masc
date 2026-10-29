@@ -806,6 +806,7 @@ let request_for ~remote_root ~cwd =
   ; timeout_sec = 1.0
   ; stdin_len = 0L
   ; mode = Exec_ssh_protocol.Effect
+  ; acceptance_frame = false
   }
 
 let config_for root =
@@ -903,7 +904,8 @@ let test_probe_identity () =
     ((if Exec_shim.observe_supported () then [ Exec_ssh_protocol.observe_capability ] else [])
      @ (if Exec_shim.user_notif_supported ()
         then [ Exec_ssh_protocol.user_notif_capability ]
-        else []))
+        else [])
+     @ [ Exec_ssh_protocol.request_acceptance_capability ])
     p.Exec_ssh_protocol.capabilities;
   match Exec_ssh_protocol.parse_probe (Exec_ssh_protocol.render_probe p) with
   | Error e -> fail e

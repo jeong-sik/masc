@@ -13,11 +13,14 @@ import tempfile
 import time
 
 
-def call(binary: Path, root: Path, config: Path, major: int, mode: str, argv: list[str]):
+def call(binary: Path, root: Path, config: Path, major: int, mode: str, argv: list[str],
+         acceptance_frame: bool = False):
     encode = lambda value: base64.b64encode(value.encode()).decode()
     request = {"v": major, "argv": [encode(arg) for arg in argv], "env": [],
                "cwd": encode(str(root)), "remote_root": encode(str(root)),
                "timeout_sec": 10, "stdin_len": 0, "mode": mode}
+    if acceptance_frame:
+        request["acceptance_frame"] = True
     payload = json.dumps(request).encode()
     environment = dict(os.environ, MASC_EXEC_SHIM_CONFIG=str(config))
     with subprocess.Popen([str(binary)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -46,7 +49,7 @@ def call(binary: Path, root: Path, config: Path, major: int, mode: str, argv: li
     if len(parts) != 3 or parts[-1] != b"":
         raise AssertionError(f"no complete result trailer: {output!r}")
     trailer = json.loads(parts[1])["masc_exec_result"]
-    return status, bytes(output["stdout"]), trailer
+    return status, bytes(output["stdout"]), trailer, bytes(output["stderr"])
 
 
 def main():
@@ -73,7 +76,7 @@ def main():
              "exec_failed", "filesystem_and_network_box", 127),
         ]
         for mode, argv, boundary, plan, expected_exit in cases:
-            status, stdout, trailer = call(binary, root, config, major, mode, argv)
+            status, stdout, trailer, _ = call(binary, root, config, major, mode, argv)
             expected_receipt = {"mode": mode, "plan": plan, "boundary": boundary}
             if status != 0 or trailer["exit"] != expected_exit or trailer["execution_receipt"] != expected_receipt:
                 raise AssertionError(f"receipt/status mismatch: {status}, {trailer!r}")
@@ -82,7 +85,25 @@ def main():
             records.append({"transport_exit": status, "stdout_bytes": len(stdout), "trailer": trailer})
         if (root / "guest-output").read_text() != "guest":
             raise AssertionError("Guest_local did not execute the fixture write")
-        status, _, trailer = call(binary, root, root / "missing-config", major, "observe", ["/bin/true"])
+        # The acceptance frame is the first thing on stderr, only when asked, and
+        # it leaves the trailer where it was. The payload writes to stderr too, to
+        # show the frame is ahead of payload bytes rather than merged into them.
+        if "request_acceptance_frame" not in probe["capabilities"]:
+            raise AssertionError("the shim does not advertise request_acceptance_frame")
+        frame = b"\x1e" + json.dumps({"masc_request_accepted": {"v": major}},
+                                       separators=(",", ":")).encode() + b"\x1e"
+        argv = ["/bin/sh", "-c", "printf payload-err >&2; exit 3"]
+        status, _, trailer, stderr = call(binary, root, config, major, "effect", argv,
+                                          acceptance_frame=True)
+        if status != 0 or trailer["exit"] != 3 or not stderr.startswith(frame + b"payload-err"):
+            raise AssertionError(f"acceptance frame missing or misplaced: {status}, {stderr!r}")
+        if stderr.count(frame) != 1:
+            raise AssertionError(f"acceptance frame written more than once: {stderr!r}")
+        status, _, trailer, stderr = call(binary, root, config, major, "effect", argv)
+        if frame in stderr or not stderr.startswith(b"payload-err"):
+            raise AssertionError(f"a request that did not ask got a frame: {stderr!r}")
+        records.append({"acceptance_frame_first": True, "trailer": trailer})
+        status, _, trailer, _ = call(binary, root, root / "missing-config", major, "observe", ["/bin/true"])
         if status != 1 or trailer["exit"] is not None or trailer["execution_receipt"] != {
                 "mode": "observe", "plan": "filesystem_and_network_box", "boundary": "refused"}:
             raise AssertionError(f"pre-spawn refusal mislabeled as applied: {status}, {trailer!r}")

@@ -1120,6 +1120,15 @@ let emit_trailer_stderr ?execution_receipt (t : Exec_ssh_protocol.trailer) =
   try write_all Unix.stderr s 0 (String.length s) with
   | Unix.Unix_error (Unix.EPIPE, _, _) -> ()
 
+(* Written once the request was read, checked and its child forked, before
+   the supervise loop relays any payload byte, so it is the first thing on
+   this stderr. The child's stderr is a pipe of its own, so nothing can come
+   ahead of it. *)
+let emit_acceptance_frame ~v =
+  let s = Exec_ssh_protocol.render_acceptance_frame v in
+  try write_all Unix.stderr s 0 (String.length s) with
+  | Unix.Unix_error (Unix.EPIPE, _, _) -> ()
+
 (* [v] is the request's major once a request has been read; before that --
    a frame that did not decode -- there is no caller version to echo, and
    the newest one this build speaks is the only honest answer. *)
@@ -1279,6 +1288,7 @@ let run () =
                  shim_fail ~boundary:Child_ack_unavailable
                    (Printf.sprintf "%s: spawn failed: %s" shim_error_code
                       (Printexc.to_string exn)) in
+             if req.Exec_ssh_protocol.acceptance_frame then emit_acceptance_frame ~v;
              let trailer, boundary =
                Fun.protect
                  ~finally:(fun () ->
@@ -1319,6 +1329,7 @@ let probe () =
     ; capabilities =
       (if observe_supported () then [ observe_capability ] else [])
       @ (if user_notif_supported () then [ user_notif_capability ] else [])
+      @ [ request_acceptance_capability ]
     ; release = (if Shim_build_id.release = "" then None else Some Shim_build_id.release)
     ; boot_id = kernel_boot_id ()
     }

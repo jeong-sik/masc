@@ -83,6 +83,9 @@ let test_candidate_shape () =
   check name_or_none "plain name" (Some "alice") (shape "alice");
   check name_or_none "case is preserved" (Some "MiXeD-Agent") (shape "MiXeD-Agent");
   check name_or_none "digits, underscore and hyphen" (Some "a_1-b") (shape "a_1-b");
+  (* Real stored names start with a digit: a commit hash after an [@]. *)
+  check name_or_none "starts with a digit" (Some "1e9fb53c9b") (shape "1e9fb53c9b");
+  check name_or_none "only digits" (Some "9") (shape "9");
   check name_or_none "empty" None (shape "");
   check name_or_none "npm scope" None (shape "types/node");
   check name_or_none "parent directory" None (shape "../x");
@@ -129,14 +132,49 @@ let test_candidate_cannot_leave_a_directory () =
   (* Strings of length 1 to 5 over the three name characters: 3 + 9 + 27 + 81 + 243. *)
   check int "every name made of name characters was accepted" 363 !accepted
 
+(* Every byte on its own. A name character is an ASCII letter, a digit, an
+   underscore or a hyphen, and nothing else is: the exhaustive walk above uses
+   ten characters, and this one covers the other 246. *)
+let test_candidate_accepts_exactly_the_name_characters () =
+  let is_name_character = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> true
+    | _ -> false
+  in
+  for code = 0 to 255 do
+    let name = String.make 1 (Char.chr code) in
+    check bool
+      (Printf.sprintf "byte %d on its own" code)
+      (is_name_character (Char.chr code))
+      (Option.is_some (Candidate.of_string name))
+  done
+
 let test_resolve_sorts_the_answers () =
   check_resolve "a Keeper name" ~recipients:[ "alice" ] ~unresolved:[] [ "alice" ];
   check_resolve "an alias" ~recipients:[ "alice" ] ~unresolved:[] [ "al" ];
   check_resolve "a name nobody declared" ~recipients:[] ~unresolved:[ "check" ] [ "check" ];
-  check_resolve "no candidates" ~recipients:[] ~unresolved:[] [];
-  let long = String.make 300 'a' in
-  check_resolve "a name too long for any Keeper is prose" ~recipients:[]
-    ~unresolved:[ long ] [ long ]
+  check_resolve "no candidates" ~recipients:[] ~unresolved:[] []
+
+(* The caller's [equal] decides which recipients are one. Here two spellings of a
+   Keeper come back from the declaration, and only the caller's equality knows
+   they are the same one. *)
+let test_resolve_merges_with_the_callers_equality () =
+  let declared candidate =
+    match Candidate.to_string candidate with
+    | "first" -> Ok (Some "Alice")
+    | "second" -> Ok (Some "alice")
+    | _ -> Ok None
+  in
+  let same_ignoring_case left right =
+    String.equal (String.lowercase_ascii left) (String.lowercase_ascii right)
+  in
+  match
+    Recipient_resolution.resolve ~equal:same_ignoring_case ~declared
+      (List.map candidate_exn [ "first"; "second" ])
+  with
+  | Ok { Recipient_resolution.recipients; unresolved } ->
+    check strings "one recipient, the first spelling" [ "Alice" ] recipients;
+    check strings "nothing unresolved" [] unresolved
+  | Error _ -> fail "the lookup failed"
 
 (* The samples are in neither ascending nor descending order, so a sort cannot
    pass for "the order written". *)
@@ -234,11 +272,15 @@ let () =
     [ ( "candidate",
         [ test_case "shape" `Quick test_candidate_shape;
           test_case "cannot leave a directory" `Quick
-            test_candidate_cannot_leave_a_directory ] );
+            test_candidate_cannot_leave_a_directory;
+          test_case "accepts exactly the name characters" `Quick
+            test_candidate_accepts_exactly_the_name_characters ] );
       ( "resolve",
         [ test_case "sorts the answers" `Quick test_resolve_sorts_the_answers;
           test_case "order" `Quick test_resolve_order;
           test_case "merges duplicates" `Quick test_resolve_merges_duplicates;
+          test_case "merges with the caller's equality" `Quick
+            test_resolve_merges_with_the_callers_equality;
           test_case "case" `Quick test_resolve_case;
           test_case "asks once per spelling" `Quick test_resolve_asks_once_per_spelling;
           test_case "failure" `Quick test_resolve_failure ] );

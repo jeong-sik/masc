@@ -22,8 +22,9 @@
 
    Board posts are internal and the output carries their titles. It is for the
    operator's terminal and is not meant to be committed. The exit code is 1
-   when a line of the posts file could not be read, 2 for a bad argument or an
-   unreadable Keeper setting.
+   when a line of the posts file could not be read. It is 2 for a bad argument,
+   a file or folder that is missing, and Keeper settings that are absent or
+   unreadable. A run that exits 1 is not a source for the numbers in the RFC.
 
    Usage:
      recipient_replay --keepers <dir of keeper .toml files> --posts <board_posts.jsonl> *)
@@ -65,18 +66,23 @@ let read_keeper path =
     |> Result.map_error (fun detail -> Printf.sprintf "%s: %s" path detail)
 
 let read_keepers dir =
-  Sys.readdir dir
-  |> Array.to_list
-  |> List.filter (fun file -> Filename.check_suffix file ".toml")
-  |> List.sort String.compare
-  |> List.fold_left
-       (fun keepers file ->
-          match keepers, read_keeper (Filename.concat dir file) with
-          | (Error _ as failed), _ -> failed
-          | Ok _, Error detail -> Error detail
-          | Ok keepers, Ok keeper -> Ok (keeper :: keepers))
-       (Ok [])
-  |> Result.map List.rev
+  let keepers =
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun file -> Filename.check_suffix file ".toml")
+    |> List.sort String.compare
+    |> List.fold_left
+         (fun keepers file ->
+            match keepers, read_keeper (Filename.concat dir file) with
+            | (Error _ as failed), _ -> failed
+            | Ok _, Error detail -> Error detail
+            | Ok keepers, Ok keeper -> Ok (keeper :: keepers))
+         (Ok [])
+    |> Result.map List.rev
+  in
+  match keepers with
+  | Ok [] -> Error (Printf.sprintf "no Keeper settings (*.toml) in %s" dir)
+  | Ok _ | Error _ -> keepers
 
 (* A Keeper's own name is answered first. Otherwise the Keepers that list the
    name as an alias answer, and two of them are a failure, as the alias lookup
@@ -115,10 +121,11 @@ type post =
     body : string;
     recorded : string list }
 
-(* The record shape is the one lib/board_types writes. A line the replay cannot
-   read is counted, and the run exits with 1: invalid JSON, a missing field, a
-   post kind it does not know, or an audience whose targets are not a list of
-   strings. Nothing is skipped quietly. *)
+(* The record shape is the one lib/board_types writes, with the four audience
+   kinds of lib/board/board_audience.ml. A line the replay cannot read is
+   counted, and the run exits with 1: invalid JSON, a missing field, a post
+   kind or an audience kind it does not know, or targets that are empty or not
+   a list of strings. Nothing is skipped quietly. *)
 let post_of_line line =
   match Yojson.Safe.from_string line with
   | exception Yojson.Json_error _ -> None
@@ -131,8 +138,12 @@ let post_of_line line =
          | `Null -> []
          | `Assoc _ as audience ->
            (match to_string (member "kind" audience) with
-            | "targets" -> List.map to_string (to_list (member "targets" audience))
-            | _ -> [])
+            | "targets" ->
+              (match List.map to_string (to_list (member "targets" audience)) with
+               | [] -> raise (Type_error ("a targets audience names no one", audience))
+               | targets -> targets)
+            | "broadcast" | "thread_participants" | "discoverable" -> []
+            | kind -> raise (Type_error ("unknown audience kind " ^ kind, audience)))
          | (`Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as other ->
            raise (Type_error ("audience is not an object", other))
        in
@@ -160,16 +171,13 @@ let candidates_of_text text =
   | Board_addressing.Broadcast_all
   | Board_addressing.Unsupported_broadcast _ -> []
 
-(* What the declaration says a recorded name is: [None] when it is no longer a
-   recipient, because it is not shaped like a name, is not declared, or the
-   lookup failed. *)
+(* What the declaration says a recorded name is: [Ok None] when it is no longer
+   a recipient, because it is not shaped like a name or is not declared. A
+   lookup that cannot tell stays an [Error], as it is for the write path. *)
 let recipient_of_recorded keepers name =
   match Candidate.of_string name with
-  | None -> None
-  | Some candidate ->
-    (match declared keepers candidate with
-     | Ok recipient -> recipient
-     | Error (Ambiguous_alias _) -> None)
+  | None -> Ok None
+  | Some candidate -> declared keepers candidate
 
 type verdict =
   | Unchanged
@@ -201,14 +209,34 @@ let replay keepers post =
     Recipient_resolution.resolve ~equal:String.equal ~declared:(declared keepers)
       (candidates_of_text (address_text post))
   in
-  let kept = List.filter_map (recipient_of_recorded keepers) post.recorded in
-  let lost =
-    List.filter (fun name -> Option.is_none (recipient_of_recorded keepers name)) post.recorded
+  let lookups =
+    List.map (fun name -> name, recipient_of_recorded keepers name) post.recorded
   in
-  match resolved with
-  | Error failure ->
+  let kept =
+    List.filter_map
+      (function
+        | _, Ok (Some recipient) -> Some recipient
+        | _, (Ok None | Error _) -> None)
+      lookups
+  in
+  let lost =
+    List.filter_map
+      (function
+        | name, Ok None -> Some name
+        | _, (Ok (Some _) | Error _) -> None)
+      lookups
+  in
+  let recorded_failure =
+    List.find_map
+      (function
+        | _, Error failure -> Some failure
+        | _, Ok _ -> None)
+      lookups
+  in
+  match recorded_failure, resolved with
+  | Some failure, (Ok _ | Error _) | None, Error failure ->
     { post; verdict = Lookup_failed failure; recipients = []; unresolved = []; lost }
-  | Ok { Recipient_resolution.recipients; unresolved } ->
+  | None, Ok { Recipient_resolution.recipients; unresolved } ->
     let verdict =
       if not (same_set kept recipients) then Differs
       else if lost = [] then Unchanged
@@ -317,4 +345,8 @@ let () =
   if String.equal !keepers_dir "" || String.equal !posts_file "" then (
     prerr_endline usage;
     exit 2);
-  exit (run ~keepers_dir:!keepers_dir ~posts_file:!posts_file)
+  exit
+    (try run ~keepers_dir:!keepers_dir ~posts_file:!posts_file with
+     | Sys_error detail ->
+       prerr_endline detail;
+       2)

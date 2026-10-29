@@ -382,6 +382,38 @@ L4d 배포 뒤 읽기 lane 실행 시간의 50%가 `gate/keepers` 였다(2시간
   | L4g | 0.17~0.28초 | 0.19~0.35 ms | 0.9~2.4 ms |
 - 운영: 배포 뒤 `rtev_fibers` 로 같은 창을 다시 떠서 가장 많이 기다린 lock 과 `gate/keepers` 의 실행 비율을 본다. `by_name` 에서 `respond_keeper_tool_json` 의 실행 평균과 읽기 lane 의 대기를 본다.
 
+#### L4g 배포 뒤 (2026-10-29)
+
+- TUI `Pool.request` timeout: 13:12~14:02(TUI 1개, 50분) 0건, 14:42~15:42(TUI 1개, 서버 재시작으로 7분 빔) 1건. L4d 직후 1시간 41건, L4e·L4f 1시간 13건과 조건이 다르다. TUI 수가 다르고, 아래 L4h 에서 보듯 시간대에 따라 tool-call 원장 크기가 다르다.
+- 서버가 뜬 직후 `/api/v1/dashboard/goals` 가 약 80초 동안 답하지 않았다(14:42·15:06 두 번 다). `pool_wait.read.by_name` 에서 첫 goals 계산은 풀 대기 0.14 ms, 실행 78.8초였다. 같은 계산을 서버 밖에서 하면 처음 2.4초, 그다음 40~57 ms 다.
+
+#### L4h — 새 프로세스도 이미 증명한 원장 앞부분을 다시 해시하지 않는다
+
+16:12 에 뜬 서버에 처음 150초 동안 `rtev_fibers` 를 붙였다(이벤트 유실 0). `Keeper_tool_call_index.blocking` 25개가 wall 합 202초, 최대 26.2초였고 모두 `keeper tool-call read index`(색인의 system thread)를 기다렸다. 기동 3분 뒤 goals 첫 계산 2.5초도 실행은 0.43초이고 이 대기가 1.25초였다. goals tree·`gate/keepers`·keepers_json 이 쓰는 Keeper trust snapshot 이 최근 도구 호출을 이 색인에서 읽는다.
+
+- 색인 읽기(`with_index`)는 프로세스 전체가 쓰는 `store_mu` 를 쥐고 1970년부터 오늘까지 원장 날짜 파일을 모두 따라잡는다. 파일의 stat 이 마지막으로 증명한 때와 다르면 continuity 를 믿기 전에 앞부분을 0바이트부터 SHA-256 체인으로 다시 해시한다(`prefix_matches`).
+- "stat 이 같으면 증명을 건너뛴다" 는 지름길은 프로세스 메모리(`store.observations`)에만 있었다. 그래서 새 프로세스는 모든 파일을 다시 해시했다. 2026-10-29 원장은 25개 파일 4.7 GB, witness 는 한 코어에서 약 175 MB/s 다(47 MB 0.28초, 223 MB 1.25초, 312 MB 1.79초). 전부면 약 27초이고, 그동안 다른 색인 읽기는 `store_mu` 뒤에서 기다린다.
+
+설계:
+
+1. 읽기가 지름길 캐시에 stat 을 넣을 때, 같은 stat(dev·inode·size·mtime·ctime)과 그때의 continuity(generation·boundary·prefix digest)를 continuity 기록 옆 파일(`<hex>.observed`)에도 쓴다. 다음 프로세스는 파일이 정확히 그 stat 이고 continuity 가 정확히 그 값일 때만 증명을 건너뛴다. 프로세스 안 캐시가 기대는 증거와 같다. 앞부분을 바꾸는 쓰기는 ctime 을 바꾸고, ctime 을 되돌리는 호출은 없다. 같은 clock tick 안에 크기를 지키는 쓰기를 놓칠 수 있다는 한계도 프로세스 안 캐시와 같고 interface 에 적혀 있다.
+2. 이 파일은 SQLite 색인처럼 파생물이다. fsync 없이 쓰고(`save_file_atomic_rename_only`), 모든 필드가 맞을 때만 믿는다. 없거나 찢어졌거나 낡았으면 지금처럼 앞부분을 다시 읽는다. 쓰다 실패해도 같다. mtime·ctime 은 hex float 로 적어 정확히 비교한다.
+3. continuity 기록의 형식은 그대로다. 예전 기록을 읽는 코드가 없다. 배포 뒤 첫 프로세스만 지금처럼 전부 증명하고, 그때 이 파일들을 쓴다.
+4. 원장 날짜 파일이 사라져 continuity 기록을 지울 때 이 파일을 먼저 지운다. 둘 사이에서 멈춰도 기록 없이 이 파일만 남지 않는다.
+
+이 층이 줄이지 않는 것: 오늘 파일은 거의 모든 읽기 사이에 append 를 받는다. 그래서 읽기마다 오늘 파일 앞부분을 다시 해시한다(오후 47 MB 0.28초, 밤 300 MB 1.8초, 스캔 중 append 가 오면 두 번). 이것을 줄이려면 내용 증명 정책(RFC-0437)을 바꾸거나, 쓰는 쪽(`Dated_jsonl.append_notifying_commit`)이 자기가 붙인 줄을 증거로 남겨야 한다. 여러 저장소가 쓰는 `Dated_jsonl` 을 바꾸는 일이라 다음 층에서 따로 정한다.
+
+검증:
+
+- 단위(`test_keeper_tool_call_log` 95개, `test_keeper_tool_call_index_witness`·`_domain`, `test_keeper_tool_call_log_file_change_concurrent`): 모두 통과. mutant 둘이 모두 실패한다. 기록된 관찰을 stat 확인 없이 믿으면 같은 inode 재작성·교체·축소 시험 6개가 실패하고, continuity 를 지울 때 이 파일을 남기면 보존 기간 시험이 실패한다.
+- bench: 실제 원장 최근 5일(1.2 GB)을 APFS clone 으로 복사해, 새 프로세스의 첫 읽기(`forget_for_ledger` 뒤 `recent_rows`)를 기록이 없을 때(main 과 같음)와 있을 때 번갈아 3번씩 쟀다(2026-10-29 07:35Z, load 23→114).
+
+  | | 1 | 2 | 3 |
+  |---|---|---|---|
+  | 기록 없음 | 23.6초 | 21.5초 | 13.4초 |
+  | 기록 있음 | 0.115초 | 0.027초 | 0.022초 |
+- 운영: 배포 뒤 다음 기동에 `rtev_fibers` 를 처음부터 붙여 `Keeper_tool_call_index.blocking` 의 최대 wall 과 goals 첫 계산 시간을 본다.
+
 ## 5. 순서
 
 1. L1 — 코드가 작고, A/B 로 효과를 이미 봤다.
@@ -395,6 +427,7 @@ L4d 배포 뒤 읽기 lane 실행 시간의 50%가 `gate/keepers` 였다(2시간
 9. L4e — goals tree 계산 자체를 줄인다. 시간의 97%가 쓰지 않는 Keeper 의 trust snapshot 이었다.
 10. L4f — trust snapshot 시간의 98%였던 승인 기록 읽기를 한 번 읽는 index 로 바꾼다.
 11. L4g — Keeper meta 를 읽을 때마다 프로세스 전체를 줄 세우던 디렉터리 확인 lock 을 없앤다.
+12. L4h — 새 프로세스가 이미 증명된 tool-call 원장 날짜 파일 전부(4.7 GB)를 다시 해시하지 않게 한다. 읽기마다 오늘 파일을 다시 해시하는 비용은 다음 층에서 정한다.
 
 ## 6. 하지 않는 것
 

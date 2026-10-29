@@ -56,7 +56,7 @@ should be treated as restart-required.
 | Runtime root and config root | `MASC_BASE_PATH`, `MASC_CONFIG_DIR`, `HOME` | `Config_dir_resolver` caches the resolved root for the life of the process (`<base-path>/.masc/` owns all runtime state) |
 | Server bind and socket topology | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_GRPC_PORT`, `MASC_GRPC_ENABLED`, `MASC_WS_ENABLED` | listeners and advertised base URLs are fixed during server startup |
 | Backend/bootstrap wiring | `MASC_STARTUP_WATCHDOG_SEC`, `MASC_JSONL_RETENTION_DAYS` | boot-time watchdog setup and unified dated JSONL retention (default `30` days; `[maintenance] jsonl_retention_days` in `runtime.toml`) |
-| Sandbox DNS | `[sandbox] microvm_dns` | guest DNS servers for microVM Keepers (`runtime.toml` only; IPv4/IPv6 addresses) |
+| Sandbox DNS | `[sandbox] microvm_dns` | the nameserver a microVM guest is booted with (`runtime.toml` only; one IPv4 or IPv6 address) |
 | Startup-only TOML seeding | every `MASC_KEEPER_*` value sourced from `runtime.toml` | TOML is loaded into the process-local boot override store. A registry row marked `Toml_only` reads only that store and never the process environment. `MASC_KEEPER_AUTONOMOUS_ENABLED`, `MASC_OTEL_ENABLED`, `MASC_SEARXNG_URL` and `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` are `Toml_and_env`: an explicit process env value takes precedence |
 
 Representative code paths:

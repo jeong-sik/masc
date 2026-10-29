@@ -14,7 +14,7 @@ val measure :
   Keeper_memory_os_types.fact list -> t
 
 val current : Keeper_memory_os_types.fact list -> t
-(** Measure with the operator's effective TOML/env settings. *)
+(** Measure with the operator's effective settings. *)
 
 val exceeded : t -> bool
 

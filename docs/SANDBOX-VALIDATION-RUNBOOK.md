@@ -38,7 +38,7 @@ Pass criteria:
 - Profiles are one of `docker` (or `docker_hardened` / `docker_with_git` in Keeper TOML), `microvm` or `remote_ssh`.
 - `(profile, network)` pairs are ones the profile accepts
   (`Keeper_types_profile_sandbox.network_mode_rejection`): `docker` takes
-  `none` or `inherit`, `microvm` takes `none`, `inherit` or `policy` (and when `network_mode = "inherit"` is used on a host whose `/etc/resolv.conf` only lists loopback/link-local/unspecified resolvers, `[sandbox] microvm_dns` must provide reachable upstream DNS servers), and
+  `none` or `inherit`, `microvm` takes `none`, `inherit` or `policy` (and when `network_mode = "inherit"` is used on a host whose `/etc/resolv.conf` only lists loopback/link-local/unspecified resolvers, `[sandbox] microvm_dns` must name a reachable upstream DNS server), and
   `remote_ssh` takes `inherit` only.
 
 If any keeper reports `<missing>`, run

@@ -45,12 +45,12 @@ Injects the Workspace Wiki table of contents (one line per page: title, file, su
   ```
 
 ### 4. MicroVM Sandbox Guest DNS (`[sandbox] microvm_dns`)
-Configures custom DNS servers passed into microVM Keeper guests (`apple_container`, `microsandbox`, `nerdctl_kata`).
+Sets the nameserver passed into microVM Keeper guests (`apple_container`, `microsandbox`, `nerdctl_kata`). Without it, a guest copies the host's first resolver from `/etc/resolv.conf`.
 
 - **TOML Setting**: `<base-path>/.masc/config/runtime.toml`
   ```toml
   [sandbox]
-  microvm_dns = ["1.1.1.1", "8.8.8.8"]  # Valid IPv4 or IPv6 literals
+  microvm_dns = "1.1.1.1"  # One IPv4 or IPv6 address
   ```
 
 ### 5. Dated JSONL Store Retention (`[maintenance] jsonl_retention_days`)
@@ -113,7 +113,7 @@ enabled = true
 jsonl_retention_days = 30
 
 [sandbox]
-microvm_dns = ["1.1.1.1", "8.8.8.8"]
+microvm_dns = "1.1.1.1"
 
 [keeper.hitl]
 # Set operator approval wait window to 5 minutes

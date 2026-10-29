@@ -53,7 +53,7 @@ end
 
 (** {1 Keeper Turn Configuration} *)
 
-(* The process layer (env > runtime.toml > default) under the
+(* The boot layer (runtime.toml > default) under the
    [keeper.turn.*] Runtime_params in [Keeper_config]: each param's default
    thunk and validation bounds are these, and the operator settings
    projection reads the same readers. *)
@@ -239,8 +239,8 @@ module KeeperAutonomous = struct
       Read from the binary, not from [<config-root>/prompts]. That managed
       copy is distribution state for inspection; [Managed_asset_sync]
       converges it onto the embedded tree on boot. Fleet customization uses
-      the runtime setting [autonomous.wake_prompt] (environment key
-      [MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT]), not [prompt_overrides.json].
+      the runtime setting [autonomous.wake_prompt], not
+      [prompt_overrides.json].
 
       This binding runs before startup asset sync, so reading the managed
       copy here would also fail on the first boot containing a new asset. *)
@@ -731,7 +731,7 @@ module KeeperKeepalive = struct
       and strictly positive; malformed values are operator configuration
       errors, never a fallback.
 
-      Env: [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC]. Default: unset -> [None].
+      Setting: runtime.toml [turn.stream_idle_timeout_sec]. Default: unset -> [None].
       @category Timeouts @ops_class operator *)
   let stream_idle_timeout_sec () = declared_stream_budget_seconds stream_idle_timeout_env_key
 
@@ -759,7 +759,7 @@ module KeeperKeepalive = struct
       are operator configuration errors, never a fallback. Same value grammar
       as the other timeout settings, hence the shared reader.
 
-      Env: [MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC]. Default: unset -> [None].
+      Setting: runtime.toml [turn.first_event_timeout_sec]. Default: unset -> [None].
       @category Timeouts @ops_class operator *)
   let first_event_timeout_sec () = declared_stream_budget_seconds first_event_timeout_env_key
 
@@ -793,8 +793,8 @@ module KeeperKeepalive = struct
   ;;
 
   (* Fail-safe no-progress threshold for a provider call attempt (seconds),
-     substituted by the resolved layer when neither the env var nor
-     runtime.toml [turn.provider_call_deadline_sec] declares one. Without it
+     substituted by the resolved layer when runtime.toml
+     [turn.provider_call_deadline_sec] declares none. Without it
      a default install runs no attempt watchdog at all and a tool's provider
      sub-call has no bound: an attempt that never produces a token holds the
      keeper until an operator interrupts it. The value is the one the live
@@ -804,7 +804,7 @@ module KeeperKeepalive = struct
      of the wedge, and above the two stream floors, so a silent prefill is
      ended by the reader's typed first-token timeout, not by this. A
      universal liveness ceiling, not a per-provider tuning; an explicit
-     env/toml value overrides it. *)
+     runtime.toml value overrides it. *)
   let provider_call_deadline_failsafe_floor_sec = 900.0
 
   (** The keeper's no-progress threshold for a provider call attempt, in
@@ -829,7 +829,7 @@ module KeeperKeepalive = struct
       {!provider_call_deadline_max_sec}]; a value outside it raises
       {!Env_config_core.Config_error}.
 
-      Env: [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC]. Default: unset -> [None].
+      Setting: runtime.toml [turn.provider_call_deadline_sec]. Default: unset -> [None].
       @category Timeouts
       @ops_class operator *)
   let provider_call_deadline_env_key = "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"

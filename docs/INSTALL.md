@@ -634,7 +634,7 @@ managed directory on the host and differs from Apple's guest ext4 disk.
 space actually available follows the host filesystem. This difference is
 shown in the boot log. Host descriptor characteristics measured on Apple are
 not guaranteed to be the same on Linux. Use `network_mode=none` or `inherit`;
-`policy` is not supported on Linux. When `network_mode=inherit` is used on a host whose `/etc/resolv.conf` only lists loopback, link-local, or unspecified resolvers, configure reachable upstream DNS servers via `[sandbox] microvm_dns` in `runtime.toml` so the microVM guest can resolve hostnames. `scripts/smoke-nerdctl-kata-volume.sh`
+`policy` is not supported on Linux. When `network_mode=inherit` is used on a host whose `/etc/resolv.conf` only lists loopback, link-local, or unspecified resolvers, name a reachable upstream DNS server in `[sandbox] microvm_dns` in `runtime.toml` so the microVM guest can resolve hostnames. `scripts/smoke-nerdctl-kata-volume.sh`
 checks Kata's volume and isolation. To verify as far as an installed Keeper,
 set `release_run` of the `Kata volume smoke` workflow to the run number of a
 Release whose Linux x64 job succeeded. That path installs that release's

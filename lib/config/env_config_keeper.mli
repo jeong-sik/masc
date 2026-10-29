@@ -36,7 +36,7 @@ end
 
 (** {1 Keeper turn} *)
 
-(** The env/TOML/default layer under [Keeper_config]'s [keeper.turn.*]
+(** The runtime.toml/default layer under [Keeper_config]'s [keeper.turn.*]
     runtime params: their default thunks and validation bounds. *)
 module KeeperTurn : sig
   val batch_limit_default : int
@@ -330,7 +330,7 @@ module KeeperKeepalive : sig
 
   val provider_call_deadline_failsafe_floor_sec : float
   (** Resolved runtime fallback for the provider-call no-progress threshold
-      when neither env nor runtime.toml declares one. Kept beside the two
+      when runtime.toml declares none. Kept beside the two
       stream floors so runtime execution and operator projection share one
       value. *)
 
@@ -338,18 +338,17 @@ module KeeperKeepalive : sig
   val provider_call_deadline_max_sec : float
   (** The declared range of {!provider_call_deadline_sec_override}, in
       seconds. The settings registry projects and validates against these;
-      the reader refuses a value outside them, so the environment and
-      runtime.toml give one answer. *)
+      the reader refuses a value outside them. *)
 
   val provider_call_deadline_sec_override : unit -> float option
   (** The keeper's no-progress threshold for a provider call attempt
-      (#27349, #28417), read on every call (env, then the runtime.toml boot
+      (#27349, #28417), read on every call (from the runtime.toml boot
       override). [None] (unset) means no explicit value; the resolved layer
       substitutes {!provider_call_deadline_failsafe_floor_sec}. A declared
       value that is not a finite positive number of seconds within the
       declared range raises {!Env_config_core.Config_error}.
 
-      Env: [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC]. *)
+      Setting: runtime.toml [turn.provider_call_deadline_sec]. *)
 
 end
 

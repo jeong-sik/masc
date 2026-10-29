@@ -257,7 +257,9 @@ let test_a_file_owned_name_is_answered_from_the_file () =
   Unix.putenv name "from the shell";
   Fun.protect
     ~finally:(fun () ->
-      Unix.putenv name (Option.value previous ~default:"");
+      (match previous with
+       | Some value -> Unix.putenv name value
+       | None -> Unix.unsetenv name);
       Config_boot_overrides.reset_for_tests ())
     (fun () ->
       let json =

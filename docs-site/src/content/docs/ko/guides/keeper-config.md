@@ -45,12 +45,12 @@ Keeper가 Gate 보호 대상 민감 도구를 호출했을 때 오퍼레이터�
   ```
 
 ### 4. MicroVM 샌드박스 게스트 DNS (`[sandbox] microvm_dns`)
-microVM Keeper 게스트(`apple_container`, `microsandbox`, `nerdctl_kata`)에 전달할 사용자 정의 DNS 서버 목록을 설정합니다.
+microVM Keeper 게스트(`apple_container`, `microsandbox`, `nerdctl_kata`)에 전달할 네임서버를 지정합니다. 지정하지 않으면 게스트는 호스트 `/etc/resolv.conf` 의 첫 번째 리졸버를 복사합니다.
 
 - **TOML 설정**: `<base-path>/.masc/config/runtime.toml`
   ```toml
   [sandbox]
-  microvm_dns = ["1.1.1.1", "8.8.8.8"]  # 유효한 IPv4 또는 IPv6 리터럴 목록
+  microvm_dns = "1.1.1.1"  # IPv4 또는 IPv6 주소 하나
   ```
 
 ### 5. 날짜별 JSONL 저장소 보존 기간 (`[maintenance] jsonl_retention_days`)
@@ -113,7 +113,7 @@ enabled = true
 jsonl_retention_days = 30
 
 [sandbox]
-microvm_dns = ["1.1.1.1", "8.8.8.8"]
+microvm_dns = "1.1.1.1"
 
 [keeper.hitl]
 # 오퍼레이터 승인 대기 창을 5분으로 설정

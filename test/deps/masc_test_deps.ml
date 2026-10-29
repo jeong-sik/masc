@@ -56,12 +56,14 @@ let with_process_env key value f =
 ;;
 
 (* Runs [f] with [values] ((name, value) pairs) as the runtime file's values,
-   the way the loader leaves them: every name declared file-owned and every
-   value in the boot store, so the shell's own values for these names are not
-   consulted. The store and the declaration are emptied before and after. *)
+   the way the loader leaves them: every file-owned registry name declared and
+   the given values in the boot store, so the shell's own values for any of
+   those names are not consulted. The store and the declaration are emptied
+   before and after. *)
 let with_file_owned_values values f =
   Config_boot_overrides.reset_for_tests ();
-  Config_boot_overrides.declare_file_owned (List.map fst values);
+  Config_boot_overrides.declare_file_owned
+    (Keeper_runtime_setting_registry.file_owned_env_names @ List.map fst values);
   List.iter (fun (name, value) -> Config_boot_overrides.set name value) values;
   Fun.protect ~finally:Config_boot_overrides.reset_for_tests f
 ;;

@@ -45,7 +45,7 @@ Apple 빌드 볼륨은 새 게스트 부팅 때 재생성되므로 같은 이름
 런타임마다 이미지 저장소가 따로라서, Docker 로 빌드해 둔 이미지는 셋 중
 어디에도 보이지 않는다.
 
-`network_mode = "inherit"` 인 게스트에서 호스트 `/etc/resolv.conf` 가 루프백(`127.0.0.1`, `::1`), 링크 로컬, 미지정 주소만 담고 있으면 게스트 안에서 DNS 해석이 실패하므로 부팅을 거절한다. 이 경우 `runtime.toml` 의 `[sandbox] microvm_dns` 에 게스트에서 도달 가능한 업스트림 DNS 서버 목록을 지정한다 (#43254).
+`network_mode = "inherit"` 인 게스트에서 호스트 `/etc/resolv.conf` 가 루프백(`127.0.0.1`, `::1`), 링크 로컬, 미지정 주소만 담고 있으면 게스트 안에서 DNS 해석이 실패하므로 부팅을 거절한다. 이 경우 `runtime.toml` 의 `[sandbox] microvm_dns` 에 게스트에서 도달 가능한 업스트림 DNS 서버 하나를 지정한다 (#43254).
 
 전에는 셋 다 Apple `container` 로 떴기 때문에 `microsandbox` 라고 적은 keeper 의
 게스트를 `msb stop` 으로 내리려 하면 `sandbox not found` 가 났고, 실제로 떠 있는

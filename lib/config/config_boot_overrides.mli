@@ -1,8 +1,7 @@
 (** Process-local boot override store.
 
-    Holds startup-loaded configuration defaults that behave like
-    process-env inputs for readers, without mutating the real process
-    environment.
+    Holds startup-loaded configuration that readers consult without mutating
+    the real process environment.
 
     Precedence used by {!source} and standard readers:
     real process env > boot override store > hardcoded default. A file-owned

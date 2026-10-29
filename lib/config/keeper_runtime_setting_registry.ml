@@ -262,18 +262,13 @@ let all =
       ~consumers:[ "Env_config_keeper.KeeperWireCapture"; "Keeper wire capture" ]
       ~category:Diagnostics
       "Enable diagnostic provider wire capture"
-  ; (* Sized in TOML beside the switch that turns the feature on. These two were
-       [Env_only] while [wire_capture.enabled] was [Toml_and_env], so the table
-       accepted one key and made its siblings a boot FATAL: [wire_capture] is an
-       owned namespace, so [max_bytes] resolved to no setting and was rejected
-       as unknown. An operator who enabled capture in TOML and then tried to
-       size it there took the server down, and the recovery was to comment the
-       keys out and reach for env vars instead.
+  ; (* Sized in TOML beside the switch that turns the feature on. [wire_capture]
+       is an owned namespace: a key with no setting of its own is rejected as
+       unknown at load, so sizing capture there needs a row for each key.
 
-       Both are bounded diagnostic budgets — the range below is enforced on
-       either path — and the consequential switch, whether raw provider payloads
-       are captured at all, was already operator-editable here. The asymmetry
-       was in how the three were declared, not in what they do. *)
+       Both are bounded diagnostic budgets — the range below is enforced when
+       the file loads — and the consequential switch, whether raw provider
+       payloads are captured at all, is operator-editable here too. *)
     setting
       ~range:(int_range ~min:1 ~max:30 ())
       ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperWireCapture.retention_days ())))

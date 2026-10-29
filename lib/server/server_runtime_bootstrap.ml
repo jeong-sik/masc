@@ -495,7 +495,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     (Yojson.Safe.to_string
        (Keeper_runtime_resolved.to_yojson (Keeper_runtime_resolved.current ())));
   (* RFC-0345 (#25128): state the effective streaming idle timeout and whether it
-     came from an operator value (env/toml) or the fail-safe floor, so operators
+     came from an operator value (runtime.toml) or the fail-safe floor, so operators
      can see the floor is active and raise it if their provider legitimately
      idles longer. *)
   Keeper_runtime_resolved.(

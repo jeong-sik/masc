@@ -1052,8 +1052,6 @@ let test_preview_precondition_matches_save () =
 
 let test_supervisor_and_rotation_bounds_reach_boot () =
   with_env "MASC_CONFIG_DIR" None @@ fun () ->
-  with_env "MASC_KEEPER_SUPERVISOR_SWEEP_SEC" None @@ fun () ->
-  with_env "MASC_KEEPER_METRICS_MAX_ROTATED" None @@ fun () ->
   with_clean_boot_overrides @@ fun () ->
   with_base_path @@ fun base_path ->
   List.iter (fun toml ->
@@ -1065,14 +1063,17 @@ let test_supervisor_and_rotation_bounds_reach_boot () =
     ["[supervisor]\nsweep_sec = 0.0\n";
      "[supervisor]\nsweep_sec = 121.0\n";
      "[metrics]\nmax_rotated = -1\n"];
-  (* The loads above declared the file-owned names, so the raw input these
-     readers see is the boot value the file would have left, not the shell. *)
+  (* The loads above failed, so none of them left a value or a declaration. Each
+     case below is the boot state a file with that value would have left. *)
   List.iter (fun (raw, expected) ->
-    Config_boot_overrides.set "MASC_KEEPER_SUPERVISOR_SWEEP_SEC" raw;
+    Masc_test_deps.with_file_owned_values
+      [ "MASC_KEEPER_SUPERVISOR_SWEEP_SEC", raw ]
+    @@ fun () ->
     check (float 0.) "boot value respects scheduler bounds" expected
       (Runtime_params.get Runtime_settings.keeper_supervisor_sweep_sec))
     ["0", 10.; "121", 120.; "nan", 30.; "infinity", 30.];
-  Config_boot_overrides.set "MASC_KEEPER_METRICS_MAX_ROTATED" "0";
+  Masc_test_deps.with_file_owned_values [ "MASC_KEEPER_METRICS_MAX_ROTATED", "0" ]
+  @@ fun () ->
   check int "a boot value of zero requests no backups" 0
     (Env_config_keeper.KeeperMetrics.max_rotated_files ())
 ;;

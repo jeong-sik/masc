@@ -116,8 +116,8 @@ enabled = true
 jsonl_retention_days = 30
 
 [sandbox]
-# microVM Keeper 게스트에 전달할 DNS 서버 목록.
-microvm_dns = ["1.1.1.1", "8.8.8.8"]
+# microVM Keeper 게스트에 전달할 네임서버(IPv4 또는 IPv6 주소 하나, 선택).
+microvm_dns = "1.1.1.1"
 
 [tui]
 # Board MIDI 첨부파일을 fluidsynth 로 재생할 때 사용할 SoundFont (.sf2 / .sf3) 경로.

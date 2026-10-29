@@ -51,6 +51,8 @@ let test_block_id_post_tool_round_classes () =
     ; (Prompt_block_id.Temporal_summary, false)
     ; (Prompt_block_id.Memory_os_recall, false)
     ; (Prompt_block_id.Librarian_working_context, false)
+    ; (Prompt_block_id.Recalled_memory, false)
+    ; (Prompt_block_id.Recalled_memory_status, false)
     ; (Prompt_block_id.Operator_note, true)
     ; (Prompt_block_id.Skill_compositions, false)
     ]
@@ -71,6 +73,15 @@ let test_block_id_post_tool_round_classes () =
         true
         (List.exists (fun (row, _) -> Prompt_block_id.equal row block) pinned))
     Prompt_block_id.all_known
+
+(* A resumed official-client session keeps the recall body it holds, so an
+   unchanged body is not sent again. The status line names its turn, so each
+   turn's line is new even when the words repeat. *)
+let test_block_id_resend_classes_of_the_recall_blocks () =
+  check bool "the recall body is not sent again when the session holds it" false
+    (Prompt_block_id.resent_when_held Prompt_block_id.Recalled_memory);
+  check bool "the recall status line is sent every resume" true
+    (Prompt_block_id.resent_when_held Prompt_block_id.Recalled_memory_status)
 
 (* ── TurnRecord codec ─────────────────────────────────── *)
 
@@ -325,6 +336,33 @@ let test_historical_row_without_usage_scope_is_unavailable () =
       true
       (decoded.usage.scope = Runtime_usage_scope.Usage_scope_unavailable)
 ;;
+
+(* The Dashboard refuses a whole turn record that names a prompt block id it
+   does not know (#38923), and then every row of that Keeper disappears. So the
+   list it decodes against has to name exactly the ids the server writes. The
+   list is read out of its TypeScript source, one quoted name per entry. *)
+let test_dashboard_decoder_lists_every_block_id () =
+  let source =
+    In_channel.with_open_text "../dashboard/src/api/dashboard-turn-records.ts" In_channel.input_all
+  in
+  let opening = "export const TURN_PROMPT_BLOCK_IDS = [" in
+  let start =
+    match Astring.String.find_sub ~sub:opening source with
+    | Some index -> index + String.length opening
+    | None -> fail "the Dashboard source no longer declares TURN_PROMPT_BLOCK_IDS"
+  in
+  let listed =
+    match Astring.String.find_sub ~start ~sub:"] as const" source with
+    | None -> fail "the Dashboard block id list has no end"
+    | Some finish ->
+      String.sub source start (finish - start)
+      |> String.split_on_char '\''
+      |> List.mapi (fun index piece -> index, piece)
+      |> List.filter_map (fun (index, piece) -> if index mod 2 = 1 then Some piece else None)
+  in
+  check (list string) "the Dashboard decodes exactly the ids the server writes"
+    (List.sort String.compare (List.map Prompt_block_id.to_string Prompt_block_id.all_known))
+    (List.sort String.compare listed)
 
 (* The Dashboard decoder reads the same unmodified writer output. Keep it
    checked against the current strict codec instead of a frontend-only snapshot. *)
@@ -1246,6 +1284,8 @@ let () =
         ; test_case "unknown block rejected" `Quick test_block_id_unknown_rejected
         ; test_case "post-tool round classes" `Quick
             test_block_id_post_tool_round_classes
+        ; test_case "resend classes of the recall blocks" `Quick
+            test_block_id_resend_classes_of_the_recall_blocks
         ] )
     ; ( "codec"
       , [ test_case "roundtrip" `Quick test_codec_roundtrip
@@ -1253,6 +1293,8 @@ let () =
             test_client_turn_usage_roundtrip
         ; test_case "Dashboard writer fixture uses the current strict codec" `Quick
             test_dashboard_writer_fixture_roundtrip
+        ; test_case "dashboard decoder lists every block id" `Quick
+            test_dashboard_decoder_lists_every_block_id
         ; test_case "cache counts round-trip and stay optional" `Quick
             test_cache_counts_round_trip_and_stay_optional
         ; test_case "historical row without usage scope is unavailable" `Quick

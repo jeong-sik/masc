@@ -254,6 +254,32 @@ let test_a_cancellation_is_the_turns_own_and_is_raised_again () =
     Alcotest.check_raises "from the judgment" cancelled (fun () ->
       ignore (prepare_raising ~judge:(fun _ -> raise cancelled) ~read_facts:(fun () -> Ok facts) ())))
 
+(* ---- the prompt blocks ---- *)
+
+let test_the_texts_become_the_two_prompt_blocks () =
+  with_policy (recall Runtime_schema.All_keepers) (fun () ->
+    let blocks_of judgment =
+      prepare ~probe:(probe ()) ~facts_result:(Ok facts) ~answer:(Ok (Turn.Judged judgment)) ()
+      |> some_or_fail
+    in
+    let carrying = blocks_of carrying_the_first in
+    (match carrying.Blocks.body, Blocks.prompt_blocks carrying with
+     | Some body, [ (status_block, status); (body_block, text) ] ->
+       Alcotest.(check string) "the status line is the status block" "recalled_memory_status"
+         (Prompt_block_id.to_string status_block);
+       Alcotest.(check string) "with the status text" carrying.Blocks.status status;
+       Alcotest.(check string) "the body is the memory block" "recalled_memory"
+         (Prompt_block_id.to_string body_block);
+       Alcotest.(check string) "with the body text" body text
+     | _ -> Alcotest.fail "expected the status block, then the body block");
+    let nothing = blocks_of carrying_nothing in
+    match Blocks.prompt_blocks nothing with
+    | [ (status_block, status) ] ->
+      Alcotest.(check string) "a judgment that carried nothing has only the status block"
+        "recalled_memory_status" (Prompt_block_id.to_string status_block);
+      Alcotest.(check string) "with its text" nothing.Blocks.status status
+    | blocks -> Alcotest.failf "expected one block, got %d" (List.length blocks))
+
 (* ---- the purpose and the store ---- *)
 
 let test_the_purpose_is_the_input_the_instructions_and_the_turn_and_nothing_else () =
@@ -473,6 +499,10 @@ let () =
             test_something_that_raises_gives_no_texts_and_does_not_end_the_turn
         ; Alcotest.test_case "a cancellation is the turn's own and is raised again" `Quick
             test_a_cancellation_is_the_turns_own_and_is_raised_again
+        ] )
+    ; ( "the prompt blocks"
+      , [ Alcotest.test_case "the texts become the two prompt blocks" `Quick
+            test_the_texts_become_the_two_prompt_blocks
         ] )
     ; ( "the purpose and the store"
       , [ Alcotest.test_case "the purpose is the input, the instructions and the turn and nothing else" `Quick

@@ -7,6 +7,8 @@ type t =
   | Temporal_summary
   | Memory_os_recall
   | Librarian_working_context
+  | Recalled_memory
+  | Recalled_memory_status
   | Operator_note
   | Skill_compositions
 [@@deriving enumerate]
@@ -21,10 +23,12 @@ let equal a b =
   | Temporal_summary, Temporal_summary
   | Librarian_working_context, Librarian_working_context
   | Memory_os_recall, Memory_os_recall
+  | Recalled_memory, Recalled_memory
+  | Recalled_memory_status, Recalled_memory_status
   | Operator_note, Operator_note
   | Skill_compositions, Skill_compositions -> true
   | ( Keeper_instructions | Dynamic_context | Active_goals | Completion_authority | Admitted_scheduled_input | Temporal_summary | Memory_os_recall
-    | Librarian_working_context | Operator_note | Skill_compositions )
+    | Librarian_working_context | Recalled_memory | Recalled_memory_status | Operator_note | Skill_compositions )
   , _ -> false
 
 let to_string = function
@@ -36,6 +40,8 @@ let to_string = function
   | Temporal_summary -> "temporal_summary"
   | Memory_os_recall -> "memory_os_recall"
   | Librarian_working_context -> "librarian_working_context"
+  | Recalled_memory -> "recalled_memory"
+  | Recalled_memory_status -> "recalled_memory_status"
   | Operator_note -> "operator_note"
   | Skill_compositions -> "skill_compositions"
 
@@ -53,6 +59,8 @@ let all_known =
   ; Temporal_summary
   ; Memory_os_recall
   ; Librarian_working_context
+  ; Recalled_memory
+  ; Recalled_memory_status
   ; Operator_note
   ; Skill_compositions
   ]
@@ -71,11 +79,19 @@ let cache_rank = function
   | Active_goals -> 4
   | Completion_authority -> 5
   | Admitted_scheduled_input -> 6
-  | Dynamic_context -> 7
-  | Temporal_summary -> 8
+  (* The two recall blocks are placed before their first measurement (RFC
+     keeper-recall-reaches-the-turn, section 4.4). The body changes only when
+     the set of carried memories does, so it is in front of the context that
+     changes on nearly every turn. The status line names the turn, so it
+     changes every turn and sits behind that context and in front of the
+     clock. The canary measures how often each really changes. *)
+  | Recalled_memory -> 7
+  | Dynamic_context -> 8
+  | Recalled_memory_status -> 9
+  | Temporal_summary -> 10
   (* An operator speaking mid-turn is the newest thing in the assembly and the
      newest instruction in a post-tool round; it stays last on both counts. *)
-  | Operator_note -> 9
+  | Operator_note -> 11
 ;;
 
 (* See the mli. [Keeper_instructions] never enters the extra-context
@@ -85,7 +101,7 @@ let cache_rank = function
    inheriting either class silently. *)
 let injected_on_post_tool_round = function
   | Dynamic_context | Temporal_summary | Memory_os_recall | Librarian_working_context
-  | Skill_compositions -> false
+  | Recalled_memory | Recalled_memory_status | Skill_compositions -> false
   | Keeper_instructions | Active_goals | Completion_authority | Admitted_scheduled_input | Operator_note -> true
 ;;
 
@@ -94,6 +110,6 @@ let injected_on_post_tool_round = function
    the system prompt it recorded at its first launch. *)
 let resent_when_held = function
   | Keeper_instructions | Dynamic_context | Active_goals | Temporal_summary | Memory_os_recall
-  | Librarian_working_context | Skill_compositions -> false
-  | Completion_authority | Admitted_scheduled_input | Operator_note -> true
+  | Librarian_working_context | Recalled_memory | Skill_compositions -> false
+  | Completion_authority | Admitted_scheduled_input | Recalled_memory_status | Operator_note -> true
 ;;

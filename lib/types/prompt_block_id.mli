@@ -23,6 +23,12 @@
     It changes independently of the ordinary facts in [Memory_os_recall], so
     official-client resumes compare and deliver these two blocks separately.
 
+    [Recalled_memory_status] and [Recalled_memory] are the two texts of a recall
+    judgment (docs/rfc/RFC-keeper-recall-reaches-the-turn.md, section 4.4). The
+    status line says what the judgment came to, names its turn and lists the
+    ids it carried. The body holds those memories and exists only when the
+    judgment carried some. A Keeper whose recall judgment is off has neither.
+
     [Skill_compositions] names the composition Skills carried by this turn's
     tool surface. It exists because nothing else says they are there to a model
     that does not read tool descriptions: keeper prompt blocks mentioned Skills
@@ -40,6 +46,8 @@ type t =
   | Temporal_summary
   | Memory_os_recall
   | Librarian_working_context
+  | Recalled_memory
+  | Recalled_memory_status
   | Operator_note
   | Skill_compositions
 
@@ -68,6 +76,12 @@ val cache_rank : t -> int
     turn. That turn reported 314,080 cache-creation tokens against 50,788
     cache reads.
 
+    [recalled_memory] and [recalled_memory_status] have not been measured yet:
+    the body is placed in front of [dynamic_context] because it changes only
+    when the carried set does, and the status line behind it because it names
+    its turn and so changes on every turn. The canary measures both and the
+    ranks follow.
+
     Equal ranks keep their assembly order, so this decides only what the
     measurement decided. A new constructor must choose a rank here; the
     exhaustive match is what makes that a decision rather than an accident. *)
@@ -88,6 +102,9 @@ val injected_on_post_tool_round : t -> bool
     state. Operator
     speech remains [Operator_note] (RFC-0366). A new constructor must declare
     its class here before it can ride a post-tool round.
+
+    [Recalled_memory] and [Recalled_memory_status] are first-round blocks as
+    well: the judgment is made once, before the turn's first request.
 
     [Temporal_summary] is one of those first-round blocks for the same
     reason, so the clock a Keeper reads is the one rendered for its turn's
@@ -112,6 +129,12 @@ val resent_when_held : t -> bool
     preserving their producer layers' [Sent_every_resume] semantics even when
     the session saw identical bytes. Entry facts name their own exact turn;
     later empty/unknown observations do not erase historical transcript rows.
+
+    [Recalled_memory_status] answers [true]: each turn's line names its own
+    turn, so an unchanged copy is still a new line, and the session reads the
+    lines over turns. [Recalled_memory] answers [false]: the session keeps the
+    body it holds, and the status line says which of its memories this turn
+    carries.
 
     [Dynamic_context] answers for the block as one text. When the renderer's
     partition of the block is known, a resume compares its World State

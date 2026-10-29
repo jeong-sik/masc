@@ -643,6 +643,14 @@ let assemble_hooks
     let active_tool_surface_enabled = ref false in
     let active_checkpoint_owner = ref None in
     let host_memory = ref None in
+    (* The recall judgment of this run of the turn is made once, before its
+       first request, and every later call gets the same judgment back, unless
+       it came to unavailable, which is asked again. A runtime attempt that
+       fails over re-assembles the context but must not judge again, so unlike
+       [host_memory] this is not reset in [on_runtime_attempt]. A run that
+       starts again for the same turn, from a checkpoint, builds a new memo and
+       may judge again. *)
+    let recall_memo = Keeper_memory_recall_turn.create_memo () in
     let on_memory_capacity_refusal ~refusal = match !host_memory with
       | None -> Ok Keeper_memory_delivery_reprojection.Unchanged
       | Some prepared -> Keeper_workspace_memory_host_recall.defer_for_capacity prepared ~refusal in
@@ -1119,6 +1127,35 @@ let assemble_hooks
                          ~now:(Time_compat.now ())
                          ()) in
                    Option.iter (record_block Prompt_block_id.Memory_os_recall) ordinary_recall);
+                (* The recall judgment (RFC keeper-recall-reaches-the-turn, section
+                   4.4). A Keeper that is not judged gets nothing here and reads
+                   nothing, and MASC_KEEPER_MEMORY_OS_RECALL=0 turns it off with
+                   the block above. Like that block, it is made on the first
+                   round only. *)
+                (if not post_tool_round
+                 then
+                   let turn_ref =
+                     Ids.Turn_ref.make
+                       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                       ~absolute_turn:keeper_turn_id
+                   in
+                   Option.iter
+                     (fun recalled ->
+                        List.iter
+                          (fun (block, text) -> record_block block text)
+                          (Keeper_memory_recall_blocks.prompt_blocks recalled))
+                     (Keeper_memory_recall_blocks.prepare
+                        ~memo:recall_memo
+                        ~config
+                        ~keepers_dir:memory_os_keepers_dir
+                        ~keeper_id:meta.name
+                        ~turn_ref
+                        ~purpose:
+                          (Keeper_memory_recall_blocks.purpose
+                             ~current_input:user_message
+                             ~keeper_instructions:meta.instructions
+                             ~turn_ref)
+                        ~memory_search_available:(recall_tool_available "keeper_memory_search")));
                 (* The Librarian index changes independently of ordinary facts.
                    Keeping separate identities avoids replaying every fact when
                    only the working-context revision or artifact changed. *)

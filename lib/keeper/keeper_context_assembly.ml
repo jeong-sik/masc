@@ -52,6 +52,8 @@ let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
       | (Block (Prompt_block_id.Temporal_summary), _)
       | (Block (Prompt_block_id.Memory_os_recall), _)
       | (Block (Prompt_block_id.Librarian_working_context), _)
+      | (Block (Prompt_block_id.Recalled_memory), _)
+      | (Block (Prompt_block_id.Recalled_memory_status), _)
       | (Block (Prompt_block_id.Operator_note), _) | (Block (Prompt_block_id.Skill_compositions), _) -> Not_applicable in
     spans :=
       { kind

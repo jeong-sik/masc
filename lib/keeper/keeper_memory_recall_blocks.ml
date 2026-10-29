@@ -8,6 +8,12 @@ type t =
   ; body : string option
   }
 
+let prompt_blocks { status; body } =
+  (Prompt_block_id.Recalled_memory_status, status)
+  :: (match body with
+      | Some body -> [ Prompt_block_id.Recalled_memory, body ]
+      | None -> [])
+
 let purpose ~current_input ~keeper_instructions ~turn_ref =
   `Assoc
     [ "current_input", `String current_input

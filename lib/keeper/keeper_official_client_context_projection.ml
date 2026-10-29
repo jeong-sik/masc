@@ -284,7 +284,7 @@ let block_body assembly = function
      | None -> Whole_text)
   | Prompt_block_id.(
       Keeper_instructions | Active_goals | Completion_authority | Admitted_scheduled_input | Temporal_summary | Memory_os_recall
-      | Librarian_working_context | Operator_note | Skill_compositions) -> Whole_text
+      | Librarian_working_context | Recalled_memory | Recalled_memory_status | Operator_note | Skill_compositions) -> Whole_text
 ;;
 
 (* The context carrier splits into its typed blocks only when it is the exact
@@ -743,7 +743,7 @@ let resume_prompt ~goal ~held ?composed_context messages =
       ( Session_store.Context_block
           Prompt_block_id.(
             Keeper_instructions | Active_goals | Completion_authority | Admitted_scheduled_input | Temporal_summary | Memory_os_recall
-            | Librarian_working_context | Operator_note | Skill_compositions)
+            | Librarian_working_context | Recalled_memory | Recalled_memory_status | Operator_note | Skill_compositions)
       | Session_store.Librarian_working_state
       | Session_store.Librarian_unread
       | Session_store.Historical_task_reference | Session_store.Tool_result_receipts ) -> false

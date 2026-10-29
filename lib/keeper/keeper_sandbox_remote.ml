@@ -959,6 +959,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
         ; timeout_sec
         ; stdin_len = Int64.of_int (String.length stdin)
         ; mode
+        ; acceptance_frame = false
         }
       in
       (match Exec_ssh_protocol.encode_request request ~stdin with

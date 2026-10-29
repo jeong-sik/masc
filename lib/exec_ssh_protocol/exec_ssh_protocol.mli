@@ -87,6 +87,11 @@ val user_notif_capability : string
     2, a separate PR: fd-passing and the supervisor's read/decode/respond
     loop). *)
 
+val request_acceptance_capability : string
+(** The probe capability a shim advertises when it answers a request that
+    sets [acceptance_frame]: ["request_acceptance_frame"]. The host reads an
+    absent frame as evidence only from a shim that advertises this. *)
+
 val github_token_env_names : string list
 (** The environment names a GitHub token rides in: [GH_TOKEN], [GITHUB_TOKEN],
     [GH_ENTERPRISE_TOKEN], [GITHUB_ENTERPRISE_TOKEN]. The server strips them
@@ -136,6 +141,12 @@ type request =
   ; stdin_len : int64
     (** declared byte length of the raw stdin payload *)
   ; mode : mode  (** how the shim boxes the payload; ["mode"] on the wire *)
+  ; acceptance_frame : bool
+    (** ask the shim to write {!render_acceptance_frame} to the front of its
+        stderr once it has accepted this request. Sent only to a shim whose
+        probe lists {!request_acceptance_capability}; absent on the wire
+        when [false], so every request an older host sends reads as [false].
+        Refused for a v2 frame, whose shim cannot answer it. *)
   }
 
 (** Wire layout (§4.2):
@@ -273,6 +284,42 @@ val render_trailer : ?execution_receipt:execution_receipt -> trailer -> string
     shim appends to stderr.  Control bytes inside [shim_error] are
     JSON-escaped by the renderer, so no literal [\x1e] can appear
     between the delimiters. *)
+
+(** {1 Request acceptance frame}
+
+    The shim writes this to the front of its stderr, once, after it has read
+    and checked a request that set [acceptance_frame] and before the payload
+    can write. It says only that this request reached the shim and was
+    accepted. It says nothing about the outcome, which stays in the trailer. *)
+
+val render_acceptance_frame : major -> string
+(** [\x1e{"masc_request_accepted":{"v":N}}\x1e], echoing the request's major. *)
+
+type acceptance_head =
+  | Head_pending
+    (** these bytes could still become a frame; hold them *)
+  | Head_payload
+    (** these bytes are not a frame and are payload from the first byte *)
+  | Head_frame of { v : major; preamble : string; rest : string }
+    (** a frame was read. [preamble] is what the transport itself wrote before
+        the shim ran, [rest] what followed the frame; the caller sees
+        [preamble ^ rest] *)
+
+val acceptance_frame_max_bytes : int
+(** A head that has not resolved within this many bytes is payload. *)
+
+val split_acceptance_head : string -> acceptance_head
+(** Reads the front of a stderr stream. The frame is the first record
+    separator in it: the transport may print a line of its own ahead of the
+    shim, but the child cannot, because the shim writes the frame before the
+    child runs. Total: a head with no frame, one that diverges from every
+    frame this build reads, or one that does not resolve within the bound is
+    [Head_payload] and is released unchanged. *)
+
+val settle_acceptance_head : string -> string
+(** The bytes to release when the stream ends while the head is still
+    {!Head_pending}: all of it, except a trailing prefix of a frame, which
+    is what a wire cut off mid-frame leaves and is not payload. *)
 
 val parse_trailer : string -> (trailer, string) result
 (** [parse_trailer tail] extracts the trailer from the TAIL of a

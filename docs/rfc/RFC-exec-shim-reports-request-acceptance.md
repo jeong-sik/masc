@@ -1,7 +1,7 @@
 ---
 rfc: "exec-shim-reports-request-acceptance"
 title: "shim이 요청 수신을 먼저 알려 전달되지 않은 실행을 가른다"
-status: Draft
+status: Active
 created: 2026-10-29
 updated: 2026-10-29
 author: vincent + claude

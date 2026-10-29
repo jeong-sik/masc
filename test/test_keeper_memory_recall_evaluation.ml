@@ -72,8 +72,8 @@ let with_config f =
     ~finally:(fun () -> Fs_compat.remove_tree base)
     (fun () -> f (Workspace.default_config base))
 
-let create_journal config =
-  Eval.create ~config ~keeper_id:"fixture" ~turn_ref ~destinations:(destination, [])
+let create_journal ?(keeper_id = "fixture") config =
+  Eval.create ~config ~keeper_id ~turn_ref ~destinations:(destination, [])
 
 let with_journal f = with_config (fun config -> f (create_journal config))
 
@@ -205,13 +205,6 @@ let capacity_body = {|{"detail":{"error_type":"max_tokens_exceeded"}}|}
 
 let failure first later : Client.failure = { first_attempt = first; later_attempts = later }
 
-let attempt_failure_token = function
-  | Flow.Capacity_refused -> "capacity_refused"
-  | Flow.Rate_limited -> "rate_limited"
-  | Flow.Invalid_response -> "invalid_response"
-  | Flow.Failed -> "failed"
-  | Flow.Not_recorded -> "not_recorded"
-
 let test_the_client_failure_becomes_the_flow_failure () =
   let cases =
     [ "capacity: every destination says so", failure (http 400 capacity_body) [ http 400 capacity_body ], "capacity_refused"
@@ -231,7 +224,7 @@ let test_the_client_failure_becomes_the_flow_failure () =
   List.iter
     (fun (label, failure, expected) ->
       Alcotest.(check string) label expected
-        (attempt_failure_token (Eval.attempt_failure_of_client_failure failure)))
+        (Flow.attempt_failure_token (Eval.attempt_failure_of_client_failure failure)))
     cases
 
 let test_a_failed_request_is_saved_and_classified () =
@@ -246,6 +239,128 @@ let test_a_failed_request_is_saved_and_classified () =
     | [ _; failed ] ->
       Alcotest.(check bool) "the failure is saved" true (field "failure" failed <> `Null)
     | [] | [ _ ] | _ :: _ :: _ :: _ -> Alcotest.fail "expected two rows")
+
+(* The client's own bug is not a cancellation and not a failure the flow knows:
+   it is raised again, and its request stays open in the journal. *)
+let test_an_exception_that_is_not_a_cancellation_leaves_the_request_open () =
+  with_journal (fun journal ->
+    let call ~destinations:_ ~state:_ ~questions:_ () = failwith "client bug" in
+    Alcotest.check_raises "the exception is raised again" (Failure "client bug") (fun () ->
+      ignore (Eval.evaluate_with ~call journal (candidate_request ())));
+    Alcotest.(check (list string)) "only started is saved" [ "started" ]
+      (statuses (read_rows (Eval.journal_path journal))))
+
+(* ---- metrics ---- *)
+
+(* The metric store is shared by every test of this process, so each test counts
+   under a Keeper of its own. *)
+let counter name labels =
+  Option.value ~default:0.0 (Otel_metric_store.get_metric_value name ~labels ())
+
+let requests ~keeper ~kind ~result =
+  counter
+    Keeper_metrics.(to_string MemoryRecallRequests)
+    [ "keeper", keeper; "kind", kind; "result", result ]
+
+let input_bytes ~keeper =
+  counter Keeper_metrics.(to_string MemoryRecallInputBytes) [ "keeper", keeper ]
+
+let timed_requests ~keeper ~kind =
+  counter
+    (Otel_metric_store.histogram_count_name Keeper_metrics.(to_string MemoryRecallRequestSeconds))
+    [ "keeper", keeper; "kind", kind ]
+
+let with_keeper_journal keeper f =
+  with_config (fun config -> f (create_journal ~keeper_id:keeper config))
+
+let first_line path =
+  match String.split_on_char '\n' (Fs_compat.load_file path) with
+  | line :: _ -> line
+  | [] -> Alcotest.fail "no row"
+
+let test_a_request_is_counted_sized_and_timed () =
+  let keeper = "metrics-answered" in
+  with_keeper_journal keeper (fun journal ->
+    ignore (Eval.evaluate_with ~call:accepted_call journal (candidate_request ()));
+    Alcotest.(check (float 0.0)) "one answered request of the candidates question" 1.0
+      (requests ~keeper ~kind:"candidates" ~result:"answered");
+    Alcotest.(check (float 0.0)) "the size of the started row, with its newline"
+      (Float.of_int (String.length (first_line (Eval.journal_path journal)) + 1))
+      (input_bytes ~keeper);
+    Alcotest.(check (float 0.0)) "one sample of the time" 1.0
+      (timed_requests ~keeper ~kind:"candidates"))
+
+let test_each_question_kind_is_counted_on_its_own () =
+  let keeper = "metrics-kinds" in
+  with_keeper_journal keeper (fun journal ->
+    let piece = piece_of two_candidates in
+    List.iter
+      (fun request -> ignore (Eval.evaluate_with ~call:accepted_call journal request))
+      [ built (Codec.candidate_request ~purpose piece)
+      ; built (Codec.turn_request ~purpose)
+      ; built (Codec.time_request piece)
+      ; built (Codec.time_request piece)
+      ];
+    List.iter
+      (fun (kind, expected) ->
+        Alcotest.(check (float 0.0)) kind expected (requests ~keeper ~kind ~result:"answered"))
+      [ "candidates", 1.0; "turn", 1.0; "time", 2.0 ])
+
+let test_a_failed_request_is_counted_by_its_failure () =
+  List.iter
+    (fun (result, client_failure) ->
+      let keeper = "metrics-failed-" ^ result in
+      with_keeper_journal keeper (fun journal ->
+        let call ~destinations:_ ~state:_ ~questions:_ () = Error client_failure in
+        ignore (Eval.evaluate_with ~call journal (candidate_request ()));
+        Alcotest.(check (float 0.0)) result 1.0 (requests ~keeper ~kind:"candidates" ~result);
+        Alcotest.(check (float 0.0)) (result ^ " is not counted as answered") 0.0
+          (requests ~keeper ~kind:"candidates" ~result:"answered");
+        Alcotest.(check (float 0.0)) (result ^ " is timed") 1.0
+          (timed_requests ~keeper ~kind:"candidates")))
+    [ "capacity_refused", failure (http 400 capacity_body) []
+    ; "rate_limited", failure (http 429 "") []
+    ; "invalid_response", failure (http 200 "not json") []
+    ; "failed", failure transport []
+    ]
+
+let test_a_request_that_was_not_sent_has_no_size_and_no_time () =
+  let keeper = "metrics-not-sent" in
+  with_keeper_journal keeper (fun journal ->
+    Fs_compat.mkdir_p (Eval.journal_path journal);
+    let call ~destinations:_ ~state:_ ~questions:_ () = Alcotest.fail "an unsaved request was sent" in
+    ignore (Eval.evaluate_with ~call journal (candidate_request ()));
+    Alcotest.(check (float 0.0)) "counted as not recorded" 1.0
+      (requests ~keeper ~kind:"candidates" ~result:"not_recorded");
+    Alcotest.(check (float 0.0)) "no input was saved" 0.0 (input_bytes ~keeper);
+    Alcotest.(check (float 0.0)) "no call was timed" 0.0 (timed_requests ~keeper ~kind:"candidates"))
+
+let test_a_dropped_response_is_counted_as_not_recorded_after_it_was_timed () =
+  let keeper = "metrics-dropped" in
+  with_keeper_journal keeper (fun journal ->
+    let call ~destinations:_ ~state:_ ~questions () =
+      break_journal journal;
+      Ok (evaluated (answers_for questions possibly))
+    in
+    ignore (Eval.evaluate_with ~call journal (candidate_request ()));
+    Alcotest.(check (float 0.0)) "counted as not recorded" 1.0
+      (requests ~keeper ~kind:"candidates" ~result:"not_recorded");
+    Alcotest.(check (float 0.0)) "not as answered" 0.0
+      (requests ~keeper ~kind:"candidates" ~result:"answered");
+    Alcotest.(check bool) "the request was sent, so its input was counted" true (input_bytes ~keeper > 0.0);
+    Alcotest.(check (float 0.0)) "and its call timed" 1.0 (timed_requests ~keeper ~kind:"candidates"))
+
+let test_a_cancelled_request_is_counted_and_not_timed () =
+  let keeper = "metrics-cancelled" in
+  with_keeper_journal keeper (fun journal ->
+    let call ~destinations:_ ~state:_ ~questions:_ () = raise (Eio.Cancel.Cancelled (Failure "stopped")) in
+    (try ignore (Eval.evaluate_with ~call journal (candidate_request ())) with
+     | Eio.Cancel.Cancelled _ -> ());
+    Alcotest.(check (float 0.0)) "counted as cancelled" 1.0
+      (requests ~keeper ~kind:"candidates" ~result:"cancelled");
+    Alcotest.(check (float 0.0)) "a cancelled call has no time" 0.0
+      (timed_requests ~keeper ~kind:"candidates");
+    Alcotest.(check bool) "its input was counted" true (input_bytes ~keeper > 0.0))
 
 (* ---- rotation ---- *)
 
@@ -378,6 +493,22 @@ let () =
             test_a_cancelled_request_leaves_a_cancelled_row_and_is_raised_again
         ; Alcotest.test_case "the cancelled row is saved inside a cancelled context" `Quick
             test_the_cancelled_row_is_saved_inside_a_cancelled_context
+        ; Alcotest.test_case "an exception that is not a cancellation leaves the request open" `Quick
+            test_an_exception_that_is_not_a_cancellation_leaves_the_request_open
+        ] )
+    ; ( "metrics"
+      , [ Alcotest.test_case "a request is counted, sized and timed" `Quick
+            test_a_request_is_counted_sized_and_timed
+        ; Alcotest.test_case "each question kind is counted on its own" `Quick
+            test_each_question_kind_is_counted_on_its_own
+        ; Alcotest.test_case "a failed request is counted by its failure" `Quick
+            test_a_failed_request_is_counted_by_its_failure
+        ; Alcotest.test_case "a request that was not sent has no size and no time" `Quick
+            test_a_request_that_was_not_sent_has_no_size_and_no_time
+        ; Alcotest.test_case "a dropped response is counted as not recorded after it was timed" `Quick
+            test_a_dropped_response_is_counted_as_not_recorded_after_it_was_timed
+        ; Alcotest.test_case "a cancelled request is counted and not timed" `Quick
+            test_a_cancelled_request_is_counted_and_not_timed
         ] )
     ; ( "client failure"
       , [ Alcotest.test_case "the client failure becomes the flow failure" `Quick

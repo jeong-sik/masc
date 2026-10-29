@@ -205,6 +205,9 @@ type t =
   | WorkingStateNotCarried      (* counter: an official client left the Librarian working state out, because carried in front of the range it would have displaced atoms it does not cover *)
   | WorkspaceMemoryBriefingBytes (* gauge: briefing summary bytes observed at the keeper turn boundary *)
   | WorkspaceMemoryLedgerClaims  (* gauge: classified ledger claim count observed at the keeper turn boundary *)
+  | MemoryRecallRequests        (* counter: recall judgment requests, by question kind and result *)
+  | MemoryRecallInputBytes      (* counter: bytes of the request records the recall judgment saved before sending *)
+  | MemoryRecallRequestSeconds  (* histogram: seconds a recall judgment request took, from sending to its result *)
 [@@deriving enumerate]
 
 (** String conversion
@@ -423,6 +426,9 @@ let to_string = function
   | WorkingStateNotCarried -> "masc_keeper_librarian_working_state_not_carried_total"
   | WorkspaceMemoryBriefingBytes -> "masc_keeper_workspace_memory_briefing_bytes"
   | WorkspaceMemoryLedgerClaims -> "masc_keeper_workspace_memory_ledger_claims"
+  | MemoryRecallRequests -> "masc_keeper_memory_recall_requests_total"
+  | MemoryRecallInputBytes -> "masc_keeper_memory_recall_input_bytes_total"
+  | MemoryRecallRequestSeconds -> "masc_keeper_memory_recall_request_seconds"
 ;;
 
 type collection =
@@ -484,7 +490,8 @@ let collection = function
   | RawTraceRetentionSkipped | RawTraceRetentionUnlinkFailed | WireCaptureResponseSuppressed
   | WireCaptureWriteFailures | WireCaptureRecordSkipped | TurnBoundaryFailures
   | HistoryFragmentFailures | QuietFinals | WorkingStateNotCarried | WorkspaceMemoryBriefingBytes
-  | WorkspaceMemoryLedgerClaims -> Metric_store
+  | WorkspaceMemoryLedgerClaims | MemoryRecallRequests | MemoryRecallInputBytes
+  | MemoryRecallRequestSeconds -> Metric_store
 ;;
 
 (* Zero-fill: register the unlabeled 0-cell of every counter at module

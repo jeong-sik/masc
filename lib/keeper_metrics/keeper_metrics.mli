@@ -195,6 +195,9 @@ type t =
   | WorkingStateNotCarried
   | WorkspaceMemoryBriefingBytes (* gauge: briefing summary bytes observed at the keeper turn boundary *)
   | WorkspaceMemoryLedgerClaims  (* gauge: classified ledger claim count observed at the keeper turn boundary *)
+  | MemoryRecallRequests        (* counter: recall judgment requests, by question kind and result *)
+  | MemoryRecallInputBytes      (* counter: bytes of the request records the recall judgment saved before sending *)
+  | MemoryRecallRequestSeconds  (* histogram: seconds a recall judgment request took, from sending to its result *)
 
 val to_string : t -> string
 

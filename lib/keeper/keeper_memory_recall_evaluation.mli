@@ -17,8 +17,19 @@
     number of kept files are those of the other Keeper logs
     ([MASC_KEEPER_METRICS_MAX_BYTES], [MASC_KEEPER_METRICS_MAX_ROTATED]).
 
+    A Keeper runs one turn at a time and a turn makes one judgment, so one
+    file has one judgment writing to it. Two judgments of one Keeper at once
+    would lose no row, but their rotations could overlap and lose an old file.
+
     Rows contain private Keeper memory and sanitized destination identities.
     Credentials are never written.
+
+    Each request is counted by Keeper, question kind and result
+    ([masc_keeper_memory_recall_requests_total]) and timed from the call to its
+    result ([masc_keeper_memory_recall_request_seconds]). The size of its
+    [started] row, the state and the questions with the identity fields, is
+    added to [masc_keeper_memory_recall_input_bytes_total]. That is the size of
+    the record, not of the body on the wire.
 
     The functions that write run inside an Eio main loop: the first row of a
     judgment forces the rotation inside a protected section. *)
@@ -59,7 +70,11 @@ val evaluate :
     state and questions, then [response_received] or [provider_failed], or
     [cancelled] when the call is cancelled. Every row carries the [judgment_id],
     the [turn_ref], the [request_id] and the [kind] of the question. The
-    cancellation is raised again once its row is saved, when it can be. *)
+    cancellation is raised again once its row is saved, when it can be.
+
+    A request is closed when a row with another status than [started] carries
+    its [request_id]. An exception that is not a cancellation, which the client
+    does not raise, is raised again and leaves its request open. *)
 
 val evaluate_with :
   call:

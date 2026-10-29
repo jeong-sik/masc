@@ -31,6 +31,10 @@ type attempt_failure =
           sent, or could not save the record of the response, so the response
           is not used. *)
 
+val attempt_failure_token : attempt_failure -> string
+(** [capacity_refused], [rate_limited], [invalid_response], [failed],
+    [not_recorded]. The [result] label of the request metric. *)
+
 type evaluate =
   Keeper_memory_recall_jev_codec.request ->
   (Typesafeai_types.eval_response, attempt_failure) result

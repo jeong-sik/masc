@@ -1,0 +1,40 @@
+ 대시보드  작업  ▸키퍼  사용량  보드  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  hints on                                                                                                                                   │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  MASC · Multi-Agent Shared Context                                                                                                                           │
+│                                                                                                                                                              │
+│Candle details                                                                 ◆ Queue                                                                        │
+│Candle unavailable: live keeper status unavailable: fixture unavailable          n                immediate priority                                          │
+│                                                                                 l                low priority                                                │
+│                                                                                 ↑/↓ / j/k        select                                                      │
+│                                                                                 Enter            read                                                        │
+│                                                                                 f                allow context                                               │
+│                                                                                 PgUp/PgDn        page                                                        │
+│                                                                                 Home/End         edges                                                       │
+│                                                                                 r                refresh                                                     │
+│                                                                                 Esc              back                                                        │
+│                                                                                 ?                help                                                        │
+│                                                                                                                                                              │
+│◇ Slash commands                                                               ◇ Global                                                                       │
+│  /login [client]  sign in to an official client and verify a model              Tab / Shift-Tab  next / previous surface                                     │
+│                  connection                                                     3                jump to Keepers when the active field or panel does not     │
+│  /task-inspect   inspect this session's Task creations without repeating                         use 3                                                       │
+│                  them                                                           r                refresh the current surface                                 │
+│  /task-recover   restore a retained Task command for this Keeper; inspect       i                focus the composer; on Dashboard, choose a Keeper           │
+│                  Tasks before repeating an unconfirmed creation                 :                command palette                                             │
+│  /task <title>   create a task for this keeper (lines below become the body)    ;                agenda: what is coming, and who is waiting on you; Enter    │
+│  /keeper <name>  switch this pane to another keeper                                              opens a row                                                 │
+│  /addons [inspect|attach JSON|observe ID|detach ID|slice JSON|evidence JSON…    @                answering: who is mid-turn or just finished; Enter opens    │
+│                  open optional cross-lane observations and package actions                       their chat                                                  │
+│  /play [invites|invite <name> <hours>|link [name]|revoke <name>]                ?                this help                                                   │
+│                  list, issue or revoke shared DOS play links                    &                Collab: watch MSX/DOS and manage play links (also `:` go    │
+│  /listen         play the newest audio or MIDI attachment in this                                Collab)                                                     │
+│                  conversation                                                   Ctrl-B           show or hide the Keeper roster; it starts hidden and the    │
+│  /artifacts (/reports)  browse published Markdown and HTML reports in a                          choice persists across navigation and resizing              │
+│                  full-width reader                                              Ctrl-L           cycle the Activity pane narrow, wide or hidden; the wheel   │
+│  /settings       open type-aware runtime settings                                                over the pane scrolls the full list; a press picks a        │
+│  [lines 1-32/633]                                                                                                                                            │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close
+ › to fixture   (i to write)

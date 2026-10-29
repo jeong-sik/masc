@@ -1,0 +1,24 @@
+ 대시보드  작업  ▸키퍼  사용량  보드  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ MASC Queue  fixture · automatic                                              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│Partial conversation · Esc:full chat                                          │
+│✗  HTTP 503 refused Child read                                                │
+│○  0 observed · provider completeness unknown · liveness unknown              │
+│✗  HTTP 503 refused native-task read                                          │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  Both server reads unavailable · r retries                                   │
+│  Server confirmed event update: fixture-event-01                             │
+│  Local unsent messages · 0                                                   │
+│  Inventory unavailable: GET failed: Malformed Response: unexpected eof (http…│
+│  Server queue unavailable: GET failed: Connection Error: Failed connecting t…│
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+  ↑/↓ / j/k:select  Enter:read  f:prefer full  PgUp/PgDn:page  Esc:back  …?
+ › to fixture ORIGINAL-DRAFT

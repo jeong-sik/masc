@@ -822,6 +822,7 @@
   masc_tui_types
   masc_tui_keeper_mark
   masc_tui_context_inspector
+  masc_tui_queue_layout
   masc_tui_board_kind_mark
   masc_tui_config_mark
   masc_tui_file_icon
@@ -1280,7 +1281,7 @@
  (wrapped false)
  (modules masc_tui_press)
  (libraries masc_tui_action_notice masc_tui_hit masc_tui_types masc_tui_context_inspector masc_tui_lane_inventory
-  masc_tui_queue_inspection masc_tui_message_layout masc_tui_play_card))
+  masc_tui_queue_inspection masc_tui_queue_layout masc_tui_message_layout masc_tui_play_card))
 
 (library
  (name masc_tui_help)
@@ -1786,6 +1787,7 @@
   masc.masc_random_id
   masc_tui_fusion_launch
   masc_tui_queue_inspection
+  masc_tui_queue_layout
   masc_tui_lane_declaration
   masc.browser_lane
   masc.sse_wire
@@ -2256,6 +2258,8 @@
   masc_tui_render_prim
   masc_tui_composer
   masc_tui_ansi
+  masc_tui_frame
+  masc_tui_hit
   masc_tui_markdown_render_cache
   masc_tui_message_layout
   masc_tui_execute_result
@@ -2512,6 +2516,7 @@
   masc_tui_play_room
   masc_tui_preparation_details
   masc_tui_queue_inspection
+  masc_tui_queue_layout
   masc_tui_render_chat
   masc_tui_runtime_config_receipt
   masc_tui_runtime_config_snapshot
@@ -2600,6 +2605,7 @@
   masc_tui_fusion_seat_routes
   masc_tui_lane_installer
   masc_tui_queue_inspection
+  masc_tui_queue_layout
   masc_tui_fork_guard
   masc_tui_async_read
   masc_tui_lane_subscriptions
@@ -3047,6 +3053,12 @@
   eio_main
   unix
   mtime.clock.os))
+
+(library
+ (name masc_tui_queue_layout)
+ (wrapped false)
+ (modules masc_tui_queue_layout)
+ (libraries masc_tui_message_layout masc_tui_pane_selection))
 
 (library
  (name masc_tui_queue_inspection)

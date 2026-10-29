@@ -10220,7 +10220,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
 
 let open_keeper_queue_panel state ~mailbox ~keeper_name =
   state.queue_panel <- Some
-    { qp_keeper=keeper_name; qp_reading=Queue_unavailable;
+    { qp_keeper=keeper_name; qp_layout=Masc_tui_queue_layout.Adaptive; qp_reading=Queue_unavailable;
       qp_observation=None; qp_notice=None; qp_receipt=None; qp_selected=None; qp_scroll=0;
       qp_detail=None; qp_detail_scroll=0; qp_refresh_after_priority=false };
   launch_keeper_queue state ~mailbox ~keeper_name Masc_tui_queue_inspection.Inspect
@@ -10247,13 +10247,11 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
   let items () = queue_panel_items state panel in
   let move direction =
     let rows = items () in
-    let terminal_rows, _ = get_terminal_size () in
-    let budget = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+    let budget = Masc_tui_render_overlays.queue_panel_list_budget state panel in
     update (queue_panel_move ~items:rows ~budget ~direction) in
   let selected () = queue_panel_selected_id ~items:(items ()) panel in
   let act command =
-    let terminal_rows, _ = get_terminal_size () in
-    if Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows <= queue_panel_fixed_rows ~items:(items ()) panel then ()
+    if Masc_tui_render_overlays.queue_panel_list_budget state panel <= queue_panel_fixed_rows ~items:(items ()) panel then ()
     else if panel.qp_reading = Queue_loading then notice "Wait for the current queue request"
     else if panel.qp_reading <> Queue_current || not (server_authority_ready state) then
       notice ~failure:true "Queue observation is unavailable; refresh before changing it"
@@ -10262,10 +10260,7 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
         (resolve_queue_selection ~require_action_ready:true ~state ~panel ~items:(items ())) with
     | None -> notice ~failure:true "Queue selection changed or has not been shown; review the selected row and retry"
     | Some (Inbox.Local_message id) ->
-      if List.exists (fun (name, _, intervention) ->
-        String.equal name panel.qp_keeper && match intervention with
-        | Retained_before_dispatch -> true
-        | Retained_after_stop | Awaiting_control _ -> false) state.keeper_interactive_waiting then
+      if queue_local_reordering_held state ~keeper_name:panel.qp_keeper then
         notice "Unsent input is retained after a failed preflight; resume it before reordering"
       else (match command with
        | `Last ->
@@ -10310,6 +10305,7 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
      | _ -> ())
   else match key with
   | "esc" -> state.queue_panel <- None
+  | "f" -> update (fun panel -> {panel with qp_layout=Masc_tui_queue_layout.toggle panel.qp_layout})
   | "j" | "down" -> move `Down
   | "k" | "up" -> move `Up
   | "\r" | "\n" | "enter" ->
@@ -10321,14 +10317,14 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
         | Some id -> update (fun panel -> {panel with qp_detail=Some id; qp_detail_scroll=0})
         | None -> notice ~failure:true "Queue selection changed or has not been shown; review the selected row and retry"))
   | "pageup" | "pagedown" | "home" | "end" ->
-    let terminal_rows, _ = get_terminal_size () in
-    let budget = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
+    let budget = Masc_tui_render_overlays.queue_panel_list_budget state panel in
     let rows = items () in
     let count = List.length rows in
     update (fun panel ->
       let old_height = max 0 (budget - queue_panel_fixed_rows ~items:rows panel) in
       let old_scroll = queue_panel_scroll ~items:rows ~height:old_height panel in
       let panel = {panel with qp_selected=None} in
+      let budget = Masc_tui_render_overlays.queue_panel_list_budget state panel in
       let height = max 1 (budget - queue_panel_fixed_rows ~items:rows panel) in
       let scroll = (match key with
         | "pageup" ->
@@ -24216,6 +24212,8 @@ let main
       queue_selection_authority_changed ~presented:(!presented).presses ~candidate:presses
       || queue_owner_authority_changed ~presented:(queue_owner_of_reader (!presented).reader)
            ~candidate:(queue_owner_of_reader reader)
+      || ((Option.is_some (queue_owner_of_reader (!presented).reader)
+           || Option.is_some (queue_owner_of_reader reader)) && (!presented).panes <> panes)
       || play_owner_authority_changed ~presented:(play_card_of_reader (!presented).reader)
            ~candidate:(play_card_of_reader reader)
       || Presented.panel_presentation_changed !presented ~current_owner:panel_owner
@@ -26245,13 +26243,55 @@ and is loaded on demand through keeper_skill.
         | Presented.Reject_action | Presented.Reject_paste ->
             pointer_gesture := Masc_tui_pane_selection.Idle;
             None in
+      (* A Queue refresh can change its placement or page boundary before
+         the replacement frame. Refuse that input before it can acknowledge
+         an earlier rejection or begin a gesture against changing content. *)
+      let queue_viewport_decision =
+        let terminal_rows, _ = get_terminal_size () in
+        match input, queue_owner_of_reader (!presented).reader,
+              Masc_tui_render.queue_below_play state ~terminal_rows with
+        | Some event, Some owner, Some panel
+          when not state.image_open && not state.msx_open
+               && not (queue_owner_matches state panel
+                 ~viewport:(Masc_tui_render_overlays.queue_panel_viewport state panel) owner) ->
+            (match event with
+             | Pasted _ -> Presented.Reject_paste
+             | Graphics_reply _ -> Presented.Accept_input
+             | Key _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _
+             | Mouse_wheel _ -> Presented.Reject_action)
+        | (Some _ | None), (Some _ | None), (Some _ | None) -> Presented.Accept_input in
+      (match queue_viewport_decision with
+       | Presented.Reject_paste when Option.is_some interrupted_paste ->
+           presented := Presented.reject_recovery !presented
+       | Presented.Accept_input | Presented.Reject_action | Presented.Reject_paste -> ());
+      let input = match queue_viewport_decision with
+        | Presented.Accept_input -> input
+        | Presented.Reject_action | Presented.Reject_paste ->
+            pointer_gesture := Masc_tui_pane_selection.Idle;
+            None in
+      (* A rejected press may be followed by motion/release after the replacement
+         frame. Without an accepted press there is no gesture to complete;
+         that tail must not acknowledge the displayed rejection either. *)
+      let orphan_pointer_tail =
+        not state.image_open && not state.msx_open
+        && (match !pointer_gesture with
+            | Masc_tui_pane_selection.Idle ->
+                (match input with
+                 | Some (Mouse_left_drag _ | Mouse_left_release _) -> true
+                 | Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
+                     | Mouse_wheel _) | None -> false)
+            | Pressed _ | Selecting _ | Drag_without_pane -> false) in
+      let input = if orphan_pointer_tail then None else input in
+      if orphan_pointer_tail then
+        Render_schedule.request render_schedule Render_schedule.Background;
       (* A rejected gesture has no target, but it still interrupts any armed
          confirmation. Never send its key or payload to another surface. *)
       let decision_rejected = function
         | Presented.Accept_input -> false
         | Presented.Reject_action | Presented.Reject_paste -> true in
       let rejected_operator_input = rejected || decision_rejected unpresented_decision
-        || decision_rejected panel_decision in
+        || decision_rejected panel_decision || decision_rejected queue_viewport_decision
+        || orphan_pointer_tail in
       let panel_owns_input = Option.is_some current_panel
         && panel_owner_matches current_panel
         && not state.image_open && not state.msx_open in
@@ -26439,6 +26479,16 @@ and is loaded on demand through keeper_skill.
        | Presented.Reject_paste ->
            report_input_rejection state Masc_tui_action_notice.Paste_rejected
              "Paste was not applied on this screen; retry in a text field";
+           Render_schedule.request render_schedule Render_schedule.Background);
+      (match queue_viewport_decision with
+       | Presented.Accept_input -> ()
+       | Presented.Reject_action ->
+           report_input_rejection state Masc_tui_action_notice.Input_rejected
+             "Queue changed: input was not applied; review the new frame and retry";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Presented.Reject_paste ->
+           report_input_rejection state Masc_tui_action_notice.Paste_rejected
+             "Queue changed: paste was not applied; retry in a text field";
            Render_schedule.request render_schedule Render_schedule.Background);
       reconcile_chat_focus ();
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
@@ -26994,7 +27044,9 @@ and is loaded on demand through keeper_skill.
       let rows, _ = get_terminal_size () in
       let beneath = Masc_tui_render.queue_below_play state ~terminal_rows:rows in
       let queue_play_owner = queue_play_input_owner ~play_presented:presented_play
-          ~play_shown ~compact:compact_viewport ~state ~beneath ~presented_queue in
+          ~play_shown ~compact:compact_viewport ~state ~beneath
+          ~viewport:(Option.map (Masc_tui_render_overlays.queue_panel_viewport state) beneath)
+          ~presented_queue in
       let presented_queue_input = match queue_play_owner with
         | Queue_input panel -> Some panel
         | Play_input | Wait_for_frame | Other_input -> None in

@@ -4302,6 +4302,28 @@ let keeper_message_find_scroll ?preview_lookup state ~keeper_name ~needle ~(olde
   complete_keeper_message_search work (run_keeper_message_search work)
 
 
+let queue_context_lines (state : state) ~keeper_name ~cols ~height =
+  let chat_cols = Masc_tui_frame.outer_width ~inner:cols in
+  let projection = keeper_message_projection state ~keeper_name ~chat_cols in
+  let theme = Chat_theme.snapshot () in
+  let preview = preview_snapshot Masc_tui_link_preview.get_preview in
+  let markdown = cached_chat_markdown_with_preview ~preview
+      ~link_previews_mode:state.link_previews_mode ~theme in
+  let source_body = source_body_lookup state ~keeper_name projection ~inner_width:cols ~theme ~preview in
+  let requested = requested_scroll_from_pin state ~keeper_name projection
+      ~markdown ~source_body ~inner_width:cols in
+  let window = Message_layout.clamped_scrolled_rows ~markdown
+      ~origin:state.msg_origin_display ~inner_width:cols ~height
+      ~requested projection.layout_entries in
+  let buf = Buffer.create 1024 in
+  List.iter (render_chat_row ~theme ~origin:state.msg_origin_display buf chat_cols) window.rows;
+  (* The preview has no interactive chat controls, including any marks a
+     shared row renderer may acquire later. Queue remains the input owner. *)
+  let rows, _ = Masc_tui_hit.extract Masc_tui_press.press_marks (frame_lines buf) in
+  List.map (fun row -> row
+      |> fun text -> Message_layout.drop_cells text Masc_tui_frame.content_column
+      |> fun text -> Message_layout.take_cells text cols) rows
+
 let render_keeper_message (state : state) =
   (* The chat draws its own composer and footer instead of taking the shared
      composer row. Its columns are every surface's: the terminal less the

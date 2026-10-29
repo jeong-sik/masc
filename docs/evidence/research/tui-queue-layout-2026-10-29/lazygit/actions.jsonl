@@ -1,0 +1,7 @@
+{"at": "2026-10-28T17:40:17.240558+00:00", "action": "j selects previous synthetic commit; Patch updates", "session": "lazygit-study"}
+{"at": "2026-10-28T17:40:17.561509+00:00", "action": "Enter drills into files of selected commit", "session": "lazygit-study"}
+{"at": "2026-10-28T17:40:17.890939+00:00", "action": "Esc returns to commits", "session": "lazygit-study"}
+{"at": "2026-10-28T17:40:18.221170+00:00", "action": "? opens local keybinding help", "session": "lazygit-study"}
+{"at": "2026-10-28T17:40:18.533429+00:00", "action": "Esc returns from Help", "session": "lazygit-study"}
+{"at": "2026-10-28T17:40:18.859297+00:00", "action": "Tab changes focused pane", "session": "lazygit-study"}
+{"at": "2026-10-28T17:40:51.922981+00:00", "action": "4 returns to Commits; resize120x36 then160x40; same selected commit17", "session": "lazygit-study"}

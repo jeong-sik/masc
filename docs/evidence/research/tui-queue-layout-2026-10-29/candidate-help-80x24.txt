@@ -1,0 +1,24 @@
+ 대시보드  작업  ▸키퍼  사용량  보드  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  hints on                                                   │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  MASC · Multi-Agent Shared Context                                           │
+│                                                                              │
+│Candle details                                                                │
+│Candle unavailable: live keeper status unavailable: fixture unavailable       │
+│                                                                              │
+│◆ Queue                                                                       │
+│  ↑/↓ / j/k        select                                                     │
+│  Enter            read                                                       │
+│  n                immediate priority                                         │
+│  l                low priority                                               │
+│  f                expand/context                                             │
+│  PgUp/PgDn        page                                                       │
+│  Home/End         edges                                                      │
+│  r                refresh                                                    │
+│  Esc              back                                                       │
+│  ?                help                                                       │
+│  [lines 1-16/919]                                                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+  TUI 38b6edd ≠ server fixture (generations differ)  j/k:scroll  Esc:close  …?
+ › to fixture   (i to write)

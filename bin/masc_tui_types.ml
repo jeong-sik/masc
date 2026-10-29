@@ -8623,6 +8623,7 @@ type queue_panel_reading = Queue_loading | Queue_current | Queue_unavailable
 
 type queue_panel = {
   qp_keeper : string;
+  qp_layout : Masc_tui_queue_layout.preference;
   qp_reading : queue_panel_reading;
   qp_observation : Masc_tui_queue_inspection.observation option;
   qp_notice : queue_panel_notice option;
@@ -8634,11 +8635,19 @@ type queue_panel = {
   qp_refresh_after_priority : bool;
 }
 
+type queue_panel_viewport = {
+  qv_placement : Masc_tui_queue_layout.placement;
+  qv_content_rows : int;
+  qv_document_rows : int;
+}
+
 type queue_panel_owner = {
   qo_workspace : workspace_authority;
   qo_read_authority : unit ref;
   qo_keeper : string;
   qo_detail : Masc_tui_queue_inspection.item_id option;
+  qo_layout : Masc_tui_queue_layout.preference;
+  qo_viewport : queue_panel_viewport;
 }
 
 type state = {
@@ -10536,15 +10545,18 @@ let queue_panel_items (state : state) (panel : queue_panel) =
     | None, _ -> item in
   local_header :: local_items @ List.map with_schedule_name observed
 
-let queue_panel_owner state panel =
+let queue_panel_owner state panel ~viewport =
   {qo_workspace=state.workspace_authority; qo_read_authority=state.workspace_read_authority;
-   qo_keeper=panel.qp_keeper; qo_detail=panel.qp_detail}
+   qo_keeper=panel.qp_keeper; qo_detail=panel.qp_detail; qo_layout=panel.qp_layout;
+   qo_viewport=viewport}
 
 let same_queue_panel_owner left right =
   left.qo_workspace = right.qo_workspace
   && left.qo_read_authority == right.qo_read_authority
   && String.equal left.qo_keeper right.qo_keeper
   && left.qo_detail = right.qo_detail
+  && left.qo_layout = right.qo_layout
+  && left.qo_viewport = right.qo_viewport
 
 type queue_panel_detail_reading =
   | Queue_detail_none
@@ -10596,6 +10608,29 @@ let queue_panel_selected_id ~items panel =
   match queue_panel_selected_index ~items panel with
   | Some _ -> panel.qp_selected
   | None -> None
+
+let queue_local_reordering_held state ~keeper_name =
+  List.exists (fun (name, _, intervention) ->
+      String.equal name keeper_name && match intervention with
+      | Retained_before_dispatch -> true
+      | Retained_after_stop | Awaiting_control _ -> false) state.keeper_interactive_waiting
+
+type queue_panel_priority =
+  | Queue_no_priority | Queue_local_order | Queue_server_order | Queue_event_urgency
+
+let queue_panel_priority state ~items panel =
+  match queue_panel_selected_id ~items panel with
+  | Some (Masc_tui_queue_inspection.Local_message id) ->
+      (match List.find_opt (fun (item : Masc_tui_keeper_chat_queue.item) ->
+          String.equal item.request.request_id id)
+          (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name:panel.qp_keeper) with
+       | Some {intent=Next; _} ->
+           if queue_local_reordering_held state ~keeper_name:panel.qp_keeper then Queue_no_priority
+           else Queue_local_order
+       | Some {intent=Steer_after_interrupt; _} | None -> Queue_no_priority)
+  | Some (Server_message _) -> Queue_server_order
+  | Some (Event _) -> Queue_event_urgency
+  | Some (Running_message _ | Schedule _) | None -> Queue_no_priority
 
 let reconcile_queue_panel_selection ~items panel =
   {panel with qp_selected=queue_panel_selected_id ~items panel}

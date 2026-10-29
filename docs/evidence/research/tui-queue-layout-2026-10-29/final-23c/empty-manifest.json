@@ -1,0 +1,11 @@
+{
+  "fixture_manifest": "/Users/dancer/me/workspace/yousleepwhen/masc-tui-queue-layout-20261029/artifacts/queue-layout-observation-20261029/pending-0/manifest.json",
+  "fixture_pid": 53086,
+  "port": 54122,
+  "workspace": "/Users/dancer/me/workspace/yousleepwhen/masc-tui-queue-layout-20261029/artifacts/queue-layout-observation-20261029/pending-0/workspace",
+  "home": "/Users/dancer/me/workspace/yousleepwhen/masc-tui-queue-layout-20261029/artifacts/queue-layout-observation-20261029/final-23c/empty-home",
+  "fixture_sha256": "bfdeb4867a4d3a84649ba31411f3af938d6da618f07fbe83884917ef08adc431",
+  "session": "final-empty",
+  "source": "23c5ea834f89a0988c02ffe3e492980152869179",
+  "condition": "zero actual inventory items; synthetic generation mismatch on both compared executables"
+}

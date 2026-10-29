@@ -342,6 +342,7 @@ val help_sections_for_state :
 
 val footer_hints_patch_review : unit -> string
 val footer_hints_about : unit -> string
+val footer_hints_queue : Masc_tui_types.state -> Masc_tui_types.queue_panel -> string
 val footer_hints_context : cols:int -> Masc_tui_types.state -> string
 val footer_hints_runtime_detail : ?ko:bool -> ?routes:bool -> unit -> string
 

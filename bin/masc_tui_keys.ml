@@ -1175,12 +1175,8 @@ let for_surface = function
 
 let group_rank = function Navigate -> 0 | Act -> 1 | Search -> 2 | Meta -> 3
 
-(* Sort by group, then flatten to the footer's "key:label  key:label" form.
-   Both the static per-surface footer and the Fusion detail footer (which
-   appends a live scroll position) render through this one projection. *)
-let hints_of_bindings ?(lang = Lang_en) bindings =
+let hints_in_order ?(lang = Lang_en) bindings =
   bindings
-  |> List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group))
   |> List.map (fun { key; label; label_ko; _ } ->
       let label = match lang with
         | Lang_ko -> Option.value label_ko ~default:label
@@ -1188,6 +1184,14 @@ let hints_of_bindings ?(lang = Lang_en) bindings =
       in
       key ^ ":" ^ label)
   |> String.concat "  "
+
+(* Sort by group, then flatten to the footer's "key:label  key:label" form.
+   Both the static per-surface footer and the Fusion detail footer (which
+   appends a live scroll position) render through this one projection. *)
+let hints_of_bindings ?(lang = Lang_en) bindings =
+  bindings
+  |> List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group))
+  |> hints_in_order ~lang
 
 (* [detail_open] is how a surface that owns a detail says which of its two
    states is on screen. A surface without a detail leaves it out, and then
@@ -2414,10 +2418,37 @@ let context_bindings ~cols (state : state) =
 let footer_hints_about () = hints_of_bindings about_bindings
 let footer_hints_context ~cols state = hints_of_bindings (context_bindings ~cols state)
 
+let queue_bindings state panel =
+  let close = [b Meta "Esc" "back"; b Meta "?" "help"] in
+  if Option.is_some panel.qp_detail then
+    [b Navigate "j/k" "scroll"; b Navigate "PgUp/PgDn" "page";
+     b Navigate "Home/End" "edges"; b Meta "Enter / Esc" "list"; b Meta "?" "help"]
+  else
+    let actions =
+      if panel.qp_reading <> Queue_current || not (server_authority_ready state) then []
+      else match queue_panel_priority state ~items:(queue_panel_items state panel) panel with
+        | Queue_local_order -> [b Act "n" "first locally"; b Act "l" "last locally"]
+        | Queue_server_order -> [b Act "n" "run next"; b Act "l" "move last"]
+        | Queue_event_urgency -> [b Act "n" "immediate priority"; b Act "l" "low priority"]
+        | Queue_no_priority -> [] in
+    actions @ [b Navigate "↑/↓ / j/k" "select"; b Navigate "Enter" "read"]
+    @ [b Navigate "f" (match panel.qp_layout with
+         | Masc_tui_queue_layout.Adaptive -> "prefer full"
+         | Expanded -> "allow context");
+       b Navigate "PgUp/PgDn" "page"; b Navigate "Home/End" "edges";
+       b Act "r" "refresh"] @ close
+
+(* The selected action has higher priority than generic movement. The shared
+   default group sort would put every navigation key ahead of it and cause
+   next/last to disappear first as the footer gives up its tail. *)
+let footer_hints_queue state panel = hints_in_order (queue_bindings state panel)
+
 let help_sections_for_state ~cols (state : state) =
   let active =
     if state.about_open then Some ("About", about_bindings)
     else if state.context_inspector_open then Some ("Context", context_bindings ~cols state)
+    else if Option.is_some state.queue_panel then
+      Option.map (fun panel -> "Queue", queue_bindings state panel) state.queue_panel
     else if state.patch_modal_open then Some ("Patch review", patch_review_bindings)
     else if state.view = Lanes && Option.is_some state.exact_activity_open then
       Some ("Exact activity", exact_activity_bindings)

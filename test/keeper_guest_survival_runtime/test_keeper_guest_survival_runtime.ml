@@ -590,6 +590,16 @@ let test_identity_refresh_preserves_guest_if_helper_appears () = with_fixture @@
   check int "refresh did not delete a guest or helper" 0 (count "delete" root);
   check int "refresh did not start a replacement" 1 (count "run" root)
 
+let test_boot_refused_for_unusable_identity_reports_the_identity () = with_fixture @@ fun root ->
+  let central, _ = configure_identity root "first-fixture-token" in
+  write (Filename.concat central "hosts.yml") "malformed: [central identity is unavailable";
+  let status, stderr = step_captured root "prepare-identity" in
+  check bool "a boot with an unusable identity is refused" true (status = Unix.WEXITED 2);
+  check bool "the identity reports it, not the guest boundary" true
+    (Astring.String.is_infix ~affix:"identity_unavailable: " stderr
+     && not (Astring.String.is_infix ~affix:"sandbox_unavailable: " stderr));
+  check int "no guest was started for it" 0 (count "run" root)
+
 let test_endpoint_uses_effective_network_override () = with_fixture @@ fun root ->
   check bool "runtime override reaches matching mounted snapshot" true (step root "override" = Unix.WEXITED 0);
   check bool "second process adopts override guest" true (step root "override" = Unix.WEXITED 0);
@@ -673,6 +683,7 @@ let () =
         test_case "attached reader never rereads central identity" `Quick test_attached_reader_does_not_reread_central_identity;
         test_case "identity refresh follows actual guest absence" `Quick test_identity_refresh_replaces_after_actual_absence;
         test_case "identity refresh preserves guest if helper appears" `Quick test_identity_refresh_preserves_guest_if_helper_appears;
+        test_case "boot refused for an unusable identity names the identity" `Quick test_boot_refused_for_unusable_identity_reports_the_identity;
         test_case "fresh process adopts without boot effects" `Quick test_fresh_process_adopts_without_boot_effects;
         test_case "helper uncertainty preserves guest on adopt and replace" `Quick test_helper_uncertainty_preserves_guest_on_adopt_and_replace;
         test_case "wrapped image adopts without relabelling or boot effects" `Quick test_wrapped_image_adopts_without_relabelling_or_boot_effects;

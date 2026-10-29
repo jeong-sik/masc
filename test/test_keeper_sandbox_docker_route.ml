@@ -1143,6 +1143,86 @@ let test_execute_identity_failure_after_start_reports_identity_code () =
     (parse_string_field raw "failure_stage")
 ;;
 
+(* Both container starts read the Keeper's GitHub identity: creation mounts it
+   and adoption refreshes the derived git config. A start that refuses the
+   identity says so; it is not a sandbox failure. *)
+let test_execute_identity_refused_at_container_creation_reports_identity_code () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let github_config_dir =
+    match
+      Keeper_github_identity.ensure_config_dir ~config ~keeper_name:meta.name
+    with
+    | Ok path -> path
+    | Error message -> Alcotest.fail message
+  in
+  (* The credential file is a directory before any container exists. *)
+  Unix.mkdir (Filename.concat github_config_dir "hosts.yml") 0o700;
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_tool_execute_runtime.handle_tool_execute
+      ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
+      ()
+  in
+  Alcotest.(check (option string)) "creation that refuses the identity keeps the identity code"
+    (Some "github_identity_snapshot_unavailable")
+    (parse_string_field raw "code");
+  Alcotest.(check bool) "identity detail is preserved" true
+    (response_mentions raw "error" "must be a regular file");
+  Alcotest.(check (option string)) "it is not a guest failure" None
+    (parse_string_field raw "failure_stage")
+;;
+
+let test_execute_identity_refused_at_container_adoption_reports_identity_code () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let github_config_dir =
+    match
+      Keeper_github_identity.ensure_config_dir ~config ~keeper_name:meta.name
+    with
+    | Ok path -> path
+    | Error message -> Alcotest.fail message
+  in
+  let hosts_path = Filename.concat github_config_dir "hosts.yml" in
+  write_file hosts_path "github.com:\n  user: keeper-user\n  oauth_token: stable-token\n";
+  Unix.chmod hosts_path 0o600;
+  let execute factory =
+    Keeper_tool_execute_runtime.handle_tool_execute
+      ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
+      ()
+  in
+  (with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+   Alcotest.(check (option bool)) "the first runtime creates the container" (Some true)
+     (parse_bool_field (execute factory) "ok"));
+  (* A new runtime finds that container running and adopts it. By then the
+     credential file is a directory. *)
+  Sys.remove hosts_path;
+  Unix.mkdir hosts_path 0o700;
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw = execute factory in
+  Alcotest.(check (option string)) "adoption that refuses the identity keeps the identity code"
+    (Some "github_identity_snapshot_unavailable")
+    (parse_string_field raw "code");
+  Alcotest.(check bool) "identity detail is preserved" true
+    (response_mentions raw "error" "must be a regular file");
+  Alcotest.(check (option string)) "it is not a guest failure" None
+    (parse_string_field raw "failure_stage")
+;;
+
 let test_docker_run_does_not_retry_generic_timeout () =
   with_fake_docker fake_docker_timeout_then_ok_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -3031,6 +3111,12 @@ let () =
           Alcotest.test_case
             "Execute identity failure after start keeps the identity code"
             `Quick test_execute_identity_failure_after_start_reports_identity_code;
+          Alcotest.test_case
+            "Execute identity refused at container creation keeps the identity code"
+            `Quick test_execute_identity_refused_at_container_creation_reports_identity_code;
+          Alcotest.test_case
+            "Execute identity refused at container adoption keeps the identity code"
+            `Quick test_execute_identity_refused_at_container_adoption_reports_identity_code;
           Alcotest.test_case
             "docker run does not retry generic timeout"
             `Quick

@@ -169,8 +169,9 @@ Auto Judge에서는 `file`, `uniq`, `git ls-remote`, `git cat-file`,
 
 프로필은 실행 방식과 격리 방식을 고르는 설정입니다. 고른다고 해서 게스트가
 정상으로 떠 있다는 뜻은 아닙니다. 아래 숫자는 지금 구현된 기본값이고, 권장하는
-Keeper 수가 아닙니다. Keeper 전체 수나 호스트 메모리 총량을 제한하는 기능은
-아직 없습니다.
+Keeper 수가 아닙니다. 기본값은 `lib/config/env_config_sandbox.ml`과
+`lib/runtime/exec_ssh_endpoint.ml`에 있고, 이 표와 코드가 다르면 코드가
+맞습니다. Keeper 전체 수나 호스트 메모리 총량을 제한하는 기능은 아직 없습니다.
 [호스트 메모리 예산 RFC](rfc/RFC-keeper-guests-stay-inside-a-host-memory-budget.md)와
 그 안의 hibernation 설계도 아직 초안입니다.
 
@@ -331,8 +332,8 @@ Keeper와 더 확실히 떼어 놓아야 하면 endpoint와 Unix 계정을 따�
 
 | 신호 | 뜻 | 먼저 할 일 |
 |---|---|---|
-| `sandbox_guest_unavailable` (`microvm_work_volume_probe_unverified`가 들어 있는 경우 포함) | 게스트를 띄우거나, 떠 있는 게스트를 이어받거나, 교체하는 단계가 실패했습니다. 명령을 게스트로 보내는 연결(transport)이 실패한 경우도 같습니다. GitHub가 토큰을 거부했다는 증거는 아직 없습니다. 게스트가 뜨는 도중 GitHub 로그인 정보 검사에서 걸린 경우도 이 코드이고, 메시지에 `github_identity_invalid`가 들어 있습니다. | 게스트와 transport부터 확인하세요. 메시지에 `github_identity_invalid`가 있으면 그 Keeper의 GitHub 로그인 정보를 먼저 보세요. 다시 로그인하거나 `gh auth status`를 반복하면, 이미 문제가 있는 게스트에 요청만 더 쌓입니다. |
-| `github_identity_snapshot_unavailable` | 게스트와 상관없이, GitHub 로그인 정보를 갱신하거나 스냅샷을 만들거나 revision을 검사하는 단계가 실패했습니다. | 게스트와 transport가 정상인 것을 확인한 뒤, `masc keeper-github status`나 GitHub 탭에서 이 Keeper의 GitHub 계정을 확인하세요. |
+| `sandbox_guest_unavailable` (`microvm_work_volume_probe_unverified`가 들어 있는 경우 포함) | 게스트를 띄우거나, 떠 있는 게스트를 이어받거나, 교체하는 단계가 실패했습니다. 명령을 게스트로 보내는 연결(transport)이 실패한 경우도 같습니다. GitHub가 토큰을 거부했다는 증거는 아직 없습니다. | 게스트와 transport부터 확인하세요. 다시 로그인하거나 `gh auth status`를 반복하면, 이미 문제가 있는 게스트에 요청만 더 쌓입니다. |
+| `github_identity_snapshot_unavailable` | 이 Keeper의 GitHub 로그인 정보에서 문제가 생겼습니다. 로그인 정보를 갱신하거나, 스냅샷을 만들거나, revision을 검사하는 단계가 실패한 경우입니다. 게스트나 컨테이너를 띄우다가 로그인 정보가 올바르지 않아 멈춘 경우도 같습니다. | `masc keeper-github status`나 GitHub 탭에서 이 Keeper의 GitHub 계정을 확인하세요. |
 | `remote_github_unreachable` | 이 Keeper의 인증이 실패했고 GitHub API도 응답하지 않아서, 토큰이 유효한지 알 수 없습니다. | endpoint의 네트워크와 DNS부터 고친 뒤 인증을 다시 확인하세요. |
 | `remote_github_identity_missing` | API는 응답했지만 이 Keeper 전용 인증이 실패했습니다. | 이 Keeper의 GitHub 계정을 다시 설정하세요. 도구를 부를 때마다 토큰을 붙여 넣지 마세요. |
 

@@ -42,7 +42,10 @@ val github_identity_secret_files : t -> string list
 
 type github_identity_preparation_error =
   | Sandbox_unavailable of string
+      (** The guest or container could not be started, adopted or replaced. *)
   | Identity_unavailable of string
+      (** The Keeper's GitHub identity is what failed: a token refresh, the
+          snapshot or revision check, or a start that refused the identity. *)
 
 val github_identity_preparation_error_message :
   github_identity_preparation_error -> string
@@ -52,9 +55,10 @@ val prepare_github_identity_secret_files :
 (** After authorization, observe and bind the container to the current GitHub
     identity, then return every credential file whose token must remain
     redacted. [Sandbox_unavailable] comes from the guest start, adoption or
-    replacement boundary; [Identity_unavailable] comes from a direct identity
-    refresh, snapshot or revision check outside that boundary. Callers must
-    branch on the constructor, not on the detail text.
+    replacement boundary; [Identity_unavailable] comes from the identity
+    itself, whether a direct refresh, snapshot or revision check, or a start
+    that refused the identity. Callers must branch on the constructor, not on
+    the detail text.
 
     Docker: the bind is [ensure_started] itself and the redaction target is the
     stable [hosts.yml] the running container has mounted; a central login

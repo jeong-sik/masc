@@ -245,6 +245,39 @@ let test_pure_projection_redacts_explicit_observation () =
     Yojson.Safe.Util.(json |> member "source" |> to_string)
 ;;
 
+(* The shell that started the server does not change what a file-owned setting
+   runs, so the operator surface must not report the shell's value as the
+   server's. *)
+let test_a_file_owned_name_is_answered_from_the_file () =
+  let name = "MASC_SNAPSHOT_FILE_OWNED_PROBE" in
+  Config_boot_overrides.reset_for_tests ();
+  Config_boot_overrides.declare_file_owned [ name ];
+  Config_boot_overrides.set name "from the file";
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name "from the shell";
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv name (Option.value previous ~default:"");
+      Config_boot_overrides.reset_for_tests ())
+    (fun () ->
+      let json =
+        Env_config_snapshot_collector.(to_json (entry ~default:"none" name "probe"))
+      in
+      let open Yojson.Safe.Util in
+      check string "the value is the file's" "from the file"
+        (json |> member "value" |> to_string);
+      check string "the source is the runtime file, not the environment" "runtime"
+        (json |> member "source" |> to_string);
+      check bool "no environment variable is claimed" false
+        (json |> member "provenance" |> member "raw_env_present" |> to_bool);
+      Config_boot_overrides.clear name;
+      let unset =
+        Env_config_snapshot_collector.(to_json (entry ~default:"none" name "probe"))
+      in
+      check string "without a file value the default shows" "default"
+        (unset |> member "source" |> to_string))
+;;
+
 let () =
   run
     "env snapshot reports the applied default"
@@ -270,6 +303,10 @@ let () =
             "pure projection redacts explicit observations"
             `Quick
             test_pure_projection_redacts_explicit_observation
+        ; test_case
+            "a file-owned name is answered from the file"
+            `Quick
+            test_a_file_owned_name_is_answered_from_the_file
         ; test_case
             "declarations reach the operator surface"
             `Quick

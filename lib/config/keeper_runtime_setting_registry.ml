@@ -192,7 +192,6 @@ let all =
       ~exposure:(Toml_only "autonomous.wake_prompt")
       ~value_kind:String
       ~default:Env_config_keeper.KeeperAutonomous.default_wake_prompt
-      ~reload_class:Next_turn
       ~consumers:[ "Keeper_unified_prompt" ]
       ~category:Lifecycle
       "User message an autonomous turn is woken with, before any keeper override"

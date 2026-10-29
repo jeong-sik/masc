@@ -163,8 +163,7 @@ module Runtime = struct
 
   (* What the workspace named, apart from anything the host supplies. Blank is
      unset. A value that is set and is not a usable address is refused, and
-     the refusal names both spellings of the setting: the operator wrote one
-     and the process reads the other. *)
+     the refusal names the setting. *)
   let configured_nameserver raw =
     match String.trim raw with
     | "" -> Ok None
@@ -174,9 +173,8 @@ module Runtime = struct
        | Error refusal ->
          Error
            (Printf.sprintf
-              "%s (%s)=%S %s"
+              "%s=%S %s"
               microvm_dns_toml_key
-              microvm_dns_env
               value
               (nameserver_refusal_to_string refusal)))
   ;;

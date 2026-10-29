@@ -426,9 +426,10 @@ let record_runtime_toml_load_failure (failure : Keeper_runtime_config.load_failu
    resolves them: the server at boot, and a CLI that makes a provider call
    under the keeper's settings (the capability probe), which otherwise reads
    the process env alone and runs its call with none of what the operator
-   declared in the file. Existing process env vars take precedence; TOML only
-   fills unset slots. A file that does not load is a configuration error and
-   stops the process. *)
+   declared in the file. A setting the registry marks [Toml_only] ignores the
+   process env once the file is applied; a [Toml_and_env] setting keeps the env
+   ahead of the file, which only fills its unset slot. A file that does not
+   load is a configuration error and stops the process. *)
 let apply_runtime_toml ~base_path =
   match Keeper_runtime_config.load_and_apply ~base_path with
   | Ok 0 -> ()

@@ -1,21 +1,17 @@
 (* A setting the runtime file alone feeds never reads the process environment.
 
    The probe runs against every such registry row, so a row added later is
-   covered without a line here. Each row is first probed while its name is not
-   declared: a candidate value that changes what the row's reader returns proves
-   the reader consults the environment. The same candidate must then change
-   nothing once the loader has declared the file-owned names. *)
+   covered without a line here. Each row is probed from a shell that exports
+   nothing for its name. A candidate value that changes what the row's reader
+   returns, while the name is not declared, proves the reader consults the
+   environment. Once the loader has declared the names, the same environment
+   value must change nothing, and the boot store must answer exactly as the
+   environment did. *)
 open Alcotest
 
 module R = Keeper_runtime_setting_registry
 
-let with_env name value f =
-  let previous = Sys.getenv_opt name in
-  Unix.putenv name value;
-  Fun.protect
-    ~finally:(fun () -> Unix.putenv name (Option.value previous ~default:""))
-    f
-;;
+let with_env = Masc_test_deps.with_process_env
 
 let read (row : R.setting) =
   match R.effective_value row with
@@ -37,39 +33,57 @@ let file_owned_rows =
   List.filter (fun row -> not (R.reads_process_env row)) R.toml_settings
 ;;
 
+(* These two readers take the boot store directly, never the environment, so
+   no environment value can move them. *)
+let store_only_names =
+  [ "MASC_KEEPER_MICROVM_MEMORY"; "MASC_KEEPER_MICROVM_CPUS" ]
+;;
+
 let declare () =
   Config_boot_overrides.declare_file_owned R.file_owned_env_names
 ;;
 
+(* [Some name] when the probe moved the reader, so the rule was checked. *)
+let probe (row : R.setting) =
+  with_env row.env_name None (fun () ->
+    Config_boot_overrides.reset_for_tests ();
+    let baseline = read row in
+    let moves candidate =
+      with_env row.env_name (Some candidate) (fun () -> read row <> baseline)
+    in
+    match List.find_opt moves (candidates row) with
+    | None -> None
+    | Some candidate ->
+      let through_env = with_env row.env_name (Some candidate) (fun () -> read row) in
+      declare ();
+      with_env row.env_name (Some candidate) (fun () ->
+        check bool (row.env_name ^ " ignores the process environment") true
+          (read row = baseline));
+      Config_boot_overrides.set row.env_name candidate;
+      check bool (row.env_name ^ " reads the boot store as it read the environment")
+        true (read row = through_env);
+      Config_boot_overrides.reset_for_tests ();
+      Some row.env_name)
+;;
+
 let test_the_environment_does_not_reach_a_file_owned_reader () =
-  let informative = ref 0 in
-  List.iter
-    (fun (row : R.setting) ->
-       Config_boot_overrides.reset_for_tests ();
-       let baseline = read row in
-       let probe =
-         List.find_opt
-           (fun candidate ->
-              with_env row.env_name candidate (fun () -> read row <> baseline))
-           (candidates row)
-       in
-       match probe with
-       | None -> ()
-       | Some candidate ->
-         incr informative;
-         declare ();
-         with_env row.env_name candidate (fun () ->
-           check bool (row.env_name ^ " ignores the process environment") true
-             (read row = baseline)))
-    file_owned_rows;
+  let probed = List.map (fun row -> row, probe row) file_owned_rows in
   Config_boot_overrides.reset_for_tests ();
-  check bool "the probe moved at least one reader before the names were declared" true
-    (!informative > 0)
+  List.iter
+    (fun ((row : R.setting), outcome) ->
+       if Option.is_none outcome && not (List.mem row.env_name store_only_names)
+       then
+         failf
+           "no candidate moved the reader of %s, so the rule was not checked for it: add a value of its kind"
+           row.env_name)
+    probed;
+  check bool "the probe moved at least one reader" true
+    (List.exists (fun (_, outcome) -> Option.is_some outcome) probed)
 ;;
 
 let with_empty_base_path f =
   let base_path = Filename.temp_dir "masc-file-owned" "" in
-  with_env "MASC_CONFIG_DIR" "" (fun () ->
+  with_env "MASC_CONFIG_DIR" None (fun () ->
     Fun.protect
       ~finally:(fun () -> try Unix.rmdir base_path with Unix.Unix_error _ -> ())
       (fun () -> f base_path))
@@ -103,7 +117,7 @@ let test_a_declared_name_answers_from_the_file_only () =
   | row :: _ ->
     Config_boot_overrides.reset_for_tests ();
     declare ();
-    with_env row.env_name "from the shell" (fun () ->
+    with_env row.env_name (Some "from the shell") (fun () ->
       check (option string) "the shell's value is not read" None
         (Env_config_core.raw_value_opt row.env_name);
       check bool "the source is not the environment" true
@@ -119,9 +133,10 @@ let test_a_declared_name_answers_from_the_file_only () =
 let test_a_name_that_is_not_declared_still_reads_the_environment () =
   Config_boot_overrides.reset_for_tests ();
   declare ();
-  with_env "MASC_FILE_OWNED_PROBE_UNDECLARED" "from the shell" (fun () ->
+  let name = "MASC_FILE_OWNED_PROBE_UNDECLARED" in
+  with_env name (Some "from the shell") (fun () ->
     check (option string) "the environment answers" (Some "from the shell")
-      (Env_config_core.raw_value_opt "MASC_FILE_OWNED_PROBE_UNDECLARED"));
+      (Env_config_core.raw_value_opt name));
   Config_boot_overrides.reset_for_tests ()
 ;;
 

@@ -101,8 +101,8 @@ module Runtime : sig
 
   val microvm_dns : unit -> (Ipaddr.t, string) result
   (** The nameserver a microvm guest on the default network is booted with:
-      [MASC_KEEPER_MICROVM_DNS], which [runtime.toml] [sandbox.microvm_dns]
-      seeds, else the host's first [/etc/resolv.conf] nameserver, through
+      [runtime.toml] [sandbox.microvm_dns], else the host's first
+      [/etc/resolv.conf] nameserver, through
       {!microvm_dns_from}. runtime.toml is read once at boot, so a change to
       the key takes a server restart. *)
 

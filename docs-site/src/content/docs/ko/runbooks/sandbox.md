@@ -109,7 +109,7 @@ network_mode = "none"        # "none" | "inherit" | "policy"
 않고 이 값을 안 주면 진행을 거부합니다.
 
 microVM 게스트에 사용자 지정 DNS 서버를 넘겨야 한다면 `<base-path>/.masc/config/runtime.toml`
-의 `[sandbox]` 섹션에 `microvm_dns` 를 지정합니다(또는 `MASC_KEEPER_MICROVM_DNS` 환경 변수 사용).
+의 `[sandbox]` 섹션에 `microvm_dns` 를 지정합니다.
 
 ```toml
 [sandbox]

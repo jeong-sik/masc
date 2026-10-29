@@ -60,7 +60,7 @@ Apple Silicon 이면 `container` CLI 를 설치한 뒤 프로필을 지정하세
 [명령어 안전 격리](/ko/runbooks/sandbox/)를 보세요. 다음 항목도 함께 확인하세요:
 
 - **해당 런타임 스토어에 `sandbox_image` 가 promote 되지 않음**: `<base-path>/.masc/config/sandbox-image-builds.toml` 에 Keeper 의 `sandbox_image`(`"base"` 또는 `"ocaml"`)가 현재 런타임 스토어(Docker 와 각 microVM 런타임은 이미지 스토어를 따로 씁니다)에 promote 되어 있어야 합니다. 거부 메시지에 안내된 대로 `masc sandbox-image`(microVM 은 `--runtime <backend>` 포함)와 `masc sandbox-image promote` 를 실행하세요.
-- **잘못된 `microvm_dns` 주소**: `runtime.toml` 의 `[sandbox] microvm_dns`(또는 `MASC_KEEPER_MICROVM_DNS`)에 유효한 IPv4/IPv6 주소가 아닌 문자열이 들어 있으면 microVM 기동이 거부됩니다.
+- **잘못된 `microvm_dns` 주소**: `runtime.toml` 의 `[sandbox] microvm_dns` 에 유효한 IPv4/IPv6 주소가 아닌 문자열이 들어 있으면 microVM 기동이 거부됩니다.
 - **게스트 네트워크 모드**: 웹 검색이나 `git push` 를 하는 Keeper 는 `network_mode = "inherit"` 도 필요합니다. 기본값 `none` 은 게스트에 네트워크를 주지 않습니다.
 
 ## 프로바이더 rate limit

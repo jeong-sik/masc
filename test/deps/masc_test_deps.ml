@@ -40,10 +40,11 @@ let with_server_root_switch ~sw f =
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
 (* Runs [f] with [key] set to [value] ([None]: absent) in the process
-   environment -- the channel an operator declares a keeper setting through,
-   and the one that outranks a boot override -- then puts back what the
-   shell running the suite had exported. A case declares its value over an
-   inherited one instead of skipping under it. *)
+   environment -- the channel a shell declares a setting through. It outranks
+   a boot override for a [Toml_and_env] setting and is not read for a
+   [Toml_only] one. Puts back what the shell running the suite had exported.
+   A case declares its value over an inherited one instead of skipping under
+   it. *)
 let with_process_env key value f =
   let inherited = Sys.getenv_opt key in
   let install = function

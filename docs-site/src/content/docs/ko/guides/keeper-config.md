@@ -43,7 +43,6 @@ Keeper가 Gate 보호 대상 민감 도구를 호출했을 때 오퍼레이터�
   [wiki_contents]
   enabled = true  # 기본값: true. false로 두면 모든 턴에서 위키 목차를 생략합니다.
   ```
-- **환경 변수**: `MASC_KEEPER_WIKI_CONTENTS_ENABLED` (`true` / `false`).
 
 ### 4. MicroVM 샌드박스 게스트 DNS (`[sandbox] microvm_dns`)
 microVM Keeper 게스트(`apple_container`, `microsandbox`, `nerdctl_kata`)에 전달할 사용자 정의 DNS 서버 목록을 설정합니다.
@@ -53,7 +52,6 @@ microVM Keeper 게스트(`apple_container`, `microsandbox`, `nerdctl_kata`)에 �
   [sandbox]
   microvm_dns = ["1.1.1.1", "8.8.8.8"]  # 유효한 IPv4 또는 IPv6 리터럴 목록
   ```
-- **환경 변수**: `MASC_KEEPER_MICROVM_DNS` (쉼표로 구분된 IPv4/IPv6 주소).
 
 ### 5. 날짜별 JSONL 저장소 보존 기간 (`[maintenance] jsonl_retention_days`)
 `.masc/` 아래의 날짜별 JSONL 저장소(`audit`, `telemetry`, `tool_usage`, `tool_calls`, `agent-core-events` 등)에 대해 시작 시 정리 및 24시간 주기 정리가 공유하는 보존 일수를 설정합니다.
@@ -153,7 +151,7 @@ masc start --base-path . --port 8935
 
 - **승인 타임아웃 초기화**: `tool_approval_timeout_sec`를 제거하거나 `MASC_KEEPER_TOOL_APPROVAL_TIMEOUT_SEC`를 해제하면 기본값 180초로 돌아갑니다.
 - **Keeper `yolo` 모드 해제**: TUI에서 해당 Keeper를 선택하고 `g`를 누르면(또는 API로 `auto`를 지정하면) 영속 오버라이드 행이 제거됩니다.
-- **위키 목차 주입 끄기**: `[wiki_contents] enabled = false`(또는 `MASC_KEEPER_WIKI_CONTENTS_ENABLED=false`)로 설정합니다.
+- **위키 목차 주입 끄기**: `[wiki_contents] enabled = false`로 설정합니다.
 - **기억 선별 끄기**: `[typesafeai]`에서 `workspace_memory_selection_enabled = false`로 설정합니다.
 - **메트릭**: 메트릭 게이지는 턴 관측 파이프라인에 내장되어 있어 별도 비활성화가 필요하지 않습니다.
 

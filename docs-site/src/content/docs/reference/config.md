@@ -115,7 +115,7 @@ enabled = true
 jsonl_retention_days = 30
 
 [sandbox]
-# Optional guest DNS servers for microVM Keepers (overridden by MASC_KEEPER_MICROVM_DNS).
+# Optional guest DNS servers for microVM Keepers.
 microvm_dns = ["1.1.1.1", "8.8.8.8"]
 
 [tui]

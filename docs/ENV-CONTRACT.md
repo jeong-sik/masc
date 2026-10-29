@@ -56,7 +56,7 @@ should be treated as restart-required.
 | Runtime root and config root | `MASC_BASE_PATH`, `MASC_CONFIG_DIR`, `HOME` | `Config_dir_resolver` caches the resolved root for the life of the process (`<base-path>/.masc/` owns all runtime state) |
 | Server bind and socket topology | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_GRPC_PORT`, `MASC_GRPC_ENABLED`, `MASC_WS_ENABLED` | listeners and advertised base URLs are fixed during server startup |
 | Backend/bootstrap wiring | `MASC_STARTUP_WATCHDOG_SEC`, `MASC_JSONL_RETENTION_DAYS` | boot-time watchdog setup and unified dated JSONL retention (default `30` days; `[maintenance] jsonl_retention_days` in `runtime.toml`) |
-| Sandbox DNS | `MASC_KEEPER_MICROVM_DNS` | guest DNS servers for microVM Keepers (`[sandbox] microvm_dns` in `runtime.toml`, the only input; comma-separated IPv4/IPv6 addresses) |
+| Sandbox DNS | `[sandbox] microvm_dns` | guest DNS servers for microVM Keepers (`runtime.toml` only; IPv4/IPv6 addresses) |
 | Startup-only TOML seeding | every `MASC_KEEPER_*` value sourced from `runtime.toml` | TOML is loaded into the process-local boot override store. A registry row marked `Toml_only` reads only that store and never the process environment. `MASC_KEEPER_AUTONOMOUS_ENABLED`, `MASC_OTEL_ENABLED`, `MASC_SEARXNG_URL` and `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` are `Toml_and_env`: an explicit process env value takes precedence |
 
 Representative code paths:
@@ -69,8 +69,10 @@ Representative code paths:
 
 ### 2. Env-backed defaults that become runtime-dynamic through `Runtime_params`
 
-These env values still enter the system as boot inputs, but the effective
-runtime parameter authority is `Runtime_params`, not the parent shell env.
+These settings enter the system as boot inputs: a `runtime.toml` key, plus the
+process env for the few settings the registry marks `Toml_and_env`. The
+effective runtime parameter authority is `Runtime_params`, not the parent shell
+env.
 
 | Effective contract | Examples | Operator path |
 | --- | --- | --- |
@@ -108,8 +110,7 @@ Examples:
 
 The `[metrics]` keys `max_bytes` and `max_rotated` configure the auxiliary
 JSONL writer used for decision logs, response feedback and runtime manifests.
-The boot override store keys are `MASC_KEEPER_METRICS_MAX_BYTES` and
-`MASC_KEEPER_METRICS_MAX_ROTATED`; the process environment is not read for them. The typed
+The typed
 [`runtime setting registry`](../lib/config/keeper_runtime_setting_registry.ml)
 owns their defaults, bounds and operator-facing descriptions.
 
@@ -124,7 +125,7 @@ These two settings do not limit that store's size or retention.
 
 #### Date-sharded Keeper metrics
 
-`metrics.store_max_bytes` (`MASC_KEEPER_METRICS_STORE_MAX_BYTES`) sets a
+`metrics.store_max_bytes` sets a
 separate per-Keeper byte target for date-sharded turn and heartbeat metrics.
 The default `0` preserves every record. A positive value is captured when
 the store opens, so changing this setting requires restart.
@@ -164,10 +165,9 @@ restart and the next `Execute` call picks it up.
 The WebSearch backend reads these values while handling each search request.
 They are authored in `<resolved-config-root>/runtime.toml` under `[web_search]`.
 Runtime TOML values are loaded into the process-local boot override store at
-startup, so `runtime.toml` edits require a process restart. The process
-environment is not read for them, except `MASC_SEARXNG_URL`, which a process env
-var overrides. The variable names in the table below are the keys the boot load
-stores the values under. API keys are env-only.
+startup, so `runtime.toml` edits require a process restart. Only
+`MASC_SEARXNG_URL` can also come from a process env var, which wins over
+`runtime.toml`. API keys are env-only.
 
 `masc web-search-setup` prints which provider has its credential and what to
 export for the rest, and writes the `[web_search]` keys below. It never writes an
@@ -178,21 +178,21 @@ Precedence:
 1. `[web_search]` value from `runtime.toml` (for `MASC_SEARXNG_URL`, a process env var comes first)
 2. Built-in default
 
-| Variable | Default | Effect |
+| Key or variable | Default | Effect |
 | --- | --- | --- |
 | `MASC_SEARXNG_URL` | `http://127.0.0.1:8888` | Enables the self-hosted SearXNG provider and gives it first priority when present. Use `scripts/searxng-local.sh start` from a checkout, or `masc prerequisite-actions searxng` from an installed binary, to run a Docker-backed local instance with JSON output enabled. The second prints the one action that fits the container: `searxng_docker_run` when there is none, `searxng_docker_start_existing` when one is stopped (`--execute <id>`); a running, paused, restarting or unusable container has none, and `dependency_readiness` says which it is. `searxng_docker_run` writes `<base-path>/.masc/searxng/settings.yml` unless a file is there, bind-mounts `<base-path>/.masc/searxng:/etc/searxng`, pulls an image fixed by tag and digest, and starts the container `masc-searxng` with `--restart unless-stopped`, published on `127.0.0.1:8888` only. `searxng_docker_start_existing` starts that name as Docker created it and writes nothing, so a container the script made keeps the address and directory the script gave it. Neither sets this variable or `web_search.searxng_url`. The default is `http://127.0.0.1:8888`, not `localhost`: a program listening on `[::1]:8888` answers `localhost` and the container does not. An instance that only listens on `[::1]` needs an explicit URL. |
-| `MASC_WEB_SEARCH_PROVIDER` | `auto` | Pins one provider instead of auto order selection. |
-| `MASC_WEB_SEARCH_PROVIDER_ORDER` | built-in order | Overrides provider order for auto mode. |
-| `MASC_WEB_SEARCH_FALLBACKS` | built-in fallback order | Overrides fallback providers after the primary provider fails. |
-| `MASC_WEB_SEARCH_TIMEOUT_SEC` | `15` | Per-provider request timeout. |
-| `MASC_WEB_SEARCH_CACHE_TTL_SEC` | `900.0` | In-process WebSearch cache TTL. |
+| `[web_search] provider` | `auto` | Pins one provider instead of auto order selection. |
+| `[web_search] provider_order` | built-in order | Sets the provider order for auto mode. |
+| `[web_search] fallbacks` | built-in fallback order | Sets the fallback providers after the primary provider fails. |
+| `[web_search] timeout_sec` | `15` | Per-provider request timeout. |
+| `[web_search] cache_ttl_sec` | `900.0` | In-process WebSearch cache TTL. |
 | `BRAVE_SEARCH_API_KEY` | `(none)` | Env-only credential; presence admits the `brave` and `brave_llm_context` providers. |
 | `TAVILY_API_KEY` | `(none)` | Env-only credential; presence admits the `tavily` provider. |
 | `EXA_API_KEY` | `(none)` | Env-only credential; presence admits the `exa` provider. |
 | `BING_SEARCH_API_KEY` | `(none)` | Env-only credential; presence admits the `bing_api` provider. |
 | `AZURE_BING_SEARCH_API_KEY` | `(none)` | Azure-issued alias with the same admission as `BING_SEARCH_API_KEY`. |
 | `OLLAMA_API_KEY` | `(none)` | Env-only credential; presence admits the `ollama` provider. |
-| `ZAI_API_KEY` | `(none)` | Env-only credential; the `zai` provider (z.ai Web Search MCP, GLM Coding Plan) reads it when named in `provider`, `provider_order` or `fallbacks`. It is not in the default order. A `zai` search is three requests, each under `MASC_WEB_SEARCH_TIMEOUT_SEC`. The `glm-coding` model provider reads the same variable. |
+| `ZAI_API_KEY` | `(none)` | Env-only credential; the `zai` provider (z.ai Web Search MCP, GLM Coding Plan) reads it when named in `provider`, `provider_order` or `fallbacks`. It is not in the default order. A `zai` search is three requests, each under `timeout_sec`. The `glm-coding` model provider reads the same variable. |
 
 Web artifact corpus (RFC-0383): every truncation offload stores the full
 extraction as a content-addressed blob in the `Tool_blob_store`

@@ -27,6 +27,12 @@ let rec remove path =
    short enough that the case ends well inside the fixture budget. *)
 let idle_bound_s = 0.5
 
+(* The same setting in this process's environment, with another value. The
+   idle bound is file-owned, so the server does not read it: were it read,
+   the resolved layer would serve it and the first check would name the
+   difference. *)
+let different_env_idle_bound = Printf.sprintf "%g" (idle_bound_s +. 1.0)
+
 (* One OpenAI-compatible answer delta. Once it is read the stream is past
    its first output, so the deadline that ends the wait afterwards is the
    inter-line idle bound, not the first-event one. *)
@@ -50,11 +56,10 @@ let stream_idle_timeout_after_the_first_delta = function
 ;;
 
 let test_idle_bound_reaches_a_turn_that_named_none () =
-  match Sys.getenv_opt Env_config_keeper.KeeperKeepalive.stream_idle_timeout_env_key with
-  | Some _ ->
-    (* An ambient operator value would replace the bound this case installs. *)
-    skip ()
-  | None ->
+  Masc_test_deps.with_process_env
+    Env_config_keeper.KeeperKeepalive.stream_idle_timeout_env_key
+    (Some different_env_idle_bound)
+    (fun () ->
     Eio_main.run
     @@ fun env ->
     Eio.Switch.run
@@ -157,7 +162,7 @@ stream_idle_timeout_sec = %g
          "the turn ended by the installed bound, not the fixture budget (%.2fs)"
          elapsed_s)
       true
-      (elapsed_s >= idle_bound_s && elapsed_s < Exact_output_fixture.fixture_wait_seconds)
+      (elapsed_s >= idle_bound_s && elapsed_s < Exact_output_fixture.fixture_wait_seconds))
 ;;
 
 let () =

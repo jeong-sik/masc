@@ -64,7 +64,7 @@ on Apple Silicon the `container` CLI, then set the profile — see
 [Keeper Sandbox](/runbooks/sandbox/). Also check:
 
 - **`sandbox_image` not promoted for the target store**: `<base-path>/.masc/config/sandbox-image-builds.toml` must have a promoted tag for the Keeper's `sandbox_image` (`"base"` or `"ocaml"`) in the active runtime's image store (Docker and each microVM runtime keep separate stores). Run `masc sandbox-image` (with `--runtime <backend>` for microVM) and `masc sandbox-image promote` as shown in the refusal message.
-- **Invalid `microvm_dns` address**: if `[sandbox] microvm_dns` in `runtime.toml` (or `MASC_KEEPER_MICROVM_DNS`) contains a non-IP token instead of IPv4/IPv6 literals, microVM startup is refused.
+- **Invalid `microvm_dns` address**: if `[sandbox] microvm_dns` in `runtime.toml` contains a non-IP token instead of IPv4/IPv6 literals, microVM startup is refused.
 - **Guest network mode**: a Keeper whose work is web search or `git push` needs `network_mode = "inherit"`; the default, `none`, gives the guest no network.
 
 ## Provider rate limits

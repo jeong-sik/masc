@@ -1082,13 +1082,15 @@ let test_supervisor_and_rotation_bounds_reach_boot () =
     ["[supervisor]\nsweep_sec = 0.0\n";
      "[supervisor]\nsweep_sec = 121.0\n";
      "[metrics]\nmax_rotated = -1\n"];
+  (* The loads above declared the file-owned names, so the raw input these
+     readers see is the boot value the file would have left, not the shell. *)
   List.iter (fun (raw, expected) ->
-    with_env "MASC_KEEPER_SUPERVISOR_SWEEP_SEC" (Some raw) @@ fun () ->
-    check (float 0.) "process default respects scheduler bounds" expected
+    Config_boot_overrides.set "MASC_KEEPER_SUPERVISOR_SWEEP_SEC" raw;
+    check (float 0.) "boot value respects scheduler bounds" expected
       (Runtime_params.get Runtime_settings.keeper_supervisor_sweep_sec))
     ["0", 10.; "121", 120.; "nan", 30.; "infinity", 30.];
-  with_env "MASC_KEEPER_METRICS_MAX_ROTATED" (Some "0") @@ fun () ->
-  check int "environment zero requests no backups" 0
+  Config_boot_overrides.set "MASC_KEEPER_METRICS_MAX_ROTATED" "0";
+  check int "a boot value of zero requests no backups" 0
     (Env_config_keeper.KeeperMetrics.max_rotated_files ())
 ;;
 

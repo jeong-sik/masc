@@ -38,46 +38,45 @@ let source_to_string = function
    to either. AGENT_CORE applies the body override only to non-streaming
    sync body reads and it stays opt-in. Durable channel (#27416):
    runtime.toml [turn.provider_call_deadline_sec] reaches the reader through
-   the boot-override layer behind [Env_config_core.raw_value_opt]; a set
-   process env var still wins. *)
+   the boot-override layer behind [Env_config_core.raw_value_opt]. *)
 
 (* Fail-safe liveness floor for the streaming inter-line idle timeout
-   (seconds). When neither [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC] nor runtime.toml
-   [turn.stream_idle_timeout_sec] is set, the resolved value would be [None] and
+   (seconds). When runtime.toml [turn.stream_idle_timeout_sec] is not set, the
+   resolved value would be [None] and
    AGENT_CORE would apply no inter-line idle bound, letting a hung provider stream
    freeze the keeper chat lane indefinitely (#25128, measured 30+ min). This is a
    single universal liveness ceiling — NOT a per-provider tuned default
    (RFC-0345 §3.1) — an order of magnitude above any legitimate inter-token gap
    (sub-second to low-seconds), so it fires only on genuine hangs. An explicit
-   env/toml value still overrides it verbatim. RFC-0345 §3.2 (Option A) / §3.4;
+   runtime.toml value still overrides it verbatim. RFC-0345 §3.2 (Option A) / §3.4;
    revisitable (a floor, not a tuning). *)
 let stream_idle_failsafe_floor_sec =
   Env_config_keeper.KeeperKeepalive.stream_idle_failsafe_floor_sec
 ;;
 
 (* Fail-safe bound for the silent first-event (TTFT/prefill) wait (seconds).
-   When neither [MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC] nor runtime.toml
-   [turn.first_event_timeout_sec] is set, AGENT_CORE's first-event resolver
+   When runtime.toml [turn.first_event_timeout_sec] is not set, AGENT_CORE's
+   first-event resolver
    falls back to [body_timeout_s] (unset on streaming keeper paths) and then
    to the inter-line idle value — a bound an order of magnitude below real
    silent prefill (measured: 152s mimo 1M-context turn 2026-07-20; ~200-525s
    local MLX 20.7K-token keeper prompts 2026-08-16, 9/9 canary failures at
    the 120s idle cut). Same magnitude as the RFC-0345 idle floor: a single
    universal liveness ceiling, NOT a per-provider tuned default
-   (RFC-AC-037 §3). An explicit env/toml value overrides it verbatim. *)
+   (RFC-AC-037 §3). An explicit runtime.toml value overrides it verbatim. *)
 let first_event_failsafe_floor_sec =
   Env_config_keeper.KeeperKeepalive.first_event_failsafe_floor_sec
 ;;
 
 (* Fail-safe no-progress threshold for a provider call attempt (seconds).
-   When neither [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC] nor runtime.toml
-   [turn.provider_call_deadline_sec] is set, the resolved value was [None]:
+   When runtime.toml [turn.provider_call_deadline_sec] is not set, the
+   resolved value was [None]:
    the attempt watchdog stayed off and a tool's provider sub-call ran with
    no bound, so an attempt that never produced a token held the keeper until
    an operator interrupted it. Same magnitude and same rule as the two
    stream floors: a universal liveness ceiling above the longest legitimate
    no-progress gap (see [Env_config_keeper] for the measurement), not a
-   per-provider tuning. An explicit env/toml value overrides it. *)
+   per-provider tuning. An explicit runtime.toml value overrides it. *)
 let provider_call_deadline_failsafe_floor_sec =
   Env_config_keeper.KeeperKeepalive.provider_call_deadline_failsafe_floor_sec
 ;;
@@ -86,7 +85,7 @@ let freeze_from_current () =
   let stream_idle_timeout_sec =
     match Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec () with
     | Some seconds ->
-      (* Explicit env or runtime.toml value: honoured verbatim, no floor. *)
+      (* Explicit runtime.toml value: honoured verbatim, no floor. *)
       {
         value = seconds;
         source = source_of_env_name Env_config_keeper.KeeperKeepalive.stream_idle_timeout_env_key;
@@ -104,7 +103,7 @@ let freeze_from_current () =
   let first_event_timeout_sec =
     match Env_config_keeper.KeeperKeepalive.first_event_timeout_sec () with
     | Some seconds ->
-      (* Explicit env or runtime.toml value: honoured verbatim, no floor. *)
+      (* Explicit runtime.toml value: honoured verbatim, no floor. *)
       {
         value = seconds;
         source = source_of_env_name Env_config_keeper.KeeperKeepalive.first_event_timeout_env_key;
@@ -129,7 +128,7 @@ let freeze_from_current () =
   let provider_call_deadline_sec =
     match Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override () with
     | Some seconds ->
-      (* Explicit env or runtime.toml value: honoured verbatim. *)
+      (* Explicit runtime.toml value: honoured verbatim. *)
       {
         value = seconds;
         source = source_of_env_name Env_config_keeper.KeeperKeepalive.provider_call_deadline_env_key;

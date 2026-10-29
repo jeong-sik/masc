@@ -31,6 +31,12 @@ let rec remove path =
 (* The shortest deadline the setting admits; paid once. *)
 let declared_deadline_s = Env_config_keeper.KeeperKeepalive.provider_call_deadline_min_sec
 
+(* The same setting in this process's environment, with another value. The
+   deadline is file-owned, so the server does not read it: were it read, the
+   resolved layer would serve it and the first check would name the
+   difference. *)
+let different_env_deadline = Printf.sprintf "%g" (declared_deadline_s +. 1.0)
+
 (* Scheduling on a loaded runner; the wait itself is exact to the deadline. *)
 let deadline_slack_s = 5.0
 
@@ -42,11 +48,10 @@ let queue_timeout = function
 ;;
 
 let test_a_turn_queued_behind_a_held_permit_ends_as_queue () =
-  match Sys.getenv_opt Env_config_keeper.KeeperKeepalive.provider_call_deadline_env_key with
-  | Some _ ->
-    (* An ambient operator value outranks the deadline this case declares. *)
-    skip ()
-  | None ->
+  Masc_test_deps.with_process_env
+    Env_config_keeper.KeeperKeepalive.provider_call_deadline_env_key
+    (Some different_env_deadline)
+    (fun () ->
     Eio_main.run
     @@ fun env ->
     Eio.Switch.run
@@ -166,7 +171,7 @@ provider_call_deadline_sec = %g
          "the expired waiter left the queue"
          0
          snapshot.Llm_provider.Slot_scheduler.queue_length
-     | None -> fail "the keeper's turn and the holder must share one scheduler")
+     | None -> fail "the keeper's turn and the holder must share one scheduler"))
 ;;
 
 let () =

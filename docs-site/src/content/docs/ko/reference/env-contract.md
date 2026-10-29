@@ -30,18 +30,14 @@ description: MASC가 읽는 환경 변수의 범위와 적용 시점.
 | `MASC_GRPC_PORT` · `MASC_GRPC_ENABLED` · `MASC_WS_ENABLED` | gRPC·WebSocket 전송 on/off |
 | `MASC_STARTUP_WATCHDOG_SEC` | 부팅 와치독 |
 | `MASC_JSONL_RETENTION_DAYS` | 날짜별 JSONL 보관 기간(일 단위, 기본값 `30`; `[maintenance] jsonl_retention_days` 덮어씀) |
-| `MASC_KEEPER_WIKI_CONTENTS_ENABLED` | Keeper 시스템 프롬프트에 `<wiki_contents>` 주입 여부(`[wiki_contents] enabled` 덮어씀) |
-| `MASC_KEEPER_MICROVM_DNS` | microVM 게스트에 전달할 DNS 서버 목록(쉼표로 구분된 IPv4/IPv6 주소; `[sandbox] microvm_dns` 덮어씀) |
 
 ### 웹 검색 (요청 시 읽기)
 
-`[web_search]` 값을 `runtime.toml`에 두거나 환경 변수로 줄 수 있습니다. 우선순위는 프로세스 환경 변수 > `runtime.toml` > 기본값입니다.
+`[web_search]` 값은 `runtime.toml`에 둡니다: `provider`(기본값 `auto`, 제공자 하나를 고정), `provider_order`, `fallbacks`, `timeout_sec`(기본값 `15`, 제공자별 요청 타임아웃), `cache_ttl_sec`. `MASC_SEARXNG_URL`만 환경 변수로도 줄 수 있고, 이때 `runtime.toml`보다 환경 변수가 우선합니다.
 
 | 변수 | 기본값 | 효과 |
 |---|---|---|
 | `MASC_SEARXNG_URL` | `http://127.0.0.1:8888` | 셀프호스팅 SearXNG 제공자 활성화·최우선 |
-| `MASC_WEB_SEARCH_PROVIDER` | `auto` | 제공자 하나를 고정 |
-| `MASC_WEB_SEARCH_TIMEOUT_SEC` | `15` | 제공자별 요청 타임아웃 |
 | `ZAI_API_KEY` · `BRAVE_SEARCH_API_KEY` · `TAVILY_API_KEY` · `EXA_API_KEY` · `BING_SEARCH_API_KEY` · `AZURE_BING_SEARCH_API_KEY` · `OLLAMA_API_KEY` | (없음) | 해당 검색 제공자 입장 허용 |
 
 ### 프로바이더 API 키

@@ -43,7 +43,6 @@ Injects the Workspace Wiki table of contents (one line per page: title, file, su
   [wiki_contents]
   enabled = true  # Default: true. Set false to omit the wiki listing from Keeper turns.
   ```
-- **Environment Variable**: `MASC_KEEPER_WIKI_CONTENTS_ENABLED` (`true` / `false`).
 
 ### 4. MicroVM Sandbox Guest DNS (`[sandbox] microvm_dns`)
 Configures custom DNS servers passed into microVM Keeper guests (`apple_container`, `microsandbox`, `nerdctl_kata`).
@@ -53,7 +52,6 @@ Configures custom DNS servers passed into microVM Keeper guests (`apple_containe
   [sandbox]
   microvm_dns = ["1.1.1.1", "8.8.8.8"]  # Valid IPv4 or IPv6 literals
   ```
-- **Environment Variable**: `MASC_KEEPER_MICROVM_DNS` (comma-separated IPv4/IPv6 addresses).
 
 ### 5. Dated JSONL Store Retention (`[maintenance] jsonl_retention_days`)
 Controls the day-file retention window for dated JSONL stores under `.masc/` (`audit`, `telemetry`, `tool_usage`, `tool_calls`, `agent-core-events`, etc.), shared by startup prune and periodic 24-hour maintenance prune.
@@ -153,7 +151,7 @@ masc start --base-path . --port 8935
 
 - **Reset Approval Timeout**: Remove `tool_approval_timeout_sec` or unset `MASC_KEEPER_TOOL_APPROVAL_TIMEOUT_SEC` to restore the 180s default.
 - **Revert Keeper `yolo` Mode**: Press `g` on the selected Keeper in the TUI (or set mode to `auto` via the API) to remove the persisted override row.
-- **Disable Wiki Table of Contents**: Set `[wiki_contents] enabled = false` (or `MASC_KEEPER_WIKI_CONTENTS_ENABLED=false`).
+- **Disable Wiki Table of Contents**: Set `[wiki_contents] enabled = false`.
 - **Disable Memory Select**: Set `workspace_memory_selection_enabled = false` in `[typesafeai]`.
 - **Metrics**: The metrics gauges are built into the turn observation pipeline and require no separate deactivation.
 

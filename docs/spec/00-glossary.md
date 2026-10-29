@@ -4266,7 +4266,7 @@ status: reference
 **Memory OS (키퍼 자기 기억)**
 : 개별 Keeper가 장기적으로 유지하는 독립적인 사적 사실(`Fact`) 저장소.
   - **저장 위치와 격리**: 작업공간의 `.masc/config/keepers/<keeper-id>.memory-current.json`(일반 사실) 및 `<keeper-id>.memory-source-current.json`(소스 파일 결속 사실)에 저장된다. 각 Keeper가 자신의 기억 파일을 독립적으로 소유하며, 다른 Keeper가 직접 읽거나 수정할 수 없다.
-  - **용량 및 상한 규격**: 다음 카테고리 집계와 Librarian 정리는 일반 current 사실에만 적용하며, 소스 결속·보관 사실은 제외한다. 카테고리 수 상한은 기본 30개(`MASC_KEEPER_MEMORY_CATEGORY_CAP`, 설정 `memory.category_cap`), 카테고리당 사실 수 상한은 기본 30개(`MASC_KEEPER_MEMORY_FACTS_PER_CATEGORY_CAP`, 설정 `memory.facts_per_category_cap`)를 넘으면 Librarian 정리 대상이 된다(`Keeper_memory_limits.exceeded`, `Keeper_memory_cleanup`). 정리 결과는 `Limits_reached`, `Progress_with_excess`, `Excess_retained`(초과를 그대로 둠)로 나뉘어 초과가 남을 수 있다. 쓰기를 곧바로 거절하는 상한이 아니다. 전체 기억 용량 기본값은 Keeper당 512KiB(`facts_max_bytes_default`)다.
+  - **용량 및 상한 규격**: 다음 카테고리 집계와 Librarian 정리는 일반 current 사실에만 적용하며, 소스 결속·보관 사실은 제외한다. 카테고리 수 상한은 기본 30개(설정 `memory.category_cap`), 카테고리당 사실 수 상한은 기본 30개(설정 `memory.facts_per_category_cap`)를 넘으면 Librarian 정리 대상이 된다(`Keeper_memory_limits.exceeded`, `Keeper_memory_cleanup`). 정리 결과는 `Limits_reached`, `Progress_with_excess`, `Excess_retained`(초과를 그대로 둠)로 나뉘어 초과가 남을 수 있다. 쓰기를 곧바로 거절하는 상한이 아니다. 전체 기억 용량 기본값은 Keeper당 512KiB(`facts_max_bytes_default`)다.
   - **조작 도구**: 키퍼 본인만이 `keeper_memory_write`(기록), `keeper_memory_search`(검색), `keeper_memory_retract`(철회) 도구를 통해 자기 기억을 관리한다.
   - **원장과의 경계**: 키퍼의 자기 기억은 사적 상태로 보존된다. Workspace Memory Ledger에 수집되어 분류되더라도 키퍼의 원본 기억 파일이 직접 수정되거나 다른 키퍼의 메모리와 합쳐지지 않는다.
   → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) · [Keeper_memory_limits](../../lib/keeper/keeper_memory_limits.mli) · [Keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.mli)

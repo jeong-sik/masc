@@ -116,7 +116,7 @@ enabled = true
 jsonl_retention_days = 30
 
 [sandbox]
-# microVM Keeper 게스트에 전달할 DNS 서버 목록 (MASC_KEEPER_MICROVM_DNS 환경변수가 우선).
+# microVM Keeper 게스트에 전달할 DNS 서버 목록.
 microvm_dns = ["1.1.1.1", "8.8.8.8"]
 
 [tui]

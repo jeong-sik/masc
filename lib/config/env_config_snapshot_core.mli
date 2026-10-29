@@ -11,6 +11,8 @@ type effective_source =
 
 type observation =
   | Raw_environment of string option
+  | Runtime_file of string option
+      (** The value [runtime.toml] gave a name the file alone feeds. *)
   | Applied_value of
       { value : string
       ; source : effective_source

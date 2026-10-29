@@ -24,14 +24,14 @@ let recipient id =
          (Board.show_board_error error))
 ;;
 
-(* The settings are read from disk.  A read that raises is a failed lookup, so
-   the write ends with an error the author gets instead of an exception. *)
+(* The settings are read from disk.  Listing the Keepers makes the directory
+   when it is missing, and that raises [Sys_error] when it cannot be made.  A
+   read that raises is a failed lookup, so the write ends with an error the
+   author gets instead of an exception. *)
 let reading read =
   match read () with
   | result -> result
   | exception Sys_error detail -> Error detail
-  | exception Unix.Unix_error (cause, call, path) ->
-    Error (Printf.sprintf "%s %s: %s" call path (Unix.error_message cause))
 ;;
 
 (* [all_metas] is every Keeper's settings, read the first time a name needs

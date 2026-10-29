@@ -3,8 +3,9 @@
     Command construction only: nothing here starts a VM. Dispatch does --
     [Keeper_turn_sandbox_runtime] boots and adopts the guest, and the remote
     lane ([Keeper_sandbox_remote]) drives its shim over the guest's exec.
-    The guest owns its working tree on a per-keeper volume (RFC-0400); the
-    host playground is never mounted into it.
+    The guest's working tree is on a Keeper-named volume (RFC-0400); that
+    name does not establish exclusive workspace ownership. The host
+    playground is never mounted into it.
 
     Every builder takes the runtime the keeper declared. A surface that took
     the runtime only on teardown pointed a keeper's boot and its cleanup at
@@ -309,8 +310,9 @@ val logs_tail_argv_for :
 
 (** {2 The work volume and the shim (RFC-0400)}
 
-    The keeper's working tree lives on a per-keeper persistent volume mounted
+    The keeper's working tree lives on a persistent Keeper-named volume mounted
     at {!work_volume_guest_root}; that path is the remote lane's [remote_root].
+    Same-named Keepers in separate workspaces may share that volume.
     Apple uses an ext4 disk; nerdctl uses a managed host directory with no
     enforced capacity. The following FD measurements apply only to Apple.
     A tree on Apple's virtiofs share pins one host file
@@ -406,8 +408,9 @@ type work_volume_discard_default =
 val read_work_volume_discard_default :
   backend:Keeper_microvm_backend.t -> keeper_name:string -> timeout_sec:float ->
   work_volume_discard_default
-(** Inspect the current backend's actual keeper-owned work volume, require its
-    exact expected name and ext4 source, then read the host superblock. Apple
+(** Inspect the current backend's expected Keeper-named work volume, require
+    its exact name and ext4 source, then read the host superblock. This does
+    not establish exclusive workspace ownership. Apple
     uses complete canonical CLI capture. Other backends explicitly refuse.
     No cached source, caller-provided image or preview authorizes this read. *)
 
@@ -590,10 +593,10 @@ val ensure_work_volume_for
     discarded. The disk accepts discard, but a keeper guest cannot issue it
     (its capability set is empty); {!apple_work_volume_trim_argv} trims the
     work volume at boot and sets its ext4 discard default, so later deletes
-    there return their blocks. The build volume gets neither. A keeper's [_build] on its own disposable volume, apart from
-    {!work_volume_guest_root} where the checkout lives, means that volume can
-    be deleted and recreated -- zero data-loss risk, since it holds nothing
-    but derived build output -- to reclaim that host space. *)
+    there return their blocks. The build volume gets neither. A Keeper's
+    [_build] is placed on a separate volume apart from {!work_volume_guest_root}.
+    Its name does not establish exclusive ownership: deleting it may affect
+    another workspace or an active build even if the output is derived. *)
 
 val build_volume_guest_root : string
 (** [/masc-build], distinct from {!work_volume_guest_root}. *)

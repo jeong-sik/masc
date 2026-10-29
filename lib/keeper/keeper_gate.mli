@@ -97,9 +97,11 @@ type authorization_source =
           [Observe] the guest kernel refused every file write outside a
           scratch and every socket (Landlock and seccomp, RFC-0422), so
           nothing it did could have left an effect; under [Guest_local] the
-          writes it made landed inside the guest, on the keeper's own tree,
-          and the operator chose to let those pass without judgment
-          (RFC-0422 §3.4). Either way its output is returned and no judge is
+          writes it made landed inside the endpoint, and the operator chose
+          to let those pass without judgment (RFC-0422 §3.4). The Keeper
+          microVM route currently refuses this mode because volume ownership
+          is unverified; the OpenSSH route requires [private_home]. Either way
+          its output is returned and no judge is
           asked; the audit row names which box it was. A [Guest_local] failure
           is returned as a failed process result too, without whole-call
           replay: an arbitrary script may already have changed the tree. *)

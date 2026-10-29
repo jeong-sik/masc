@@ -24,8 +24,9 @@
     This module builds the command and nothing else; [Keeper_turn_sandbox_runtime]
     runs the boot and lifecycle argv, and the remote lane
     ([Keeper_sandbox_remote]) drives the guest's shim over [container exec].
-    The guest owns its working tree on a per-keeper volume (RFC-0400): the
-    host playground is never mounted into it. *)
+    The guest's working tree is on a Keeper-named volume (RFC-0400), which
+    can be shared by same-named Keepers in different workspaces. The host
+    playground is never mounted into it. *)
 
 module Backend = Keeper_microvm_backend
 

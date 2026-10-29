@@ -528,8 +528,121 @@ let test_the_requested_mode_travels_in_the_frame () =
     decoded_mode frame_path
   in
   check string "omitted is effect" "effect" (run None);
-  check string "observe is asked for by name" "observe" (run (Some Exec_ssh_protocol.Observe));
-  check string "guest_local likewise" "guest_local" (run (Some Exec_ssh_protocol.Guest_local))
+  check string "observe is asked for by name" "observe" (run (Some Exec_ssh_protocol.Observe))
+;;
+
+let test_microvm_guest_local_is_never_sent () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, frame_path = make_stub ~dir:base_path ~mode:"probe-observe" in
+  let endpoint = make_state ~base_path ~cli in
+  let receipts = ref [] in
+  let runner =
+    Keeper_sandbox_remote.runner ~mode:Exec_ssh_protocol.Guest_local
+      ~on_receipt:(fun receipt -> receipts := receipt :: !receipts)
+      ~timeout_sec:2.0 endpoint
+  in
+  let status, _, stderr = run_request runner () in
+  check status_testable "direct request is refused" (Unix.WEXITED 1) status;
+  check string "the ownership reason survives" Keeper_sandbox_remote.microvm_guest_local_unavailable_reason stderr;
+  check bool "no request or probe reached the CLI" false
+    (Sys.file_exists frame_path || Sys.file_exists (frame_path ^ ".argv"));
+  check bool "receipt says request was not sent" true
+    (!receipts =
+       [ Keeper_sandbox_remote.Execution_unavailable Keeper_sandbox_remote.Request_not_sent ]);
+  let target_of_runner _ = Masc_exec.Sandbox_target.host () in
+  (match
+     Keeper_sandbox_shell_ir_target.observe_route_for_endpoint
+       ~run:Keeper_types_profile_sandbox.Guest_local ~timeout_sec:2.0
+       ~target_of_runner endpoint
+   with
+   | No_box reason ->
+     check string "route retains the reason" Keeper_sandbox_remote.microvm_guest_local_unavailable_reason reason
+   | Boxed _ -> fail "unverified microVM volume cannot use guest_local");
+  check bool "route refused before probing the CLI" false (Sys.file_exists (frame_path ^ ".argv"));
+  (match
+     Keeper_sandbox_shell_ir_target.observe_route_for_endpoint
+       ~run:Keeper_types_profile_sandbox.Observe ~timeout_sec:2.0
+       ~target_of_runner endpoint
+   with
+   | Boxed { run = Keeper_types_profile_sandbox.Observe; _ } -> ()
+   | Boxed { run = Keeper_types_profile_sandbox.Guest_local; _ }
+   | No_box _ -> fail "the supported read-only Observe route was lost")
+;;
+
+let test_ssh_guest_local_still_requires_private_home () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, frame_path = make_stub ~dir:base_path ~mode:"probe-observe" in
+  let endpoint private_home =
+    let openssh : Keeper_sandbox_remote.openssh =
+      { endpoint = { build_box with private_home }; ssh_bin = cli
+      ; identity_file = "key"; known_hosts_file = "hosts" }
+    in
+    Keeper_sandbox_remote.of_openssh ~base_path ~keeper_name:"keeper-a" openssh
+  in
+  let route state =
+    Keeper_sandbox_shell_ir_target.observe_route_for_endpoint
+      ~run:Keeper_types_profile_sandbox.Guest_local ~timeout_sec:2.0
+      ~target_of_runner:(fun _ -> Masc_exec.Sandbox_target.host ()) state
+  in
+  (match route (endpoint false) with
+   | No_box _ -> ()
+   | Boxed _ -> fail "SSH without private_home must keep the judge");
+  let private_endpoint = endpoint true in
+  (match route private_endpoint with
+   | Boxed { run = Keeper_types_profile_sandbox.Guest_local; _ } -> ()
+   | Boxed { run = Keeper_types_profile_sandbox.Observe; _ }
+   | No_box _ -> fail "SSH private_home with a capable shim must retain guest_local");
+  let runner = Keeper_sandbox_remote.runner ~mode:Exec_ssh_protocol.Guest_local
+    ~timeout_sec:2.0 private_endpoint in
+  ignore (run_request runner ~env:[||] () : Unix.process_status * string * string);
+  check string "SSH still sends guest_local" "guest_local" (decoded_mode frame_path)
+;;
+
+let test_guest_target_refuses_guest_local_before_runtime_acquisition () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let name = "unverified-guest-local" in
+  let meta =
+    match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String name ]) with
+    | Error detail -> fail detail
+    | Ok meta ->
+      { meta with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
+      ; microvm_backend = Some Keeper_microvm_backend.Apple_container
+      ; sandbox_image = Some "base" }
+  in
+  Masc_test_deps.declare_fixture_keeper ~base_path
+    ~sandbox_profile:(Some Keeper_types_profile_sandbox.Micro_vm) ~sandbox_image:"base" name;
+  let toml_path = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path name in
+  save toml_path (read_file toml_path ^ "\nobservation_run = \"guest_local\"\n");
+  Masc_test_deps.write_sandbox_image_catalog
+    ~store:(Keeper_sandbox_image_catalog.Microvm Keeper_microvm_backend.Apple_container)
+    ~base_path [ "base", "alpine:test" ];
+  let cli_log = Filename.concat base_path "container-called" in
+  let cli = Filename.concat base_path "container" in
+  save cli (Printf.sprintf "#!/bin/sh\nprintf called >> %s\nexit 1\n" (Filename.quote cli_log));
+  Unix.chmod cli 0o755;
+  with_env "PATH" base_path @@ fun () ->
+  let config = Workspace.default_config base_path in
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Fun.protect ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory) @@ fun () ->
+  let binding = match Keeper_sandbox_factory.resolve factory ~cwd:base_path with
+    | Runtime binding -> binding
+    | No_factory | Remote_ssh_profile -> fail "expected a microVM runtime binding"
+  in
+  let dispatch =
+    match Keeper_sandbox_shell_ir_target.guest_target ~binding ~meta ~cwd:base_path
+            ~timeout_sec:2.0 ~base_path () with
+    | Ok dispatch -> dispatch
+    | Error error -> fail error.message
+  in
+  (match dispatch.observe_route () with
+   | No_box reason ->
+     check string "the ownership refusal precedes acquisition"
+       Keeper_sandbox_remote.microvm_guest_local_unavailable_reason reason
+   | Boxed _ -> fail "unverified guest_local was boxed");
+  check bool "the isolated runtime CLI was not invoked" false (Sys.file_exists cli_log)
 ;;
 
 (* Whether there is a box is the shim's answer, read from its probe: a shim
@@ -1385,6 +1498,12 @@ let () =
               test_docker_relative_cwd_is_rejected
           ; test_case "the requested mode travels in the frame" `Quick
               test_the_requested_mode_travels_in_the_frame
+          ; test_case "microVM guest_local is refused before transport" `Quick
+              test_microvm_guest_local_is_never_sent
+          ; test_case "SSH guest_local retains its private-home boundary" `Quick
+              test_ssh_guest_local_still_requires_private_home
+          ; test_case "guest target refuses before acquiring a microVM" `Quick
+              test_guest_target_refuses_guest_local_before_runtime_acquisition
           ; test_case "observe support is what the shim advertises" `Quick
               test_observe_support_is_what_the_shim_advertises
           ; test_case "a v2 shim is spoken to in v2" `Quick

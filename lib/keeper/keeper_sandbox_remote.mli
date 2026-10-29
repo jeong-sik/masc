@@ -94,6 +94,12 @@ val gh_config_dir : t -> string
 
 val transport : t -> transport
 
+(** Guest-local execution through this Keeper microVM runner is unavailable
+    while named volumes cannot be verified as exclusive to the workspace. This reason is
+    used both when selecting the observation route and when refusing a direct
+    framed request. It does not establish isolation for other execution modes. *)
+val microvm_guest_local_unavailable_reason : string
+
 val injected_env : t -> (string * string) list
 (** The server-authored env every request carries: [GH_CONFIG_DIR],
     [GIT_TERMINAL_PROMPT], [GIT_AUTHOR_NAME] and [GIT_COMMITTER_NAME] (both
@@ -261,7 +267,8 @@ val runner :
     to build, {!Exec_ssh_protocol.Effect} when omitted; a caller passes
     [Observe] or [Guest_local] only for an endpoint {!observe_supported}
     answered yes for. Docker accepts only [Observe], even when called without
-    an explicit mode. OpenSSH and guest requests use the Keeper workspace as
+    an explicit mode. This Keeper microVM runner rejects [Guest_local] before sending a request;
+    [Effect] and [Observe] retain their existing behavior. OpenSSH and guest requests use the Keeper workspace as
     both request root and default cwd; Docker uses its already-resolved workdir.
     The local wall-clock budget includes the
     endpoint connect timeout and a bounded drain grace in addition to the

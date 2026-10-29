@@ -197,7 +197,7 @@ type tree_location =
   | Shared_mount
   | Endpoint_owned
 
-(* A microvm guest owns its tree on the work volume (RFC-0400): the host
+(* A microvm guest's tree is on the named work volume (RFC-0400): the host
    never mounts the playground into it, so every consumer that branches on
    the location reaches that tree through the remote lane. *)
 let tree_location_of_profile = function

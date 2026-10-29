@@ -31,12 +31,11 @@ type network_mode =
 
     [Observe] refuses every write outside a scratch and every socket, so a
     run that exits 0 is proven effect-free. [Guest_local] refuses sockets
-    only: writes land inside the guest, on the keeper's own volume, which a
-    microvm cannot leave (RFC-0422 §1.2) — so [dune build], [mkdir] and a
-    local [git checkout] run without the judge, at the cost of the judge no
-    longer standing between the keeper and its own tree. A remote_ssh
-    endpoint takes [Guest_local] only when its operator declared the account
-    home private ({!Exec_ssh_endpoint.t.private_home}). *)
+    only and permits endpoint writes. MicroVM may hold this setting, but its
+    observation route does not run that box while named-volume ownership is
+    unverified; the request keeps the judge. A remote_ssh observation route
+    uses [Guest_local] only when its operator declared the
+    account home private ({!Exec_ssh_endpoint.t.private_home}). *)
 type observation_run =
   | Observe
   | Guest_local
@@ -52,9 +51,11 @@ val default_observation_run : observation_run
 val observation_run_rejection : sandbox_profile -> observation_run -> string option
 (** [None] when a keeper may hold that profile and that box together, and
     [Some message] naming the refusal when it may not. A Docker guest runs no
-    shim, so it has no box to choose and refuses both. Whether a remote_ssh
-    endpoint may take [Guest_local] is the endpoint's declaration, not the
-    profile's, and is answered where the route is built. *)
+    shim, so it has no box to choose and refuses both. MicroVM may retain a
+    [Guest_local] declaration even while its observation route refuses to run
+    that box. Whether a remote_ssh endpoint may take [Guest_local] is the
+    endpoint's declaration, not the profile's, and is answered where the route
+    is built. *)
 
 val sandbox_profile_to_string : sandbox_profile -> string
 val sandbox_profile_of_string : string -> sandbox_profile option

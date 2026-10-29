@@ -133,7 +133,7 @@ let docker_runners ?capture_dir ~runtime ~timeout_sec ~cwd () =
    runner, pipeline_runner
 ;;
 
-(* A microvm guest owns its tree on the work volume (RFC-0400), so a stage
+(* A microvm guest's tree is on the work volume (RFC-0400), so a stage
    travels the remote lane: the framed request reaches the guest's shim over
    [container exec], and the remote runner translates the host cwd into the
    guest's spelling. The endpoint is acquired per call, which is what boots
@@ -185,9 +185,10 @@ let observation_run_for ~base_path ~keeper_name =
    would refuse; a shim that predates the box, or a host without Landlock,
    is a [No_box] with the endpoint named, and the request keeps the judge.
 
-   [Guest_local] lets writes land inside the guest. On a microvm that is the
-   keeper's own volume and nothing else (RFC-0422 §1.2). On an OpenSSH
-   endpoint it is the account's home, which is the keeper's alone only when
+   [Guest_local] lets writes land inside the guest. A microVM volume may be
+   shared across workspaces, so this route is unavailable until ownership can
+   be verified. On an OpenSSH endpoint it is the account's home, which is
+   the keeper's alone only when
    the operator has said so in runtime.toml ([private_home = true]); without
    that declaration the request keeps the judge rather than writing where
    someone else may also live. *)
@@ -205,9 +206,12 @@ let observe_route_for_endpoint ?on_receipt ~run ~timeout_sec ~target_of_runner e
          declared.Exec_ssh_endpoint.name)
   | Keeper_types_profile_sandbox.Guest_local, Keeper_sandbox_remote.Docker_exec _ ->
     No_box "docker_guest_local_unavailable: Docker mounts may write through to the host; Observe is required"
+  | Keeper_types_profile_sandbox.Guest_local, Keeper_sandbox_remote.Container_exec _ ->
+    No_box Keeper_sandbox_remote.microvm_guest_local_unavailable_reason
   | Keeper_types_profile_sandbox.Observe, Keeper_sandbox_remote.Docker_exec _
+  | Keeper_types_profile_sandbox.Observe, Keeper_sandbox_remote.Container_exec _
   | ( (Keeper_types_profile_sandbox.Observe | Keeper_types_profile_sandbox.Guest_local)
-    , (Keeper_sandbox_remote.Openssh _ | Keeper_sandbox_remote.Container_exec _) ) ->
+    , Keeper_sandbox_remote.Openssh _ ) ->
     if Keeper_sandbox_remote.observe_supported endpoint
     then
       Boxed
@@ -277,13 +281,15 @@ let guest_target
         , fun () ->
             match observation_run_for ~base_path ~keeper_name:meta.name with
             | Error reason -> No_box reason
-            | Ok run ->
+            | Ok Keeper_types_profile_sandbox.Guest_local ->
+              No_box Keeper_sandbox_remote.microvm_guest_local_unavailable_reason
+            | Ok Keeper_types_profile_sandbox.Observe ->
               (match Keeper_sandbox_remote_lane.microvm_endpoint ~timeout_sec runtime with
                | Error err -> No_box err
                | Ok endpoint ->
                  observe_route_for_endpoint
                    ?on_receipt
-                   ~run
+                   ~run:Keeper_types_profile_sandbox.Observe
                    ~timeout_sec
                    ~target_of_runner:(fun runner ->
                      Masc_exec.Sandbox_target.micro_vm ~image ~runner ())

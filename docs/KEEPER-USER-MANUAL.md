@@ -148,18 +148,25 @@ to a thread the Keeper already joined.
 
 ## The work surface (playground)
 
-Inside its sandbox a Keeper's working directory is
-`/home/keeper/playground/<name>/`. On the host that maps to a
-profile-scoped directory under `<base>/.masc/playground/` — Docker and
-microVM keepers get their own namespace there, so two profiles never share
-a tree.
+Docker's guest working directory is `/home/keeper/playground/<name>/` and
+its host directory is under `<base>/.masc/playground/`. A microVM executes
+under `/masc-work/<sanitized-name>/` on a runtime-managed named volume;
+remote_ssh uses its configured endpoint root.
+The microVM volume name does not include the workspace, so same-named
+Keepers using one runtime store can share a tree across workspaces.
+
+When a microVM sets `observation_run = "guest_local"`, the observation stage
+cannot establish exclusive volume ownership and sends the request to the judge
+instead of running that box. This does not prevent writes authorized through
+other paths, or establish isolation of the shared volume. `Write` and `Edit`
+inside the Keeper tree can also use the remote write path without a separate
+Gate decision.
 
 Three facts about it keep diagnoses honest:
 
-- **It is born empty.** A new Keeper (or a Keeper whose profile changed)
-  starts with an empty playground. Empty is the normal initial state, not a
-  broken mount — `ls` succeeding on an empty directory means the surface is
-  reachable and simply has nothing in it yet.
+- **It may be empty.** An empty new work tree is not necessarily a broken
+  mount: `ls` succeeding on an empty directory means the surface is reachable.
+  A reused microVM volume may still contain earlier files.
 - **Repositories are cloned by the Keeper, into the playground.** The
   convention is `playground/<name>/repos/<repo>` (e.g.
   `gh repo clone <owner>/<repo> repos/<repo> -- --depth 50`). Execution

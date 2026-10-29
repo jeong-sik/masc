@@ -12,9 +12,12 @@ related: ["0404", "0421", "0405"]
 
 > 운영 정정, 2026-10-29: 아래의 Keeper 전용 볼륨이라는 전제는 작업 공간 사이에서
 > 보장되지 않는다. 같은 런타임 저장소의 동명 Keeper가 작업 볼륨을 공유할 수 있다.
-> `guest_local`은 opt-in이며 기본값은 `observe`지만, 현재 microVM 경로는 쓰기를
-> 허용할 때 작업 공간별 볼륨 소유권을 확인하지 않는다. 실제 활성화나 피해는 이
-> 정정으로 확인된 것이 아니다.
+> `guest_local`은 opt-in이며 기본값은 `observe`다. microVM 관측 단계는 독점
+> 소유권을 확인할 수 없어 `guest_local` 상자를 만들지 않고 judge로 넘긴다.
+> 이 서버의 Keeper microVM framed runner에 직접 요청해도 이 모드를 거절한다. shim
+> 자체와 다른 발신자까지 차단하는 것은 아니다. 이 조치는 볼륨 격리나 다른 허가
+> 경로의 쓰기 차단을 보장하지 않는다. 실제 활성화나 피해는 이 정정으로 확인된
+> 것이 아니다.
 
 ## 1. 문제
 
@@ -136,11 +139,10 @@ exit 0 만 관측으로 친다. 상자 안에서 쓰기나 연결을 시도한 �
 
 프로필별 설정 `observation_run = "observe" | "guest_local"`. 기본 `observe`.
 
-`guest_local` 은 §1.2 의 사실 위에 선다. microvm 의 쓰기는 keeper 전용 볼륨 밖으로
-못 나간다. 그래서 `dune build`, `mkdir`, 로컬 `git checkout`, `git config` 가 네트워크만
-안 쓰면 judge 없이 돈다. 이틀치로 401건(microvm judge 의 56%)이다. 잃는 것은 keeper
-가 자기 작업 트리를 스스로 망가뜨릴 때 judge 가 그것을 막아 줄 기회다. 그 손실은 다시
-clone 하면 복구된다. 이 스위치를 켤지는 운영자가 프로필마다 정한다. remote_ssh 는
+이 RFC는 microVM 쓰기가 Keeper 전용 볼륨에만 닿는다는 전제에서 `dune build`,
+`mkdir`, 로컬 `git checkout`, `git config`를 judge 없이 실행하자고 제안했다.
+그 전제는 작업 공간 사이에서 보장되지 않아 현재 microVM 관측 경로는 해당 상자를
+실행하지 않는다. 아래 401건은 당시 추정치이며 현재 적용 결과가 아니다. remote_ssh 는
 계정의 홈이 그 계정만의 것이라고 운영자가 선언할 때만 `guest_local` 을 받는다. 그 선언은
 runtime.toml 의 해당 `[exec.ssh.endpoints.<name>]` 에 `private_home = true` 로 쓴다(기본 false).
 선언이 없는 엔드포인트에서 `guest_local` 요청은 상자를 만들지 않고 judge 로 간다.
@@ -157,8 +159,8 @@ Linux 가 아니거나 Landlock 을 못 만들면(`landlock_create_ruleset` 이 
    코드로 끝나고 파일이 없다. `curl https://github.com` 은 소켓에서 `EPERM` 으로 끝난다.
    `for f in a b; do echo $f; done` 과 `python3 -c 'print(open("x").read())'` 는 0 으로
    끝나고 결과가 keeper 에 그대로 간다.
-2. 이틀치 judge 요청(§1.1)을 다시 흘리면, `observe` 에서 microvm 137건 + remote_ssh
-   73건이 judge 를 건너뛰고, `guest_local` 에서 microvm 401건이 건너뛴다. 새로
+2. 원래 제안은 이틀치 judge 요청(§1.1)을 다시 흘리면 `observe` 에서 microvm 137건 + remote_ssh
+   73건, `guest_local` 에서 microvm 401건이 judge 를 건너뛸 것으로 예상했다. 새로
    건너뛴 요청 중 네트워크에 닿은 것은 0 이다(소켓이 없으므로 구조적으로 0).
 3. `test_exec_shim` 에 모드별 케이스. Landlock 없는 호스트(macOS 개발 빌드)에서는
    `observe_unsupported` 거절을 고정한다.
@@ -174,8 +176,8 @@ Linux 가 아니거나 Landlock 을 못 만들면(`landlock_create_ruleset` 이 
   의 재생이 알려 준다.
 - **두 번 실행.** 쓰는 명령은 상자에서 한 번 실패하고 승인 뒤 다시 돈다. 첫 실행은 첫
   쓰기나 첫 소켓에서 끝나므로 보통 몇 밀리초다. `dune build` 처럼 오래 걸린 뒤 쓰는
-  것은 `Observe` 에서는 `_build` 첫 쓰기에서 죽고, `guest_local` 에서는 아예 judge 를
-  안 탄다.
+  것은 `Observe` 에서는 `_build` 첫 쓰기에서 죽는다. 당초 제안한 microVM
+  `guest_local` 경로는 현재 소유권 미확인으로 실행하지 않는다.
 - **부작용 있는 읽기.** 0 으로 끝났는데 뭔가 남았을 가능성은 커널 강제 위에서 없다.
   남는 것은 스크래치이고 실행 뒤 지운다. CPU·시간은 tool 예산이 막는다.
 - **소켓을 전부 막는 것.** AF_UNIX 로 로컬 데몬에 말하는 도구가 있으면 `Observe` 에서

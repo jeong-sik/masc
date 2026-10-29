@@ -125,15 +125,22 @@ mention_targets = ["rondo, 론도"]     # 아무도 안 칠 이름 한 개
 
 ## 작업 표면 (playground)
 
-sandbox 안에서 Keeper 의 작업 디렉토리는 `/home/keeper/playground/<이름>/` 이다.
-호스트 쪽은 `<base>/.masc/playground/` 아래의 프로필별 디렉토리로 매핑된다 —
-Docker 와 microVM keeper 는 각자 네임스페이스를 받아 서로의 트리를 공유하지 않는다.
+Docker 안의 작업 디렉토리는 `/home/keeper/playground/<이름>/`이고 호스트
+디렉토리는 `<base>/.masc/playground/` 아래에 있다. microVM의 실행 경로는
+`/masc-work/<정규화된 이름>/`이며 작업 트리는 런타임의 이름 있는 볼륨에 있다.
+remote_ssh는 엔드포인트의 작업 루트를 사용한다. microVM 볼륨 이름에는 작업 공간이
+없으므로 같은 런타임 저장소의 동명 Keeper는 서로의 트리를 공유할 수 있다.
+
+microVM에서 `observation_run = "guest_local"`을 설정해도 관측 단계는 볼륨의
+독점 소유권을 확인할 수 없어 이 상자를 실행하지 않고 judge로 넘긴다. 다른 허가
+경로나 승인된 실행에서 공유 볼륨에 쓰는 것은 이 제한만으로 막지 못한다. 현재
+Keeper 트리 안의 `Write`/`Edit`도 별도 Gate 없이 원격 쓰기 경로로 갈 수 있다.
 
 진단을 정확하게 만드는 세 가지 사실:
 
-- **비어서 태어난다.** 새 Keeper(또는 프로필이 바뀐 Keeper)의 playground 는
-  비어 있다. 빈 것이 정상 초기 상태이지 mount 고장이 아니다 — 빈 디렉토리에
-  `ls` 가 성공했다면 표면은 도달 가능하고 아직 내용이 없을 뿐이다.
+- **비어 있을 수 있다.** 새 작업 트리는 비어 있을 수 있다. 빈 디렉토리에 `ls`가
+  성공했다면 표면은 도달 가능하고 아직 내용이 없을 뿐이다. 기존 microVM 볼륨을
+  재사용하는 경우에는 이전 파일이 남아 있을 수 있다.
 - **저장소는 Keeper 가 playground 안에 직접 clone 한다.** 관습 위치는
   `playground/<이름>/repos/<repo>` 다 (예:
   `gh repo clone <owner>/<repo> repos/<repo> -- --depth 50`).

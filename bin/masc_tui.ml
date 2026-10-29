@@ -2632,6 +2632,8 @@ let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
    id-less acceptance, which would inherit that seq while the leftover bytes
    glued onto the next chunk -- so each (re)connect starts a fresh one and
    asks the server to resume from the log's last seq instead. *)
+exception Rejected_keeper_live_stream
+
 let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_post ~enqueue ~control_generation ~admission_intent ~mailbox ~port ~log request =
   let enqueue_async = enqueue in
   let host = server_peer_host in
@@ -2666,7 +2668,7 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
         | Ok () when first_post && not (start_first_post ()) ->
             Error (Keeper_chat.Transport_error "Workspace authority withdrawn")
         | Ok () ->
-        let decoder = Keeper_chat_live.create () in
+        let decoder = Keeper_chat_live.create ~request () in
         (* Each idempotent re-subscribe has its own SSE grammar state. The
            visible transcript remains request-owned, but an acceptance event
            at the head of the new stream is not a duplicate in that stream. *)
@@ -2674,7 +2676,8 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
           (* Each delta travels with the journal seq of the frame that carried
              it; the request's log deduplicates on it, which is what absorbs
              the overlap between the server's replay and its live window. *)
-          match Keeper_chat_live.feed decoder chunk with
+          let deltas = Keeper_chat_live.feed decoder chunk in
+          (match deltas with
           | [] -> ()
           | deltas ->
               List.iter (fun (item : Keeper_chat_live.observed_delta) -> match item.delta with
@@ -2707,12 +2710,29 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
                   | None -> ())
                 deltas;
               enqueue_async mailbox
-                (Keeper_chat_stream_deltas (request, deltas))
+                (Keeper_chat_stream_deltas (request, deltas)));
+          (* A rejected frame can share a chunk with valid earlier frames.
+             Deliver that prefix before closing, since live events need not
+             all have reached the journal for a later replay. *)
+          if Keeper_chat_live.requires_reconnect decoder then
+            raise Rejected_keeper_live_stream
         in
         let result =
-          Masc_tui_http.post_keeper_chat_streaming ~expected_workspace ~admission_intent ~clock ~host ~port ~on_chunk
-            ~since_seq request
+          try
+            Masc_tui_http.post_keeper_chat_streaming ~expected_workspace ~admission_intent ~clock ~host ~port ~on_chunk
+              ~since_seq request
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | _ when Keeper_chat_live.requires_reconnect decoder ->
+              Eio.Fiber.check ();
+              Error (Keeper_chat.Transport_error "live acceptance could not be verified")
         in
+        let result =
+          if Keeper_chat_live.requires_reconnect decoder then begin
+            Eio.Fiber.check ();
+            Error (Keeper_chat.Transport_error "live acceptance could not be verified")
+          end
+          else result in
         match result with
         | Ok (Keeper_chat.Turn_completed { turn_outcome = Keeper_chat.Continuation_checkpoint; _ }) ->
             (* A checkpoint closes this transport segment, not the durable

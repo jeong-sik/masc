@@ -794,6 +794,104 @@ let test_interactive_acceptance_reports_authority () =
     check bool "stale control never signals" false value.signalled
   | _ -> fail "interactive admission receipt did not reach live consumer"
 
+let scoped_request : Masc_tui_keeper_chat_projection.request =
+  { request_id="tui-request-1"; keeper_name="keeper.one"; message="hello";
+    attachments=[]; references=[] }
+
+let scoped_acceptance ?(operation_id="tui-request-1") ?(state="Running") ?interactive () =
+  `Assoc ["type", `String "CUSTOM"; "threadId", `String "default";
+    "timestamp", `Float 1.0; "name", `String "KEEPER_CHAT_OPERATION_ACCEPTED";
+    "value", `Assoc (["operation_id", `String operation_id; "state", `String state;
+      "queued_count", `Int 0] @ Option.to_list (Option.map (fun receipt -> "interactive", receipt) interactive))]
+
+let test_scoped_live_stream_rejects_foreign_acceptance () =
+  let receipt = `Assoc ["outcome", `String "applied"; "chat_control_token", `String "foreign-control";
+    "signalled", `Bool false; "resumed", `Bool false; "interrupt_error", `Null;
+    "interrupt_error_code", `Null; "interrupt_incident_id", `Null] in
+  let decoder = Live.create ~request:scoped_request () in
+  let foreign = scoped_acceptance ~operation_id:"foreign-request" ~interactive:receipt () in
+  let body = sse foreign ^ "id: 999\n" ^ sse (text_content "foreign") in
+  (match feed decoder body with
+   | [(None, Live.Undecodable _)] -> ()
+   | _ -> fail "foreign acceptance or its later cursor acquired live authority");
+  check bool "foreign acceptance requests exact-operation reconciliation" true
+    (Live.requires_reconnect decoder);
+  check (list tagged) "later frames remain refused on this stream" []
+    (feed decoder (sse (scoped_acceptance ())))
+;;
+
+let test_scoped_live_stream_refuses_a_second_acceptance () =
+  let decoder = Live.create ~request:scoped_request () in
+  let acceptance = "id: 999\n" ^ sse (scoped_acceptance ()) in
+  let matching = "id: 7\n" ^ sse (text_content "owned") in
+  (match feed decoder (acceptance ^ matching) with
+   | [(None, Live.Accepted _); (Some 7, Live.Text {text="owned"; _})] -> ()
+   | _ -> fail "acceptance advanced the cursor or a matching suffix was rejected");
+  let foreign = scoped_acceptance ~operation_id:"foreign-request" () in
+  (match feed decoder ("id: 1000\n" ^ sse foreign) with
+   | [(None, Live.Undecodable _)] -> ()
+   | _ -> fail "a second acceptance acquired the request's cursor or authority");
+  check bool "duplicate acceptance requests reconciliation" true (Live.requires_reconnect decoder);
+  check (list tagged) "later frames remain refused" [] (feed decoder matching);
+  let one_chunk = Live.create ~request:scoped_request () in
+  (match feed one_chunk (acceptance ^ matching ^ sse foreign ^ matching) with
+   | [(None, Live.Accepted _); (Some 7, Live.Text {text="owned"; _});
+      (None, Live.Undecodable _)] -> ()
+   | _ -> fail "a rejected frame discarded or extended its valid chunk prefix")
+;;
+
+let test_scoped_live_stream_reconnect_and_preacceptance_error () =
+  let acceptance = sse (scoped_acceptance ()) in
+  let decoder = Live.create ~request:scoped_request () in
+  let body = acceptance ^ "id: 8\n" ^ sse (text_content "resumed") in
+  let received =
+    String.to_seq body |> List.of_seq
+    |> List.concat_map (fun char -> feed decoder (String.make 1 char)) in
+  (match received with
+   | [(None, Live.Accepted _); (Some 8, Live.Text {text="resumed"; _})] -> ()
+   | _ -> fail "fragmented reconnect suffix did not retain request ownership");
+  let decoder = Live.create ~request:scoped_request () in
+  let failure = event "RUN_ERROR" ["runId", `String run_id; "message", `String "rejected";
+    "code", `String "not_ready"] in
+  (match feed decoder (sse failure) with
+   | [(None, Live.Run_failed {message="rejected"})] -> ()
+   | _ -> fail "pre-acceptance error became an acceptance");
+  check bool "pre-acceptance error is left to whole-body decoding" false
+    (Live.requires_reconnect decoder);
+  check (list tagged) "a pre-acceptance error ends this stream" [] (feed decoder acceptance);
+  let decoder = Live.create ~request:scoped_request () in
+  let premature = event "RUN_STARTED" ["runId", `String run_id] in
+  (match feed decoder ("id: 999\n" ^ sse premature ^ acceptance) with
+   | [(None, Live.Undecodable _)] -> ()
+   | _ -> fail "an event before acceptance acquired cursor or admission authority")
+;;
+
+let test_scoped_reconnect_keeps_the_server_terminal_replay () =
+  let acceptance = sse (scoped_acceptance ~state:"Failed" ()) in
+  let orphaned = `Assoc ["type", `String "RUN_ERROR"; "threadId", `String "default";
+    "timestamp", `Float 1.0; "message", `String "public failure"; "code", `String "turn_failed"] in
+  let decoder = Live.create ~request:scoped_request () in
+  (match feed decoder (acceptance ^ "id: 12\n" ^ sse orphaned) with
+   | [(None, Live.Accepted _); (Some 12, Live.Run_failed {message="public failure"})] -> ()
+   | _ -> fail "request-owned replay lost its terminal journal cursor");
+  let decoder = Live.create ~request:scoped_request () in
+  let fallback = event "RUN_ERROR" ["runId", `String run_id;
+    "message", `String "public failure"; "code", `String "turn_failed"] in
+  (match feed decoder (acceptance ^ sse fallback) with
+   | [(None, Live.Accepted _); (None, Live.Run_failed {message="public failure"})] -> ()
+   | _ -> fail "the next replay lost the operation's fallback terminal");
+  let decoder = Live.create ~request:scoped_request () in
+  ignore (feed decoder acceptance);
+  (match feed decoder "id: 13\ndata: {\n\n" with
+   | [(Some 13, Live.Undecodable _)] -> ()
+   | _ -> fail "an unreadable post-acceptance event changed the existing cursor behavior");
+  check bool "an unreadable post-acceptance event does not request reconnection" false
+    (Live.requires_reconnect decoder);
+  (match feed decoder ("id: 14\n" ^ sse (text_content "later")) with
+   | [(Some 14, Live.Text {text="later"; _})] -> ()
+   | _ -> fail "post-acceptance events stopped after an unreadable frame")
+;;
+
 let test_acceptance_states_are_read () =
   let deltas state = feed_whole (sse (accepted ~state ~queued_count:2 ())) in
   check (list delta) "queued keeps its place in the queue"
@@ -1038,6 +1136,14 @@ let () =
     ; ( "acceptance"
       , [ test_case "the three states are read" `Quick
             test_acceptance_states_are_read
+        ; test_case "foreign acceptance cannot acquire a live request" `Quick
+            test_scoped_live_stream_rejects_foreign_acceptance
+        ; test_case "a live stream refuses a second acceptance" `Quick
+            test_scoped_live_stream_refuses_a_second_acceptance
+        ; test_case "reconnect and pre-acceptance errors keep ownership" `Quick
+            test_scoped_live_stream_reconnect_and_preacceptance_error
+        ; test_case "scoped reconnect keeps terminal replay and fallback" `Quick
+            test_scoped_reconnect_keeps_the_server_terminal_replay
         ; test_case "an unknown state is reported" `Quick
             test_unknown_acceptance_state_is_reported
         ; test_case "missing fields name themselves" `Quick

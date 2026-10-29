@@ -122,9 +122,25 @@ type delta =
   | Run_finished
   | Undecodable of string
 
-type t = { decoder : Sse_wire.decoder }
+type rejection = Invalid_stream | Preacceptance_failure
 
-let create () = { decoder = Sse_wire.create_decoder () }
+type owner =
+  | Unscoped
+  | Awaiting of Projection.request
+  | Bound
+  | Rejected of rejection
+
+type t = { decoder : Sse_wire.decoder; mutable owner : owner }
+
+let create ?request () =
+  { decoder = Sse_wire.create_decoder ()
+  ; owner = (match request with None -> Unscoped | Some request -> Awaiting request)
+  }
+
+let requires_reconnect t =
+  match t.owner with
+  | Rejected Invalid_stream -> true
+  | Unscoped | Awaiting _ | Bound | Rejected Preacceptance_failure -> false
 
 let string_field fields name =
   match List.assoc_opt name fields with
@@ -675,7 +691,17 @@ let event_deltas (event : Yojson.Safe.t) =
 
 type observed_delta = { seq : int option; at : float option; delta : delta }
 
-let frame_deltas (frame : Sse_wire.frame) =
+let is_acceptance = function
+  | `Assoc fields ->
+      List.exists (fun (name, value) -> name = "type" && value = `String "CUSTOM") fields
+      && List.exists (fun (name, value) ->
+           name = "name" && value = `String "KEEPER_CHAT_OPERATION_ACCEPTED") fields
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> false
+
+let frame_deltas t (frame : Sse_wire.frame) =
+  match t.owner with
+  | Rejected _ -> []
+  | Unscoped | Awaiting _ | Bound ->
   let seq = match frame.id with
     | None -> None
     | Some id ->
@@ -683,7 +709,7 @@ let frame_deltas (frame : Sse_wire.frame) =
       | Projection.Sse_id seq -> Some seq
       | Projection.Sse_ignored | Projection.Sse_frame_end
       | Projection.Sse_data _ | Projection.Sse_noncanonical_data -> None in
-  let at, deltas = match Yojson.Safe.from_string frame.data with
+  let at, seq, deltas = match Yojson.Safe.from_string frame.data with
     | json ->
         let at = match json with
           | `Assoc fields ->
@@ -692,9 +718,52 @@ let frame_deltas (frame : Sse_wire.frame) =
                | Some (`Float seconds) when Float.is_finite seconds && seconds >= 0. -> Some seconds
                | _ -> None)
           | _ -> None in
-        at, event_deltas json
-    | exception Yojson.Json_error detail -> None, [ Undecodable ("invalid JSON: " ^ detail) ] in
+        (match t.owner with
+         | Rejected _ -> at, None, []
+         | Unscoped -> at, seq, event_deltas json
+         | Awaiting request when is_acceptance json ->
+             (match Projection.validate_live_acceptance ~request json with
+              | Error error ->
+                  t.owner <- Rejected Invalid_stream;
+                  at, None, [Undecodable (Projection.stream_error_to_string error)]
+              | Ok () ->
+                  t.owner <- Bound;
+                  (* Acceptance is a transport preface, not a journal row. *)
+                  at, None, event_deltas json)
+         | Awaiting _ ->
+             (match event_deltas json with
+              | [Run_failed _] as failure ->
+                  t.owner <- Rejected Preacceptance_failure;
+                  at, None, failure
+              | [Undecodable _] as failure ->
+                  t.owner <- Rejected Invalid_stream;
+                  at, None, failure
+              | []
+              | [ ( Run_started | Batch_bound _ | Runtime_attempt_started _
+                  | Provider_retry_observed _ | Stream_model_started _
+                  | Model_content_activity _ | Stream_model_stopped _
+                  | Stream_details _ | Text _ | Thinking _ | Thinking_snapshot _
+                  | Media _ | Native_tool_started _ | Native_tool_progress _
+                  | Native_tool_ended _ | Tool_started _ | Tool_admitted _
+                  | Tool_args _ | Tool_ended _ | Tool_result _
+                  | Stream_protocol_error _ | Approval_requested _
+                  | Approval_settled _ | Accepted _ | Checkpoint
+                  | External_effect_completed | Reply_details _ | Run_finished ) ]
+              | _ :: _ :: _ ->
+                  t.owner <- Rejected Invalid_stream;
+                  at, None, [Undecodable "live event before request acceptance"])
+         | Bound when is_acceptance json ->
+             t.owner <- Rejected Invalid_stream;
+             at, None, [Undecodable (Projection.stream_error_to_string Projection.Duplicate_acceptance)]
+         | Bound -> at, seq, event_deltas json)
+    | exception Yojson.Json_error detail ->
+        (match t.owner with
+         | Awaiting _ ->
+             t.owner <- Rejected Invalid_stream;
+             None, None, [Undecodable ("invalid JSON: " ^ detail)]
+         | Unscoped | Bound -> None, seq, [Undecodable ("invalid JSON: " ^ detail)]
+         | Rejected _ -> None, None, []) in
   List.map (fun delta -> {seq; at; delta}) deltas
 
 let feed t chunk =
-  Sse_wire.feed t.decoder chunk |> List.concat_map frame_deltas
+  Sse_wire.feed t.decoder chunk |> List.concat_map (frame_deltas t)

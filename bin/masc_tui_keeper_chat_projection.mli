@@ -218,6 +218,11 @@ val decode_response : request:request -> string -> (response, stream_error) resu
 val decode_response_with_provenance :
   request:request -> string -> (response, protocol_error) result
 val stream_error_to_string : stream_error -> string
+
+val validate_live_acceptance :
+  request:request -> Yojson.Safe.t -> (unit, stream_error) result
+(** Check a live acceptance using the terminal decoder's request identity
+    and initial-event rules. *)
 val error_to_string : error -> string
 
 (** [unverified_retry_notice ~request_id error] is the status line shown while

@@ -10,14 +10,14 @@
 
     This reads the payloads, from chunks, as they arrive.
 
-    {2 Which one is authoritative}
+    {2 Live and terminal observations}
 
-    This one is not. It is lenient by construction: a line it cannot read
-    becomes an {!Undecodable} delta, never an error, and the turn keeps going.
-    The turn's recorded outcome still comes from the strict whole-body decode
-    that runs when the stream ends, over the same bytes. So a defect here
-    shows up as a wrong or missing row in the live pane, and cannot change
-    what the transcript ends up holding.
+    Live deltas feed the transcript and can release queued input or update a
+    control token before the stream ends. A request-scoped reader therefore
+    checks acceptance against that request before publishing it. The final
+    turn outcome still comes from the strict whole-body decode over the same
+    bytes. The live acceptance does not independently prove the workspace or
+    validate every later event's identity.
 
     {2 Chunk boundaries}
 
@@ -219,7 +219,15 @@ type delta =
 
 type t
 
-val create : unit -> t
+val create : ?request:Masc_tui_keeper_chat_projection.request -> unit -> t
+(** When [request] is supplied, an acceptance must match that request and
+    never advances the journal cursor. A pre-acceptance error remains visible;
+    any other earlier event, or a mismatched or repeated acceptance, stops
+    this decoder. Other live event identities are not checked here. *)
+
+val requires_reconnect : t -> bool
+(** An invalid scoped stream must be closed and reconciled with the same
+    request. A pre-acceptance RUN_ERROR is left for whole-body decoding. *)
 
 type observed_delta = { seq : int option; at : float option; delta : delta }
 (** Server event timestamp in epoch seconds, or [None] when not provided. *)
@@ -229,7 +237,8 @@ val feed : t -> string -> observed_delta list
     completed by it, in stream order, each with the journal seq of the frame
     that carried it: the value of the frame's [id:] line, or [None] for a
     frame without one (the acceptance event and the settle-time run_error
-    never went through the bus). The id is held across a chunk boundary and
+    never went through the bus). For a request-scoped reader, acceptance is
+    always unsequenced even if the frame includes an id. The id is held across a chunk boundary and
     dropped at the frame's end, so an id-less frame cannot inherit the seq of
     the frame before it. The server writes [id:] before [data:] in every
     frame ([Sse_wire.add_optional_headers]); an id after its data would tag

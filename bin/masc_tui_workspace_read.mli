@@ -43,6 +43,13 @@ val read_response
     consumer. Health-identity bindings refuse here because raw responses cannot
     establish the decoded health identity. Unbound callers retain raw reads. *)
 
+val read_bound_response
+  : send:(path:string -> (Masc_http_client.response, string) result)
+  -> host:string -> port:int -> path:string
+  -> (Masc_http_client.response, response_failure) result
+(** Like [read_response], but refuses without an original request-precondition
+    binding. Use when even an accidentally unbound caller must not admit data. *)
+
 val read_bytes
   : send:(path:string -> (Masc_http_client.response, string) result)
   -> host:string -> port:int -> path:string -> (string, string) result

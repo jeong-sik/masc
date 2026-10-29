@@ -104,6 +104,12 @@ let read_response ~send ~host ~port ~path =
     validate_workspace_read_response response
     |> Result.map_error (fun detail -> Workspace_refused detail)
 
+let read_bound_response ~send ~host ~port ~path =
+  match current_workspace_read () with
+  | Some {wr_proof=Request_precondition;_} -> read_response ~send ~host ~port ~path
+  | None | Some {wr_proof=Health_identity;_} ->
+    Error (Workspace_refused "Reading requires an expected workspace request precondition")
+
 let read_bytes ~send ~host ~port ~path =
   let open Result.Syntax in
   let* ()=match current_workspace_read () with

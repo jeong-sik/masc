@@ -566,6 +566,76 @@ let test_history_read_keeps_original_workspace_through_replacement () =
     expect_context "B independent handoff" (read ~send:send_b ()));
   expect_context "A original handoff" (Eio.Promise.await child)
 
+let test_file_changes_read_keeps_its_workspace () =
+  with_temp_base_path @@ fun base_a ->
+  with_temp_base_path @@ fun base_b ->
+  List.iter (fun base -> Unix.mkdir (Filename.concat base ".masc") 0o700)
+    [base_a; base_b];
+  let identity base : Masc.Tui_decode.server_identity =
+    { sid_version = "test"; sid_binary_commit = "test"; sid_binary_commit_age_s = None
+    ; sid_base_path = Masc.Tui_decode.Canonical_path.of_path (Unix.realpath base)
+    ; sid_masc_root = Masc.Tui_decode.Canonical_path.of_path
+        (Unix.realpath (Filename.concat base ".masc"))
+    ; sid_executable_in_worktree = None; sid_state_ready = Some true
+    ; sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None }
+  in
+  let config_a = Masc.Workspace.default_config base_a in
+  let config_b = Masc.Workspace.default_config base_b in
+  let receipt = Masc.Workspace.read_precondition_admission_header in
+  let frame ?(headers=[receipt]) ?(keeper="alpha") calls : Masc_http_client.response =
+    { status=200; headers; body=Yojson.Safe.to_string
+        (`Assoc ["keeper", `String keeper; "window_hours", `Float 24.;
+          "calls_in_window", `Int calls; "changes", `List [];
+          "over_budget", `Int 0; "malformed", `Int 0]) } in
+  let host = "127.0.0.1" and port = 8935 in
+  let seen = ref None in
+  let send config response ~path =
+    seen := Some path;
+    let request = Httpun.Request.create `GET path in
+    match Server_auth.validate_read_workspace_precondition ~config request with
+    | Ok Server_auth.Workspace_read_matched -> Ok response
+    | Ok Workspace_read_unbound
+    | Error (Masc.Workspace.Invalid_workspace_precondition
+            | Masc.Workspace.Workspace_precondition_failed) ->
+      Ok { Masc_http_client.status=409; headers=[]; body="workspace precondition failed" }
+  in
+  let read send = Masc_tui_http.read_keeper_file_changes ~host ~port
+      ~keeper_name:"alpha" ~window_hours:24. ~send in
+  let bound expected read =
+    Masc_tui_workspace_read.with_binding ~host ~port ~expected
+      ~proof:Masc_tui_workspace_read.Request_precondition read in
+  let expect_calls expected = function
+    | Ok (snapshot : Masc.Tui_decode.file_change_snapshot) ->
+      check int "the admitted workspace's calls survive decoding" expected snapshot.fcs_calls_in_window
+    | Error detail -> failf "expected admitted file changes: %s" detail in
+  check bool "an unbound caller cannot dispatch file contents" true
+    (Result.is_error (read (send config_a (frame 11))) && Option.is_none !seen);
+  let health_only = Masc_tui_workspace_read.with_binding ~host ~port
+      ~expected:(identity base_a) ~proof:Masc_tui_workspace_read.Health_identity
+      (fun () -> read (send config_a (frame 11))) in
+  check bool "health-only proof cannot admit file contents" true
+    (Result.is_error health_only && Option.is_none !seen);
+  bound (identity base_a) (fun () ->
+    expect_calls 11 (read (send config_a (frame 11)));
+    let uri = Uri.of_string (Option.get !seen) in
+    let query = Uri.query uri in
+    check string "file changes use the requested Keeper endpoint"
+      "/api/v1/keepers/alpha/file-changes" (Uri.path uri);
+    check (option (list string)) "the GET carries the original base"
+      (Some [Unix.realpath base_a]) (List.assoc_opt "expected_base_path" query);
+    check (option (list string)) "the GET carries the original root"
+      (Some [Unix.realpath (Filename.concat base_a ".masc")])
+      (List.assoc_opt "expected_masc_root" query);
+    check bool "the replacement server cannot answer as the original workspace" true
+      (Result.is_error (read (send config_b (frame 22))));
+    check bool "another Keeper cannot answer this endpoint" true
+      (Result.is_error (read (send config_a (frame ~keeper:"beta" 11))));
+    List.iter (fun headers ->
+      check bool "an unattested success is refused" true
+        (Result.is_error (read (send config_a (frame ~headers 11)))))
+      [[]; [receipt; receipt]; [fst receipt, "wrong"]]);
+  bound (identity base_b) (fun () -> expect_calls 22 (read (send config_b (frame 22))))
+
 let test_operator_task_cancel_requires_token_bound_admin () =
   with_temp_base_path @@ fun base_path ->
   Auth.save_auth_config base_path
@@ -603,6 +673,8 @@ let () =
          ; ( "resolution"
            , [ test_case "workspace-bound reads preserve exact query authority" `Quick
                  test_workspace_bound_read_preconditions
+             ; test_case "file changes reject a replacement workspace and unadmitted response" `Quick
+                 test_file_changes_read_keeps_its_workspace
              ; test_case "original history survives workspace replacement and parallel reads" `Quick
                  test_history_read_keeps_original_workspace_through_replacement
              ; test_case "anonymous public hint is preserved" `Quick

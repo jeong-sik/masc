@@ -2339,7 +2339,7 @@
  (name test_server_auth_dashboard_actor_resolution)
  (modules test_server_auth_dashboard_actor_resolution)
  (libraries alcotest masc masc.auth masc.masc_types masc_server
-  masc.http_client masc_tui_kept_reads masc_tui_workspace_read
+  masc.http_client masc_tui_kept_reads masc_tui_workspace_read masc_tui_loader
   masc_tui_types masc_tui_fetched
   eio eio_main httpun unix uri yojson))
 

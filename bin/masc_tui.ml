@@ -6437,9 +6437,9 @@ let launch_file_changes_load state ~mailbox ~keeper_name =
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
       enqueue_async mailbox (File_changes_loaded (keeper_name, result)))
-    (fun () ->
+    (capture_workspace_json_read state (fun () ->
       Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
-        ~window_hours:changes_window_hours)
+        ~window_hours:changes_window_hours))
 
   end
 
@@ -6469,9 +6469,9 @@ let launch_acting_pane_changes_load state ~mailbox ~keeper_name =
       Masc_tui_async_read.launch
         ~deliver:(fun result ->
           enqueue_async mailbox (Acting_pane_changes_loaded (request, result)))
-        (fun () ->
+        (capture_workspace_json_read state (fun () ->
           Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
-            ~window_hours:changes_window_hours))
+            ~window_hours:changes_window_hours)))
 
   end
 
@@ -6536,11 +6536,12 @@ let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
       state.msg_file_changes_refresh_pending <- false;
       let host = server_peer_host in
       let port = state.port in
+      let read = capture_workspace_json_read state (fun () ->
+        Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
+          ~window_hours:changes_window_hours) in
       let run () =
         let result =
-          try
-            Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
-              ~window_hours:changes_window_hours
+          try read ()
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)

@@ -3096,6 +3096,8 @@
 (include stanzas/test_keeper_memory_write_growth_probe.inc)
 (include stanzas/test_keeper_memory_recall_parts.inc)
 
+(include stanzas/test_keeper_memory_recall_flow.inc)
+
 (include stanzas/test_keeper_memory_write_supersedes.inc)
 
 (include stanzas/test_keeper_tool_emission_hook.inc)

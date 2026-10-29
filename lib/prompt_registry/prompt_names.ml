@@ -184,6 +184,8 @@ let keeper_recall_status_none_found_needed = "keeper.recall.status.none_found_ne
 let keeper_recall_status_none_found_unsure = "keeper.recall.status.none_found_unsure"
 let keeper_recall_status_none_needed = "keeper.recall.status.none_needed"
 let keeper_recall_status_unavailable = "keeper.recall.status.unavailable"
+let keeper_recall_status_unavailable_turn_question =
+  "keeper.recall.status.unavailable_turn_question"
 let keeper_recall_status_partial = "keeper.recall.status.partial"
 let keeper_recall_status_search_hint = "keeper.recall.status.search_hint"
 let keeper_recall_status_search_hint_unavailable =
@@ -193,6 +195,7 @@ let keeper_recall_body_item = "keeper.recall.body.item"
 let keeper_recall_body_source_board = "keeper.recall.body.source_board"
 let keeper_recall_body_time_bound = "keeper.recall.body.time_bound"
 let keeper_recall_body_time_unjudged = "keeper.recall.body.time_unjudged"
+let keeper_recall_body_omitted = "keeper.recall.body.omitted"
 
 let keeper_world_active_goals_unavailable = "keeper.world.active_goals.unavailable"
 let keeper_world_active_goals_heading = "keeper.world.active_goals.heading"

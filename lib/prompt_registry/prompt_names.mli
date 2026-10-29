@@ -206,6 +206,7 @@ val keeper_recall_status_none_found_needed : string
 val keeper_recall_status_none_found_unsure : string
 val keeper_recall_status_none_needed : string
 val keeper_recall_status_unavailable : string
+val keeper_recall_status_unavailable_turn_question : string
 val keeper_recall_status_partial : string
 val keeper_recall_status_search_hint : string
 val keeper_recall_status_search_hint_unavailable : string
@@ -214,6 +215,7 @@ val keeper_recall_body_item : string
 val keeper_recall_body_source_board : string
 val keeper_recall_body_time_bound : string
 val keeper_recall_body_time_unjudged : string
+val keeper_recall_body_omitted : string
 
 val keeper_world_active_goals_unavailable : string
 val keeper_world_active_goals_heading : string

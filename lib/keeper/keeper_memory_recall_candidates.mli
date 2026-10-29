@@ -18,6 +18,10 @@ val line : t -> Yojson.Safe.t
     not a representable date is [null]; the candidate stays in. The origin is
     its kind only, never a trace id. *)
 
+val utc_day : float -> string option
+(** The UTC day of a time as {!line} writes it, [YYYY-MM-DD]. [None] for a
+    time that is not a representable date. *)
+
 val line_bytes : t -> int
 (** Bytes of the compact serialization of {!line}, as the JSON writer emits
     it: UTF-8 whenever the claim is. *)

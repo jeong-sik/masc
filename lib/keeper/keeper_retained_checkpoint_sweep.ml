@@ -14,6 +14,7 @@ type error =
   | Prior_input_history_unavailable of { path : string }
   | Store_missing of { path : string }
   | Store_unreadable of { path : string; detail : string }
+  | Metadata_unreadable of { path : string; detail : string }
   | Keeper_shares_store_directory of { keeper_name : string }
 
 let error_to_string = function
@@ -24,6 +25,8 @@ let error_to_string = function
      checkpoint evidence: " ^ path
   | Store_unreadable { path; detail } ->
     Printf.sprintf "keeper operation store %s is unreadable: %s" path detail
+  | Metadata_unreadable { path; detail } ->
+    Printf.sprintf "keeper metadata %s could not be inspected, so whether that keeper is registered is unknown: %s" path detail
   | Keeper_shares_store_directory { keeper_name } ->
     Printf.sprintf
       "keeper %s has the directory of the keepers/ store of the same name" keeper_name
@@ -70,6 +73,18 @@ let live_references_of_store path =
             |> List.map (fun (reference : Keeper_checkpoint_ref.t) -> reference.sha256))
          semantic_executions)
 
+(* Any entry named as the keeper's metadata, a dangling link included, counts
+   as registered; only its absence does not. *)
+let registered ~keepers_dir keeper_name =
+  let path =
+    Filename.concat keepers_dir
+      (Keeper_runtime_root_entry.keeper_basename ~keeper_name Keeper_runtime_root_entry.Metadata)
+  in
+  match kind path with
+  | Ok None -> Ok false
+  | Ok (Some _) -> Ok true
+  | Error detail -> Error (Metadata_unreadable { path; detail })
+
 let live_references ~runtime_root =
   let keepers_dir = Filename.concat runtime_root Common.keepers_runtime_dirname in
   let unreadable detail = Store_unreadable { path = keepers_dir; detail } in
@@ -77,26 +92,32 @@ let live_references ~runtime_root =
   if not present
   then Ok String_set.empty
   else
-    let* keeper_names = sorted_entries keepers_dir |> Result.map_error unreadable in
-    List.fold_left
-      (fun acc keeper_name ->
+    let* entries = sorted_entries keepers_dir |> Result.map_error unreadable in
+    (* Every directory and every keeper metadata names a candidate, so a
+       registered keeper whose whole directory was moved aside is read too. *)
+    let candidates =
+      List.fold_left
+        (fun names entry ->
+           String_set.add
+             (Option.value ~default:entry (Keeper_runtime_root_entry.metadata_keeper_name entry))
+             names)
+        String_set.empty
+        entries
+    in
+    String_set.fold
+      (fun keeper_name acc ->
          let* live = acc in
          let* keeper_dir =
            is_directory ~follow:true (Filename.concat keepers_dir keeper_name)
            |> Result.map_error unreadable
          in
+         let* registered = registered ~keepers_dir keeper_name in
          let root_store = Common.is_keepers_root_store_dirname keeper_name in
-         let has_metadata () =
-           Sys.file_exists
-             (Filename.concat keepers_dir
-                (Keeper_runtime_root_entry.keeper_basename ~keeper_name
-                   Keeper_runtime_root_entry.Metadata))
-         in
-         if not keeper_dir
-         then Ok live
-         else if root_store && has_metadata ()
+         if root_store && keeper_dir && registered
          then Error (Keeper_shares_store_directory { keeper_name })
-         else if root_store
+         else if root_store && keeper_dir
+         then Ok live
+         else if (not keeper_dir) && not registered
          then Ok live
          else
            let path =
@@ -106,13 +127,14 @@ let live_references ~runtime_root =
               as one holding only an answer queued for an unregistered name,
               names nothing. *)
            match live_references_of_store path with
-           | Error (Store_missing _) when not (has_metadata ()) -> Ok live
+           | Error (Store_missing _) when not registered -> Ok live
            | Error
-               ( Store_missing _ | Store_unreadable _ | Prior_input_history_unavailable _
-               | Keeper_shares_store_directory _ ) as error -> error
+               ( Store_missing _ | Store_unreadable _ | Metadata_unreadable _
+               | Prior_input_history_unavailable _ | Keeper_shares_store_directory _ ) as error ->
+             error
            | Ok shas -> Ok (List.fold_left (fun set sha -> String_set.add sha set) live shas))
+      candidates
       (Ok String_set.empty)
-      keeper_names
 
 let failed report detail = { report with failures = detail :: report.failures }
 

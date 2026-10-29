@@ -257,6 +257,42 @@ let test_an_unreadable_setting_fails_an_alias_lookup_only config =
   expect_error "an alias scan reads the broken one" ~mentioning:[ "@someone"; "broken" ] (ask config "someone")
 ;;
 
+(* The broadcast path finds a Keeper by alias with
+   [persisted_keeper_for_mention_target].  It shares its scan with the lookup,
+   so what it answers is pinned here: one claim finds the Keeper, no claim finds
+   nobody, two claims or an unreadable setting are errors, and a target that is
+   not a Keeper id reads nothing. *)
+let test_the_alias_scan_the_broadcast_path_uses_answers_as_before config =
+  register_keeper config ~mention_targets:[ "alice"; "a-team" ] "alice";
+  register_keeper config ~mention_targets:[ "bob"; "shared" ] "bob";
+  register_keeper config ~mention_targets:[ "carol"; "shared" ] "carol";
+  let scan target =
+    Keeper_meta_store.persisted_keeper_for_mention_target config ~mention_target:target
+  in
+  (match scan "A-Team" with
+   | Ok (Some (keeper_name, _)) -> check string "one claim finds its Keeper" "alice" keeper_name
+   | Ok None | Error _ -> fail "an alias one Keeper claims must find that Keeper");
+  (match scan "nobody" with
+   | Ok None -> ()
+   | Ok (Some _) | Error _ -> fail "a name nobody claims finds nobody");
+  (match scan "shared" with
+   | Error detail ->
+     List.iter
+       (fun sub ->
+          check bool (Printf.sprintf "the error mentions %S (%s)" sub detail) true (contains ~sub detail))
+       [ "shared"; "bob"; "carol" ]
+   | Ok _ -> fail "two claims on one alias must be an error");
+  Out_channel.with_open_text (Keeper_types_profile.keeper_meta_path config "broken") (fun oc ->
+    output_string oc "{ this is not json");
+  (match scan "a-team" with
+   | Error detail ->
+     check bool (Printf.sprintf "the error names the unreadable Keeper (%s)" detail) true (contains ~sub:"broken" detail)
+   | Ok _ -> fail "an unreadable setting must be an error");
+  (match scan "" with
+   | Ok None -> ()
+   | Ok (Some _) | Error _ -> fail "a blank target reads no setting")
+;;
+
 (* A Board identity is 1 to 64 bytes.  A Keeper name may be longer, but then it
    cannot be recorded as a target, and saying "not declared" would hide that a
    Keeper by that name exists. *)
@@ -288,6 +324,8 @@ let () =
             (with_workspace test_two_keepers_claiming_one_alias_fail_the_lookup)
         ; test_case "an unreadable setting fails an alias lookup only" `Quick
             (with_workspace test_an_unreadable_setting_fails_an_alias_lookup_only)
+        ; test_case "the alias scan the broadcast path uses answers as before" `Quick
+            (with_workspace test_the_alias_scan_the_broadcast_path_uses_answers_as_before)
         ; test_case "a Keeper name too long for a Board identity fails the lookup" `Quick
             (with_workspace test_a_keeper_name_too_long_for_a_board_identity_fails_the_lookup)
         ] )

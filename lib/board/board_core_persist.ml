@@ -960,9 +960,15 @@ let update_post_with_outcome
           |> Result.map (fun (audience, unresolved) ->
             normalized_title, normalized_body, normalized_meta, audience, unresolved)
     in
+    (* Only the owner's edit is worked out early. Anybody else's is refused
+       under the locks and asks the lookup nothing. *)
+    let owned_by_editor (existing : post) =
+      String.equal (Agent_id.to_string existing.author) (Agent_id.to_string editor_id)
+    in
     let planned =
-      with_lock store (fun () -> Hashtbl.find_opt store.posts key)
-      |> Option.map (fun existing -> existing, plan existing)
+      match with_lock store (fun () -> Hashtbl.find_opt store.posts key) with
+      | Some existing when owned_by_editor existing -> Some (existing, plan existing)
+      | Some _ | None -> None
     in
     (* Persist-before-commit: acquire persistence first, then state. Keeping
        state locked through the write preserves unrelated concurrent fields

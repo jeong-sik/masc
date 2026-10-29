@@ -305,14 +305,23 @@ let a_read_would_wait () =
        true)
 ;;
 
+(* Raising here ends the write that holds the lock, so a lookup that runs under
+   the lock fails the test instead of leaving it waiting on that lock. *)
+let require_the_store_lock_is_free () =
+  if a_read_would_wait () then fail "the lookup ran while the store lock was held"
+;;
+
 (* The lookup reads the disk.  An edit asks it before it takes the locks, so no
    reader waits behind the disk. *)
 let test_an_edit_asks_the_lookup_before_it_takes_the_locks =
   let armed = ref false in
-  let waits = ref [] in
+  let asked = ref 0 in
   let lookup =
     Recipient_lookup.make (fun candidate ->
-      if !armed then waits := a_read_would_wait () :: !waits;
+      if !armed
+      then (
+        incr asked;
+        require_the_store_lock_is_free ());
       declared_from table candidate)
   in
   started ~lookup (fun () ->
@@ -325,8 +334,33 @@ let test_an_edit_asks_the_lookup_before_it_takes_the_locks =
             ~editor:"writer"
             ~content:"@alice and @bob"
             ()));
-    check bool "the lookup was asked" true (!waits <> []);
-    check bool "no reader waited while it ran" false (List.exists Fun.id !waits))
+    check bool "the lookup was asked" true (!asked > 0))
+;;
+
+(* Only the owner's edit is worked out before the locks.  Somebody else's edit
+   is refused under them and asks the lookup nothing. *)
+let test_an_edit_by_somebody_else_asks_the_lookup_nothing =
+  let armed = ref false in
+  let asked = ref 0 in
+  let lookup =
+    Recipient_lookup.make (fun candidate ->
+      if !armed then incr asked;
+      declared_from table candidate)
+  in
+  started ~lookup (fun () ->
+    let post, _ = get (write "first") in
+    armed := true;
+    (match
+       Board_dispatch.update_post_with_unresolved
+         ~post_id:(post_id post)
+         ~editor:"somebody-else"
+         ~content:"@alice and @bob"
+         ()
+     with
+     | Error (Board.Unauthorized _) -> ()
+     | Ok _ -> fail "somebody else must not edit the post"
+     | Error error -> fail (Board.show_board_error error));
+    check int "the lookup was not asked" 0 !asked)
 ;;
 
 (* What an edit worked out before the locks belongs to the post it saw.  When
@@ -340,7 +374,10 @@ let test_an_edit_works_out_again_when_the_post_changed_during_the_lookup =
       if String.equal (spelled candidate) "alice"
       then (
         incr alice_asked;
-        if !alice_asked = 1 then !during_the_lookup ());
+        if !alice_asked = 1
+        then (
+          require_the_store_lock_is_free ();
+          !during_the_lookup ()));
       declared_from table candidate)
   in
   started ~lookup (fun () ->
@@ -464,6 +501,10 @@ let () =
             "an edit asks the lookup before it takes the locks"
             `Quick
             test_an_edit_asks_the_lookup_before_it_takes_the_locks
+        ; test_case
+            "an edit by somebody else asks the lookup nothing"
+            `Quick
+            test_an_edit_by_somebody_else_asks_the_lookup_nothing
         ; test_case
             "an edit works out again when the post changed during the lookup"
             `Quick

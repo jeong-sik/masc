@@ -664,10 +664,10 @@ let frame_choice_after_play (state : state) =
   | None -> match current_detail_reading state with
   | Some reading -> `Detail_reading reading
   | None ->
-      if state.about_open then `About
+      if state.help_open then `Help
+      else if state.about_open then `About
       else if state.context_inspector_open then `Context
       else if state.keeper_deletions_open then `Keeper_deletions
-      else if state.help_open then `Help
       else match state.queue_panel with
       | Some panel -> `Queue panel
       | None ->
@@ -694,6 +694,22 @@ let queue_below_play state ~terminal_rows =
     | `Account_login _ | `Palette | `Collab _ | `Lane_addons _ | `Detail_reading _
     | `About | `Context | `Keeper_deletions | `Help | `Agenda | `Answering
     | `Patch | `Link | `Client_detail _ | `Surface -> None
+
+(* Input follows the same top frame as rendering. Only the inspector's visible
+   row-search editor accepts text; its covered surface never owns paste. *)
+let panel_input_owner (state : state) ~terminal_rows =
+  let module Presented = Masc_tui_presented in
+  match frame_choice state ~terminal_rows with
+  | `Help -> Some Presented.Help
+  | `About -> Some Presented.About
+  | `Context ->
+      Some (if Option.is_some state.search then Presented.Context_search
+            else Presented.Context)
+  | `Agenda -> Some Presented.Agenda
+  | `Answering -> Some Presented.Answering
+  | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
+  | `Lane_addons _ | `Detail_reading _ | `Keeper_deletions
+  | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None
 
 let render ~home ~compact_recovery_notice (state : state) =
   (* Marks number the targets of this frame alone. *)

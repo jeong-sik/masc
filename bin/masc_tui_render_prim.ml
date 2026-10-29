@@ -562,7 +562,7 @@ let recovery_box_bottom state buf ~cols =
   draw_box_bottom_with_recovery buf ~cols selected;
   selected
 
-let footer_line ?(status = []) ?position ?(recovery_in_slot = None)
+let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
     (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room; "?:help" stays as the
      door back. One seam for every surface, which is what makes the setting
@@ -571,9 +571,11 @@ let footer_line ?(status = []) ?position ?(recovery_in_slot = None)
      one named question for where [?] answers -- the rule and its reasons
      live with [Masc_tui_types.help_key_answers], beside the predicates it
      is made of. *)
-  let door_answers = help_key_answers ~compact_viewport:false state in
+  let door_answers = Option.value help_door
+      ~default:(help_key_answers ~compact_viewport:false state) in
   let hints =
-    if not state.hints_visible then Masc_tui_footer.help_hint_item
+    if not state.hints_visible then
+      if Option.value help_door ~default:true then Masc_tui_footer.help_hint_item else ""
     else if door_answers then Masc_tui_footer.ensure_help_item hints
     else hints
   in
@@ -1463,7 +1465,7 @@ let surface_window_height state ~terminal_rows ~count =
     ~chrome:surface_chrome_rows ~count ~preview_keep:None
     ~overflow_takes_row:true
 
-let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : state)
+let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sidebar (state : state)
     ~terminal_rows ~cols ~surface_key ~title ~hints
     ~(body : budget:int -> chrome_body -> unit) =
   let setup_started = Masc_tui_frame_timing.start_stage () in
@@ -1588,7 +1590,7 @@ let surface_chrome ~overflow ?(frame = Chrome_screen) ?status ?sidebar (state : 
         combined
   in
   Buffer.add_string buf
-    (footer_line ?status ~recovery_in_slot
+    (footer_line ?help_door ?status ~recovery_in_slot
        state ~max_cells:full_cols ~hints);
   Masc_tui_frame_timing.finish_stage ~name:"surface.materialize" materialize_started;
   finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols:full_cols buf
@@ -3849,7 +3851,8 @@ let help_lines ~width (state : state) =
             (fun line -> Message_layout.wrap_words ~max_cells:(max 1 width)
               (Terminal_text.single_line line)) lines @ [ "" ])
   in
-  candle @ (match Masc_tui_keys.help_sections_for_state state with
+  let _, cols = get_terminal_size () in
+  candle @ (match Masc_tui_keys.help_sections_for_state ~cols state with
   | [] -> slash_commands
   | first :: rest ->
       section first @ slash_commands @ List.concat_map section rest)

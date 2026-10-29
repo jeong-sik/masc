@@ -18465,7 +18465,7 @@ type clamped_scroll =
 
 let play_card_of_reader = function
   | Some (Play_invite_scroll (card, _)) -> Some card
-  | Some (Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+  | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
          | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
          | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
          | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
@@ -18481,7 +18481,7 @@ let play_card_of_reader = function
 
 let queue_owner_of_reader = function
   | Some (Queue_panel_presented owner) -> Some owner
-  | Some (Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+  | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
          | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
          | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
          | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
@@ -18496,7 +18496,7 @@ let queue_owner_of_reader = function
 
 let help_is_presented = function
   | Some Help_presented -> true
-  | Some (Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+  | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
          | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
          | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
          | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _

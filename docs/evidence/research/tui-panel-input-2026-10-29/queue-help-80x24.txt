@@ -1,0 +1,24 @@
+ 대시보드  작업  ▸키퍼  사용량  보드  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  hints off                                                  │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  MASC · Multi-Agent Shared Context                                           │
+│                                                                              │
+│Candle details                                                                │
+│Candle unavailable: live keeper status unavailable: fixture unavailable       │
+│                                                                              │
+│◆ Chat                                                                        │
+│  Left             empty composer: open the Keeper list; with text: move the  │
+│                   cursor left                                                │
+│  Right            roster focused: return focus to the chat composer          │
+│  Up / Down        roster focused: move; chat scrolled back: adjust by one    │
+│                   line                                                       │
+│  Enter            send from chat, or open the selected Keeper from the roster│
+│  Ctrl-J           newline in the draft                                       │
+│  Ctrl-Y           record into the draft; again to stop and keep what was said│
+│  Ctrl-A           continuous capture on/off: each sentence starts the next   │
+│                   capture                                                    │
+│  [lines 1-16/907]                                                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+  TUI 0bf908e ≠ server fixture (generations differ)  ?:help
+ › to fixture   (i to write)

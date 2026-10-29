@@ -1,0 +1,51 @@
+{
+  "source_sha": "0bf908eaf7de3a8a63d69a1bf3edfb635d5c4f16",
+  "binary_sha256": "38c99ff6e395a7fed5e5e1945a01e5badb774a902c7c0a980f68456977a62076",
+  "fixture_sha256": "374818af7daded45b8bb80a2e8cb16e9caa00c7eb4f8450762f8f48d0b95255d",
+  "run_id": 40705531014,
+  "scope": "real candidate TUI; synthetic unavailable/read-only server",
+  "captured_at": "2026-10-29 Asia/Seoul",
+  "terminal_sizes": [
+    "120x36",
+    "80x24"
+  ],
+  "provenance": "direct; synthetic conversation and read-only fixture; manual observation, no UI assertions",
+  "files": [
+    {
+      "path": "context-before-paste.txt",
+      "sha256": "a1e82e8f19e3b84a104b107409ffa34507d991fb793685739ae7792d7c9be787"
+    },
+    {
+      "path": "chat-after-context-paste.txt",
+      "sha256": "089727f9506d31a64e27bab70649068b30e7b5e391d7342b2d2a639be61b223a"
+    },
+    {
+      "path": "context-after-question.txt",
+      "sha256": "1303784220ff67106b46df824a00b76a268c0567122ed114e23381d6a65c1593"
+    },
+    {
+      "path": "about-before-question.txt",
+      "sha256": "f6e260cb30a2b32cdc36ecf29943d3c2efaa2e33d151396e3336c0d511dba7ea"
+    },
+    {
+      "path": "about-after-question.txt",
+      "sha256": "f6e260cb30a2b32cdc36ecf29943d3c2efaa2e33d151396e3336c0d511dba7ea"
+    },
+    {
+      "path": "queue-120x36.txt",
+      "sha256": "3dcf190d552738413b02902160aa73311c0298ba7fd78beb47785c280b254e10"
+    },
+    {
+      "path": "queue-80x24.txt",
+      "sha256": "8a1ee71927f7c89e0730ca253cc4691f906e5cad144563a539f598ebc3fcd896"
+    },
+    {
+      "path": "queue-help-80x24.txt",
+      "sha256": "025014697eb9e42b8c44817f843a0ac43879a9b3128b1672af7824382bc39bcf"
+    },
+    {
+      "path": "queue-return-from-help-80x24.txt",
+      "sha256": "8a1ee71927f7c89e0730ca253cc4691f906e5cad144563a539f598ebc3fcd896"
+    }
+  ]
+}

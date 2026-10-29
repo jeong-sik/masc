@@ -2381,9 +2381,44 @@ let exact_activity_bindings =
   ; b Navigate "Esc / q" "back" ~help:"retain the activity draft for this workspace and lane"
   ]
 
-let help_sections_for_state (state : state) =
+let about_bindings =
+  [b Act "c" "candle"; b Meta "Esc" "close"; b Meta "?" "help"]
+
+let context_bindings ~cols (state : state) =
+  let module Inspector = Masc_tui_context_inspector in
+  let split = cols >= Masc_tui_roster_pane.threshold_cols in
+  let tabs = [b Navigate "1/2/3/4 or Tab" "switch"] in
+  let turns = match state.context_inspector_target with
+    | Inspector.Recent _ -> [b Navigate "[ / ]" "turn"]
+    | Inspector.Pinned _ -> [] in
+  let refresh = [b Meta "r" "refresh"] in
+  let help = [b Meta "?" "help"] in
+  if Option.is_some state.search then
+    [b Search "type" "query"; b Act "Enter" "keep search"; b Meta "Esc" "cancel search"]
+  else match state.context_inspector_tab, state.context_inspector_exact with
+  | Inspector.Response, _ ->
+      tabs @ turns @ [b Navigate "j/k" "scroll"; b Navigate "PgUp/PgDn" "page";
+        b Navigate "Home/End" "top/bottom"] @ refresh @ [b Meta "Esc" "return"] @ help
+  | (Inspector.Composition | Inspector.Exact_input | Inspector.Input_map), Some _ ->
+      [b Navigate "4" "response"; b Navigate "j/k" "scroll"; b Meta "Esc" "list"] @ help
+  | (Inspector.Exact_input | Inspector.Input_map), None ->
+      tabs @ turns
+      @ (if state.context_inspector_tab = Inspector.Exact_input
+            && Option.is_some state.context_inspector_reading then [b Search "/" "search"] else [])
+      @ [b Navigate "j/k" (if split then "select or scroll" else "select")]
+      @ (if split then [b Navigate "h/l" "pane"] else [])
+      @ [b Act "Enter" "open exact"] @ refresh @ [b Meta "Esc" "close"] @ help
+  | Inspector.Composition, None ->
+      tabs @ turns @ [b Navigate "j/k" "scroll"] @ refresh @ [b Meta "Esc" "close"] @ help
+
+let footer_hints_about () = hints_of_bindings about_bindings
+let footer_hints_context ~cols state = hints_of_bindings (context_bindings ~cols state)
+
+let help_sections_for_state ~cols (state : state) =
   let active =
-    if state.patch_modal_open then Some ("Patch review", patch_review_bindings)
+    if state.about_open then Some ("About", about_bindings)
+    else if state.context_inspector_open then Some ("Context", context_bindings ~cols state)
+    else if state.patch_modal_open then Some ("Patch review", patch_review_bindings)
     else if state.view = Lanes && Option.is_some state.exact_activity_open then
       Some ("Exact activity", exact_activity_bindings)
     else if state.view = Lanes && Option.is_some state.machine_activity_open then

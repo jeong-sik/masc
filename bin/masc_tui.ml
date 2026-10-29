@@ -23890,7 +23890,7 @@ let main
   (* All interaction evidence is committed together after terminal output. *)
   let presented = ref (Presented.initial ~approval:None
       ~presses:Masc_tui_hit.no_zones ~panes:Masc_tui_pane_selection.no_panes
-      ~reader:None) in
+      ~reader:None ~panel_owner:None) in
   (* The left button's gesture from press to release. *)
   let pointer_gesture = ref Masc_tui_pane_selection.Idle in
   let terminal_title = Terminal_title.create () in
@@ -24184,7 +24184,18 @@ let main
           ~cols:physical_cols (!presented).presses
     | (true | false), (Some _ | None), (Some _ | None) -> None
   in
+  let context_search_owner () =
+    let Workspace_authority workspace = state.workspace_authority in
+    Option.map (fun keeper -> Presented.{ workspace;
+        inspector = state.context_inspector_generation; keeper }) state.context_inspector_keeper
+  in
+  let panel_owner_matches current_owner =
+    Presented.panel_owner_matches !presented ~current_owner
+      ~context_search_owner:(context_search_owner ())
+  in
   let present_frame frame approval presses panes ~input_pending ~write ~flush reader =
+    let panel_owner = Masc_tui_render.panel_input_owner state
+        ~terminal_rows:frame.Frame_presenter.terminal_rows in
     let damaged = Terminal_write_repair.consume_damage () in
     let candidate_rejection = presented_input_rejection
         ~rows:(max 1 frame.Frame_presenter.terminal_rows)
@@ -24200,16 +24211,17 @@ let main
     let owned_reader reader =
       Option.is_some (queue_owner_of_reader reader)
       || Option.is_some (play_card_of_reader reader)
-      || help_is_presented reader in
+      || Option.is_some panel_owner in
     let owner_changed =
       queue_selection_authority_changed ~presented:(!presented).presses ~candidate:presses
       || queue_owner_authority_changed ~presented:(queue_owner_of_reader (!presented).reader)
            ~candidate:(queue_owner_of_reader reader)
       || play_owner_authority_changed ~presented:(play_card_of_reader (!presented).reader)
            ~candidate:(play_card_of_reader reader)
-      || Bool.not (Bool.equal (help_is_presented (!presented).reader) (help_is_presented reader))
+      || Presented.panel_presentation_changed !presented ~current_owner:panel_owner
       || ((damaged || Option.is_none (Frame_presenter.presented_rows frame_presenter))
-          && (owned_reader (!presented).reader || owned_reader reader))
+          && (Option.is_some (!presented).panel_owner
+              || owned_reader (!presented).reader || owned_reader reader))
     in
     let frame =
       match !pointer_gesture with
@@ -24227,7 +24239,7 @@ let main
     let preset_confirmation_changed = match reader with
       | Some (Preset_detail_scroll (_, Some confirmation)) ->
         preset_confirmation_needs_present state confirmation
-      | None | Some (Task_detail _ | Board_read _ | Message_scroll _
+      | None | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _
         | Schedule_detail_scroll _ | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _
         | Acting _ | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
         | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
@@ -24278,7 +24290,7 @@ let main
         if owner_changed then pointer_gesture := Masc_tui_pane_selection.Idle;
         let input_pending = input_pending () in
         presented := Presented.presented !presented ~approval ~presses ~panes ~reader
-            ~owner_changed ~input_pending;
+            ~panel_owner ~owner_changed ~input_pending;
         state.quit_armed <- Option.map (fun arm ->
             let was_visible = Option.exists (fun previous ->
                 Masc_tui_action_notice.same_quit previous arm.qa_confirmation) previous_quit in
@@ -25995,18 +26007,13 @@ and is loaded on demand through keeper_skill.
       let frame_unavailable () =
         not state.image_open && not state.msx_open
         && Option.is_none (Frame_presenter.presented_rows frame_presenter) in
-      let help_is_current () =
+      let panel_owner_current () =
         let terminal_rows, _ = get_terminal_size () in
-        match Masc_tui_render.frame_choice state ~terminal_rows with
-        | `Help -> true
-        | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
-        | `Lane_addons _ | `Detail_reading _ | `About | `Context | `Keeper_deletions
-        | `Queue _ | `Agenda | `Answering | `Patch | `Link | `Client_detail _
-        | `Surface -> false in
+        Masc_tui_render.panel_input_owner state ~terminal_rows in
       let input_not_yet_admissible () =
         input_barrier_held () || frame_unavailable ()
         || (not state.image_open && not state.msx_open
-            && help_is_presented (!presented).reader <> help_is_current ()) in
+            && not (panel_owner_matches (panel_owner_current ()))) in
       (* A rejected event cancels any signal confirmation above. MIDI
          withdrawal and async results after this point produce newer notices. *)
       let ordinary_before_input = Masc_tui_action_notice.ordinary state.last_action in
@@ -26215,11 +26222,10 @@ and is loaded on demand through keeper_skill.
         | Presented.Reject_action | Presented.Reject_paste ->
             pointer_gesture := Masc_tui_pane_selection.Idle;
             None in
-      (* Help can open over any surface and close before the replacement is
-         painted. Neither transition may send its input to a hidden owner. *)
-      let presented_help = help_is_presented (!presented).reader in
-      let current_help = help_is_current () in
-      let help_decision = match input with
+      (* Panels and their search editors use the actual frame choice. Neither
+         a transition nor nontext paste may reach a covered text owner. *)
+      let current_panel = panel_owner_current () in
+      let panel_decision = match input with
         | None -> Presented.Accept_input
         | Some event ->
             let kind = match event with
@@ -26227,13 +26233,14 @@ and is loaded on demand through keeper_skill.
               | Mouse_wheel _ -> Presented.Action
               | Pasted _ -> Presented.Paste
               | Graphics_reply _ -> Presented.Protocol in
-            Presented.decide_help_input ~external_surface:(state.image_open || state.msx_open)
-              ~presented_help ~current_help kind in
-      (match help_decision with
+            Presented.decide_snapshot_input !presented
+              ~external_surface:(state.image_open || state.msx_open)
+              ~context_search_owner:(context_search_owner ()) ~current_owner:current_panel kind in
+      (match panel_decision with
        | Presented.Reject_paste when Option.is_some interrupted_paste ->
            presented := Presented.reject_recovery !presented
        | Presented.Accept_input | Presented.Reject_action | Presented.Reject_paste -> ());
-      let input = match help_decision with
+      let input = match panel_decision with
         | Presented.Accept_input -> input
         | Presented.Reject_action | Presented.Reject_paste ->
             pointer_gesture := Masc_tui_pane_selection.Idle;
@@ -26244,9 +26251,14 @@ and is loaded on demand through keeper_skill.
         | Presented.Accept_input -> false
         | Presented.Reject_action | Presented.Reject_paste -> true in
       let rejected_operator_input = rejected || decision_rejected unpresented_decision
-        || decision_rejected help_decision in
-      let help_owns_input = presented_help && current_help
+        || decision_rejected panel_decision in
+      let panel_owns_input = Option.is_some current_panel
+        && panel_owner_matches current_panel
         && not state.image_open && not state.msx_open in
+      let help_owns_input = panel_owns_input && current_panel = Some Presented.Help in
+      let panel_owns_commands = panel_owns_input && (match current_panel with
+            | Some (Presented.Help | About | Context | Agenda | Answering) -> true
+            | Some Context_search | None -> false) in
       if rejected_operator_input then begin
         Masc_tui_exit_signals.withdraw_interrupt exit_signals;
         (* The read may have consumed its final byte, so neither the pre- nor
@@ -26255,12 +26267,12 @@ and is loaded on demand through keeper_skill.
       end;
       let input = match input with
         | Some (Mouse_wheel (direction, _, _))
-            when not help_owns_input && Option.is_some (current_code_hover state) ->
+            when not panel_owns_input && Option.is_some (current_code_hover state) ->
             Some (Key (match direction with
               | Masc.Tui_mouse_protocol.Wheel_up -> "up"
               | Masc.Tui_mouse_protocol.Wheel_down -> "down"))
         | Some (Mouse_left_press _ | Key ("tab" | "shift-tab" | "\t"))
-            when not help_owns_input && Option.is_some (current_code_hover state) ->
+            when not panel_owns_input && Option.is_some (current_code_hover state) ->
             state.code_hover <- None; input
         | Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
                | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _)
@@ -26278,7 +26290,7 @@ and is loaded on demand through keeper_skill.
            state.code_navigation <- None
        | Some (Graphics_reply _) | None -> ());
       let input =
-        if not help_owns_input && recovered_paste_send_locked state then
+        if not panel_owns_input && recovered_paste_send_locked state then
           match input with
           | Some (Key "\007")
             when paste_phase input_reader = No_paste
@@ -26418,7 +26430,7 @@ and is loaded on demand through keeper_skill.
            report_input_rejection state Masc_tui_action_notice.Paste_rejected
              "Screen not yet displayed; paste was not applied, paste it again";
            Render_schedule.request render_schedule Render_schedule.Background);
-      (match help_decision with
+      (match panel_decision with
        | Presented.Accept_input -> ()
        | Presented.Reject_action ->
            report_input_rejection state Masc_tui_action_notice.Input_rejected
@@ -26917,7 +26929,7 @@ and is loaded on demand through keeper_skill.
       in
       let preset_confirmation_wheel = match wheel_reader with
         | Some (Preset_detail_scroll _) -> true
-        | None | Some (Task_detail _ | Board_read _ | Message_scroll _
+        | None | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _
           | Schedule_detail_scroll _ | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _
           | Acting _ | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
           | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
@@ -26973,7 +26985,9 @@ and is loaded on demand through keeper_skill.
                 (task_inspection_source reader.tci_original))
             | None -> Option.fold ~none:false ~some:editing (current_detail_reading state) in
       let text_target =
-        if help_owns_input then None
+        if panel_owns_commands then None
+        else if panel_owns_input && current_panel = Some Presented.Context_search then
+          Some Text_row_search
         else if not compact_viewport && reading_search_editing then Some Text_row_search
         else text_input_target state ~compact_viewport in
       let play_shown = play_card_shown state in
@@ -27020,7 +27034,7 @@ and is loaded on demand through keeper_skill.
           && (match key with
               | Some name when String.length name > 1 ->
                   let rows, _ = get_terminal_size () in
-                  if help_owns_input || Option.is_some presented_queue_input then true
+                  if panel_owns_commands || Option.is_some presented_queue_input then true
                   else (match Masc_tui_render.frame_choice state ~terminal_rows:rows with
                    | `Queue _ -> true
                    | `Agenda | `Answering | `Help -> not command_reading
@@ -27373,6 +27387,9 @@ and is loaded on demand through keeper_skill.
        | Some (Mouse_wheel _) when Option.is_some wheel_reader ->
            Option.iter (apply_clamped_scroll state) wheel_reader
        | Some (Mouse_wheel _) when queue_play_owner = Wait_for_frame -> ()
+       (* Marked panel controls and its reader wheel were handled above.
+          Unmarked gestures cannot use stale geometry from a covered view. *)
+       | Some (Mouse_left_release _ | Mouse_wheel _) when panel_owns_input -> ()
        (* The wheel over the Activity pane scrolls the pane. The pane is drawn
           under no modal (render reserves it no columns while one is up), so
           the hit test alone says whether the notch is the pane's. *)
@@ -27467,11 +27484,12 @@ and is loaded on demand through keeper_skill.
        | Some (Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _)
        | Some (Mouse_wheel _)
        | None -> ());
-      (* A Help key interrupts a pending confirmation; it cannot confirm an
-         action belonging to the surface the sheet covers. *)
-      let confirmation_key = if help_owns_input then None else key in
+      (* Panel input cannot confirm an action belonging to the covered
+         surface. Global quit keeps its existing, separate key policy. *)
+      let confirmation_key = if panel_owns_input then None else key in
+      let quit_input_key = if help_owns_input then None else key in
       let quit_key =
-        match confirmation_key with
+        match quit_input_key with
         | Some k ->
             (* On a viewport too small to draw them, no field is taking keys:
                the compact fallback further down owns every remaining one, so
@@ -27625,6 +27643,7 @@ and is loaded on demand through keeper_skill.
       then state.acting_pane_cursor <- None;
       let composer_claimed =
         Option.is_none state.account_login && Option.is_none state.lane_addons &&
+        not panel_owns_input &&
         (not compact_viewport)
         && (match queue_play_owner with Wait_for_frame -> false
             | Queue_input _ | Play_input | Other_input -> true)
@@ -27699,6 +27718,52 @@ and is loaded on demand through keeper_skill.
        | Some _, Some view ->
            state.browser_lane <- Some (Browser_lane_view.yield_refresh_to_input view)
        | None, _ | Some _, None -> ());
+      let handle_row_search_key k =
+           let query = Option.value state.search ~default:"" in
+           (match k with
+            | "esc" -> state.search <- None
+            | "\r" ->
+                state.search <- None;
+                state.search_last <- query
+            | "\127" | "\b" ->
+                let shorter =
+                  Masc_tui_message_layout.drop_last_utf8_scalar query
+                in
+                state.search <- Some shorter;
+                search_jump state ~query:shorter ~after:(-1)
+            | s
+              when (String.length s = 1 && Char.code s.[0] >= 32)
+                   || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
+                let longer = query ^ s in
+                state.search <- Some longer;
+                search_jump state ~query:longer ~after:(-1)
+            | _ -> ())
+      in
+      let toggle_roster_chrome () =
+           if state.keeper_navigation_open then begin
+             state.keeper_navigation_open <- false;
+             state.keeper_message_focus <- Right_pane;
+             if terminal_columns >= Masc_tui_roster_pane.threshold_cols then
+               state.roster_pane_preference <- Masc_tui_roster_pane.Hidden
+           end else (match
+              Masc_tui_roster_pane.toggle_preference state.roster_pane_preference
+                ~cols:terminal_columns
+            with
+            | None ->
+                report_action state "system"
+                  (Printf.sprintf
+                     "Keeper roster needs %d columns; preference unchanged"
+                     Masc_tui_roster_pane.threshold_cols)
+            | Some preference ->
+                state.roster_pane_preference <- preference;
+                reconcile_chat_focus ();
+                Render_schedule.request render_schedule Render_schedule.Force)
+      in
+      let toggle_activity_chrome () =
+           (match toggle_acting_pane state with
+            | Error reason -> report_action state "system" reason
+            | Ok _ -> Render_schedule.request render_schedule Render_schedule.Force)
+      in
       (match key with
        (* Above the modals on purpose: the reason to reach for this is to copy
           something already on the screen, and the help overlay is one of the
@@ -27750,6 +27815,489 @@ and is loaded on demand through keeper_skill.
             | "G" ->
               let count, height = Masc_tui_render.help_viewport state in
               state.help_scroll <- Masc_tui_scroll.maximum ~count ~height
+            | _ -> ())
+       | Some "?" when Option.is_some current_panel
+                       && current_panel <> Some Presented.Context_search ->
+           state.help_open <- true;
+           state.help_scroll <- 0
+       | Some "esc" when panel_owns_input && current_panel = Some Presented.About ->
+           state.about_open <- false;
+           state.emblem_frame <- -1;
+           state.quit_armed <- None
+       | Some _ when panel_owns_input && current_panel = Some Presented.About
+                     && Masc_tui_emblem_screen.drawn () = Masc_tui_emblem_screen.Moving
+                     && state.emblem_frame < Masc_tui_emblem_screen.final_frame ->
+           state.emblem_frame <- Masc_tui_emblem_screen.final_frame;
+           state.quit_armed <- None;
+           Render_schedule.request render_schedule Render_schedule.Force
+       | Some _ when panel_owns_input && quit_key -> handle_quit_key ()
+       | Some k when panel_owns_input && String.equal k toggle_roster_pane_key ->
+           toggle_roster_chrome ()
+       | Some k when panel_owns_input && String.equal k toggle_acting_pane_key ->
+           toggle_activity_chrome ()
+       | Some k when panel_owns_input && current_panel = Some Presented.Context_search ->
+           handle_row_search_key k
+
+       | Some k
+         when panel_owns_input && current_panel = Some Presented.Context ->
+           let exact_input_items () =
+             match state.context_inspector_reading with
+             | None -> []
+             | Some (_, reading) ->
+                 Option.fold ~none:[] ~some:Masc_tui_context_inspector.exact_input_items
+                   (Masc_tui_context_inspector.observed_input reading)
+           in
+           let input_map_rows () =
+             match state.context_inspector_reading with
+             | None -> []
+             | Some (_, reading) ->
+                 (match Masc_tui_context_inspector.inspected_record
+                          ~target:state.context_inspector_target reading with
+                  | None -> []
+                  | Some record ->
+                      Masc_tui_context_inspector.input_map_rows record
+                        (Masc_tui_context_inspector.observed_input reading))
+           in
+           let close () = close_context_inspector state in
+           (match k with
+            | "esc" when state.context_inspector_tab = Masc_tui_context_inspector.Response ->
+                enter_context_inspector_tab state state.context_inspector_response_return
+            | "esc" ->
+                (match state.context_inspector_exact with
+                 | Some _ ->
+                     state.context_inspector_exact <- None;
+                     state.context_inspector_scroll <- 0
+                 | None -> close ())
+            | "[" | "]" ->
+                (* Turn navigation: [ steps back through the page's rows, ]
+                   steps forward, and the fetch re-reads the exact provider
+                   input for the row they name. The keys work on every tab;
+                   a row without a snapshot says so on the request tab. *)
+                let count =
+                  match state.context_inspector_reading with
+                  | Some
+                      ( _
+                      , Masc_tui_context_inspector.Turn_read
+                          { selection = { Masc_tui_context_inspector.rows; _ }
+                        ; _ } ) ->
+                      List.length rows
+                  | Some (_, (Masc_tui_context_inspector.Request_failed _ | Masc_tui_context_inspector.Turn_read_failed _ | Masc_tui_context_inspector.Exact_read _))
+                  | None -> 0
+                in
+                (match Masc_tui_context_inspector.step_recent state.context_inspector_target
+                         ~older:(String.equal k "[") ~count with
+                 | None -> ()
+                 | Some target ->
+                     let forecast =
+                       match state.context_inspector_reading, state.context_inspector_keeper with
+                       | Some (reading_keeper, reading), Some keeper_name
+                         when String.equal reading_keeper keeper_name ->
+                           Masc_tui_context_inspector.retained_forecast reading
+                       | Some _, _ | None, _ -> None
+                     in
+                     state.context_inspector_target <- target;
+                     state.context_inspector_reading <- None;
+                     state.context_inspector_read_at <- None;
+                     state.context_inspector_cursor <- 0;
+                     state.context_inspector_exact <- None;
+                     state.context_inspector_scroll <- 0;
+                     state.context_inspector_detail_scroll <- 0;
+                     state.context_inspector_response_scroll <- 0;
+                     supersede_context_inspector_part_load state None;
+                     state.context_inspector_part <- Masc_tui_fetched.clear state.context_inspector_part;
+                     Option.iter
+                       (fun keeper_name -> launch_context_inspector_load ?forecast state
+                          ~mailbox:async_messages ~keeper_name)
+                       state.context_inspector_keeper)
+            | "/" when
+                state.context_inspector_tab
+                = Masc_tui_context_inspector.Exact_input
+                && Option.is_none state.context_inspector_exact
+                && Option.is_some state.context_inspector_reading ->
+                (* The inspector owns this editor even if an asynchronous
+                   surface form arrived underneath it. *)
+                state.search <- Some "";
+                Option.iter (fun owner ->
+                    presented := Presented.begin_context_search !presented owner)
+                  (context_search_owner ())
+            | ("n" | "N") when state.search_last <> "" ->
+                let after = Option.value (search_row_cursor state) ~default:0 in
+                search_jump state ~query:state.search_last ~after
+                  ~backwards:(String.equal k "N")
+            | "r" ->
+                Option.iter
+                  (fun keeper_name ->
+                     (* Historical sources have no dependency on today's catalogue. *)
+                     (match state.context_inspector_target with
+                      | Masc_tui_context_inspector.Recent _ ->
+                          launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox:async_messages
+                      | Masc_tui_context_inspector.Pinned _ -> ());
+                     launch_context_inspector_load state
+                       ~mailbox:async_messages ~keeper_name)
+                  state.context_inspector_keeper
+            | "1" ->
+                enter_context_inspector_tab state
+                  Masc_tui_context_inspector.Composition
+            | "2" ->
+                enter_context_inspector_tab state
+                  Masc_tui_context_inspector.Exact_input
+            | "3" ->
+                enter_context_inspector_tab state
+                  Masc_tui_context_inspector.Input_map
+            | "4" ->
+                enter_context_inspector_tab state Masc_tui_context_inspector.Response
+            | "\t" | "left" | "right"
+              when Option.is_none state.context_inspector_exact
+                   || state.context_inspector_tab = Masc_tui_context_inspector.Response ->
+                enter_context_inspector_tab state
+                  (match state.context_inspector_tab with
+                   | Masc_tui_context_inspector.Composition ->
+                       Masc_tui_context_inspector.Exact_input
+                   | Masc_tui_context_inspector.Exact_input ->
+                       Masc_tui_context_inspector.Input_map
+                   | Masc_tui_context_inspector.Input_map ->
+                       Masc_tui_context_inspector.Response
+                   | Masc_tui_context_inspector.Response ->
+                       Masc_tui_context_inspector.Composition)
+            | "h" | "l"
+              when Option.is_none state.context_inspector_exact
+                   && terminal_columns >= keeper_split_threshold_cols
+                   && (state.context_inspector_tab = Masc_tui_context_inspector.Exact_input
+                       || state.context_inspector_tab = Masc_tui_context_inspector.Input_map) ->
+                (* The same caret the roster and the board carry: which pane
+                   hears j/k is a question the reader answers, not the
+                   layout. *)
+                state.context_inspector_focus <-
+                  (if k = "h" then Left_pane else Right_pane)
+            | ("j" | "down" | "k" | "up" | "pageup" | "pagedown"
+              | "home" | "end" | "wheel-up" | "wheel-down")
+              when state.context_inspector_tab = Masc_tui_context_inspector.Response ->
+                let count, height = Masc_tui_render.context_inspector_viewport state in
+                let move = match k with
+                  | "j" | "down" | "wheel-down" -> Masc_tui_scroll.down ~count ~height
+                  | "k" | "up" | "wheel-up" -> Masc_tui_scroll.up ~count ~height
+                  | "pageup" -> Masc_tui_scroll.page_up ~count ~height
+                  | "pagedown" -> Masc_tui_scroll.page_down ~count ~height
+                  | "home" -> (fun _ -> 0)
+                  | _ -> (fun _ -> Masc_tui_scroll.maximum ~count ~height) in
+                state.context_inspector_response_scroll <- move state.context_inspector_response_scroll
+            | ("j" | "down" | "k" | "up")
+              when Option.is_some state.context_inspector_exact
+                   || state.context_inspector_tab
+                      = Masc_tui_context_inspector.Composition ->
+                let count, height =
+                  Masc_tui_render.context_inspector_viewport state
+                in
+                let move =
+                  match k with
+                  | "j" | "down" -> Masc_tui_scroll.down
+                  | _ -> Masc_tui_scroll.up
+                in
+                state.context_inspector_scroll <-
+                  move ~count ~height state.context_inspector_scroll
+            | ("j" | "down" | "k" | "up")
+              when state.context_inspector_focus = Right_pane
+                   && terminal_columns >= keeper_split_threshold_cols ->
+                (* The width condition mirrors the h/l arm that set the
+                   focus. A terminal narrowed under the threshold keeps the
+                   stored focus but renders no split, and without this guard
+                   j/k would reach for a detail window that does not exist --
+                   while the cursor arms below, which do work, sat
+                   shadowed. *)
+                let count, height =
+                  Masc_tui_render.context_inspector_detail_viewport state
+                in
+                let move =
+                  match k with
+                  | "j" | "down" -> Masc_tui_scroll.down
+                  | _ -> Masc_tui_scroll.up
+                in
+                state.context_inspector_detail_scroll <-
+                  move ~count ~height state.context_inspector_detail_scroll
+            | "j" | "down" ->
+                let count =
+                  match state.context_inspector_tab with
+                  | Masc_tui_context_inspector.Exact_input ->
+                      List.length (exact_input_items ())
+                  | Masc_tui_context_inspector.Input_map ->
+                      List.length (input_map_rows ())
+                  | Masc_tui_context_inspector.Composition
+                  | Masc_tui_context_inspector.Response -> 0
+                in
+                let last = max 0 (count - 1) in
+                state.context_inspector_cursor <-
+                  min last (state.context_inspector_cursor + 1);
+                (* A new item is a new document; its reader starts at its
+                   top, not at the window the previous one was left in. *)
+                state.context_inspector_detail_scroll <- 0
+            | "k" | "up" ->
+                state.context_inspector_cursor <-
+                  max 0 (state.context_inspector_cursor - 1);
+                state.context_inspector_detail_scroll <- 0
+            | "\r" ->
+                if
+                  state.context_inspector_tab
+                  = Masc_tui_context_inspector.Exact_input
+                then begin
+                  match
+                    List.nth_opt (exact_input_items ())
+                      state.context_inspector_cursor
+                  with
+                  | Some _ ->
+                      state.context_inspector_exact <-
+                        Some state.context_inspector_cursor;
+                      state.context_inspector_scroll <- 0
+                  | None -> ()
+                end
+                else if
+                  state.context_inspector_tab
+                  = Masc_tui_context_inspector.Input_map
+                then begin
+                  match
+                    List.nth_opt (input_map_rows ())
+                      state.context_inspector_cursor
+                  with
+                  | Some { Masc_tui_context_inspector.verified_item = Some _; _ } ->
+                      state.context_inspector_exact <-
+                        Some state.context_inspector_cursor;
+                      state.context_inspector_scroll <- 0
+                  | Some _ | None -> ()
+                end
+            | _ -> ())
+       (* /about is modal for the help sheet's reason: Esc closes it, c turns
+          the candle to its other style, and everything else is swallowed so
+          no surface binding or global quit fires under it. *)
+       | Some k when panel_owns_input && current_panel = Some Presented.About ->
+           (match k with
+            | "esc" -> state.about_open <- false
+            | "c" ->
+                let style = Masc_tui_emblem_screen.next_style (Masc_tui_emblem_screen.style ()) in
+                Masc_tui_emblem_screen.set_style style;
+                (* The candle on screen already changed, so a write that
+                   failed is said out loud, or a restart would bring the old
+                   one back with nothing having told the reader. *)
+                (match
+                   Masc_tui_config.set_candle ~base_path
+                     (Masc_tui_emblem_screen.string_of_style style)
+                 with
+                 | Ok () -> ()
+                 | Error message -> report_action state "error" ("Candle not saved: " ^ message))
+            | _ -> ())
+       | Some k when panel_owns_input && current_panel = Some Presented.Agenda ->
+           let close () = close_agenda state in
+           (match k with
+            | ";" | "esc" -> close ()
+            | "?" ->
+                state.help_open <- true;
+                state.help_scroll <- 0
+            | "pageup" | "pagedown" | "home" | "end" | "g" | "G" ->
+                let count, height = Masc_tui_render.agenda_viewport state in
+                let scroll = Masc_tui_render.agenda_scroll_position state in
+                state.agenda_navigation <- Agenda_read_rows;
+                state.agenda_scroll <-
+                  (match k with
+                   | "pageup" -> Masc_tui_scroll.page_up ~count ~height scroll
+                   | "pagedown" -> Masc_tui_scroll.page_down ~count ~height scroll
+                   | "home" | "g" -> 0
+                   | "end" | "G" -> Masc_tui_scroll.maximum ~count ~height
+                   | _ -> scroll)
+            | "j" | "down" | "k" | "up" ->
+                let lines = Masc_tui_render.agenda_lines state in
+                (match Masc_tui_agenda.target_indexes lines with
+                 | [] ->
+                     (* Nothing here can be opened, so the keys keep the
+                        meaning they had: a panel of prose is still read. *)
+                     let count, height =
+                       Masc_tui_render.agenda_viewport state
+                     in
+                     let move =
+                       match k with
+                       | "j" | "down" -> Masc_tui_scroll.down
+                       | _ -> Masc_tui_scroll.up
+                     in
+                     state.agenda_scroll <-
+                       move ~count ~height state.agenda_scroll
+                 | _ :: _ ->
+                     state.agenda_navigation <- Agenda_follow_selection;
+                     let direction =
+                       match k with
+                       | "j" | "down" -> Masc_tui_agenda.Next
+                       | _ -> Masc_tui_agenda.Previous
+                     in
+                     state.agenda_selected <-
+                       Masc_tui_agenda.step lines
+                         ~selected:state.agenda_selected direction;
+                     let _, height = Masc_tui_render.agenda_viewport state in
+                     Option.iter
+                       (fun cursor ->
+                          state.agenda_scroll <-
+                            Masc_tui_scroll.ensure_visible ~cursor ~height
+                              state.agenda_scroll)
+                       (Masc_tui_agenda.selected_index lines
+                          ~selected:state.agenda_selected))
+            | "\r" ->
+                let lines = Masc_tui_render.agenda_lines state in
+                let _, height = Masc_tui_render.agenda_viewport state in
+                let scroll = Masc_tui_render.agenda_scroll_position state in
+                let selected =
+                  match Masc_tui_agenda.selected_index lines
+                          ~selected:state.agenda_selected with
+                  | Some index when index >= scroll && index < scroll + height ->
+                      Masc_tui_agenda.selected_line lines
+                        ~selected:state.agenda_selected
+                  | Some _ | None -> None
+                in
+                (match selected with
+                 | Some { Masc_tui_agenda.goes_to = Masc_tui_agenda.Nowhere; _ }
+                 | None -> ()
+                 | Some
+                     { Masc_tui_agenda.goes_to = Masc_tui_agenda.Keeper_holding _
+                     ; _
+                     } ->
+                     (* The held call is answered on the Approvals surface,
+                        which is where every held call is answered. *)
+                     close ();
+                     goto_surface state ~mailbox:async_messages Approvals
+                 | Some
+                     { Masc_tui_agenda.goes_to =
+                         Masc_tui_agenda.Ask_to_answer ask
+                     ; _
+                     } ->
+                     (* Opened the way Home's Question row opens it: on
+                        Approvals, with this ask under the cursor and its
+                        questions in front of the operator. *)
+                     close ();
+                     (match
+                        List.find_index
+                          (fun row -> Masc.Tui_decode_asks.(equal_ask_key ask (ask_key row)))
+                          (open_ask_rows state)
+                      with
+                      | None ->
+                          report_action state "system"
+                            "Question changed; choose again"
+                      | Some cursor ->
+                          goto_surface state ~mailbox:async_messages Approvals;
+                          (* The reader follows the ask it was opened on,
+                             not the cursor, so a reader left open on
+                             another ask would come back instead of this
+                             one. *)
+                          (match state.ask_answer_mode with
+                           | Ask_answering { aam_ask }
+                             when not (Masc.Tui_decode_asks.equal_ask_key aam_ask ask) ->
+                               leave_ask_answering state
+                           | Ask_answering _ | Ask_browsing -> ());
+                          state.ask_cursor <- Ask.On cursor;
+                          enter_ask_answering state)
+                 | Some
+                     { Masc_tui_agenda.goes_to =
+                         Masc_tui_agenda.Goal_to_confirm goal_id
+                     ; _
+                     } ->
+                     (* The Goal's detail is where its proof is read and
+                        confirmed, the same landing a followed goal link
+                        gives. *)
+                     close ();
+                     (* The detail is reconciled against the filtered list on
+                        the next planning load, so a filter that hides Goals
+                        awaiting confirmation would send the operator back to
+                        the list. Only such a filter is widened. *)
+                     (match state.planning_filter with
+                      | Planning_filter_all | Planning_filter_active -> ()
+                      | Planning_filter_completed | Planning_filter_dropped ->
+                          state.planning_filter <- Planning_filter_active);
+                     goto_surface state ~mailbox:async_messages Planning;
+                     state.planning_mode <- Planning_detail goal_id;
+                     state.planning_scroll <- 0;
+                     state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
+                     launch_goal_timeline_load state ~mailbox:async_messages
+                       goal_id
+                 | Some
+                     { Masc_tui_agenda.goes_to =
+                         Masc_tui_agenda.Stuck_task task_id
+                     ; _
+                     } ->
+                     (* Work nobody holds is read on the task itself, the
+                        same landing the palette gives a task id. *)
+                     close ();
+                     goto_surface state ~mailbox:async_messages Planning;
+                     state.planning_mode <- Planning_list;
+                     state.task_detail_id <- Some task_id;
+                     state.task_detail_scroll <- 0;
+                     state.task_history <- Masc_tui_fetched.clear state.task_history;
+                     state.task_focus <-
+                       Masc_tui_overview_tasks.land_on state.tasks ~task_id;
+                     launch_task_history_load state ~mailbox:async_messages
+                       task_id)
+            | _ -> ())
+       | Some k when panel_owns_input && current_panel = Some Presented.Answering ->
+           let close () =
+             state.answering_open <- false;
+             state.answering_scroll <- 0;
+             state.answering_cursor <- 0
+           in
+           (match k with
+            | "@" | "esc" -> close ()
+            (* The footer stamps the help door on this row, so the key has
+               to answer; the sheet is read-only and may cover the overlay,
+               the way the activity overlays allow it to. *)
+            | "?" ->
+                state.help_open <- true;
+                state.help_scroll <- 0
+            | "j" | "down" | "k" | "up" ->
+                let lines = Masc_tui_render_prim.answering_lines state in
+                let targets = Masc_tui_answering.target_indexes lines in
+                (match targets with
+                 | [] ->
+                     let count, height = Masc_tui_render.answering_viewport state in
+                     let move = match k with
+                       | "j" | "down" -> Masc_tui_scroll.down
+                       | _ -> Masc_tui_scroll.up
+                     in
+                     state.answering_scroll <- move ~count ~height state.answering_scroll
+                 | _ ->
+                     let position =
+                       let rec find i = function
+                         | [] -> 0
+                         | index :: rest ->
+                             if index = state.answering_cursor then i
+                             else find (i + 1) rest
+                       in
+                       find 0 targets
+                     in
+                     let next_position =
+                       match k with
+                       | "j" | "down" ->
+                           min (List.length targets - 1) (position + 1)
+                       | _ -> max 0 (position - 1)
+                     in
+                     let cursor = List.nth targets next_position in
+                     state.answering_cursor <- cursor;
+                     let _, height =
+                       Masc_tui_render.answering_viewport state
+                     in
+                     (* Keep the cursor row on screen: scroll only as far as
+                        needed, in either direction. *)
+                     if cursor < state.answering_scroll then
+                       state.answering_scroll <- cursor
+                     else if cursor >= state.answering_scroll + height then
+                       state.answering_scroll <- cursor - height + 1)
+            | "pageup" | "pagedown" | "home" | "end" ->
+                let count, height = Masc_tui_render.answering_viewport state in
+                state.answering_scroll <-
+                  (match k with
+                   | "pageup" -> Masc_tui_scroll.page_up ~count ~height state.answering_scroll
+                   | "pagedown" -> Masc_tui_scroll.page_down ~count ~height state.answering_scroll
+                   | "home" -> 0
+                   | _ -> Masc_tui_scroll.maximum ~count ~height)
+            | "\r" ->
+                let lines = Masc_tui_render_prim.answering_lines state in
+                (match Masc_tui_render.answering_selected_target state ~lines with
+                 | Some keeper_name ->
+                     close ();
+                     enter_keeper_chat ~return_to:Keeper_chat_return_list state ~mailbox:async_messages
+                       ~keeper_name ~drain_queue:(fun () ->
+                         drain_queued_message state ~base_path ~mailbox:async_messages)
+                 | None -> ())
             | _ -> ())
        (* A Play card can arrive after the last Queue frame, or close before
           its replacement frame. The last accepted owner keeps the keys until
@@ -28627,16 +29175,6 @@ and is loaded on demand through keeper_skill.
        (* A visible arrival consumes its first key. Esc leaves the overlay; every
           other key reaches the final frame without also activating a shortcut
           below it. In particular q cannot arm quit while skipping motion. *)
-       | Some "esc" when state.about_open ->
-           state.about_open <- false;
-           state.emblem_frame <- -1;
-           state.quit_armed <- None
-       | Some _ when state.about_open
-                     && Masc_tui_emblem_screen.drawn () = Masc_tui_emblem_screen.Moving
-                     && state.emblem_frame < Masc_tui_emblem_screen.final_frame ->
-           state.emblem_frame <- Masc_tui_emblem_screen.final_frame;
-           state.quit_armed <- None;
-           Render_schedule.request render_schedule Render_schedule.Force
        (* [quit_key] is already false while anything is taking typed text, the
           row search and the Board draft among them, so this asks nothing more
           than that. It used to restate those two by hand and let a compact
@@ -28647,29 +29185,8 @@ and is loaded on demand through keeper_skill.
        (* Also above the modals: the roster is chrome around whatever is
           showing, and reclaiming its columns should not depend on which
           surface is up. *)
-       | Some k when String.equal k toggle_roster_pane_key ->
-           if state.keeper_navigation_open then begin
-             state.keeper_navigation_open <- false;
-             state.keeper_message_focus <- Right_pane;
-             if terminal_columns >= Masc_tui_roster_pane.threshold_cols then
-               state.roster_pane_preference <- Masc_tui_roster_pane.Hidden
-           end else (match
-              Masc_tui_roster_pane.toggle_preference state.roster_pane_preference
-                ~cols:terminal_columns
-            with
-            | None ->
-                report_action state "system"
-                  (Printf.sprintf
-                     "Keeper roster needs %d columns; preference unchanged"
-                     Masc_tui_roster_pane.threshold_cols)
-            | Some preference ->
-                state.roster_pane_preference <- preference;
-                reconcile_chat_focus ();
-                Render_schedule.request render_schedule Render_schedule.Force)
-       | Some k when String.equal k toggle_acting_pane_key ->
-           (match toggle_acting_pane state with
-            | Error reason -> report_action state "system" reason
-            | Ok _ -> Render_schedule.request render_schedule Render_schedule.Force)
+       | Some k when String.equal k toggle_roster_pane_key -> toggle_roster_chrome ()
+       | Some k when String.equal k toggle_acting_pane_key -> toggle_activity_chrome ()
        | Some k when (let terminal_rows, _ = get_terminal_size () in
              match Masc_tui_render.frame_choice state ~terminal_rows with
              | `Queue _ -> true | _ -> false) ->
@@ -28838,232 +29355,6 @@ and is loaded on demand through keeper_skill.
           toggles remain global above it, matching Help and Palette. An
           active surface search outranks it: typing during a search is the
           search, and the search arm below owns those keys. *)
-       | Some k
-         when state.context_inspector_open && Option.is_none state.search ->
-           let exact_input_items () =
-             match state.context_inspector_reading with
-             | None -> []
-             | Some (_, reading) ->
-                 Option.fold ~none:[] ~some:Masc_tui_context_inspector.exact_input_items
-                   (Masc_tui_context_inspector.observed_input reading)
-           in
-           let input_map_rows () =
-             match state.context_inspector_reading with
-             | None -> []
-             | Some (_, reading) ->
-                 (match Masc_tui_context_inspector.inspected_record
-                          ~target:state.context_inspector_target reading with
-                  | None -> []
-                  | Some record ->
-                      Masc_tui_context_inspector.input_map_rows record
-                        (Masc_tui_context_inspector.observed_input reading))
-           in
-           let close () = close_context_inspector state in
-           (match k with
-            | "esc" when state.context_inspector_tab = Masc_tui_context_inspector.Response ->
-                enter_context_inspector_tab state state.context_inspector_response_return
-            | "esc" ->
-                (match state.context_inspector_exact with
-                 | Some _ ->
-                     state.context_inspector_exact <- None;
-                     state.context_inspector_scroll <- 0
-                 | None -> close ())
-            | "[" | "]" ->
-                (* Turn navigation: [ steps back through the page's rows, ]
-                   steps forward, and the fetch re-reads the exact provider
-                   input for the row they name. The keys work on every tab;
-                   a row without a snapshot says so on the request tab. *)
-                let count =
-                  match state.context_inspector_reading with
-                  | Some
-                      ( _
-                      , Masc_tui_context_inspector.Turn_read
-                          { selection = { Masc_tui_context_inspector.rows; _ }
-                        ; _ } ) ->
-                      List.length rows
-                  | Some (_, (Masc_tui_context_inspector.Request_failed _ | Masc_tui_context_inspector.Turn_read_failed _ | Masc_tui_context_inspector.Exact_read _))
-                  | None -> 0
-                in
-                (match Masc_tui_context_inspector.step_recent state.context_inspector_target
-                         ~older:(String.equal k "[") ~count with
-                 | None -> ()
-                 | Some target ->
-                     let forecast =
-                       match state.context_inspector_reading, state.context_inspector_keeper with
-                       | Some (reading_keeper, reading), Some keeper_name
-                         when String.equal reading_keeper keeper_name ->
-                           Masc_tui_context_inspector.retained_forecast reading
-                       | Some _, _ | None, _ -> None
-                     in
-                     state.context_inspector_target <- target;
-                     state.context_inspector_reading <- None;
-                     state.context_inspector_read_at <- None;
-                     state.context_inspector_cursor <- 0;
-                     state.context_inspector_exact <- None;
-                     state.context_inspector_scroll <- 0;
-                     state.context_inspector_detail_scroll <- 0;
-                     state.context_inspector_response_scroll <- 0;
-                     supersede_context_inspector_part_load state None;
-                     state.context_inspector_part <- Masc_tui_fetched.clear state.context_inspector_part;
-                     Option.iter
-                       (fun keeper_name -> launch_context_inspector_load ?forecast state
-                          ~mailbox:async_messages ~keeper_name)
-                       state.context_inspector_keeper)
-            | "/" when
-                state.context_inspector_tab
-                = Masc_tui_context_inspector.Exact_input
-                && Option.is_none state.context_inspector_exact
-                && Option.is_some state.context_inspector_reading ->
-                (* The surface search's own arm sits below this modal block,
-                   so the pane starts the search itself: same state, same
-                   keys, and the block above now yields while it runs. *)
-                state.search <- Some ""
-            | "r" ->
-                Option.iter
-                  (fun keeper_name ->
-                     (* Historical sources have no dependency on today's catalogue. *)
-                     (match state.context_inspector_target with
-                      | Masc_tui_context_inspector.Recent _ ->
-                          launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox:async_messages
-                      | Masc_tui_context_inspector.Pinned _ -> ());
-                     launch_context_inspector_load state
-                       ~mailbox:async_messages ~keeper_name)
-                  state.context_inspector_keeper
-            | "1" ->
-                enter_context_inspector_tab state
-                  Masc_tui_context_inspector.Composition
-            | "2" ->
-                enter_context_inspector_tab state
-                  Masc_tui_context_inspector.Exact_input
-            | "3" ->
-                enter_context_inspector_tab state
-                  Masc_tui_context_inspector.Input_map
-            | "4" ->
-                enter_context_inspector_tab state Masc_tui_context_inspector.Response
-            | "\t" | "left" | "right"
-              when Option.is_none state.context_inspector_exact
-                   || state.context_inspector_tab = Masc_tui_context_inspector.Response ->
-                enter_context_inspector_tab state
-                  (match state.context_inspector_tab with
-                   | Masc_tui_context_inspector.Composition ->
-                       Masc_tui_context_inspector.Exact_input
-                   | Masc_tui_context_inspector.Exact_input ->
-                       Masc_tui_context_inspector.Input_map
-                   | Masc_tui_context_inspector.Input_map ->
-                       Masc_tui_context_inspector.Response
-                   | Masc_tui_context_inspector.Response ->
-                       Masc_tui_context_inspector.Composition)
-            | "h" | "l"
-              when Option.is_none state.context_inspector_exact
-                   && terminal_columns >= keeper_split_threshold_cols
-                   && (state.context_inspector_tab = Masc_tui_context_inspector.Exact_input
-                       || state.context_inspector_tab = Masc_tui_context_inspector.Input_map) ->
-                (* The same caret the roster and the board carry: which pane
-                   hears j/k is a question the reader answers, not the
-                   layout. *)
-                state.context_inspector_focus <-
-                  (if k = "h" then Left_pane else Right_pane)
-            | ("j" | "down" | "k" | "up" | "pageup" | "pagedown"
-              | "home" | "end" | "wheel-up" | "wheel-down")
-              when state.context_inspector_tab = Masc_tui_context_inspector.Response ->
-                let count, height = Masc_tui_render.context_inspector_viewport state in
-                let move = match k with
-                  | "j" | "down" | "wheel-down" -> Masc_tui_scroll.down ~count ~height
-                  | "k" | "up" | "wheel-up" -> Masc_tui_scroll.up ~count ~height
-                  | "pageup" -> Masc_tui_scroll.page_up ~count ~height
-                  | "pagedown" -> Masc_tui_scroll.page_down ~count ~height
-                  | "home" -> (fun _ -> 0)
-                  | _ -> (fun _ -> Masc_tui_scroll.maximum ~count ~height) in
-                state.context_inspector_response_scroll <- move state.context_inspector_response_scroll
-            | ("j" | "down" | "k" | "up")
-              when Option.is_some state.context_inspector_exact
-                   || state.context_inspector_tab
-                      = Masc_tui_context_inspector.Composition ->
-                let count, height =
-                  Masc_tui_render.context_inspector_viewport state
-                in
-                let move =
-                  match k with
-                  | "j" | "down" -> Masc_tui_scroll.down
-                  | _ -> Masc_tui_scroll.up
-                in
-                state.context_inspector_scroll <-
-                  move ~count ~height state.context_inspector_scroll
-            | ("j" | "down" | "k" | "up")
-              when state.context_inspector_focus = Right_pane
-                   && terminal_columns >= keeper_split_threshold_cols ->
-                (* The width condition mirrors the h/l arm that set the
-                   focus. A terminal narrowed under the threshold keeps the
-                   stored focus but renders no split, and without this guard
-                   j/k would reach for a detail window that does not exist --
-                   while the cursor arms below, which do work, sat
-                   shadowed. *)
-                let count, height =
-                  Masc_tui_render.context_inspector_detail_viewport state
-                in
-                let move =
-                  match k with
-                  | "j" | "down" -> Masc_tui_scroll.down
-                  | _ -> Masc_tui_scroll.up
-                in
-                state.context_inspector_detail_scroll <-
-                  move ~count ~height state.context_inspector_detail_scroll
-            | "j" | "down" ->
-                let count =
-                  match state.context_inspector_tab with
-                  | Masc_tui_context_inspector.Exact_input ->
-                      List.length (exact_input_items ())
-                  | Masc_tui_context_inspector.Input_map ->
-                      List.length (input_map_rows ())
-                  | Masc_tui_context_inspector.Composition
-                  | Masc_tui_context_inspector.Response -> 0
-                in
-                let last = max 0 (count - 1) in
-                state.context_inspector_cursor <-
-                  min last (state.context_inspector_cursor + 1);
-                (* A new item is a new document; its reader starts at its
-                   top, not at the window the previous one was left in. *)
-                state.context_inspector_detail_scroll <- 0
-            | "k" | "up" ->
-                state.context_inspector_cursor <-
-                  max 0 (state.context_inspector_cursor - 1);
-                state.context_inspector_detail_scroll <- 0
-            | "\r" ->
-                if
-                  state.context_inspector_tab
-                  = Masc_tui_context_inspector.Exact_input
-                then begin
-                  match
-                    List.nth_opt (exact_input_items ())
-                      state.context_inspector_cursor
-                  with
-                  | Some _ ->
-                      state.context_inspector_exact <-
-                        Some state.context_inspector_cursor;
-                      state.context_inspector_scroll <- 0
-                  | None -> ()
-                end
-                else if
-                  state.context_inspector_tab
-                  = Masc_tui_context_inspector.Input_map
-                then begin
-                  match
-                    List.nth_opt (input_map_rows ())
-                      state.context_inspector_cursor
-                  with
-                  | Some { Masc_tui_context_inspector.verified_item = Some _; _ } ->
-                      state.context_inspector_exact <-
-                        Some state.context_inspector_cursor;
-                      state.context_inspector_scroll <- 0
-                  | Some _ | None -> ()
-                end
-            | _ -> ())
-       (* The help overlay is modal: it answers scrolling and closing, and
-          swallows everything else so a surface binding cannot fire under a
-          screen that is describing it. Quit stays global above. *)
-       (* /about is modal for the help sheet's reason: Esc closes it, c turns
-          the candle to its other style, and everything else is swallowed so
-          no surface binding or global quit fires under it. *)
        | Some k when Option.is_some (current_board_reader state) ->
            let reader=state.board_reader in
            let document=Masc_tui_board_reader.document reader in
@@ -29218,22 +29509,6 @@ and is loaded on demand through keeper_skill.
            (match reading with
             | Some reading -> open_detail_reading state reading
             | None -> report_action state "info" "No selected reading is available")
-       | Some k when state.about_open ->
-           (match k with
-            | "esc" -> state.about_open <- false
-            | "c" ->
-                let style = Masc_tui_emblem_screen.next_style (Masc_tui_emblem_screen.style ()) in
-                Masc_tui_emblem_screen.set_style style;
-                (* The candle on screen already changed, so a write that
-                   failed is said out loud, or a restart would bring the old
-                   one back with nothing having told the reader. *)
-                (match
-                   Masc_tui_config.set_candle ~base_path
-                     (Masc_tui_emblem_screen.string_of_style style)
-                 with
-                 | Ok () -> ()
-                 | Error message -> report_action state "error" ("Candle not saved: " ^ message))
-            | _ -> ())
        | Some k when state.keeper_deletions_open ->
            (match k with
             | "esc" | "D" -> state.keeper_deletions_open <- false
@@ -29284,230 +29559,6 @@ and is loaded on demand through keeper_skill.
             | Some snapshot ->
                 state.client_detail <- List.nth_opt snapshot.Masc.Tui_decode.cls_clients state.clients_surface_cursor;
                 state.client_detail_scroll <- 0)
-       (* Modal for the same reason the help sheet is: a panel that is
-          answering "what is coming" should not have a surface binding fire
-          underneath it. *)
-       | Some k when state.agenda_open ->
-           let close () = close_agenda state in
-           (match k with
-            | ";" | "esc" -> close ()
-            | "?" ->
-                state.help_open <- true;
-                state.help_scroll <- 0
-            | "pageup" | "pagedown" | "home" | "end" | "g" | "G" ->
-                let count, height = Masc_tui_render.agenda_viewport state in
-                let scroll = Masc_tui_render.agenda_scroll_position state in
-                state.agenda_navigation <- Agenda_read_rows;
-                state.agenda_scroll <-
-                  (match k with
-                   | "pageup" -> Masc_tui_scroll.page_up ~count ~height scroll
-                   | "pagedown" -> Masc_tui_scroll.page_down ~count ~height scroll
-                   | "home" | "g" -> 0
-                   | "end" | "G" -> Masc_tui_scroll.maximum ~count ~height
-                   | _ -> scroll)
-            | "j" | "down" | "k" | "up" ->
-                let lines = Masc_tui_render.agenda_lines state in
-                (match Masc_tui_agenda.target_indexes lines with
-                 | [] ->
-                     (* Nothing here can be opened, so the keys keep the
-                        meaning they had: a panel of prose is still read. *)
-                     let count, height =
-                       Masc_tui_render.agenda_viewport state
-                     in
-                     let move =
-                       match k with
-                       | "j" | "down" -> Masc_tui_scroll.down
-                       | _ -> Masc_tui_scroll.up
-                     in
-                     state.agenda_scroll <-
-                       move ~count ~height state.agenda_scroll
-                 | _ :: _ ->
-                     state.agenda_navigation <- Agenda_follow_selection;
-                     let direction =
-                       match k with
-                       | "j" | "down" -> Masc_tui_agenda.Next
-                       | _ -> Masc_tui_agenda.Previous
-                     in
-                     state.agenda_selected <-
-                       Masc_tui_agenda.step lines
-                         ~selected:state.agenda_selected direction;
-                     let _, height = Masc_tui_render.agenda_viewport state in
-                     Option.iter
-                       (fun cursor ->
-                          state.agenda_scroll <-
-                            Masc_tui_scroll.ensure_visible ~cursor ~height
-                              state.agenda_scroll)
-                       (Masc_tui_agenda.selected_index lines
-                          ~selected:state.agenda_selected))
-            | "\r" ->
-                let lines = Masc_tui_render.agenda_lines state in
-                let _, height = Masc_tui_render.agenda_viewport state in
-                let scroll = Masc_tui_render.agenda_scroll_position state in
-                let selected =
-                  match Masc_tui_agenda.selected_index lines
-                          ~selected:state.agenda_selected with
-                  | Some index when index >= scroll && index < scroll + height ->
-                      Masc_tui_agenda.selected_line lines
-                        ~selected:state.agenda_selected
-                  | Some _ | None -> None
-                in
-                (match selected with
-                 | Some { Masc_tui_agenda.goes_to = Masc_tui_agenda.Nowhere; _ }
-                 | None -> ()
-                 | Some
-                     { Masc_tui_agenda.goes_to = Masc_tui_agenda.Keeper_holding _
-                     ; _
-                     } ->
-                     (* The held call is answered on the Approvals surface,
-                        which is where every held call is answered. *)
-                     close ();
-                     goto_surface state ~mailbox:async_messages Approvals
-                 | Some
-                     { Masc_tui_agenda.goes_to =
-                         Masc_tui_agenda.Ask_to_answer ask
-                     ; _
-                     } ->
-                     (* Opened the way Home's Question row opens it: on
-                        Approvals, with this ask under the cursor and its
-                        questions in front of the operator. *)
-                     close ();
-                     (match
-                        List.find_index
-                          (fun row -> Masc.Tui_decode_asks.(equal_ask_key ask (ask_key row)))
-                          (open_ask_rows state)
-                      with
-                      | None ->
-                          report_action state "system"
-                            "Question changed; choose again"
-                      | Some cursor ->
-                          goto_surface state ~mailbox:async_messages Approvals;
-                          (* The reader follows the ask it was opened on,
-                             not the cursor, so a reader left open on
-                             another ask would come back instead of this
-                             one. *)
-                          (match state.ask_answer_mode with
-                           | Ask_answering { aam_ask }
-                             when not (Masc.Tui_decode_asks.equal_ask_key aam_ask ask) ->
-                               leave_ask_answering state
-                           | Ask_answering _ | Ask_browsing -> ());
-                          state.ask_cursor <- Ask.On cursor;
-                          enter_ask_answering state)
-                 | Some
-                     { Masc_tui_agenda.goes_to =
-                         Masc_tui_agenda.Goal_to_confirm goal_id
-                     ; _
-                     } ->
-                     (* The Goal's detail is where its proof is read and
-                        confirmed, the same landing a followed goal link
-                        gives. *)
-                     close ();
-                     (* The detail is reconciled against the filtered list on
-                        the next planning load, so a filter that hides Goals
-                        awaiting confirmation would send the operator back to
-                        the list. Only such a filter is widened. *)
-                     (match state.planning_filter with
-                      | Planning_filter_all | Planning_filter_active -> ()
-                      | Planning_filter_completed | Planning_filter_dropped ->
-                          state.planning_filter <- Planning_filter_active);
-                     goto_surface state ~mailbox:async_messages Planning;
-                     state.planning_mode <- Planning_detail goal_id;
-                     state.planning_scroll <- 0;
-                     state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
-                     launch_goal_timeline_load state ~mailbox:async_messages
-                       goal_id
-                 | Some
-                     { Masc_tui_agenda.goes_to =
-                         Masc_tui_agenda.Stuck_task task_id
-                     ; _
-                     } ->
-                     (* Work nobody holds is read on the task itself, the
-                        same landing the palette gives a task id. *)
-                     close ();
-                     goto_surface state ~mailbox:async_messages Planning;
-                     state.planning_mode <- Planning_list;
-                     state.task_detail_id <- Some task_id;
-                     state.task_detail_scroll <- 0;
-                     state.task_history <- Masc_tui_fetched.clear state.task_history;
-                     state.task_focus <-
-                       Masc_tui_overview_tasks.land_on state.tasks ~task_id;
-                     launch_task_history_load state ~mailbox:async_messages
-                       task_id)
-            | _ -> ())
-       (* Modal like the agenda sheet: a panel answering "who is mid-turn"
-          should not have a surface binding fire underneath it. j/k walk the
-          actionable rows (running and just finished), not raw lines, and
-          Enter opens that keeper's chat through the same path the palette
-          uses. The scroll follows the cursor instead of moving on its own. *)
-       | Some k when state.answering_open ->
-           let close () =
-             state.answering_open <- false;
-             state.answering_scroll <- 0;
-             state.answering_cursor <- 0
-           in
-           (match k with
-            | "@" | "esc" -> close ()
-            (* The footer stamps the help door on this row, so the key has
-               to answer; the sheet is read-only and may cover the overlay,
-               the way the activity overlays allow it to. *)
-            | "?" ->
-                state.help_open <- true;
-                state.help_scroll <- 0
-            | "j" | "down" | "k" | "up" ->
-                let lines = Masc_tui_render_prim.answering_lines state in
-                let targets = Masc_tui_answering.target_indexes lines in
-                (match targets with
-                 | [] ->
-                     let count, height = Masc_tui_render.answering_viewport state in
-                     let move = match k with
-                       | "j" | "down" -> Masc_tui_scroll.down
-                       | _ -> Masc_tui_scroll.up
-                     in
-                     state.answering_scroll <- move ~count ~height state.answering_scroll
-                 | _ ->
-                     let position =
-                       let rec find i = function
-                         | [] -> 0
-                         | index :: rest ->
-                             if index = state.answering_cursor then i
-                             else find (i + 1) rest
-                       in
-                       find 0 targets
-                     in
-                     let next_position =
-                       match k with
-                       | "j" | "down" ->
-                           min (List.length targets - 1) (position + 1)
-                       | _ -> max 0 (position - 1)
-                     in
-                     let cursor = List.nth targets next_position in
-                     state.answering_cursor <- cursor;
-                     let _, height =
-                       Masc_tui_render.answering_viewport state
-                     in
-                     (* Keep the cursor row on screen: scroll only as far as
-                        needed, in either direction. *)
-                     if cursor < state.answering_scroll then
-                       state.answering_scroll <- cursor
-                     else if cursor >= state.answering_scroll + height then
-                       state.answering_scroll <- cursor - height + 1)
-            | "pageup" | "pagedown" | "home" | "end" ->
-                let count, height = Masc_tui_render.answering_viewport state in
-                state.answering_scroll <-
-                  (match k with
-                   | "pageup" -> Masc_tui_scroll.page_up ~count ~height state.answering_scroll
-                   | "pagedown" -> Masc_tui_scroll.page_down ~count ~height state.answering_scroll
-                   | "home" -> 0
-                   | _ -> Masc_tui_scroll.maximum ~count ~height)
-            | "\r" ->
-                let lines = Masc_tui_render_prim.answering_lines state in
-                (match Masc_tui_render.answering_selected_target state ~lines with
-                 | Some keeper_name ->
-                     close ();
-                     enter_keeper_chat ~return_to:Keeper_chat_return_list state ~mailbox:async_messages
-                       ~keeper_name ~drain_queue:(fun () ->
-                         drain_queued_message state ~base_path ~mailbox:async_messages)
-                 | None -> ())
-            | _ -> ())
        | Some k when state.link_modal_open ->
            let close () =
              state.link_modal_open <- false;
@@ -30210,28 +30261,8 @@ and is loaded on demand through keeper_skill.
        (* Row search: typing moves the surface's row cursor live to the
           first match from the top; Enter keeps the query for n/N, Esc keeps
           nothing. The list itself never narrows -- see [search] in types. *)
-       | Some k
-         when text_input_target state ~compact_viewport
-              = Some Text_row_search ->
-           let query = Option.value state.search ~default:"" in
-           (match k with
-            | "esc" -> state.search <- None
-            | "\r" ->
-                state.search <- None;
-                state.search_last <- query
-            | "\127" | "\b" ->
-                let shorter =
-                  Masc_tui_message_layout.drop_last_utf8_scalar query
-                in
-                state.search <- Some shorter;
-                search_jump state ~query:shorter ~after:(-1)
-            | s
-              when (String.length s = 1 && Char.code s.[0] >= 32)
-                   || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
-                let longer = query ^ s in
-                state.search <- Some longer;
-                search_jump state ~query:longer ~after:(-1)
-            | _ -> ())
+       | Some k when text_input_target state ~compact_viewport = Some Text_row_search ->
+           handle_row_search_key k
        (* The app form takes every printable key while it is open, the way
           the filter does. Three fields in order, enter to advance and to
           send on the last, esc to abandon -- and abandoning clears the
@@ -35845,7 +35876,19 @@ and is loaded on demand through keeper_skill.
       let ready_input = input_reader_has_ready_input input_reader || not (Queue.is_empty hangul_latin_queue) in
       (* An incomplete sequence with no ready bytes must not starve recovery
          frames. A post-presentation hold keeps its eventual tail quarantined. *)
-      let transition_input_pending = ready_input || Option.is_some interrupted_paste in
+      let granted_search_paste =
+        Option.is_some (!presented).context_search
+        && panel_owner_current () = Some Presented.Context_search
+        && panel_owner_matches (Some Presented.Context_search)
+        && (match paste_phase input_reader with
+            | Pasting paste -> not (cancel_armed paste)
+            | No_paste | Draining_tail _ -> false) in
+      (* Slash gives this unfinished paste to the query. Let that reader
+         finish before committing the search frame, even between buffers;
+         an explicit cancel and unrelated incomplete sequences still allow
+         recovery instructions to be presented. *)
+      let transition_input_pending = ready_input || Option.is_some interrupted_paste
+        || granted_search_paste in
       let terminal_rows, _ = get_terminal_size () in
       let frame_choice = Masc_tui_render.frame_choice state ~terminal_rows in
       let owned_frame = match frame_choice with
@@ -35858,10 +35901,12 @@ and is loaded on demand through keeper_skill.
         | `Queue _ | `Play_card _ | `Account_login _ | `Palette | `Collab _ | `Lane_addons _
         | `Detail_reading _ | `About | `Context | `Keeper_deletions | `Help
         | `Agenda | `Answering | `Patch | `Link | `Client_detail _ | `Surface -> false in
+      let panel_changed = Presented.panel_presentation_changed !presented
+          ~current_owner:(Masc_tui_render.panel_input_owner state ~terminal_rows) in
       let defer_owned_frame = transition_input_pending && not compact_recovery
         && (owned_frame || Option.is_some (queue_owner_of_reader (!presented).reader)
             || Option.is_some (play_card_of_reader (!presented).reader)
-            || help_is_presented (!presented).reader) in
+            || help_is_presented (!presented).reader || panel_changed) in
       (match
          Render_schedule.take
            ~input_pending:ready_input

@@ -28,7 +28,9 @@ let render_about (state : state) =
         Masc_tui_emblem_screen.Keepers_read (List.length state.keepers)
   in
   surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
-    ~surface_key:"about" ~title:(screen_title " MASC") ~hints:"c:candle  Esc:close"
+    ~help_door:true
+    ~surface_key:"about" ~title:(screen_title " MASC")
+    ~hints:(Masc_tui_keys.footer_hints_about ())
     ~body:(fun ~budget c ->
       Masc_tui_emblem_screen.about_body
         ~cols:(framed_inner_width cols) ~rows:budget
@@ -152,26 +154,7 @@ let render_context_inspector state =
          ; ("response", Masc_tui_context_inspector.Response)
          ])
   in
-  let hints =
-    let module Inspector = Masc_tui_context_inspector in
-    let turn_hint = match state.context_inspector_target with
-      | Inspector.Recent _ -> "[ / ]:turn  "
-      | Inspector.Pinned _ -> "" in
-    match state.context_inspector_tab, state.context_inspector_exact with
-    | Inspector.Response, _ ->
-        "1/2/3/4 or Tab:switch  " ^ turn_hint
-        ^ "j/k:scroll  PgUp/PgDn:page  Home/End:top/bottom  r:refresh  Esc:return"
-    | (Inspector.Composition | Inspector.Exact_input | Inspector.Input_map), Some _ ->
-        "4:response  j/k:scroll  Esc:list"
-    | (Inspector.Exact_input | Inspector.Input_map), None ->
-        "1/2/3/4 or Tab:switch  " ^ turn_hint
-        ^ (if cols >= keeper_split_threshold_cols then
-             "/:search  j/k:select or scroll  h/l:pane  Enter:open exact  "
-           else "/:search  j/k:select  Enter:open exact  ")
-        ^ "r:refresh  Esc:close"
-    | Inspector.Composition, None ->
-        "1/2/3/4 or Tab:switch  " ^ turn_hint ^ "j/k:scroll  r:refresh  Esc:close"
-  in
+  let hints = Masc_tui_keys.footer_hints_context ~cols state in
   let content = context_inspector_content_lines ~cols state in
   (* The plain shapes are one list, so the contract windows it and says which
      of its lines are showing; the inspector's overflow used to be cut with
@@ -205,6 +188,7 @@ let render_context_inspector state =
   in
   surface_chrome ~overflow state ~terminal_rows ~cols
     ~surface_key:"context-inspector"
+    ~help_door:(Option.is_none state.search)
     ~frame:Chrome_overlay
     ~title:
       (screen_title " MASC Context" ^ "  " ^ keeper ^ refreshing ^ "  " ^ tabs

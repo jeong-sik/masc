@@ -1533,6 +1533,19 @@
   eio_main))
 
 (test
+ (name test_keeper_librarian_message_floor)
+ (modules test_keeper_librarian_message_floor)
+ (libraries
+  masc_test_deps
+  exact_output_fixture
+  masc
+  masc.runtime
+  masc.masc_eio_context
+  agent_core
+  astring
+  eio_main))
+
+(test
  (name test_keeper_lane_cli_oneshot)
  (modules test_keeper_lane_cli_oneshot)
  (libraries

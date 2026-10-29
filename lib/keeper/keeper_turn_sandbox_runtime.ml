@@ -2994,6 +2994,14 @@ let stop_container_for_github_identity_refresh ?timeout_sec t =
                  (Exec_policy.truncate_for_log output))))
 ;;
 
+type github_identity_preparation_error =
+  | Sandbox_unavailable of string
+  | Identity_unavailable of string
+
+let github_identity_preparation_error_message = function
+  | Sandbox_unavailable detail | Identity_unavailable detail -> detail
+;;
+
 let prepare_github_identity_secret_files ?timeout_sec t =
   (* App-identity keepers get a fresh installation token before any lane
      consumes their hosts file; shared-identity keepers pass through
@@ -3006,7 +3014,7 @@ let prepare_github_identity_secret_files ?timeout_sec t =
       ~config:t.config
       ~keeper_name:t.meta.name
   with
-  | Error err -> Error ("github_app_token_refresh_failed: " ^ err)
+  | Error err -> Error (Identity_unavailable ("github_app_token_refresh_failed: " ^ err))
   | Ok
       ( Keeper_github_app_broker.No_app_identity
       | Keeper_github_app_broker.Fresh _
@@ -3025,10 +3033,10 @@ let prepare_github_identity_secret_files ?timeout_sec t =
       let snapshot_paths () =
         match (Atomic.get t.github_identity_snapshots).current with
         | Some _ -> Ok (github_identity_secret_files t)
-        | None -> Error "running container has no GitHub identity snapshot"
+        | None -> Error (Identity_unavailable "running container has no GitHub identity snapshot")
       in
       match ensure_started ?timeout_sec t with
-      | Error _ as error -> error
+      | Error detail -> Error (Sandbox_unavailable detail)
       | Ok _container_name ->
         (match snapshot_paths () with
          | Ok _ as result -> result
@@ -3041,7 +3049,7 @@ let prepare_github_identity_secret_files ?timeout_sec t =
               safe snapshot exists. *)
            set_state t Not_started;
            (match start_container ?timeout_sec t with
-            | Error _ as error -> error
+            | Error detail -> Error (Sandbox_unavailable detail)
             | Ok _ -> snapshot_paths ()))
     in
     match ensure_bound () with
@@ -3051,15 +3059,15 @@ let prepare_github_identity_secret_files ?timeout_sec t =
         ~config:t.config
         ~keeper_name:t.meta.name
     with
-    | Error _ as error -> error
+    | Error detail -> Error (Identity_unavailable detail)
     | Ok central_revision ->
       (match (Atomic.get t.github_identity_snapshots).current with
-       | None -> Error "running guest lost its validated identity binding"
+       | None -> Error (Identity_unavailable "running guest lost its validated identity binding")
        | Some snapshot when String.equal (identity_revision snapshot) central_revision ->
          Ok paths
        | Some _ ->
          (match stop_container_for_github_identity_refresh ?timeout_sec t with
-          | Error _ as error -> error
+          | Error detail -> Error (Sandbox_unavailable detail)
           | Ok () -> ensure_bound ())))
   else
     (* The persistent Docker container mounts the stable config directory
@@ -3069,14 +3077,14 @@ let prepare_github_identity_secret_files ?timeout_sec t =
        gitconfig refreshed at adoption. An unconfigured keeper exposes no
        credential file. *)
     match ensure_started ?timeout_sec t with
-    | Error _ as error -> error
+    | Error detail -> Error (Sandbox_unavailable detail)
     | Ok _container_name ->
       (match
          Keeper_github_identity.existing_config_dir
            ~config:t.config
            ~keeper_name:t.meta.name
        with
-       | Error _ as error -> error
+       | Error detail -> Error (Identity_unavailable detail)
        | Ok None -> Ok []
        | Ok (Some dir) -> Ok [ Filename.concat dir "hosts.yml" ])
 ;;

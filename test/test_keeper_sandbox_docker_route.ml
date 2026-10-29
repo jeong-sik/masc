@@ -1040,13 +1040,25 @@ done\n\
 printf 'retry-ok\n'\n\
 exit 0\n"
 
-let test_execute_identity_failure_keeps_message_and_code () =
-  with_fake_docker fake_docker_daemon_unavailable_then_ok_script @@ fun () ->
+(* A stopped daemon refuses every subcommand with the same message, including
+   the container probes that run before [docker run]. *)
+let fake_docker_daemon_down_script =
+  "#!/bin/sh\n\
+printf 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock\n' >&2\n\
+exit 1\n"
+
+let test_execute_guest_start_failure_reports_sandbox_and_conditions () =
+  with_fake_docker fake_docker_daemon_down_script @@ fun () ->
   setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   Masc_test_deps.write_sandbox_image_catalog
     ~base_path:config.Workspace.base_path [ "base", "alpine:test" ];
-  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let meta =
+    { meta with
+      Keeper_meta_contract.sandbox_image = Some "base"
+    ; network_mode = Keeper_types_profile_sandbox.Network_inherit
+    }
+  in
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
@@ -1065,16 +1077,70 @@ let test_execute_identity_failure_keeps_message_and_code () =
   in
   Alcotest.(check int) "one error field" 1
     (List.length (List.filter (fun (name, _) -> String.equal name "error") fields));
-  Alcotest.(check bool) "identity preparation detail is preserved" true
+  Alcotest.(check bool) "daemon detail is preserved" true
     (match List.assoc_opt "error" fields with
      | Some (`String message) ->
-       String_util.contains_substring message "GitHub identity snapshot unavailable"
+       String_util.contains_substring message "Cannot connect to the Docker daemon"
      | Some _ | None -> false);
   Alcotest.(check (option string)) "machine-readable failure code"
-    (Some "github_identity_snapshot_unavailable")
+    (Some "sandbox_guest_unavailable")
     (match List.assoc_opt "code" fields with
      | Some (`String code) -> Some code
-     | Some _ | None -> None)
+     | Some _ | None -> None);
+  Alcotest.(check (option string)) "failure names the preparation stage"
+    (Some "sandbox_guest_prepare")
+    (match List.assoc_opt "failure_stage" fields with
+     | Some (`String stage) -> Some stage
+     | Some _ | None -> None);
+  Alcotest.(check (option string)) "failure names the effective network mode"
+    (Some "inherit")
+    (match List.assoc_opt "network_mode" fields with
+     | Some (`String mode) -> Some mode
+     | Some _ | None -> None);
+  Alcotest.(check bool) "Docker failure invents no microVM backend" false
+    (List.mem_assoc "microvm_backend" fields)
+;;
+
+let test_execute_identity_failure_after_start_reports_identity_code () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base" } in
+  let github_config_dir =
+    match
+      Keeper_github_identity.ensure_config_dir ~config ~keeper_name:meta.name
+    with
+    | Ok path -> path
+    | Error message -> Alcotest.fail message
+  in
+  let hosts_path = Filename.concat github_config_dir "hosts.yml" in
+  write_file hosts_path "github.com:\n  user: keeper-user\n  oauth_token: stable-token\n";
+  Unix.chmod hosts_path 0o600;
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let execute () =
+    Keeper_tool_execute_runtime.handle_tool_execute
+      ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:(Some factory) ~config ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
+      ()
+  in
+  Alcotest.(check (option bool)) "guest starts with a valid identity" (Some true)
+    (parse_bool_field (execute ()) "ok");
+  (* The guest keeps running while its credential file becomes a directory.
+     The guest is healthy, so the failure must name the identity. *)
+  Sys.remove hosts_path;
+  Unix.mkdir hosts_path 0o700;
+  let raw = execute () in
+  Alcotest.(check (option string)) "identity failure keeps its own code"
+    (Some "github_identity_snapshot_unavailable")
+    (parse_string_field raw "code");
+  Alcotest.(check bool) "identity detail is preserved" true
+    (response_mentions raw "error" "must be a regular file");
+  Alcotest.(check (option string)) "identity failure is not a guest failure" None
+    (parse_string_field raw "failure_stage")
 ;;
 
 let test_docker_run_does_not_retry_generic_timeout () =
@@ -2960,8 +3026,11 @@ let () =
             "turn runtime redacts its mounted GitHub snapshot"
             `Quick test_turn_runtime_redacts_the_stable_identity_mount;
           Alcotest.test_case
-            "Execute identity failure keeps its message and code"
-            `Quick test_execute_identity_failure_keeps_message_and_code;
+            "Execute guest start failure reports sandbox and conditions"
+            `Quick test_execute_guest_start_failure_reports_sandbox_and_conditions;
+          Alcotest.test_case
+            "Execute identity failure after start keeps the identity code"
+            `Quick test_execute_identity_failure_after_start_reports_identity_code;
           Alcotest.test_case
             "docker run does not retry generic timeout"
             `Quick

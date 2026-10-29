@@ -956,8 +956,10 @@ let test_live_turn_runtime_cat () =
       with
       | Ok (path :: _) -> path
       | Ok [] -> Alcotest.fail "guest identity preparation returned no snapshot path"
-      | Error message ->
-        Alcotest.failf "guest GitHub identity preparation failed: %s" message
+      | Error error ->
+        Alcotest.failf
+          "guest GitHub identity preparation failed: %s"
+          (Masc.Keeper_turn_sandbox_runtime.github_identity_preparation_error_message error)
     in
     (* A turn's runtime comes from its factory, as in dispatch; the binding
        is what the Execute target is built from. *)

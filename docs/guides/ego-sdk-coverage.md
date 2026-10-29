@@ -32,6 +32,10 @@ This source inventory was refreshed against the pending native stack through
 matcher, evaluation/navigation diagnostics, pending native-download cancellation
 and both Dashboard browser observation repairs. Source coverage does not mean
 these changes are merged, installed or exercised by a real Keeper.
+The subsequent retention adapter described in this tree adds native
+`keepPages="all"` to `finish_space`; this source addition has the same evidence
+limits. The handler validates both retention policies before any effect; the
+generic Agent-Core argument validator does not enforce nested `oneOf` itself.
 
 The official [Space guide](https://lite.ego.app/document/en/docs/space) describes
 Spaces as BrowserContexts in the same Ego browser process, rather than headless
@@ -59,7 +63,7 @@ local Space is visible or that its login is complete.
 | `TaskSpace.release` | Explicit `page.act` release_tab unmanages an unknown-origin Page without closing it | Real SDK/installed-route proof and per-goal scope |
 | `TaskSpace.waitForControl` | `page.act` wait_for_control forwards native interval/timeout and uses the SDK clock within an agent-owned Space | Real SDK/installed-route proof; no handoff completion or takeover implied |
 | `TaskSpace.handOff` | `page.act` hand_off returns same-Space ID/name; Keeper guidance composes `masc_ask` and explicit-confirmation resume. Input-reset assertions are separate and never authorize takeover | Real Keeper login handoff and current UI control-state behavior; published ownership remains a dated observation |
-| `TaskSpace.finish` | Explicit finish_space with keepPages (default empty), validated native receipt, terminal Page guard and process-local no replay; retirement preserves Space/files | Automatic Goal completion, durable cross-worker reconciliation and retained-file reclamation |
+| `TaskSpace.finish` | Explicit finish_space with native keepPages="all" or label array (default empty), validated native receipt, terminal Page guard and process-local no replay; all retains the Space even with no managed Pages; retirement preserves Space/files | Automatic Goal completion, durable cross-worker reconciliation and retained-file reclamation |
 | `TaskSpace.cdp` | Fixed native activate_tab uses Target activation and same-target window lookup; restores only a minimized window. No caller-supplied protocol, target or window IDs | Real SDK/installed route and visible UI proof; general Target/Browser protocol boundary and lifecycle reconciliation |
 | `Page.label` | Inventory and document-read DTO retain the permanent label; TUI shows it for the selected tab | Installed/UI proof and lifecycle-aware resume |
 | `Page.spaceId` | Bound connection Space accompanies inventory and read receipts | Installed-route proof |

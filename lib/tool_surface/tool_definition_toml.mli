@@ -122,6 +122,14 @@ val load
     [params] (object params only) and [items] (array params only).
     Everything else is an [Error] naming the offending key or value.
 
+    A parameter may declare [one_of] instead of [type], as a non-empty array
+    of schema tables. Each alternative uses the same typed parameter grammar,
+    without [name] or [required], or recursively declares [one_of]. The union
+    itself accepts only [description] alongside [one_of]; named parameters
+    still accept [name] and [required] metadata. Mixing [type] and [one_of] is
+    rejected. The emitted JSON Schema uses [oneOf]. This is distinct from the
+    top-level [[one_of]] field-presence alternatives.
+
     Array [items] support string, integer and object elements. Integer
     elements accept integer [minimum] / [maximum] bounds.
 

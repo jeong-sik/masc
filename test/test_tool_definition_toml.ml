@@ -1297,11 +1297,43 @@ let test_web_fetch_description_names_the_reader () =
     (contains ~needle:"keeper_artifact_read" serialized)
 ;;
 
+let test_native_retention_union () =
+  let contents = minimal "t" ^ {|[[params]]
+name = "keepPages"
+required = true
+description = "Native retention."
+one_of = [{ type = "string", enum = ["all"] }, { type = "array", unique_items = true, items = { type = "string", min_length = 1 } }]
+|} in
+  let schema = match Tool_definition_toml.load ~name:"t" ~contents with
+    | Ok loaded -> loaded.schema.input_schema
+    | Error detail -> fail detail in
+  let open Yojson.Safe.Util in
+  let keep = schema |> member "properties" |> member "keepPages" in
+  check string "disjoint native policies use oneOf without a conflicting type"
+    {|{"description":"Native retention.","oneOf":[{"type":"string","enum":["all"]},{"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1}}]}|}
+    (Yojson.Safe.to_string keep);
+  check bool "named union participates in required fields" true
+    (schema |> member "required" = `List [`String "keepPages"]);
+  List.iter (fun (declaration, expected) ->
+    check_rejects ~name:"t" ~contents:(minimal "t" ^ "[[params]]\nname = \"keep\"\n" ^ declaration) expected)
+    [ "one_of = []\n", "must not be empty"
+    ; "one_of = [1]\n", "must be a table"
+    ; "type = \"array\"\none_of = [{ type = \"string\" }]\n", "not valid alongside one_of"
+    ; "one_of = [{ type = \"array\" }]\n", "must declare items"
+    ; "one_of = [{ type = \"string\", required = true }]\n", "unknown key"
+    ; "one_of = [{ type = \"string\", enum = [1] }]\n", "must be a string"
+    ; "one_of = [{ type = \"string\", typo = true }]\n", "unknown key"
+    ; "one_of = [{ one_of = [] }]\n", "must not be empty"
+    ]
+;;
+
 let () =
   run "tool_definition_toml"
     [ ( "load"
       , [ test_case "full-feature TOML round-trips byte-identically" `Quick
             test_full_feature_round_trip
+        ; test_case "native retention schema has disjoint literal and label policies" `Quick
+            test_native_retention_union
         ; test_case "help table round-trips" `Quick test_help_table_round_trips
         ; test_case "help decode is fail-closed" `Quick
             test_help_table_is_fail_closed

@@ -336,8 +336,8 @@ let support backend operation = match backend with
           Unsupported "Only an ego connection has native Space metadata.")
     | Finish_space -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"finish_space" Act
-          ["Requires the exact observed clientId and agent-controlled Space. Complete a successful task exactly once, with optional keepPages permanent labels (default empty).";
-           "Ends all former Page labels. Never use for user control, errors or transport retirement. A lost receipt requires reconciliation, never replay. Retained Pages preserve file leases."]
+          ["Requires the exact observed clientId and agent-controlled Space. Complete a successful task exactly once, with optional keepPages: native all or permanent label array (default empty). All retains the Space even with no managed Pages.";
+           "Ends all former Page labels. Never use for user control, errors or transport retirement. A lost receipt requires reconciliation, never replay. Retained Spaces preserve file leases."]
       | Connected (Browser_lane.Web_extension|Browser_lane.Webdriver_bidi)|Owned_gecko|Owned_chromium|Safari_unavailable ->
           Unsupported "Only an ego connection completes a native task Space.")
     | Wait_for_control -> (match backend with

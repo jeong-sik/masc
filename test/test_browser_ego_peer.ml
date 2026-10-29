@@ -3127,18 +3127,40 @@ let test_explicit_completion_is_terminal_and_never_replayed () =
     ignore (before_effect "former Page work" (dispatch peer Live.Tabs_list (obj [])));
     ignore (before_effect "takeover after completion" (dispatch peer Live.Page_act (obj ["action",str "take_over"])));
     peer,first,second in
-  let receipt ?(closed=true) ?(kept=[]) ()=obj ["spaceId",`Int 51;"closedSpace",`Bool closed;
-    "keptManagedLabels",`List (List.map str kept);"closedManagedLabels",`List [];"preservedUnmanagedCount",`Int 0] in
+  let receipt ?(closed=true) ?(kept=[]) ?(removed=[]) ()=obj ["spaceId",`Int 51;"closedSpace",`Bool closed;
+    "keptManagedLabels",`List (List.map str kept);"closedManagedLabels",`List (List.map str removed);"preservedUnmanagedCount",`Int 0] in
   let peer,first,second=scenario (fun sent ->
     check bool "empty retention forwarded to native SDK" true (field "keep" sent.args=`List []);
-    answered (receipt ())) [] in
+    answered (receipt ())) (Keep_labels []) in
   check bool "confirmed receipt is returned without replay" true (Result.is_ok first && first=second);
   check bool "confirmed closure settles files" true (Peer.retirement_settlement peer=Ok ());
-  let peer,first,second=scenario (fun _ -> answered (receipt ~closed:false ~kept:["p2"] ())) ["p2"] in
+  let peer,first,second=scenario (fun _ -> answered (receipt ~closed:false ~kept:["p2"] ())) (Keep_labels ["p2"]) in
   check bool "retained result has a stable native receipt" true (Result.is_ok first && first=second);
   check bool "retained native tabs preserve file ownership" true (Result.is_error (Peer.retirement_settlement peer));
+  List.iter (fun kept ->
+    let peer,first,second=scenario (fun sent ->
+      check bool "all is forwarded as native literal" true (field "keep" sent.args=str "all");
+      answered (receipt ~closed:false ~kept ())) Keep_all in
+    check bool "all has a stable terminal receipt, even without managed Pages" true
+      (Result.is_ok first && first=second);
+    check bool "all retains Space-backed file ownership" true (Result.is_error (Peer.retirement_settlement peer));
+    ignore (before_effect "cannot change all policy after completion"
+      (dispatch peer Live.Page_act (Browser_lane.Action.to_json (Control (Finish_space (Keep_labels [])))))))
+    [[];["p2";"p3"]];
+  List.iter (fun value ->
+    let peer,first,second=scenario (fun _ -> answered value) Keep_all in
+    check bool "all cannot confirm closure or closed managed Pages" true
+      (match first with Error (Live.Outcome_unknown _) -> true | _ -> false);
+    ignore (before_effect "invalid all receipt is never replayed" second);
+    check bool "invalid all receipt preserves files" true (Result.is_error (Peer.retirement_settlement peer)))
+    [receipt ();receipt ~closed:false ~removed:["p1"] ()];
+  let peer,first,second=scenario (fun _ -> Error (Peer.Unobserved "lost all completion")) Keep_all in
+  check bool "lost all completion is unknown" true
+    (match first with Error (Live.Outcome_unknown _) -> true | _ -> false);
+  ignore (before_effect "lost all completion is never replayed" second);
+  check bool "lost all completion preserves files" true (Result.is_error (Peer.retirement_settlement peer));
   List.iter (fun reply ->
-    let peer,first,second=scenario reply [] in
+    let peer,first,second=scenario reply (Keep_labels []) in
     check bool "lost or invalid completion is unknown" true (match first with Error (Live.Outcome_unknown _ | Live.Observed_failure {disposition=Live.Uncertain;_}) -> true | _ -> false);
     ignore (before_effect "uncertain completion replay" second);
     check bool "unknown completion preserves files" true (Result.is_error (Peer.retirement_settlement peer)))

@@ -22,7 +22,11 @@ type interaction =
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload | Close_tab
 type control_wait = { interval_ms : float option; timeout_ms : float option }
-type control = Hand_off | Take_over | Space_status | Finish_space of string list | Wait_for_control of control_wait
+type keep_pages = Keep_all | Keep_labels of string list
+let keep_pages_to_json = function
+  | Keep_all -> `String "all"
+  | Keep_labels labels -> `List (List.map (fun label -> `String label) labels)
+type control = Hand_off | Take_over | Space_status | Finish_space of keep_pages | Wait_for_control of control_wait
   | Adopt_tab of { tab_id : int; label : string option }
   | Release_tab of int
 type t = Open_tab of string | Open_window of string | Control of control
@@ -192,9 +196,12 @@ let parse = function
      | "finish_space" ->
        let* ()=exact ["keepPages"] in
        let* keep=match List.assoc_opt "keepPages" fields with
-         | None -> Ok [] | Some value -> string_list "keepPages" value in
-       let* ()=if List.length keep=List.length (List.sort_uniq String.compare keep)
-         then Ok () else Error "keepPages must contain distinct Page labels" in
+         | None -> Ok (Keep_labels [])
+         | Some (`String "all") -> Ok Keep_all
+         | Some value ->
+           let* labels = string_list "keepPages" value in
+           if List.length labels=List.length (List.sort_uniq String.compare labels)
+           then Ok (Keep_labels labels) else Error "keepPages must be all or distinct Page labels" in
        Ok (Control (Finish_space keep))
      | "wait_for_control" ->
        let* ()=exact ["controlOptions"] in
@@ -251,7 +258,7 @@ let to_json = function
   | Control Hand_off -> `Assoc ["action",`String "hand_off"]
   | Control Take_over -> `Assoc ["action",`String "take_over"]
   | Control Space_status -> `Assoc ["action",`String "space_status"]
-  | Control (Finish_space keep) -> `Assoc ["action",`String "finish_space";"keepPages",`List (List.map (fun label -> `String label) keep)]
+  | Control (Finish_space keep) -> `Assoc ["action",`String "finish_space";"keepPages",keep_pages_to_json keep]
   | Control (Wait_for_control options) -> `Assoc ["action",`String "wait_for_control";
       "controlOptions",control_wait_to_json options]
   | Control (Adopt_tab {tab_id;label}) -> `Assoc (["action",`String "adopt_tab";"tabId",`Int tab_id]

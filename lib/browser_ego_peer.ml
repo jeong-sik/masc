@@ -71,7 +71,7 @@ module Input = Browser_ego_input
 type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) result }
 
 type finish_state = Active | Finish_uncertain | Finished of {
-  keep : string list; receipt : Yojson.Safe.t; settlement : (unit, string) result }
+  keep : Browser_lane.Action.keep_pages; receipt : Yojson.Safe.t; settlement : (unit, string) result }
 
 type t = { run : runner; run_native : string -> (string, run_failure) result; now : unit -> float; space : Browser_lane.ego_space; version : string; capture_directory : string;
   downloads : downloads; published : (string, Yojson.Safe.t) Hashtbl.t; uploads : Browser_lane.Upload_lease.owner;
@@ -688,9 +688,14 @@ let finish_receipt ~space_id ~keep value =
       field "closedManagedLabels" value,field "preservedUnmanagedCount" value with
   | Some (`Int id),Some (`Bool closed),Some kept,Some removed,Some (`Int count) when id=space_id && count>=0 ->
     let* kept=labels kept in let* removed=labels removed in
+    let policy_matches = match keep with
+      | Browser_lane.Action.Keep_all -> not closed && removed=[]
+      | Keep_labels requested ->
+        List.for_all (fun label -> List.mem label kept) requested
+        && (not closed || requested=[]) in
     if List.exists (fun label -> List.mem label removed) kept
-      || not (List.for_all (fun label -> List.mem label kept) keep)
-      || (closed && (kept<>[] || count<>0 || keep<>[])) then bad ()
+      || not policy_matches
+      || (closed && (kept<>[] || count<>0)) then bad ()
     else Ok closed
   | _ -> bad ()
 
@@ -704,7 +709,7 @@ let finish_space t keep =
     (* Record before a yielding runner: cancellation/lost output stays uncertain. *)
     t.finish_state <- Finish_uncertain;
     t.space_observation <- None;
-    let args=obj ["keep",`List (List.map str keep)] in
+    let args=obj ["keep",Browser_lane.Action.keep_pages_to_json keep] in
     match run_native_step t ~step:"space.finish" ~args
         "  const receipt = await task.finish({keep: args.keep});\n  emit({ok: true, value: receipt});" with
     | Error failure ->
@@ -719,13 +724,13 @@ let finish_space t keep =
           (match Browser_lane.Upload_lease.release_owner t.uploads with
            | () -> Ok ()
            | exception ((Sys_error _|Unix.Unix_error _) as exn) -> Error ("upload cleanup unconfirmed: " ^ Printexc.to_string exn))
-        else Error "native task completed with retained tabs; browser-backed files remain owned" in
+        else Error "native task completed with retained Space; browser-backed files remain owned" in
       let receipt=obj ["action",str "finish_space";"spaceId",`Int t.space.id;"spaceName",str t.space.name;
-        "keepPages",`List (List.map str keep);"nativeReceipt",value] in
+        "keepPages",Browser_lane.Action.keep_pages_to_json keep;"nativeReceipt",value] in
       t.finish_state <- Finished {keep;receipt;settlement};
       Ok receipt
 
-let finish t = finish_space t [] |> Result.map (fun _ -> ()) |> Result.map_error (function
+let finish t = finish_space t (Browser_lane.Action.Keep_labels []) |> Result.map (fun _ -> ()) |> Result.map_error (function
   | Live.Before_effect detail|Outcome_unknown detail -> detail
   | Partial_failure {message;_}|Observed_failure {message;_} -> message)
 

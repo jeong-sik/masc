@@ -229,16 +229,50 @@ let rec param_of_pairs ~context pairs =
     | Some value -> as_non_empty_string ~context:(sprintf "%s.name" context) value
   in
   let context = sprintf "%s (%s)" context name in
-  let* declared = find_param_type ~context pairs in
   let* required =
     match List.assoc_opt "required" pairs with
     | None -> Ok false
     | Some value -> as_bool ~context:(sprintf "%s.required" context) value
   in
+  let* json = schema_json ~context
+    (List.filter (fun (key, _) -> key <> "name" && key <> "required") pairs) in
+  Ok { param_name = name; param_required = required; param_json = json }
+
+and schema_json ~context pairs =
+  match List.assoc_opt "one_of" pairs with
+  | None -> typed_schema_json ~context pairs
+  | Some alternatives ->
+    let* tables = match alternatives with
+      | Otoml.TomlTableArray tables | Otoml.TomlArray tables -> Ok tables
+      | (Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+        | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+        | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlTable _
+        | Otoml.TomlInlineTable _) as other ->
+        Error (sprintf "%s.one_of must be an array of schema tables, got %s" context (toml_shape other)) in
+    let rec collect index acc = function
+      | [] -> Ok (List.rev acc)
+      | table :: rest ->
+        let context = sprintf "%s.one_of[%d]" context index in
+        let* branch = as_table_pairs ~context table in
+        let* json = schema_json ~context branch in
+        collect (index + 1) (json :: acc) rest in
+    let* branches = match tables with
+      | [] -> Error (sprintf "%s.one_of must not be empty" context)
+      | _ :: _ -> collect 0 [] tables in
+    let field key value = match key with
+      | "one_of" -> Ok (Some ("oneOf", `List branches))
+      | "description" ->
+        let* text = as_non_empty_string ~context:(context ^ ".description") value in
+        Ok (Some (key, `String text))
+      | other -> Error (sprintf "%s: key %S is not valid alongside one_of" context other) in
+    let* fields = ordered_fields ~field pairs in
+    Ok (`Assoc fields)
+
+and typed_schema_json ~context pairs =
+  let* declared = find_param_type ~context pairs in
   let field key value =
     let key_context = sprintf "%s.%s" context key in
     match key with
-    | "name" | "required" -> Ok None
     | "type" -> Ok (Some ("type", `String (param_type_to_string declared)))
     | "description" ->
       let* text = as_non_empty_string ~context:key_context value in
@@ -419,7 +453,7 @@ let rec param_of_pairs ~context pairs =
     | (Ptype_object, None)
     | ((Ptype_string | (Ptype_integer | (Ptype_number | (Ptype_boolean | Ptype_array)))), _) -> Ok fields
   in
-  Ok { param_name = name; param_required = required; param_json = `Assoc fields }
+  Ok (`Assoc fields)
 
 and params_of_value ~context value =
   match value with

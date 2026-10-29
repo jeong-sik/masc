@@ -616,19 +616,13 @@ let text_block_of_document
               ])
         in
         Ok
-          (Agent_core.Types.Text
+          (Llm_provider.Types.Text
              (Printf.sprintf
                 "User-provided attachment metadata: %s\n\n%s"
                 metadata
                 text))
 
-(* A user attachment enters history here: its bytes go to the store and the
-   block keeps the reference. *)
-let stored_block ~media_store wire =
-  Agent_core.History.of_wire_block media_store wire
-  |> Result.map_error (fun error -> Agent_core.Error.to_string (Agent_core.Error.Media error))
-
-let document_block_to_agent_core ~media_store ~attachments media =
+let document_block_to_agent_core ~attachments media =
   match resolve_media_payload ~attachments "document" media with
   | Error _ as error -> error
   | Ok (att, media_type, data) ->
@@ -640,7 +634,7 @@ let document_block_to_agent_core ~media_store ~attachments media =
              ~media_type
              data
        | Preserve_document ->
-           stored_block ~media_store
+           Ok
              (Llm_provider.Types.document_block ~media_type
                 ~source:(Llm_provider.Types.Base64 data)))
 
@@ -652,27 +646,39 @@ let document_block_to_agent_core ~media_store ~attachments media =
    Nothing here fetches the reference — the provider resolves it or visibly
    rejects it. *)
 let image_reference_to_agent_core (reference : user_image_reference) source =
-  Agent_core.Types.image_block
+  Llm_provider.Types.image_block
     ~media_type:(Option.value reference.mime_type ~default:"application/octet-stream")
     ~source
 
+type input_error =
+  | Invalid_input of string
+  | Media_store_unavailable of Agent_core.History.media_error
+
+let input_error_to_string = function
+  | Invalid_input detail -> detail
+  | Media_store_unavailable error ->
+    "attachment could not be stored: "
+    ^ Agent_core.Error.to_string (Agent_core.Error.Media error)
+;;
+
+(* The blocks are checked and built in provider form first; their media then
+   enter history in one step, so a payload that does not decode is the
+   sender's error and a store that cannot keep the bytes is the store's. *)
 let to_agent_core_blocks ~media_store ~attachments blocks =
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
     | User_text text :: rest ->
         let acc =
-          if String.trim text = "" then acc else Agent_core.Types.Text text :: acc
+          if String.trim text = "" then acc else Llm_provider.Types.Text text :: acc
         in
         loop acc rest
     | User_image (Attached media) :: rest -> (
         match
-          Result.bind
-            (media_block_to_agent_core ~attachments "image"
-               (fun ~media_type ~data () ->
-                  Llm_provider.Types.image_block ~media_type
-                    ~source:(Llm_provider.Types.Base64 data))
-               media)
-            (stored_block ~media_store)
+          media_block_to_agent_core ~attachments "image"
+            (fun ~media_type ~data () ->
+               Llm_provider.Types.image_block ~media_type
+                 ~source:(Llm_provider.Types.Base64 data))
+            media
         with
         | Ok block -> loop (block :: acc) rest
         | Error err -> Error err)
@@ -680,31 +686,38 @@ let to_agent_core_blocks ~media_store ~attachments blocks =
         loop
           (image_reference_to_agent_core
              reference
-             (Agent_core.Types.Url reference.value)
+             (Llm_provider.Types.Url reference.value)
            :: acc)
           rest
     | User_image (File_id_ref reference) :: rest ->
         loop
           (image_reference_to_agent_core
              reference
-             (Agent_core.Types.File_id reference.value)
+             (Llm_provider.Types.File_id reference.value)
            :: acc)
           rest
     | User_document media :: rest -> (
-        match document_block_to_agent_core ~media_store ~attachments media with
+        match document_block_to_agent_core ~attachments media with
         | Ok block -> loop (block :: acc) rest
         | Error err -> Error err)
     | User_audio media :: rest -> (
         match
-          Result.bind
-            (media_block_to_agent_core ~attachments "audio"
-               (fun ~media_type ~data () ->
-                  Llm_provider.Types.audio_block ~media_type
-                    ~source:(Llm_provider.Types.Base64 data))
-               media)
-            (stored_block ~media_store)
+          media_block_to_agent_core ~attachments "audio"
+            (fun ~media_type ~data () ->
+               Llm_provider.Types.audio_block ~media_type
+                 ~source:(Llm_provider.Types.Base64 data))
+            media
         with
         | Ok block -> loop (block :: acc) rest
         | Error err -> Error err)
   in
-  loop [] blocks
+  match loop [] blocks with
+  | Error detail -> Error (Invalid_input detail)
+  | Ok wire ->
+    (match Agent_core.History.of_wire_blocks media_store wire with
+     | Ok blocks -> Ok blocks
+     | Error (Agent_core.History.Invalid_base64 _ as error) ->
+       Error (Invalid_input (Agent_core.Error.to_string (Agent_core.Error.Media error)))
+     | Error
+         ((Agent_core.History.Store_failed _ | Missing_bytes _ | Digest_mismatch _) as error)
+       -> Error (Media_store_unavailable error))

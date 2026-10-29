@@ -17,6 +17,7 @@ type request_error =
   | Invalid_target of string
   | Empty_prompt
   | Invalid_multimodal_input of string
+  | Media_store_unavailable of Agent_core.History.media_error
   | Invalid_wire_value of
       { field : string
       ; expected : string

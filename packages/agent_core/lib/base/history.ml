@@ -103,12 +103,27 @@ let map_option f = function
   | Some value -> Result.map Option.some (f value)
 ;;
 
+let decode_media ~media_type encoded =
+  match Base64.decode encoded with
+  | Ok raw -> Ok raw
+  | Error (`Msg detail) -> Error (Invalid_base64 { media_type; detail })
+;;
+
 let source_of_wire store ~media_type (source : P.media_source) =
   match source with
   | P.Base64 encoded ->
-    (match Base64.decode encoded with
-     | Ok raw -> Result.map (fun stored -> Stored stored) (store.put ~media_type ~raw)
-     | Error (`Msg detail) -> Error (Invalid_base64 { media_type; detail }))
+    Result.bind (decode_media ~media_type encoded) (fun raw ->
+      Result.map (fun stored -> Stored stored) (store.put ~media_type ~raw))
+  | P.Url url -> Ok (Url url)
+  | P.File_id file_id -> Ok (File_id file_id)
+;;
+
+(* The source [source_of_wire] gives, computed from the decoded bytes
+   without a store: [put] returns [stored_of_raw raw]. *)
+let source_reference ~media_type (source : P.media_source) =
+  match source with
+  | P.Base64 encoded ->
+    Result.map (fun raw -> Stored (stored_of_raw raw)) (decode_media ~media_type encoded)
   | P.Url url -> Ok (Url url)
   | P.File_id file_id -> Ok (File_id file_id)
 ;;
@@ -161,6 +176,7 @@ let to_wire_message store message =
 ;;
 
 let of_wire_blocks store blocks = map_list (of_wire_block store) blocks
+let reference_of_wire_blocks blocks = map_list (map_block_sources source_reference) blocks
 let to_wire_blocks store blocks = map_list (to_wire_block store) blocks
 let to_wire_messages store messages = map_list (to_wire_message store) messages
 

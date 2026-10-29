@@ -276,6 +276,12 @@ let test_parse_keeper_chat_stream_request_accepts_connector_context () =
       check string "workspace id" "workspace-9" payload.channel_workspace_id
   | Error err -> fail ("expected connector context to parse: " ^ err)
 
+
+(* The tests read a conversion failure as its sentence. *)
+let to_agent_core_blocks ~media_store ~attachments blocks =
+  Keeper_multimodal_input.to_agent_core_blocks ~media_store ~attachments blocks
+  |> Result.map_error Keeper_multimodal_input.input_error_to_string
+
 let test_chat_input_preserves_text_whitespace () =
   let text = "    첫 줄\n    둘째 줄  \n\n" in
   let blocks = [ Keeper_multimodal_input.User_text text ] in
@@ -307,7 +313,7 @@ let test_chat_input_preserves_text_whitespace () =
   | Ok decoded ->
       check string "durable message retained" text decoded.message;
       check bool "durable block retained" true (decoded.user_blocks = blocks);
-      (match Keeper_multimodal_input.to_agent_core_blocks ~media_store:test_media_store ~attachments:[] decoded.user_blocks with
+      (match to_agent_core_blocks ~media_store:test_media_store ~attachments:[] decoded.user_blocks with
        | Ok [ Agent_core.Types.Text actual ] ->
            check string "model input retained" text actual
        | Ok _ -> fail "expected one text block"
@@ -546,6 +552,39 @@ let test_keeper_chat_operation_input_accepts_referenced_attachment () =
       check int "user block preserved" 1 (List.length decoded.user_blocks)
   | Error err -> fail ("expected a referenced attachment to decode: " ^ err)
 
+(* A payload that does not decode is the sender's error; a store that cannot
+   keep a valid payload is the store's, so the two arrive as different
+   errors and the operation fails as a store failure, not as bad input. *)
+let test_keeper_multimodal_input_separates_bad_payloads_from_store_failures () =
+  let attachment data =
+    { K.id = "att-img"; att_type = "image"; name = "screen.png"; size = 1024
+    ; mime_type = "image/png"; data; width = None; height = None }
+  in
+  let media =
+    { Keeper_multimodal_input.attachment_id = "att-img"; name = "screen.png"
+    ; mime_type = "image/png"; size = Some 1024 }
+  in
+  let failing_store : Agent_core.History.media_store =
+    { put = (fun ~media_type:_ ~raw:_ ->
+        Error (Agent_core.History.Store_failed { detail = "disk full" }))
+    ; get = (fun stored -> Error (Agent_core.History.Missing_bytes stored)) }
+  in
+  let convert ~media_store data =
+    Keeper_multimodal_input.to_agent_core_blocks ~media_store
+      ~attachments:[ attachment data ]
+      [ Keeper_multimodal_input.User_image (Attached media) ]
+  in
+  (match convert ~media_store:failing_store "data:image/png;base64,YWJjMTIz" with
+   | Error (Keeper_multimodal_input.Media_store_unavailable (Agent_core.History.Store_failed _)) -> ()
+   | Error (Keeper_multimodal_input.Invalid_input detail) ->
+     fail ("a store failure must not read as bad input: " ^ detail)
+   | Error (Keeper_multimodal_input.Media_store_unavailable _) | Ok _ ->
+     fail "a store that cannot put must fail as the store");
+  match convert ~media_store:(Agent_core.History.Memory_store.create ()) "data:image/png;base64,abc" with
+  | Error (Keeper_multimodal_input.Invalid_input _) -> ()
+  | Error (Keeper_multimodal_input.Media_store_unavailable _) | Ok _ ->
+    fail "base64 that does not decode must be the sender's error"
+
 let test_keeper_multimodal_input_converts_user_blocks_to_agent_core_blocks () =
   let attachments =
     [
@@ -571,7 +610,7 @@ let test_keeper_multimodal_input_converts_user_blocks_to_agent_core_blocks () =
   in
   let media_store = Agent_core.History.Memory_store.create () in
   match
-    Keeper_multimodal_input.to_agent_core_blocks ~media_store ~attachments
+    to_agent_core_blocks ~media_store ~attachments
       [
         Keeper_multimodal_input.User_image (Attached media);
         Keeper_multimodal_input.User_text "describe this";
@@ -715,7 +754,7 @@ let test_keeper_multimodal_parse_rejects_ambiguous_image_carriers () =
 
 let test_keeper_multimodal_reference_crosses_in_native_form () =
   match
-    Keeper_multimodal_input.to_agent_core_blocks ~media_store:test_media_store ~attachments:[]
+    to_agent_core_blocks ~media_store:test_media_store ~attachments:[]
       [ Keeper_multimodal_input.User_image
           (Keeper_multimodal_input.Url_ref
              { value = "https://example.test/a.png"; mime_type = Some "image/png" })
@@ -855,7 +894,7 @@ let test_keeper_multimodal_input_projects_text_documents_as_text () =
          document_input ~mime_type ~payload:(Base64.encode_string body)
        in
        match
-         Keeper_multimodal_input.to_agent_core_blocks ~media_store:test_media_store ~attachments
+         to_agent_core_blocks ~media_store:test_media_store ~attachments
            [ Keeper_multimodal_input.User_document media ]
        with
        | Ok [ Agent_core.Types.Text projected ] ->
@@ -882,7 +921,7 @@ let test_keeper_multimodal_input_preserves_binary_document () =
   let attachments, media = document_input ~mime_type:"application/pdf" ~payload in
   let media_store = Agent_core.History.Memory_store.create () in
   match
-    Keeper_multimodal_input.to_agent_core_blocks ~media_store ~attachments
+    to_agent_core_blocks ~media_store ~attachments
       [ Keeper_multimodal_input.User_document media ]
   with
   | Ok [ Agent_core.Types.Document { media_type; source = Agent_core.Types.Stored stored } ] ->
@@ -896,7 +935,7 @@ let test_keeper_multimodal_input_rejects_invalid_text_document_payload () =
     document_input ~mime_type:"text/markdown" ~payload:"%%%"
   in
   (match
-     Keeper_multimodal_input.to_agent_core_blocks ~media_store:test_media_store ~attachments
+     to_agent_core_blocks ~media_store:test_media_store ~attachments
        [ Keeper_multimodal_input.User_document media ]
    with
    | Ok _ -> fail "invalid textual document base64 should be rejected"
@@ -908,7 +947,7 @@ let test_keeper_multimodal_input_rejects_invalid_text_document_payload () =
     document_input ~mime_type:"text/html" ~payload:invalid_utf8
   in
   match
-    Keeper_multimodal_input.to_agent_core_blocks ~media_store:test_media_store ~attachments
+    to_agent_core_blocks ~media_store:test_media_store ~attachments
       [ Keeper_multimodal_input.User_document media ]
   with
   | Ok _ -> fail "invalid UTF-8 textual document should be rejected"
@@ -920,7 +959,7 @@ let test_keeper_multimodal_input_rejects_invalid_text_document_payload () =
         document_input ~mime_type:"text/plain" ~payload:unsupported_control
       in
       match
-        Keeper_multimodal_input.to_agent_core_blocks ~media_store:test_media_store ~attachments
+        to_agent_core_blocks ~media_store:test_media_store ~attachments
           [ Keeper_multimodal_input.User_document media ]
       with
       | Ok _ -> fail "text control characters should not be silently repaired"
@@ -953,7 +992,7 @@ let test_keeper_multimodal_input_accepts_mixed_case_data_url () =
   in
   let media_store = Agent_core.History.Memory_store.create () in
   match
-    Keeper_multimodal_input.to_agent_core_blocks ~media_store ~attachments
+    to_agent_core_blocks ~media_store ~attachments
       [ Keeper_multimodal_input.User_image (Attached media) ]
   with
   | Ok [ Agent_core.Types.Image { media_type; source = Agent_core.Types.Stored stored } ] ->
@@ -988,7 +1027,7 @@ let test_keeper_multimodal_input_normalizes_inferred_data_url_mime () =
   in
   let media_store = Agent_core.History.Memory_store.create () in
   match
-    Keeper_multimodal_input.to_agent_core_blocks ~media_store ~attachments
+    to_agent_core_blocks ~media_store ~attachments
       [ Keeper_multimodal_input.User_image (Attached media) ]
   with
   | Ok [ Agent_core.Types.Image { media_type; source = Agent_core.Types.Stored stored } ] ->
@@ -1022,7 +1061,7 @@ let test_keeper_multimodal_input_rejects_mismatched_data_url_mime () =
     }
   in
   match
-    Keeper_multimodal_input.to_agent_core_blocks ~media_store:test_media_store ~attachments
+    to_agent_core_blocks ~media_store:test_media_store ~attachments
       [ Keeper_multimodal_input.User_image (Attached media) ]
   with
   | Ok _ -> fail "expected mismatched data URL MIME to be rejected"
@@ -1055,7 +1094,7 @@ let test_keeper_multimodal_input_rejects_malformed_data_url () =
     }
   in
   match
-    Keeper_multimodal_input.to_agent_core_blocks ~media_store:test_media_store ~attachments
+    to_agent_core_blocks ~media_store:test_media_store ~attachments
       [ Keeper_multimodal_input.User_image (Attached media) ]
   with
   | Ok _ -> fail "expected malformed data URL to be rejected"
@@ -4399,6 +4438,8 @@ let () =
             test_keeper_chat_operation_input_rejects_orphan_attachment;
           test_case "chat operation input accepts referenced attachment" `Quick
             test_keeper_chat_operation_input_accepts_referenced_attachment;
+          test_case "multimodal input separates bad payloads from store failures" `Quick
+            test_keeper_multimodal_input_separates_bad_payloads_from_store_failures;
           test_case "multimodal input converts user blocks to AGENT_CORE blocks" `Quick
             test_keeper_multimodal_input_converts_user_blocks_to_agent_core_blocks;
           test_case "multimodal parse maps each kind to its constructor" `Quick

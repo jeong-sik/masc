@@ -24787,26 +24787,32 @@ let main
         report_action state "system"
           "Approval list changed; review the updated row before deciding"
   in
-  let last_visible_rejection () =
-    match state.image_open || state.msx_open,
-          Frame_presenter.presented_rows frame_presenter with
+  let last_visible_rejection ~presented_rows () =
+    match state.image_open || state.msx_open, presented_rows with
     | true, (Some _ | None) -> None
     | false, None -> None
     | false, Some rows ->
         let _, cols = Masc_tui_ansi.get_terminal_size () in
         presented_input_rejection ~rows:(List.length rows) ~cols (!presented).presses
   in
-  let last_visible_quit () =
-    match state.image_open || state.msx_open,
-          Frame_presenter.presented_rows frame_presenter,
-          Masc_tui_ansi.probe_terminal_size () with
-    | false, Some rows, Some (physical_rows, physical_cols)
-      when not (Terminal_write_repair.damage_pending ())
-           && not (Atomic.get resize_requested)
-           && (physical_rows, physical_cols) = Masc_tui_ansi.get_terminal_size () ->
-        presented_quit_confirmation ~rows:(List.length rows)
-          ~cols:physical_cols (!presented).presses
-    | (true | false), (Some _ | None), (Some _ | None) -> None
+  let last_visible_quit ~presented_rows () =
+    (* The probe runs only past the guards that make it moot: it is a fresh
+       ioctl per descriptor, and neither a fullscreen surface nor a missing
+       frame leaves anything for it to validate. The probe itself is a pure
+       read -- the size cache moves only through [refresh_terminal_size] --
+       so skipping the call changes neither cache. *)
+    match state.image_open || state.msx_open, presented_rows with
+    | true, (Some _ | None) -> None
+    | false, None -> None
+    | false, Some rows -> (
+        match Masc_tui_ansi.probe_terminal_size () with
+        | Some (physical_rows, physical_cols)
+          when not (Terminal_write_repair.damage_pending ())
+               && not (Atomic.get resize_requested)
+               && (physical_rows, physical_cols) = Masc_tui_ansi.get_terminal_size () ->
+            presented_quit_confirmation ~rows:(List.length rows)
+              ~cols:physical_cols (!presented).presses
+        | (Some _ | None) -> None)
   in
   let context_search_owner () =
     let Workspace_authority workspace = state.workspace_authority in
@@ -24819,6 +24825,8 @@ let main
   in
   let present_frame frame approval presses panes acting_pane chat_row_actions change_authority
       ~input_pending ~write ~flush reader =
+    (* Read once: each call copies the whole screen into a fresh list. *)
+    let presented_rows = Frame_presenter.presented_rows frame_presenter in
     let panel_owner = Masc_tui_render.panel_input_owner state
         ~terminal_rows:frame.Frame_presenter.terminal_rows in
     let damaged = Terminal_write_repair.consume_damage () in
@@ -24826,8 +24834,10 @@ let main
         ~rows:(max 1 frame.Frame_presenter.terminal_rows)
         ~cols:(max 1 frame.Frame_presenter.terminal_cols) presses in
     let rejection_changed = not (Option.equal Masc_tui_action_notice.same_rejection
-        (last_visible_rejection ()) candidate_rejection) in
-    let previous_quit = if damaged then None else last_visible_quit () in
+        (last_visible_rejection ~presented_rows ()) candidate_rejection) in
+    let previous_quit =
+      if damaged then None else last_visible_quit ~presented_rows ()
+    in
     let candidate_quit = presented_quit_confirmation
         ~rows:(max 1 frame.Frame_presenter.terminal_rows)
         ~cols:(max 1 frame.Frame_presenter.terminal_cols) presses in
@@ -24846,7 +24856,7 @@ let main
       || play_owner_authority_changed ~presented:(play_card_of_reader (!presented).reader)
            ~candidate:(play_card_of_reader reader)
       || Presented.panel_presentation_changed !presented ~current_owner:panel_owner
-      || ((damaged || Option.is_none (Frame_presenter.presented_rows frame_presenter))
+      || ((damaged || Option.is_none presented_rows)
           && (Option.is_some (!presented).panel_owner
               || owned_reader (!presented).reader || owned_reader reader))
     in
@@ -26704,7 +26714,8 @@ and is loaded on demand through keeper_skill.
                       && not (input_unsettled ())
                       && Masc_tui_action_notice.quit_authorized current
                            ~kind:Masc_tui_action_notice.Interrupt
-                           ~currently_visible:(last_visible_quit ())
+                           ~currently_visible:(last_visible_quit
+                             ~presented_rows:(Frame_presenter.presented_rows frame_presenter) ())
                            ~ordinary_before:(Masc_tui_action_notice.ordinary state.last_action)
                            ~now:(Unix.gettimeofday ()) ~window:last_action_window_s
                   | (Masc_tui_exit_signals.Interrupt_armed | Masc_tui_exit_signals.Interrupt_again),
@@ -27105,7 +27116,8 @@ and is loaded on demand through keeper_skill.
         | Some confirmation
           when Masc_tui_action_notice.quit_authorized confirmation
               ~kind:Masc_tui_action_notice.Quit_key
-              ~currently_visible:(last_visible_quit ())
+              ~currently_visible:(last_visible_quit
+                ~presented_rows:(Frame_presenter.presented_rows frame_presenter) ())
               ~ordinary_before:(Masc_tui_action_notice.ordinary state.last_action)
               ~now:(Unix.gettimeofday ()) ~window:last_action_window_s -> Some confirmation
         | Some _ | None -> None in
@@ -27113,17 +27125,20 @@ and is loaded on demand through keeper_skill.
         if rejected_operator_input then
           Masc_tui_action_notice.after_rejected_input state.last_action
             ~ordinary_before:ordinary_before_input
-            ~currently_visible:(last_visible_rejection ())
+            ~currently_visible:(last_visible_rejection
+              ~presented_rows:(Frame_presenter.presented_rows frame_presenter) ())
             ~now:(Unix.gettimeofday ()) ~window:last_action_window_s
         else
           Masc_tui_action_notice.after_input state.last_action
             ~input_seen:(Option.is_some input)
             ~operator_input:(Option.exists is_operator_input input)
-            ~currently_visible:(last_visible_rejection ())
+            ~currently_visible:(last_visible_rejection
+              ~presented_rows:(Frame_presenter.presented_rows frame_presenter) ())
             ~now:(Unix.gettimeofday ()) ~window:last_action_window_s;
       state.last_action <- Masc_tui_action_notice.after_drain state.last_action
           ~at:(Unix.gettimeofday ()) ~input_pending:(input_unsettled ())
-          ~currently_visible:(last_visible_rejection ());
+          ~currently_visible:(last_visible_rejection
+            ~presented_rows:(Frame_presenter.presented_rows frame_presenter) ());
       (* Further operator input owns focus. A pending creation may finish and
          refresh its metadata, but cannot jump over the next gesture/draft. *)
       (match input with
@@ -28333,7 +28348,9 @@ and is loaded on demand through keeper_skill.
           | Some before, Some arm ->
               Masc_tui_action_notice.same_quit before arm.qa_confirmation
               && quit_arm_matches state arm
-              && Option.exists (Masc_tui_action_notice.same_quit before) (last_visible_quit ())
+              && Option.exists (Masc_tui_action_notice.same_quit before)
+                   (last_visible_quit
+                      ~presented_rows:(Frame_presenter.presented_rows frame_presenter) ())
               && (match Masc_tui_action_notice.ordinary state.last_action with
                   | None -> true
                   | Some ordinary -> ordinary == Masc_tui_action_notice.quit_ordinary before)
@@ -36729,7 +36746,8 @@ and is loaded on demand through keeper_skill.
       state.quit_armed <- Option.map (fun arm ->
           { arm with qa_confirmation =
               Masc_tui_action_notice.quit_after_drain arm.qa_confirmation
-                ~currently_visible:(last_visible_quit ())
+                ~currently_visible:(last_visible_quit
+                  ~presented_rows:(Frame_presenter.presented_rows frame_presenter) ())
                 ~input_pending:(input_unsettled ()
                   || Masc_tui_exit_signals.interrupt_pending exit_signals) }) state.quit_armed;
       (match state.quit_armed with

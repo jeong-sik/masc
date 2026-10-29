@@ -545,24 +545,30 @@ let bare_urls text =
   loop 0 []
 
 let dress_bare_links ~open_style ~close_style text =
-  let length = String.length text in
-  let buffer = Buffer.create (length + 16) in
-  let rec loop index =
-    if index >= length then ()
-    else if url_begins_at text index then begin
-      let stop = url_end text index in
-      Buffer.add_string buffer open_style;
-      Buffer.add_string buffer (String.sub text index (stop - index));
-      Buffer.add_string buffer close_style;
-      loop stop
-    end
-    else begin
-      Buffer.add_char buffer text.[index];
-      loop (index + 1)
-    end
-  in
-  loop 0;
-  Buffer.contents buffer
+  (* [url_begins_at] needs an 'h'. Without one the scan below would copy the
+     row byte for byte into a fresh string, so hand the row back untouched.
+     Rows with a link still walk the whole scan. *)
+  if not (String.contains text 'h') then text
+  else begin
+    let length = String.length text in
+    let buffer = Buffer.create (length + 16) in
+    let rec loop index =
+      if index >= length then ()
+      else if url_begins_at text index then begin
+        let stop = url_end text index in
+        Buffer.add_string buffer open_style;
+        Buffer.add_string buffer (String.sub text index (stop - index));
+        Buffer.add_string buffer close_style;
+        loop stop
+      end
+      else begin
+        Buffer.add_char buffer text.[index];
+        loop (index + 1)
+      end
+    in
+    loop 0;
+    Buffer.contents buffer
+  end
 
 let composer_max_rows = 5
 

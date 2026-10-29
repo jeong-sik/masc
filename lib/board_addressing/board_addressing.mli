@@ -55,3 +55,12 @@ val parse : string -> raw_address
     whole signal — the otherwise-valid direct targets are deliberately
     NOT surfaced, because partially routing an ambiguous address would
     silently reinterpret the author's intent. *)
+
+val routing_target : string -> string option
+(** The one name a single-recipient consumer routes on, from the same
+    tokens as {!parse}, so a code span or fence carries no address.
+    A [@@] selector wins over direct targets: [@@all] gives ["all"] and any
+    other selector gives that selector, lowercased, for the caller to reject
+    as an unknown target.  A selector with nothing after it, as in the
+    [@@] of a diff hunk header, gives [None].  Otherwise the first direct
+    target, case preserved and not validated; no address gives [None]. *)

@@ -967,7 +967,7 @@ let broadcast_internal ?trace_context ?request_id ?on_committed ?(fleet_delivery
      unsynchronized. *)
   let pre_extract_mention = match fleet_delivery with
     | Deferred_passive_fleet -> None
-    | Immediate_fleet | Deferred_fleet -> Mention.extract content in
+    | Immediate_fleet | Deferred_fleet -> Board_addressing.routing_target content in
   match rewrite_task_cache_signal config ~msg_type ~task_cache_signal ~content with
   | Error _ as error -> error
   | Ok (content, msg_type) ->
@@ -1055,7 +1055,7 @@ let await_exact_request request_id operation =
           Condition.wait operation.ready_condition exact_request_operations_mutex
         done)
 
-let validate_deferred_fleet_content content = match Mention.extract content with
+let validate_deferred_fleet_content content = match Board_addressing.routing_target content with
   | Some _ -> Error (Broadcast_policy_rejected "deferred Fleet publication cannot carry a mention")
   | None -> Ok ()
 

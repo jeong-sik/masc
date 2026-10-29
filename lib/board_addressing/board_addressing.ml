@@ -140,3 +140,17 @@ let parse text =
     | [] -> No_explicit_address
     | _ :: _ -> Raw_targets targets)
 ;;
+
+(* A consumer that notifies one recipient routes on one name. A [@@] selector
+   is that name: [@@all] or an unknown selector the caller rejects as an
+   unknown target. A selector with nothing after it, such as the [@@] that
+   opens a diff hunk header, names nobody. *)
+let routing_target text =
+  match parse text with
+  | No_explicit_address -> None
+  | Broadcast_all -> Some broadcast_all_selector
+  | Unsupported_broadcast selectors ->
+    List.find_opt (fun selector -> not (String.equal selector "")) selectors
+  | Raw_targets [] -> None
+  | Raw_targets (first :: _) -> Some first
+;;

@@ -115,6 +115,48 @@ let test_parse_code_spans () =
   check_parse "unterminated span swallows the rest" "none"
     "opening `@alpha and never closing"
 
+let check_routing label expected content =
+  check (option string) label expected (Board_addressing.routing_target content)
+
+(* The contract of the removed regex extractor, kept for the one-recipient
+   consumers, plus the shapes that made it name the wrong recipient. *)
+let test_routing_target () =
+  check_routing "direct" (Some "ollama") "@ollama status?";
+  check_routing "full hyphenated target"
+    (Some "canary-feature-20260813-202635")
+    "@canary-feature-20260813-202635 please ack";
+  check_routing "underscore and digits" (Some "agent_v2") "hello @agent_v2";
+  check_routing "first direct mention wins" (Some "ollama")
+    "@ollama please ask @canary-feature-20260813-202635";
+  check_routing "plain text" None "Hello world";
+  check_routing "email is not a mention" None "mail test@example.com";
+  check_routing "bare marker" None "@";
+  check_routing "embedded marker" None "prefix@agent";
+  check_routing "a particle after the name is not part of it" (Some "alpha")
+    "@alpha에게 부탁해요"
+
+let test_routing_target_selectors () =
+  check_routing "fleet selector" (Some "all") "release note @@all";
+  check_routing "fleet selector in any casing" (Some "all") "release note @@ALL";
+  check_routing "another selector is the name for the caller to reject"
+    (Some "gemini") "notice @@gemini";
+  check_routing "selector lowercased" (Some "delta") "release note @@Delta";
+  check_routing "selector wins over a direct mention" (Some "gemini")
+    "@ollama please notify @@gemini";
+  (* The [@@] that opens a diff hunk header names nobody. *)
+  check_routing "hunk header names nobody" None
+    "moved the hunk '@@ -1435,6 +1435,7 @@' by hand"
+
+(* A dune alias in a code span is not a recipient, and it must not hide the
+   recipient written after it. *)
+let test_routing_target_code_spans () =
+  check_routing "alias in a code span names nobody" None
+    "run `dune build @check` first";
+  check_routing "alias in a fence names nobody" None
+    "```\ndune build @runtest\n```";
+  check_routing "a mention after a code span is still found" (Some "alpha")
+    "main fails `dune build @check` today\n\n@alpha @beta look"
+
 let () =
   run "board_addressing"
     [ ( "tokenization",
@@ -123,4 +165,8 @@ let () =
       ( "parse",
         [ test_case "targets" `Quick test_parse_targets;
           test_case "broadcast" `Quick test_parse_broadcast;
-          test_case "code spans" `Quick test_parse_code_spans ] ) ]
+          test_case "code spans" `Quick test_parse_code_spans ] );
+      ( "routing_target",
+        [ test_case "direct targets" `Quick test_routing_target;
+          test_case "selectors" `Quick test_routing_target_selectors;
+          test_case "code spans" `Quick test_routing_target_code_spans ] ) ]

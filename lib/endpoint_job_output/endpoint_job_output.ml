@@ -34,7 +34,7 @@ type metadata_operation = Open_recovery | Publish of string
 type metadata_stage = Waiting | Acquired
 (* Transfer-buffer size only. Neither total output nor execution is capped. *)
 let buffer_bytes = 65536
-let cpu f = Domain_pool_ref.submit_cpu_or_inline f
+let cpu f = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ f
 let io f = try Ok (f ()) with
   | Eio.Io _ | Unix.Unix_error _ | Sys_error _ | Invalid_argument _ | End_of_file -> Error Storage_unavailable
 let reader_stat = function

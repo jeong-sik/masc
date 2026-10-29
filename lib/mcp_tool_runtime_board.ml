@@ -250,7 +250,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
                  ())
         in
         (* Mention processing — mirror masc_broadcast pattern *)
-        let mention = Mention.extract content in
+        let mention = Board_addressing.routing_target content in
         (match mention with
          | Some target ->
              Notify.notify_mention ~from_agent:author
@@ -297,7 +297,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
                  ())
         in
         (* Mention processing — mirror masc_broadcast pattern *)
-        let mention = Mention.extract content in
+        let mention = Board_addressing.routing_target content in
         (match mention with
          | Some target ->
              Notify.notify_mention ~from_agent:author

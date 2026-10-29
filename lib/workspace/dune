@@ -48,7 +48,6 @@
   workspace_verification_store
   workspace_verification_operator_evidence
   event_kind
-  mention
   workspace_resilience
   workspace_goal_index
   nickname)
@@ -76,6 +75,8 @@
   ; Config_dir_resolver.base_path_or_cwd ().
   masc.config_dir_resolver
   masc.skill_reference
+  ; the one @-address grammar; broadcast routes a mention on it
+  masc.board_addressing
   time_compat
   fs_compat
   yojson

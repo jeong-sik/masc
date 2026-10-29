@@ -2,10 +2,11 @@ open Alcotest
 open Masc
 
 (* The Keeper side of the Board recipient lookup reads the persisted Keeper
-   settings: a name stands for a Keeper when it is the Keeper's own name or one
-   of its [mention_targets].  Each case writes real settings under a temporary
-   base path and asks through the same [Recipient_lookup.resolve] the write path
-   uses. *)
+   settings: a name is declared when a Keeper answers to it, which is its
+   [mention_targets] when it has any and its own name when it has none, the
+   same question the Board router asks.  Each case writes real settings under a
+   temporary base path and asks through the same [Recipient_lookup.resolve] the
+   write path uses. *)
 
 let rec remove_tree path =
   if Sys.file_exists path
@@ -35,9 +36,10 @@ let with_workspace f () =
        f config)
 ;;
 
-(* The aliases are part of the Keeper's configuration, so they go in its TOML;
-   the persisted settings are overlaid with it when they are read. *)
-let register_keeper config ?(aliases = []) name =
+(* The [mention_targets] are part of the Keeper's configuration, so they go in
+   its TOML; the persisted settings are overlaid with it when they are read.
+   Without them the Keeper answers to its own name alone. *)
+let register_keeper config ?(mention_targets = []) name =
   let meta =
     match
       Masc_test_deps.meta_of_json_fixture
@@ -55,12 +57,12 @@ let register_keeper config ?(aliases = []) name =
   in
   Fs_compat.mkdir_p keepers_dir;
   let alias_line =
-    match aliases with
+    match mention_targets with
     | [] -> ""
     | _ :: _ ->
       Printf.sprintf
         "mention_targets = [%s]\n"
-        (String.concat ", " (List.map (Printf.sprintf "%S") aliases))
+        (String.concat ", " (List.map (Printf.sprintf "%S") mention_targets))
   in
   Out_channel.with_open_text (Filename.concat keepers_dir (name ^ ".toml")) (fun oc ->
     output_string
@@ -117,17 +119,100 @@ let expect_error label ~mentioning = function
       mentioning
 ;;
 
+(* A post from somebody who is no Keeper's own lane. *)
+let post_signal : Board_dispatch.board_signal =
+  { kind = Board_dispatch.Board_post_created
+  ; post_id = "post-1"
+  ; author = "carol"
+  ; title = "title"
+  ; content = "content"
+  ; hearth = None
+  ; updated_at = None
+  }
+;;
+
+(* Whether the Board router delivers a post recorded for [recipient] to the
+   Keeper [keeper]: the question the recorded name has to answer yes to. *)
+let routed_to config ~keeper recipient =
+  match
+    Keeper_meta_store.read_effective_meta config keeper
+    , Keeper_identity.Keeper_id.of_string recipient
+  with
+  | Ok (Some meta), Some id ->
+    (match
+       Keeper_board_audience.route_for_keeper
+         ~audience:(Keeper_board_audience.Targets [ id ])
+         ~meta
+         ~signal:post_signal
+     with
+     | Keeper_world_observation_board_signal.Available (Keeper_board_audience.Deliver _) ->
+       true
+     | Keeper_world_observation_board_signal.Available
+         (Keeper_board_audience.Judge_discoverable | Keeper_board_audience.Ignore)
+     | Keeper_world_observation_board_signal.Unavailable _ -> false)
+  | Ok None, _ -> fail (Printf.sprintf "no Keeper named %S" keeper)
+  | Error detail, _ -> fail detail
+  | Ok (Some _), None -> fail (Printf.sprintf "%S is not a Keeper id" recipient)
+;;
+
 let test_a_keepers_own_name_in_any_case config =
   register_keeper config "alice";
   expect_ok "lower case" ([ "alice" ], []) (ask config "alice");
   expect_ok "upper case" ([ "alice" ], []) (ask config "ALICE")
 ;;
 
-let test_an_alias_stands_for_its_keeper config =
-  register_keeper config ~aliases:[ "a-team"; "Release-Leader" ] "alice";
+(* An alias is recorded as the name the author wrote, in lower case.  The
+   router matches a recorded target against the names a Keeper answers to, and
+   the alias is one of them. *)
+let test_an_alias_is_recorded_as_the_name_its_keeper_answers_to config =
+  register_keeper config ~mention_targets:[ "alice"; "a-team"; "Release-Leader" ] "alice";
   register_keeper config "bob";
-  expect_ok "alias" ([ "alice" ], []) (ask config "a-team");
-  expect_ok "alias in another case" ([ "alice" ], []) (ask config "RELEASE-leader")
+  expect_ok "alias" ([ "a-team" ], []) (ask config "a-team");
+  expect_ok "alias in another case" ([ "release-leader" ], []) (ask config "RELEASE-leader");
+  expect_ok "the Keeper's own name, which it lists" ([ "alice" ], []) (ask config "alice")
+;;
+
+(* A Keeper that lists aliases and leaves its own name out is not addressed by
+   that name: the router does not count it once a list exists.  Declaring it
+   would record a target nobody is woken for and tell the author nothing. *)
+let test_a_keeper_that_lists_only_aliases_is_not_declared_by_its_own_name config =
+  register_keeper config ~mention_targets:[ "a-team" ] "alice";
+  expect_ok "alias" ([ "a-team" ], []) (ask config "a-team");
+  expect_ok "own name" ([], [ "alice" ]) (ask config "alice")
+;;
+
+let test_a_name_another_keeper_lists_is_declared_by_that_keeper config =
+  register_keeper config ~mention_targets:[ "a-team" ] "alice";
+  register_keeper config ~mention_targets:[ "bob"; "alice" ] "bob";
+  expect_ok "alice is bob's alias" ([ "alice" ], []) (ask config "alice");
+  check bool "bob is routed on it" true (routed_to config ~keeper:"bob" "alice");
+  check bool "alice is not" false (routed_to config ~keeper:"alice" "alice")
+;;
+
+(* The recorded name is what the router delivers on, for a Keeper that lists
+   nothing, one that lists its own name and an alias, and one that lists only an
+   alias. *)
+let test_every_recorded_name_reaches_the_keeper_that_declared_it config =
+  register_keeper config "plain";
+  register_keeper config ~mention_targets:[ "listed"; "listed-alias" ] "listed";
+  register_keeper config ~mention_targets:[ "only-alias" ] "aliased";
+  List.iter
+    (fun (keeper, name) ->
+       match ask config name with
+       | Ok ([ recipient ], []) ->
+         check
+           bool
+           (Printf.sprintf "@%s reaches %s" name keeper)
+           true
+           (routed_to config ~keeper recipient)
+       | Ok _ | Error _ -> fail (Printf.sprintf "@%s should be declared by %s" name keeper))
+    [ "plain", "plain"
+    ; "plain", "PLAIN"
+    ; "listed", "listed"
+    ; "listed", "listed-alias"
+    ; "listed", "LISTED-ALIAS"
+    ; "aliased", "only-alias"
+    ]
 ;;
 
 let test_an_unknown_name_is_not_declared config =
@@ -154,8 +239,8 @@ let test_a_name_no_keeper_can_have_is_not_declared config =
 ;;
 
 let test_two_keepers_claiming_one_alias_fail_the_lookup config =
-  register_keeper config ~aliases:[ "shared" ] "alice";
-  register_keeper config ~aliases:[ "shared" ] "bob";
+  register_keeper config ~mention_targets:[ "alice"; "shared" ] "alice";
+  register_keeper config ~mention_targets:[ "bob"; "shared" ] "bob";
   expect_error
     "shared alias"
     ~mentioning:[ "@shared"; "alice"; "bob" ]
@@ -187,8 +272,14 @@ let () =
     [ ( "lookup"
       , [ test_case "a Keeper's own name in any case" `Quick
             (with_workspace test_a_keepers_own_name_in_any_case)
-        ; test_case "an alias stands for its Keeper" `Quick
-            (with_workspace test_an_alias_stands_for_its_keeper)
+        ; test_case "an alias is recorded as the name its Keeper answers to" `Quick
+            (with_workspace test_an_alias_is_recorded_as_the_name_its_keeper_answers_to)
+        ; test_case "a Keeper that lists only aliases is not declared by its own name" `Quick
+            (with_workspace test_a_keeper_that_lists_only_aliases_is_not_declared_by_its_own_name)
+        ; test_case "a name another Keeper lists is declared by that Keeper" `Quick
+            (with_workspace test_a_name_another_keeper_lists_is_declared_by_that_keeper)
+        ; test_case "every recorded name reaches the Keeper that declared it" `Quick
+            (with_workspace test_every_recorded_name_reaches_the_keeper_that_declared_it)
         ; test_case "an unknown name is not declared" `Quick
             (with_workspace test_an_unknown_name_is_not_declared)
         ; test_case "a name no Keeper can have is not declared" `Quick

@@ -6,17 +6,20 @@ type 'recipient resolution = 'recipient Recipient_resolution.resolution =
   ; unresolved : string list
   }
 
-type t = Candidate.t -> (Agent_id.t option, string) result
+type t = unit -> Candidate.t -> (Agent_id.t option, string) result
 
-let make declared = declared
+let make_per_write start = start
 
-let none_declared _candidate = Ok None
+let make declared = make_per_write (fun () -> declared)
 
-let unavailable candidate =
-  Error
-    (Printf.sprintf
-       "cannot tell whether @%s names a Keeper: the Board backend has no recipient lookup"
-       (Candidate.to_string candidate))
+let none_declared = make (fun _candidate -> Ok None)
+
+let unavailable =
+  make (fun candidate ->
+    Error
+      (Printf.sprintf
+         "cannot tell whether @%s names a Keeper: the Board backend has no recipient lookup"
+         (Candidate.to_string candidate)))
 ;;
 
 let same_agent left right =
@@ -24,5 +27,5 @@ let same_agent left right =
 ;;
 
 let resolve lookup candidates =
-  Recipient_resolution.resolve ~equal:same_agent ~declared:lookup candidates
+  Recipient_resolution.resolve ~equal:same_agent ~declared:(lookup ()) candidates
 ;;

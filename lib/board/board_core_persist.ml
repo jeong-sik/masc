@@ -903,10 +903,12 @@ let create_post_once_by_fusion_run_id
    metadata passed through [normalize_meta_json] so an edit cannot silently
    lose it. [post_kind]/[visibility]/[hearth]/[thread_id]/[origin] are
    preserved. Author mismatch returns [Unauthorized] (no silent ignore).
-   Normalization runs inside the store lock because the meta merge needs the
-   existing post's [meta_json]; the added work is pure string/JSON manipulation,
-   dominated by the [posts_jsonl_unlocked] snapshot already taken under the
-   lock. *)
+   Normalization and the audience depend on the existing post's [post_kind],
+   [visibility] and [meta_json], and the audience asks the recipient lookup,
+   which reads Keeper settings from disk. They are worked out before the locks
+   on the post as it stands. Under the locks that result is used only if the
+   post is still the same record in the table; otherwise it is worked out
+   again there, so no write is based on a post it did not see. *)
 let update_post_with_outcome
       store
       ~lookup
@@ -925,12 +927,48 @@ let update_post_with_outcome
   match Agent_id.of_string editor with
   | Error e -> Error e
   | Ok editor_id ->
+    let key = Post_id.to_string pid in
+    (* What the edit stores for [existing], leaving out who owns it: the
+       normalized text, its meta and the audience the text names. Seeded with
+       the existing post's metadata so body edits cannot erase it. *)
+    let plan (existing : post) =
+      match
+        normalize_post_payload
+          ~content
+          ?title
+          ?body
+          ~post_kind:existing.post_kind
+          ?meta_json:existing.meta_json
+          ()
+      with
+      | Error (Board_core_payload.Meta_not_assoc payload) ->
+        Error
+          (Validation_error
+             (Printf.sprintf
+                "Malformed meta_json: expected JSON object, got %s"
+                (Yojson.Safe.to_string payload)))
+      | Ok (normalized_title, normalized_body, _kind, normalized_meta) ->
+        if String.length normalized_body = 0
+        then Error (Validation_error "Content cannot be empty")
+        else
+          Board_audience.audience_for_post
+            ~lookup
+            ~post_kind:existing.post_kind
+            ~visibility:existing.visibility
+            ~title:normalized_title
+            ~content:normalized_body
+          |> Result.map (fun (audience, unresolved) ->
+            normalized_title, normalized_body, normalized_meta, audience, unresolved)
+    in
+    let planned =
+      with_lock store (fun () -> Hashtbl.find_opt store.posts key)
+      |> Option.map (fun existing -> existing, plan existing)
+    in
     (* Persist-before-commit: acquire persistence first, then state. Keeping
        state locked through the write preserves unrelated concurrent fields
        without a rollback or a stale staged-row replacement. *)
     with_persist_lock store (fun () ->
       with_lock store (fun () ->
-        let key = Post_id.to_string pid in
         match Hashtbl.find_opt store.posts key with
         | None -> Error (Post_not_found post_id)
         | Some existing ->
@@ -954,34 +992,16 @@ let update_post_with_outcome
             (match next_author_result with
              | Error e -> Error e
              | Ok next_author ->
-            (* Normalize identically to create, seeded with the existing post's
-               metadata so body edits cannot erase it. [post_kind] is passed
-               through and the result kind ([_kind]) discarded — the existing
-               post's kind is preserved via [{ existing with }]. *)
+            (* Normalized identically to create. [post_kind] is passed through
+               and the result kind is discarded: the existing post's kind is
+               preserved via [{ existing with }]. *)
             match
-              normalize_post_payload
-                ~content
-                ?title
-                ?body
-                ~post_kind:existing.post_kind
-                ?meta_json:existing.meta_json
-                ()
+              (match planned with
+               | Some (seen, result) when seen == existing -> result
+               | Some _ | None -> plan existing)
             with
-            | Error (Board_core_payload.Meta_not_assoc payload) ->
-                Error
-                  (Validation_error
-                     (Printf.sprintf
-                        "Malformed meta_json: expected JSON object, got %s"
-                        (Yojson.Safe.to_string payload)))
-            | Ok (normalized_title, normalized_body, _kind, normalized_meta) ->
-              if String.length normalized_body = 0
-              then Error (Validation_error "Content cannot be empty")
-              else match Board_audience.audience_for_post ~lookup
-                  ~post_kind:existing.post_kind
-                  ~visibility:existing.visibility
-                  ~title:normalized_title ~content:normalized_body with
-              | Error error -> Error error
-              | Ok (audience, unresolved) -> (
+            | Error error -> Error error
+            | Ok (normalized_title, normalized_body, normalized_meta, audience, unresolved) -> (
                 let content_changed =
                   not (String.equal existing.title normalized_title
                        && String.equal existing.body normalized_body

@@ -2,6 +2,13 @@ open Alcotest
 open Masc
 module VAT = Verification_authority_tools
 let () = Mirage_crypto_rng_unix.use_default ()
+(* These tests pin what the verification evidence reads from a post, not who is
+   declared: every name with the shape of a Board identity stands for itself. *)
+let every_name_declared =
+  Recipient_lookup.make (fun candidate ->
+    Ok
+      (Result.to_option
+         (Board.Agent_id.parse (Recipient_lookup.Candidate.to_string candidate))))
 let require label = function Ok value -> value | Error _ -> fail label
 let require_durable_deletion label = function
   | Ok Board.Durable_deletion -> ()
@@ -23,6 +30,7 @@ let with_fixture f = Eio_main.run @@ fun env ->
     (fun () ->
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some "producer"));
+      Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
       f config)
 let call surface name args = VAT.dispatch surface ~name ~args
 let read surface name args =

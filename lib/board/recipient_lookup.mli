@@ -26,12 +26,23 @@ val make : (Candidate.t -> (Agent_id.t option, string) result) -> t
 (** [make declared] is a lookup that asks [declared] once per spelling.
 
     - [Ok (Some recipient)]: the name is declared and stands for [recipient],
-      the Keeper's own name, whichever alias or case the author wrote.
+      the name a Keeper answers to, in lower case whichever case the author
+      wrote.
     - [Ok None]: no Keeper declares the name.  It is prose.
     - [Error detail]: the declaration could not be read, so the write is
       refused and nothing is stored.  Recording "no recipient" instead would
       lose the address for good.  [detail] reaches the author, so it names what
       is broken. *)
+
+val make_per_write
+  :  (unit -> Candidate.t -> (Agent_id.t option, string) result)
+  -> t
+(** [make_per_write start] calls [start] once for each write and asks the
+    function it returns once per spelling of that write, with the answers of
+    {!make}.  What is costly to read, such as every Keeper's settings, belongs
+    inside [start]: it is then read at most once for the write, and only if a
+    name needs it.  Nothing outlives the write, so a declaration that changes
+    between two writes is read again. *)
 
 val none_declared : t
 (** Declares no name: every candidate is prose and nothing is ever an error.

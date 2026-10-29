@@ -436,8 +436,7 @@ let persisted_keeper_names config =
 ;;
 
 
-let persisted_keeper_for_mention_target config ~mention_target =
-  let target = Keeper_identity.Keeper_id.of_string mention_target in
+let persisted_effective_metas config =
   let read_effective keeper_name =
     match
       read_meta_file_path
@@ -451,40 +450,48 @@ let persisted_keeper_for_mention_target config ~mention_target =
         meta
       |> Result.map Option.some
   in
-  let rec collect matches = function
-    | [] -> Ok (List.rev matches)
+  let rec collect metas = function
+    | [] -> Ok (List.rev metas)
     | keeper_name :: rest ->
       (match read_effective keeper_name with
        | Error detail -> Error detail
-       | Ok None -> collect matches rest
-       | Ok (Some meta) ->
-         if
-           List.exists
-             (fun alias ->
-                match Keeper_identity.Keeper_id.of_string alias, target with
-                | Some alias_id, Some target_id ->
-                  Keeper_identity.Keeper_id.equal alias_id target_id
-                | None, _ | _, None -> false)
-             meta.mention_targets
-         then collect ((keeper_name, meta) :: matches) rest
-         else collect matches rest)
+       | Ok None -> collect metas rest
+       | Ok (Some meta) -> collect ((keeper_name, meta) :: metas) rest)
   in
-  if Option.is_none target
+  match persisted_keeper_names_result config with
+  | Error _ as error -> error
+  | Ok keeper_names -> collect [] keeper_names
+;;
+
+let keeper_for_mention_target_in metas ~mention_target =
+  match Keeper_identity.Keeper_id.of_string mention_target with
+  | None -> Ok None
+  | Some target_id ->
+    let claims (_keeper_name, (meta : Keeper_meta_contract.keeper_meta)) =
+      List.exists
+        (fun alias ->
+           match Keeper_identity.Keeper_id.of_string alias with
+           | Some alias_id -> Keeper_identity.Keeper_id.equal alias_id target_id
+           | None -> false)
+        meta.mention_targets
+    in
+    (match List.filter claims metas with
+     | [] -> Ok None
+     | [ match_ ] -> Ok (Some match_)
+     | matches ->
+       Error
+         (Printf.sprintf
+            "multiple persisted Keepers claim mention_target=%s: %s"
+            (String.trim mention_target)
+            (matches |> List.map fst |> String.concat ",")))
+;;
+
+let persisted_keeper_for_mention_target config ~mention_target =
+  if Option.is_none (Keeper_identity.Keeper_id.of_string mention_target)
   then Ok None
   else
-    match persisted_keeper_names_result config with
-    | Error _ as error -> error
-    | Ok keeper_names ->
-      (match collect [] keeper_names with
-       | Error _ as error -> error
-       | Ok [] -> Ok None
-       | Ok [ match_ ] -> Ok (Some match_)
-       | Ok matches ->
-         Error
-           (Printf.sprintf
-              "multiple persisted Keepers claim mention_target=%s: %s"
-              (String.trim mention_target)
-              (matches |> List.map fst |> String.concat ",")))
+    Result.bind (persisted_effective_metas config) (fun metas ->
+      keeper_for_mention_target_in metas ~mention_target)
 ;;
 
 let configured_keeper_names config =

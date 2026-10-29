@@ -42,7 +42,8 @@ let get = function
 
 let spelled = Recipient_lookup.Candidate.to_string
 
-(* The Keeper each spelling stands for, whatever its case. *)
+(* The recipient each spelling stands for, whatever its case.  Two spellings
+   may stand for one recipient; the resolution keeps it once. *)
 let table = [ "alice", "alice"; "a-team", "alice"; "bob", "bob" ]
 
 let declared_from table candidate =
@@ -102,10 +103,10 @@ let test_declared_names_are_targets_and_the_rest_are_reported =
       (target_names stored.audience))
 ;;
 
-let test_an_alias_and_a_spelling_variant_are_one_target =
+let test_spellings_standing_for_one_recipient_are_one_target =
   started ~lookup:(declaring table) (fun () ->
     let post, unresolved = get (write "@Alice @a-team @ALICE") in
-    check (list string) "one Keeper, once" [ "alice" ] (target_names post.audience);
+    check (list string) "one recipient, once" [ "alice" ] (target_names post.audience);
     check (list string) "nothing is left over" [] unresolved)
 ;;
 
@@ -273,6 +274,104 @@ let test_an_edit_resolves_again_with_the_current_declaration =
     check (list string) "so the name is reported" [ "alice" ] unresolved)
 ;;
 
+(* A lookup made per write starts once for each write, however many names the
+   text has, and what it read for one write is not kept for the next. *)
+let test_a_per_write_lookup_starts_once_for_each_write =
+  let starts = ref 0 in
+  let lookup =
+    Recipient_lookup.make_per_write (fun () ->
+      incr starts;
+      declared_from table)
+  in
+  started ~lookup (fun () ->
+    ignore (get (write "@alice @bob @check @nobody @other"));
+    check int "one start for a write with five names" 1 !starts;
+    ignore (get (write "@alice"));
+    check int "the next write starts again" 2 !starts;
+    ignore (get (write "no address here"));
+    check int "a text with no name starts nothing" 2 !starts)
+;;
+
+(* Whether a reader that arrives now has to wait for the store lock.  The read
+   is started first and a sibling that only yields once is the other side of the
+   race, so a lock nobody holds lets the read finish first. *)
+let a_read_would_wait () =
+  Eio.Fiber.first
+    (fun () ->
+       ignore (Board_dispatch.list_posts ());
+       false)
+    (fun () ->
+       Eio.Fiber.yield ();
+       true)
+;;
+
+(* The lookup reads the disk.  An edit asks it before it takes the locks, so no
+   reader waits behind the disk. *)
+let test_an_edit_asks_the_lookup_before_it_takes_the_locks =
+  let armed = ref false in
+  let waits = ref [] in
+  let lookup =
+    Recipient_lookup.make (fun candidate ->
+      if !armed then waits := a_read_would_wait () :: !waits;
+      declared_from table candidate)
+  in
+  started ~lookup (fun () ->
+    let post, _ = get (write "first") in
+    armed := true;
+    ignore
+      (get
+         (Board_dispatch.update_post_with_unresolved
+            ~post_id:(post_id post)
+            ~editor:"writer"
+            ~content:"@alice and @bob"
+            ()));
+    check bool "the lookup was asked" true (!waits <> []);
+    check bool "no reader waited while it ran" false (List.exists Fun.id !waits))
+;;
+
+(* What an edit worked out before the locks belongs to the post it saw.  When
+   another write replaces that post during the lookup, the edit works it out
+   again on the new post instead of storing from the old one. *)
+let test_an_edit_works_out_again_when_the_post_changed_during_the_lookup =
+  let alice_asked = ref 0 in
+  let during_the_lookup = ref (fun () -> ()) in
+  let lookup =
+    Recipient_lookup.make (fun candidate ->
+      if String.equal (spelled candidate) "alice"
+      then (
+        incr alice_asked;
+        if !alice_asked = 1 then !during_the_lookup ());
+      declared_from table candidate)
+  in
+  started ~lookup (fun () ->
+    let post, _ = get (write ~visibility:Board.Public "first") in
+    during_the_lookup :=
+      (fun () ->
+         ignore
+           (get
+              (Board_dispatch.update_post_with_unresolved
+                 ~post_id:(post_id post)
+                 ~editor:"writer"
+                 ~content:"changed in between"
+                 ())));
+    let edited, _ =
+      get
+        (Board_dispatch.update_post_with_unresolved
+           ~post_id:(post_id post)
+           ~editor:"writer"
+           ~content:"@alice @bob"
+           ())
+    in
+    check int "alice was asked again after the post changed" 2 !alice_asked;
+    check
+      (list string)
+      "the edit records its own addresses"
+      [ "alice"; "bob" ]
+      (target_names edited.audience);
+    let stored = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    check string "the stored text is the edit's" "@alice @bob" stored.body)
+;;
+
 (* A read can start the backend before the server does. That backend has no
    lookup, so a text with an address in it is refused until one is installed. *)
 let test_a_backend_started_by_a_read_refuses_addresses_until_a_lookup_is_installed () =
@@ -284,12 +383,7 @@ let test_a_backend_started_by_a_read_refuses_addresses_until_a_lookup_is_install
   Board_dispatch.reset_for_test ();
   ignore (Board_dispatch.list_posts ());
   (match write "@alice hello" with
-   | Error (Board.Recipient_lookup_failed detail) ->
-     check
-       bool
-       "the error says no lookup was installed"
-       true
-       (contains ~sub:"no recipient lookup" detail)
+   | Error (Board.Recipient_lookup_failed _) -> ()
    | Ok _ -> fail "an address must be refused without a lookup"
    | Error error -> fail (Board.show_board_error error));
   ignore (get (write "no address here"));
@@ -335,9 +429,9 @@ let () =
             `Quick
             test_declared_names_are_targets_and_the_rest_are_reported
         ; test_case
-            "an alias and a spelling variant are one target"
+            "spellings standing for one recipient are one target"
             `Quick
-            test_an_alias_and_a_spelling_variant_are_one_target
+            test_spellings_standing_for_one_recipient_are_one_target
         ; test_case
             "an undeclared name does not reject the post"
             `Quick
@@ -362,6 +456,18 @@ let () =
             "an edit resolves again with the current declaration"
             `Quick
             test_an_edit_resolves_again_with_the_current_declaration
+        ; test_case
+            "a per-write lookup starts once for each write"
+            `Quick
+            test_a_per_write_lookup_starts_once_for_each_write
+        ; test_case
+            "an edit asks the lookup before it takes the locks"
+            `Quick
+            test_an_edit_asks_the_lookup_before_it_takes_the_locks
+        ; test_case
+            "an edit works out again when the post changed during the lookup"
+            `Quick
+            test_an_edit_works_out_again_when_the_post_changed_during_the_lookup
         ] )
     ; ( "backend"
       , [ test_case

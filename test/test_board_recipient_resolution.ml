@@ -91,14 +91,18 @@ let post_id (post : Board.post) = Board.Post_id.to_string post.id
 let test_declared_names_are_targets_and_the_rest_are_reported =
   started ~lookup:(declaring table) (fun () ->
     let post, unresolved =
-      get (write "@alice and @bob please look, @check is a dune alias")
+      get (write "@alice and @bob please look, @check is a dune alias and @Param a doc tag")
     in
     check
       (list string)
       "the targets are the declared Keepers"
       [ "alice"; "bob" ]
       (target_names post.audience);
-    check (list string) "the undeclared name comes back as written" [ "check" ] unresolved;
+    check
+      (list string)
+      "the undeclared names come back as written"
+      [ "check"; "Param" ]
+      unresolved;
     let stored = get (Board_dispatch.get_post ~post_id:(post_id post)) in
     check
       (list string)

@@ -352,6 +352,14 @@ let test_a_keeper_name_too_long_for_a_board_identity_fails_the_lookup config =
   expect_error "65 bytes" ~mentioning:[ "Board recipient" ] (ask config name)
 ;;
 
+(* The limit holds for an alias too.  It is declared, so it cannot be dropped as
+   prose, and a Board identity cannot hold it. *)
+let test_an_alias_too_long_for_a_board_identity_fails_the_lookup config =
+  let alias = String.make 65 'a' in
+  register_keeper config ~mention_targets:[ "long-owner"; alias ] "long-owner";
+  expect_error "65 bytes" ~mentioning:[ "Board recipient" ] (ask config alias)
+;;
+
 let () =
   run
     "Keeper Board recipient lookup"
@@ -384,6 +392,8 @@ let () =
             (with_workspace test_the_alias_scan_the_broadcast_path_uses_answers_as_before)
         ; test_case "a Keeper name too long for a Board identity fails the lookup" `Quick
             (with_workspace test_a_keeper_name_too_long_for_a_board_identity_fails_the_lookup)
+        ; test_case "an alias too long for a Board identity fails the lookup" `Quick
+            (with_workspace test_an_alias_too_long_for_a_board_identity_fails_the_lookup)
         ] )
     ]
 ;;

@@ -234,14 +234,15 @@ blob 정리는 L1 과 같은 stack 에 들어간다. `Tool_blob_maintenance` 의
    - L1-1(#46651): media 를 payload 합타입으로 싣는다. 동작은 바뀌지 않는다.
    - L1-2a(#46728): media 를 참조로 드는 history 타입(D5).
    - L1-2b(#46729): history 와 checkpoint 가 media 를 참조로만 들고, 바이트는 resolver 로 되돌린다(§3.4). 리뷰 지적은 #46738, #46758 로 고쳤다.
-3. **L1-3~L1-5, v17, native stack 하나.**
-   1. L1-3a: agent_core `Checkpoint_objects`. 저장 계획, head·묶음 인코딩, chain, 읽기. I/O 는 하지 않는다. 쓰지 않는 delta API 와 `Agent_core.Checkpoint_store` 를 지운다.
-   2. L1-3b: Keeper store 와, store 밖에서 checkpoint 바이트를 다루는 곳. 객체 쓰기, head 쓰기, 턴 마무리 저장(`Turn_closes`) 인자, CAS 경로, 보관, accepted-checkpoints, v17. exact snapshot 이 바이트를 들지 않게 되므로 바이트를 비교하거나 풀던 곳(Gate, journal 준비, history clear, input history cut, input wait response, semantic execution, 대시보드 purge, bin 도구)이 같은 층에서 바뀐다. bench 를 턴 단위 저장으로 바꾼다.
-   3. L1-4: head 로 읽기(§3.5). 개수·미리보기, Librarian `chain(k)`.
-   4. L1-5: 객체 정리와 기준점(§3.6).
-
-   층마다 리뷰를 받고, 모두 승인되면 맨 위에서 한 번에 병합한다. 배포가 곧 하드컷이다.
-4. **L2.** 보관 snapshot 을 head 사본으로 바꾸고, 정리를 head 를 따라가게 한다.
+3. **L1-3, v17.** 병합됐다(2026-10-29). L1-4·L1-5 보다 먼저 들어가서, 배포하면 정리 없이 하드컷이 일어난다.
+   1. L1-3a(#46775): agent_core `Checkpoint_objects`. 저장 계획, head·묶음 인코딩, chain, 읽기. I/O 는 하지 않는다. 쓰지 않는 delta API 와 `Agent_core.Checkpoint_store` 를 지운다.
+   2. L1-3b(#46776): Keeper store 와, store 밖에서 checkpoint 바이트를 다루는 곳. 객체 쓰기, head 쓰기, 턴 마무리 저장(`Turn_closes`) 인자, CAS 경로, 보관, accepted-checkpoints, v17. exact snapshot 이 바이트를 들지 않게 되므로 바이트를 비교하거나 풀던 곳(Gate, journal 준비, history clear, input history cut, input wait response, semantic execution, 대시보드 purge, bin 도구)이 같은 층에서 바뀐다. bench 를 턴 단위 저장으로 바꾼다.
+   3. 리뷰 수정(#46790, #46791): purge 백업은 head 와 객체를 세션 경로 그대로 복사한다. head 만 해석한 저장은 객체가 있는지 보고 없는 것을 다시 쓴다. CAS 출처 확인은 head 를 늘 읽는다.
+4. **L1-4: head 로 읽기(§3.5).**
+   1. L1-4a: `plan_save` 와 load 가 메시지마다의 chain 값을 memo 에 남기고, 다음 저장은 물리적으로 같은 앞부분의 값을 이어 쓴다. 16000 메시지에서 라운드 저장이 메시지 수에 비례하지 않게 된다.
+   2. 개수·미리보기, Librarian `chain(k)`.
+5. **L1-5: 객체 정리와 기준점(§3.6).** 정리는 잠금 밖에서 객체를 읽는 읽기(`decode_changed_bytes`)가 쥔 head 의 객체를 지우지 않아야 한다. purge 는 옛 묶음을 가리키는 보관 head 도 지운다.
+6. **L2.** 보관 snapshot 을 head 사본으로 바꾸고, 정리를 head 를 따라가게 한다.
 
 ## 6. 하지 않는 것
 

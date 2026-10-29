@@ -450,6 +450,60 @@ let test_a_rich_checkpoint_keeps_its_digest_and_bytes () =
   Alcotest.(check string) "and the same head" plan.head_bytes again.head_bytes
 ;;
 
+(* A memo that saw the last plan or load takes the entries and chain values
+   of the messages that begin as before; a fresh memo encodes and hashes
+   everything. Over appends, edits, cuts, closed turns and a load, both give
+   the same plan, byte for byte. *)
+let test_a_memo_gives_the_plan_a_fresh_memo_gives () =
+  let random = Random.State.make [| 476 |] in
+  let changes = [| `Edit; `Cut; `Append; `Append; `Append; `Append |] in
+  let store = store () in
+  let memo = O.create_memo () in
+  let fresh_plan ?previous boundary cp = plan_ok ?previous (O.create_memo ()) boundary cp in
+  let same label (expected : O.plan) (actual : O.plan) =
+    Alcotest.(check string) (label ^ ": head") expected.head_bytes actual.head_bytes;
+    Alcotest.(check string) (label ^ ": content") (expected.content :> string) (actual.content :> string);
+    Alcotest.(check (list (pair string string))) (label ^ ": objects")
+      (List.map (fun ((digest : O.digest), bytes) -> (digest :> string), bytes) expected.objects)
+      (List.map (fun ((digest : O.digest), bytes) -> (digest :> string), bytes) actual.objects)
+  in
+  let rec step index previous messages =
+    if index < 60 then (
+      let messages =
+        match changes.(Random.State.int random (Array.length changes)), messages with
+        | `Edit, _ :: _ ->
+          (* An edit somewhere: that message and the ones after it differ. *)
+          let at = Random.State.int random (List.length messages) in
+          List.mapi (fun i m -> if i = at then user (Printf.sprintf "edited %d at %d" index i) else m) messages
+        | `Cut, _ :: _ :: _ -> List.filteri (fun i _ -> i < List.length messages - 1) messages
+        | (`Edit | `Cut | `Append), _ -> messages @ turn index
+      in
+      let boundary = if Random.State.bool random then O.Turn_closes else O.Turn_continues in
+      let cp = checkpoint messages in
+      let planned = plan_ok ?previous memo boundary cp in
+      same (Printf.sprintf "step %d" index) (fresh_plan ?previous boundary cp) planned;
+      (match O.content_digest memo cp with
+       | Ok digest ->
+         Alcotest.(check string) (Printf.sprintf "step %d: value digest" index)
+           (planned.content :> string) (digest :> string)
+       | Error error -> Alcotest.fail (Error.to_string error));
+      write store planned;
+      (* Every tenth step goes through a load, as a restart would. *)
+      let messages =
+        if index mod 10 = 9 then (
+          match O.head_of_string planned.head_bytes with
+          | Error error -> Alcotest.fail (O.load_error_to_string error)
+          | Ok head ->
+            (match O.load memo ~read_object:(read store) head with
+             | Ok loaded -> loaded.messages
+             | Error error -> Alcotest.fail (O.load_error_to_string error)))
+        else planned.decoded.messages
+      in
+      step (index + 1) (Some planned.head.history) messages)
+  in
+  step 0 None []
+;;
+
 (* A later binary's head reads as its version even when its shape is not this
    build's: another top-level field, another format. *)
 let test_a_later_head_reads_as_its_version () =
@@ -539,6 +593,8 @@ let () =
             test_an_absent_object_is_written_again
         ; Alcotest.test_case "a rich checkpoint keeps its digest and bytes" `Quick
             test_a_rich_checkpoint_keeps_its_digest_and_bytes
+        ; Alcotest.test_case "a memo gives the plan a fresh memo gives" `Quick
+            test_a_memo_gives_the_plan_a_fresh_memo_gives
         ] )
     ; ( "refusals"
       , [ Alcotest.test_case "a load refuses what it cannot prove" `Quick

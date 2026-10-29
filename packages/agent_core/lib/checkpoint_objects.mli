@@ -75,8 +75,10 @@ type boundary =
   | Turn_closes
 
 (** The encoded messages of earlier saves and loads, by message identity
-    ([==]), so a save encodes and hashes only messages it has not seen. One
-    memo serves one sequence of saves of one checkpoint. *)
+    ([==]), so a save encodes only messages it has not seen; and the chain
+    values over the messages of the last save or load, so a save whose
+    messages begin with those values hashes only what follows them. One memo
+    serves one sequence of saves of one checkpoint. *)
 type memo
 
 val create_memo : unit -> memo

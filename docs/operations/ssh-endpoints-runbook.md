@@ -317,6 +317,7 @@ sentence saying so is not.
 | Error prefix | Meaning | Operator action |
 |---|---|---|
 | `sandbox_guest_unavailable` | A Docker/microVM guest could not be prepared, or its execution transport failed. It is not evidence that GitHub rejected the Keeper's token. | Inspect the guest, work-volume probe, and transport; do not re-login or repeatedly call `gh auth status`. Check `network_mode` and `microvm_backend` in the failure envelope. |
+| `github_identity_snapshot_unavailable` | The Keeper's GitHub identity is what failed: a direct refresh, snapshot, or revision check, or a guest or container start that refused the identity. | Inspect that Keeper's GitHub identity with `masc keeper-github status` or the GitHub tab. The [Keeper manual](../KEEPER-USER-MANUAL.md#read-sandbox-failures-before-changing-credentials) lists the other signals. |
 | `remote_ssh_no_network_mode` | `remote_ssh` was combined with a Docker-only network mode. | Remove `network_mode`; endpoint networking is host policy. |
 | `remote_endpoint_requires_remote_ssh` | A non-SSH profile still has `remote_endpoint`. | Clear it with JSON `null` or select `remote_ssh`. |
 | `remote_ssh_runtime_config_missing` | Effective runtime TOML cannot be found. | Verify the base path and `.masc/config/runtime.toml`. |

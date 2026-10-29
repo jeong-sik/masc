@@ -161,14 +161,14 @@ let test_tokens () =
   Alcotest.(check (list string)) "question (c) labels" ["standing"; "time_bound"]
     (List.map J.time_nature_label J.all_of_time_nature);
   Alcotest.(check (list string)) "unjudged reasons"
-    ["capacity"; "too_large"; "rate_limited"; "provider_failed"; "invalid_answer"]
+    ["capacity"; "too_large"; "rate_limited"; "provider_failed"; "invalid_answer"; "not_recorded"]
     (List.map J.unjudged_reason_token J.all_of_unjudged_reason)
 
 (* Every list of up to four results over every kind of result, against every
    answer to question (b), read against a second statement of the rule that
    shares nothing with [J.reduce]: the status line it must produce, written as
-   text. 7 results per position (carried, left out, five reasons) give 2801
-   lists, so 11204 cases. *)
+   text. 8 results per position (carried, left out, six reasons) give 4681
+   lists, so 18724 cases. *)
 let result_kinds =
   `Carried :: `Left_out :: List.map (fun reason -> `Undecided reason) J.all_of_unjudged_reason
 
@@ -203,6 +203,7 @@ let status_line_by_rule kinds turn =
   | _ :: _, [], _, Some J.Rate_limited, _ -> Some ("unavailable 0/" ^ string_of_int total ^ " rate_limited")
   | _ :: _, [], _, Some J.Provider_failed, _ -> Some ("unavailable 0/" ^ string_of_int total ^ " provider_failed")
   | _ :: _, [], _, Some J.Invalid_answer, _ -> Some ("unavailable 0/" ^ string_of_int total ^ " invalid_answer")
+  | _ :: _, [], _, Some J.Not_recorded, _ -> Some ("unavailable 0/" ^ string_of_int total ^ " not_recorded")
   | _ :: _, [], _, None, _ -> Alcotest.fail "no judged candidate and no reason"
   | _ :: _, _ :: _, (_ :: _ as ids), _, J.Turn_answered J.Needs_no_knowledge ->
     Some (Printf.sprintf "selected %s [%s] contradicted" counts (String.concat "," ids))
@@ -214,7 +215,7 @@ let status_line_by_rule kinds turn =
 
 let test_reduce_agrees_with_the_rule_on_every_short_list () =
   let lists = lists_up_to 4 in
-  Alcotest.(check int) "lists" 2801 (List.length lists);
+  Alcotest.(check int) "lists" 4681 (List.length lists);
   List.iter (fun kinds ->
     List.iter (fun turn ->
       Alcotest.(check (option string)) "status line"
@@ -530,6 +531,15 @@ let test_candidate_result () =
        (Codec.decode_candidates (piece_of two_facts)
           (response [first_id, possibly 0.9])))
 
+(* A record of a request reads the kind and never guesses it from the shape
+   of the state, so each builder has to set its own. *)
+let test_each_request_names_its_question () =
+  let piece = piece_of two_facts in
+  let token label built = Codec.request_kind_token (ok_request label built).Codec.kind in
+  Alcotest.(check string) "(a)" "candidates" (token "candidates" (Codec.candidate_request ~purpose piece));
+  Alcotest.(check string) "(b)" "turn" (token "turn" (Codec.turn_request ~purpose));
+  Alcotest.(check string) "(c)" "time" (token "time" (Codec.time_request piece))
+
 let test_turn_request_has_no_candidates () =
   let request = ok_request "turn" (Codec.turn_request ~purpose) in
   Alcotest.(check json) "state" (`Assoc ["purpose", purpose]) request.state;
@@ -763,6 +773,8 @@ let () =
         ; Alcotest.test_case "a duplicate or unknown id leaves the whole piece" `Quick
             test_a_response_with_a_duplicate_or_unknown_id_leaves_the_whole_piece
         ; Alcotest.test_case "candidate result" `Quick test_candidate_result
+        ; Alcotest.test_case "each request names its question" `Quick
+            test_each_request_names_its_question
         ; Alcotest.test_case "turn request has no candidates" `Quick
             test_turn_request_has_no_candidates
         ; Alcotest.test_case "turn answers" `Quick test_turn_answers

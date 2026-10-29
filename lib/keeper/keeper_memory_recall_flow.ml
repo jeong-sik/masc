@@ -9,6 +9,7 @@ type attempt_failure =
   | Rate_limited
   | Invalid_response
   | Failed
+  | Not_recorded
 
 type evaluate = Codec.request -> (Types.eval_response, attempt_failure) result
 
@@ -40,7 +41,7 @@ let ask_turn ~evaluate request =
   | Ok response -> Turn_taken (Codec.turn_answer (Codec.decode_turn response))
   | Error Invalid_response -> Turn_taken J.Turn_question_failed
   | Error Capacity_refused -> Turn_capacity_refused
-  | Error (Rate_limited | Failed) -> Turn_not_taken
+  | Error (Rate_limited | Failed | Not_recorded) -> Turn_not_taken
 
 let undecided piece reason =
   List.map (fun candidate -> J.Undecided { id = Candidates.id candidate; reason })
@@ -94,6 +95,7 @@ let rec resolve ~evaluate ~purpose ~turn_done ~request piece =
   | Error Rate_limited -> [ Unanswered_piece (undecided piece J.Rate_limited) ]
   | Error Invalid_response -> [ Unanswered_piece (undecided piece J.Invalid_answer) ]
   | Error Failed -> [ Unanswered_piece (undecided piece J.Provider_failed) ]
+  | Error Not_recorded -> [ Unanswered_piece (undecided piece J.Not_recorded) ]
   | Error Capacity_refused ->
     (match Candidates.piece_candidates piece with
      | [] -> impossible "a piece without candidates"
@@ -137,7 +139,7 @@ let ask_time ~evaluate piece =
   match evaluate (built (Codec.time_request piece)) with
   | Ok response ->
     List.map (fun (id, answer) -> id, Codec.time_mark answer) (Codec.decode_time piece response)
-  | Error (Capacity_refused | Rate_limited | Invalid_response | Failed) ->
+  | Error (Capacity_refused | Rate_limited | Invalid_response | Failed | Not_recorded) ->
     List.map (fun candidate -> Candidates.id candidate, J.Time_unjudged)
       (Candidates.piece_candidates piece)
 

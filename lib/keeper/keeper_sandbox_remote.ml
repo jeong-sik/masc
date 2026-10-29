@@ -490,9 +490,17 @@ let split_final_trailer stderr =
 
 let trailer_tail_limit = 64 * 1024
 
+(* The front of a stderr stream is held only while it could still become the
+   acceptance frame, and only for a request that asked for one. *)
+type stderr_head =
+  | Head_settled
+  | Awaiting_head of string
+
 type stderr_stream =
   { callback : (string -> unit) option
   ; mutable tail : string
+  ; mutable head : stderr_head
+  ; on_accepted : unit -> unit
   }
 
 (* The trailer is the final RS-delimited frame, so its opening delimiter is the
@@ -511,7 +519,7 @@ let releasable_prefix_len text =
      | Some second_last -> second_last)
 ;;
 
-let stream_stderr_chunk stream chunk =
+let stream_payload_chunk stream chunk =
   let combined = stream.tail ^ chunk in
   (* The tail limit still bounds the retained region when payload bytes carry an
      RS of their own; a trailer is orders of magnitude below it. *)
@@ -525,6 +533,34 @@ let stream_stderr_chunk stream chunk =
       stream.callback;
     stream.tail <- String.sub combined release (String.length combined - release))
   else stream.tail <- combined
+;;
+
+let stream_stderr_chunk stream chunk =
+  match stream.head with
+  | Head_settled -> stream_payload_chunk stream chunk
+  | Awaiting_head held ->
+    let head = held ^ chunk in
+    (match Exec_ssh_protocol.split_acceptance_head head with
+     | Exec_ssh_protocol.Head_pending -> stream.head <- Awaiting_head head
+     | Exec_ssh_protocol.Head_payload ->
+       stream.head <- Head_settled;
+       stream_payload_chunk stream head
+     | Exec_ssh_protocol.Head_frame { preamble; rest; _ } ->
+       stream.head <- Head_settled;
+       stream.on_accepted ();
+       let payload = preamble ^ rest in
+       if payload <> "" then stream_payload_chunk stream payload)
+;;
+
+(* The process ended while the front was still undecided: those bytes are
+   payload, less a frame the wire cut off. *)
+let settle_stderr_head stream =
+  match stream.head with
+  | Head_settled -> ()
+  | Awaiting_head held ->
+    stream.head <- Head_settled;
+    let payload = Exec_ssh_protocol.settle_acceptance_head held in
+    if payload <> "" then stream_payload_chunk stream payload
 ;;
 
 let flush_stderr_payload stream payload =
@@ -808,6 +844,20 @@ let report_openssh ~scope ~base_path (o : openssh) =
     ; probe = Probe_not_asked; last_dispatch = None }
 ;;
 
+(* Whether to ask this endpoint's shim for the acceptance frame: only a shim
+   that said so in its probe writes one. An endpoint not yet probed, or whose
+   probe failed, is not asked, so the absence of a frame is never read as
+   evidence about a shim that cannot send it. *)
+let acceptance_requested_of_probe ~(v : Exec_ssh_protocol.major) : probe_answer option -> bool =
+  function
+  | Some { capabilities; _ } ->
+    (match v with
+     | Exec_ssh_protocol.V3 ->
+       List.mem Exec_ssh_protocol.request_acceptance_capability capabilities
+     | Exec_ssh_protocol.V2 -> false)
+  | None -> false
+;;
+
 (* The protocol major this endpoint's shim speaks, asked once per endpoint
    per process and remembered beside its capabilities. A shim that answers
    no probe -- a guest not up yet, a stub in a test -- gets this build's
@@ -830,9 +880,18 @@ let wire_major t =
        Exec_ssh_protocol.newest)
 ;;
 
+(* Whether the shim confirmed it accepted this request, read off the front of
+   its stderr. Evidence for the operator, not a verdict: no classification
+   reads it. [Acceptance_not_asked] is a shim that does not advertise the
+   frame, so its absence says nothing. *)
+type acceptance_evidence =
+  | Acceptance_not_asked
+  | Acceptance_not_read
+  | Acceptance_read
+
 type receipt_unavailable =
   | Request_not_sent
-  | Transport_unavailable
+  | Transport_unavailable of acceptance_evidence
   | Peer_receipt_missing
   | Invalid_receipt of string
   | Shim_refused_without_receipt
@@ -845,7 +904,13 @@ let execution_observation_to_yojson = function
   | Execution_unavailable reason ->
     let reason, detail = match reason with
       | Request_not_sent -> "request_not_sent", []
-      | Transport_unavailable -> "transport_unavailable", []
+      | Transport_unavailable evidence ->
+        let evidence = match evidence with
+          | Acceptance_not_asked -> "not_asked"
+          | Acceptance_not_read -> "not_read"
+          | Acceptance_read -> "read"
+        in
+        "transport_unavailable", ["acceptance_frame", `String evidence]
       | Peer_receipt_missing -> "peer_receipt_missing", []
       | Invalid_receipt detail -> "invalid_receipt", ["detail", `String detail]
       | Shim_refused_without_receipt -> "shim_refused_without_receipt", []
@@ -950,8 +1015,16 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
       (match remote_cwd t cwd with
        | Error error -> transport_failed ~failure:Transport_failed error
        | Ok cwd ->
+      (* [wire_major] probes a first-time endpoint, so the capability is read
+         after it, not beside it. *)
+      let v = wire_major t in
+      let acceptance_frame =
+        (* A v2 frame cannot carry the request, so a probe that changed
+           between the two reads never yields a frame that cannot be encoded. *)
+        acceptance_requested_of_probe ~v (Atomic.get t.shared.probe_answer)
+      in
       let request : Exec_ssh_protocol.request =
-        { v = wire_major t
+        { v
         ; argv
         ; env
         ; cwd
@@ -959,7 +1032,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
         ; timeout_sec
         ; stdin_len = Int64.of_int (String.length stdin)
         ; mode
-        ; acceptance_frame = false
+        ; acceptance_frame
         }
       in
       (match Exec_ssh_protocol.encode_request request ~stdin with
@@ -992,7 +1065,13 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                  Option.iter (fun emit -> emit chunk) on_stdout_chunk), (fun () -> ())) in
            let stderr_path_stream = Option.map path_stream on_stderr_chunk in
            let stderr_stream =
-             { callback = Option.map fst stderr_path_stream; tail = "" }
+             { callback = Option.map fst stderr_path_stream
+             ; tail = ""
+             ; head = (if acceptance_frame then Awaiting_head "" else Head_settled)
+             ; on_accepted =
+                 (fun () ->
+                   observation := Execution_unavailable (Transport_unavailable Acceptance_read))
+             }
            in
            let rewrite text =
              match t.transport with
@@ -1002,7 +1081,10 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                  ~remote_workspace_root:(workspace_root t) ~keeper:t.keeper_name text
            in
            let budget = local_wall_budget t timeout_sec in
-           observation := Execution_unavailable Transport_unavailable;
+           observation :=
+             Execution_unavailable
+               (Transport_unavailable
+                  (if acceptance_frame then Acceptance_not_read else Acceptance_not_asked));
            let status, stdout, raw_stderr =
              Process_eio.run_argv_with_stdin_held_open_and_status_split
                ~timeout_sec:budget
@@ -1014,6 +1096,20 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                (transport_argv t)
            in
            Option.iter (fun (_, finish) -> finish ()) stdout_path_stream;
+           settle_stderr_head stderr_stream;
+           (* The frame the stream took off the front is not payload here
+              either: the trailer split and the error messages below read this
+              text. *)
+           let raw_stderr =
+             if not acceptance_frame
+             then raw_stderr
+             else
+               match Exec_ssh_protocol.split_acceptance_head raw_stderr with
+               | Exec_ssh_protocol.Head_frame { preamble; rest; _ } -> preamble ^ rest
+               | Exec_ssh_protocol.Head_pending ->
+                 Exec_ssh_protocol.settle_acceptance_head raw_stderr
+               | Exec_ssh_protocol.Head_payload -> raw_stderr
+           in
            let local_timed_out =
              Process_eio.exit_reason_of_status status = Process_eio.Timed_out
            in

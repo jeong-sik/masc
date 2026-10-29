@@ -222,6 +222,8 @@ let advance (state : State.t) entry : State.t =
     { state with State.pending = None; aborted = intent :: state.State.aborted }
 ;;
 
+let apply state entry = Result.map (fun () -> advance state entry) (check state entry)
+
 let describe_state (state : State.t) =
   Printf.sprintf
     "%d entries, %s"

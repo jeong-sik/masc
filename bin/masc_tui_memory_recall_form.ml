@@ -180,6 +180,12 @@ let open_on ?source_revision ~keepers text =
 
 let with_server t server = { t with server }
 
+let stop_waiting t reason =
+  match t.server with
+  | Server_unread -> { t with server = Server_unavailable reason }
+  | Server_unavailable _ | Server_read _ -> t
+;;
+
 let next_mode = function
   | Off -> Listed
   | Listed -> All
@@ -405,14 +411,16 @@ let wrapped ~width ~lead text =
   | first :: rest -> (lead ^ first) :: List.map (fun row -> indent ^ row) rest
 ;;
 
-(* Exhaustive on purpose: a seventh reason stops the build here. *)
+(* Short, because a reason shares a row with a Keeper's name and its other
+   marks, and the pane cuts a row at its edge. Exhaustive on purpose: a seventh
+   reason stops the build here. *)
 let reason_label = function
-  | Standing.Environment_switch_off -> "환경 스위치가 꺼져 있어요"
-  | Standing.Recall_not_switched_on -> "스위치가 꺼져 있거나 범위 밖이에요"
-  | Standing.Keeper_excluded -> "제외 목록에 있어요"
-  | Standing.Lane_disabled -> "Jev 길이 꺼져 있어요"
-  | Standing.No_armed_destination -> "Jev 키가 없어요"
-  | Standing.Refused_by_another_gate -> "다른 게이트의 이유로 닫혀 있어요"
+  | Standing.Environment_switch_off -> "환경 스위치 꺼짐"
+  | Standing.Recall_not_switched_on -> "스위치 꺼짐 · 범위 밖"
+  | Standing.Keeper_excluded -> "제외 목록"
+  | Standing.Lane_disabled -> "Jev 길 꺼짐"
+  | Standing.No_armed_destination -> "Jev 키 없음"
+  | Standing.Refused_by_another_gate -> "다른 게이트가 닫음"
 ;;
 
 let judged_now (_, standing) =
@@ -450,35 +458,55 @@ let capped ~limit rows =
 (* What the server says about the gate as a whole. The environment switch is
    asked before the gate, so one Keeper that names it names it for all. *)
 let server_line = function
-  | Server_unread -> "서버 · 지금 상태를 읽는 중이에요"
-  | Server_unavailable detail -> "서버 · 지금 상태를 읽지 못했어요 · " ^ detail
+  | Server_unread -> "서버 · 상태를 읽는 중이에요"
+  | Server_unavailable detail -> "서버 · 상태를 읽지 못했어요 · " ^ detail
   | Server_read reading ->
     if environment_switch_is_off reading
-    then "서버 · 환경 스위치(MASC_KEEPER_MEMORY_OS_RECALL)가 꺼져 있어서 판정 대상이 없어요"
+    then "서버 · 환경 스위치가 꺼져 있어서 판정 대상이 없어요"
     else (
       match reading.Reading.mrr_lane with
       | Error reason -> "서버 · " ^ reason_label reason
       | Ok () ->
         Printf.sprintf
-          "서버 · Jev 키 있음 · 지금 판정 대상 %d명"
+          "서버 · Jev 키 있음 · 판정 대상 %d명"
           (List.length (List.filter judged_now reading.Reading.mrr_keepers)))
 ;;
 
-(* A Keeper the server judges says so. One that is picked and not judged says
-   why not: the file lists it and the server does not reach it, which is what
-   a file the server has not loaded looks like. A Keeper that is neither
-   picked nor judged is the usual case and says nothing. *)
-let standing_suffix t entry =
+(* What the list says of a Keeper beside the server's reading. A Keeper the
+   gate admits says so; the server's word means the gate admits it, not that
+   it runs now, and a Keeper nothing runs has its own mark. One that is picked
+   and not admitted says why not -- the file lists it and the server does not
+   reach it, which is what a file the server has not loaded looks like -- and
+   so does a picked Keeper the server has no declaration for, since the
+   reading lists the declarations it has. A Keeper that is not picked and not
+   admitted is the usual case and says nothing. *)
+type mark =
+  | No_mark
+  | Reached
+  | Not_reached of Standing.reason
+  | No_declaration
+
+let mark t name =
   match t.server with
-  | Server_unread | Server_unavailable _ -> ""
+  | Server_unread | Server_unavailable _ -> No_mark
   | Server_read reading ->
-    (match List.assoc_opt entry.keeper.name reading.Reading.mrr_keepers with
-     | None -> ""
-     | Some Standing.Judged -> "  (지금 판정 대상)"
-     | Some (Standing.Not_judged reason) ->
-       if List.mem entry.keeper.name t.picked
-       then "  (지금은 아니에요 · " ^ reason_label reason ^ ")"
-       else "")
+    let picked = List.mem name t.picked in
+    (match List.assoc_opt name reading.Reading.mrr_keepers with
+     | Some Standing.Judged -> Reached
+     | Some (Standing.Not_judged reason) -> if picked then Not_reached reason else No_mark
+     | None -> if picked then No_declaration else No_mark)
+;;
+
+let mark_text = function
+  | No_mark -> ""
+  | Reached -> "  (판정 대상)"
+  | Not_reached reason -> "  (대상 아님 · " ^ reason_label reason ^ ")"
+  | No_declaration -> "  (서버에 선언이 없어요)"
+;;
+
+let server t = t.server
+
+let standing_suffix t entry = mark_text (mark t entry.keeper.name)
 ;;
 
 let entry_suffix entry =

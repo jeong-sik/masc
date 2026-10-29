@@ -13511,6 +13511,31 @@ let fleet_stream_view state =
   | Fleet_stream_following view -> view
   | Fleet_stream_idle -> Masc_tui_fleet_stream.Awaiting_first_reading
 
+(* The recall form's reading of the server's gate
+   ([GET /api/v1/runtime/config/memory-recall]). Each open of the form takes a
+   number here; the answer carries it back, and an answer that carries another
+   number belongs to a form the operator already left. *)
+let begin_memory_recall_standing_read (state : state) =
+  state.memory_recall_standing_generation <- state.memory_recall_standing_generation + 1;
+  state.memory_recall_standing_generation
+
+let finish_memory_recall_standing_read (state : state) ~generation answer =
+  if generation = state.memory_recall_standing_generation
+  then
+    state.memory_recall_form <-
+      Option.map
+        (fun form -> Masc_tui_memory_recall_form.with_server form answer)
+        state.memory_recall_form
+
+(* A reading that will not be answered must not leave the form saying it is
+   still reading: the workspace identity is not confirmed, so the reply would
+   be retired, and the form would wait for it for good. *)
+let stop_waiting_for_memory_recall_standing (state : state) reason =
+  state.memory_recall_form <-
+    Option.map
+      (fun form -> Masc_tui_memory_recall_form.stop_waiting form reason)
+      state.memory_recall_form
+
 let suspend_workspace_readings state =
   state.resource_diagrams <- None;
   (match state.keeper_peer_reading with
@@ -13540,6 +13565,8 @@ let suspend_workspace_readings state =
   state.board_listing <- Masc_tui_fetched.Absent;
   state.board_list_reported_error <- None;
   retire_keeper_message_search state;
+  stop_waiting_for_memory_recall_standing state
+    "서버 신원 확인이 끊겨서 읽지 못했어요";
   state.workspace_read_authority <- ref ();
   state.queue_panel <- Option.map (fun panel ->
     {panel with qp_reading=Queue_unavailable; qp_observation=None;

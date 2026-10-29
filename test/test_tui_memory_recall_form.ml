@@ -572,40 +572,57 @@ let test_the_server_reading_is_display_only () =
 
 (* A Keeper the file lists and the server does not reach is the sign of a file
    the server has not loaded, so it says why. One nobody picked does not: it is
-   the usual case. *)
-let test_only_a_picked_keeper_the_server_does_not_reach_says_why () =
-  let rows_with word_for_b =
-    let form =
-      F.with_server
-        (listed_a_form ())
-        (F.Server_read (reading [ "a", Standing.Judged; "b", word_for_b ]))
-    in
-    F.rows ~width:100 ~height:30 form
+   the usual case. A picked one the reading does not list says there is no
+   declaration. The words are the pane's; these are the marks. *)
+let test_marks_follow_what_the_server_reads_and_what_is_picked () =
+  (* a is picked; b and c are not. *)
+  let marks server =
+    let form = F.with_server (listed_a_form ()) server in
+    List.map (F.mark form) [ "a"; "b"; "c" ]
   in
+  let read keepers = F.Server_read (reading keepers) in
+  let excluded = Standing.Not_judged Standing.Keeper_excluded in
   Alcotest.(check bool)
-    "b was not picked: the reason it is not judged changes nothing"
+    "all admitted"
     true
-    (rows_with (Standing.Not_judged Standing.Keeper_excluded)
-     = rows_with (Standing.Not_judged Standing.Recall_not_switched_on));
+    (marks (read [ "a", Standing.Judged; "b", Standing.Judged; "c", Standing.Judged ])
+     = [ F.Reached; F.Reached; F.Reached ]);
   Alcotest.(check bool)
-    "b was not picked and the server judges it: that is drawn"
+    "picked and not admitted says why; unpicked and not admitted says nothing"
     true
-    (rows_with Standing.Judged <> rows_with (Standing.Not_judged Standing.Keeper_excluded));
-  let picked_b_rows word_for_b =
-    let form =
-      F.with_server
-        (edited (opened probe) [ "right"; "down"; "down"; " " ])
-        (F.Server_read (reading [ "b", word_for_b ]))
-    in
-    F.rows ~width:100 ~height:30 form
+    (marks (read [ "a", excluded; "b", excluded; "c", Standing.Judged ])
+     = [ F.Not_reached Standing.Keeper_excluded; F.No_mark; F.Reached ]);
+  Alcotest.(check bool)
+    "picked and not in the reading has no declaration; unpicked says nothing"
+    true
+    (marks (read []) = [ F.No_declaration; F.No_mark; F.No_mark ]);
+  Alcotest.(check bool)
+    "each reason is carried"
+    true
+    (List.for_all
+       (fun reason ->
+          List.hd (marks (read [ "a", Standing.Not_judged reason ])) = F.Not_reached reason)
+       Standing.all_reasons);
+  List.iter
+    (fun (label, server) ->
+       Alcotest.(check bool) (label ^ ": no mark") true (marks server = [ F.No_mark; F.No_mark; F.No_mark ]))
+    [ "unread", F.Server_unread; "unavailable", F.Server_unavailable "refused" ]
+;;
+
+(* Every kind of mark has words of its own, so a mark cannot be dropped, or two
+   reasons given one word, without a test noticing. *)
+let test_every_kind_of_mark_has_words_of_its_own () =
+  let kinds =
+    [ F.Reached; F.No_declaration ]
+    @ List.map (fun reason -> F.Not_reached reason) Standing.all_reasons
   in
-  Alcotest.(check bool)
-    "b was picked: judged, and each reason it is not, are drawn apart"
-    true
-    (let judged = picked_b_rows Standing.Judged in
-     List.for_all
-       (fun reason -> picked_b_rows (Standing.Not_judged reason) <> judged)
-       Standing.all_reasons)
+  let texts = List.map F.mark_text kinds in
+  Alcotest.(check bool) "none is empty" true (List.for_all (fun text -> text <> "") texts);
+  Alcotest.(check int)
+    "no two are alike"
+    (List.length texts)
+    (List.length (List.sort_uniq String.compare texts));
+  Alcotest.(check string) "no mark draws nothing" "" (F.mark_text F.No_mark)
 ;;
 
 (* The environment switch is asked before the gate, so one Keeper that names it
@@ -696,11 +713,42 @@ let test_the_server_reading_cannot_colour_the_pane_or_overflow () =
     [ 60; 100 ]
 ;;
 
-let test_a_reading_that_names_other_keepers_changes_nothing_for_the_roster () =
-  let form =
-    F.with_server (listed_a_form ()) (F.Server_read (reading [ "stranger", Standing.Judged ]))
+(* Names the roster lacks draw nothing of their own: two readings that differ
+   only in which unknown Keeper they name draw the same rows. *)
+let test_a_reading_that_names_other_keepers_draws_nothing_of_its_own () =
+  let rows_with name =
+    F.rows
+      ~width:100
+      ~height:30
+      (F.with_server (listed_a_form ()) (F.Server_read (reading [ name, Standing.Judged ])))
   in
-  Alcotest.(check string) "the choice is written as before" (text_of (listed_a_form ())) (text_of form)
+  Alcotest.(check bool) "rows are drawn" true (rows_with "stranger" <> []);
+  Alcotest.(check bool)
+    "which stranger does not matter"
+    true
+    (rows_with "stranger" = rows_with "outsider")
+;;
+
+(* The pane stops a form waiting when the answer cannot come. A form that has
+   an answer, or has already given up, keeps what it has. *)
+let test_a_form_that_waits_stops_waiting_and_one_with_an_answer_does_not () =
+  let waiting = listed_a_form () in
+  Alcotest.(check bool) "a new form waits" true (F.server waiting = F.Server_unread);
+  let stopped = F.stop_waiting waiting "why" in
+  Alcotest.(check bool) "it stops, saying why" true (F.server stopped = F.Server_unavailable "why");
+  Alcotest.(check bool)
+    "and says it once"
+    true
+    (F.server (F.stop_waiting stopped "again") = F.Server_unavailable "why");
+  let answered = F.with_server waiting (F.Server_read (reading [])) in
+  Alcotest.(check bool)
+    "an answer is kept"
+    true
+    (F.server (F.stop_waiting answered "why") = F.server answered);
+  Alcotest.(check string)
+    "waiting does not change what is written"
+    (text_of waiting)
+    (text_of stopped)
 ;;
 
 let () =
@@ -769,8 +817,10 @@ let () =
         ] )
     ; ( "the server's reading"
       , [ Alcotest.test_case "it is display only" `Quick test_the_server_reading_is_display_only
-        ; Alcotest.test_case "only a picked keeper the server does not reach says why" `Quick
-            test_only_a_picked_keeper_the_server_does_not_reach_says_why
+        ; Alcotest.test_case "marks follow what the server reads and what is picked" `Quick
+            test_marks_follow_what_the_server_reads_and_what_is_picked
+        ; Alcotest.test_case "every kind of mark has words of its own" `Quick
+            test_every_kind_of_mark_has_words_of_its_own
         ; Alcotest.test_case "the environment switch is told on the server line" `Quick
             test_the_environment_switch_is_told_on_the_server_line
         ; Alcotest.test_case "a judged keeper is marked on its own row" `Quick
@@ -779,8 +829,10 @@ let () =
             test_each_state_of_the_server_reading_is_drawn_apart
         ; Alcotest.test_case "it cannot colour the pane or overflow" `Quick
             test_the_server_reading_cannot_colour_the_pane_or_overflow
-        ; Alcotest.test_case "a reading that names other keepers changes nothing" `Quick
-            test_a_reading_that_names_other_keepers_changes_nothing_for_the_roster
+        ; Alcotest.test_case "a reading that names other keepers draws nothing of its own" `Quick
+            test_a_reading_that_names_other_keepers_draws_nothing_of_its_own
+        ; Alcotest.test_case "a form that waits stops waiting and one with an answer does not" `Quick
+            test_a_form_that_waits_stops_waiting_and_one_with_an_answer_does_not
         ] )
     ]
 ;;

@@ -6774,16 +6774,12 @@ let launch_fusion_historical_detail_load state ~mailbox ~reference =
 
   end
 
-(* The two requests behind the launch form. Neither is inflight-guarded by
-   a field of its own: the form's state says which request it waits on, and
-   the generation in the answer says whether it is still that one. *)
-
 (* The server's reading of which Keepers the memory recall judgment reaches,
    asked when the [m] form opens and drawn in it. Each open takes a new
-   generation, so the answer for a form the operator already left is dropped. *)
+   generation, so the answer for a form the operator already left is dropped
+   ([Masc_tui_types.finish_memory_recall_standing_read]). *)
 let launch_memory_recall_standing_load state ~mailbox =
-  state.memory_recall_standing_generation <- state.memory_recall_standing_generation + 1;
-  let generation = state.memory_recall_standing_generation in
+  let generation = Masc_tui_types.begin_memory_recall_standing_read state in
   if server_authority_ready state then begin
     let enqueue_async = workspace_enqueue state in
     let host = server_peer_host in
@@ -6794,13 +6790,12 @@ let launch_memory_recall_standing_load state ~mailbox =
       (fun () -> Masc_tui_loader.load_memory_recall_standing ~host ~port)
   end
   else
-    state.memory_recall_form <-
-      Option.map
-        (fun form ->
-           Masc_tui_memory_recall_form.with_server form
-             (Masc_tui_memory_recall_form.Server_unavailable
-                "서버 신원을 아직 확인하지 못했어요"))
-        state.memory_recall_form
+    Masc_tui_types.stop_waiting_for_memory_recall_standing state
+      "서버 신원을 아직 확인하지 못했어요"
+
+(* The two requests behind the launch form. Neither is inflight-guarded by
+   a field of its own: the form's state says which request it waits on, and
+   the generation in the answer says whether it is still that one. *)
 
 let launch_fusion_launch_options_load state ~mailbox =
   if server_authority_ready state then begin
@@ -23728,15 +23723,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         ~report:(report_action state "system")
         ~refresh:(fun () -> launch_fusion_runs_load state ~mailbox) result
   | Memory_recall_standing_loaded (generation, result) ->
-      if generation = state.memory_recall_standing_generation then
-        state.memory_recall_form <-
-          Option.map
-            (fun form ->
-               Masc_tui_memory_recall_form.with_server form
-                 (match result with
-                  | Ok reading -> Masc_tui_memory_recall_form.Server_read reading
-                  | Error detail -> Masc_tui_memory_recall_form.Server_unavailable detail))
-            state.memory_recall_form
+      Masc_tui_types.finish_memory_recall_standing_read state ~generation
+        (match result with
+         | Ok reading -> Masc_tui_memory_recall_form.Server_read reading
+         | Error detail -> Masc_tui_memory_recall_form.Server_unavailable detail)
   | Verification_loaded result ->
       state.verification_inflight <- false;
       if state.verification_refresh_after_inflight then begin

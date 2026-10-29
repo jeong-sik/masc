@@ -396,7 +396,8 @@ let test_unverified_microvm_guest_local_reaches_the_judge_without_running () =
     { name = "masc-exec-shim"
     ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
     ; capabilities = [ Exec_ssh_protocol.observe_capability ]
-    ; release = None }
+    ; release = None
+    ; boot_id = None }
   in
   let oc = open_out probe_script in
   output_string oc (Printf.sprintf "#!/bin/sh\nprintf '%%s' %s\n" (Filename.quote probe));

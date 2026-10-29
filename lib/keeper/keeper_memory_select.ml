@@ -101,7 +101,7 @@ let handle ?turn_ref ~clock ~config ~(meta : Keeper_meta_contract.keeper_meta) ~
         "keeper_instructions",`String meta.instructions;
         "turn_ref",(match turn_ref with None -> `Null | Some turn -> Ids.Turn_ref.to_yojson turn)] in
       let io=Io.create ~config ~keeper_id:meta.name ~destinations in
-      let outcomes=Select.select_resolved_many ~evaluate:(Io.evaluate ?clock io) ~purpose
+      let outcomes=Select.select_resolved_many ~evaluate:(Io.evaluate ~clock io) ~purpose
         (List.map (fun row -> row.choice,row.detail) before.candidates) in
       let after=collect ~config ~meta ~keepers_dir in
       let publication_policy=Typesafeai_config.workspace_memory_selection_destinations ~keeper_id:meta.name in

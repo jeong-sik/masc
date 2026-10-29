@@ -122,7 +122,7 @@ let replay ~enabled () =
       check bool "current questions differ only by the frozen adopted spans" true
         (questions=adopted_questions spans historical);
       match io with
-      | Ok io -> Io.evaluate io ~state:actual_state ~questions:historical
+      | Ok io -> Io.evaluate ~clock:None io ~state:actual_state ~questions:historical
       | Error detail -> Error (Selection.Unavailable detail) in
     observed:=[];
     let outcomes=Selection.select_resolved_many ~evaluate ~purpose:(member "current_purpose" query) candidates in

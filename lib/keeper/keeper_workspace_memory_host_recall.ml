@@ -161,7 +161,7 @@ let prepare_available ~config ~keeper_id ~purpose =
             View.detail_in_snapshot snapshot ~id in
         let result = collect_with
           ~is_excluded:(fun keeper_id -> Typesafeai_config.is_excluded ~keeper_id) ~summary ~detail_snapshot
-          ~evaluate:(IO.evaluate adapter) ~purpose in
+          ~evaluate:(IO.evaluate ~clock:(Eio_context.get_clock_opt ()) adapter) ~purpose in
         let result = match IO.retain_result adapter ~purpose result with
           | Ok () -> result
           | Error detail -> Error ("selection result persistence failed: " ^ detail) in

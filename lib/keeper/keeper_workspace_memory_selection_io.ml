@@ -110,7 +110,7 @@ let evaluate_with ~call t ~state ~questions =
            | Client.Capacity_refused -> Keeper_workspace_memory_selection.Capacity_refused detail
            | Other_refusal -> Keeper_workspace_memory_selection.Unavailable detail))
 
-let evaluate ?clock t ~state ~questions =
+let evaluate ~clock t ~state ~questions =
   evaluate_with ~call:(fun ~destinations ~state ~questions () ->
     Client.evaluate ?clock ~destinations ~state ~questions ()) t ~state ~questions
 

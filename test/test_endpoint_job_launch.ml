@@ -1694,6 +1694,39 @@ let endpoint_cancel_observer_survives_busy_startup = fixture (fun ~env ~sw:_ ~st
       check "later explicit cancellation preserves the same admission and revision"
         (R.admission_id repeated=R.admission_id cancelled && R.revision repeated=R.revision cancelled)))))
 
+let while_holding_lease fixture binding body =
+  match File_lock_eio.try_with_liveness_lock_observed ~lock_path:(leaf fixture binding "lease") body with
+  | File_lock_eio.Lock_attempted (File_lock_eio.Body_completed {value;release_error=None}) -> value
+  | File_lock_eio.Lock_attempted (File_lock_eio.Body_completed {release_error=Some error;_}) ->
+      Alcotest.fail (File_lock_eio.durable_lock_error_to_string error)
+  | File_lock_eio.Lock_attempted (File_lock_eio.Lock_not_acquired _) | File_lock_eio.Lock_held_elsewhere ->
+      Alcotest.fail "test could not hold the original job lease"
+
+(* Another holder keeps the lease, so the startup and the cancellation both
+   lose the registry. The cancellation is requested before the startup runs, so
+   the startup sees it pending and waits for it. Nothing was recorded, so the
+   startup must not turn that failed cancellation into a cancelled result. *)
+let endpoint_failed_cancellation_is_not_a_cancelled_result = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun endpoint ->
+    let binding,permit=prepare store fixture "05" "printf x >> ran; exit 0" in
+    let job=ref None in
+    let cancelled,result=while_holding_lease fixture binding (fun () ->
+      let started=owned_job ~sw:endpoint ~env fixture permit in
+      job:=Some started;
+      let cancelled=C.cancel started in
+      cancelled,C.await_result started) in
+    let job=match !job with Some started -> started | None -> Alcotest.fail "job was not started" in
+    check "cancellation fails while another holder keeps the lease" (cancelled=Error (C.Registry_error R.Busy));
+    check "a cancellation that was never recorded produces no result" (Result.is_error result);
+    check "the failed cancellation left no durable cancellation"
+      (R.cancellation_state (R.load store ~binding |> registry)=R.No_cancellation);
+    check "no unlaunched receipt was published"
+      (not (Sys.file_exists (leaf fixture binding (R.evidence_leaf R.Terminal_receipt))));
+    check "the payload never started" (not (Sys.file_exists (Filename.concat fixture.work "ran")));
+    let repeated=C.cancel job |> lifetime in
+    check "a later cancellation is recorded once the lease is free"
+      (R.cancellation_state repeated=R.Cancellation_requested)))
+
 let endpoint_teardown_resolves_unentered_reservation = fixture (fun ~env ~sw ~store fixture ->
   let binding,permit=prepare store fixture "05" ": > must-not-run" in
   let job=Eio.Switch.run (fun endpoint -> owned_job ~sw:endpoint ~env fixture permit) in
@@ -1918,6 +1951,7 @@ let () =
       "no-child authority refuses rebound storage before publication",no_child_original_authority_rejects_rebound_storage;
       "endpoint jobs survive request scopes and result observer cancellation",endpoint_lifetime_survives_request_and_result_observer;
       "endpoint cancellation survives its observer and waits only original startup",endpoint_cancel_observer_survives_busy_startup;
+      "endpoint failed cancellation is never a cancelled result",endpoint_failed_cancellation_is_not_a_cancelled_result;
       "endpoint teardown resolves a never-entered job reservation",endpoint_teardown_resolves_unentered_reservation;
       "endpoint pre-child cancellation publishes only opaque original absence",endpoint_prechild_cancellation_publishes_actual_absence;
       "one refused endpoint job does not fail another",endpoint_failed_job_does_not_fail_other_jobs;

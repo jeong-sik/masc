@@ -36,9 +36,12 @@ val start_effect_workspace :
 val original : t -> P.original
 val await_result : t -> (P.Sha256.t,error) result
 (** Event-driven historical publication digest, never a fresh integrity check.
-    Cancelling this observer leaves the job and its publication alive. Endpoint
-    shutdown resolves unfinished futures with Owner_stopped even if a reserved
-    worker never entered. No deadline or status polling is introduced. *)
+    A startup that lost the registry to this job's own pending cancellation
+    waits for that cancellation to complete, then retires the unused launch
+    permit as an unlaunched result. No relaunch is attempted. Cancelling this
+    observer leaves the job and its publication alive. Endpoint shutdown
+    resolves unfinished futures with Owner_stopped even if a reserved worker
+    never entered. No deadline or status polling is introduced. *)
 val load_result : sw:Eio.Switch.t -> t -> (D.t,error) result
 (** Await the original digest, then fully open/verify that exact result using
     original captured storage and the known digest. Reader resources belong to

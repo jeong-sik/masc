@@ -35,6 +35,12 @@ type error =
 
 val error_to_string : error -> string
 
+val check_execution_domain : P.spec -> (unit,error) result
+(** Pure domain/mode/network compatibility check shared with the trusted
+    controller before committing launch intent. This grants no permission and
+    does not verify native kernel, execution, peer or filesystem readiness.
+    The native launcher rechecks the exact committed specification. *)
+
 type activation = Requested | Held of error
 val activation : t -> activation
 val original : t -> P.original

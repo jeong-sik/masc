@@ -1,0 +1,6 @@
+(include_subdirs no)
+(library
+ (name endpoint_job_owner)
+ (public_name masc.endpoint_job_owner)
+ (modules endpoint_job_owner)
+ (libraries endpoint_job_protocol endpoint_job_registry endpoint_job_launch endpoint_job_lifetime endpoint_job_result eio))

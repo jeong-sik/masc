@@ -54,7 +54,7 @@ let command_observation receipts =
   let not_sent, unknown, other =
     List.fold_left (fun (not_sent, unknown, other) -> function
       | Keeper_sandbox_remote.Execution_unavailable Request_not_sent -> true, unknown, other
-      | Execution_unavailable (Transport_unavailable | Shim_refused_without_receipt) ->
+      | Execution_unavailable (Transport_unavailable _ | Shim_refused_without_receipt) ->
         not_sent, true, other
       | Execution_observed (_, { Exec_ssh_protocol.shim_error = Some _; _ }) ->
         not_sent, true, other
@@ -114,7 +114,7 @@ let shim_execution_evidence_json receipts =
 let observation_is_ordinary_effect = function
   | Keeper_sandbox_remote.Execution_unavailable
       ( Keeper_sandbox_remote.Request_not_sent
-      | Keeper_sandbox_remote.Transport_unavailable
+      | Keeper_sandbox_remote.Transport_unavailable _
       | Keeper_sandbox_remote.Peer_receipt_missing
       | Keeper_sandbox_remote.Invalid_receipt _
       | Keeper_sandbox_remote.Shim_refused_without_receipt ) -> false

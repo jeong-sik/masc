@@ -69,7 +69,10 @@ let stub_main () =
        args
   then (
     let capabilities =
-      if String.equal mode "probe-observe" then [ Exec_ssh_protocol.observe_capability ] else []
+      if String.equal mode "probe-observe" then [ Exec_ssh_protocol.observe_capability ]
+      else if String.starts_with ~prefix:"accept-" mode
+      then [ Exec_ssh_protocol.request_acceptance_capability ]
+      else []
     in
     (* "probe-v2" stands in for a shim one release behind: it speaks the
        previous major and has no box. Every other mode answers the current
@@ -103,7 +106,38 @@ let stub_main () =
     Exec_ssh_protocol.render_trailer
       { v; exit; signal; timed_out; shim_error; observed_syscalls = [] }
   in
+  (* The "accept-" modes advertise the acceptance frame in their probe and
+     write it only when the request asked, as the shim does. *)
+  let acceptance =
+    if request.Exec_ssh_protocol.acceptance_frame
+    then Exec_ssh_protocol.render_acceptance_frame v
+    else ""
+  in
+  let half s = String.sub s 0 (String.length s / 2) in
+  let after_half s = String.sub s (String.length s / 2) (String.length s - String.length s / 2) in
   match mode with
+  | "accept-ok" ->
+    write_all Unix.stdout "guest-out";
+    write_all Unix.stderr (acceptance ^ "guest-err" ^ trailer ~exit:3 ());
+    exit 0
+  | "accept-split" ->
+    (* The frame arrives in two reads, with a pause between them. *)
+    write_all Unix.stderr (half acceptance);
+    Unix.sleepf 0.3;
+    write_all Unix.stderr (after_half acceptance ^ "guest-err" ^ trailer ~exit:3 ());
+    exit 0
+  | "accept-die" ->
+    (* Accepted, then the wire died with no trailer. *)
+    write_all Unix.stderr acceptance;
+    exit 1
+  | "accept-partial" ->
+    write_all Unix.stderr (half acceptance);
+    exit 1
+  | "accept-silent" -> exit 1
+  | "accept-rs-payload" ->
+    write_all Unix.stderr ("\x1e{\"not\":\"a frame\"}\x1eguest-err" ^ trailer ~exit:3 ());
+    exit 0
+  | "die" -> exit 1
   | "binary" ->
     write_all Unix.stdout (binary_fixture ());
     write_all Unix.stderr (trailer ~exit:0 ());
@@ -1260,7 +1294,7 @@ let test_interrupted_wire_publishes_unknown_receipt () =
    | `Returned -> fail "the runner swallowed cancellation");
   let open Keeper_sandbox_remote in
   match !observations with
-  | [Execution_unavailable Transport_unavailable] -> ()
+  | [Execution_unavailable (Transport_unavailable _)] -> ()
   | [] | _ :: _ :: _
   | [Execution_observed _]
   | [Execution_unavailable
@@ -1456,6 +1490,84 @@ let test_shared_openssh_dispatches_belong_to_their_keepers () =
        ~scope:Keeper_sandbox_remote.Endpoint_dispatch ~base_path openssh)
 ;;
 
+(* --- request acceptance frame --- *)
+
+let run_with_stderr_chunks mode =
+  let base_path = temp_dir () in
+  let cli, frame_path = make_stub ~dir:base_path ~mode in
+  let observed = ref [] in
+  let chunks = Buffer.create 64 in
+  let runner = Keeper_sandbox_remote.runner
+      ~on_receipt:(fun receipt -> observed := receipt :: !observed)
+      ~timeout_sec:2.0 (make_state ~base_path ~cli) in
+  let outcome =
+    runner ~on_stdout_chunk:None
+      ~on_stderr_chunk:(Some (Buffer.add_string chunks))
+      ~stdin_content:None ~argv:["/bin/true"] ~env:[||] ~cwd:None
+  in
+  let asked =
+    match Exec_ssh_protocol.decode_request (read_file frame_path) with
+    | Ok (request, _) -> request.Exec_ssh_protocol.acceptance_frame
+    | Error error -> fail error
+  in
+  outcome, !observed, Buffer.contents chunks, asked
+;;
+
+let test_acceptance_frame_is_asked_only_of_a_shim_that_advertises_it () =
+  with_eio @@ fun () ->
+  let _, _, _, plain = run_with_stderr_chunks "exit3" in
+  check bool "a shim whose probe lists nothing is not asked" false plain;
+  let _, _, _, advertising = run_with_stderr_chunks "accept-ok" in
+  check bool "a shim that lists request_acceptance_frame is asked" true advertising
+;;
+
+let test_acceptance_frame_never_reaches_the_payload_stderr () =
+  with_eio @@ fun () ->
+  List.iter (fun mode ->
+    match run_with_stderr_chunks mode with
+    | Masc_exec.Sandbox_target.Ran { stderr; status; _ }, _, streamed, true ->
+      check status_testable (mode ^ ": the payload status is the real one")
+        (Unix.WEXITED 3) status;
+      check string (mode ^ ": the stderr result starts at the payload") "guest-err" stderr;
+      check string (mode ^ ": the streamed stderr starts at the payload") "guest-err" streamed
+    | _ -> fail (mode ^ ": the run did not finish as a payload result"))
+    ["accept-ok"; "accept-split"]
+;;
+
+(* A payload may start with a record separator of its own. When the request
+   asked for a frame and the first bytes are not one, nothing is lost. *)
+let test_a_head_that_is_not_the_frame_stays_payload () =
+  with_eio @@ fun () ->
+  match run_with_stderr_chunks "accept-rs-payload" with
+  | Masc_exec.Sandbox_target.Ran { stderr; _ }, _, streamed, true ->
+    let expected = "\x1e{\"not\":\"a frame\"}\x1eguest-err" in
+    check string "the result keeps every payload byte" expected stderr;
+    check string "the stream keeps every payload byte" expected streamed
+  | _ -> fail "the run did not finish as a payload result"
+;;
+
+let test_acceptance_evidence_stays_with_an_unknown_effect () =
+  with_eio @@ fun () ->
+  List.iter (fun (mode, expected, wire_word) ->
+    match run_with_stderr_chunks mode with
+    | Masc_exec.Sandbox_target.Transport_failed _, [observation], _, _ ->
+      (match observation with
+       | Keeper_sandbox_remote.Execution_unavailable
+           (Keeper_sandbox_remote.Transport_unavailable evidence) ->
+         check bool (mode ^ ": the evidence is what the wire showed") true
+           (evidence = expected);
+         check bool (mode ^ ": it reaches the tool result") true
+           (contains (Printf.sprintf "\"acceptance_frame\":\"%s\"" wire_word)
+              (Yojson.Safe.to_string
+                 (Keeper_sandbox_remote.execution_observation_to_yojson observation)))
+       | _ -> fail (mode ^ ": a dead wire was not an unknown effect"))
+    | _ -> fail (mode ^ ": the dead wire did not fail as a transport"))
+    [ "accept-die", Keeper_sandbox_remote.Acceptance_read, "read"
+    ; "accept-silent", Keeper_sandbox_remote.Acceptance_not_read, "not_read"
+    ; "accept-partial", Keeper_sandbox_remote.Acceptance_not_read, "not_read"
+    ; "die", Keeper_sandbox_remote.Acceptance_not_asked, "not_asked" ]
+;;
+
 let () =
   if Array.length Sys.argv > 1 && String.equal Sys.argv.(1) "--container-stub"
   then stub_main ()
@@ -1466,6 +1578,14 @@ let () =
               test_receipts_are_owned_by_each_transport_call
           ; test_case "missing and invalid receipts retain actual status" `Quick
               test_missing_and_invalid_receipts_keep_actual_status
+          ; test_case "the acceptance frame is asked only of a shim that lists it" `Quick
+              test_acceptance_frame_is_asked_only_of_a_shim_that_advertises_it
+          ; test_case "the acceptance frame never reaches the payload stderr" `Quick
+              test_acceptance_frame_never_reaches_the_payload_stderr
+          ; test_case "a head that is not the frame stays payload" `Quick
+              test_a_head_that_is_not_the_frame_stays_payload
+          ; test_case "acceptance evidence stays with an unknown effect" `Quick
+              test_acceptance_evidence_stays_with_an_unknown_effect
           ; test_case "shim refusals remain distinct from child exits" `Quick
               test_shim_refusal_preserves_its_distinct_observation
           ; test_case "remote timeout retains its trusted receipt" `Quick

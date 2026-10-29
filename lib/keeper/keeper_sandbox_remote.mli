@@ -242,9 +242,19 @@ val report_openssh : scope:dispatch_scope -> base_path:string -> openssh -> lane
 val report : t -> lane_report
 (** The endpoint's shared probe and this runner's Keeper-specific last dispatch. *)
 
+(** Whether the shim confirmed, on the front of its stderr, that it accepted
+    this request. Evidence kept beside an unknown effect for the operator and
+    for measuring how many unknowns never reached the shim; no classification
+    reads it. [Acceptance_not_asked] is a shim that does not advertise the
+    frame, so its absence says nothing. *)
+type acceptance_evidence =
+  | Acceptance_not_asked
+  | Acceptance_not_read
+  | Acceptance_read
+
 type receipt_unavailable =
   | Request_not_sent
-  | Transport_unavailable
+  | Transport_unavailable of acceptance_evidence
   | Peer_receipt_missing
   | Invalid_receipt of string
   | Shim_refused_without_receipt

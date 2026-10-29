@@ -45,8 +45,8 @@ let write store (plan : O.plan) =
 
 let read store digest = Ok (Hashtbl.find_opt store (digest : O.digest :> string))
 
-let plan_ok ?previous memo boundary cp =
-  match O.plan_save memo ?previous boundary cp with
+let plan_ok ?previous ?absent memo boundary cp =
+  match O.plan_save memo ?previous ?absent boundary cp with
   | Ok plan -> plan
   | Error error -> Alcotest.fail (Error.to_string error)
 ;;
@@ -388,6 +388,79 @@ let test_a_document_that_is_not_a_head () =
   | Ok _ | Error _ -> Alcotest.fail "this build's version without a head must be Head_invalid"
 ;;
 
+(* A later binary's head reads as its version even when its shape is not this
+   build's: another top-level field, another format. *)
+let test_a_later_head_reads_as_its_version () =
+  let later = Checkpoint.checkpoint_version + 1 in
+  let plan = plan_ok (O.create_memo ()) O.Turn_closes (checkpoint (turn 1)) in
+  let later_head =
+    match Yojson.Safe.from_string plan.head_bytes with
+    | `Assoc fields ->
+      let fields =
+        List.map
+          (fun (name, value) ->
+             match name with
+             | "format" -> name, `String "masc.checkpoint.head.later"
+             | "checkpoint" ->
+               (match value with
+                | `Assoc checkpoint ->
+                  ( name
+                  , `Assoc
+                      (List.map
+                         (fun (field, value) ->
+                            if String.equal field "version" then field, `Int later else field, value)
+                         checkpoint) )
+                | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+                  Alcotest.fail "head.checkpoint is an object")
+             | _ -> name, value)
+          fields
+      in
+      Yojson.Safe.to_string (`Assoc (fields @ [ "objects_root", `String "elsewhere" ]))
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Alcotest.fail "a head is an object"
+  in
+  match O.head_of_string later_head with
+  | Error
+      (O.Checkpoint_invalid (Error.Serialization (VersionMismatch { expected; got })))
+    when expected = Checkpoint.checkpoint_version && got = later -> ()
+  | Ok _ | Error _ -> Alcotest.fail "a later head must be reported as its version"
+;;
+
+(* Objects the previous head names but the store does not hold are written
+   again from the messages in hand, so the next head names only what is
+   there. *)
+let test_an_absent_object_is_written_again () =
+  let memo = O.create_memo () in
+  let store = store () in
+  let first = plan_ok memo O.Turn_closes (checkpoint (turn 1)) in
+  write store first;
+  let messages = turn 1 @ [ user "ask 2" ] in
+  let second = plan_ok memo ~previous:first.head.history O.Turn_continues (checkpoint messages) in
+  write store second;
+  let bundle = (List.hd second.head.history.turns).bundle in
+  let open_message = List.hd second.head.history.open_messages in
+  Alcotest.(check (list string)) "the head names its bundle and its open message"
+    [ (bundle :> string); (open_message :> string) ]
+    (List.map (fun (digest : O.digest) -> (digest :> string)) (O.history_objects second.head.history));
+  Hashtbl.remove store (bundle :> string);
+  Hashtbl.remove store (open_message :> string);
+  let unchanged =
+    plan_ok memo ~previous:second.head.history O.Turn_continues (checkpoint messages)
+  in
+  Alcotest.(check int) "a save that trusts the head writes nothing" 0 (object_count unchanged);
+  let third =
+    plan_ok memo ~previous:second.head.history ~absent:[ bundle; open_message ] O.Turn_continues
+      (checkpoint messages)
+  in
+  Alcotest.(check (list string)) "the absent bundle and message are written again"
+    [ (bundle :> string); (open_message :> string) ]
+    (List.map (fun ((digest : O.digest), _) -> (digest :> string)) third.objects);
+  Alcotest.(check bool) "the turn is kept as it was" true
+    (third.head.history.turns = second.head.history.turns);
+  write store third;
+  same_messages "the history loads back" messages (load_ok store third)
+;;
+
 let () =
   Alcotest.run "checkpoint_objects"
     [ ( "save and load"
@@ -400,12 +473,16 @@ let () =
             test_a_loaded_checkpoint_saves_unchanged
         ; Alcotest.test_case "one content digest for every layout" `Quick
             test_one_content_digest_for_every_layout
+        ; Alcotest.test_case "an absent object is written again" `Quick
+            test_an_absent_object_is_written_again
         ] )
     ; ( "refusals"
       , [ Alcotest.test_case "a load refuses what it cannot prove" `Quick
             test_a_load_refuses_what_it_cannot_prove
         ; Alcotest.test_case "a document that is not a head" `Quick
             test_a_document_that_is_not_a_head
+        ; Alcotest.test_case "a later head reads as its version" `Quick
+            test_a_later_head_reads_as_its_version
         ] )
     ]
 ;;

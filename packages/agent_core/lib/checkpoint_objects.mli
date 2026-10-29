@@ -53,6 +53,10 @@ type head =
 
 val message_count : history -> int
 
+(** Every object [history] names: the turns' bundles in order, then the open
+    messages. *)
+val history_objects : history -> digest list
+
 (** {1 Content digest}
 
     The SHA-256 of a fixed tag, the head's checkpoint field and the chain over
@@ -93,12 +97,16 @@ type plan =
     messages are still the first messages of [checkpoint] (their chain values
     match) are kept as they are; every message after them is open, or one new
     bundle when [boundary] is [Turn_closes]. An open message that [previous]
-    already listed as open is not written again. After a success, [memo] holds
-    [checkpoint]'s messages. Fails when a message or the fields around them do
-    not pass the checkpoint codec's checks. *)
+    already listed as open is not written again. [absent] names objects of
+    [previous] that are not stored: a kept turn whose bundle is absent has its
+    bundle written again from [checkpoint]'s messages, and an absent open
+    message is written again. After a success, [memo] holds [checkpoint]'s
+    messages. Fails when a message or the fields around them do not pass the
+    checkpoint codec's checks. *)
 val plan_save
   :  memo
   -> ?previous:history
+  -> ?absent:digest list
   -> boundary
   -> Checkpoint_types.t
   -> (plan, Error.t) result
@@ -112,9 +120,10 @@ val content_digest : memo -> Checkpoint_types.t -> (digest, Error.t) result
 type load_error =
   | Head_invalid of string
   | Checkpoint_invalid of Error.t
-      (** The head's checkpoint field does not decode, or the document is not
-          a head and names another [checkpoint_version]
-          ([Serialization (VersionMismatch _)]). *)
+      (** The head's checkpoint field does not decode, or the document names
+          another [checkpoint_version] ([Serialization (VersionMismatch _)]): a
+          head in its checkpoint field, any other document at its top. The
+          version is read before the head's shape. *)
   | Object_missing of digest
   | Object_unreadable of
       { digest : digest

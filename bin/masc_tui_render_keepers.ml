@@ -1009,6 +1009,140 @@ let proactive_outcome_word = function
   | Masc.Keeper_meta_contract.Proactive_mixed_response -> "text and tools"
   | Masc.Keeper_meta_contract.Proactive_error -> "error"
 
+(* The Terminal tab: a Keeper's Execute output as a terminal draws it, oldest
+   row first. [terminal_rows] scroll; [terminal_status] is the row under them
+   that stays put. [width] is the cells a row may use. *)
+type terminal_drawing = { terminal_rows : string list; terminal_status : string }
+
+let terminal_drawing (state : state) ~width =
+  let module Execute_terminal = Masc_tui_execute_terminal in
+  let hold = Masc_tui_types.keeper_terminal_hold state in
+  let live = keeper_execute_view state in
+  let observation = match hold with
+    | Execute_terminal.Paused { frozen; _ } ->
+        Masc_tui_fetched.Ready (frozen.ktf_reading, frozen.ktf_observed_at)
+    | Execute_terminal.Following -> live in
+  let sanitize = Masc.Tui_terminal_text.sanitize_terminal_text in
+  let text_cells = max 1 (width - 2) in
+  (* Each wrapped row replays the style it opened under and ends with a reset,
+     so the pane can cut the list anywhere. *)
+  let wrapped styled =
+    Message_layout.wrap_styled_words ~max_cells:text_cells styled
+    |> List.map (fun row -> "  " ^ row) in
+  let note text = wrapped (Theme.recede () ^ sanitize text) in
+  let lines_of = function
+    | Keeper_execute_none -> []
+    | Keeper_execute_snapshot snapshot ->
+        List.map terminal_line_of_execute_line snapshot.kes_lines in
+  let drawn_rows (reading : keeper_execute_reading) =
+    match reading with
+    | Keeper_execute_none -> note "No Execute output observed in this server process."
+    | Keeper_execute_snapshot snapshot ->
+        let rows = Execute_terminal.rows (lines_of reading) in
+        let tagged = Execute_terminal.tagged rows in
+        let tag (row : Execute_terminal.row) =
+          if not tagged then ""
+          else
+            Theme.recede ()
+            ^ Printf.sprintf "[%s] "
+                (match row.stream_id with Some id -> string_of_int id | None -> "?")
+            ^ Ansi.reset in
+        (* A terminal puts a tab at the next stop; here it would read [\x09]. The
+           stops run across the colour runs of one row. *)
+        let with_tab_stops line =
+          let _, runs =
+            List.fold_left
+              (fun (column, expanded) (run : Masc_tui_sgr_text.run) ->
+                 let text, column = Execute_terminal.expand_tabs ~column run.text in
+                 column, { run with text } :: expanded)
+              (0, []) line in
+          List.rev runs in
+        let output_rows ~style (row : Execute_terminal.row) =
+          Masc_tui_sgr_text.parse row.text
+          |> List.concat_map (fun line ->
+               wrapped
+                 (tag row ^ style
+                  ^ Masc_tui_sgr_text.render ~sanitize (with_tab_stops line))) in
+        let ended_rows (row : Execute_terminal.row) status =
+          let tone, label = match status with
+            | Execute_terminal.Process (Unix.WEXITED 0 as ended) ->
+                Theme.recede (), Masc_tui_execute_result.process_status_text ended
+            | Process (Unix.WEXITED _ | Unix.WSIGNALED _ as ended) ->
+                Theme.bad (), Masc_tui_execute_result.process_status_text ended
+            | Process (Unix.WSTOPPED _ as ended) ->
+                Theme.warn (), Masc_tui_execute_result.process_status_text ended
+            | Outcome (phase, outcome) ->
+                let what = match phase with
+                  | Execute_terminal.Command -> ""
+                  | Gate_observation -> "gate observation " in
+                (match outcome with
+                 | Execute_terminal.Result_unknown -> Theme.warn (), what ^ "result unknown"
+                 | Request_not_sent -> Theme.warn (), what ^ "request not sent"
+                 | Observation_ended -> Theme.recede (), what ^ "ended")
+            | Rejected { why; reason } ->
+                Theme.bad (),
+                "rejected: " ^ why ^ (match reason with Some r -> " (" ^ r ^ ")" | None -> "")
+            | Unrecognized text -> Theme.recede (), "status " ^ text in
+          wrapped (tag row ^ tone ^ "\xc2\xb7 " ^ sanitize label) in
+        let drawn (row : Execute_terminal.row) =
+          match row.kind with
+          | Execute_terminal.Command_start ->
+              wrapped (tag row ^ Theme.info () ^ "$ " ^ Ansi.reset ^ Ansi.bold ^ sanitize row.text)
+          | Command_more ->
+              wrapped (tag row ^ Theme.info () ^ "> " ^ Ansi.reset ^ Ansi.bold ^ sanitize row.text)
+          | Stdout -> output_rows ~style:"" row
+          | Stderr -> output_rows ~style:(Theme.warn ()) row
+          | Status status -> ended_rows row status
+          | Foreign name ->
+              wrapped (tag row ^ Theme.recede () ^ sanitize ("[" ^ name ^ "] " ^ row.text)) in
+        let started = List.filter_map (fun (row : Execute_terminal.row) ->
+          match row.kind with
+          | Execute_terminal.Command_start -> row.stream_id
+          | Command_more | Stdout | Stderr | Status _ | Foreign _ -> None) rows in
+        (* A command that began before this window still runs; its line is the
+           only thing that says what the output below belongs to. *)
+        let running = List.filter (fun (stream : keeper_execute_stream) ->
+          not (List.mem stream.kes_id started)) snapshot.kes_active in
+        (if snapshot.kes_first_seq > 1 then
+           note (Printf.sprintf "Earlier output is no longer kept (before sequence %d)."
+                   snapshot.kes_first_seq)
+         else [])
+        @ (if snapshot.kes_lines_omitted > 0 then
+             note (Printf.sprintf "%d older rows are not in this view." snapshot.kes_lines_omitted)
+           else [])
+        @ List.concat_map (fun (stream : keeper_execute_stream) ->
+            note ("running: " ^ stream.kes_command)) running
+        @ List.concat_map drawn rows in
+  let rows = match observation with
+    | Masc_tui_fetched.Absent -> note "Execute output has not been read."
+    | Loading -> note "Reading Execute output\xe2\x80\xa6"
+    | Failed detail -> wrapped (Theme.bad () ^ sanitize ("Execute output unavailable: " ^ detail))
+    | Ready (reading, _) | Stale ((reading, _), _) -> drawn_rows reading in
+  let newer = match hold, Masc_tui_fetched.value live with
+    | Execute_terminal.Paused { frozen; _ }, Some (live_reading, _) ->
+        Execute_terminal.unseen ~seen:(lines_of frozen.ktf_reading) ~latest:(lines_of live_reading)
+    | (Execute_terminal.Paused _ | Execute_terminal.Following), (Some _ | None) -> 0 in
+  let mode = match hold with
+    | Execute_terminal.Following -> "following"
+    | Paused _ ->
+        Printf.sprintf "paused \xc2\xb7 %s \xc2\xb7 End:follow"
+          (Message_layout.count_noun newer "newer row") in
+  let facts = match observation with
+    | Masc_tui_fetched.Ready (Keeper_execute_snapshot snapshot, observed_at)
+    | Stale ((Keeper_execute_snapshot snapshot, observed_at), _) ->
+        let time = Unix.localtime observed_at in
+        [ (if snapshot.kes_active_count > 0 then Printf.sprintf "%d active" snapshot.kes_active_count
+           else if snapshot.kes_closed then "closed" else "state unknown")
+        ; Printf.sprintf "%02d:%02d:%02d" time.Unix.tm_hour time.tm_min time.tm_sec ]
+    | Ready (Keeper_execute_none, _) | Stale ((Keeper_execute_none, _), _)
+    | Absent | Loading | Failed _ -> [] in
+  let stale = match observation with
+    | Masc_tui_fetched.Stale (_, detail) -> [ Theme.bad () ^ "stale: " ^ sanitize detail ^ Ansi.reset ]
+    | Ready _ | Absent | Loading | Failed _ -> [] in
+  { terminal_rows = rows;
+    terminal_status = Theme.recede () ^ String.concat " \xc2\xb7 " (mode :: facts) ^ Ansi.reset
+                      ^ String.concat "" (List.map (fun part -> " \xc2\xb7 " ^ part) stale) }
+
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     ~origin:(origin_row, origin_col) buf =
     (* Beside the roster pane the box is the pane separator; alone on the
@@ -1103,7 +1237,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             ~content_rows:base_height ~content_cols:inner
       | (Detail_info | Detail_items), Tui_decode.Unavailable _
       | (Detail_sandbox | Detail_instructions | Detail_secrets | Detail_github
-        | Detail_identity | Detail_channels | Detail_automation | Detail_runs), _ -> None
+        | Detail_identity | Detail_channels | Detail_automation | Detail_runs
+        | Detail_terminal), _ -> None
     in
     let item_row index item =
       let facts = if inner < 90 then "" else
@@ -1126,7 +1261,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                (Masc_tui_keeper_portrait.beside band (headline @ List.mapi item_row items))
           then None else Some band
       | (Detail_info | Detail_items | Detail_sandbox | Detail_instructions | Detail_secrets
-        | Detail_github | Detail_identity | Detail_channels | Detail_automation | Detail_runs), portrait -> portrait
+        | Detail_github | Detail_identity | Detail_channels | Detail_automation | Detail_runs
+        | Detail_terminal), portrait -> portrait
     in
     let item_lines () =
       let count = List.length items in
@@ -2233,6 +2369,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | Masc_tui_fetched.Stale (runs, detail) -> failure detail :: listing runs
       | Masc_tui_fetched.Ready runs -> listing runs
     in
+    let terminal = lazy (terminal_drawing state ~width:inner) in
     let all_lines =
       match state.detail_tab with
       | Detail_info -> info_lines ()
@@ -2321,6 +2458,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           channel_lines ()
       | Detail_automation -> automation_lines ()
       | Detail_runs -> run_lines ()
+      | Detail_terminal -> (Lazy.force terminal).terminal_rows
     in
     let total_lines = List.length all_lines in
 
@@ -2365,22 +2503,32 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        bottom); the indicator, when the content overflows, spends one
        content row rather than growing the pane, so the pane's height is
        rows - 1 in both cases and the split's two bottoms stay level. *)
+    let terminal_tab = state.detail_tab = Detail_terminal in
     let content_height =
-      if total_lines > base_height then max 0 (base_height - 1)
+      (* The Terminal's status row is there whether or not the output
+         overflows, so the output never moves when it starts to. *)
+      if total_lines > base_height || terminal_tab then max 0 (base_height - 1)
       else base_height
     in
     let visible_lines = min content_height total_lines in
+    (* How far back from the bottom this window can go, and how far it is. *)
+    let terminal_back =
+      min (Masc_tui_execute_terminal.back (Masc_tui_types.keeper_terminal_hold state))
+        (max 0 (total_lines - content_height))
+    in
     let scroll =
-      Render_schedule.normalize_keeper_detail_scroll ~line_count:total_lines
-        ~content_height state.detail_scroll
-      |> fun scroll ->
-        if state.detail_tab = Detail_runs then
-          Option.fold ~none:scroll
-            ~some:(fun (cursor, _) ->
-              Masc_tui_scroll.ensure_visible ~cursor:(cursor + 1)
-                ~height:(max 1 content_height) scroll)
-            (Masc_tui_fusion_model.selected_keeper_run state)
-        else scroll
+      if terminal_tab then max 0 (total_lines - content_height) - terminal_back
+      else
+        Render_schedule.normalize_keeper_detail_scroll ~line_count:total_lines
+          ~content_height state.detail_scroll
+        |> fun scroll ->
+          if state.detail_tab = Detail_runs then
+            Option.fold ~none:scroll
+              ~some:(fun (cursor, _) ->
+                Masc_tui_scroll.ensure_visible ~cursor:(cursor + 1)
+                  ~height:(max 1 content_height) scroll)
+              (Masc_tui_fusion_model.selected_keeper_run state)
+          else scroll
     in
     let all_lines_window = Rows.of_list ~first:scroll ~height:visible_lines all_lines in
 
@@ -2409,15 +2557,18 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       box_empty buf cols
     done;
 
-    (* Scroll indicator *)
-    Option.iter
-      (fun row ->
-        box_line buf cols ((Theme.recede ()) ^ row ^ Ansi.reset))
-      (Masc_tui_scroll.position_row ~scroll ~height:content_height total_lines);
+    (* Scroll indicator; on the Terminal tab the row says what the view is
+       doing instead. *)
+    if terminal_tab then box_line buf cols (Lazy.force terminal).terminal_status
+    else
+      Option.iter
+        (fun row ->
+          box_line buf cols ((Theme.recede ()) ^ row ^ Ansi.reset))
+        (Masc_tui_scroll.position_row ~scroll ~height:content_height total_lines);
 
     (* Bottom border *)
     box_bottom buf cols;
-    scroll
+    if terminal_tab then Keeper_terminal_scroll terminal_back else Keeper_detail scroll
 
 
 let render_keeper_detail (state : state) =
@@ -2470,7 +2621,7 @@ let render_keeper_detail (state : state) =
           ~origin:(strip_rows, 0) buf
       in
       Buffer.add_string buf footer;
-      finish_surface state ~clamped:(Keeper_detail scroll)
+      finish_surface state ~clamped:scroll
         ~surface_key:"keeper-detail" ~rows:terminal_rows ~cols buf
     end
     else begin
@@ -2491,7 +2642,7 @@ let render_keeper_detail (state : state) =
       write_two_panes buf ~left_cols:left_cols ~left:left_buf
         ~right:right_buf;
       Buffer.add_string buf footer;
-      finish_surface state ~clamped:(Keeper_detail scroll)
+      finish_surface state ~clamped:scroll
         ~surface_key:"keeper-detail" ~rows:terminal_rows ~cols buf
     end
   end

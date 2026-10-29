@@ -1105,6 +1105,42 @@ unbinds as `U` `U` on the Channels tab; any other key leaves the bindings.
 The offer does not answer to `U`: on the list `U` still opens the runtime
 picker, so pausing and then picking another runtime keeps the channels.
 
+The Terminal tab is the last tab, one `[` back from Info. It shows the
+Keeper's Execute output the way a terminal does, oldest row first and the
+newest at the bottom. A command line starts with `$ ` (`> ` on its later
+lines), then comes what it printed, with stderr in the warning colour and a
+`· exit 0` row when it ends. A signal, a rejection, or an unknown result gets
+its own row there. Colours the command wrote are kept, and a tab goes to the
+next stop of eight cells. The command line is the server's summary of the
+command, not a quoted shell line to paste.
+
+While the tab is open the TUI reads the newest 500 rows once a second, and the
+view follows them. The row under the output says `following`, how many
+commands are active (`closed` when none is and the last one ended,
+`state unknown` when none is active and the server has not recorded an end),
+and when it was read. When commands overlap their rows interleave, and each
+row then starts with its stream number as `[3] `, or `[?] ` for a row the
+server did not attribute to a stream.
+
+`k`, `PgUp`, `Home`, or the mouse wheel stops following and holds the screen as
+it was, so output that arrives meanwhile does not move the rows you are
+reading. The row under the output then says `paused`, how many newer rows have
+arrived, and `End:follow`.
+
+| Key | Effect |
+|-----|--------|
+| `j` / `k` | one row down / up; the mouse wheel does the same |
+| `PgDn` / `PgUp` | one page down / up |
+| `Home` | the oldest row the TUI holds |
+| `End` | the bottom; the view follows again |
+
+Scrolling down to the bottom follows again too. Leaving the tab, or choosing
+another Keeper, drops the hold: the next reading opens at the bottom. `g` is
+the approval-gate toggle on every tab, so the Terminal does not use it for the
+top. The rows come from the server process's memory (the newest 5,000 events
+per Keeper), so a Keeper that has run nothing since the last server restart
+shows `No Execute output observed in this server process.`
+
 ### Keeper logs
 
 `l` from detail. The newest 200 physical rows from the keeper's dated metrics

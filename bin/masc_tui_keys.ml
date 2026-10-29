@@ -2190,6 +2190,15 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
             "requeue every waiting Board-attention partition in order, with \
              a separate audited CAS for each; judgment calls may run again"
       ]
+  | Detail_terminal ->
+      (* [g] is the approval-gate toggle on every tab, so the Terminal does not
+         borrow it for the top the way readers elsewhere do. *)
+      [ b Navigate "j/k" "scroll"
+      ; b Navigate "PgUp/PgDn" "page"
+      ; b Navigate "Home/End" "oldest/follow"
+          ~help:"Home goes to the oldest output kept; End goes back to the \
+                 bottom and follows new output again"
+      ]
   | Detail_secrets | Detail_automation | Detail_runs -> []
 
 (* The single keys a binding's key names, in this table's own notation:

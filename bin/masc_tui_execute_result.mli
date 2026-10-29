@@ -31,6 +31,10 @@ val of_result : string -> t option
     not in the shape the producer writes. The caller then draws the result as
     it arrived. *)
 
+val process_status_text : Unix.process_status -> string
+(** How a process ended, in the words {!status_text} opens with: [exit 0],
+    [signal 9], [stopped 19]. *)
+
 val status_text : t -> string
 (** How the command ended and how long it ran: [exit 0 · 808 ms],
     [signal 9 · 30012 ms · timed out at 30 s], [stopped 19 · 40 ms]. *)

@@ -4074,10 +4074,11 @@ type keeper_detail_tab =
   | Detail_channels
   | Detail_automation
   | Detail_runs
+  | Detail_terminal
 
 let keeper_detail_tabs =
   [ Detail_info; Detail_items; Detail_sandbox; Detail_instructions; Detail_secrets; Detail_github
-  ; Detail_identity; Detail_channels; Detail_automation; Detail_runs ]
+  ; Detail_identity; Detail_channels; Detail_automation; Detail_runs; Detail_terminal ]
 
 let keeper_detail_tab_label = function
   | Detail_info -> "Info"
@@ -4090,6 +4091,7 @@ let keeper_detail_tab_label = function
   | Detail_channels -> "Channels"
   | Detail_automation -> "Automation"
   | Detail_runs -> "Runs"
+  | Detail_terminal -> "Terminal"
 
 (** Which Keeper a connected client is acting for, where that is a reading
     its row does not already carry.
@@ -4705,6 +4707,19 @@ let decode_keeper_execute_output ~keeper json =
         kes_status = json |> member "status"; kes_observed_at = observed_at })
     | _ -> Error "Execute output returned an unknown observation"
   with Yojson.Safe.Util.Type_error _ -> Error "Execute output response is incomplete or malformed"
+
+(* What the Terminal tab holds still while the reader looks back: the reading
+   as it was on screen, with the key it was read for. A reading held for
+   another Keeper or workspace is not this Keeper's output. *)
+type keeper_terminal_frozen = {
+  ktf_key : keeper_log_key;
+  ktf_reading : keeper_execute_reading;
+  ktf_observed_at : float;
+}
+
+let terminal_line_of_execute_line (line : keeper_execute_line) : Masc_tui_execute_terminal.line =
+  { seq = line.kel_seq; stream_id = line.kel_stream_id; stream = line.kel_stream;
+    text = line.kel_text }
 
 (* An explicit edit intent owns its readonly preparation separately from the
    external editor and the later guarded write. *)
@@ -9628,6 +9643,7 @@ type state = {
   mutable keeper_execute_output: (keeper_log_key, keeper_execute_reading * float) Masc_tui_fetched.t;
   mutable keeper_execute_read: keeper_execute_request option;
   mutable keeper_execute_cancel: (unit ref * (unit -> unit)) option;
+  mutable keeper_terminal: keeper_terminal_frozen Masc_tui_execute_terminal.hold;
   mutable keeper_log_read: keeper_log_request option;
   mutable keeper_log_cancel: (unit ref * (unit -> unit)) option;
   mutable keeper_log_refresh_pending: bool;
@@ -11654,9 +11670,15 @@ let take_keeper_log_read state request result =
         clear_keeper_logs state;
         None
 
+(* The Keeper detail view on its Terminal tab. *)
+let keeper_terminal_on_screen state =
+  state.view = Keepers Keeper_detail && state.detail_tab = Detail_terminal
+
 let keeper_execute_target state =
   match state.view with
   | Keepers Keeper_logs -> List.nth_opt state.keepers state.keeper_cursor
+  | Keepers Keeper_detail when state.detail_tab = Detail_terminal ->
+    List.nth_opt state.keepers state.keeper_cursor
   | Keepers (Keeper_detail | Keeper_list | Keeper_calls | Keeper_message | Keeper_runtime_pick)
   | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
   | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
@@ -11714,6 +11736,46 @@ let keeper_execute_view state =
   | (Workspace_identity_mismatch _ | Workspace_identity_unread), (Some _ | None) ->
     Masc_tui_fetched.Failed "Workspace identity is unavailable"
   | Workspace_identity_match, None -> Masc_tui_fetched.Absent
+
+(* The reading on screen, in the form the Terminal tab holds still. *)
+let keeper_terminal_live state =
+  match Masc_tui_fetched.current_key state.keeper_execute_output, keeper_execute_view state with
+  | Some key, (Masc_tui_fetched.Ready (reading, observed_at)
+              | Masc_tui_fetched.Stale ((reading, observed_at), _)) ->
+    Some { ktf_key = key; ktf_reading = reading; ktf_observed_at = observed_at }
+  | (Some _ | None), (Masc_tui_fetched.Absent | Loading | Failed _ | Ready _ | Stale _) -> None
+
+(* The Terminal tab's view, if the tab is on screen for the Keeper it was held
+   for. A hold kept for another Keeper, kept while another view was open (the
+   logs view reads the same output), or kept after the workspace stopped being
+   confirmed, reads as following: what it froze is not what is on screen. *)
+let keeper_terminal_hold state =
+  match state.keeper_terminal, state.workspace_identity, keeper_execute_target state with
+  | Masc_tui_execute_terminal.Paused { frozen; _ }, Workspace_identity_match, Some keeper
+    when keeper_terminal_on_screen state
+         && keeper_log_equal_key frozen.ktf_key
+              (keeper_log_key state ~limit:frozen.ktf_key.klk_limit keeper) ->
+    state.keeper_terminal
+  | (Masc_tui_execute_terminal.Paused _ | Masc_tui_execute_terminal.Following),
+    (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
+    | Workspace_identity_match_unconfirmed _), (Some _ | None) ->
+    Masc_tui_execute_terminal.Following
+
+(* Run once per pass of the main loop. A hold that no longer belongs to what is
+   on screen is dropped for good, so coming back to the tab or to the Keeper
+   opens at the bottom rather than on a reading from before. *)
+let reconcile_keeper_terminal state =
+  state.keeper_terminal <- keeper_terminal_hold state
+
+(* One scroll key on the Terminal tab, counted back from the newest output:
+   [by] above zero goes toward older rows. The window's bound is the frame's
+   to apply and report, since only the frame knows how many rows it drew. *)
+let move_keeper_terminal state ~by =
+  let hold = keeper_terminal_hold state in
+  state.keeper_terminal <-
+    if by > 0
+    then Masc_tui_execute_terminal.older ~live:(keeper_terminal_live state) ~by hold
+    else Masc_tui_execute_terminal.newer ~by:(-by) hold
 
 (** One keeper as the Keepers surface reads it: durable pause from the
     metadata row, live runtime from the roster. *)
@@ -17632,6 +17694,7 @@ let create_state
   keeper_execute_output = Masc_tui_fetched.initial;
   keeper_execute_read = None;
   keeper_execute_cancel = None;
+  keeper_terminal = Masc_tui_execute_terminal.Following;
   keeper_log_read = None;
   keeper_log_cancel = None;
   keeper_log_refresh_pending = false;
@@ -18934,6 +18997,10 @@ type clamped_scroll =
   | Message_scroll of chat_scroll_position
   | Schedule_detail_scroll of int
   | Keeper_detail of int
+  (* The Terminal tab counts drawn rows back from the newest output, so 0 is the
+     bottom it follows. [state.keeper_terminal] keeps the reading still while
+     the count is above 0, and the frame reports how far back it could go. *)
+  | Keeper_terminal_scroll of int
   | Keeper_calls of int
   | Keeper_logs_scroll of { scroll : int; cols : int }
   | Acting of int
@@ -19006,7 +19073,7 @@ type clamped_scroll =
 let play_card_of_reader = function
   | Some (Play_invite_scroll (card, _)) -> Some card
   | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
-         | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
+         | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
          | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
          | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
          | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
@@ -19022,7 +19089,7 @@ let play_card_of_reader = function
 let queue_owner_of_reader = function
   | Some (Queue_panel_presented owner) -> Some owner
   | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
-         | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
+         | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
          | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
          | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
          | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
@@ -19037,7 +19104,7 @@ let queue_owner_of_reader = function
 let help_is_presented = function
   | Some Help_presented -> true
   | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
-         | Keeper_detail _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
+         | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
          | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
          | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
          | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
@@ -19061,7 +19128,7 @@ let help_is_presented = function
 let resource_scroll_position = function
   | Resource_scroll position -> Some position
   | Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _ | Keeper_detail _
-  | Keeper_calls _ | Keeper_logs_scroll _ | Acting _ | Acting_selection _
+  | Keeper_terminal_scroll _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _ | Acting_selection _
   | Acting_detail_scroll _ | Memory_fact_detail_scroll _ | Client_detail_scroll _
   | Verification_detail_scroll _ | Harness_detail_scroll _ | Fusion_detail_scroll _
   | Runtime_detail_scroll _ | Runtime_params_scroll _ | System_log_detail_scroll _
@@ -19096,6 +19163,10 @@ let apply_clamped_scroll (state : state) = function
       state.msg_scroll_pin <- pin
   | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value
+  | Keeper_terminal_scroll back ->
+      state.keeper_terminal <-
+        Masc_tui_execute_terminal.scroll_to ~live:(keeper_terminal_live state) ~back
+          (keeper_terminal_hold state)
   | Keeper_calls value -> state.keeper_calls_scroll <- value
   | Acting value -> state.acting_scroll <- value
   | Acting_selection (scroll, cursor) -> state.acting_scroll <- scroll; state.acting_cursor <- cursor

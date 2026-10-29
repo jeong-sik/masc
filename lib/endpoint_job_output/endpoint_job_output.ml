@@ -219,7 +219,7 @@ let stable_stat (before : Eio.File.Stat.t) (after : Eio.File.Stat.t) =
   (* Reads may advance atime; every other observed property must remain fixed. *)
   {before with atime=after.atime}=after
 
-let reopen_with_hook ~after_chunk ~after_stat ~sw ~storage ~stream =
+let reopen_with_hook ~after_chunk ~after_stat ~sync_reader ~sw ~storage ~stream =
   Eio.Switch.check sw;
   let* known=R.refresh (R.storage_record storage) |> Result.map_error (fun e -> Registry_error e) in
   let* ()=match R.launch_state known with
@@ -283,16 +283,34 @@ let reopen_with_hook ~after_chunk ~after_stat ~sw ~storage ~stream =
   let actual=cpu (fun () -> Agent_core_sha256.(to_hex (get context))) in
   let* ()=if actual=P.Sha256.to_string seal.sha256 then Ok () else Error Invalid_storage in
   let* ()=validate () in
+  let sync leaf = function
+    | Captured _ -> Error Invalid_storage
+    | Reopened reader ->
+      let* synced=io (fun () -> sync_reader ~parent:directory ~leaf reader) in
+      synced |> Result.map_error (fun _ -> Invalid_storage) in
+  let* ()=sync (tag stream ^ ".bin") file in
+  let* ()=sync (tag stream ^ ".seal.json") metadata in
+  let* ()=validate () in
   Eio.Switch.check sw;
   let done_,resolve=Eio.Promise.create () in Eio.Promise.resolve resolve (Ok seal);
   Ok {file;state=Atomic.make (Sealed seal);done_;validate_read=Some validate}
 
 let reopen ~sw ~storage ~stream =
-  reopen_with_hook ~after_chunk:(fun () -> ()) ~after_stat:(fun ~leaf:_ -> ()) ~sw ~storage ~stream
+  reopen_with_hook ~after_chunk:(fun () -> ()) ~after_stat:(fun ~leaf:_ -> ())
+    ~sync_reader:Fs_compat.sync_owned_reader ~sw ~storage ~stream
+
+let revalidate_sealed t =
+  match Atomic.get t.state,t.validate_read with
+  | Sealed seal,Some validate -> let* ()=validate () in Ok seal
+  | Unavailable e,_ -> Error e
+  | Growing _,_ | Sealed _,None -> Error Invalid_storage
 
 module For_testing = struct
   type nonrec metadata_operation = metadata_operation = Open_recovery | Publish of string
   type nonrec metadata_stage = metadata_stage = Waiting | Acquired
   let start = start_with_hook
-  let reopen = reopen_with_hook
+  let reopen ~after_chunk ~after_stat ~before_sync ~sw ~storage ~stream =
+    let sync_reader ~parent ~leaf reader =
+      Fs_compat.Owned_reader_for_testing.sync_owned_reader ~before_sync:(before_sync ~leaf) ~parent ~leaf reader in
+    reopen_with_hook ~after_chunk ~after_stat ~sync_reader ~sw ~storage ~stream
 end

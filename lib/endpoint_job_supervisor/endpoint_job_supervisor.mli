@@ -1,8 +1,8 @@
 (** Per-job endpoint supervision with owned stdio.
     Every child descriptor and capture source is created here for the same
     original launch. Stdin comes from that immutable committed specification.
-    This core still needs an authenticated daemon/host adapter and durable
-    terminal-result publication before protocol result readiness or Release. *)
+    An authenticated daemon/host adapter, restart receipt reconciliation and
+    durable host consumption/Release remain separate obligations. *)
 module P = Endpoint_job_protocol
 module R = Endpoint_job_registry
 module L = Endpoint_job_launch
@@ -19,6 +19,10 @@ type error =
   | Registry_cleanup_failed of File_lock_eio.durable_lock_error
   | Interrupted
   | Supervisor_failed
+  | Codec_error of P.codec_error
+  | Publication_failed of Fs_compat.capability_write_error
+  | Recovery_failed of string
+  | Receipt_storage_unavailable
 val error_to_string : error -> string
 type input_delivery =
   | Written of int64
@@ -70,16 +74,54 @@ val await_observation : t -> (observation,error) result
     Result_pending: no immutable terminal receipt, exec proof, host ACK or
     Release is fabricated. Original authority or capture failure remains an
     error even when the physical child has exited. Never infer replay permission. *)
+type result_receipt = private { sha256 : P.Sha256.t; status : P.response; content : string }
+val result_leaf : string
+val await_result : t -> (result_receipt,error) result
+(** The job-owned supervisor automatically publishes once after original
+    physical/tree settlement, input delivery and both seals. It freezes the
+    original admission/known launch, source revision/cancellation and raw gate
+    observations in a private immutable receipt using canonical durable
+    exclusive publication. Only confirmed publication produces Result_ready
+    with the digest of these exact receipt bytes. Both original streams are
+    fully reopened/hashed outside metadata/registry locks and compared with the
+    actual cached seals. Their retained attachments and the exact private
+    receipt bytes/attachment are revalidated after publication before readiness;
+    the exact readback file and its actual parent are fsynced together.
+    These are bounded observations, not protection against later mutation.
+    The result remains an
+    uncertain-execution observation, never payload or Task/Goal success.
+
+    Transient contention on the original registry read lock leaves the
+    job-owned publisher pending; it retries only that read, including after
+    exclusive receipt publication. Observer cancellation leaves publication
+    and the original job alive.
+    Publication/capture failure or owner teardown settles this observer with an
+    error; it never grants a new launch or overwrites an existing receipt.
+    Repeated observers share the same original immutable receipt. Restart
+    readback/reconciliation and durable host consumption/Release remain separate
+    obligations; this API grants neither cleanup nor recovered kernel authority. *)
 val read_output : t -> stream:P.stream -> offset:int64 -> max_bytes:int -> (O.chunk,error) result
 val cancel : t -> (R.record,error) result
 val await_quiescent : t -> (G.exit_observation,error) result
 (** Original-owner durable cancellation and raw physical/tree settlement remain
     available even when output initialization or capture is unavailable. *)
 module For_testing : sig
+  type result_read =
+    | Observe_original | Open_storage | Reopen_stdout | Reopen_stderr
+    | Validate_stdout | Validate_stderr | Refresh_after_publication
   val launch_effect_workspace :
-    after_spawn:(L.t -> unit) ->
+    ?before_result_read:(result_read -> unit) ->
+    ?on_result_read_busy:(result_read -> unit) ->
+    after_spawn:(L.t -> unit) -> before_result_publish:(unit -> unit) ->
+    after_result_publish:(unit -> unit) ->
     sw:Eio.Switch.t -> fs:Eio.Fs.dir_ty Eio.Path.t ->
     cgroup_parent_path:string -> execution:L.execution -> R.launch_intent -> launch_outcome
-  (** Original owner exists and parent child-ends are closed; input/capture
-      workers have not started. No alternate spawn or storage path. *)
+  (** [after_spawn]: original owner exists and parent child-ends are closed;
+      input/capture workers have not started. [before_result_publish]: actual
+      physical/tree/input/output settlement exists, before result publication
+      and outside the owner metadata lock. [after_result_publish] runs after the
+      actual durable exclusive commit, before attachment readback/readiness.
+      Both publication hooks run outside the owner metadata lock.
+      [before_result_read] runs before a job-owned read or validation attempt;
+      [on_result_read_busy] runs after that read observed real contention. *)
 end

@@ -180,13 +180,17 @@ let release_entry entry =
 
 let run_blocking_lock_op f = Eio_guard.run_in_systhread ~label:"file-lock-op" f
 
+(* Keep contention pacing shared with the existing lock retry helpers. *)
+let retry_sleep_sec = 0.01
+let wait_after_contention () = Eio_unix.sleep retry_sleep_sec
+
 (** Acquire a non-blocking Unix file lock (F_TLOCK) with retry.
     This is the blocking variant for callers that already run in a systhread
     (for example backend and Hebbian file I/O paths). On success, returns the
     open file descriptor with the lock held. On timeout, closes the fd and
     raises [Flock_timeout]. *)
 let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
-    ?(max_attempts = 200) ?(sleep_sec = 0.01) ~caller () =
+    ?(max_attempts = 200) ?(sleep_sec = retry_sleep_sec) ~caller () =
   let fd = Unix.openfile lock_path mode perm in
   let started_at = Time_compat.now () in
   let rec acquire attempts =
@@ -226,7 +230,7 @@ let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
     to the Eio scheduler when a clock is available and otherwise sleeps in a
     systhread so the calling fiber does not block the domain. *)
 let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
-    ?(max_attempts = 200) ?(sleep_sec = 0.01) ~caller () =
+    ?(max_attempts = 200) ?(sleep_sec = retry_sleep_sec) ~caller () =
   let fd = run_blocking_lock_op (fun () -> Unix.openfile lock_path mode perm) in
   let started_at = Time_compat.now () in
   let rec acquire attempts =
@@ -610,14 +614,16 @@ let lock_count () = SMap.cardinal (Atomic.get table).entries
 
 external try_open_liveness_raw : string -> Unix.file_descr option
   = "masc_try_open_liveness_lock"
+external try_open_shared_liveness_raw : string -> Unix.file_descr option
+  = "masc_try_open_shared_liveness_lock"
 
-let try_with_liveness_lock_observed ~lock_path f =
+let try_with_liveness_lock_observed_with ~open_lock ~lock_path f =
   let execution_context = Eio_guard.execution_context () in
   (* Protect descriptor acquisition through publication of its ownership to
      this scope. The caller's body stays cancellable. *)
   let acquire () =
     try
-      let fd = run_blocking_lock_op (fun () -> try_open_liveness_raw lock_path) in
+      let fd = run_blocking_lock_op (fun () -> open_lock lock_path) in
       Ok fd
     with Unix.Unix_error (error, operation, argument) ->
       Error (durable_lock_error ~lock_path ~phase:Open_lock_file
@@ -644,6 +650,12 @@ let try_with_liveness_lock_observed ~lock_path f =
       Log.Misc.error "liveness lock release failed during owner exception: %s"
         (durable_lock_error_to_string error);
       Printexc.raise_with_backtrace exn backtrace
+
+let try_with_liveness_lock_observed ~lock_path f =
+  try_with_liveness_lock_observed_with ~open_lock:try_open_liveness_raw ~lock_path f
+
+let try_with_shared_liveness_lock_observed ~lock_path f =
+  try_with_liveness_lock_observed_with ~open_lock:try_open_shared_liveness_raw ~lock_path f
 
 let acquire_liveness_lock ~sw ~lock_path =
   Eio.Cancel.protect (fun () ->

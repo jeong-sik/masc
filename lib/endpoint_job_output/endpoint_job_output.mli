@@ -39,12 +39,19 @@ val reopen :
     storage. Strictly validate its private seal, original admission and stream,
     atomically open no-follow, nonblocking regular seal/spool descriptors,
     verify the same single-link spool inode, and hash every byte before exposing
-    Sealed. Missing/corrupt data never becomes an empty or growing result.
+    Sealed. The verified spool and private seal plus each actual parent are
+    fsynced, then their snapshots/source are revalidated before returning.
+    Missing/corrupt/unsynced data never becomes an empty or growing result.
     Reads/hash run outside the registry lock; original authority and canonical
     attachments are revalidated afterward and around subsequent range reads.
     No capture, process, signal, publication or launch permission is created.
     [sw] owns this reader's descriptors and must cover result consumption;
     use a separate reader scope rather than the global registry lifetime. *)
+val revalidate_sealed : t -> (seal, error) result
+(** Revalidate a reopened original's held descriptors, canonical seal/spool
+    snapshots and original source authority after the completed full-byte hash.
+    This does not hash again or infer completion from EOF. Captures cannot turn
+    a cached seal into this validation and return [Invalid_storage]. *)
 type chunk = { data : string; extent : P.extent }
 val read : t -> offset:int64 -> max_bytes:int -> (chunk, error) result
 (** Read from the pinned original file descriptor within its observed prefix.
@@ -63,9 +70,12 @@ module For_testing : sig
       [Acquired] runs inside that lock before the specified Fs operation. *)
   val reopen :
     after_chunk:(unit -> unit) -> after_stat:(leaf:string -> unit) ->
+    before_sync:(leaf:string -> Fs_compat.Owned_reader_for_testing.sync_stage -> unit) ->
     sw:Eio.Switch.t -> storage:R.storage ->
     stream:P.stream -> (t, error) result
   (** Interleave after hashing an actual original spool chunk, outside any
       registry lock. [after_stat] runs after the actual initial private leaf
-      stat and before atomic opening. No injected seal, bytes or authority. *)
+      stat and before atomic opening. [before_sync] faults the real matched
+      file/parent sync boundary in its worker; it must not perform Eio effects.
+      No injected seal, bytes or authority. *)
 end

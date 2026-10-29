@@ -11,6 +11,10 @@ type error =
   | Pipe_unavailable | Pipe_cleanup_failed of pipe_end list
   | Registry_cleanup_failed of File_lock_eio.durable_lock_error
   | Interrupted | Supervisor_failed
+  | Codec_error of P.codec_error
+  | Publication_failed of Fs_compat.capability_write_error
+  | Recovery_failed of string
+  | Receipt_storage_unavailable
 let pipe_tag = function
   | Child_stdin -> "child stdin" | Child_stdout -> "child stdout"
   | Child_stderr -> "child stderr" | Input_writer -> "stdin writer"
@@ -23,15 +27,21 @@ let error_to_string = function
   | Registry_cleanup_failed e -> File_lock_eio.durable_lock_error_to_string e
   | Interrupted -> "original job supervision interrupted"
   | Supervisor_failed -> "original job supervision failed"
+  | Codec_error e -> P.error_to_string e
+  | Publication_failed e -> Fs_compat.capability_write_error_to_string e
+  | Recovery_failed detail -> "result publication recovery: " ^ detail
+  | Receipt_storage_unavailable -> "original result storage unavailable"
 exception Cleanup_failed of pipe_end list
 type input_delivery = Written of int64 | Write_failed of { confirmed_prefix : int64 }
 type settled = { physical_exit : G.exit_observation; stdin : input_delivery; stdout : O.seal; stderr : O.seal }
+type result_receipt = { sha256 : P.Sha256.t; status : P.response; content : string }
 type t = {
   owner : L.t;
   stdout : (O.t,error) result;
   stderr : (O.t,error) result;
   availability : (unit,error) result;
   done_ : (settled,error) result Eio.Promise.t;
+  result : (result_receipt,error) result Eio.Promise.t;
 }
 type launch_outcome =
   | Not_performed of { error : error; pipe_cleanup_errors : pipe_end list }
@@ -49,18 +59,203 @@ let availability t =
     let* _=O.extent out |> Result.map_error (fun cause -> Output_error {stream=P.Stdout;cause}) in
     let* _=O.extent err |> Result.map_error (fun cause -> Output_error {stream=P.Stderr;cause}) in Ok ()
 let await_settled t = Eio.Promise.await t.done_
+let await_result t = Eio.Promise.await t.result
 type observation = { settled : settled; status : P.response }
-let await_observation t =
-  let* settled=await_settled t in
-  let* record=L.observe_original t.owner |> Result.map_error (fun e -> Launch_error e) in
+let status record (settled : settled) result : P.response =
   let physical_status=match settled.physical_exit.status with
     | G.Exited code -> P.Exited code | G.Signaled signal -> P.Signaled signal in
   let sealed (seal : O.seal)=P.Sealed {byte_length=seal.byte_length;sha256=seal.sha256} in
-  let status=P.Status {original=P.original ~binding:(R.binding record) ~admission_id:(R.admission_id record);
+  P.Status {original=P.original ~binding:(R.binding record) ~admission_id:(R.admission_id record);
     revision=R.revision record;phase=P.Termination_observed physical_status;
     cancel_requested=(R.cancellation_state record=R.Cancellation_requested);
-    result=P.Result_pending;stdout=sealed settled.stdout;stderr=sealed settled.stderr} in
-  Ok {settled;status}
+    result;stdout=sealed settled.stdout;stderr=sealed settled.stderr}
+let observe_settled t settled =
+  let* record=L.observe_original t.owner |> Result.map_error (fun e -> Launch_error e) in
+  Ok ({settled;status=status record settled P.Result_pending},record)
+let await_observation t =
+  let* settled=await_settled t in
+  let* observed,_=observe_settled t settled in Ok observed
+
+let result_leaf="terminal-result.json"
+let receipt_io f = try Ok (f ()) with
+  | Eio.Io _ | Unix.Unix_error _ | Sys_error _ | Invalid_argument _ -> Error Receipt_storage_unavailable
+let cpu f = Domain_pool_ref.submit_cpu_or_inline f
+let result_content (observation : observation) launch_id =
+  let* status=P.response_to_json observation.status |> Result.map_error (fun e -> Codec_error e) in
+  let boundary=observation.settled.physical_exit.boundary in
+  let preparation=match boundary.preparation with
+    | G.Pending -> `Assoc ["state",`String "pending"]
+    | G.Ready -> `Assoc ["state",`String "ready"]
+    | G.Rejected {stage;error} ->
+      (* Display evidence only. No reader may parse this diagnostic to infer
+         exec, non-start, retry or signalling authority. *)
+      let detail=G.error_to_string (G.Child_rejected {stage;error}) in
+      `Assoc ["state",`String "rejected";"diagnostic_b64",`String (Base64.encode_string detail)] in
+  let decision=match boundary.decision with
+    | G.Undecided -> "undecided" | Activate_requested -> "activate_requested" | Abort_requested -> "abort_requested" in
+  let control=match boundary.control with
+    | G.Open -> `Assoc ["state",`String "open"]
+    | G.Ended -> `Assoc ["state",`String "ended"]
+    | G.Failed failure ->
+      (* Display evidence only, like a rejection diagnostic. *)
+      let detail=G.error_to_string (G.control_failure_error failure) in
+      `Assoc ["state",`String "failed";"diagnostic_b64",`String (Base64.encode_string detail)] in
+  let stdin=match observation.settled.stdin with
+    | Written count -> `Assoc ["state",`String "written";"byte_length",`String (Int64.to_string count)]
+    | Write_failed {confirmed_prefix} ->
+      `Assoc ["state",`String "write_failed";"confirmed_prefix",`String (Int64.to_string confirmed_prefix)] in
+  Ok (Yojson.Safe.to_string (`Assoc ["version",`Int 1;"status",status;
+    "launch_id",`String (P.Id.to_string launch_id);"stdin",stdin;
+    "gate",`Assoc ["preparation",preparation;"decision",`String decision;"control",control]]))
+
+let verify_receipt ~sw ~storage ~root_stat ~content ~sha256 =
+  let* opened=receipt_io (fun () -> Fs_compat.open_owned_reader ~sw ~parent:storage ~leaf:result_leaf) in
+  let* reader=opened |> Result.map_error (fun _ -> Receipt_storage_unavailable) in
+  let* initial=receipt_io (fun () -> Fs_compat.owned_reader_stat reader) in
+  let* ()=if initial.kind=`Regular_file && initial.nlink=1L && initial.uid=root_stat.Eio.File.Stat.uid
+      && initial.perm land 0o7777=0o400 && Optint.Int63.to_int64 initial.size=Int64.of_int (String.length content)
+    then Ok () else Error Receipt_storage_unavailable in
+  let stable (current : Eio.File.Stat.t) = {initial with atime=current.atime}=current in
+  let validate () =
+    let* root=receipt_io (fun () -> Eio.Path.stat ~follow:false storage) in
+    let* held=receipt_io (fun () -> Fs_compat.owned_reader_stat reader) in
+    let* canonical=receipt_io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(storage / result_leaf)) in
+    if root.kind=`Directory && root.dev=root_stat.dev && root.ino=root_stat.ino
+        && root.uid=root_stat.uid && root.perm land 0o7777=0o700 && stable held && stable canonical
+      then Ok () else Error Receipt_storage_unavailable in
+  let* ()=validate () in
+  let bytes=Buffer.create (String.length content) in
+  let rec read offset =
+    if offset=String.length content then Ok (Buffer.contents bytes) else
+    let* data=receipt_io (fun () -> Fs_compat.owned_reader_pread reader ~offset:(Int64.of_int offset)
+      ~length:(min 65536 (String.length content-offset))) in
+    if String.length data=0 then Error Receipt_storage_unavailable else (Buffer.add_string bytes data;read (offset+String.length data)) in
+  let* actual=read 0 in
+  let hash=cpu (fun () -> Agent_core_sha256.(to_hex (digest_string actual))) in
+  let* ()=if actual=content && hash=P.Sha256.to_string sha256 then Ok () else Error Receipt_storage_unavailable in
+  let* synced=receipt_io (fun () -> Fs_compat.sync_owned_reader ~parent:storage ~leaf:result_leaf reader) in
+  let* ()=synced |> Result.map_error (fun _ -> Receipt_storage_unavailable) in
+  let* ()=validate () in
+  Ok validate
+
+type result_read =
+  | Observe_original | Open_storage | Reopen_stdout | Reopen_stderr
+  | Validate_stdout | Validate_stderr | Refresh_after_publication
+
+let validation_stage = function P.Stdout -> Validate_stdout | P.Stderr -> Validate_stderr
+let busy_stage ~default = function
+  | Registry_error error -> if error=R.Busy then Some default else None
+  | Launch_error error -> if error=L.Registry_error R.Busy then Some default else None
+  | Output_error {stream;cause} ->
+    if cause=O.Registry_error R.Busy then Some (validation_stage stream) else None
+  | Pipe_unavailable | Pipe_cleanup_failed _ | Registry_cleanup_failed _ | Interrupted
+  | Supervisor_failed | Codec_error _ | Publication_failed _ | Recovery_failed _
+  | Receipt_storage_unavailable -> None
+
+(* These are non-effecting, per-original reads. A competing mutation holds the
+   same lease only temporarily; do not settle the job-owned result on Busy.
+   Retrying each read separately also avoids replaying the exclusive receipt
+   publication when the final refresh is contended. Pace retries with the
+   existing file-lock interval and no timeout, while preserving cancellation. *)
+let await_result_read ~before_result_read ~on_result_read_busy stage f =
+  before_result_read stage;
+  let rec await () =
+    match f () with
+    | Ok value -> Ok value
+    | Error error -> (match busy_stage ~default:stage error with
+      | None -> Error error
+      | Some current -> on_result_read_busy current;File_lock_eio.wait_after_contention ();await ()) in
+  await ()
+
+let publish_result ~before_result_read ~on_result_read_busy
+    ~before_result_publish ~after_result_publish ~sw ~fs t settled =
+  let read stage f=await_result_read ~before_result_read ~on_result_read_busy stage f in
+  let* observation,record=read Observe_original (fun () -> observe_settled t settled) in
+  let* launch_id=match R.launch_state record with
+    | R.Requested launch_id -> Ok launch_id
+    | R.Not_requested -> Error (Registry_error R.Stale_record) in
+  let* opened=read Open_storage (fun () ->
+    R.open_storage ~sw record |> Result.map_error (fun e -> Registry_error e)) in
+  let storage=R.storage_path opened in
+  let* root_stat=receipt_io (fun () -> Eio.Path.stat ~follow:true storage) in
+  let* root_path=receipt_io (fun () -> Eio.Path.native_exn storage) in
+  let* content=cpu (fun () -> result_content observation launch_id) in
+  let hash=cpu (fun () -> Agent_core_sha256.(to_hex (digest_string content))) in
+  let* sha256=P.Sha256.of_string hash |> Result.map_error (fun _ -> Receipt_storage_unavailable) in
+  let* target=Fs_compat.capability_publication_target ~allowed_root_path:root_path
+      ~allowed_root_device:root_stat.dev ~allowed_root_inode:root_stat.ino
+      ~parent_components:[] ~target_leaf:result_leaf ~permissions:0o400
+    |> Result.map_error (fun e -> Recovery_failed (Fs_compat.capability_publication_target_error_to_string e)) in
+  before_result_publish ();
+  let validate_once stream reader expected =
+    let* actual=O.revalidate_sealed reader |> Result.map_error (fun cause -> Output_error {stream;cause}) in
+    if actual=expected then Ok () else Error (Output_error {stream;cause=O.Invalid_storage}) in
+  let validate stream reader expected =
+    read (validation_stage stream) (fun () -> validate_once stream reader expected) in
+  let with_reopened stream expected use =
+    let stage=match stream with P.Stdout -> Reopen_stdout | P.Stderr -> Reopen_stderr in
+    before_result_read stage;
+    let rec attempt () =
+      (* A failed reopen can already own descriptors. Close that attempt's
+         switch before retrying; a successful reader stays alive through [use].
+         In particular, never retry [use] after it has published the result. *)
+      match Eio.Switch.run (fun reader_sw ->
+        match O.reopen ~sw:reader_sw ~storage:opened ~stream with
+        | Error cause -> if cause=O.Registry_error R.Busy then `Busy
+          else `Done (Error (Output_error {stream;cause}))
+        | Ok reader -> `Done (let* ()=validate stream reader expected in use reader)) with
+      | `Busy -> on_result_read_busy stage;File_lock_eio.wait_after_contention ();attempt ()
+      | `Done result -> result in
+    attempt () in
+  with_reopened P.Stdout settled.stdout (fun stdout ->
+  with_reopened P.Stderr settled.stderr (fun stderr ->
+  Eio.Switch.run (fun read_sw ->
+  let validate_now stream reader expected =
+    before_result_read (validation_stage stream);
+    validate_once stream reader expected in
+  let validate_outputs_once () =
+    let* ()=validate_now P.Stdout stdout settled.stdout in
+    validate_now P.Stderr stderr settled.stderr in
+  let validate_outputs () =
+    let rec attempt () =
+      match validate_outputs_once () with
+      | Ok () -> Ok ()
+      | Error error -> (match busy_stage ~default:Refresh_after_publication error with
+        | None -> Error error
+        | Some stage ->
+          (* If stderr waited, stdout must be checked again after that wait. *)
+          on_result_read_busy stage;File_lock_eio.wait_after_contention ();attempt ()) in
+    attempt () in
+  let* ()=validate_outputs () in
+  let* ()=L.with_storage_publication t.owner (fun () ->
+    let* recovery=Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root:storage
+      |> Result.map_error (fun e -> Recovery_failed (Fs_compat.Publication_recovery.registry_error_to_string e)) in
+    let* outcome=Fs_compat.Publication_recovery.with_lane ~registry:recovery ~owner:"result" (fun recovery ->
+      Fs_compat.create_capability_file_exclusive ~recovery ~parent:storage ~target content
+      |> Result.map_error (fun e -> Publication_failed e))
+      |> Result.map_error (fun e -> Recovery_failed (Fs_compat.Publication_recovery.lane_open_error_to_string e)) in
+    match outcome with
+    | Lane_released value -> value
+    | Lane_release_failed {value;release_failure} ->
+      let detail=Fs_compat.Publication_recovery.lane_release_failure_to_string release_failure in
+      Error (Recovery_failed (match value with Ok () -> detail | Error e -> error_to_string e ^ "; " ^ detail))) in
+  after_result_publish ();
+  let* validate_receipt=verify_receipt ~sw:read_sw ~storage ~root_stat ~content ~sha256 in
+  let rec readiness () =
+    let result=
+      before_result_read Refresh_after_publication;
+      let* current=R.refresh record |> Result.map_error (fun e -> Registry_error e) in
+      let* ()=validate_outputs_once () in
+      let* ()=validate_receipt () in
+      Ok {sha256;status=status current settled (P.Result_ready sha256);content} in
+    match result with
+    | Ok receipt -> Ok receipt
+    | Error error -> (match busy_stage ~default:Refresh_after_publication error with
+      | None -> Error error
+      | Some stage ->
+        (* Re-read cancellation and both streams after any contested validation. *)
+        on_result_read_busy stage;File_lock_eio.wait_after_contention ();readiness ()) in
+  readiness ())))
 let cancel t = L.cancel t.owner |> Result.map_error (fun e -> Launch_error e)
 let await_quiescent t = L.await_quiescent t.owner |> Result.map_error (fun e -> Launch_error e)
 let read_output t ~stream ~offset ~max_bytes =
@@ -138,7 +333,8 @@ let start_input ~sw pipes data =
     `Stop_daemon);
   done_
 
-let supervise ~sw ~fs pipes owner ~registry_release_error ~pipe_cleanup_errors =
+let supervise ~before_result_read ~on_result_read_busy ~before_result_publish ~after_result_publish
+    ~sw ~fs pipes owner ~registry_release_error ~pipe_cleanup_errors =
   let capture stream source=O.start ~sw ~fs ~owner ~stream ~source
     |> Result.map_error (fun cause -> Output_error {stream;cause}) in
   let stdout=capture P.Stdout pipes.stdout_source in
@@ -150,9 +346,14 @@ let supervise ~sw ~fs pipes owner ~registry_release_error ~pipe_cleanup_errors =
     let* ()=match registry_release_error with None -> Ok () | Some e -> Error (Registry_cleanup_failed e) in
     let* _=stdout in let* _=stderr in Ok () in
   let done_,resolve=Eio.Promise.create () in
+  let result,resolve_result=Eio.Promise.create () in
   let finished=Atomic.make false in
-  let finish value=if Atomic.compare_and_set finished false true then Eio.Promise.resolve resolve value in
-  let t={owner;stdout;stderr;availability;done_} in
+  let result_finished=Atomic.make false in
+  let finish_result value=if Atomic.compare_and_set result_finished false true then Eio.Promise.resolve resolve_result value in
+  let finish value=
+    if Atomic.compare_and_set finished false true then Eio.Promise.resolve resolve value;
+    match value with Ok _ -> () | Error e -> finish_result (Error e) in
+  let t={owner;stdout;stderr;availability;done_;result} in
   let daemon f =
     Eio.Switch.check sw;
     Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -175,7 +376,13 @@ let supervise ~sw ~fs pipes owner ~registry_release_error ~pipe_cleanup_errors =
        let* stdout=O.await_sealed out |> Result.map_error (fun cause -> Output_error {stream=P.Stdout;cause}) in
        let* stderr=O.await_sealed err |> Result.map_error (fun cause -> Output_error {stream=P.Stderr;cause}) in
        Ok {physical_exit;stdin;stdout;stderr} in
-     daemon (fun () -> finish (settle ()));
+     daemon (fun () ->
+       let settled=settle () in
+       finish settled;
+       match settled with
+       | Error _ -> ()
+       | Ok settled -> finish_result (publish_result ~before_result_read ~on_result_read_busy
+           ~before_result_publish ~after_result_publish ~sw ~fs t settled));
      let watch stream capture=daemon (fun () ->
        match capture with
        | Error e -> finish (Error e)
@@ -185,7 +392,8 @@ let supervise ~sw ~fs pipes owner ~registry_release_error ~pipe_cleanup_errors =
      daemon (fun () -> match Eio.Promise.await input with Ok _ -> () | Error e -> finish (Error e)));
   t
 
-let launch_with_hook ~after_spawn ~sw ~fs ~cgroup_parent_path ~execution intent =
+let launch_with_hook ~before_result_read ~on_result_read_busy ~after_spawn ~before_result_publish
+    ~after_result_publish ~sw ~fs ~cgroup_parent_path ~execution intent =
   Eio.Switch.check sw;
   match pipes ~sw with
   | Error error -> Not_performed {error;pipe_cleanup_errors=[]}
@@ -198,11 +406,20 @@ let launch_with_hook ~after_spawn ~sw ~fs ~cgroup_parent_path ~execution intent 
         | Error e -> Error (Launch_error e)
         | Ok owner ->
           after_spawn owner;
-          Ok (supervise ~sw ~fs pipes owner ~registry_release_error ~pipe_cleanup_errors) in
+          Ok (supervise ~before_result_read ~on_result_read_busy ~before_result_publish
+            ~after_result_publish ~sw ~fs pipes owner ~registry_release_error ~pipe_cleanup_errors) in
       Performed {value;registry_release_error;pipe_cleanup_errors}
 
 let launch_effect_workspace ~sw ~fs ~cgroup_parent_path ~execution intent =
-  launch_with_hook ~after_spawn:(fun _ -> ()) ~sw ~fs ~cgroup_parent_path ~execution intent
+  launch_with_hook ~after_spawn:(fun _ -> ()) ~before_result_publish:(fun () -> ())
+    ~after_result_publish:(fun () -> ()) ~before_result_read:(fun _ -> ())
+    ~on_result_read_busy:(fun _ -> ()) ~sw ~fs ~cgroup_parent_path ~execution intent
 module For_testing = struct
-  let launch_effect_workspace = launch_with_hook
+  type nonrec result_read = result_read =
+    | Observe_original | Open_storage | Reopen_stdout | Reopen_stderr
+    | Validate_stdout | Validate_stderr | Refresh_after_publication
+  let launch_effect_workspace ?(before_result_read=fun _ -> ()) ?(on_result_read_busy=fun _ -> ())
+      ~after_spawn ~before_result_publish ~after_result_publish ~sw ~fs ~cgroup_parent_path ~execution intent =
+    launch_with_hook ~before_result_read ~on_result_read_busy ~after_spawn ~before_result_publish
+      ~after_result_publish ~sw ~fs ~cgroup_parent_path ~execution intent
 end

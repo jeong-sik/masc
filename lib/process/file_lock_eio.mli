@@ -21,6 +21,12 @@
 
 exception Flock_timeout of { caller : string; path : string; attempts : int }
 
+val wait_after_contention : unit -> unit
+(** Cooperatively pace a retry after a nonwaiting file-lock attempt reports
+    contention, using the existing file-lock retry interval. The wait is
+    cancellable and imposes no timeout or attempt limit. Call from a fiber
+    running on an Eio Unix backend. *)
+
 type durable_lock_phase =
   | Open_lock_file
   | Acquire_process_lock
@@ -131,6 +137,15 @@ val try_with_liveness_lock_observed :
     This callback also remains cancellable, with protected descriptor release.
     A successful short callback observes an inactive owner, not execution or
     replay authority. *)
+
+val try_with_shared_liveness_lock_observed :
+  lock_path:string -> (unit -> 'a) -> 'a durable_lock_attempt
+(** Read-only inspection under a shared nonwaiting flock on the same stable
+    private inode. Independent readers may overlap; an exclusive owner or
+    writer still refuses admission without waiting. This uses the same
+    no-follow identity checks, cancellable callback and protected descriptor
+    release as {!try_with_liveness_lock_observed}. The callback must not mutate
+    the protected operation or derive effect permission from a shared lease. *)
 
 val with_durable_lock :
   lock_path:string -> (unit -> 'a) -> ('a, durable_lock_error) result

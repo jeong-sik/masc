@@ -290,11 +290,15 @@ let settle_lock = function
   | Lock_attempted (Body_completed {value;release_error=None}) -> value
   | Lock_attempted (Body_completed {value;release_error=Some cause}) ->
     let primary=match value with Ok _ -> None | Error error -> Some error in Error (Cleanup_failed {primary;cause})
-let locked (registry : t) (binding : P.binding) f =
+let with_job_lock attempt (registry : t) (binding : P.binding) f =
   let* ()=root_binding registry binding in
   let* ()=validate_root registry in
-  settle_lock (File_lock_eio.try_with_liveness_lock_observed ~lock_path:(lock_path registry binding) f)
-let load registry ~binding = locked registry binding (fun () -> read_record registry binding)
+  settle_lock (attempt ~lock_path:(lock_path registry binding) f)
+let locked registry binding f =
+  with_job_lock File_lock_eio.try_with_liveness_lock_observed registry binding f
+let read_locked registry binding f =
+  with_job_lock File_lock_eio.try_with_shared_liveness_lock_observed registry binding f
+let load registry ~binding = read_locked registry binding (fun () -> read_record registry binding)
 
 let in_recovery_lane recovery owner f =
   match Fs_compat.Publication_recovery.with_lane ~registry:recovery ~owner f with
@@ -451,11 +455,13 @@ let same_original (original : record) (current : record) =
   && same_execution_progress original.claim.state current.claim.state
   && original.spec=current.spec
 
-let refresh (original : record) =
+let refresh_with_hook ~after_lock (original : record) =
   let registry=original.registry and binding=original.claim.binding in
-  locked registry binding (fun () ->
+  read_locked registry binding (fun () ->
+    after_lock ();
     let* current=read_record registry binding in
     if same_original original current then Ok current else Error Stale_record)
+let refresh original = refresh_with_hook ~after_lock:(fun () -> ()) original
 
 let resync_cancel ~before_parent_sync (current : record) =
   let registry=current.registry and binding=current.claim.binding in
@@ -533,7 +539,7 @@ let original_storage ~sw (current : record) =
 let open_storage ~sw (original : record) =
   Eio.Switch.check sw;
   let registry=original.registry and binding=original.claim.binding in
-  locked registry binding (fun () ->
+  read_locked registry binding (fun () ->
     let* current=read_record registry binding in
     let* ()=if same_original original current then Ok () else Error Stale_record in
     let* directory=original_storage ~sw current in
@@ -581,6 +587,7 @@ let commit_launch original ~confirmed_admission_id ~launch_id =
 let with_launch ~sw intent perform =
   with_launch_with_hook ~after_original:(fun () -> ()) ~sw intent perform
 module For_testing = struct
+  let refresh = refresh_with_hook
   let with_launch = with_launch_with_hook
   let admit = admit_with_hooks
   let commit_launch = commit_launch_with_hook

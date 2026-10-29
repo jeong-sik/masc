@@ -85,8 +85,10 @@ val admit :
 
 val load : t -> binding:P.binding -> (record, error) result
 (** Read the exact original claim, start bytes and head under the stable job
-    lock. Every record read uses a single-link, no-follow descriptor
-    and validates its snapshot before returning bytes. Only initial absence is
+    shared read lock. Readers may overlap; an active exclusive mutation or
+    launch still returns [Busy] without waiting. Every record read uses a
+    single-link, no-follow descriptor and validates its snapshot before
+    returning bytes. Only initial absence is
     reported missing; a failed observed read remains unavailable. Corruption, missing data
     and busy authority stay explicit. Old-boot
     records may be inspected, but cannot issue a new effect permission. *)
@@ -98,7 +100,8 @@ val revision : record -> int64
 val payload_uid : record -> int
 
 val refresh : record -> (record, error) result
-(** Read only this opaque record's original registry/job and known launch.
+(** Read only this opaque record's original registry/job and known launch under
+    the same nonwaiting shared read lock as [load].
     Legitimate cancellation progress is visible; a replaced registry, job,
     admission, payload or already-known launch never substitutes another one.
     This read grants no launch/signal permission and permits old-boot inspection. *)
@@ -107,7 +110,8 @@ val open_storage : sw:Eio.Switch.t -> record -> (storage, error) result
 val storage_record : storage -> record
 val storage_path : storage -> Eio.Fs.dir_ty Eio.Path.t
 (** Open the refreshed original private directory under its own nonwaiting
-    lock, pin its physical identity, then release the lock before returning.
+    shared read lock, pin its physical identity, then release the lock before
+    returning.
     The capability belongs to [sw]; immutable result reads/hashing can proceed
     outside the lock and revalidate [storage_record] afterward. No launch
     permit is created or reconstructed. Old-boot terminal data remains readable
@@ -183,6 +187,9 @@ val with_launch :
     mutation for this same operation. No PID signalling is authorized here. *)
 
 module For_testing : sig
+  val refresh : after_lock:(unit -> unit) -> record -> (record, error) result
+  (** Interleave after acquiring the actual shared read lock and before reading
+      the original. The hook remains cancellable and cannot authorize writes. *)
   val with_launch :
     after_original:(unit -> unit) -> sw:Eio.Switch.t -> launch_intent ->
     (launch_target -> storage:Eio.Fs.dir_ty Eio.Path.t -> 'a) -> 'a launch_outcome

@@ -300,6 +300,23 @@ val owned_reader_stat : owned_reader -> Eio.File.Stat.t
 val owned_reader_pread : owned_reader -> offset:int64 -> length:int -> string
 (** Positioned reads of the held descriptor. May return fewer bytes at EOF;
     I/O/closed-resource errors raise, as for Eio.File. [sw] must cover use. *)
+val sync_owned_reader :
+  parent:Eio.Fs.dir_ty Eio.Path.t -> leaf:string -> owned_reader ->
+  (unit, owned_regular_file_read_error) result
+(** Match the held reader with the canonical single-link owned regular file
+    under the verified parent capability, fsync that exact file and its actual
+    parent, then revalidate both attachments/snapshots. No creation, overwrite,
+    repair or retry. The bounded entered sync is cancellation protected; the
+    original cancellation is checked after cleanup. *)
+module Owned_reader_for_testing : sig
+  type sync_stage = Sync_file | Sync_parent
+  val sync_owned_reader :
+    before_sync:(sync_stage -> unit) ->
+    parent:Eio.Fs.dir_ty Eio.Path.t -> leaf:string -> owned_reader ->
+    (unit, owned_regular_file_read_error) result
+  (** Fault hook on the real matched descriptor boundary, immediately before
+      each fsync. It runs in the worker and must not perform Eio effects. *)
+end
 
 type owned_regular_file_range_digest =
   { content : string

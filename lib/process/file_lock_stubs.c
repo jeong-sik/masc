@@ -15,7 +15,7 @@
 /* flock(2) is tied to the open-file description. An independent inspection
  * open/close cannot release the live producer's lock, even in one process.
  * https://man7.org/linux/man-pages/man2/flock.2.html */
-CAMLprim value masc_try_open_liveness_lock(value path_value) {
+static value try_open_private_lock(value path_value, int lock_mode) {
   CAMLparam1(path_value);
   CAMLlocal1(result);
   char *path = caml_stat_strdup(String_val(path_value));
@@ -33,7 +33,7 @@ CAMLprim value masc_try_open_liveness_lock(value path_value) {
     failure = EINVAL;
   else {
     int locked;
-    do { locked = flock(fd, LOCK_EX | LOCK_NB); }
+    do { locked = flock(fd, lock_mode | LOCK_NB); }
     while (locked < 0 && errno == EINTR);
     if (locked < 0) {
       if (errno == EWOULDBLOCK || errno == EAGAIN) held = 1;
@@ -51,4 +51,12 @@ CAMLprim value masc_try_open_liveness_lock(value path_value) {
   if (held) CAMLreturn(Val_none);
   result = caml_alloc_some(Val_int(fd));
   CAMLreturn(result);
+}
+
+CAMLprim value masc_try_open_liveness_lock(value path_value) {
+  return try_open_private_lock(path_value, LOCK_EX);
+}
+
+CAMLprim value masc_try_open_shared_liveness_lock(value path_value) {
+  return try_open_private_lock(path_value, LOCK_SH);
 }

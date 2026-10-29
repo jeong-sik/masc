@@ -272,26 +272,18 @@ let one_at_a_time f = Eio.Mutex.use_rw ~protect:true invites_lock f
 
 let add_routes router =
   router
-  |> Http.Router.post invites_path (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _by request reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) invites_path (fun state _by request reqd ->
            let config = Mcp_server.workspace_config state in
            Http.Request.read_body_async reqd (fun body ->
              let status, json = one_at_a_time (fun () -> issue_response ~config ~body) in
              respond_json_value_with_cors ~status request reqd json))
-         request reqd)
-  |> Http.Router.get invites_path (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _by request reqd ->
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) invites_path (fun state _by request reqd ->
            let config = Mcp_server.workspace_config state in
            let status, json = match query_workspace_precondition ~config request with
              | Error refusal -> refusal
              | Ok _ -> list_json ~config in
            respond_json_value_with_cors ~status request reqd json)
-         request reqd)
-  |> Http.Router.prefix_delete invite_prefix (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state by request reqd ->
+  |> Server_route.prefix_delete (Server_route.Token_permission Masc_domain.CanAdmin) invite_prefix (fun state by request reqd ->
            let status, json =
              match Server_utils.extract_path_param ~prefix:invite_prefix (Http.Request.path request) with
              | None -> `Bad_request, Server_refusal.json ~code:"invalid_request" "an invite name is required"
@@ -303,4 +295,3 @@ let add_routes router =
                  | Ok _ -> revoke_response ~config ~by ~raw_name)
            in
            respond_json_value_with_cors ~status request reqd json)
-         request reqd)

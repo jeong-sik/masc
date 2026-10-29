@@ -1,0 +1,31 @@
+[2026-10-29 00:18:11] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `dashboard_routing_body'.
+This run has ID `K14DHNFM'.
+
+  [OK]          parse          0   named lane accepts a runtime_ids array.
+  [OK]          parse          1   named lane accepts a revision-bound full o...
+  [OK]          parse          2   named lane without runtime_ids is an error.
+  [OK]          parse          3   default keeps the single runtime_id field.
+  [OK]          parse          4   exact lane accepts a runtime_ids array.
+  [OK]          parse          5   create takes a name nothing resolves yet.
+  [OK]          parse          6   set refuses a name nothing resolves.
+  [OK]          parse          7   create refuses a route keyword as a lane n...
+  [OK]          parse          8   create refuses an exact/ name.
+  [OK]          parse          9   rename refuses an exact/ name to take.
+  [OK]          parse         10   remove names a declared lane and carries n...
+  [OK]          parse         11   an unknown action is refused.
+  [OK]          parse         12   append adds one slot to an exact lane.
+  [OK]          parse         13   rename names the lane and what it becomes.
+  [OK]          parse         14   rename needs a name to take.
+  [OK]          parse         15   rename refuses another route at either end.
+  [OK]          parse         16   drop names one slot of an exact lane.
+  [OK]          parse         17   move carries the slot and a direction.
+  [OK]          parse         18   move refuses a direction it cannot read.
+  [OK]          parse         19   drop and move refuse a conversation lane.
+  [OK]          parse         20   append refuses a conversation lane.
+  [OK]          parse         21   an exact lane the server does not run is r...
+  [OK]          parse         22   append needs the slot it adds.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/dashboard_routing_body'.
+Test Successful in 0.380s. 23 tests run.
+exit=0

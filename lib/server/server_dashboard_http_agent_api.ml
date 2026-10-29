@@ -6,7 +6,6 @@
 
 module Http = Http_server_eio
 
-open Server_auth
 
 let is_ascii_digit = function '0' .. '9' -> true | _ -> false
 
@@ -114,8 +113,7 @@ let agent_activity_http_json ~(config : Workspace.config) ~hours : Yojson.Safe.t
 let add_agent_api_routes router =
   router
   (* Agent activity -- per-agent tool call stats from telemetry *)
-  |> Http.Router.get "/api/v1/agent-activity" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/agent-activity" (fun state req reqd ->
          let hours_result =
            positive_float_param ~name:"hours" ~default:24.0 (Server_utils.query_param req "hours")
          in
@@ -132,11 +130,10 @@ let add_agent_api_routes router =
              ~hours
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
+       )
 
   (* Tool metrics -- restart-safe aggregate stats for dashboard *)
-  |> Http.Router.get "/api/v1/tool-metrics" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/tool-metrics" (fun _state req reqd ->
          let json =
            Tool_unified.summary_report
              ~public_names:
@@ -144,11 +141,10 @@ let add_agent_api_routes router =
              ()
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
+       )
 
   (* Agent timeline -- per-agent activity timeline for Observatory detail *)
-  |> Http.Router.get "/api/v1/agent-timeline" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/agent-timeline" (fun state req reqd ->
          let agent_name =
            match Server_utils.query_param req "agent_name" with
            | Some n ->
@@ -200,11 +196,10 @@ let add_agent_api_routes router =
                ~include_tool_calls:true
            in
           Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
+       )
 
   (* Agent relations -- deterministic empty feed *)
-  |> Http.Router.get "/api/v1/agent-relations" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/agent-relations" (fun _state req reqd ->
          let agent_name =
            match Server_utils.query_param req "agent_name" with
            | Some n ->
@@ -223,4 +218,4 @@ let add_agent_api_routes router =
          else
            let json = Dashboard_agent_relations.json ~agent_name () in
           Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
+       )

@@ -1,0 +1,9 @@
+Testing `workspace-git-log'.
+This run has ID `BLE1WZGE'.
+
+  [OK]          rows          0   a row splits on the first three tabs.
+  [OK]          rows          1   a malformed row is dropped.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/workspace-git-log'.
+Test Successful in 0.000s. 2 tests run.
+exit=0

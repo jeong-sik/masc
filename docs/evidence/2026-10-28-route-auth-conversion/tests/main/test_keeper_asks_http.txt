@@ -1,0 +1,8 @@
+Testing `Keeper Ask HTTP workspace'.
+This run has ID `3CXVO36U'.
+
+  [OK]          wire          0   original questions bind to both workspace r...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/Keeper Ask HTTP workspace'.
+Test Successful in 0.033s. 1 test run.
+exit=0

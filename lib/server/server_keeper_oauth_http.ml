@@ -96,9 +96,7 @@ let handle_callback ~clock request reqd =
    ship with the binary, plus whether this install already has a client for
    each -- nothing about any Keeper -- so it reads like the rest of the
    operator snapshot. *)
-let handle_providers request reqd =
-  Server_auth.with_public_read
-    (fun state req reqd ->
+let handle_providers = (fun state req reqd ->
       Http.Response.json_value ~compress:true ~request:req
         (* NDT-OK: the HTTP request boundary samples Unix wall time once;
            [declarations_json] receives it explicitly to compare persisted
@@ -111,15 +109,12 @@ let handle_providers request reqd =
                 ~now:(Time_compat.now ()) )
           ])
         reqd)
-    request reqd
 ;;
 
 (* What each declared provider currently offers one Keeper. Names only --
    the same reason the secret projection reports names: a screen has no use
    for a credential and every use for knowing whether one is there. *)
-let handle_attached_tools request reqd =
-  Server_auth.with_public_read
-    (fun state req reqd ->
+let handle_attached_tools = (fun state req reqd ->
       let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
       match Server_utils.query_param req "keeper" with
       | None ->
@@ -133,16 +128,13 @@ let handle_attached_tools request reqd =
             ; "providers", Server_keeper_oauth.attached_tools_json ~base_path ~keeper
             ])
           reqd)
-    request reqd
 ;;
 
 (* Recording an app an operator made themselves. Admin, because what it
    writes is what redeems a code: an id that is not theirs would send the
    consent somewhere else. Not scoped to a Keeper -- the client belongs to
    the install, the same as one this server registered. *)
-let handle_attempt_status request reqd =
-  Server_auth.with_token_permission_auth ~permission:Masc_domain.CanAdmin
-    (fun state _agent_name req reqd ->
+let handle_attempt_status = (fun state _agent_name req reqd ->
       let field = Server_utils.query_param req in
       let json = match field "keeper", field "provider", field "attempt_id" with
         | Some keeper, Some provider_id, Some attempt_id ->
@@ -151,16 +143,13 @@ let handle_attempt_status request reqd =
               ~now:(Time_compat.now ()) ~keeper ~provider_id ~attempt_id
         | _ -> `Assoc ["error", `String "keeper, provider and attempt_id are required"] in
       Http.Response.json_value ~compress:true ~request:req json reqd)
-    request reqd
 ;;
 
-let handle_set_client request reqd =
-  (* The same authority as starting a login, and for the same reason the
-     login route gives: what this writes is what redeems a code. A stricter
-     tier here refused the operator token the TUI carries, which is the one
-     that is allowed to begin the flow this feeds. *)
-  Server_auth.with_token_permission_auth ~permission:Masc_domain.CanAdmin
-    (fun state _agent_name req reqd ->
+(* The same authority as starting a login, and for the same reason the
+   login route gives: what this writes is what redeems a code. A stricter
+   tier here refused the operator token the TUI carries, which is the one
+   that is allowed to begin the flow this feeds. *)
+let handle_set_client = (fun state _agent_name req reqd ->
       let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
       Http.Request.read_body_async reqd (fun body_str ->
         let answer =
@@ -190,16 +179,13 @@ let handle_set_client request reqd =
             reqd
         | Ok payload ->
           Http.Response.json_value ~compress:true ~request:req payload reqd))
-    request reqd
 ;;
 
 (* Detaching one Keeper from one provider. The same authority as attaching
    one: it deletes a credential the login route wrote, and an operator token
    the TUI carries is the one allowed to begin that flow. Not scoped to the
    install -- the token belongs to the Keeper the request names. *)
-let handle_disconnect ~clock request reqd =
-  Server_auth.with_token_permission_auth ~permission:Masc_domain.CanAdmin
-    (fun state _agent_name req reqd ->
+let handle_disconnect ~clock state _agent_name req reqd =
       let config = Mcp_server.workspace_config state in
       Http.Request.read_body_async reqd (fun body_str ->
         let answer =
@@ -224,16 +210,15 @@ let handle_disconnect ~clock request reqd =
             (`Assoc [ "error", `String message ])
             reqd
         | Ok payload ->
-          Http.Response.json_value ~compress:true ~request:req payload reqd))
-    request reqd
+          Http.Response.json_value ~compress:true ~request:req payload reqd)
 ;;
 
 let add_routes ~clock router =
   router
-  |> Http.Router.get Server_keeper_oauth.callback_path (handle_callback ~clock)
-  |> Http.Router.get "/api/v1/keepers/oauth/providers" handle_providers
-  |> Http.Router.get "/api/v1/keepers/oauth/attached-tools" handle_attached_tools
-  |> Http.Router.get "/api/v1/keepers/oauth/attempt-status" handle_attempt_status
-  |> Http.Router.post "/api/v1/keepers/oauth/client" handle_set_client
-  |> Http.Router.post "/api/v1/keepers/oauth/disconnect" (handle_disconnect ~clock)
+  |> Server_route.get (Server_route.Self_authenticated Route_access.Oauth_protocol) Server_keeper_oauth.callback_path (handle_callback ~clock)
+  |> Server_route.get Server_route.Public_read "/api/v1/keepers/oauth/providers" handle_providers
+  |> Server_route.get Server_route.Public_read "/api/v1/keepers/oauth/attached-tools" handle_attached_tools
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/keepers/oauth/attempt-status" handle_attempt_status
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/keepers/oauth/client" handle_set_client
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/keepers/oauth/disconnect" (handle_disconnect ~clock)
 ;;

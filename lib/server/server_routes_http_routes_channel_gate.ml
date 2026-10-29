@@ -759,70 +759,53 @@ let handle_gate_connector_unbind _state request reqd =
 (** Register all gate routes on the router. *)
 let add_routes ~sw ~clock router =
   router
-  |> Http.Router.post "/api/v1/gate/message" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"channel_gate" (fun state _submitted_by _req reqd ->
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "channel_gate" }) "/api/v1/gate/message" (fun state _submitted_by request reqd ->
          handle_gate_message ~clock state request reqd
-       ) request reqd)
+       )
 
-  |> Http.Router.get "/api/v1/gate/health" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/gate/health" (fun state request reqd ->
          handle_gate_health state request reqd
-       ) request reqd)
+       )
 
-  |> Http.Router.get "/api/v1/gate/status" (fun request reqd ->
-        with_public_read (fun state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/gate/status" (fun state request reqd ->
           handle_gate_status state request reqd
-        ) request reqd)
+        )
 
-  |> Http.Router.get "/api/v1/gate/connectors" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/gate/connectors" (fun state request reqd ->
          handle_gate_connectors state request reqd
-       ) request reqd)
+       )
 
-  |> Http.Router.get "/api/v1/gate/connector/names" (fun request reqd ->
-       with_read_auth (fun state _req reqd ->
+  |> Server_route.get Server_route.Read_auth "/api/v1/gate/connector/names" (fun state request reqd ->
          handle_gate_connector_names state request reqd
-       ) request reqd)
+       )
 
-  |> Http.Router.get "/api/v1/gate/connector/status" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/gate/connector/status" (fun state request reqd ->
          handle_gate_connector_status state request reqd
-       ) request reqd)
+       )
 
-  |> Http.Router.get "/api/v1/gate/events" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/gate/events" (fun state request reqd ->
          handle_gate_events state request reqd
-       ) request reqd)
+       )
 
-  |> Http.Router.get "/api/v1/gate/keepers" (fun request reqd ->
-        with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+  |> Server_route.get (Server_route.Tool { tool_name = "channel_gate" }) "/api/v1/gate/keepers" (fun state request reqd ->
          handle_gate_keepers ~sw ~clock state request reqd
-       ) request reqd)
+       )
 
-  |> Http.Router.get "/api/v1/gate/keeper-status" (fun request reqd ->
-       with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+  |> Server_route.get (Server_route.Tool { tool_name = "channel_gate" }) "/api/v1/gate/keeper-status" (fun state request reqd ->
          handle_gate_keeper_status_by_name ~sw ~clock state request reqd
-       ) request reqd)
+       )
 
-  |> Http.Router.get "/api/v1/gate/keeper-sandbox-logs" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanReadState
-         (fun state _agent_name _req reqd ->
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/gate/keeper-sandbox-logs" (fun state _agent_name request reqd ->
            handle_gate_keeper_sandbox_logs state request reqd)
-         request reqd)
 
-  |> Http.Router.get "/api/v1/gate/keeper-shims" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanReadState
-         (fun state _agent_name _req reqd ->
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/gate/keeper-shims" (fun state _agent_name request reqd ->
            handle_gate_keeper_shims state request reqd)
-         request reqd)
 
   (* Generic connector routes — dispatch by ?name=<connector> *)
-  |> Http.Router.post "/api/v1/gate/connector/bind" (fun request reqd ->
-       with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+  |> Server_route.post (Server_route.Tool { tool_name = "channel_gate" }) "/api/v1/gate/connector/bind" (fun state request reqd ->
          handle_gate_connector_bind ~sw ~clock state request reqd
-       ) request reqd)
+       )
 
-  |> Http.Router.post "/api/v1/gate/connector/unbind" (fun request reqd ->
-       with_tool_auth ~tool_name:"channel_gate" (fun _state _req reqd ->
+  |> Server_route.post (Server_route.Tool { tool_name = "channel_gate" }) "/api/v1/gate/connector/unbind" (fun _state request reqd ->
          handle_gate_connector_unbind _state request reqd
-       ) request reqd)
+       )

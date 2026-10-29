@@ -1,0 +1,14 @@
+Testing `artifacts_endpoint'.
+This run has ID `Y5GT93WO'.
+
+  [OK]          sha256 validation          0   valid + invalid forms.
+  [OK]          sha256 validation          1   exact bytes require operator a...
+  [OK]          sha256 validation          2   route enforces Admin bearer.
+  [OK]          sha256 validation          3   generated audio retains worksp...
+  [OK]          sha256 validation          4   generated media checks Origin ...
+  [OK]          blob_response              0   not found.
+  [OK]          blob_response              1   hit returns envelope.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/artifacts_endpoint'.
+Test Successful in 3.013s. 7 tests run.
+exit=0

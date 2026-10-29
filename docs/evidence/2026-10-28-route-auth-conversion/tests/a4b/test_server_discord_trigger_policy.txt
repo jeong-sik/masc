@@ -1,0 +1,28 @@
+[2026-10-29 00:32:04] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `server_discord_trigger_policy'.
+This run has ID `3EI0QXKE'.
+
+  [OK]          toml_loader                   0   missing file => unset.
+  [OK]          toml_loader                   1   missing key => unset.
+  [OK]          toml_loader                   2   blank value => unset.
+  [OK]          toml_loader                   3   valid value loads.
+  [OK]          toml_loader                   4   malformed TOML => load error.
+  [OK]          toml_loader                   5   wrong type => load error.
+  [OK]          toml_loader                   6   invalid policy => load error.
+  [OK]          resolved_precedence           0   the configured value resolves.
+  [OK]          resolved_precedence           1   invalid value => load error...
+  [OK]          resolved_precedence           2   all unset => default.
+  [OK]          ingress handoff               0   durable accept precedes Dis...
+  [OK]          directory projection          0   named channels.
+  [OK]          directory projection          1   recent participant names.
+  [OK]          directory projection          2   full channel and member pages.
+  [OK]          params_plane                  0   start without token publish...
+  [OK]          params_plane                  1   configured answers without ...
+  [OK]          params_plane                  2   override wins over configured.
+  [OK]          params_plane                  3   clear returns to configured.
+  [OK]          params_plane                  4   user_only round trips.
+  [OK]          params_plane                  5   status follows set, clear a...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/server_discord_trigger_policy'.
+Test Successful in 0.687s. 20 tests run.
+exit=0

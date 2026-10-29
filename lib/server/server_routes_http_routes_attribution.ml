@@ -7,7 +7,6 @@
     - [GET /api/v1/attribution/summary] — per-gate outcome counts over the
       current ring window, for the dashboard graph nodes. *)
 
-open Server_auth
 
 module Http = Http_server_eio
 module DA = Dashboard_attribution
@@ -50,8 +49,7 @@ let summary_json () : Yojson.Safe.t =
 
 let add_routes router =
   router
-  |> Http.Router.get "/api/v1/attribution/recent" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/attribution/recent" (fun _state req reqd ->
          let gate = trimmed_query_param req "gate" in
          let limit =
            match trimmed_query_param req "limit" with
@@ -60,9 +58,8 @@ let add_routes router =
          in
          let json = recent_json ?gate ?limit () in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/attribution/summary" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+       )
+  |> Server_route.get Server_route.Public_read "/api/v1/attribution/summary" (fun _state req reqd ->
          let json = summary_json () in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
+       )

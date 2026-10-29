@@ -244,7 +244,7 @@ let try_mcp_validation_block
 
     [GET /ws] (same-origin WebSocket upgrade + discovery) is owned by
     the route table ([Server_routes_http_routes_frontend] via
-    [Http.Router.ws_get]) and reached through
+    [Server_route.ws_get]) and reached through
     [Http.Router.dispatch ~upgrade] below.  RFC-0281 consolidated the
     previously-duplicated main_eio upgrade/discovery handlers into the
     router so [/ws] has a single owner that actually drives the

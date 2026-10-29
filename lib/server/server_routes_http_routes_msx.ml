@@ -532,52 +532,27 @@ let handle_checkpoint ~state ~restore request reqd =
 
 let add_routes router =
   router
-  |> Http.Router.get "/api/v1/msx/activity" (fun request reqd ->
-       with_public_read
-         (fun state req reqd -> Http.Response.json_value ~compress:true ~request:req
+  |> Server_route.get Server_route.Public_read "/api/v1/msx/activity" (fun state req reqd -> Http.Response.json_value ~compress:true ~request:req
            (activity_json ~config:(Mcp_server.workspace_config state)) reqd)
-         request reqd)
-  |> Http.Router.get "/api/v1/msx/carts" (fun request reqd ->
-       with_public_read
-         (fun state req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/msx/carts" (fun state req reqd ->
            let status, json = carts_response ~config:(Mcp_server.workspace_config state) in
            respond_json_value_with_cors ~status:(status :> Httpun.Status.t) req reqd json)
-         request reqd)
-  |> Http.Router.post "/api/v1/msx/checkpoint-operation" (fun request reqd ->
-       with_read_auth (fun state request reqd ->
+  |> Server_route.post Server_route.Read_auth "/api/v1/msx/checkpoint-operation" (fun state request reqd ->
          Http.Request.read_body_async reqd (fun body ->
            let config = Mcp_server.workspace_config state in
            let status,json = checkpoint_status_response ~config ~body in
-           respond_json_value_with_cors ~status request reqd json)) request reqd)
-  |> Http.Router.post "/api/v1/msx/press" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:(Msx_tool.name Msx_tool.Press)
-         (fun state who _req reqd ->
+           respond_json_value_with_cors ~status request reqd json))
+  |> Server_route.post (Server_route.Tool_actor { tool_name = (Msx_tool.name Msx_tool.Press) }) "/api/v1/msx/press" (fun state who request reqd ->
            handle_press ~state ~who request reqd)
-         request reqd)
-  |> Http.Router.post "/api/v1/msx/load" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:(Msx_tool.name Msx_tool.Load)
-         (fun state agent_name _req reqd ->
+  |> Server_route.post (Server_route.Tool_actor { tool_name = (Msx_tool.name Msx_tool.Load) }) "/api/v1/msx/load" (fun state agent_name request reqd ->
            handle_load ~state ~agent_name request reqd)
-         request reqd)
-  |> Http.Router.post "/api/v1/msx/save" (fun request reqd ->
-       with_tool_auth ~tool_name:(Msx_tool.name Msx_tool.Save)
-         (fun state _req reqd ->
+  |> Server_route.post (Server_route.Tool { tool_name = (Msx_tool.name Msx_tool.Save) }) "/api/v1/msx/save" (fun state request reqd ->
            handle_checkpoint ~state ~restore:false
              request reqd)
-         request reqd)
-  |> Http.Router.post "/api/v1/msx/restore" (fun request reqd ->
-       with_tool_auth ~tool_name:(Msx_tool.name Msx_tool.Restore)
-         (fun state _req reqd ->
+  |> Server_route.post (Server_route.Tool { tool_name = (Msx_tool.name Msx_tool.Restore) }) "/api/v1/msx/restore" (fun state request reqd ->
            handle_checkpoint ~state ~restore:true
              request reqd)
-         request reqd)
-  |> Http.Router.post "/api/v1/msx/disk" (fun request reqd ->
-       with_tool_auth ~tool_name:(Msx_tool.name Msx_tool.Change_disk)
-         (fun state _req reqd ->
+  |> Server_route.post (Server_route.Tool { tool_name = (Msx_tool.name Msx_tool.Change_disk) }) "/api/v1/msx/disk" (fun state request reqd ->
            handle_change_disk ~state request reqd)
-         request reqd)
-  |> Http.Router.post "/api/v1/msx/tick" (fun request reqd ->
-       with_tool_auth ~tool_name:(Msx_tool.name Msx_tool.Step)
-         (fun state _req reqd -> handle_tick ~config:(Mcp_server.workspace_config state) request reqd)
-         request reqd)
+  |> Server_route.post (Server_route.Tool { tool_name = (Msx_tool.name Msx_tool.Step) }) "/api/v1/msx/tick" (fun state request reqd -> handle_tick ~config:(Mcp_server.workspace_config state) request reqd)
 ;;

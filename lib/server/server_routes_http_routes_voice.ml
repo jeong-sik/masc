@@ -231,10 +231,8 @@ let handle_voice_catalogue request reqd body =
 
 let add_routes router =
   router
-  |> Http.Router.prefix_get Masc_network_defaults.voice_audio_path_prefix
-       (fun request reqd ->
-       with_public_read
-         (fun _state _req reqd ->
+  |> Server_route.prefix_get Server_route.Public_read Masc_network_defaults.voice_audio_path_prefix
+       (fun _state request reqd ->
            let path = Http.Request.path request in
            match
              extract_path_param
@@ -250,12 +248,9 @@ let add_routes router =
                     ; ("reason", `String "expected 32-char hex (128-bit)")
                     ])
            | Some token -> serve_clip ~token request reqd)
-         request reqd)
-  |> Http.Router.prefix_get "/api/v1/media/" (fun request reqd ->
-       (* RFC-0301: model-generated media (image/audio/document) fetched by an
-          authenticated content locator. Content hashes are not capabilities. *)
-       with_permission_auth ~permission:Masc_domain.CanReadState
-         (fun state _req reqd ->
+  (* RFC-0301: model-generated media (image/audio/document) fetched by an
+     authenticated content locator. Content hashes are not capabilities. *)
+  |> Server_route.prefix_get (Server_route.Permission Masc_domain.CanReadState) "/api/v1/media/" (fun state request reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            let path = Http.Request.path request in
            match extract_path_param ~prefix:"/api/v1/media/" path with
@@ -269,65 +264,43 @@ let add_routes router =
                     ; ("reason", `String "expected 64-char lowercase hex (SHA-256)")
                     ])
            | Some token -> serve_media ~base_path ~token request reqd)
-         request reqd)
-  |> Http.Router.post "/api/v1/voice/transcribe" (fun request reqd ->
-       (* RFC-0236 P1: browser-captured speech -> text. Admin/owner-only
-          ([CanAdmin]) — each call spends an ElevenLabs STT credit, so unlike
-          the GET audio route this carries no public capability. *)
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _agent_name _req reqd ->
+  (* RFC-0236 P1: browser-captured speech -> text. Admin/owner-only
+     ([CanAdmin]) — each call spends an ElevenLabs STT credit, so unlike
+     the GET audio route this carries no public capability. *)
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/voice/transcribe" (fun state _agent_name request reqd ->
            Http.Request.read_body_async reqd (fun body ->
              handle_transcribe state request reqd body))
-         request reqd)
   (* Probing a TTS endpoint spends a credit on a metered provider, the same
      reason /voice/transcribe is admin-gated rather than carrying a public
      capability. *)
-  |> Http.Router.post "/api/v1/voice/probe/tts" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state _agent_name _req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/voice/probe/tts" (fun _state _agent_name request reqd ->
            Http.Request.read_body_async reqd (fun body ->
              handle_probe_tts request reqd body))
-         request reqd)
-  |> Http.Router.post "/api/v1/voice/probe/stt" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state _agent_name _req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/voice/probe/stt" (fun _state _agent_name request reqd ->
            Http.Request.read_body_async reqd (fun body ->
              handle_probe_stt request reqd body))
-         request reqd)
   (* Asking a provider for its catalogue spends nothing but reaches out with
      the operator's credential, so it is gated like the rest of setup. *)
-  |> Http.Router.post "/api/v1/voice/voices" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state _agent_name _req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/voice/voices" (fun _state _agent_name request reqd ->
            Http.Request.read_body_async reqd (fun body ->
              handle_voice_catalogue request reqd body))
-         request reqd)
   (* Voice setup: read what is configured, see what a change would do, commit
      it. All three are CanAdmin -- they read and rewrite the workspace's
      runtime.toml, which GET /api/v1/voice/config deliberately does not expose
      (it answers three booleans and no endpoint identity, because it is a public
      read). *)
-  |> Http.Router.get "/api/v1/voice/setup" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _agent_name _req reqd ->
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/voice/setup" (fun state _agent_name request reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            match Server_voice_setup_actions.observe ~base_path with
            | Ok json -> respond_json_value_with_cors ~status:`OK request reqd json
            | Error error -> respond_voice_setup_error request reqd error)
-         request reqd)
-  |> Http.Router.post "/api/v1/voice/setup/preview" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _agent_name _req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/voice/setup/preview" (fun state _agent_name request reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            Http.Request.read_body_async reqd (fun body ->
              handle_voice_setup ~base_path
                ~act:Server_voice_setup_actions.preview request reqd body))
-         request reqd)
-  |> Http.Router.post "/api/v1/voice/setup" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _agent_name _req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/voice/setup" (fun state _agent_name request reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            Http.Request.read_body_async reqd (fun body ->
              handle_voice_setup ~base_path ~act:Server_voice_setup_actions.apply request
                reqd body))
-         request reqd)

@@ -14,7 +14,6 @@ let refuse request reqd error =
 let presence_error request reqd =
   respond ~status:`Conflict request reqd (`Assoc ["code", `String "artifact_draft_session_closed";
     "error", `String "The editing session is closed or belongs to another actor."])
-let authorized handler = with_token_permission_auth ~permission:Masc_domain.CanAdmin handler
 
 (* Each connection receives only its authenticated document room, never the
    global agent event stream. The promise is replaced under the room mutex, so
@@ -78,7 +77,7 @@ let parse_presence json =
   Ok (target, session_id, command)
 
 let add_routes router = router
-  |> Http.Router.prefix_get "/api/v1/artifact-draft-events/" (authorized (fun state actor request reqd ->
+  |> Server_route.prefix_get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/artifact-draft-events/" (fun state actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     let parsed =
       let* artifact_id = match extract_path_param ~prefix:"/api/v1/artifact-draft-events/" (Http.Request.path request) with
@@ -99,8 +98,8 @@ let add_routes router = router
       | Ok view ->
         Live.publish ~base_path ~draft:view.draft ~content:view.content;
         stream ~sw ~clock ~session request reqd
-      with exn -> Live.leave session; raise exn))
-  |> Http.Router.post "/api/v1/artifact-draft-presence" (authorized (fun state actor request reqd ->
+      with exn -> Live.leave session; raise exn)
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/artifact-draft-presence" (fun state actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     Http.Request.read_body_async reqd (fun body ->
       let parsed = match Yojson.Safe.from_string body with
@@ -120,4 +119,4 @@ let add_routes router = router
           | Ok () ->
             let result = match command with Leave -> Live.leave session; Ok () | Position position -> Live.position session position in
             match result with Error _ -> presence_error request reqd
-            | Ok () -> respond request reqd (`Assoc ["ok", `Bool true]))))
+            | Ok () -> respond request reqd (`Assoc ["ok", `Bool true])))

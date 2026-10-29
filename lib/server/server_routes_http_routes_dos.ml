@@ -103,15 +103,12 @@ let press_into ~config ~who ~saves_name ~keys =
   status, json
 
 let add_route router route =
-  Http.Router.post (path route)
-    (fun request reqd ->
-      with_tool_actor_auth ~tool_name:(tool_name route)
-        (fun state who request reqd ->
+  Server_route.post (Server_route.Tool_actor { tool_name = (tool_name route) }) (path route)
+    (fun state who request reqd ->
           let config = Mcp_server.workspace_config state in
           Http.Request.read_body_async reqd (fun body ->
             let status, json = run_response ~config ~who ~route ~body in
             respond_json_value_with_cors ~status request reqd json))
-        request reqd)
     router
 
 let add_routes router = List.fold_left add_route router all_routes

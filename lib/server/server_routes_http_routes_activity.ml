@@ -765,26 +765,22 @@ let respond_board_json reqd json =
 
 let add_routes ~sw ~clock router =
   router
-  |> Http.Router.get "/api/v1/activity/events" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/activity/events" (fun state req reqd ->
          let json = activity_events_http_json ~state req in
          Http.Response.json_value json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/activity/graph" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       )
+  |> Server_route.get Server_route.Public_read "/api/v1/activity/graph" (fun state req reqd ->
          let json = activity_graph_http_json ~state req in
          Http.Response.json_value json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/activity/swimlane" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       )
+  |> Server_route.get Server_route.Public_read "/api/v1/activity/swimlane" (fun state req reqd ->
          let json =
            Server_activity_http.swimlane_http_json
              ~deps:activity_http_deps ~state req
          in
          Http.Response.json_value json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/runtime/params" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
+       )
+  |> Server_route.get Server_route.Public_read "/api/v1/runtime/params" (fun _state _req reqd ->
          let params = Runtime_params.registry () in
          let meta_to_json = function
            | None -> `Null
@@ -824,10 +820,9 @@ let add_routes ~sw ~clock router =
              ]
          in
          Http.Response.json_value json reqd
-       ) request reqd)
+       )
 
-  |> Http.Router.get "/api/v1/runtime/params/audit" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/runtime/params/audit" (fun state req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
          let entries = Runtime_params.recent_audit ~base_path limit in
@@ -836,10 +831,9 @@ let add_routes ~sw ~clock router =
            ("count", `Int (List.length entries));
          ] in
          Http.Response.json_value json reqd
-       ) request reqd)
+       )
 
-  |> Http.Router.get "/api/v1/audit" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/audit" (fun state req reqd ->
          let config = (Mcp_server.workspace_config state) in
          let limit  = int_query_param req "limit"  ~default:100 |> clamp ~min_v:1 ~max_v:500 in
          let actor_filter    = query_param req "actor" in
@@ -874,10 +868,9 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req
            json reqd
-       ) request reqd)
+       )
 
-  |> Http.Router.get "/api/v1/board" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/board" (fun state req reqd ->
          let config = Mcp_server.workspace_config state in
          with_optional_board_reaction_actor
            ~base_path:config.base_path
@@ -893,25 +886,18 @@ let add_routes ~sw ~clock router =
               in
               Http.Response.json_lazy ~status ~request:req ~etag:payload.etag
                 (fun () -> payload.raw_json) reqd)
-       ) request reqd)
+       )
 
-  |> Http.Router.get "/api/v1/board/reactions/catalog" (fun request reqd ->
-       with_public_read
-         (fun _state _request reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/board/reactions/catalog" (fun _state _request reqd ->
             Http.Response.json_value
               (Server_board_reaction_http.catalog_json ())
               reqd)
-         request
-         reqd)
 
   (* Registered before the single-target read so the longer path is matched
      first. One page of the board asks about its rows here instead of once per
      row. *)
-  |> Http.Router.get "/api/v1/board/reactions/batch" (fun request reqd ->
-       with_token_permission_auth
-         ~permission:Masc_domain.CanReadState
-         (fun _state actor req reqd ->
-            let actor = String.trim actor in
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/board/reactions/batch" (fun _state actor req reqd ->
+            let request = req in let actor = String.trim actor in
             let result =
               Server_board_reaction_http.targets_of_strings
                 ~target_type:(query_param req "target_type")
@@ -919,14 +905,9 @@ let add_routes ~sw ~clock router =
               |> Result.map (Server_board_reaction_http.list_batch_json ~actor)
             in
             respond_board_reaction_result request reqd result)
-         request
-         reqd)
 
-  |> Http.Router.get "/api/v1/board/reactions" (fun request reqd ->
-       with_token_permission_auth
-         ~permission:Masc_domain.CanReadState
-         (fun _state actor req reqd ->
-            let actor = String.trim actor in
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/board/reactions" (fun _state actor req reqd ->
+            let request = req in let actor = String.trim actor in
             let result =
               Result.bind
                 (Server_board_reaction_http.target_of_strings
@@ -935,13 +916,8 @@ let add_routes ~sw ~clock router =
                 (Server_board_reaction_http.list_json ~actor)
             in
             respond_board_reaction_result request reqd result)
-         request
-         reqd)
 
-  |> Http.Router.post "/api/v1/board/reactions" (fun request reqd ->
-       with_token_permission_auth
-         ~permission:Masc_domain.CanVote
-         (fun _state actor _req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanVote) "/api/v1/board/reactions" (fun _state actor request reqd ->
             let actor = String.trim actor in
             Http.Request.read_body_async reqd (fun body ->
               let parsed =
@@ -956,11 +932,8 @@ let add_routes ~sw ~clock router =
                   (Server_board_reaction_http.toggle_json ~actor)
               in
               respond_board_reaction_result request reqd result))
-         request
-         reqd)
 
-  |> Http.Router.get "/api/v1/board/hearths" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/board/hearths" (fun state req reqd ->
          let config = Mcp_server.workspace_config state in
          let exclude_system = bool_query_param req "exclude_system" ~default:false in
          let exclude_automation =
@@ -988,34 +961,27 @@ let add_routes ~sw ~clock router =
                 ]))
          in
          Server_cached_read_http.respond ~request:req reqd payload
-       ) request reqd)
+       )
 
-  |> Http.Router.get "/api/v1/board/curation" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/board/curation" (fun _state _req reqd ->
          respond_board_json reqd (board_curation_json ())
-       ) request reqd)
+       )
 
-  |> Http.Router.get "/api/v1/board/flairs" (fun _request reqd ->
+  |> Server_route.get Server_route.Always_public "/api/v1/board/flairs" (fun _request reqd ->
        let flairs = List.map Board.flair_to_yojson Board.available_flairs in
        let json = `Assoc [("flairs", `List flairs)] in
        Http.Response.json_value json reqd)
 
-  |> Http.Router.get "/api/v1/board/sub-boards" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/board/sub-boards" (fun _state _req reqd ->
          respond_board_json reqd (board_sub_boards_json ())
-       ) request reqd)
+       )
 
-  |> Http.Router.post "/api/v1/board/context-inference" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:Keeper_tool_name.(to_string Keeper_delegate)
-         (fun state submitted_by _req reqd ->
+  |> Server_route.post (Server_route.Tool_actor { tool_name = Keeper_tool_name.(to_string Keeper_delegate) }) "/api/v1/board/context-inference" (fun state submitted_by request reqd ->
          Http.Request.read_body_async reqd
            (handle_board_context_inference_request ~state ~sw ~clock
               ~submitted_by ~request reqd))
-         request reqd)
 
-  |> Http.Router.post "/api/v1/board/sub-boards" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_board_sub_board_create"
-         (fun _state agent_name _req reqd ->
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_board_sub_board_create" }) "/api/v1/board/sub-boards" (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body ->
            try
              let args = Yojson.Safe.from_string body in
@@ -1046,19 +1012,15 @@ let add_routes ~sw ~clock router =
              Http.Response.json_value ~status:`Bad_request
                (`Assoc [("error", `String ("invalid JSON: " ^ msg))])
                reqd))
-         request reqd)
 
-  |> Http.Router.prefix_get board_sub_board_detail_prefix (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
+  |> Server_route.prefix_get Server_route.Public_read board_sub_board_detail_prefix (fun _state request reqd ->
          let status, json =
            board_sub_board_detail_json ~path:(Http.Request.path request)
          in
          Http.Response.json_value ~status json reqd
-       ) request reqd)
+       )
 
-  |> Http.Router.prefix_delete "/api/v1/board/sub-boards/" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_board_sub_board_delete"
-         (fun _state agent_name _req reqd ->
+  |> Server_route.prefix_delete (Server_route.Tool_actor { tool_name = "masc_board_sub_board_delete" }) "/api/v1/board/sub-boards/" (fun _state agent_name request reqd ->
          let path = Http.Request.path request in
          (match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
           | None ->
@@ -1085,11 +1047,8 @@ let add_routes ~sw ~clock router =
                      (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
                      reqd)))
          )
-         request reqd)
 
-  |> Http.Router.prefix_put "/api/v1/board/sub-boards/" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_board_sub_board_update"
-         (fun _state agent_name _req reqd ->
+  |> Server_route.prefix_put (Server_route.Tool_actor { tool_name = "masc_board_sub_board_update" }) "/api/v1/board/sub-boards/" (fun _state agent_name request reqd ->
          Http.Request.read_body_async reqd (fun body ->
            try
              let args = Yojson.Safe.from_string body in
@@ -1132,11 +1091,9 @@ let add_routes ~sw ~clock router =
              Http.Response.json_value ~status:`Bad_request
                (`Assoc [("error", `String ("invalid JSON: " ^ msg))])
                reqd))
-         request reqd)
 
-  |> Http.Router.prefix_get "/api/v1/board/" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let path = Http.Request.path request in
+  |> Server_route.prefix_get Server_route.Public_read "/api/v1/board/" (fun state req reqd ->
+         let request = req in let path = Http.Request.path request in
          (match extract_path_param ~prefix:"/api/v1/board/" path with
           | None ->
               Http.Response.json_value
@@ -1183,15 +1140,13 @@ let add_routes ~sw ~clock router =
                             ~response_format ~post_id ()
                         in
                         respond_json_with_cors ~status request reqd body)))
-       ) request reqd)
+       )
 
   (* The four Board post/comment/vote routes below consume the auth resolver's
      actor. An ordinary bearer credential resolves to its owner; an admitted
      token-less same-origin request keeps its supplied local attribution.
      These routes do not re-read the identity headers. *)
-  |> Http.Router.post "/api/v1/tools/masc_board_vote" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_board_vote"
-         (fun state agent_name _req reqd ->
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_board_vote" }) "/api/v1/tools/masc_board_vote" (fun state agent_name request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1218,11 +1173,9 @@ let add_routes ~sw ~clock router =
              respond_json_value_with_cors ~status:`Bad_request request reqd
                (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
-       ) request reqd)
+       )
 
-  |> Http.Router.post "/api/v1/tools/masc_board_post" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:(Tool_name.Board_name.to_string Tool_name.Board_name.Board_post)
-         (fun state agent_name _req reqd ->
+  |> Server_route.post (Server_route.Tool_actor { tool_name = (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post) }) "/api/v1/tools/masc_board_post" (fun state agent_name request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1252,11 +1205,9 @@ let add_routes ~sw ~clock router =
              respond_json_value_with_cors ~status:`Bad_request request reqd
                (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
-       ) request reqd)
+       )
 
-  |> Http.Router.post "/api/v1/tools/masc_board_comment" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_board_comment"
-         (fun state agent_name _req reqd ->
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_board_comment" }) "/api/v1/tools/masc_board_comment" (fun state agent_name request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1283,14 +1234,12 @@ let add_routes ~sw ~clock router =
              respond_json_value_with_cors ~status:`Bad_request request reqd
                (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
-       ) request reqd)
+       )
 
   (* Comment vote — mirrors masc_board_vote. [voter] comes from the auth
      resolver: the ordinary bearer credential's owner, or the attribution
      supplied by an admitted token-less same-origin request. *)
-  |> Http.Router.post "/api/v1/tools/masc_board_comment_vote" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_board_comment_vote"
-         (fun state agent_name _req reqd ->
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_board_comment_vote" }) "/api/v1/tools/masc_board_comment_vote" (fun state agent_name request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1317,16 +1266,14 @@ let add_routes ~sw ~clock router =
              respond_json_value_with_cors ~status:`Bad_request request reqd
                (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
-       ) request reqd)
+       )
 
   (* Goal lifecycle from the terminal (#29684). The workspace tool already owns
      the transition rules ([Goal_phase.decide_transition] inside
      [handle_goal_transition]); this route supplies the authorized actor
      as the tool context. An invalid phase transition remains the tool's
      rejection to make, not the route's. *)
-  |> Http.Router.post "/api/v1/tools/masc_goal_transition" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_goal_transition"
-         (fun state agent_name _req reqd ->
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_goal_transition" }) "/api/v1/tools/masc_goal_transition" (fun state agent_name request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1357,33 +1304,25 @@ let add_routes ~sw ~clock router =
              respond_json_value_with_cors ~status:`Bad_request request reqd
                (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
-       ) request reqd)
+       )
   (* Schedule create/modify from the terminal. Their schemas share the same
      editable definition; update additionally requires the stable id. Actor
      auth resolves the caller; the tool records that caller as the actor and
      refuses a form field that names someone else. *)
-  |> Http.Router.post "/api/v1/tools/masc_schedule_create" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_schedule_create"
-         (fun state agent_name _request reqd ->
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_schedule_create" }) "/api/v1/tools/masc_schedule_create" (fun state agent_name request reqd ->
             Http.Request.read_body_async reqd
               (handle_schedule_write_request ~update:false ~state ~agent_name
                  ~request reqd))
-         request reqd)
-  |> Http.Router.post "/api/v1/tools/masc_schedule_update" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_schedule_update"
-         (fun state agent_name _request reqd ->
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_schedule_update" }) "/api/v1/tools/masc_schedule_update" (fun state agent_name request reqd ->
             Http.Request.read_body_async reqd
               (handle_schedule_write_request ~update:true ~state ~agent_name
                  ~request reqd))
-         request reqd)
   (* Schedule cancel from the terminal (#29684). The workspace tool owns the
      argument contract ([Tool_schedule.handle_cancel]: schedule_id, reason)
      and the store transition. The HTTP trust boundary owns the canceller:
      [schedule_caller] decides from the credential whether the caller is the
      operator, who may cancel any schedule. *)
-  |> Http.Router.post "/api/v1/tools/masc_schedule_cancel" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_schedule_cancel"
-         (fun state agent_name _req reqd ->
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_schedule_cancel" }) "/api/v1/tools/masc_schedule_cancel" (fun state agent_name request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1430,10 +1369,9 @@ let add_routes ~sw ~clock router =
              respond_json_value_with_cors ~status:`Bad_request request reqd
                (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
-       ) request reqd)
+       )
 
-  |> Http.Router.get "/api/v1/karma" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/karma" (fun _state _req reqd ->
          let karma_list = Board_dispatch.get_all_karma () in
          let sorted = List.sort (fun (_, a) (_, b) -> compare b a) karma_list in
          let json = `Assoc [
@@ -1442,25 +1380,22 @@ let add_routes ~sw ~clock router =
            ) sorted));
          ] in
          Http.Response.json_value json reqd
-       ) request reqd)
+       )
 
-  |> Http.Router.get "/api/v1/board/karma/ledger" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/board/karma/ledger" (fun _state req reqd ->
          respond_board_json reqd (board_karma_ledger_json req)
-       ) request reqd)
+       )
 
   (* Prompt Registry API *)
-  |> Http.Router.get "/api/v1/prompts" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/prompts" (fun _state _req reqd ->
          let json = prompt_catalog_json () in
          Http.Response.json_value json reqd
-       ) request reqd)
+       )
 
   (* Skill catalog API: projection only. Bootstrap and runtime-config apply
      publish the workspace snapshot; this read never scans the filesystem or
      recomputes a competing catalog. *)
-  |> Http.Router.get "/api/v1/skills" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/skills" (fun state _req reqd ->
          let config = Mcp_server.workspace_config state in
          let json =
            match Server_skill_snapshot_runtime.lookup ~base_path:config.Workspace.base_path with
@@ -1662,11 +1597,9 @@ let add_routes ~sw ~clock router =
                ]
          in
          Http.Response.json_value json reqd
-       ) request reqd)
+       )
 
-  |> Http.Router.post "/api/v1/prompts" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_prompt_override"
-         (fun state _req reqd ->
+  |> Server_route.post (Server_route.Tool { tool_name = "masc_prompt_override" }) "/api/v1/prompts" (fun state request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            match Server_prompt_override_request.decode body_str with
            | Error error ->
@@ -1710,12 +1643,10 @@ let add_routes ~sw ~clock router =
                        ("error", `String "prompt override persistence failed");
                      ]))
          )
-       ) request reqd)
+       )
 
   (* Runtime Params: set / clear *)
-  |> Http.Router.post "/api/v1/runtime/params/set" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_set_param"
-         (fun state _req reqd ->
+  |> Server_route.post (Server_route.Tool { tool_name = "masc_set_param" }) "/api/v1/runtime/params/set" (fun state request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            match Server_runtime_param_request.decode_set body_str with
            | Error error ->
@@ -1773,11 +1704,9 @@ let add_routes ~sw ~clock router =
                       ]
                       @ effect_fields)))
          )
-       ) request reqd)
+       )
 
-  |> Http.Router.post "/api/v1/runtime/params/clear" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_set_param"
-         (fun state _req reqd ->
+  |> Server_route.post (Server_route.Tool { tool_name = "masc_set_param" }) "/api/v1/runtime/params/clear" (fun state request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            match Server_runtime_param_request.decode_clear body_str with
            | Error error ->
@@ -1826,4 +1755,4 @@ let add_routes ~sw ~clock router =
                       ]
                       @ effect_fields)))
          )
-       ) request reqd)
+       )

@@ -1,0 +1,10 @@
+[2026-10-29 00:17:40] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `keeper shutdown acknowledgement HTTP'.
+This run has ID `G63N0N6E'.
+
+  [OK]          actual router          0   admin authorization and observatio...
+  [OK]          actual router          1   preview recheck and verified actor...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/keeper shutdown acknowledgement HTTP'.
+Test Successful in 0.127s. 2 tests run.
+exit=0

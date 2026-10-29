@@ -1,0 +1,43 @@
+[2026-10-29 00:26:28] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `server Skill editor'.
+This run has ID `K8LI073E'.
+
+  [OK]          editor          0   unavailable tool authority does not write.
+  [OK]          editor          1   load preview and publish.
+  [OK]          editor          2   near-miss fence is diagnosed in preview.
+  [OK]          editor          3   invalid candidate is never written.
+  [OK]          editor          4   invalid new Skill is never created.
+  [OK]          editor          5   composition preview exposes validated flow.
+  [OK]          editor          6   external edit conflicts.
+  [OK]          editor          7   read-only source rejects save.
+  [OK]          editor          8   unreadable body is never written.
+  [OK]          editor          9   oversized candidate is never written.
+  [OK]          editor         10   saved but unpublished is explicit.
+  [OK]          editor         11   create publishes without host path input.
+  [OK]          editor         12   create behind an earlier source names the...
+  [OK]          editor         13   delete exact reference and publish.
+  [OK]          editor         14   delete removes the empty package and the ...
+  [OK]          editor         15   delete keeps a package that holds other f...
+  [OK]          editor         16   delete stale revision does not mutate.
+  [OK]          editor         17   delete stale published revision does not ...
+  [OK]          editor         18   delete restores pre-mutation replacement.
+  [OK]          editor         19   delete retains quarantine when original r...
+  [OK]          editor         20   delete retains open-fd write after verifi...
+  [OK]          editor         21   delete cancellation after move is typed.
+  [OK]          editor         22   delete parent cancellation while waiting ...
+  [OK]          editor         23   delete cancellation after verification is...
+  [OK]          editor         24   delete cancellation after quarantine is t...
+  [OK]          editor         25   delete refresh cancellation is unpublished.
+  [OK]          editor         26   delete moved settlement failure is typed.
+  [OK]          editor         27   delete requires confirmation.
+  [OK]          editor         28   delete read-only source does not mutate.
+  [OK]          editor         29   delete missing file is not found.
+  [OK]          editor         30   delete rejects symlink leaf.
+  [OK]          editor         31   delete rejects symlink directory escape.
+  [OK]          editor         32   deleted but unpublished is explicit.
+  [OK]          editor         33   server skill snapshot runtime refresh fro...
+  [OK]          editor         34   client read contract rejects unknown auth...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/server Skill editor'.
+Test Successful in 0.185s. 35 tests run.
+exit=0

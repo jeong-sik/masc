@@ -1,0 +1,184 @@
+{
+ "boot": [
+  {
+   "dashboard_status": 302,
+   "ready_status": 200,
+   "samples": 1
+  },
+  {
+   "dashboard_status": 302,
+   "ready_status": 503,
+   "samples": 23
+  }
+ ],
+ "rows": [
+  {
+   "host": "other_host",
+   "page": "/dashboard",
+   "query": "none",
+   "status": 302,
+   "location": "http://127.0.0.1:PORT/dashboard"
+  },
+  {
+   "host": "other_host",
+   "page": "/dashboard",
+   "query": "one_parameter",
+   "status": 302,
+   "location": "http://127.0.0.1:PORT/dashboard?expected_base_path=<BASE>"
+  },
+  {
+   "host": "other_host",
+   "page": "/dashboard",
+   "query": "mismatch",
+   "status": 302,
+   "location": "http://127.0.0.1:PORT/dashboard?expected_base_path=/nowhere&expected_masc_root=/nowhere/.masc"
+  },
+  {
+   "host": "other_host",
+   "page": "/dashboard",
+   "query": "match",
+   "status": 302,
+   "location": "http://127.0.0.1:PORT/dashboard?expected_base_path=<BASE>&expected_masc_root=<BASE>/.masc"
+  },
+  {
+   "host": "other_host",
+   "page": "/dashboard/",
+   "query": "none",
+   "status": 302,
+   "location": "http://127.0.0.1:PORT/dashboard/"
+  },
+  {
+   "host": "other_host",
+   "page": "/dashboard/",
+   "query": "one_parameter",
+   "status": 302,
+   "location": "http://127.0.0.1:PORT/dashboard/?expected_base_path=<BASE>"
+  },
+  {
+   "host": "other_host",
+   "page": "/dashboard/",
+   "query": "mismatch",
+   "status": 302,
+   "location": "http://127.0.0.1:PORT/dashboard/?expected_base_path=/nowhere&expected_masc_root=/nowhere/.masc"
+  },
+  {
+   "host": "other_host",
+   "page": "/dashboard/",
+   "query": "match",
+   "status": 302,
+   "location": "http://127.0.0.1:PORT/dashboard/?expected_base_path=<BASE>&expected_masc_root=<BASE>/.masc"
+  },
+  {
+   "host": "other_host",
+   "page": "/dashboard/settings",
+   "query": "none",
+   "status": 302,
+   "location": "http://127.0.0.1:PORT/dashboard/settings"
+  },
+  {
+   "host": "other_host",
+   "page": "/dashboard/settings",
+   "query": "one_parameter",
+   "status": 302,
+   "location": "http://127.0.0.1:PORT/dashboard/settings?expected_base_path=<BASE>"
+  },
+  {
+   "host": "other_host",
+   "page": "/dashboard/settings",
+   "query": "mismatch",
+   "status": 302,
+   "location": "http://127.0.0.1:PORT/dashboard/settings?expected_base_path=/nowhere&expected_masc_root=/nowhere/.masc"
+  },
+  {
+   "host": "other_host",
+   "page": "/dashboard/settings",
+   "query": "match",
+   "status": 302,
+   "location": "http://127.0.0.1:PORT/dashboard/settings?expected_base_path=<BASE>&expected_masc_root=<BASE>/.masc"
+  },
+  {
+   "host": "canonical_host",
+   "page": "/dashboard",
+   "query": "none",
+   "status": 503,
+   "location": ""
+  },
+  {
+   "host": "canonical_host",
+   "page": "/dashboard",
+   "query": "one_parameter",
+   "status": 400,
+   "location": ""
+  },
+  {
+   "host": "canonical_host",
+   "page": "/dashboard",
+   "query": "mismatch",
+   "status": 409,
+   "location": ""
+  },
+  {
+   "host": "canonical_host",
+   "page": "/dashboard",
+   "query": "match",
+   "status": 503,
+   "location": ""
+  },
+  {
+   "host": "canonical_host",
+   "page": "/dashboard/",
+   "query": "none",
+   "status": 503,
+   "location": ""
+  },
+  {
+   "host": "canonical_host",
+   "page": "/dashboard/",
+   "query": "one_parameter",
+   "status": 400,
+   "location": ""
+  },
+  {
+   "host": "canonical_host",
+   "page": "/dashboard/",
+   "query": "mismatch",
+   "status": 409,
+   "location": ""
+  },
+  {
+   "host": "canonical_host",
+   "page": "/dashboard/",
+   "query": "match",
+   "status": 503,
+   "location": ""
+  },
+  {
+   "host": "canonical_host",
+   "page": "/dashboard/settings",
+   "query": "none",
+   "status": 503,
+   "location": ""
+  },
+  {
+   "host": "canonical_host",
+   "page": "/dashboard/settings",
+   "query": "one_parameter",
+   "status": 400,
+   "location": ""
+  },
+  {
+   "host": "canonical_host",
+   "page": "/dashboard/settings",
+   "query": "mismatch",
+   "status": 409,
+   "location": ""
+  },
+  {
+   "host": "canonical_host",
+   "page": "/dashboard/settings",
+   "query": "match",
+   "status": 503,
+   "location": ""
+  }
+ ]
+}

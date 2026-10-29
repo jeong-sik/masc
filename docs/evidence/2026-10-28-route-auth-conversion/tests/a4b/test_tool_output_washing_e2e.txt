@@ -1,0 +1,10 @@
+Testing `tool_output_washing_e2e'.
+This run has ID `C81FK08M'.
+
+  [OK]          full data flow              0   externalize -> reference -> s...
+  [OK]          endpoint hardening          0   rejects invalid sha shapes.
+  [OK]          range contract              0   artifact pages make progress.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/tool_output_washing_e2e'.
+Test Successful in 0.208s. 3 tests run.
+exit=0

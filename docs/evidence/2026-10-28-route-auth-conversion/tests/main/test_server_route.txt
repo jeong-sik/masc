@@ -1,0 +1,22 @@
+Testing `server_route'.
+This run has ID `2UR8NEQ0'.
+
+  [OK]          route table          0   each kind is recorded on the route.
+  [OK]          route table          1   access is what the registration reco...
+  [OK]          route table          2   the older functions record unclassif...
+  [OK]          route table          3   method and kind follow the function.
+  [OK]          route table          4   ws_get records the upgrade reason.
+  [OK]          route table          5   inventory json.
+  [OK]          one table            0   an older reference sees the same table.
+  [OK]          one table            1   the later registration of a path wins.
+  [OK]          one table            2   a route replaced for some methods ke...
+  [OK]          one table            3   an exact path and a prefix both apply.
+  [OK]          one table            4   equal prefixes and the longest prefix.
+  [OK]          one table            5   a method the router does not index.
+  [OK]          dispatch             0   without server state a wrapper stops...
+  [OK]          dispatch             1   strict auth: each kind answers like ...
+  [OK]          dispatch             2   loopback: each kind answers like its...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/server_route'.
+Test Successful in 0.453s. 15 tests run.
+exit=0

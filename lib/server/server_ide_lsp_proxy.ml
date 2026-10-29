@@ -1157,7 +1157,7 @@ let start_dispatch_workers cs =
 (** Register the /api/v1/ide/lsp WebSocket endpoint. *)
 let add_routes ~sw ~clock router =
   let router =
-    Http.Router.ws_get
+    Server_route.ws_get
       ide_lsp_upgrade_path
       (fun ~upgrade request reqd ->
          (* Token-gated like /api/v1/lsp/question, and for the same reason:

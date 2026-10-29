@@ -883,6 +883,8 @@ module Router = struct
       :  tool_name:string
       -> (state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
       -> request_handler
+
+    val with_canonical_loopback_host : port:int -> request_handler -> request_handler
   end
 
   module type Typed = sig
@@ -894,6 +896,7 @@ module Router = struct
     type _ auth =
       | Always_public : request_handler auth
       | Public_read : state_handler auth
+      | Public_read_on_canonical_host : { port : int } -> state_handler auth
       | Read_auth : state_handler auth
       | Permission : Masc_domain.permission -> state_handler auth
       | Token_permission : Masc_domain.permission -> token_handler auth
@@ -932,6 +935,7 @@ module Router = struct
     type _ auth =
       | Always_public : request_handler auth
       | Public_read : state_handler auth
+      | Public_read_on_canonical_host : { port : int } -> state_handler auth
       | Read_auth : state_handler auth
       | Permission : Masc_domain.permission -> state_handler auth
       | Token_permission : Masc_domain.permission -> token_handler auth
@@ -945,6 +949,7 @@ module Router = struct
     let access : type h. h auth -> Route_access.t = function
       | Always_public -> Route_access.Always_public
       | Public_read -> Route_access.Public_read
+      | Public_read_on_canonical_host _ -> Route_access.Public_read
       | Read_auth -> Route_access.Read_auth
       | Permission permission -> Route_access.Permission permission
       | Token_permission permission -> Route_access.Token_permission permission
@@ -962,6 +967,8 @@ module Router = struct
       | Always_public -> handler
       | Self_authenticated _ -> handler
       | Public_read -> W.with_public_read handler
+      | Public_read_on_canonical_host { port } ->
+        W.with_canonical_loopback_host ~port (W.with_public_read handler)
       | Read_auth -> W.with_read_auth handler
       | Permission permission -> W.with_permission_auth ~permission handler
       | Token_permission permission ->

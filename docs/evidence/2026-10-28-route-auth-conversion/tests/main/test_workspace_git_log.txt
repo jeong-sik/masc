@@ -1,0 +1,9 @@
+Testing `workspace-git-log'.
+This run has ID `SC66WCMJ'.
+
+  [OK]          rows          0   a row splits on the first three tabs.
+  [OK]          rows          1   a malformed row is dropped.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/workspace-git-log'.
+Test Successful in 0.001s. 2 tests run.
+exit=0

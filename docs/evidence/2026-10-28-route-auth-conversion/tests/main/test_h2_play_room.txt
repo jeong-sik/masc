@@ -1,0 +1,9 @@
+[2026-10-29 00:17:16] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `H2 Play room'.
+This run has ID `WNSEHXPH'.
+
+  [OK]          routes          0   read, write, auth and validation.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/H2 Play room'.
+Test Successful in 0.812s. 1 test run.
+exit=0

@@ -1,4 +1,3 @@
-open Server_auth
 open Server_utils
 
 module Http = Http_server_eio
@@ -516,31 +515,16 @@ let handle_discover_repositories state _agent_name req reqd =
 
 let add_routes router =
   router
-  |> Http.Router.get "/api/v1/repositories" (fun request reqd ->
-       with_public_read handle_list_repositories request reqd)
+  |> Server_route.get Server_route.Public_read "/api/v1/repositories" handle_list_repositories
   (* Exact, so it is found before the [/:id] prefix route below. *)
-  |> Http.Router.get "/api/v1/repositories/pulls" (fun request reqd ->
-       with_public_read
-         (fun _state req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/repositories/pulls" (fun _state req reqd ->
            Http.Response.json_value ~request:req
              (Server_repository_pulls.snapshot_to_yojson
                 (Server_repository_pulls.current ()))
              reqd)
-         request reqd)
-  |> Http.Router.prefix_get repositories_prefix (fun request reqd ->
-       with_public_read handle_get_repository_path request reqd)
-  |> Http.Router.post "/api/v1/repositories" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         handle_add_repository request reqd)
-  |> Http.Router.post "/api/v1/repositories/discover" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         handle_discover_repositories request reqd)
-  |> Http.Router.prefix_delete repositories_prefix (fun request reqd ->
-         with_token_permission_auth ~permission:Masc_domain.CanAdmin
-           handle_remove_repository request reqd)
-  |> Http.Router.prefix_put repositories_prefix (fun request reqd ->
-         with_token_permission_auth ~permission:Masc_domain.CanAdmin
-           handle_update_repository request reqd)
-  |> Http.Router.prefix_post repositories_prefix (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         handle_sync_repository request reqd)
+  |> Server_route.prefix_get Server_route.Public_read repositories_prefix handle_get_repository_path
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/repositories" handle_add_repository
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/repositories/discover" handle_discover_repositories
+  |> Server_route.prefix_delete (Server_route.Token_permission Masc_domain.CanAdmin) repositories_prefix handle_remove_repository
+  |> Server_route.prefix_put (Server_route.Token_permission Masc_domain.CanAdmin) repositories_prefix handle_update_repository
+  |> Server_route.prefix_post (Server_route.Token_permission Masc_domain.CanAdmin) repositories_prefix handle_sync_repository

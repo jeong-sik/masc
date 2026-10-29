@@ -4,7 +4,6 @@
     Reads/writes are scoped to the workspace base resolved by
     {!Server_routes_http_routes_workspace.classify_workspace_query}. *)
 
-open Server_auth
 open Masc_domain
 module Http = Http_server_eio
 
@@ -438,9 +437,7 @@ let ide_ask_description { file_path; line; context; _ } =
 
 let add_routes router =
   router
-  |> Http.Router.get "/api/v1/agents" (fun request reqd ->
-    with_public_read
-      (fun state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/agents" (fun state request reqd ->
          let config = Mcp_server.workspace_config state in
          let agents = Workspace.get_active_agents config in
          let entries =
@@ -459,11 +456,7 @@ let add_routes router =
            ~request
            (json_ok (`Assoc [ "agents", `List entries ]))
            reqd)
-      request
-      reqd)
-  |> Http.Router.get "/api/v1/status" (fun request reqd ->
-    with_public_read
-      (fun state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/status" (fun state request reqd ->
          let config = (Mcp_server.workspace_config state) in
          let workspace_state = Workspace.read_state config in
          let tempo = Tempo.get_tempo config in
@@ -477,12 +470,8 @@ let add_routes router =
            ~request
            (json_ok json)
            reqd)
-      request
-      reqd)
-  |> Http.Router.get "/api/v1/ide/repository-activity" (fun request reqd ->
-    (* Exact before/after content has the same admin gate as file activity. *)
-    with_token_permission_auth ~permission:Masc_domain.CanAdmin
-      (fun state _agent_name _req reqd ->
+  (* Exact before/after content has the same admin gate as file activity. *)
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/ide/repository-activity" (fun state _agent_name request reqd ->
         let uri = Uri.of_string request.target in
         match required_query_param uri "repo_id", file_activity_window_hours uri with
         | Error detail, _ | _, Error detail ->
@@ -499,14 +488,11 @@ let add_routes router =
             let data = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
               repository_activity_json ~repo_id ~window_hours) in
             Http.Response.json_value ~compress:true ~request (json_ok data) reqd)
-      request reqd)
-  |> Http.Router.get "/api/v1/ide/file-activity" (fun request reqd ->
-    (* Same data, same gate as [/api/v1/keepers/:name/file-changes]: every
-       row carries the exact text a keeper wrote (before/after strings, whole
-       file bodies), fleet-wide over the window. A public read here was a
-       second door onto content the keeper route keeps behind CanAdmin. *)
-    with_token_permission_auth ~permission:Masc_domain.CanAdmin
-      (fun state _agent_name _req reqd ->
+  (* Same data, same gate as [/api/v1/keepers/:name/file-changes]: every
+     row carries the exact text a keeper wrote (before/after strings, whole
+     file bodies), fleet-wide over the window. A public read here was a
+     second door onto content the keeper route keeps behind CanAdmin. *)
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/ide/file-activity" (fun state _agent_name request reqd ->
         let uri = Uri.of_string request.target in
         match required_query_param uri "file_path", file_activity_window_hours uri with
         | Error detail, _ | _, Error detail ->
@@ -555,10 +541,7 @@ let add_routes router =
                         (cached_file_activity_json ~base_path:(base_path_of_state state)
                            ~codebase ~repo_id ~file_path ~window_hours))
                      reqd)))
-      request reqd)
-  |> Http.Router.get "/api/v1/ide/events" (fun request reqd ->
-    with_public_read
-      (fun state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/ide/events" (fun state request reqd ->
          let uri = Uri.of_string request.target in
          match event_kind_param uri with
          | Error msg ->
@@ -618,27 +601,19 @@ let add_routes router =
                       ~request
                       (json_ok result)
                       reqd))))
-      request
-      reqd)
   (* [build_presence_snapshot] extracted in main — conflict resolved by taking
      main's helper call instead of our inline construction. *)
-  |> Http.Router.get "/api/v1/ide/presence" (fun request reqd ->
-    with_public_read
-      (fun state _req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/ide/presence" (fun state request reqd ->
          let snapshot = build_presence_snapshot state in
          Http.Response.json_value
            ~compress:true
            ~request
            (json_ok snapshot)
            reqd)
-      request
-      reqd)
-  |> Http.Router.post "/api/v1/ide/asks" (fun request reqd ->
-    (* The plane's first mutation, so the first route behind CanAdmin: filing
-       a task spends keeper attention, and an unauthenticated caller could
-       flood the backlog the fleet claims from. *)
-    with_token_permission_auth ~permission:Masc_domain.CanAdmin
-      (fun state _agent_name req reqd ->
+  (* The plane's first mutation, so the first route behind CanAdmin: filing
+     a task spends keeper attention, and an unauthenticated caller could
+     flood the backlog the fleet claims from. *)
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/ide/asks" (fun state _agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            match
              (match Yojson.Safe.from_string body_str with
@@ -700,5 +675,4 @@ let add_routes router =
                   (json_error ~code:"ask_store_unavailable"
                      (Workspace_task.add_task_error_to_string error))
                   reqd)))
-      request reqd)
 ;;

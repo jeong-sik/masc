@@ -123,14 +123,12 @@ let respond_markdown text reqd =
 
 let add_routes router =
   router
-  |> Http.Router.get Play_invite.agent_guide_path (fun request reqd ->
+  |> Server_route.get Server_route.Always_public Play_invite.agent_guide_path (fun request reqd ->
        match guide_response () with
        | Ok text -> respond_markdown text reqd
        | Error (status, json) ->
          respond_json_value_with_cors ~status:(status :> Httpun.Status.t) request reqd json)
-  |> Http.Router.prefix_get Server_play_skills.prefix (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanPlayMachine
-         (fun state _name request reqd ->
+  |> Server_route.prefix_get (Server_route.Token_permission Masc_domain.CanPlayMachine) Server_play_skills.prefix (fun state _name request reqd ->
            let answer =
              match public_base () with
              | Error (status, json) -> Error ((status :> Httpun.Status.t), json)
@@ -142,4 +140,3 @@ let add_routes router =
            match answer with
            | Ok text -> respond_markdown text reqd
            | Error (status, json) -> respond_json_value_with_cors ~status request reqd json)
-         request reqd)

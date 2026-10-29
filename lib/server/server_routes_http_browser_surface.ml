@@ -76,23 +76,23 @@ let add_routes router =
     read_view_body ~config:(Mcp_server.workspace_config state)
       ~principal:(Lane_addon_call_context.Host_actor actor) operation request reqd in
   router
-  |> Http.Router.post "/api/v1/dashboard/browser-lane/command"
-      (with_token_permission_auth ~permission:Masc_domain.CanAdmin (fun state agent_name request reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/browser-lane/command"
+      (fun state agent_name request reqd ->
          let config=Mcp_server.workspace_config state in
          read_body request reqd (fun arguments -> Ok (command ~config
-           ~principal:(Lane_addon_call_context.Host_actor agent_name) arguments))))
-  |> Http.Router.get "/api/v1/dashboard/browser-lane/clients"
-      (with_permission_auth ~permission:Masc_domain.CanReadState (fun state request reqd ->
-         reply_view request reqd (clients_listing ~config:(Mcp_server.workspace_config state))))
-  |> Http.Router.post "/api/v1/dashboard/browser-lane/read"
-      (with_permission_auth ~permission:Masc_domain.CanReadState (read Browser_addon_view.read))
-  |> Http.Router.post "/api/v1/dashboard/browser-lane/scene"
-      (with_permission_auth ~permission:Masc_domain.CanReadState (read Browser_addon_view.scene))
-  |> Http.Router.post "/api/v1/dashboard/browser-lane/screenshot"
-      (with_permission_auth ~permission:Masc_domain.CanReadState (read Browser_addon_view.capture))
-  |> Http.Router.post "/api/v1/dashboard/browser-lane/interact"
-      (with_token_permission_auth ~permission:Masc_domain.CanAdmin (write Browser_addon_view.interact))
-  |> Http.Router.post "/api/v1/dashboard/browser-lane/session"
-      (with_token_permission_auth ~permission:Masc_domain.CanAdmin (write Browser_addon_view.session))
-  |> Http.Router.post "/api/v1/dashboard/browser-lane/goto"
-      (with_token_permission_auth ~permission:Masc_domain.CanAdmin (write Browser_addon_view.goto))
+           ~principal:(Lane_addon_call_context.Host_actor agent_name) arguments)))
+  |> Server_route.get (Server_route.Permission Masc_domain.CanReadState) "/api/v1/dashboard/browser-lane/clients"
+      (fun state request reqd ->
+         reply_view request reqd (clients_listing ~config:(Mcp_server.workspace_config state)))
+  |> Server_route.post (Server_route.Permission Masc_domain.CanReadState) "/api/v1/dashboard/browser-lane/read"
+      (read Browser_addon_view.read)
+  |> Server_route.post (Server_route.Permission Masc_domain.CanReadState) "/api/v1/dashboard/browser-lane/scene"
+      (read Browser_addon_view.scene)
+  |> Server_route.post (Server_route.Permission Masc_domain.CanReadState) "/api/v1/dashboard/browser-lane/screenshot"
+      (read Browser_addon_view.capture)
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/browser-lane/interact"
+      (write Browser_addon_view.interact)
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/browser-lane/session"
+      (write Browser_addon_view.session)
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/browser-lane/goto"
+      (write Browser_addon_view.goto)

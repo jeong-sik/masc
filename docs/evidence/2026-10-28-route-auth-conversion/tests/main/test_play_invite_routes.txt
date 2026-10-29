@@ -1,0 +1,10 @@
+Testing `play-invite-routes'.
+This run has ID `HO2ZAHYH'.
+
+  [OK]          routes          0   persisted malformed invite returns 503.
+  [OK]          routes          1   list without a machine worker reports why.
+  [OK]          routes          2   issue, list and revoke through the router.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/play-invite-routes'.
+Test Successful in 0.801s. 3 tests run.
+exit=0

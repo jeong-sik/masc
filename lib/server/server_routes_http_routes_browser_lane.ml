@@ -151,7 +151,7 @@ let add_routes ?config router =
     | Outcome_unknown detail -> respond_json_value_with_cors ~status:`Bad_gateway request reqd (error_json detail) in
   router
   |> Server_routes_http_browser_surface.add_routes
-  |> Http.Router.post "/browser-lane/poll" (fun request reqd ->
+  |> Server_route.post (Server_route.Self_authenticated Route_access.Browser_lane) "/browser-lane/poll" (fun request reqd ->
        with_lane request reqd (fun config ->
          match client_of_request request with
          | Error message ->
@@ -166,7 +166,7 @@ let add_routes ?config router =
              respond_json_value_with_cors request reqd (`Assoc [ ("ok", `Bool true); ("empty", `Bool true) ])
            | Ok (Some issued) ->
              respond_json_value_with_cors request reqd (poll_answer_json issued))))
-  |> Http.Router.post "/browser-lane/result" (fun request reqd ->
+  |> Server_route.post (Server_route.Self_authenticated Route_access.Browser_lane) "/browser-lane/result" (fun request reqd ->
        with_lane request reqd (fun config ->
          Http.Request.read_body_async reqd (fun body ->
              let respond ~status fields =
@@ -189,10 +189,10 @@ let add_routes ?config router =
                  | _ ->
                    respond_json_value_with_cors ~status:`Bad_request request reqd
                      (error_json "id is required"))))))
-  |> Http.Router.post "/browser-lane/ping" (fun request reqd ->
+  |> Server_route.post (Server_route.Self_authenticated Route_access.Browser_lane) "/browser-lane/ping" (fun request reqd ->
        with_lane request reqd (fun _config ->
          respond_json_value_with_cors request reqd (`Assoc ["ok", `Bool true])))
-  |> Http.Router.post "/browser-lane/disconnect" (fun request reqd ->
+  |> Server_route.post (Server_route.Self_authenticated Route_access.Browser_lane) "/browser-lane/disconnect" (fun request reqd ->
        with_lane request reqd (fun config -> match client_of_request request with
        | Error message -> respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
        | Ok info ->

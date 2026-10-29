@@ -1,0 +1,17 @@
+[2026-10-29 00:17:53] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `Server board context inference resolution'.
+This run has ID `F7PEW201'.
+
+  [OK]          parse_request              0   parse request payloads.
+  [OK]          target_resolution          0   explicit registered target.
+  [OK]          target_resolution          1   explicit unregistered target.
+  [OK]          target_resolution          2   implicit registered author.
+  [OK]          target_resolution          3   implicit unregistered author.
+  [OK]          runtime_params             0   request admission is typed and...
+  [OK]          runtime_params             1   cadence decrease wakes only li...
+  [OK]          runtime_params             2   cadence mutation and wake are ...
+  [OK]          runtime_params             3   Keeper metric producer tracks ...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/Server board context inference resolution'.
+Test Successful in 1.393s. 9 tests run.
+exit=0

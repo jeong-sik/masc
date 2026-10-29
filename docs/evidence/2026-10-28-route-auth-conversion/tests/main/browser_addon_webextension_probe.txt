@@ -1,0 +1,4 @@
+Fatal error: exception Invalid_argument("missing --manifest")
+Raised at Stdlib.invalid_arg in file "stdlib.ml", line 30, characters 20-45
+Called from Dune__exe__Browser_addon_webextension_probe in file "test/browser_addon_webextension_probe.ml", line 51, characters 29-52
+exit=2

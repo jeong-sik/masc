@@ -27,17 +27,11 @@ let transitions_response () =
 
 let add_routes router =
   router
-  |> Http.Router.prefix_get "/api/v1/autonomous/phases"
-       (fun request reqd ->
-         with_public_read
-           (fun _state _req reqd ->
+  |> Server_route.prefix_get Server_route.Public_read "/api/v1/autonomous/phases"
+       (fun _state request reqd ->
              let json = phases_response () in
              respond_public_read_json_value ~status:`OK request reqd json)
-           request reqd)
-  |> Http.Router.prefix_get "/api/v1/autonomous/transitions"
-       (fun request reqd ->
-         with_public_read
-           (fun _state _req reqd ->
+  |> Server_route.prefix_get Server_route.Public_read "/api/v1/autonomous/transitions"
+       (fun _state request reqd ->
              let json = transitions_response () in
              respond_public_read_json_value ~status:`OK request reqd json)
-           request reqd)

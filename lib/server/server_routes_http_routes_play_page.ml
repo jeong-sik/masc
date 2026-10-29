@@ -1557,25 +1557,16 @@ let session_response ~config ~name ~token body =
 
 let add_routes router =
   router
-  |> Http.Router.get play_page_path serve_page
-  |> Http.Router.get seat_path (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanPlayMachine
-         (fun state name request reqd ->
+  |> Server_route.get Server_route.Always_public play_page_path serve_page
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanPlayMachine) seat_path (fun state name request reqd ->
            let status, json = seat_response ~config:(Mcp_server.workspace_config state) ~name in
            respond_json_value_with_cors ~status request reqd json)
-         request reqd)
-  |> Http.Router.get participants_path (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanPlayMachine
-         (fun state _name request reqd ->
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanPlayMachine) participants_path (fun state _name request reqd ->
            let status, json = participants_response ~config:(Mcp_server.workspace_config state) in
            respond_json_value_with_cors ~status request reqd json)
-         request reqd)
-  |> Http.Router.post session_path (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanPlayMachine
-         (fun state name request reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanPlayMachine) session_path (fun state name request reqd ->
            Http.Request.read_body_async reqd (fun body ->
              let status, json = match auth_token_from_request request with
                | Some token -> session_response ~config:(Mcp_server.workspace_config state) ~name ~token body
                | None -> `Unauthorized, Server_refusal.json ~code:"missing_token" "a bearer is required" in
              respond_json_value_with_cors ~status request reqd json))
-         request reqd)

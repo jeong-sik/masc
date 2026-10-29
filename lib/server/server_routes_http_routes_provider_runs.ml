@@ -1,6 +1,5 @@
 
 open Server_utils
-open Server_auth
 
 module Http = Http_server_eio
 
@@ -229,13 +228,11 @@ let dashboard_feed_limit req =
 
 let add_routes ~sw router =
   router
-  |> Http.Router.get "/api/v1/providers" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/providers" (fun _state req reqd ->
          let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/models/metrics" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       )
+  |> Server_route.get Server_route.Public_read "/api/v1/models/metrics" (fun state req reqd ->
          let window = int_query_param req "window" ~default:30 in
          let bucket_min = int_query_param req "bucket_min" ~default:0 in
          let base_path = (Mcp_server.workspace_config state).base_path in
@@ -260,9 +257,8 @@ let add_routes ~sw router =
                |> Result.map_error Model_inference_metrics.read_error_to_string)
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/runtime/metrics" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin (fun state _agent req reqd ->
+       )
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/runtime/metrics" (fun state _agent req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in
          let window_minutes = 1440 in
          let history = cached_dashboard_json ~sw ~sync_first:false
@@ -275,9 +271,7 @@ let add_routes ~sw router =
          let json = `Assoc [ "history", history;
            "specifications", `List (List.map runtime_specification_json runtimes) ] in
          Http.Response.json_value ~compress:true ~request:req json reqd)
-         request reqd)
-  |> Http.Router.get "/api/v1/dashboard/keeper-costs" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/keeper-costs" (fun state req reqd ->
          match
            Dashboard_http_keeper_feeds.keeper_costs_window_of_query
              (query_param req "window")
@@ -323,9 +317,8 @@ let add_routes ~sw router =
                  ~keepers ~window_minutes:window ~now_ts:(Unix.gettimeofday ()))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/provider-usage-history" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       )
+  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/provider-usage-history" (fun state req reqd ->
          (* The window is parsed here, once; [read] takes the variant and has
             no count of its own to check. *)
          let window =
@@ -371,9 +364,8 @@ let add_routes ~sw router =
                       ; "error", `String "days must be 1, 7, or 14" ]
          in
          Http.Response.json_value ~status ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/cost-latency" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       )
+  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/cost-latency" (fun state req reqd ->
          let window = int_query_param req "window" ~default:1440 in
          let base_path = (Mcp_server.workspace_config state).base_path in
          let json =
@@ -387,9 +379,8 @@ let add_routes ~sw router =
                |> Result.map_error Model_inference_metrics.read_error_to_string)
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/keeper-decisions" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       )
+  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/keeper-decisions" (fun state req reqd ->
          let limit = dashboard_feed_limit req in
          let config = (Mcp_server.workspace_config state) in
          let key = cache_key [ config.base_path; string_of_int limit ] in
@@ -418,9 +409,8 @@ let add_routes ~sw router =
                  ~limit ())
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/keeper-decisions-log" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       )
+  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/keeper-decisions-log" (fun state req reqd ->
          let limit = dashboard_feed_limit req in
          let config = (Mcp_server.workspace_config state) in
          let key = cache_key [ config.base_path; string_of_int limit ] in
@@ -449,9 +439,8 @@ let add_routes ~sw router =
                  ~keepers ~limit ())
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/keeper-practice" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       )
+  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/keeper-practice" (fun state req reqd ->
          let limit = dashboard_feed_limit req in
          let config = (Mcp_server.workspace_config state) in
          let key = cache_key [ config.base_path; string_of_int limit ] in
@@ -480,4 +469,4 @@ let add_routes ~sw router =
                  ~limit ())
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
+       )

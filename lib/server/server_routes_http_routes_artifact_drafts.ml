@@ -25,17 +25,16 @@ let respond ?(status = `OK) request reqd json =
   Http.Response.json_value ~status
     ~extra_headers:(["cache-control", "private, no-store"] @ cors_headers (get_origin request)) json reqd
 let refuse request reqd error = let json, status = error_response error in respond ~status request reqd json
-let authorized handler = with_token_permission_auth ~permission:Masc_domain.CanAdmin handler
 let add_routes router = router
-  |> Http.Router.prefix_get "/api/v1/artifact-drafts/" (authorized (fun state _actor request reqd ->
+  |> Server_route.prefix_get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/artifact-drafts/" (fun state _actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     match extract_path_param ~prefix:"/api/v1/artifact-drafts/" (Http.Request.path request) with
     | None -> refuse request reqd (Store.Invalid "artifact id required")
     | Some artifact_id ->
       match Store.read ~base_path ~artifact_id () with
       | Error error -> refuse request reqd error
-      | Ok view -> respond request reqd (Store.view_to_json view)))
-  |> Http.Router.post "/api/v1/artifact-drafts" (authorized (fun state actor request reqd ->
+      | Ok view -> respond request reqd (Store.view_to_json view))
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/artifact-drafts" (fun state actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     Http.Request.read_body_async reqd (fun body ->
       let parsed = match Yojson.Safe.from_string body with
@@ -46,4 +45,4 @@ let add_routes router = router
       | Ok command ->
         match Store.execute ~base_path ~actor command with
         | Error error -> refuse request reqd error
-        | Ok view -> respond request reqd (Store.view_to_json view))))
+        | Ok view -> respond request reqd (Store.view_to_json view)))

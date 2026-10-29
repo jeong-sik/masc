@@ -1,0 +1,8 @@
+Testing `play-screen'.
+This run has ID `EAK6BPOL'.
+
+  [OK]          screen          0   an invite reads the frame as a PNG.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/play-screen'.
+Test Successful in 0.324s. 1 test run.
+exit=0

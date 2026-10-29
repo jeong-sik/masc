@@ -88,21 +88,20 @@ let decode_share_request ~config ~body =
        | _ -> Error (error_response (Store.Invalid "id must be a valid artifact id and shared must be a boolean")))
   | _ -> Error (error_response (Store.Invalid "expected a JSON object"))
 
-let authorized handler request reqd =
-  with_token_permission_auth ~permission:Masc_domain.CanAdmin handler request reqd
-
-let authorized_capability_read handler request reqd =
-  with_public_read (fun state request reqd ->
-    let base_path = (Mcp_server.workspace_config state).base_path in
-    match authorize_optional_token_bound_permission_request
-            ~base_path ~permission:Masc_domain.CanAdmin request with
-    | Error err -> respond_auth_error request reqd err
-    | Ok actor ->
-        match check_agent_rate_limit
-                ~quota:(read_request_quota request.Httpun.Request.meth)
-                request reqd with
-        | Ok () -> handler state actor request reqd
-        | Error () -> ()) request reqd
+(* A shared artifact reads without a token and a private one only with the admin
+   token. The route is registered [Public_read]; this checks the token when the
+   request carries one. *)
+let capability_read handler state request reqd =
+  let base_path = (Mcp_server.workspace_config state).base_path in
+  match authorize_optional_token_bound_permission_request
+          ~base_path ~permission:Masc_domain.CanAdmin request with
+  | Error err -> respond_auth_error request reqd err
+  | Ok actor ->
+      match check_agent_rate_limit
+              ~quota:(read_request_quota request.Httpun.Request.meth)
+              request reqd with
+      | Ok () -> handler state actor request reqd
+      | Error () -> ()
 
 let revision_param request =
   match query_param request "revision" with
@@ -114,7 +113,7 @@ let revision_param request =
 
 let add_routes router =
   router
-  |> Http.Router.get "/api/v1/published-artifacts" (authorized (fun state _actor request reqd ->
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/published-artifacts" (fun state _actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     match Eio_unix.run_in_systhread (fun () -> Store.list ~base_path) with
     | Error error -> refuse request reqd error
@@ -122,8 +121,8 @@ let add_routes router =
       respond request reqd (`Assoc
         ["artifacts", `List listing.artifacts;
          "diagnostics", `List (List.map (fun (id, message) ->
-           `Assoc ["id", `String id; "error", `String message]) listing.diagnostics)])))
-  |> Http.Router.prefix_get "/api/v1/published-artifacts/" (authorized_capability_read (fun state actor request reqd ->
+           `Assoc ["id", `String id; "error", `String message]) listing.diagnostics)]))
+  |> Server_route.prefix_get Server_route.Public_read "/api/v1/published-artifacts/" (capability_read (fun state actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     match extract_path_param ~prefix:"/api/v1/published-artifacts/" (Http.Request.path request),
           revision_param request with
@@ -152,7 +151,7 @@ let add_routes router =
            "content", `String content;
            "revisions", `List (List.map Published_artifact.revision_to_json artifact.revisions);
            "shared", `Bool shared])))
-  |> Http.Router.post "/api/v1/published-artifacts" (authorized (fun state actor request reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/published-artifacts" (fun state actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     Http.Request.read_body_async reqd (fun body ->
       let parsed = match Yojson.Safe.from_string body with
@@ -165,16 +164,16 @@ let add_routes router =
         | Error error -> refuse request reqd error
         | Ok (artifact, revision) ->
           respond ~status:`Created request reqd
-            (Published_artifact.publication_to_json ~id:artifact.id revision))))
-  |> Http.Router.get "/api/v1/published-artifact-checks" (authorized (fun state _actor request reqd ->
+            (Published_artifact.publication_to_json ~id:artifact.id revision)))
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/published-artifact-checks" (fun state _actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     match Eio_unix.run_in_systhread (fun () -> Published_artifact_check_store.list ~base_path) with
     | Error error -> refuse_check request reqd error
     | Ok listing -> respond request reqd (`Assoc
       ["checks", `List (List.map Published_artifact_check.to_json listing.checks);
        "diagnostics", `List (List.map (fun (file, message) ->
-         `Assoc ["file", `String file; "error", `String message]) listing.diagnostics)])))
-  |> Http.Router.post "/api/v1/published-artifact-checks" (authorized (fun state actor request reqd ->
+         `Assoc ["file", `String file; "error", `String message]) listing.diagnostics)]))
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/published-artifact-checks" (fun state actor request reqd ->
     let config = Mcp_server.workspace_config state in
     let base_path = config.base_path in
     Http.Request.read_body_async reqd (fun body ->
@@ -185,8 +184,8 @@ let add_routes router =
           Published_artifact_check_store.set ~base_path ~actor change) with
         | Error error -> refuse_check request reqd error
         | Ok check -> respond request reqd
-          (`Assoc ["check", Published_artifact_check.to_json check]))))
-  |> Http.Router.post "/api/v1/published-artifact-shares" (authorized (fun state _actor request reqd ->
+          (`Assoc ["check", Published_artifact_check.to_json check])))
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/published-artifact-shares" (fun state _actor request reqd ->
     let config = Mcp_server.workspace_config state in
     let base_path = config.base_path in
     Http.Request.read_body_async reqd (fun body ->
@@ -195,4 +194,4 @@ let add_routes router =
       | Ok (id, shared) ->
         match Eio_unix.run_in_systhread (fun () -> Store.set_shared ~base_path ~id ~shared) with
         | Error error -> refuse request reqd error
-        | Ok shared -> respond request reqd (`Assoc ["id", `String id; "shared", `Bool shared]))))
+        | Ok shared -> respond request reqd (`Assoc ["id", `String id; "shared", `Bool shared])))

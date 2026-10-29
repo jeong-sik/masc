@@ -15,6 +15,7 @@ module Wrappers = struct
 
   let with_tool_auth = Server_auth.with_tool_auth
   let with_tool_actor_auth = Server_auth.with_tool_actor_auth
+  let with_canonical_loopback_host = Server_canonical_host.with_canonical_loopback_host
 end
 
 include Http_server_eio.Router.Make_typed (Wrappers)

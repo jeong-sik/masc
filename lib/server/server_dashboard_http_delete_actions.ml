@@ -9,7 +9,6 @@
 
 module Http = Http_server_eio
 
-open Server_auth
 
 type agent_purge_cleanup_result =
   { agent_name : string
@@ -1176,9 +1175,7 @@ let keeper_purge_status_to_json (operation : Keeper_shutdown_types.t) =
 
 let add_delete_action_routes router =
   router
-  |> Http.Router.post "/api/v1/dashboard/keepers/configuration-deletions/retry" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _actor req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/keepers/configuration-deletions/retry" (fun state _actor req reqd ->
            Http.Request.read_body_async reqd (fun body ->
              try
                let json = Yojson.Safe.from_string body in
@@ -1195,10 +1192,7 @@ let add_delete_action_routes router =
                         (Keeper_configuration_removal.error_to_string error))
                | _ -> respond_error ~request:req reqd "keeper_name and operation_id are required"
              with Yojson.Json_error _ -> respond_error ~request:req reqd "invalid deletion retry JSON"))
-         request reqd)
-  |> Http.Router.post "/api/v1/dashboard/keepers/deletions/retry" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _agent_name req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/keepers/deletions/retry" (fun state _agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body ->
              try
                let json = Yojson.Safe.from_string body in
@@ -1218,10 +1212,7 @@ let add_delete_action_routes router =
                         (Keeper_shutdown_runtime.submit_error_to_string error))
                | _ -> respond_error ~request:req reqd "keeper_name and operation_id are required"
              with Yojson.Json_error _ -> respond_error ~request:req reqd "invalid deletion retry JSON"))
-         request reqd)
-  |> Http.Router.get "/api/v1/dashboard/keepers/deletions" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanReadState
-         (fun state _agent_name req reqd ->
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/dashboard/keepers/deletions" (fun state _agent_name req reqd ->
            let config = Mcp_server.workspace_config state in
            match Keeper_shutdown_store.scan_inventory ~config with
            | Error error -> respond_error ~status:`Internal_server_error ~request:req reqd
@@ -1249,10 +1240,7 @@ let add_delete_action_routes router =
                  "errors", `List (List.rev errors);
                  "configuration_removals", `List configuration_removals;
                  "configuration_errors", `List (List.map (fun error -> `String error) configuration_errors)]) reqd)
-         request reqd)
-  |> Http.Router.get "/api/v1/dashboard/keepers/purge-status" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanReadState
-         (fun state _agent_name req reqd ->
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/dashboard/keepers/purge-status" (fun state _agent_name req reqd ->
            match Server_utils.query_param req "keeper_name",
                  Server_utils.query_param req "operation_id" with
            | Some keeper_name, Some raw_id ->
@@ -1284,10 +1272,7 @@ let add_delete_action_routes router =
                       "operation is not a Dashboard Keeper purge")
            | _ -> respond_error ~request:req reqd
                     "keeper_name and operation_id are required")
-         request reqd)
-  |> Http.Router.post "/api/v1/dashboard/board/delete" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state _agent_name req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/board/delete" (fun _state _agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
@@ -1324,14 +1309,12 @@ let add_delete_action_routes router =
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "post_id")
          )
-       ) request reqd)
+       )
 
   (* Pin is an operator-curated board mutation: same CanAdmin gate and auth
      helper as board/delete, so it lives alongside it rather than as an
      agent-facing MCP tool (which would let any keeper self-pin). *)
-  |> Http.Router.post "/api/v1/dashboard/board/pin" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state _agent_name req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/board/pin" (fun _state _agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
@@ -1362,7 +1345,7 @@ let add_delete_action_routes router =
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "post_id")
          )
-       ) request reqd)
+       )
 
   (* Close is the operator tier of the three-tier close permission model
      (task-1758/#39356): author self-service and configured-moderator are
@@ -1373,17 +1356,13 @@ let add_delete_action_routes router =
      [with_token_permission_auth] already resolves for every other route in
      this file, not a client-supplied field (a client could otherwise claim
      to be anyone). *)
-  |> Http.Router.post "/api/v1/dashboard/board/close" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state agent_name req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/board/close" (fun _state agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            handle_board_close_post ~agent_name req reqd body_str
          )
-       ) request reqd)
+       )
 
-  |> Http.Router.post "/api/v1/dashboard/board/reopen" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state _agent_name req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/board/reopen" (fun _state _agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
@@ -1398,11 +1377,9 @@ let add_delete_action_routes router =
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "post_id")
          )
-       ) request reqd)
+       )
 
-  |> Http.Router.get "/api/v1/dashboard/tasks/deletions" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanReadState
-         (fun state _agent_name req reqd ->
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/dashboard/tasks/deletions" (fun state _agent_name req reqd ->
            match Workspace.deletion_receipts_r (Mcp_server.workspace_config state) with
            | Error message -> respond_error ~status:`Internal_server_error ~request:req reqd message
            | Ok observation ->
@@ -1413,11 +1390,8 @@ let add_delete_action_routes router =
                (`Assoc ["receipts", `List (List.map Masc_domain.task_deletion_receipt_to_yojson observation.receipts);
                  "copies", `Assoc ["state", `String copies_state;
                    "errors", `List (List.map (fun error -> `String error) copy_errors)]]) reqd)
-         request reqd)
 
-  |> Http.Router.post "/api/v1/dashboard/tasks/deletions/retry" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _agent_name req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/tasks/deletions/retry" (fun state _agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              try
                let json = Yojson.Safe.from_string body_str in
@@ -1441,11 +1415,8 @@ let add_delete_action_routes router =
                      (`Assoc ["deletion_id", `String deletion_id; "ok", `Bool (errors=[]);
                        "errors", `List (List.map (fun error -> `String error) errors)]) reqd
              with Yojson.Json_error _ -> respond_error ~request:req reqd (invalid_request "deletion_id")))
-         request reqd)
 
-  |> Http.Router.post "/api/v1/dashboard/tasks/delete" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _agent_name req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/tasks/delete" (fun state _agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
@@ -1471,15 +1442,13 @@ let add_delete_action_routes router =
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "task_id")
          )
-       ) request reqd)
+       )
 
   (* RFC-0267 Phase 2: assign an existing goalless task to a goal. Operator
      surface (CanAdmin); shares the validated backend
      [Task.Goal_assignment.set_task_goal] with the masc_task_set_goal MCP tool,
      so the precondition checks live in exactly one place. *)
-  |> Http.Router.post "/api/v1/dashboard/tasks/assign-goal" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _agent_name req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/tasks/assign-goal" (fun state _agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
@@ -1525,11 +1494,9 @@ let add_delete_action_routes router =
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "task_id")
          )
-       ) request reqd)
+       )
 
-  |> Http.Router.post "/api/v1/dashboard/goals/delete" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _agent_name req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/goals/delete" (fun state _agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
@@ -1579,11 +1546,9 @@ let add_delete_action_routes router =
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "goal_id")
          )
-       ) request reqd)
+       )
 
-  |> Http.Router.post "/api/v1/dashboard/agents/purge" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state actor req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/agents/purge" (fun state actor req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
@@ -1681,4 +1646,4 @@ let add_delete_action_routes router =
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "agent_name")
          )
-       ) request reqd)
+       )

@@ -1,0 +1,18 @@
+[2026-10-29 00:18:40] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `keeper_tool_approval_mode_persist'.
+This run has ID `EDXSNZJQ'.
+
+  [OK]          persist          0   yolo survives a restart.
+  [OK]          persist          1   auto removes the row.
+  [OK]          persist          2   a corrupt store is an error, not a quiet...
+  [OK]          persist          3   set on a corrupt store holds and recovers.
+  [OK]          persist          4   concurrent sets do not lose updates.
+  [OK]          persist          5   wrong schema tag is rejected.
+  [OK]          persist          6   invalid mode word is rejected.
+  [OK]          persist          7   set applies when audit log fails.
+  [OK]          route            0   GET surfaces restore_error.
+  [OK]          route            1   POST surfaces audit_error on 200.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/keeper_tool_approval_mode_persist'.
+Test Successful in 0.109s. 10 tests run.
+exit=0

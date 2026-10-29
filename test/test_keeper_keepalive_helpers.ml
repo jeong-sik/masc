@@ -458,7 +458,7 @@ let audience_signal ?(kind = Board_dispatch.Board_post_created) ~author content 
 (* The audience the write boundary records for a signal's text. A post reads an
    address from its title and body; a comment, which records none, from its
    own content. *)
-let audience_of_text ~post_kind ~visibility (signal : Board_dispatch.board_signal) =
+let write_boundary_audience ~post_kind ~visibility (signal : Board_dispatch.board_signal) =
   match signal.kind with
   | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ ->
     (match
@@ -477,7 +477,7 @@ let audience_of_text ~post_kind ~visibility (signal : Board_dispatch.board_signa
 ;;
 
 let classified ?(visibility = Board.Internal) signal =
-  match audience_of_text ~post_kind:Board.Human_post ~visibility signal with
+  match write_boundary_audience ~post_kind:Board.Human_post ~visibility signal with
   | Ok audience -> audience
   | Error error -> fail (KBA.classification_error_to_string error)
 ;;
@@ -610,29 +610,29 @@ let test_closed_board_audience_routes_only_its_authority () =
      | _ -> false);
   let unsupported = audience_signal ~author:"external-author" "@@delta inspect" in
   check bool "unsupported broadcast fails closed" true
-    (match audience_of_text ~post_kind:Board.Human_post ~visibility:Board.Internal unsupported with
+    (match write_boundary_audience ~post_kind:Board.Human_post ~visibility:Board.Internal unsupported with
      | Error (KBA.Invalid_board_audience (Board.Validation_error _)) -> true
      | Error _ | Ok _ -> false);
   check bool "Direct without targets fails closed" true
-    (match audience_of_text ~post_kind:Board.Human_post ~visibility:Board.Direct discoverable with
+    (match write_boundary_audience ~post_kind:Board.Human_post ~visibility:Board.Direct discoverable with
      | Error (KBA.Invalid_board_audience (Board.Validation_error _)) -> true
      | Error _ | Ok _ -> false);
   let mixed = audience_signal ~author:"external-author" "@alpha @@delta inspect" in
   check bool "mixed direct target and unsupported selector fails closed" true
-    (match audience_of_text ~post_kind:Board.Human_post ~visibility:Board.Internal mixed with
+    (match write_boundary_audience ~post_kind:Board.Human_post ~visibility:Board.Internal mixed with
      | Error (KBA.Invalid_board_audience (Board.Validation_error _)) -> true
      | Error _ | Ok _ -> false);
   let direct_broadcast = audience_signal ~author:"external-author" "@@all inspect" in
   check bool "@@all on a Direct post fails closed" true
-    (match audience_of_text ~post_kind:Board.Human_post ~visibility:Board.Direct direct_broadcast with
+    (match write_boundary_audience ~post_kind:Board.Human_post ~visibility:Board.Direct direct_broadcast with
      | Error (KBA.Invalid_board_audience (Board.Validation_error _)) -> true
      | Error _ | Ok _ -> false);
   check bool "@@all on a non-Direct post still broadcasts" true
-    (match audience_of_text ~post_kind:Board.Human_post ~visibility:Board.Internal direct_broadcast with
+    (match write_boundary_audience ~post_kind:Board.Human_post ~visibility:Board.Internal direct_broadcast with
      | Ok KBA.Broadcast -> true
      | Error _ | Ok _ -> false);
   check bool "a system post reads no address from its text" true
-    (match audience_of_text ~post_kind:Board.System_post ~visibility:Board.Internal mixed with
+    (match write_boundary_audience ~post_kind:Board.System_post ~visibility:Board.Internal mixed with
      | Ok KBA.Discoverable -> true
      | Error _ | Ok _ -> false)
 
@@ -647,7 +647,7 @@ let test_system_post_text_does_not_wake_the_named_lane () =
     audience_signal ~author:"platform" "Rejected task t (vrf:v): @alpha please redo"
   in
   let audience_of post_kind =
-    match audience_of_text ~post_kind ~visibility:Board.Unlisted signal with
+    match write_boundary_audience ~post_kind ~visibility:Board.Unlisted signal with
     | Ok audience -> audience
     | Error error -> fail (KBA.classification_error_to_string error)
   in

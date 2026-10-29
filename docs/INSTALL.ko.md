@@ -580,7 +580,7 @@ Linux nerdctl/Kata는 해당 runtime의 영속 named volume을 생성하고 insp
 공간은 호스트 filesystem을 따릅니다. 이 차이는 부팅 로그에 표시합니다.
 Apple에서 측정한 host descriptor 특성이 Linux에서도 같다고 보장하지 않습니다.
 `network_mode=none` 또는 `inherit`를 사용하며 Linux의 `policy`는 지원하지 않습니다.
-호스트의 `/etc/resolv.conf`에 루프백, 링크 로컬, 미지정 주소만 있는 상태에서 `network_mode=inherit`를 쓰면 게스트가 DNS를 해석할 수 없으므로, `runtime.toml`의 `[sandbox] microvm_dns`나 `MASC_KEEPER_MICROVM_DNS`에 도달 가능한 업스트림 DNS 서버를 지정하세요.
+호스트의 `/etc/resolv.conf`에 루프백, 링크 로컬, 미지정 주소만 있는 상태에서 `network_mode=inherit`를 쓰면 게스트가 DNS를 해석할 수 없으므로, `runtime.toml`의 `[sandbox] microvm_dns`에 도달 가능한 업스트림 DNS 서버를 지정하세요.
 `scripts/smoke-nerdctl-kata-volume.sh`는 Kata의 볼륨·격리를 검사합니다.
 설치된 Keeper까지 검증하려면 `Kata volume smoke` workflow의 `release_run`에
 Linux x64 작업이 성공한 Release 실행 번호를 지정합니다. 이 경로는 해당 바이너리와

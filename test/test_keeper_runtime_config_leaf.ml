@@ -44,17 +44,23 @@ let test_memory_count_settings () =
 
 let test_resolve_overrides_keeps_env_precedence () =
   let env_lookup = function
-    | "MASC_KEEPER_BATCH_LIMIT" -> Some "from-env"
+    | "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" | "MASC_KEEPER_BATCH_LIMIT" -> Some "from-env"
     | _ -> None
   in
   let count, overrides =
     K.resolve_overrides
       ~env_lookup
-      [ "turn.batch_limit", T.Toml_int 9; "turn.temperature", T.Toml_float 0.25 ]
+      [ "heartbeat.interval_sec", T.Toml_int 9
+      ; "turn.batch_limit", T.Toml_int 9
+      ; "turn.temperature", T.Toml_float 0.25
+      ]
   in
-  check int "count" 1 count;
-  check (option string) "env preempts toml"
+  check int "count" 2 count;
+  check (option string) "env preempts a row that still reads the environment"
     None
+    (List.assoc_opt "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" overrides);
+  check (option string) "env does not preempt a row the file alone feeds"
+    (Some "9")
     (List.assoc_opt "MASC_KEEPER_BATCH_LIMIT" overrides);
   check (option string) "unset key applies"
     (Some "0.25")

@@ -21,9 +21,9 @@ let () = Printexc.register_printer (function
   | _ -> None)
 
 let raw_value_opt name =
-  match Unix.getenv name with
-  | v -> Some v
-  | exception Not_found ->
+  if Config_boot_overrides.is_file_owned name
+  then Config_boot_overrides.get_opt name
+  else
     match Sys.getenv_opt name with
     | Some _ as value -> value
     | None -> Config_boot_overrides.get_opt name

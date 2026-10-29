@@ -266,12 +266,12 @@ let test_runtime_toml_sandbox_table_seeds_the_variables () =
     (Keeper_runtime_config.validation_report_is_valid (Keeper_runtime_config.validate_doc zero_cpus))
 ;;
 
-(* A variable the caller exported preempts every row it names, except a row the
-   file alone feeds. *)
+(* A variable the caller exported preempts a row that still reads the
+   environment, and no row the file alone feeds. *)
 let test_the_loader_applies_a_file_only_row_whatever_the_environment_holds () =
   let doc =
     parse_or_fail
-      "[sandbox]\nmicrovm_memory = \"2g\"\nmicrovm_cpus = 6\nmicrovm_dns = \"1.1.1.1\"\n"
+      "[sandbox]\nmicrovm_memory = \"2g\"\nmicrovm_cpus = 6\n[heartbeat]\ninterval_sec = 23\n"
   in
   let _count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:(fun _ -> Some "from the shell") doc
@@ -281,7 +281,7 @@ let test_the_loader_applies_a_file_only_row_whatever_the_environment_holds () =
   check (option string) "cpus is the file's" (Some "6")
     (List.assoc_opt "MASC_KEEPER_MICROVM_CPUS" overrides);
   check (option string) "a row the environment may preempt still defers" None
-    (List.assoc_opt "MASC_KEEPER_MICROVM_DNS" overrides)
+    (List.assoc_opt "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" overrides)
 ;;
 
 let test_the_operator_surface_does_not_blame_the_environment_for_a_file_only_row () =

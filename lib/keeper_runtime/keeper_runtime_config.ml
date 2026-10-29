@@ -9,18 +9,11 @@ let key_to_env = Keeper_runtime_setting_registry.toml_env_mappings
 let env_is_set env_lookup env_name =
   Option.is_some (env_lookup env_name)
 
-(* Store keys of the rows whose TOML key is their only input. A variable of the
-   same name in the process environment is not a caller override for them. *)
-let file_only_env_names =
-  List.filter_map
-    (fun (row : Keeper_runtime_setting_registry.setting) ->
-       if Keeper_runtime_setting_registry.reads_process_env row
-       then None
-       else Some row.env_name)
-    Keeper_runtime_setting_registry.toml_settings
-
+(* A variable of the same name in the process environment is not a caller
+   override for a row whose TOML key is its only input. *)
 let env_preempts env_lookup env_name =
-  (not (List.mem env_name file_only_env_names)) && env_is_set env_lookup env_name
+  (not (List.mem env_name Keeper_runtime_setting_registry.file_owned_env_names))
+  && env_is_set env_lookup env_name
 
 let resolved_config_root ~base_path =
   let inputs = Config_dir_resolver.inputs_from_env () in
@@ -636,6 +629,10 @@ let load_and_apply_document ~base_path =
            Ok count)
 
 let load_and_apply ~base_path : (int, load_failure) result =
+  (* First, so the validation below and every later read of these names leave
+     the process environment out. *)
+  Config_boot_overrides.declare_file_owned
+    Keeper_runtime_setting_registry.file_owned_env_names;
   let validation =
     try
       List.iter (fun setting ->

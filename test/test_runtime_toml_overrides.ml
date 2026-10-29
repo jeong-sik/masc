@@ -554,7 +554,7 @@ let test_resolved_stream_idle_timeout_uses_toml () =
     "toml"
     (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
 
-let test_resolved_runtime_prefers_env_over_toml () =
+let test_resolved_runtime_ignores_env_for_a_file_owned_setting () =
   with_clean_boot_overrides @@ fun () ->
   with_base_path @@ fun base_path ->
   write_toml base_path "[turn]\nstream_idle_timeout_sec = 50\n";
@@ -564,10 +564,10 @@ let test_resolved_runtime_prefers_env_over_toml () =
    | Ok _ -> ());
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
-  check (float 0.0001) "env stream idle timeout wins"
-    55.0 runtime.stream_idle_timeout_sec.value;
-  check string "env source"
-    "env"
+  check (float 0.0001) "the file's stream idle timeout is used, not the shell's"
+    50.0 runtime.stream_idle_timeout_sec.value;
+  check string "the source is the file"
+    "toml"
     (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
 
 (* #27416: the provider-call deadline knob must survive a restart that
@@ -612,7 +612,7 @@ let test_resolved_provider_call_deadline_uses_toml () =
     "toml"
     (Keeper_runtime_resolved.source_to_string runtime.provider_call_deadline_sec.source)
 
-let test_resolved_provider_call_deadline_prefers_env () =
+let test_resolved_provider_call_deadline_ignores_env () =
   with_clean_boot_overrides @@ fun () ->
   with_base_path @@ fun base_path ->
   write_toml base_path "[turn]\nprovider_call_deadline_sec = 900\n";
@@ -622,10 +622,10 @@ let test_resolved_provider_call_deadline_prefers_env () =
    | Ok _ -> ());
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
-  check (float 0.0001) "env provider call deadline wins"
-    1200.0 runtime.provider_call_deadline_sec.value;
-  check string "env source"
-    "env"
+  check (float 0.0001) "the file's provider call deadline is used, not the shell's"
+    900.0 runtime.provider_call_deadline_sec.value;
+  check string "the source is the file"
+    "toml"
     (Keeper_runtime_resolved.source_to_string runtime.provider_call_deadline_sec.source)
 
 let test_resolved_stream_idle_timeout_does_not_clamp () =
@@ -1097,20 +1097,36 @@ let test_strict_reader_validation_happens_at_boot () =
   with_env "MASC_PARSE_WARN" (Some "true") @@ fun () ->
   with_clean_boot_overrides @@ fun () ->
   with_base_path @@ fun base_path ->
+  let load_with_toml has_toml =
+    let path = toml_path base_path in
+    if has_toml then write_toml base_path "[metrics]\nmax_bytes = 17\n"
+    else if Sys.file_exists path then Sys.remove path;
+    Keeper_runtime_config.load_and_apply ~base_path
+  in
+  (* A setting that still reads the environment is validated before it can
+     fail a Keeper cycle. *)
   List.iter (fun key ->
     with_env key (Some "malformed") @@ fun () ->
     List.iter (fun has_toml ->
-      let path = toml_path base_path in
-      if has_toml then write_toml base_path "[metrics]\nmax_bytes = 17\n"
-      else if Sys.file_exists path then Sys.remove path;
-      match Keeper_runtime_config.load_and_apply ~base_path with
+      match load_with_toml has_toml with
       | Error {kind=Keeper_runtime_config.Validate;_} -> ()
       | Error error -> fail (Keeper_runtime_config.load_failure_to_string error)
       | Ok _ -> fail (key ^ " bypassed strict startup validation")) [false; true])
+    ["MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"];
+  (* A file-owned setting never reads the environment, so a malformed value
+     there is not an input to reject. *)
+  List.iter (fun key ->
+    with_env key (Some "malformed") @@ fun () ->
+    List.iter (fun has_toml ->
+      match load_with_toml has_toml with
+      | Ok _ -> ()
+      | Error error ->
+        fail (key ^ " was validated though the file alone feeds it: "
+              ^ Keeper_runtime_config.load_failure_to_string error)) [false; true])
     ["MASC_KEEPER_METRICS_MAX_BYTES"; "MASC_KEEPER_METRICS_MAX_ROTATED";
-     "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"; "MASC_KEEPER_SNAPSHOT_SEC";
-     "MASC_KEEPER_WORK_AS_HEARTBEAT"; "MASC_KEEPER_SLEEP_CHUNK_SEC";
-     "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"; "MASC_KEEPER_DEBUG"]
+     "MASC_KEEPER_SNAPSHOT_SEC"; "MASC_KEEPER_WORK_AS_HEARTBEAT";
+     "MASC_KEEPER_SLEEP_CHUNK_SEC"; "MASC_KEEPER_SUPERVISOR_SWEEP_SEC";
+     "MASC_KEEPER_DEBUG"]
 ;;
 
 let test_boot_settings_reach_consumers_and_projection () =
@@ -1192,22 +1208,25 @@ let test_boot_settings_reach_consumers_and_projection () =
   with_env "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" (Some "11") @@ fun () ->
   with_env "MASC_KEEPER_METRICS_MAX_BYTES" (Some "100") @@ fun () ->
   (match Keeper_runtime_config.load_and_apply ~base_path with
-   | Ok count -> check int "environment preempts two settings at boot" 6 count
+   | Ok count -> check int "the environment preempts one setting at boot" 7 count
    | Error error -> fail (Keeper_runtime_config.load_failure_to_string error));
   let env_rows = Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail toml) in
-  List.iter (fun (env, expected) ->
+  List.iter (fun (env, status, expected) ->
     let row = env_rows |> to_list |> List.find (fun row -> row |> member "env" |> to_string = env) in
-    check string (env ^ " is preempted") "preempted_by_env"
+    check string (env ^ " status") status
       (row |> member "application_status" |> to_string);
     check string (env ^ " effective value") expected
       (row |> member "effective_value" |> to_string))
-    ["MASC_KEEPER_HEARTBEAT_INTERVAL_SEC", "11"; "MASC_KEEPER_METRICS_MAX_BYTES", "100"];
+    [ "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC", "preempted_by_env", "11"
+    ; "MASC_KEEPER_METRICS_MAX_BYTES", "applied", "17" ];
   check int "heartbeat consumer preserves environment precedence" 11
     (Keeper_heartbeat_snapshot.keepalive_interval_sec ());
   write first;
   Keeper_types_support.append_jsonl_line path row;
-  check string "environment threshold prevents rotation during append"
-    (first ^ "{\"boot\":true}\n") (Fs_compat.load_file path)
+  check string "the file's threshold rotates though the environment says 100"
+    first (Fs_compat.load_file (path ^ ".1"));
+  check string "the appended row starts the fresh file"
+    "{\"boot\":true}\n" (Fs_compat.load_file path)
 ;;
 
 let test_zero_retention_toml_reaches_legacy_jsonl_rotation () =
@@ -1331,9 +1350,10 @@ let () =
             test_provider_call_deadline_invalid_toml_returns_error
         ; test_case "resolved provider call deadline uses toml" `Quick
             test_resolved_provider_call_deadline_uses_toml
-        ; test_case "resolved provider call deadline prefers env" `Quick
-            test_resolved_provider_call_deadline_prefers_env
-        ; test_case "resolved runtime prefers env over toml" `Quick test_resolved_runtime_prefers_env_over_toml
+        ; test_case "resolved provider call deadline ignores env" `Quick
+            test_resolved_provider_call_deadline_ignores_env
+        ; test_case "resolved runtime ignores env for a file-owned setting" `Quick
+            test_resolved_runtime_ignores_env_for_a_file_owned_setting
         ; test_case "resolved stream idle timeout does not clamp" `Quick test_resolved_stream_idle_timeout_does_not_clamp
         ; test_case "resolved stream idle timeout env below floor preserved" `Quick test_resolved_stream_idle_timeout_env_below_floor_preserved
         ; test_case "invalid stream idle env fails loud" `Quick test_resolved_stream_idle_timeout_invalid_env_fails_loud

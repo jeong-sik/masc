@@ -56,8 +56,8 @@ should be treated as restart-required.
 | Runtime root and config root | `MASC_BASE_PATH`, `MASC_CONFIG_DIR`, `HOME` | `Config_dir_resolver` caches the resolved root for the life of the process (`<base-path>/.masc/` owns all runtime state) |
 | Server bind and socket topology | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_GRPC_PORT`, `MASC_GRPC_ENABLED`, `MASC_WS_ENABLED` | listeners and advertised base URLs are fixed during server startup |
 | Backend/bootstrap wiring | `MASC_STARTUP_WATCHDOG_SEC`, `MASC_JSONL_RETENTION_DAYS` | boot-time watchdog setup and unified dated JSONL retention (default `30` days; `[maintenance] jsonl_retention_days` in `runtime.toml`) |
-| Sandbox DNS | `MASC_KEEPER_MICROVM_DNS` | guest DNS servers for microVM Keepers (`[sandbox] microvm_dns` in `runtime.toml`, comma-separated IPv4/IPv6 addresses) |
-| Startup-only TOML seeding | every `MASC_KEEPER_*` value sourced from `runtime.toml` | TOML is loaded into the process-local boot override store; explicit process env values take precedence |
+| Sandbox DNS | `MASC_KEEPER_MICROVM_DNS` | guest DNS servers for microVM Keepers (`[sandbox] microvm_dns` in `runtime.toml`, the only input; comma-separated IPv4/IPv6 addresses) |
+| Startup-only TOML seeding | every `MASC_KEEPER_*` value sourced from `runtime.toml` | TOML is loaded into the process-local boot override store. A registry row marked `Toml_only` reads only that store and never the process environment. `MASC_KEEPER_AUTONOMOUS_ENABLED`, `MASC_OTEL_ENABLED`, `MASC_SEARXNG_URL` and `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` are `Toml_and_env`: an explicit process env value takes precedence |
 
 Representative code paths:
 
@@ -108,8 +108,8 @@ Examples:
 
 The `[metrics]` keys `max_bytes` and `max_rotated` configure the auxiliary
 JSONL writer used for decision logs, response feedback and runtime manifests.
-Their environment names are `MASC_KEEPER_METRICS_MAX_BYTES` and
-`MASC_KEEPER_METRICS_MAX_ROTATED`. The typed
+The boot override store keys are `MASC_KEEPER_METRICS_MAX_BYTES` and
+`MASC_KEEPER_METRICS_MAX_ROTATED`; the process environment is not read for them. The typed
 [`runtime setting registry`](../lib/config/keeper_runtime_setting_registry.ml)
 owns their defaults, bounds and operator-facing descriptions.
 
@@ -162,11 +162,12 @@ restart and the next `Execute` call picks it up.
 ### 5. WebSearch provider selection (`boot_static` seed, request-time read)
 
 The WebSearch backend reads these values while handling each search request.
-Values can be authored either as process env vars or in
-`<resolved-config-root>/runtime.toml` under `[web_search]`. Runtime TOML values
-are loaded into the process-local boot override store at startup, so
-`runtime.toml` edits require a process restart. Changing the process env inside
-the running process is still picked up on the next WebSearch call.
+They are authored in `<resolved-config-root>/runtime.toml` under `[web_search]`.
+Runtime TOML values are loaded into the process-local boot override store at
+startup, so `runtime.toml` edits require a process restart. The process
+environment is not read for them, except `MASC_SEARXNG_URL`, which a process env
+var overrides. The variable names in the table below are the keys the boot load
+stores the values under. API keys are env-only.
 
 `masc web-search-setup` prints which provider has its credential and what to
 export for the rest, and writes the `[web_search]` keys below. It never writes an
@@ -174,9 +175,8 @@ API key: those stay in the environment of the process that starts the server.
 
 Precedence:
 
-1. Process env var
-2. `[web_search]` value from `runtime.toml`
-3. Built-in default
+1. `[web_search]` value from `runtime.toml` (for `MASC_SEARXNG_URL`, a process env var comes first)
+2. Built-in default
 
 | Variable | Default | Effect |
 | --- | --- | --- |

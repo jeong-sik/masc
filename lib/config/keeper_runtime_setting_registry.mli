@@ -81,6 +81,11 @@ val all : setting list
 val toml_settings : setting list
 (** The rows that own a TOML key. *)
 
+val file_owned_env_names : string list
+(** The [env_name] of every row whose only input is its TOML key ([Toml_only]).
+    The loader declares these to {!Config_boot_overrides} before it applies the
+    file; the process environment is not read for them from then on. *)
+
 val toml_env_mappings : (string * string) list
 (** TOML key to environment name, one pair per row of [toml_settings]. *)
 

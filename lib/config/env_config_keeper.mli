@@ -4,7 +4,8 @@
     in [<resolved config root>/runtime.toml] and which remain environment-only.
     TOML-backed readers resolve the boot overrides when called, after startup
     has loaded the runtime document.
-    Precedence: process env > TOML > hardcoded default.
+    Precedence: process env > TOML > hardcoded default. A setting classified
+    [Toml_only] has no process-env step: TOML > hardcoded default.
 
     Surface flows through [include Env_config_keeper] in
     {!Env_config}, so callers reach values either as

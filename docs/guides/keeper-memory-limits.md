@@ -42,8 +42,8 @@ working contexts and history cursors untouched.
 
 The settings registry seeds these keys at process startup. Restart after editing
 this TOML; saving the file alone does not reload these values.
-`MASC_KEEPER_MEMORY_CATEGORY_CAP` and
-`MASC_KEEPER_MEMORY_FACTS_PER_CATEGORY_CAP` explicitly override TOML.
+The process environment is not read for `memory.category_cap` and
+`memory.facts_per_category_cap`; only the TOML values apply.
 
 The current memory recall path already supplies a discovery notice and on-demand
 retrieval, rather than injecting all stored facts. Lower counts can reduce the

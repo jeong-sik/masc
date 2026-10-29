@@ -1,14 +1,15 @@
 (** Env_config_keeper — keeper runtime parameters from environment.
 
     {!Keeper_runtime_setting_registry} is the public inventory. Only settings
-    classified there as [Toml_and_env] can be declared in
-    [<resolved config root>/runtime.toml]; the remainder are explicitly
-    [Env_only]. The TOML loader ({!Keeper_runtime_config.load_and_apply}) runs
+    classified there with a TOML key ([Toml_only], [Toml_and_env]) can be
+    declared in [<resolved config root>/runtime.toml]; the remainder are
+    explicitly [Env_only]. The TOML loader ({!Keeper_runtime_config.load_and_apply}) runs
     at server startup and records unset values in the process-local boot
     override store. TOML-backed accessors read that store when called, after
     startup has loaded the document; module initialization precedes that load.
 
-    Precedence: process env > TOML > hardcoded default below.
+    Precedence: process env > TOML > hardcoded default below. A setting
+    classified [Toml_only] has no process-env step: TOML > hardcoded default.
 
     See [docs/ENV-CONTRACT.md] for the environment contract. *)
 

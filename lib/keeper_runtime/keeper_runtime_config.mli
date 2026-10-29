@@ -14,7 +14,9 @@
 
     A row the registry declares [Toml_only] has no step 1: the process
     environment is not read for it, so the shell that started the server
-    cannot change what the file says.
+    cannot change what the file says. {!load_and_apply} declares those names to
+    {!Config_boot_overrides} before it reads anything; a name read before that
+    call is read with the process environment first.
 
     The TOML loader runs at server startup, after OCaml module initialization.
     It stores boot defaults in a process-local override table; TOML-backed

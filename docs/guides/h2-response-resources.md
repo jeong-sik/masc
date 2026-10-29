@@ -1,9 +1,10 @@
 # HTTP/2 response resources
 
 The H2-only and Auto listeners read two restart-scoped settings from
-`runtime.toml`. Process environment takes precedence over TOML.
+`runtime.toml`. The process environment is not read for them; the second column
+is the key the boot load stores the value under.
 
-| TOML key | Environment | Default | Scope |
+| TOML key | Boot-store key | Default | Scope |
 | --- | --- | --- | --- |
 | `transport.h2_max_concurrent_streams` | `MASC_H2_MAX_CONCURRENT_STREAMS` | 100 | Peer request streams per H2 connection |
 | `transport.h2_max_pending_response_bytes` | `MASC_H2_MAX_PENDING_RESPONSE_BYTES` | 67108864 | Application payload bytes retained across all H2 connections of one listener |

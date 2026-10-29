@@ -399,19 +399,25 @@ L4d 배포 뒤 읽기 lane 실행 시간의 50%가 `gate/keepers` 였다(2시간
 1. 읽기가 지름길 캐시에 stat 을 넣을 때, 같은 stat(dev·inode·size·mtime·ctime)과 그때의 continuity(generation·boundary·prefix digest)를 continuity 기록 옆 파일(`<hex>.observed`)에도 쓴다. 다음 프로세스는 파일이 정확히 그 stat 이고 continuity 가 정확히 그 값일 때만 증명을 건너뛴다. 프로세스 안 캐시가 기대는 증거와 같다. 앞부분을 바꾸는 쓰기는 ctime 을 바꾸고, ctime 을 되돌리는 호출은 없다. 같은 clock tick 안에 크기를 지키는 쓰기를 놓칠 수 있다는 한계도 프로세스 안 캐시와 같고 interface 에 적혀 있다.
 2. 이 파일은 SQLite 색인처럼 파생물이다. fsync 없이 쓰고(`save_file_atomic_rename_only`), 모든 필드가 맞을 때만 믿는다. 없거나 찢어졌거나 낡았으면 지금처럼 앞부분을 다시 읽는다. 쓰다 실패해도 같다. mtime·ctime 은 hex float 로 적어 정확히 비교한다.
 3. continuity 기록의 형식은 그대로다. 예전 기록을 읽는 코드가 없다. 배포 뒤 첫 프로세스만 지금처럼 전부 증명하고, 그때 이 파일들을 쓴다.
-4. 원장 날짜 파일이 사라져 continuity 기록을 지울 때 이 파일을 먼저 지운다. 둘 사이에서 멈춰도 기록 없이 이 파일만 남지 않는다.
+4. 원장 날짜 파일이 사라져 continuity 기록을 지울 때 이 파일을 먼저 지운다. 둘 사이에서 멈춰도 기록 없이 이 파일만 남지 않는다. 지우다 실패해도 읽기를 실패시키지 않는다. 그 경로의 다음 continuity 는 새 generation 이라 남은 파일이 다시 맞을 수 없다.
+5. 이 파일은 SQLite cursor 가 그 continuity 의 boundary 에서 이어질 때만 본다. cursor 가 없으면 스캔이 어차피 앞부분을 처음부터 다시 읽으므로 건너뛸 것이 없다. 그리고 내용과 어긋난 기록을 다시 믿으면 `with_index` 의 "SQLite 를 버리고 다시 시도" 복구가 매번 같은 기록을 믿어 영영 실패한다(적대 리뷰에서 찾음).
+6. 쓰기에 실패한 관찰은 프로세스 안 캐시에 "기록 안 됨" 으로 남겨 다음 읽기에서 다시 쓴다. 파일이 바뀌지 않는 지난 날짜 파일은 그렇지 않으면 그 프로세스가 끝날 때까지 기록되지 않는다.
+
+예전 바이너리로 되돌리면 그 바이너리의 정리는 `.json` 만 지우므로 `.observed` 가 남을 수 있다. 사라진 generation 을 가리키므로 다시 맞지 않고, 개수는 그동안 사라진 날짜 파일 수를 넘지 않는다.
 
 이 층이 줄이지 않는 것: 오늘 파일은 거의 모든 읽기 사이에 append 를 받는다. 그래서 읽기마다 오늘 파일 앞부분을 다시 해시한다(오후 47 MB 0.28초, 밤 300 MB 1.8초, 스캔 중 append 가 오면 두 번). 이것을 줄이려면 내용 증명 정책(RFC-0437)을 바꾸거나, 쓰는 쪽(`Dated_jsonl.append_notifying_commit`)이 자기가 붙인 줄을 증거로 남겨야 한다. 여러 저장소가 쓰는 `Dated_jsonl` 을 바꾸는 일이라 다음 층에서 따로 정한다.
 
 검증:
 
-- 단위(`test_keeper_tool_call_log` 95개, `test_keeper_tool_call_index_witness`·`_domain`, `test_keeper_tool_call_log_file_change_concurrent`): 모두 통과. mutant 둘이 모두 실패한다. 기록된 관찰을 stat 확인 없이 믿으면 같은 inode 재작성·교체·축소 시험 6개가 실패하고, continuity 를 지울 때 이 파일을 남기면 보존 기간 시험이 실패한다.
-- bench: 실제 원장 최근 5일(1.2 GB)을 APFS clone 으로 복사해, 새 프로세스의 첫 읽기(`forget_for_ledger` 뒤 `recent_rows`)를 기록이 없을 때(main 과 같음)와 있을 때 번갈아 3번씩 쟀다(2026-10-29 07:35Z, load 23→114).
+- 단위(`test_keeper_tool_call_log` 95개, `test_keeper_tool_call_index_witness`·`_domain`, `test_keeper_tool_call_log_file_change_concurrent`): 모두 통과. mutant 둘이 모두 실패한다. 기록된 관찰을 stat 확인 없이 믿으면 같은 inode 재작성 시험 2개가 실패하고, continuity 를 지울 때 이 파일을 남기면 보존 기간 시험이 실패한다. 기록을 실제로 써서 건너뛰는지는 결과가 같아 단위 시험으로 가를 수 없다. 아래 bench 와 배포 뒤 trace 로 본다.
+- bench: 실제 원장 최근 5일(1.2 GB)을 APFS clone 으로 복사해, 새 프로세스의 첫 읽기(`forget_for_ledger` 뒤 `recent_rows`)를 기록이 없을 때(main 과 같음)와 있을 때 번갈아 3번씩 쟀다.
 
   | | 1 | 2 | 3 |
   |---|---|---|---|
-  | 기록 없음 | 23.6초 | 21.5초 | 13.4초 |
-  | 기록 있음 | 0.115초 | 0.027초 | 0.022초 |
+  | 기록 없음, 07:35Z load 23→114 | 23.6초 | 21.5초 | 13.4초 |
+  | 기록 있음, 같은 때 | 0.115초 | 0.027초 | 0.022초 |
+  | 기록 없음, 07:52Z load 17 (5번 반영 뒤) | 6.75초 | 6.68초 | 6.71초 |
+  | 기록 있음, 같은 때 | 0.011초 | 0.019초 | 0.009초 |
 - 운영: 배포 뒤 다음 기동에 `rtev_fibers` 를 처음부터 붙여 `Keeper_tool_call_index.blocking` 의 최대 wall 과 goals 첫 계산 시간을 본다.
 
 ## 5. 순서

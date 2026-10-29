@@ -76,9 +76,14 @@ CREATE TABLE IF NOT EXISTS cursors (
 ) WITHOUT ROWID;
 |}
 
+(* [on_record] says whether the observation is also written beside its
+   continuity record (RFC-0474 L4h), so a write that failed is tried again by
+   the next read rather than left out until the file changes. *)
+type observed = { stamp : Unix.stats; on_record : bool }
+
 type store =
   { db : Sqlite3.db
-  ; observations : (string, Unix.stats) Hashtbl.t
+  ; observations : (string, observed) Hashtbl.t
   }
 
 let store_mu = Stdlib.Mutex.create ()
@@ -600,16 +605,21 @@ let recorded_observation_matches path held (stats : Unix.stats) =
 
 (* A record that fails to write is the record a power loss would have torn:
    the next process finds none, or a stale one, and reads the prefix again. No
-   answer depends on it. *)
+   answer depends on it, so the read goes on; the result says whether it is on
+   record, and the next read tries again when it is not. *)
 let record_observation path held stats =
   match
     Fs_compat.save_file_atomic_rename_only (observation_path path)
       (Yojson.Safe.to_string (observation_json path held stats))
   with
-  | Ok () | Error _ -> ()
+  | Ok () -> true
+  | Error _ -> false
 
+(* Every later continuity of this path gets a new generation, so a record
+   left behind by a failed unlink can never match again; failing the read
+   for it would trade a stray file for every read. *)
 let forget_recorded_observation path =
-  try Unix.unlink (observation_path path) with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+  try Unix.unlink (observation_path path) with Unix.Unix_error _ -> ()
 
 (* How much of the ledger one read takes while a prefix is verified. *)
 let prefix_read_bytes = 65536
@@ -687,28 +697,45 @@ let prefix_matches path (held : continuity) =
 
 (* Where the evidence that [held]'s prefix is still the file's came from. *)
 type prefix_proof =
-  | Observed_here  (* this process saw the file read so after proving it *)
+  | Observed_here of { on_record : bool }
+      (* this process saw the file read so after proving it *)
   | Recorded  (* the observation a process recorded beside [held] *)
   | Read_again  (* the prefix itself, hashed now *)
 
 let advance_one store ~before_scan ~path ~(cursor : cursor option) =
   let* before = inspect_file path in
   let unchanged_observation =
-    Option.exists (fun previous -> same_observed_file previous before)
-      (Hashtbl.find_opt store.observations path) in
+    match Hashtbl.find_opt store.observations path with
+    | Some observed when same_observed_file observed.stamp before -> Some observed.on_record
+    | Some _ | None -> None in
   let verified_observation = ref None in
   let verified_continuity = ref None in
   let result =
     let saved = match load_continuity path with
       | Ok saved -> saved
       | Error detail -> raise (Continuity_unavailable detail) in
+    let cursor_continues (held : continuity) =
+      match cursor with
+      | Some cursor ->
+        String.equal cursor.generation held.generation
+        && cursor.device = before.st_dev && cursor.inode = before.st_ino
+        && cursor.boundary = held.boundary
+      | None -> false in
+    (* A recorded observation is consulted only where the scan would start at
+       [held]'s boundary. Without that cursor the scan reads the prefix from
+       its first byte anyway, and a record the content contradicts would turn
+       the discard-and-retry recovery in [with_index] into a failure on every
+       read: the retry would trust the record again instead of starting a new
+       generation. *)
     let proof_of (held : continuity) =
       if not (held.device = before.st_dev && held.inode = before.st_ino
               && held.boundary <= before.st_size) then None
-      else if unchanged_observation then Some Observed_here
-      else if recorded_observation_matches path held before then Some Recorded
-      else if prefix_matches path held then Some Read_again
-      else None in
+      else match unchanged_observation with
+        | Some on_record -> Some (Observed_here { on_record })
+        | None ->
+          if cursor_continues held && recorded_observation_matches path held before then Some Recorded
+          else if prefix_matches path held then Some Read_again
+          else None in
     let fresh () =
       { generation = new_generation (); boundary = 0; prefix_digest = empty_digest
       ; device = before.st_dev; inode = before.st_ino } in
@@ -721,9 +748,7 @@ let advance_one store ~before_scan ~path ~(cursor : cursor option) =
          | None -> Ok (fresh (), None))
       | None -> Ok (fresh (), None) in
     let from, invalidate = match cursor with
-      | Some cursor when String.equal cursor.generation held.generation
-                         && cursor.device = before.st_dev && cursor.inode = before.st_ino
-                         && cursor.boundary = held.boundary -> cursor.boundary, false
+      | Some cursor when cursor_continues held -> cursor.boundary, false
       | Some _ -> 0, true
       | None -> 0, false in
     transaction store (fun () ->
@@ -796,10 +821,13 @@ let advance_one store ~before_scan ~path ~(cursor : cursor option) =
       verified_observation := Some after;
       let next = { held with boundary; prefix_digest } in
       (* The record already says this when the prefix was proved by an
-         observation and the read moved nothing: same continuity, and the
-         file still reads as [before]. *)
+         observation that is on record and the read moved nothing: same
+         continuity, and the file still reads as [before]. *)
       let already_recorded =
-        (match proof with Some (Observed_here | Recorded) -> true | Some Read_again | None -> false)
+        (match proof with
+         | Some (Observed_here { on_record }) -> on_record
+         | Some Recorded -> true
+         | Some Read_again | None -> false)
         && next = held && same_observed_file before after in
       verified_continuity := Some (next, already_recorded);
       (* Commit authoritative continuity before the disposable SQLite cursor.
@@ -821,8 +849,8 @@ let advance_one store ~before_scan ~path ~(cursor : cursor option) =
    | Ok () ->
      (match !verified_observation, !verified_continuity with
       | Some stamp, Some (next, already_recorded) when same_observed_file stamp (Unix.lstat path) ->
-        Hashtbl.replace store.observations path stamp;
-        if not already_recorded then record_observation path next stamp
+        let on_record = already_recorded || record_observation path next stamp in
+        Hashtbl.replace store.observations path { stamp; on_record }
       | Some _, _ | None, _ -> Hashtbl.remove store.observations path)
    | Error _ -> Hashtbl.remove store.observations path);
   result

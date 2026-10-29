@@ -1,28 +1,31 @@
 type owner = Keeper_chat_events.response_identity
 
 type t = {
-  mutable admitted : owner option;
-  mutable closed : owner option;
-  mutable unobserved_scope : int option;
+  admitted : owner option;
+  closed : owner option;
+  unobserved_scope : int option;
 }
 
 type admission =
-  | Admitted
-  | Preserved_unobserved
+  | Admitted of t
+  | Preserved_unobserved of t
   | Stale
 
 let create () = { admitted = None; closed = None; unobserved_scope = None }
 
 let owner_order (a : owner) (b : owner) =
-  compare
-    (a.response_generation, a.response_scope)
-    (b.response_generation, b.response_scope)
+  let generation = Int.compare a.response_generation b.response_generation in
+  if generation = 0 then Int.compare a.response_scope b.response_scope
+  else generation
 
 let admit t (response : Keeper_chat_events.text_response) =
   match response with
   | Keeper_chat_events.Unobserved_scope scope ->
-    Option.iter (fun scope -> t.unobserved_scope <- Some scope) scope;
-    Preserved_unobserved
+    let t = match scope, t.unobserved_scope with
+      | Some scope, Some current when scope = current -> t
+      | Some scope, (Some _ | None) -> {t with unobserved_scope=Some scope}
+      | None, (Some _ | None) -> t in
+    Preserved_unobserved t
   | Keeper_chat_events.Observed_response owner ->
     let closed_out =
       match t.closed with
@@ -37,19 +40,17 @@ let admit t (response : Keeper_chat_events.text_response) =
          | None -> false)
       | Some _ | None -> false in
     if closed_out || precedes_current then Stale
-    else begin
-      t.admitted <- Some owner;
-      t.unobserved_scope <- None;
-      Admitted
-    end
+    else match t.admitted, t.unobserved_scope with
+      | Some current, None when owner_order owner current = 0 -> Admitted t
+      | (Some _ | None), (Some _ | None) ->
+          Admitted {t with admitted=Some owner; unobserved_scope=None}
 
 let retire_attempt t =
-  (match t.admitted with
+  let closed = match t.admitted with
    | Some owner ->
-     t.closed <- Some
+     Some
        (match t.closed with
         | Some closed when owner_order closed owner >= 0 -> closed
         | Some _ | None -> owner)
-   | None -> ());
-  t.admitted <- None;
-  t.unobserved_scope <- None
+   | None -> t.closed in
+  {admitted=None; closed; unobserved_scope=None}

@@ -385,6 +385,49 @@ let test_runtime_attempt_discards_unfinished_text_and_keeps_tool_trail () =
       check bool "prior tool evidence is retained" true (contains content "Read")
   | sent -> failf "expected one final Slack send, got %d" (List.length sent)
 
+let test_response_owner_survives_stream_and_retry () =
+  let response generation scope =
+    Masc.Keeper_chat_events.Observed_response
+      {response_generation=generation; response_scope=scope} in
+  let finals = ref [] in
+  let outcomes =
+    run_adapter ~now:(fun () -> 0.) ~sleep:(fun _ -> ())
+      ~post_stream:(fun ~content:_ -> Ok "stream-message")
+      ~edit_stream:(fun ~message_id:_ ~content:_ -> Ok ())
+      ~edit_blocks:(fun ~message_id:_ ~content ~blocks:_ -> finals := content :: !finals; Ok ())
+      ~delete_stream:(fun ~message_id:_ -> fail "the streamed message must not be deleted")
+      [ Masc.Keeper_chat_events.Run_started {run_id="run-owner";thread_id="thread-owner"}
+      ; Masc.Keeper_chat_events.Text_delta {text="old ";response=response 1 1}
+      ; Masc.Keeper_chat_events.Text_delta {text="newer ";response=response 1 2}
+      ; Masc.Keeper_chat_events.Agent_core_runtime_attempt_started
+          {runtime_id=Some "next-runtime";attempt_index=Some 1}
+      ; Masc.Keeper_chat_events.Text_delta {text="late ";response=response 1 2}
+      ; Masc.Keeper_chat_events.Text_delta {text="fresh";response=response 2 0}
+      ; Masc.Keeper_chat_events.Run_finished {run_id="run-owner"}
+      ]
+      ~send_plain:(fun ~content:_ -> fail "the streamed message must be edited")
+      ~send_blocks:(fun ~content:_ ~blocks:_ -> fail "the streamed message must be edited") in
+  check bool "streaming settles successfully" true (outcomes = [Ok ()]);
+  check (list string) "retired response bytes do not return after retry" ["fresh"]
+    (List.rev !finals);
+  let finals = ref [] in
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.Run_started {run_id="run-buffered";thread_id="thread-buffered"}
+      ; Masc.Keeper_chat_events.Text_delta {text="A";response=response 1 1}
+      ; Masc.Keeper_chat_events.Text_delta {text="B";response=response 1 2}
+      ; Masc.Keeper_chat_events.Text_delta {text="stale";response=response 1 1}
+      ; Masc.Keeper_chat_events.Text_delta {text="U";response=Unobserved_scope (Some 4)}
+      ; Masc.Keeper_chat_events.Text_delta {text="old";response=response 1 3}
+      ; Masc.Keeper_chat_events.Text_delta {text="C";response=response 1 4}
+      ; Masc.Keeper_chat_events.Run_finished {run_id="run-buffered"}
+      ]
+      ~send_plain:(fun ~content:_ -> fail "terminal reply uses block delivery")
+      ~send_blocks:(fun ~content ~blocks:_ -> finals := content :: !finals; Ok ()) in
+  check bool "buffered delivery settles successfully" true (outcomes = [Ok ()]);
+  check (list string) "buffered delivery rejects older response scopes" ["ABUC"]
+    (List.rev !finals)
+
 let test_protocol_diagnostic_cannot_mask_final_failure () =
   let protocol_error : Masc.Keeper_chat_events.stream_protocol_error =
     { kind = Masc.Keeper_chat_events.Sse_error
@@ -952,6 +995,8 @@ let () =
             test_adapter_terminal_success_once
         ; test_case "runtime retry drops stale text and keeps tool evidence" `Quick
             test_runtime_attempt_discards_unfinished_text_and_keeps_tool_trail
+        ; test_case "response ownership survives stream and retry" `Quick
+            test_response_owner_survives_stream_and_retry
         ; test_case "streams one edited reply" `Quick
             test_adapter_streams_one_edited_reply
         ; test_case "stream error edits accepted reply" `Quick

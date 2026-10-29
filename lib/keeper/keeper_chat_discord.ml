@@ -334,16 +334,16 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
     match event with
     | Text_delta {text; response} ->
         (match Keeper_chat_response_ownership.admit ownership response with
-         | Keeper_chat_response_ownership.Stale -> continue ()
-         | Admitted | Preserved_unobserved ->
+         | Keeper_chat_response_ownership.Stale -> continue ~ownership ()
+         | Admitted ownership | Preserved_unobserved ownership ->
         let acc_text = acc_text ^ text in
         let patch_content = streaming_patch_content acc_text in
         (match msg_id with
-         | None when String.length patch_content = 0 -> continue ~acc_text ()
+         | None when String.length patch_content = 0 -> continue ~ownership ~acc_text ()
          | None when post_attempts_left > 0 ->
              (match post_message ~content:patch_content with
               | Ok created_id ->
-                  continue ~acc_text ~msg_id:(Some created_id)
+                  continue ~ownership ~acc_text ~msg_id:(Some created_id)
                     ~last_edit_time:(now ()) ~last_edited_text:patch_content ()
               | Error err ->
                   (* A failed POST may still have landed server-side (network
@@ -356,20 +356,20 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
                   Log.Keeper.warn
                     "keeper_chat_discord: streaming POST failed: %s"
                     (Format.asprintf "%a" Discord_rest_client.pp_error err);
-                  continue ~acc_text
+                  continue ~ownership ~acc_text
                     ~post_attempts_left:(post_attempts_left - 1) ())
          | None ->
              (* The POST retry budget is spent; skip live edits until the
                 final send. *)
-             continue ~acc_text ()
+             continue ~ownership ~acc_text ()
          | Some mid ->
              let elapsed = now () -. last_edit_time in
-             if patch_content = last_edited_text then continue ~acc_text ()
-             else if elapsed < min_edit_interval_s then continue ~acc_text ()
+             if patch_content = last_edited_text then continue ~ownership ~acc_text ()
+             else if elapsed < min_edit_interval_s then continue ~ownership ~acc_text ()
              else
                (match edit_message ~message_id:mid ~content:patch_content with
                 | Ok () ->
-                    continue ~acc_text ~last_edit_time:(now ())
+                    continue ~ownership ~acc_text ~last_edit_time:(now ())
                       ~last_edited_text:patch_content ()
                 | Error err ->
                     Log.Keeper.warn
@@ -382,7 +382,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
                        window. Retry-After is unavailable here (the HTTP
                        client discards response headers), so re-arming the
                        plain interval is the honest bound. *)
-                    continue ~acc_text ~last_edit_time:(now ()) ())))
+                    continue ~ownership ~acc_text ~last_edit_time:(now ()) ())))
     | Text_message_end ->
         let final_content = truncate acc_text in
         (match msg_id with
@@ -446,8 +446,8 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
           ~last_edited_text:"" ~post_attempts_left:2
           ~ownership:(Keeper_chat_response_ownership.create ())
     | Agent_core_runtime_attempt_started _ ->
-        Keeper_chat_response_ownership.retire_attempt ownership;
-        continue ~acc_text:"" ()
+        let ownership = Keeper_chat_response_ownership.retire_attempt ownership in
+        continue ~ownership ~acc_text:"" ()
     | Provider_retry_observed _ -> continue ()
     | Text_message_start _ -> continue ()
     | Reply_details _

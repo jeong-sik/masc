@@ -11,17 +11,18 @@
 type t
 
 type admission =
-  | Admitted  (** owned bytes of the newest admitted response; append them *)
-  | Preserved_unobserved
-      (** bytes without a usable owner: append them without touching
-          ownership *)
-  | Stale  (** owned by a superseded response: drop the bytes *)
+  | Admitted of t  (** owned bytes of the newest admitted response; append them *)
+  | Preserved_unobserved of t
+      (** Append bytes without a usable owner. The admitted owner is unchanged,
+          but a supplied scope may update the returned value's frontier. *)
+  | Stale  (** owned by a superseded response: drop the bytes; keep the prior value *)
 
 val create : unit -> t
 
 val admit : t -> Keeper_chat_events.text_response -> admission
+(** An accepted result carries the next ownership value. *)
 
-val retire_attempt : t -> unit
+val retire_attempt : t -> t
 (** An advancing runtime attempt starts a newer response: the admitted owner
     is demoted to the stale floor (its identity and anything older can no
     longer append), and ownership tracking restarts empty. *)

@@ -315,6 +315,22 @@ let test_the_other_failures_leave_only_their_piece_undecided_and_are_not_retried
   check_strings "each piece once" [ "a[c0]"; "a[c1]"; "a[c2]"; "a[c3]"; "a[c4]" ]
     (sorted (rendered_calls candidates Candidate_question calls))
 
+(* A judgment whose own record could not be saved is replaced as a whole: what
+   the model answered is not kept. *)
+let test_not_recorded_replaces_the_whole_judgment () =
+  let candidates = List.init 3 (fun index -> sized index small) in
+  let name = names candidates in
+  let judged = judged_of (fst (run_flow ~piece_bytes:small accepting candidates)) in
+  Alcotest.(check string) "before" "selected 3/3 [c0,c1,c2]" (describe_status name judged.status);
+  Alcotest.(check bool) "it had marks" true (judged.marks <> []);
+  let replaced = Flow.not_recorded judged in
+  check_strings "results"
+    [ "c0:not_recorded"; "c1:not_recorded"; "c2:not_recorded" ]
+    (List.map (describe_result name) replaced.results);
+  Alcotest.(check string) "status" "unavailable 0/3 not_recorded" (describe_status name replaced.status);
+  Alcotest.(check bool) "question (b) counts as failed" true (replaced.turn = J.Turn_question_failed);
+  Alcotest.(check int) "no marks" 0 (List.length replaced.marks)
+
 let test_an_answer_that_does_not_decode_leaves_only_that_candidate () =
   let candidates = List.init 2 (fun index -> sized index small) in
   let name = names candidates in
@@ -763,6 +779,8 @@ let () =
             test_a_purpose_that_is_too_large_stops_everything
         ; Alcotest.test_case "other failures leave their piece undecided, no retry" `Quick
             test_the_other_failures_leave_only_their_piece_undecided_and_are_not_retried
+        ; Alcotest.test_case "not recorded replaces the whole judgment" `Quick
+            test_not_recorded_replaces_the_whole_judgment
         ; Alcotest.test_case "an answer that does not decode leaves one candidate" `Quick
             test_an_answer_that_does_not_decode_leaves_only_that_candidate
         ; Alcotest.test_case "a failed (c) is unjudged and never cut" `Quick

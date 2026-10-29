@@ -5,35 +5,29 @@
 
 (** The file of the authorization log, [authz.jsonl] (design 6.3, 8.1).
 
-    The module knows the file and nothing about what a line means. At process
-    start it reads every line, checks the chain with {!Authz_record.of_line},
-    and hands each record to a fold function that the caller passes. Later it
-    appends lines, one zone at a time. What state the lines add up to, which
-    events may follow which, and what a pointer into the external high-water
-    mark means belong to the layers above.
+    The file machinery is that of {!Authz_jsonl_file}: the recovery read at
+    process start, the cut of a last line that never ended, the zone, the append
+    at the cursor, and the stop after a failure. This module fixes the format of
+    the lines. Each line is an {!Authz_record.t} that carries the hash of the
+    line before it, so the file is a chain, and the state of the file is the
+    head of the chain ({!Authz_record.head}). The module knows the file and
+    nothing about what a record means. What the records add up to (the value
+    that the caller folds them into), which events may follow which, and what a
+    pointer into the external high-water mark means belong to the layers above.
 
-    {b The file.} [<base path>/.masc/auth/authz.jsonl], next to [config.json]
-    ({!path_of_base_path}). [Fs_compat] creates it with mode 0600 and keeps a
-    stable lock file beside it. The module keeps the head of the chain and the
-    end of the file (a cursor of [Fs_compat], made of device, inode, and size).
-    Open the log once per process and path. A second {!t} on the same path does
-    not share the zone, so its first append returns {!Diverged} and stops it.
+    {b The log.} [<base path>/.masc/auth/authz.jsonl], next to [config.json]
+    ({!path_of_base_path}). Open the log once per process and path.
 
-    {b Who writes.} Inside the process, one zone per {!t}: an [Eio.Mutex] held
-    while a function runs ({!with_writer}). Between processes, this module
-    relies on two things it does not check. Only one server runs on a base
-    path, and a tool that reads the file takes the lock of [Fs_compat] for the
-    length of one read. While a tool holds that lock an append returns
-    {!Write_locked}. A second writer on the same file shows up as {!Diverged}.
-
-    {b After a failure.} The log is stopped when an append fails and the module
+    {b Who writes, and after a failure.} The rules are those of
+    {!Authz_jsonl_file}. Inside the process there is one zone per {!t}, entered
+    through {!with_writer}. A log is stopped when an append fails and the module
     cannot say whether the file changed, when the end of the file is not where
     this process left it, or when the write raises an exception. A stopped log
     does not enter a zone ({!with_writer} returns [Error]) and every {!append}
     returns {!Stopped}, until the process restarts and opens the file again.
-    While the log is stopped, the in-memory head is not trusted, and the file
-    is the only truth. A refusal that wrote nothing ({!Write_locked}, {!Wrong_seq},
-    {!Wrong_previous_hash}, {!Would_not_read_back}) does not stop the log. *)
+    While the log is stopped, the in-memory head is not trusted, and the file is
+    the only truth. A refusal that wrote nothing ({!Write_locked}, {!Rejected},
+    {!Would_not_read_back}, {!Read_back_changed}) does not stop the log. *)
 
 type t
 
@@ -42,7 +36,7 @@ type t
 type writer
 
 (** Why a log is stopped. *)
-type stop =
+type stop = Authz_jsonl_file.stop =
   { path : string
   ; reason : string
   }
@@ -53,44 +47,48 @@ val stopped : t -> stop option
 (** [<base path>/.masc/auth/authz.jsonl]. *)
 val path_of_base_path : base_path:string -> string
 
-(** What the file was when it was opened. *)
-type contents =
-  | Missing  (** There is no file. *)
-  | Empty  (** The file exists and holds no complete line. *)
-  | Lines of int  (** The file holds this many complete lines. *)
+(** What the file was when it was opened. This is the type of
+    {!Authz_jsonl_file}, with its constructors listed so that a caller matches
+    on them here. *)
+type contents = Authz_jsonl_file.contents =
+  | Missing
+  | Empty
+  | Lines of int
 
-type tail =
-  | Complete  (** The file ended after a complete line. *)
+(** How the file ended when it was opened. Same re-export as {!contents}. *)
+type tail = Authz_jsonl_file.tail =
+  | Complete
   | Cut of
       { kept_bytes : int
       ; discarded_bytes : int
       }
-      (** The file ended inside a line, left by an append that died. The
-          module cut it back to the last complete line and synced. The cut
-          bytes were never acknowledged to any caller. *)
 
-type recovered =
-  { contents : contents  (** After the cut, if there was one. *)
+(** What opening found: the {!contents} after the cut, if there was one, and the
+    {!tail}. Same re-export as {!contents}. *)
+type recovered = Authz_jsonl_file.recovered =
+  { contents : contents
   ; tail : tail
   }
 
+(** Why the file did not open. [Line_rejected] means that {!Authz_record.of_line}
+    refuses the line as the next line of the chain. The other constructors are
+    those of {!Authz_jsonl_file.Make}. *)
 type 'reason open_error =
   | Locked of { path : string }
-      (** Another process holds the lock. Nothing was read. *)
   | Unreadable of
       { path : string
       ; detail : string
-      }  (** The file, or a directory above it, cannot be read. [detail] says why. *)
+      }
   | Line_rejected of
       { path : string
-      ; line_number : int  (** From 1. *)
+      ; line_number : int
       ; error : Authz_record.decode_error
-      }  (** The line is not the next line of the chain. *)
+      }
   | Fold_refused of
       { path : string
-      ; line_number : int  (** From 1. *)
+      ; line_number : int
       ; reason : 'reason
-      }  (** The caller's fold function refused the record on this line. *)
+      }
 
 val open_error_to_string : ('reason -> string) -> 'reason open_error -> string
 
@@ -133,40 +131,38 @@ val open_at_start
     {!append} then returns {!Writer_expired}. *)
 val with_writer : t -> (writer -> Authz_record.head -> 'a) -> ('a, stop) result
 
-type append_error =
-  | Writer_expired  (** The zone of this writer has ended. Nothing was written. *)
-  | Stopped of stop
-      (** An earlier failure stopped the log. See the top of this file. Nothing
-          was written. *)
+(** Why the chain refuses a record as the next record. *)
+type reject =
   | Wrong_seq of
-      { index : int  (** In the list, from 0. *)
-      ; expected : int
+      { expected : int
       ; actual : int
-      }  (** The seq of the record is not the next seq. Nothing was written. *)
-  | Wrong_previous_hash of { index : int }
-      (** The record names a different record before it. Nothing was written. *)
+      }  (** The seq of the record is not the next seq. *)
+  | Wrong_previous_hash  (** The record names a different record before it. *)
+
+(** Why an append wrote nothing, or failed. The constructors are those of
+    {!Authz_jsonl_file.Make}. [Rejected] carries a {!reject}.
+    [Would_not_read_back] means that {!Authz_record.of_line} refuses the line
+    that {!Authz_record.to_line} writes for the record, and [Read_back_changed]
+    means that it reads the line as another record. Both are bugs in
+    [Authz_record]. *)
+type append_error =
+  | Writer_expired
+  | Stopped of stop
+  | Rejected of
+      { index : int
+      ; reject : reject
+      }
   | Would_not_read_back of
       { index : int
       ; error : Authz_record.decode_error
       }
-      (** {!Authz_record.of_line} refuses the line that {!Authz_record.to_line}
-          writes for this record. This means a bug in [Authz_record]. Nothing
-          was written. *)
+  | Read_back_changed of { index : int }
   | Write_locked of { path : string }
-      (** Another process holds the lock. Nothing was written and the log is
-          not stopped. The caller may try again later; this module never
-          retries. *)
   | Diverged of { path : string }
-      (** The end of the file is not where this process left it: another writer
-          appended, or the file was cut. The file is identified by device,
-          inode, and size, so a file of the same size that took the old inode
-          number is not noticed. The log is stopped. *)
   | Write_failed of
       { path : string
       ; detail : string
       }
-      (** The write failed in a way that leaves the file unknown. The log is
-          stopped. *)
 
 val append_error_to_string : append_error -> string
 
@@ -174,12 +170,13 @@ val append_error_to_string : append_error -> string
     returns the head after the last one. The first record must continue the
     current head of the zone (the head [f] was given, or the one the last
     {!append} returned), each next record the one before it. A list that does
-    not continue the chain is refused before any byte is written. Each line is
-    read back with {!Authz_record.of_line} before it is written, so a line that
-    {!Authz_record.of_line} would refuse at the next start is never written.
-    The fold function of {!open_at_start} is not run here, and a record that it
-    refuses stops every later start, so the caller runs the same fold function
-    before it appends. An empty list writes nothing.
+    not continue the chain is refused with [Rejected] before any byte is
+    written. Each line is read back with {!Authz_record.of_line} before it is
+    written, so a line that {!Authz_record.of_line} would refuse at the next
+    start, or would read as another record, is never written. The fold function
+    of {!open_at_start} is not run here, and a record that it refuses stops
+    every later start, so the caller runs the same fold function before it
+    appends. An empty list writes nothing.
 
     Once this returns [Ok], the lines are in the file and synced the way
     [Fs_compat] syncs. [Fs_compat] does not call [F_FULLFSYNC], so the lines
@@ -196,6 +193,6 @@ val append_error_to_string : append_error -> string
     the exception was raised before the file work began, because the module
     cannot tell the two cases apart. An exception raised while the records are
     checked comes before any byte is written and does not stop the log. The
-    caller does not append the same records again: the next start shows what
+    caller must not append the same records again: the next start shows what
     the file holds. *)
 val append : writer -> Authz_record.t list -> (Authz_record.head, append_error) result

@@ -11,46 +11,89 @@ let path_of_base_path ~base_path =
   Filename.concat (Common.auth_dir_from_base_path ~base_path) file_name
 ;;
 
-type stop =
+type reject =
+  | Wrong_seq of
+      { expected : int
+      ; actual : int
+      }
+  | Wrong_previous_hash
+
+(* The lines of the log are the records of [Authz_record], and the state of the
+   file is the head of their chain. *)
+module Chain_format = struct
+  type state = Authz_record.head
+  type record = Authz_record.t
+  type line_error = Authz_record.decode_error
+  type nonrec reject = reject
+
+  let description = "authorization log"
+  let thread_label = "authz-log"
+  let genesis = Authz_record.genesis
+  let of_line head line = Authz_record.of_line ~head line
+  let to_line = Authz_record.to_line
+  (* A record is plain data: ints, strings, variants and a body that holds no
+     float. [=] compares every member, one that is added later too. A member
+     that is not plain data needs a typed comparison here. *)
+  let equal_record (left : Authz_record.t) right = left = right
+  let advance _head record = Authz_record.head_after record
+
+  let check_next head (record : Authz_record.t) =
+    let expected = Authz_record.next_seq head in
+    if record.Authz_record.seq <> expected
+    then Error (Wrong_seq { expected; actual = record.Authz_record.seq })
+    else if
+      not
+        (Authz_record.Hash.equal
+           record.Authz_record.previous_hash
+           (Authz_record.head_hash head))
+    then Error Wrong_previous_hash
+    else Ok ()
+  ;;
+
+  let describe_state head =
+    Printf.sprintf
+      "next seq %d after hash %s"
+      (Authz_record.next_seq head)
+      (Authz_record.Hash.to_hex (Authz_record.head_hash head))
+  ;;
+
+  let line_error_to_string = Authz_record.decode_error_to_string
+
+  let reject_to_string = function
+    | Wrong_seq { expected; actual } ->
+      Printf.sprintf "its seq is %d where %d was expected" actual expected
+    | Wrong_previous_hash -> "it does not name the record before it"
+  ;;
+end
+
+module File = Authz_jsonl_file.Make (Chain_format)
+
+type t = File.t
+type writer = File.writer
+
+type stop = Authz_jsonl_file.stop =
   { path : string
   ; reason : string
   }
 
-type t =
-  { path : string
-  ; zone : Eio.Mutex.t
-  ; mutable head : Authz_record.head
-  ; mutable cursor : Fs_compat.Private_jsonl_cursor.t
-  ; mutable stopped : string option
-  }
-
-let stopped (log : t) =
-  Option.map (fun reason -> { path = log.path; reason }) log.stopped
-;;
-
-type writer =
-  { log : t
-  ; mutable live : bool
-  }
-
-type contents =
+type contents = Authz_jsonl_file.contents =
   | Missing
   | Empty
   | Lines of int
 
-type tail =
+type tail = Authz_jsonl_file.tail =
   | Complete
   | Cut of
       { kept_bytes : int
       ; discarded_bytes : int
       }
 
-type recovered =
+type recovered = Authz_jsonl_file.recovered =
   { contents : contents
   ; tail : tail
   }
 
-type 'reason open_error =
+type 'reason open_error = 'reason File.open_error =
   | Locked of { path : string }
   | Unreadable of
       { path : string
@@ -67,185 +110,18 @@ type 'reason open_error =
       ; reason : 'reason
       }
 
-let open_error_to_string reason_to_string = function
-  | Locked { path } -> Printf.sprintf "authorization log %s is locked by another process" path
-  | Unreadable { path; detail } ->
-    Printf.sprintf "authorization log %s cannot be read: %s" path detail
-  | Line_rejected { path; line_number; error } ->
-    Printf.sprintf
-      "authorization log %s line %d is not the next line of the chain: %s"
-      path
-      line_number
-      (Authz_record.decode_error_to_string error)
-  | Fold_refused { path; line_number; reason } ->
-    Printf.sprintf
-      "authorization log %s line %d was refused by the caller: %s"
-      path
-      line_number
-      (reason_to_string reason)
-;;
-
-let store_error = Fs_compat.private_jsonl_transaction_error_to_string
-
-(* A completed transaction whose descriptor settlement stayed incomplete has
-   still done its work, so the caller goes on and the evidence is logged.
-   Settlement is the close of a descriptor after the transaction body returned.
-   For an append the body syncs the lines before it returns, and the contract
-   of [Fs_compat.private_jsonl_success_receipt] lets a consumer advance from the
-   value as long as it observes the error. *)
-let observe_settlement ~path error =
-  Log.Auth.warn
-    "authorization log: descriptor settlement incomplete path=%s detail=%s"
-    path
-    (store_error error)
-;;
-
-(* How a failure of the cursor family bears on the log. Every failure is named
-   here so that a new one in [Fs_compat] fails to compile until it is placed.
-   A lock that another process holds wrote nothing and read nothing. A cursor
-   that no longer matches means another writer moved the end. Every other
-   failure may have left bytes behind, so the file is not known. *)
-type failure_kind =
-  | Lock_held_by_another_process
-  | End_moved
-  | Outcome_unknown
-
-let failure_kind : Fs_compat.private_jsonl_transaction_error -> failure_kind = function
-  | Fs_compat.Stable_lock_contended _ -> Lock_held_by_another_process
-  | Fs_compat.Cursor_mismatch _ -> End_moved
-  | Fs_compat.Unexpected_stable_lock_permissions _
-  | Fs_compat.Invalid_stable_lock_state _
-  | Fs_compat.Unexpected_transaction_file_kind _
-  | Fs_compat.Ambiguous_transaction_file_identity _
-  | Fs_compat.Transaction_path_binding_changed _
-  | Fs_compat.Transaction_content_changed _
-  | Fs_compat.Incomplete_transaction_tail _
-  | Fs_compat.Invalid_transaction_suffix
-  | Fs_compat.Private_jsonl_operation_failed _
-  | Fs_compat.Rewrite_stage_failed _
-  | Fs_compat.Rewrite_published_durability_unknown _
-  | Fs_compat.Transaction_settlement_failed _
-  | Fs_compat.Transaction_append_failed _ -> Outcome_unknown
-;;
-
-(* The size the file has before the cut, to tell how much of it the cut took.
-   A missing file has no bytes. It is read before the lock is taken, so it is
-   exact only while no other process writes the file, which the server that
-   opens the log guarantees (see the interface). *)
-let size_of_file ~path =
-  match Unix.stat path with
-  | stats -> Ok stats.Unix.st_size
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok 0
-  | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
-;;
-
-(* Reads the file as the recovery read of [Fs_compat] does, which is the only
-   read that cuts a last line that never ended. Process start is the one caller the
-   contract of [Fs_compat] allows. *)
-let read_for_recovery ~path =
-  match size_of_file ~path with
-  | Error detail -> Error (Unreadable { path; detail })
-  | Ok size_before ->
-    (match
-       Fs_compat.private_jsonl_snapshot_success_receipt
-         (Fs_compat.recover_private_jsonl_durable_locked_result path)
-     with
-     | Ok { Fs_compat.value = snapshot; settlement_error } ->
-       Option.iter (observe_settlement ~path) settlement_error;
-       Ok (snapshot, size_before)
-     | Error error ->
-       (match failure_kind error with
-        | Lock_held_by_another_process -> Error (Locked { path })
-        | End_moved | Outcome_unknown ->
-          Error (Unreadable { path; detail = store_error error })))
-;;
-
-(* Checks the lines of a complete store one by one against the chain and folds
-   them. [Fs_compat] returns only complete rows, so every line ends in a
-   newline. *)
-let replay ~path ~init ~step bytes =
-  let length = String.length bytes in
-  let rec go line_number offset head state =
-    if offset >= length
-    then Ok (state, head, line_number - 1)
-    else (
-      match String.index_from_opt bytes offset '\n' with
-      | None ->
-        Error (Unreadable { path; detail = "the last row of the store has no newline" })
-      | Some stop ->
-        let line = String.sub bytes offset (stop - offset) in
-        (match Authz_record.of_line ~head line with
-         | Error error -> Error (Line_rejected { path; line_number; error })
-         | Ok record ->
-           (match step state record with
-            | Error reason -> Error (Fold_refused { path; line_number; reason })
-            | Ok state ->
-              go (line_number + 1) (stop + 1) (Authz_record.head_after record) state)))
-  in
-  go 1 0 Authz_record.genesis init
-;;
-
-let contents_of ~missing ~line_count =
-  if missing then Missing else if line_count = 0 then Empty else Lines line_count
-;;
-
-(* A size that is not larger than the bytes kept is reported as no cut. A file
-   that grew between the stat and the lock, which only a second writer causes,
-   gives a difference of zero or less, and then a cut that really happened goes
-   unreported. The append of the process that wrote second returns [Diverged]. *)
-let tail_of ~size_before ~kept_bytes =
-  let discarded_bytes = size_before - kept_bytes in
-  if discarded_bytes > 0 then Cut { kept_bytes; discarded_bytes } else Complete
-;;
-
-let open_on_thread ~path ~init ~step =
-  Result.bind (read_for_recovery ~path) (fun (snapshot, size_before) ->
-    let bytes = snapshot.Fs_compat.bytes in
-    Result.map
-      (fun (state, head, line_count) ->
-        let tail = tail_of ~size_before ~kept_bytes:(String.length bytes) in
-        let contents =
-          contents_of
-            ~missing:(Fs_compat.Private_jsonl_cursor.is_missing snapshot.Fs_compat.cursor)
-            ~line_count
-        in
-        state, head, snapshot.Fs_compat.cursor, { contents; tail })
-      (replay ~path ~init ~step bytes))
-;;
-
-let open_at_start ~path ~init ~step =
-  match
-    Systhread_host.run ~label:"authz-log-open" (fun () -> open_on_thread ~path ~init ~step)
-  with
-  | Error error -> Error error
-  | Ok (state, head, cursor, recovered) ->
-    (match recovered.tail with
-     | Complete -> ()
-     | Cut { kept_bytes; discarded_bytes } ->
-       Log.Auth.warn
-         "authorization log %s: cut %d bytes of a last line that never ended, kept %d \
-          bytes, next seq %d after hash %s"
-         path
-         discarded_bytes
-         kept_bytes
-         (Authz_record.next_seq head)
-         (Authz_record.Hash.to_hex (Authz_record.head_hash head)));
-    Ok ({ path; zone = Eio.Mutex.create (); head; cursor; stopped = None }, state, recovered)
-;;
-
-type append_error =
+type append_error = File.append_error =
   | Writer_expired
   | Stopped of stop
-  | Wrong_seq of
+  | Rejected of
       { index : int
-      ; expected : int
-      ; actual : int
+      ; reject : reject
       }
-  | Wrong_previous_hash of { index : int }
   | Would_not_read_back of
       { index : int
       ; error : Authz_record.decode_error
       }
+  | Read_back_changed of { index : int }
   | Write_locked of { path : string }
   | Diverged of { path : string }
   | Write_failed of
@@ -253,143 +129,9 @@ type append_error =
       ; detail : string
       }
 
-let append_error_to_string = function
-  | Writer_expired -> "the zone of this writer has ended"
-  | Stopped { path; reason } ->
-    Printf.sprintf "authorization log %s is stopped: %s" path reason
-  | Wrong_seq { index; expected; actual } ->
-    Printf.sprintf "record %d has seq %d where %d was expected" index actual expected
-  | Wrong_previous_hash { index } ->
-    Printf.sprintf "record %d does not name the record before it" index
-  | Would_not_read_back { index; error } ->
-    Printf.sprintf
-      "record %d would not read back: %s"
-      index
-      (Authz_record.decode_error_to_string error)
-  | Write_locked { path } ->
-    Printf.sprintf "authorization log %s is locked by another process" path
-  | Diverged { path } ->
-    Printf.sprintf "authorization log %s does not end where this process left it" path
-  | Write_failed { path; detail } ->
-    Printf.sprintf "authorization log %s could not be written: %s" path detail
-;;
-
-(* Why a log refuses appends once the end of its file has moved. A write that
-   fails in a way that leaves the file unknown stops the log with the text of
-   its failure. An exception that leaves a write unfinished needs no flag: the
-   next append names the end it expects, and [Fs_compat] refuses it if the
-   write moved the end. *)
-let end_moved = "the end of the file is not where this process left it"
-
-(* The lines to write and the head after them, or the first record that does
-   not continue the chain. Each line is read back against the head it would
-   have in the file. *)
-let encode ~head records =
-  let rec go index head lines = function
-    | [] -> Ok (List.rev lines, head)
-    | (record : Authz_record.t) :: rest ->
-      let expected = Authz_record.next_seq head in
-      if record.Authz_record.seq <> expected
-      then Error (Wrong_seq { index; expected; actual = record.Authz_record.seq })
-      else if
-        not
-          (Authz_record.Hash.equal
-             record.Authz_record.previous_hash
-             (Authz_record.head_hash head))
-      then Error (Wrong_previous_hash { index })
-      else (
-        let line = Authz_record.to_line record in
-        match Authz_record.of_line ~head line with
-        | Error error -> Error (Would_not_read_back { index; error })
-        | Ok _ -> go (index + 1) (Authz_record.head_after record) (line :: lines) rest)
-  in
-  go 0 head [] records
-;;
-
-(* The thread gets the path and the cursor as values, so it reads no field that
-   the zone changes. *)
-let write_on_thread (log : t) payload =
-  let path = log.path
-  and expected = log.cursor in
-  Systhread_host.run ~label:"authz-log-append" (fun () ->
-    Fs_compat.private_jsonl_cursor_success_receipt
-      (Fs_compat.append_private_jsonl_durable_locked_at_cursor_result path ~expected payload))
-;;
-
-let write (log : t) ~head payload =
-  match write_on_thread log payload with
-  | exception exn ->
-    (* The lines may or may not be in the file, and the head and the cursor
-       stay where they were. The log stops, so that no caller reads the head as
-       if it were current. The exception goes on to the caller. *)
-    let backtrace = Printexc.get_raw_backtrace () in
-    log.stopped
-    <- Some
-         (Printf.sprintf
-            "a write raised %s, so the end of the file is not known"
-            (Printexc.to_string exn));
-    Printexc.raise_with_backtrace exn backtrace
-  | Ok { Fs_compat.value = cursor; settlement_error } ->
-    Option.iter (observe_settlement ~path:log.path) settlement_error;
-    log.head <- head;
-    log.cursor <- cursor;
-    Ok head
-  | Error error ->
-    (match failure_kind error with
-     | Lock_held_by_another_process -> Error (Write_locked { path = log.path })
-     | End_moved ->
-       log.stopped <- Some end_moved;
-       Error (Diverged { path = log.path })
-     | Outcome_unknown ->
-       let detail = store_error error in
-       log.stopped <- Some detail;
-       Error (Write_failed { path = log.path; detail }))
-;;
-
-let append writer records =
-  let log = writer.log in
-  if not writer.live
-  then Error Writer_expired
-  else (
-    match log.stopped with
-    | Some reason -> Error (Stopped { path = log.path; reason })
-    | None ->
-      Result.bind (encode ~head:log.head records) (fun (lines, head) ->
-        match lines with
-        | [] -> Ok head
-        | _ :: _ ->
-          write log ~head (String.concat "" (List.map (fun line -> line ^ "\n") lines))))
-;;
-
-type 'a zone_outcome =
-  | Entered of 'a
-  | Refused of stop
-  | Raised of exn * Printexc.raw_backtrace
-
-(* [Eio.Mutex.use_rw] disables the mutex for good when its function raises.
-   That would turn any exception of the caller's, even one that never touched the
-   file, into a log that cannot be entered again. What the file holds is kept
-   consistent by the cursor and by [stopped], so the exception is carried out of
-   the critical section and raised after the mutex is released. A stop that
-   happened while this fiber waited is seen only after the zone is its own. *)
-let with_writer (log : t) f =
-  let outcome =
-    Eio.Mutex.use_rw ~protect:true log.zone (fun () ->
-      match log.stopped with
-      | Some reason -> Refused { path = log.path; reason }
-      | None ->
-        let writer = { log; live = true } in
-        (match f writer log.head with
-         | result ->
-           writer.live <- false;
-           Entered result
-         | exception exn ->
-           let backtrace = Printexc.get_raw_backtrace () in
-           writer.live <- false;
-           Raised (exn, backtrace)))
-  in
-  match outcome with
-  | Entered result -> Ok result
-  | Refused stop -> Error stop
-  | Raised (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
-;;
+let stopped = File.stopped
+let open_error_to_string = File.open_error_to_string
+let open_at_start = File.open_at_start
+let with_writer = File.with_writer
+let append_error_to_string = File.append_error_to_string
+let append = File.append

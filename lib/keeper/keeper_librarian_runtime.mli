@@ -461,6 +461,8 @@ type admission_preparation = {
   variables : (string * string) list;
   rendered_prompt : string;
   output_schema : Yojson.Safe.t;
+  admission_prompt : Prompt_registry.prompt_resolution;
+  retirement_prompt : Prompt_registry.prompt_resolution;
 }
 type admission_proposal = Deferred | Accepted of accepted
 val prepare_admission : batch:Keeper_memory_admission_queue.batch ->

@@ -213,10 +213,12 @@ let preparation_json (prepared:Runtime.admission_preparation) = `Assoc [
   "policy",`Assoc ["facts_max_bytes",`Int prepared.policy.facts_max_bytes;
     "category_cap",`Int prepared.policy.category_cap;"facts_per_category_cap",`Int prepared.policy.facts_per_category_cap];
   "rule_prompt",prompt_json prepared.rule_prompt;"prompt",prompt_json prepared.prompt;
+  "admission_prompt",prompt_json prepared.admission_prompt;
+  "retirement_prompt",prompt_json prepared.retirement_prompt;
   "variables",`List (List.map (fun (key,value) -> `Assoc ["key",`String key;"value",`String value]) prepared.variables);
   "rendered_prompt",`String prepared.rendered_prompt;"output_schema",prepared.output_schema]
 let preparation_of_json json =
-  let* fields=object_fields ["policy";"rule_prompt";"prompt";"variables";"rendered_prompt";"output_schema"] json in
+  let* fields=object_fields ["policy";"rule_prompt";"prompt";"admission_prompt";"retirement_prompt";"variables";"rendered_prompt";"output_schema"] json in
   let* policy_fields=object_fields ["facts_max_bytes";"category_cap";"facts_per_category_cap"] (value "policy" fields) in
   let* facts_max_bytes=integer (value "facts_max_bytes" policy_fields) in
   let* category_cap=integer (value "category_cap" policy_fields) in
@@ -224,11 +226,13 @@ let preparation_of_json json =
   let policy={Runtime.facts_max_bytes;category_cap;facts_per_category_cap} in
   let* rule_prompt=prompt_of_json (value "rule_prompt" fields) in
   let* prompt=prompt_of_json (value "prompt" fields) in
+  let* admission_prompt=prompt_of_json (value "admission_prompt" fields) in
+  let* retirement_prompt=prompt_of_json (value "retirement_prompt" fields) in
   let* variables=list (fun json -> let* fields=object_fields ["key";"value"] json in
     let* key=nonblank (value "key" fields) in let+ value=text (value "value" fields) in key,value)
     (value "variables" fields) in
   let+ rendered_prompt=nonblank (value "rendered_prompt" fields) in
-  {Runtime.policy;rule_prompt;prompt;variables;rendered_prompt;output_schema=value "output_schema" fields}
+  {Runtime.policy;rule_prompt;prompt;admission_prompt;retirement_prompt;variables;rendered_prompt;output_schema=value "output_schema" fields}
 
 let candidate_json (id:Current.explicit_candidate_id) = `Assoc [
   "queue_generation",`String id.queue_generation;"request_id",`String id.request_id;
@@ -257,7 +261,7 @@ let batch capture=capture.original_batch
 let input capture=capture.original_input
 let expected_revision capture=capture.revision
 let now capture=capture.parsing_now
-let to_json capture = `Assoc ["schema",`Int 1;"kind",`String "execution";
+let to_json capture = `Assoc ["schema",`Int 2;"kind",`String "execution";
   "request_id",`String capture.id;"parent_part_id",`String capture.parent;"owner",owner_to_json capture.owner;
   "destination",destination_json capture.destination;
   "candidate_ids",`List (List.map candidate_json (Queue.candidate_ids capture.original_batch));
@@ -317,7 +321,7 @@ let restore ~owner ~load_parent (retained:Owner.retained) =
     "candidate_ids";"batch_text";"input_text";"expected_revision";"now";"retirement_text";"preparation"] retained.request in
   let* schema=integer (value "schema" fields) in
   let* kind=nonblank (value "kind" fields) in
-  let* ()=if schema=1 && kind="execution" then Ok () else Error "Unknown original Librarian execution schema/kind" in
+  let* ()=if schema=2 && kind="execution" then Ok () else Error "Unknown original Librarian execution schema/kind" in
   let* id=nonblank (value "request_id" fields) in
   let* parent=nonblank (value "parent_part_id" fields) in
   let* ()=owner_matches_json owner (value "owner" fields) in

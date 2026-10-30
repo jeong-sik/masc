@@ -364,12 +364,19 @@ type admission_preparation = {
   variables : (string * string) list;
   rendered_prompt : string;
   output_schema : Yojson.Safe.t;
+  admission_prompt : Prompt_registry.prompt_resolution;
+  retirement_prompt : Prompt_registry.prompt_resolution;
 }
 let admission_schema () = Keeper_memory_admission_judgment.output_schema
   ~memory_schema:Keeper_structured_output_schema.librarian_current_output_schema
-let admission_suffix ~batch ~retirement = "\n\n" ^
-  Keeper_memory_admission_judgment.prompt_suffix ~batch ^
-  Keeper_memory_admission_judgment.retirement_prompt_suffix ~batch retirement
+let admission_suffix ~admission_prompt ~retirement_prompt ~batch ~retirement =
+  let open Result.Syntax in
+  let* admission=Prompt_registry.render_resolved_prompt_template
+    Prompt_names.librarian_admission_policy admission_prompt [] in
+  let+ historical=Prompt_registry.render_resolved_prompt_template
+    Prompt_names.librarian_retirement_policy retirement_prompt [] in
+  Keeper_memory_admission_judgment.prompt_suffix ~instructions:admission ~batch ^
+  Keeper_memory_admission_judgment.retirement_prompt_suffix ~instructions:historical ~batch retirement
 let validate_resolution (resolution : Prompt_registry.prompt_resolution) =
   let source,effective=match resolution.override_value,resolution.file_value with
     | Some value,_ -> Prompt_registry.Override,value
@@ -496,6 +503,10 @@ let validate_admission_preparation ~batch ~retirement ~input preparation =
     then Ok () else Error "Original Librarian advisory limits are invalid" in
   let* ()=validate_resolution preparation.rule_prompt in
   let* ()=validate_resolution preparation.prompt in
+  let* ()=validate_resolution preparation.admission_prompt in
+  let* ()=validate_resolution preparation.retirement_prompt in
+  let* suffix=admission_suffix ~admission_prompt:preparation.admission_prompt
+    ~retirement_prompt:preparation.retirement_prompt ~batch ~retirement in
   let* rule=Prompt_registry.render_resolved_prompt_template
     Prompt_names.librarian_working_contexts_rule preparation.rule_prompt [] in
   let variables=(working_contexts_rule_variable,String.trim rule)
@@ -507,7 +518,7 @@ let validate_admission_preparation ~batch ~retirement ~input preparation =
     Prompt_names.librarian preparation.prompt preparation.variables in
   let* actual_schema=Lane_addon_action.canonical preparation.output_schema in
   let* expected_schema=Lane_addon_action.canonical (admission_schema ()) in
-  if String.trim rule<>"" && preparation.rendered_prompt=rendered ^ admission_suffix ~batch ~retirement
+  if String.trim rule<>"" && preparation.rendered_prompt=rendered ^ suffix
     && Yojson.Safe.equal actual_schema expected_schema
   then Ok () else Error "Original Librarian prompt/schema differs from its captured template and input"
 let prepare_admission ~batch ~retirement input =
@@ -522,8 +533,13 @@ let prepare_admission ~batch ~retirement input =
     ::Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
       ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap input in
   let* prompt,rendered=Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian variables in
-  let preparation={policy;rule_prompt;prompt;variables;
-    rendered_prompt=rendered ^ admission_suffix ~batch ~retirement;output_schema=admission_schema ()} in
+  let* admission_prompt,_=Prompt_registry.resolve_and_render_prompt_template
+    Prompt_names.librarian_admission_policy [] in
+  let* retirement_prompt,_=Prompt_registry.resolve_and_render_prompt_template
+    Prompt_names.librarian_retirement_policy [] in
+  let* suffix=admission_suffix ~admission_prompt ~retirement_prompt ~batch ~retirement in
+  let preparation={policy;rule_prompt;prompt;admission_prompt;retirement_prompt;variables;
+    rendered_prompt=rendered ^ suffix;output_schema=admission_schema ()} in
   let* ()=validate_admission_preparation ~batch ~retirement ~input preparation in
   Ok preparation
 

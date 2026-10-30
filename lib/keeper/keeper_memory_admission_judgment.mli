@@ -48,9 +48,10 @@ val output_schema : memory_schema:Yojson.Safe.t -> Yojson.Safe.t
     schema. Nullable claim fields are required; decoding enforces their
     outcome-specific meaning and complete candidate coverage. *)
 
-val prompt_suffix : batch:Keeper_memory_admission_queue.batch -> string
-(** Describes the separate candidate authority and strict response wrapper,
-    carrying original candidate payloads as untrusted proposed data. *)
+val prompt_suffix : instructions:string -> batch:Keeper_memory_admission_queue.batch -> string
+(** Frame the supplied managed policy with original candidate payloads as
+    untrusted proposed data. The preparation owner validates and captures the
+    instruction resolution before calling this pure formatter. *)
 
 type retirement_evidence =
   | Available of Keeper_memory_os_current.archived_fact list
@@ -58,8 +59,9 @@ type retirement_evidence =
 (** Read-only historical evidence; unavailable history is never an empty archive. *)
 
 val retirement_prompt_suffix :
-  batch:Keeper_memory_admission_queue.batch -> retirement_evidence -> string
-(** Include only originals with the exact memory identity of a pending candidate,
+  instructions:string -> batch:Keeper_memory_admission_queue.batch -> retirement_evidence -> string
+(** Frame the supplied managed retirement policy with originals that have
+    the exact memory identity of a pending candidate,
     linked to its request IDs. No matching originals produces the empty string.
     The archive omits current identities, later re-additions or absorptions and
     removals without explicit reasons. Absence proves no historical negative.

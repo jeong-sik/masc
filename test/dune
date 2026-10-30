@@ -147,7 +147,7 @@
 (test
  (name test_keeper_librarian_absorb_gate)
  (modules test_keeper_librarian_absorb_gate)
- (deps fixtures/librarian_statements_golden.json)
+ (deps fixtures/librarian_statements_golden.json ../config/prompts/librarian.md)
  (libraries alcotest masc masc_test_deps exact_output_fixture
   librarian_run_tui_reading eio_main mtime.clock.os))
 

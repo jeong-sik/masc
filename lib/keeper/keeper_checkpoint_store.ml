@@ -119,10 +119,13 @@ let decode_head_off_scheduler ~session_dir ~memo (content : string) :
       Objects.load memo ~read_object:(Keeper_checkpoint_object_store.read ~session_dir) head
       |> Result.map (fun checkpoint -> head, checkpoint))
 
-let agent_core_history_snapshot_id_of_checkpoint (ckpt : Agent_core.Checkpoint.t) : string =
-  let created_ms = max 0 (int_of_float (ckpt.created_at *. 1000.0)) in
+let agent_core_history_snapshot_id_of_created_at (created_at : float) : string =
+  let created_ms = max 0 (int_of_float (created_at *. 1000.0)) in
   Printf.sprintf "%s%013d%s"
     agent_core_history_prefix created_ms agent_core_history_suffix
+
+let agent_core_history_snapshot_id_of_checkpoint (ckpt : Agent_core.Checkpoint.t) : string =
+  agent_core_history_snapshot_id_of_created_at ckpt.created_at
 
 let prune_agent_core_history ~(session_dir : string) ~(retained : int) : unit =
   let files = list_agent_core_history_files ~session_dir in
@@ -421,6 +424,69 @@ let load_agent_core_history_file ~(session_dir : string) ~(snapshot_id : string)
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> Error (Io_error (Printexc.to_string exn))
     else Error Not_found)
+
+type 'a checkpoint_summary =
+  { created_at : float
+  ; message_count : int
+  ; system_prompt : string option
+  ; latest : 'a option
+  }
+
+(* A summary must isolate the same read/decode failures as the full load.
+   Cancellation still belongs to the caller and must not become a row error. *)
+let protect_summary_read ~on_exception f =
+  try f () with
+  | Eio.Cancel.Cancelled _ as exn ->
+    Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+  | exn -> Error (on_exception exn)
+
+let canonical_read_exception = function
+  | Unix.Unix_error (errno, _, _) as exn ->
+    Read_failed { cause = Os_error errno; detail = Printexc.to_string exn }
+  | exn -> Read_failed { cause = Read_raised; detail = Printexc.to_string exn }
+
+(* The header's session and what a list shows, from the head and the few
+   objects it takes, decoded off the scheduler as a load is. *)
+let summarize_head_bytes ~session_dir ~latest bytes =
+  offload_checkpoint_cpu (fun () ->
+    let read_object = Keeper_checkpoint_object_store.read ~session_dir in
+    Result.bind (Objects.head_of_string bytes) (fun (head : Objects.head) ->
+      Result.bind (Objects.system_prompt ~read_object head) (fun system_prompt ->
+        Result.map
+          (fun latest ->
+             ( head.header.session_id
+             , { created_at = head.header.created_at
+               ; message_count = Objects.message_count head.history
+               ; system_prompt
+               ; latest
+               } ))
+          (Objects.find_last ~read_object head latest))))
+  |> Result.map_error classify_objects_error
+
+let summarize_canonical ~session_dir ~session_id ~latest =
+  if not (leaf_is_real_segment session_id) then
+    Error (Store_error "session_id is not a real path segment")
+  else
+    protect_summary_read ~on_exception:canonical_read_exception (fun () ->
+      Result.bind
+        (read_checkpoint_bytes ~session_dir (agent_core_checkpoint_path ~session_dir ~session_id))
+        (fun bytes ->
+           Result.bind (summarize_head_bytes ~session_dir ~latest bytes) (fun (named, summary) ->
+             if String.equal named session_id
+             then Ok summary
+             else
+               Error
+                 (Store_error
+                    (Printf.sprintf "the canonical of session %s names session %s" session_id named)))))
+
+let summarize_agent_core_history_file ~session_dir ~snapshot_id ~latest =
+  (* As in [load_agent_core_history_file], a non-segment id is absent. *)
+  if not (leaf_is_real_segment snapshot_id) then Error Not_found
+  else
+    protect_summary_read ~on_exception:(fun exn -> Io_error (Printexc.to_string exn)) (fun () ->
+      Result.bind
+        (read_checkpoint_bytes ~session_dir (agent_core_history_path ~session_dir ~snapshot_id))
+        (fun bytes -> Result.map snd (summarize_head_bytes ~session_dir ~latest bytes)))
 
 (* ── Canonical summary (RFC main-domain-scheduler-latency §8 P4b) ────
    The scalars other paths need from the canonical checkpoint — session_id
@@ -815,8 +881,8 @@ let load_agent_core_for_save ~keeper_name ~session_dir ~session_id =
 
 (** Message count of the canonical checkpoint. Answered from the canonical
     summary while the file on disk is the one the summary was taken from;
-    otherwise the checkpoint is loaded and parsed once, which fills the
-    summary. [Ok None] when there is no checkpoint. *)
+    otherwise from the head on disk, with no object read (RFC-0476 §3.5).
+    [Ok None] when there is no checkpoint. *)
 let canonical_message_count ~(session_dir : string) ~(session_id : string)
   : (int option, checkpoint_load_error) result =
   if not (leaf_is_real_segment session_id) then
@@ -826,8 +892,12 @@ let canonical_message_count ~(session_dir : string) ~(session_id : string)
     match cached_summary ~canonical_path with
     | Some summary -> Ok (Some summary.summary_message_count)
     | None ->
-      (match load_agent_core ~session_dir ~session_id with
-       | Ok checkpoint -> Ok (Some (List.length checkpoint.messages))
+      (match
+         protect_summary_read ~on_exception:canonical_read_exception (fun () ->
+           Result.bind (read_checkpoint_bytes ~session_dir canonical_path) (fun bytes ->
+             head_of_bytes_off_scheduler bytes |> Result.map_error classify_objects_error))
+       with
+       | Ok head -> Ok (Some (Objects.message_count head.history))
        | Error Not_found -> Ok None
        | Error
            (( Store_error _

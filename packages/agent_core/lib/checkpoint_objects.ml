@@ -68,6 +68,7 @@ type segment =
 type header =
   { session_id : string
   ; turn_count : int
+  ; created_at : float
   }
 
 type header_objects =
@@ -502,7 +503,11 @@ let plan_save memo ?previous ?(absent = []) boundary (cp : Checkpoint_types.t) =
   let segment, turns, segments = pack kept_segment closed [] in
   remember_plan memo ~shared messages entries chains;
   let head =
-    { header = { session_id = decoded_header.session_id; turn_count = decoded_header.turn_count }
+    { header =
+        { session_id = decoded_header.session_id
+        ; turn_count = decoded_header.turn_count
+        ; created_at = decoded_header.created_at
+        }
     ; header_json
     ; header_objects
     ; history = { segment; turns; open_messages }
@@ -689,7 +694,28 @@ let history_of_json = function
     let* open_messages = open_of_json ~what fields in
     if List.length turns >= turns_per_segment
     then Error (Printf.sprintf "history.turns holds %d turns, a segment's worth or more" (List.length turns))
-    else Ok { segment; turns; open_messages }
+    else (
+      (* Each part was checked as nonnegative above. Check the sum without
+         overflowing before [message_count] is used to answer from the head. *)
+      let add_count total count =
+        if count > max_int - total
+        then Error "history message count exceeds the integer range"
+        else Ok (total + count)
+      in
+      let initial =
+        match segment with
+        | None -> 0
+        | Some segment -> segment.segment_messages
+      in
+      let* closed =
+        List.fold_left
+          (fun sum (turn : turn) ->
+             let* total = sum in
+             add_count total turn.messages)
+          (Ok initial) turns
+      in
+      let* (_ : int) = add_count closed (List.length open_messages) in
+      Ok { segment; turns; open_messages })
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
     Error "history must be an object"
 ;;
@@ -786,7 +812,11 @@ let head_of_fields fields =
              (match checkpoint.messages with
               | [] ->
                 Ok
-                  { header = { session_id = checkpoint.session_id; turn_count = checkpoint.turn_count }
+                  { header =
+                      { session_id = checkpoint.session_id
+                      ; turn_count = checkpoint.turn_count
+                      ; created_at = checkpoint.created_at
+                      }
                   ; header_json
                   ; header_objects
                   ; history
@@ -868,7 +898,10 @@ let bundle_entries ~bundle bytes =
         then Ok (List.rev rev)
         else Error (invalid "bytes follow the last listed message")
       | (digest, length) :: rest ->
-        if offset + length >= String.length bytes
+        (* [length] comes from the bundle header. Compare against the
+           remaining bytes before adding it to [offset]: a large valid JSON
+           integer can otherwise overflow and make the index negative. *)
+        if length >= String.length bytes - offset
         then Error (invalid "a listed message runs past the end of the bundle")
         else if not (Char.equal bytes.[offset + length] '\n')
         then Error (invalid (Printf.sprintf "the message at byte %d does not end its line" offset))
@@ -884,17 +917,73 @@ let bundle_entries ~bundle bytes =
     slices (newline + 1) [] header
 ;;
 
+let header_object ~read_object digest =
+  let* bytes = read_checked ~read_object digest in
+  match Yojson.Safe.from_string bytes with
+  | exception Yojson.Json_error detail ->
+    Error (Header_object_invalid { digest; detail = "not JSON: " ^ detail })
+  | json -> Ok json
+;;
+
+let system_prompt ~read_object head =
+  let digest = head.header_objects.system_prompt in
+  let* json = header_object ~read_object digest in
+  match json with
+  | `Null -> Ok None
+  | `String prompt -> Ok (Some prompt)
+  | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ ->
+    Error (Header_object_invalid { digest; detail = "a system prompt is a string or null" })
+;;
+
+let find_last ~read_object head find =
+  let first_found = function
+    | Some _ as found -> fun (_ : unit -> ('a option, load_error) result) -> Ok found
+    | None -> fun next -> next ()
+  in
+  let rec in_open = function
+    | [] -> Ok None
+    | digest :: older ->
+      let* bytes = read_checked ~read_object digest in
+      let* message = decode_message ~digest bytes in
+      first_found (find message) (fun () -> in_open older)
+  in
+  let rec in_turns = function
+    | [] -> Ok None
+    | (turn : turn) :: older ->
+      let* bytes = read_checked ~read_object turn.bundle in
+      let* entries = bundle_entries ~bundle:turn.bundle bytes in
+      let held = List.length entries in
+      if held <> turn.messages
+      then
+        Error
+          (Turn_mismatch
+             { bundle = turn.bundle
+             ; detail = Printf.sprintf "it holds %d messages, the turn names %d" held turn.messages
+             })
+      else
+        first_found
+          (List.find_map (fun (entry : entry) -> find entry.decoded) (List.rev entries))
+          (fun () -> in_turns older)
+  in
+  let rec in_segments = function
+    | None -> Ok None
+    | Some digest ->
+      let* bytes = read_checked ~read_object digest in
+      let* segment = segment_of_string ~digest bytes in
+      let* found = in_turns (List.rev segment.segment_turns) in
+      first_found found (fun () -> in_segments segment.previous)
+  in
+  let* found = in_open (List.rev head.history.open_messages) in
+  first_found found (fun () ->
+    let* found = in_turns (List.rev head.history.turns) in
+    first_found found (fun () ->
+      in_segments (Option.map (fun (segment : segment_ref) -> segment.segment) head.history.segment)))
+;;
+
 let load memo ~read_object head =
   let next = Entries.create 0 in
-  let header_object digest =
-    let* bytes = read_checked ~read_object digest in
-    match Yojson.Safe.from_string bytes with
-    | exception Yojson.Json_error detail ->
-      Error (Header_object_invalid { digest; detail = "not JSON: " ^ detail })
-    | json -> Ok json
-  in
-  let* system_prompt = header_object head.header_objects.system_prompt in
-  let* tools = header_object head.header_objects.tools in
+  let* system_prompt = header_object ~read_object head.header_objects.system_prompt in
+  let* tools = header_object ~read_object head.header_objects.tools in
   (* The segments' turns, oldest first, read from the last segment back. *)
   let rec segment_turns later = function
     | None -> Ok later

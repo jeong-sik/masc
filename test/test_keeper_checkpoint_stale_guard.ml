@@ -2044,6 +2044,130 @@ let test_summary_answers_watermark_and_count_without_reading () =
   | Error e -> fail ("watermark read the unreadable file: " ^ e)
 ;;
 
+let rec remove_tree path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then (
+      Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path)
+    else Unix.unlink path
+
+(* Without a summary the message count is the head's: no object is read
+   (RFC-0476 §3.5). *)
+let test_a_message_count_without_a_summary_reads_no_object () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "count-from-head" in
+  ignore
+    (Masc_test_deps.write_checkpoint_head ~session_dir
+       ~path:(Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid)
+       (make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"one")
+     : string);
+  remove_tree (Filename.concat session_dir Keeper_checkpoint_object_store.dirname);
+  match Keeper_checkpoint_store.canonical_message_count ~session_dir ~session_id:sid with
+  | Ok (Some count) -> check int "the head's message count" 2 count
+  | Ok None -> fail "the head was not found"
+  | Error error ->
+    fail ("the count read the objects: " ^ Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+;;
+
+let test_a_message_count_refuses_an_overflowing_head () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "overflowing-head-count" in
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
+  ignore
+    (Masc_test_deps.write_checkpoint_head ~session_dir ~path
+       (make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"one") : string);
+  let digest = `String (String.make 64 'a') in
+  let history =
+    `Assoc
+      [ "segment", `Null
+      ; "turns", `List [ `Assoc [ "bundle", digest; "messages", `Int max_int; "chain", digest ] ]
+      ; "open", `List [ digest ]
+      ]
+  in
+  let bytes =
+    match Yojson.Safe.from_string (Fs_compat.load_file path) with
+    | `Assoc fields ->
+      `Assoc (List.map (fun (name, value) -> if String.equal name "history" then name, history else name, value) fields)
+      |> Yojson.Safe.to_string
+    | _ -> fail "saved head must be an object"
+  in
+  let channel = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel bytes);
+  match Keeper_checkpoint_store.canonical_message_count ~session_dir ~session_id:sid with
+  | Error (Keeper_checkpoint_store.Parse_error _) -> ()
+  | Ok _ | Error _ -> fail "an overflowing head must be refused as a parse error"
+;;
+
+(* A list row comes from the head and the newest message with text; a
+   canonical that names another session is refused. *)
+let test_a_summary_shows_the_head_and_the_newest_text () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "summary-row" in
+  save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:3 ~marker:"newest") "save";
+  let latest (message : Agent_core.Types.message) =
+    match Agent_core.Types.text_of_message message with
+    | "" -> None
+    | text -> Some text
+  in
+  (match Keeper_checkpoint_store.summarize_canonical ~session_dir ~session_id:sid ~latest with
+   | Ok summary ->
+     check int "message count" 2 summary.message_count;
+     check (option string) "newest text" (Some "newest") summary.latest;
+     check (float 0.) "creation time" 1000.0 summary.created_at;
+     check (option string) "no system prompt" None summary.system_prompt
+   | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error));
+  let other = "summary-other" in
+  ignore
+    (Masc_test_deps.write_checkpoint_head ~session_dir
+       ~path:(Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:other)
+       (make_checkpoint ~session_id:sid ~turn_count:3 ~marker:"newest")
+     : string);
+  match Keeper_checkpoint_store.summarize_canonical ~session_dir ~session_id:other ~latest with
+  | Error (Keeper_checkpoint_store.Store_error _) -> ()
+  | Error error ->
+    fail ("refused as another error: " ^ Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+  | Ok _ -> fail "a canonical of another session was shown"
+;;
+
+(* An exception in one preview must remain an error for that row, while a
+   cancellation still stops its caller. *)
+let test_a_summary_isolates_exceptions_and_propagates_cancellation () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let session_id = "summary-exception" in
+  let snapshot_id = "summary-exception-archive" in
+  let checkpoint = make_checkpoint ~session_id ~turn_count:3 ~marker:"newest" in
+  let canonical = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id in
+  let archive = Keeper_checkpoint_store.agent_core_history_path ~session_dir ~snapshot_id in
+  ignore (Masc_test_deps.write_checkpoint_head ~session_dir ~path:canonical checkpoint : string);
+  ignore (Masc_test_deps.write_checkpoint_head ~session_dir ~path:archive checkpoint : string);
+  let raises _ = raise (Failure "preview failed") in
+  (match Keeper_checkpoint_store.summarize_canonical ~session_dir ~session_id ~latest:raises with
+   | Error (Keeper_checkpoint_store.Read_failed { cause = Keeper_checkpoint_store.Read_raised; _ }) -> ()
+   | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+   | Ok _ -> fail "a canonical preview exception became a success");
+  (match Keeper_checkpoint_store.summarize_agent_core_history_file ~session_dir ~snapshot_id ~latest:raises with
+   | Error (Keeper_checkpoint_store.Io_error _) -> ()
+   | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+   | Ok _ -> fail "an archive preview exception became a success");
+  let cancel _ = raise (Eio.Cancel.Cancelled (Failure "preview cancelled")) in
+  (match Keeper_checkpoint_store.summarize_agent_core_history_file ~session_dir ~snapshot_id ~latest:cancel with
+   | exception Eio.Cancel.Cancelled cause ->
+     check bool "cancellation cause is retained" true (cause = Failure "preview cancelled")
+   | Error _ | Ok _ -> fail "archive cancellation was swallowed")
+;;
+
 (* A save reaches the canonical through the session root's resolved path. A
    reader handed the root's symlinked spelling finds the summary that save
    published, without reading the file. *)
@@ -3320,5 +3444,13 @@ let () =
             test_a_bundle_lost_behind_a_segment_is_written_again;
           test_case "one keeper name in two workspaces keeps both values" `Quick
             test_one_keeper_name_in_two_workspaces_keeps_both_values;
+          test_case "a message count without a summary reads no object" `Quick
+            test_a_message_count_without_a_summary_reads_no_object;
+          test_case "a message count refuses an overflowing head" `Quick
+            test_a_message_count_refuses_an_overflowing_head;
+          test_case "a summary shows the head and the newest text" `Quick
+            test_a_summary_shows_the_head_and_the_newest_text;
+          test_case "a summary isolates exceptions and propagates cancellation" `Quick
+            test_a_summary_isolates_exceptions_and_propagates_cancellation;
         ] );
     ]

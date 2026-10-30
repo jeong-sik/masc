@@ -811,6 +811,131 @@ let test_checkpoint_inventory_preserves_partial_load_failures () =
     (failed |> member "error_detail" |> to_string |> String.length > 0)
 ;;
 
+(* An archive can name a malformed bundle under its actual digest. A damaged
+   entry must not prevent the current checkpoint or another archive appearing
+   in the dashboard's HTTP response. *)
+let test_checkpoint_inventory_isolates_overflowing_bundle () =
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  with_temp_dir @@ fun dir ->
+  let module Store = Keeper_checkpoint_store in
+  let module Objects = Agent_core.Checkpoint_objects in
+  let state = Mcp_server.For_testing.create_state ~base_path:dir in
+  let config = Mcp_server.workspace_config state in
+  let keeper_name = "checkpoint-overflowing-archive" in
+  let trace_id = "trace-checkpoint-overflowing-archive" in
+  Keeper_meta_store.replace_snapshot config (make_checkpoint_inventory_meta ~name:keeper_name ~trace_id)
+  |> Result.map_error (fun detail -> fail detail) |> Result.get_ok;
+  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+  let checkpoint turn text =
+    { (make_inventory_checkpoint ~session_id:trace_id ~turn_count:turn ~created_at:(float_of_int turn)) with
+      Agent_core.Checkpoint.messages = [ Agent_core.Types.user_msg text ] }
+  in
+  let good = checkpoint 1 "healthy archive" in
+  let bad = checkpoint 2 "damaged archive" in
+  let current = checkpoint 3 "healthy current" in
+  let good_id = Store.agent_core_history_snapshot_id_of_checkpoint good in
+  let bad_id = Store.agent_core_history_snapshot_id_of_checkpoint bad in
+  let archive_path snapshot_id = Store.agent_core_history_path ~session_dir ~snapshot_id in
+  ignore (Masc_test_deps.write_checkpoint_head ~session_dir ~path:(archive_path good_id) good : string);
+  let bad_head = Masc_test_deps.write_checkpoint_head ~session_dir ~path:(archive_path bad_id) bad in
+  ignore
+    (Masc_test_deps.write_checkpoint_head ~session_dir
+       ~path:(Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id) current : string);
+  let bundle =
+    Printf.sprintf {|{"messages":[{"sha256":"%s","bytes":%d}]}|}
+      (String.make 64 'a') max_int ^ "\n"
+  in
+  let digest = Objects.digest_of_bytes bundle in
+  (match Keeper_checkpoint_object_store.write ~session_dir [ digest, bundle ] with
+   | Ok _ -> ()
+   | Error error -> fail (Keeper_checkpoint_object_store.write_error_to_string error));
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string bad_head in
+  let history = json |> member "history" in
+  let turn =
+    match history |> member "turns" |> to_list with
+    | [ turn ] -> turn
+    | _ -> fail "damaged fixture must have one closed turn"
+  in
+  let turn = json_with_field turn "bundle" (`String (digest :> string)) in
+  let turn = json_with_field turn "messages" (`Int 1) in
+  let history = json_with_field history "turns" (`List [ turn ]) in
+  let bad_head = json_with_field json "history" history |> Yojson.Safe.to_string in
+  Fs_compat.save_file (archive_path bad_id) bad_head;
+  (match Store.summarize_agent_core_history_file ~session_dir ~snapshot_id:bad_id ~latest:(fun _ -> None) with
+   | Error (Store.Objects_invalid (Objects.Bundle_invalid _)) -> ()
+   | Ok _ | Error _ -> fail "the archive must reach the malformed bundle");
+  let status, response = get_checkpoint_inventory state ~keeper_name in
+  check int "inventory responds successfully" 200 status;
+  check string "current remains available" "available" (response |> member "current_status" |> to_string);
+  check string "current preview remains visible" "healthy current"
+    (response |> member "current" |> member "latest_preview" |> to_string);
+  (match response |> member "history" |> to_list with
+   | [ row ] ->
+     check string "healthy archive remains visible" good_id (row |> member "snapshot_id" |> to_string);
+     check string "healthy archive preview remains visible" "healthy archive" (row |> member "latest_preview" |> to_string)
+   | _ -> fail "expected only the healthy archive in history");
+  match response |> member "history_errors" |> to_list with
+  | [ row ] ->
+    check string "only damaged archive failed" bad_id (row |> member "snapshot_id" |> to_string);
+    check string "damaged bundle is typed" "objects_invalid" (row |> member "error_kind" |> to_string)
+  | _ -> fail "expected only the damaged archive in history_errors"
+;;
+
+(* The rows come from the heads and the newest message with text
+   (RFC-0476 §3.5). The archive entry of the current checkpoint is not listed
+   again. *)
+let test_checkpoint_inventory_rows_come_from_the_heads () =
+  with_temp_dir @@ fun dir ->
+  let config = Workspace.default_config dir in
+  let keeper_name = "checkpoint-rows" in
+  let trace_id = "trace-checkpoint-rows" in
+  Keeper_meta_store.replace_snapshot config (make_checkpoint_inventory_meta ~name:keeper_name ~trace_id)
+  |> Result.map_error (fun detail -> fail ("checkpoint inventory meta write failed: " ^ detail))
+  |> Result.get_ok;
+  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+  let older =
+    { (make_inventory_checkpoint ~session_id:trace_id ~turn_count:1 ~created_at:1.0) with
+      Agent_core.Checkpoint.messages = [ Agent_core.Types.user_msg "older question" ] }
+  in
+  ignore
+    (Masc_test_deps.write_checkpoint_head ~session_dir
+       ~path:
+         (Keeper_checkpoint_store.agent_core_history_path ~session_dir
+            ~snapshot_id:(Keeper_checkpoint_store.agent_core_history_snapshot_id_of_checkpoint older))
+       older
+     : string);
+  let current =
+    { (make_inventory_checkpoint ~session_id:trace_id ~turn_count:2 ~created_at:2.0) with
+      Agent_core.Checkpoint.system_prompt = Some "be brief"
+    ; messages =
+        [ Agent_core.Types.user_msg "a question"; Agent_core.Types.assistant_msg "the newest reply" ]
+    }
+  in
+  (match
+     Keeper_checkpoint_store.save_agent_core_classified
+       ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~history_retained:3 ~session_dir current
+   with
+   | Ok _ -> ()
+   | Error detail -> fail ("checkpoint inventory current save failed: " ^ detail));
+  let status, json = Checkpoints.inventory_json config keeper_name in
+  check bool "inventory is HTTP 200" true (status = `OK);
+  let open Yojson.Safe.Util in
+  let row = json |> member "current" in
+  check int "current message count" 2 (row |> member "message_count" |> to_int);
+  check string "current newest text" "the newest reply" (row |> member "latest_preview" |> to_string);
+  check bool "current system prompt" true (row |> member "system_prompt_present" |> to_bool);
+  check (float 0.) "current creation time" 2.0 (row |> member "created_at" |> to_number);
+  match json |> member "history" |> to_list with
+  | [ archived ] ->
+    check int "archived message count" 1 (archived |> member "message_count" |> to_int);
+    check string "archived newest text" "older question"
+      (archived |> member "latest_preview" |> to_string);
+    check bool "archived system prompt" false (archived |> member "system_prompt_present" |> to_bool)
+  | rows -> failf "expected the older archive entry alone, got %d rows" (List.length rows)
+;;
+
 let test_checkpoint_inventory_projects_missing_current () =
   with_temp_dir @@ fun dir ->
   let config = Workspace.default_config dir in
@@ -1704,10 +1829,14 @@ let () =
             "preserves partial history failures with HTTP 200"
             `Quick
             test_checkpoint_inventory_preserves_partial_load_failures
+        ; test_case "isolates an overflowing archived bundle" `Quick
+            test_checkpoint_inventory_isolates_overflowing_bundle
         ; test_case
             "projects missing current without failing inventory"
             `Quick
             test_checkpoint_inventory_projects_missing_current
+        ; test_case "rows come from the heads" `Quick
+            test_checkpoint_inventory_rows_come_from_the_heads
         ; test_case
             "input wait follows exact same-turn replacement and settlement"
             `Quick

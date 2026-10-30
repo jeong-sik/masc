@@ -8,28 +8,28 @@ let stat_json_of_path (path : string) =
   | Unix.Unix_error _ -> `Null
 ;;
 
+(* Read from the head and the few objects the row needs (RFC-0476 §3.5). *)
 let agent_core_checkpoint_summary_json
       ~(source_kind : string)
       ~(snapshot_id : string)
       ~(path : string)
       ~(is_current : bool)
-      (checkpoint : Agent_core.Checkpoint.t)
+      (summary : string Keeper_checkpoint_store.checkpoint_summary)
   =
-  let messages = checkpoint.messages in
   `Assoc
     [ "snapshot_id", `String snapshot_id
     ; "source_kind", `String source_kind
     ; "is_current", `Bool is_current
     ; "status", `String "available"
     ; "path", `String path
-    ; "created_at", `Float checkpoint.created_at
-    ; "message_count", `Int (List.length messages)
+    ; "created_at", `Float summary.created_at
+    ; "message_count", `Int summary.message_count
     ; ( "system_prompt_present"
       , `Bool
-          (match checkpoint.system_prompt with
+          (match summary.system_prompt with
            | Some prompt -> Option.is_some (String_util.trim_nonempty prompt)
            | None -> false) )
-    ; ( "latest_preview", Json_util.string_opt_to_json (latest_preview_of_messages messages) )
+    ; "latest_preview", Json_util.string_opt_to_json summary.latest
     ; "file_stat", stat_json_of_path path
     ]
 ;;
@@ -114,28 +114,6 @@ let current_checkpoint_error_json
       ]
 ;;
 
-let checkpoint_ref_load_error_json
-      (error : Keeper_checkpoint_store.checkpoint_ref_load_error)
-  =
-  match error with
-  | Ref_not_found -> `Assoc [ "kind", `String "not_found" ]
-  | Ref_read_failed error ->
-    `Assoc [ "kind", `String "read_failed"; "cause", checkpoint_load_error_json error ]
-  | Ref_identity_invalid error ->
-    `Assoc
-      [ "kind", `String "identity_invalid"
-      ; "detail", `String (Keeper_checkpoint_store.checkpoint_identity_error_to_string error)
-      ]
-  | Ref_session_mismatch { expected; actual } ->
-    `Assoc
-      [ "kind", `String "session_mismatch"
-      ; "expected", `String (Keeper_id.Trace_id.to_string expected)
-      ; "actual", `String (Keeper_id.Trace_id.to_string actual)
-      ]
-  | Ref_lock_failed detail ->
-    `Assoc [ "kind", `String "lock_failed"; "detail", `String detail ]
-;;
-
 let checkpoint_load_failure_json
       ~(source_kind : string)
       ~(snapshot_id : string)
@@ -168,38 +146,32 @@ let inventory_json (config : Workspace.config) (name : string)
     let current_path =
       Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id
     in
-    (* Canonical summary and reference come from one exact read. A
-       concurrent replacement cannot lend its identity to another payload. *)
-    let snapshot_result =
-      Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id
-    in
     let current_json, current_history_snapshot_id, current_status, current_error =
-      match snapshot_result with
-      | Ok snapshot ->
-        let checkpoint = Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot in
-        let current_history_snapshot_id =
-          Keeper_checkpoint_store.agent_core_history_snapshot_id_of_checkpoint checkpoint
-        in
+      match
+        Keeper_checkpoint_store.summarize_canonical ~session_dir ~session_id:trace_id
+          ~latest:preview_of_message
+      with
+      | Ok summary ->
         agent_core_checkpoint_summary_json
           ~source_kind:"agent_core_current"
           ~snapshot_id:(Filename.basename current_path)
           ~path:current_path
           ~is_current:true
-          checkpoint
-        |> fun json -> Some json, current_history_snapshot_id, "available", `Null
-      | Error Ref_not_found -> None, "", "missing", `Null
-      | Error (Ref_read_failed error) ->
+          summary
+        |> fun json ->
+        ( Some json
+        , Keeper_checkpoint_store.agent_core_history_snapshot_id_of_created_at summary.created_at
+        , "available"
+        , `Null )
+      | Error error ->
         let status =
           match error with
-          | Keeper_checkpoint_store.Not_found
-          | Superseded_version _ -> "missing"
+          | Keeper_checkpoint_store.Not_found | Superseded_version _ -> "missing"
           | Newer_version _ | Store_error _ | Parse_error _ | Io_error _
           | Read_failed _ | Agent_core_error _ | Objects_invalid _ ->
             "unavailable"
         in
         None, "", status, current_checkpoint_error_json error
-      | Error ((Ref_identity_invalid _ | Ref_session_mismatch _ | Ref_lock_failed _) as error) ->
-        None, "", "unavailable", checkpoint_ref_load_error_json error
     in
     let history_json, history_errors =
       Keeper_checkpoint_store.list_agent_core_history_files ~session_dir
@@ -211,15 +183,16 @@ let inventory_json (config : Workspace.config) (name : string)
                Keeper_checkpoint_store.agent_core_history_path ~session_dir ~snapshot_id
              in
              match
-               Keeper_checkpoint_store.load_agent_core_history_file ~session_dir ~snapshot_id
+               Keeper_checkpoint_store.summarize_agent_core_history_file ~session_dir ~snapshot_id
+                 ~latest:preview_of_message
              with
-             | Ok checkpoint ->
+             | Ok summary ->
                ( agent_core_checkpoint_summary_json
                    ~source_kind:"agent_core_history"
                    ~snapshot_id
                    ~path
                    ~is_current:false
-                   checkpoint
+                   summary
                  :: available
                , failures )
              | Error error ->

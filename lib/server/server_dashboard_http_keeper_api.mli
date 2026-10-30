@@ -111,7 +111,7 @@ val handle_keeper_board_attention_quarantine_recovery_post :
 include module type of Server_dashboard_http_keeper_api_types
 
 (** Trajectory preview helpers (trim_to_opt / truncate_text /
-    latest_preview_of_messages)
+    preview_of_message)
     moved to Server_dashboard_http_keeper_api_types — re-exported via
     [include module type of] above. *)
 

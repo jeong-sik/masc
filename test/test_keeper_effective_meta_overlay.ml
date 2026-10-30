@@ -1008,6 +1008,48 @@ let test_status_keeps_short_answers_and_excludes_internal_sources () =
   Alcotest.(check (list string)) "persisted answers survive source-based history selection"
     answers visible
 
+(* The status's message count is the head's: it holds with the messages'
+   objects gone (RFC-0476 §3.5). *)
+let test_status_message_count_reads_the_head () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "status-message-count" in
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"docker"
+    ~instructions:"count from the head";
+  let config = Workspace.default_config base in
+  let meta = seed_runtime_meta config name in
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let session_dir = Masc.Keeper_types_support.keeper_session_dir config trace_id in
+  let checkpoint : Agent_core.Checkpoint.t =
+    { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
+    ; session_id = trace_id; agent_name = name; model = "test-model"; system_prompt = None
+    ; messages = [ Agent_core.Types.user_msg "ask"; Agent_core.Types.assistant_msg "answer" ]
+    ; usage = Agent_core.Types.empty_usage; turn_count = 1; created_at = 1.0; tools = []
+    ; tool_choice = None; disable_parallel_tool_use = false; temperature = None; top_p = None
+    ; top_k = None; min_p = None; enable_thinking = None; preserve_thinking = None
+    ; response_format = Agent_core.Types.Off; reasoning_effort = None; cache_system_prompt = false
+    ; context = Agent_core.Context.create_sync (); pending_input = None; mcp_sessions = []
+    ; working_context = None }
+  in
+  ignore
+    (Masc_test_deps.write_checkpoint_head ~session_dir
+       ~path:(Masc.Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id)
+       checkpoint
+     : string);
+  let rec remove_tree path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Array.iter (fun entry -> remove_tree (Filename.concat path entry)) (Sys.readdir path);
+        Unix.rmdir path)
+      else Unix.unlink path
+  in
+  remove_tree (Filename.concat session_dir Masc.Keeper_checkpoint_object_store.dirname);
+  let status =
+    status_json_with_args config (`Assoc
+      [ "name", `String name; "fast", `Bool true; "include_context", `Bool true ])
+  in
+  Alcotest.(check (option int)) "the head's message count" (Some 2)
+    (json_assoc_field "context" status |> json_int_field "message_count")
+
 let test_status_reports_normalized_options () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "status-options-cache" in
@@ -1992,6 +2034,8 @@ let () =
             test_status_tracks_toml_overlay_changes;
           Alcotest.test_case "status reports normalized options"
             `Quick test_status_reports_normalized_options;
+          Alcotest.test_case "status message count reads the head"
+            `Quick test_status_message_count_reads_the_head;
           Alcotest.test_case "status keeps short answers and excludes internal sources"
             `Quick test_status_keeps_short_answers_and_excludes_internal_sources;
           Alcotest.test_case "fast status selects repository inspection explicitly"

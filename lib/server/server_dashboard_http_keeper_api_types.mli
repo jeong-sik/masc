@@ -140,9 +140,9 @@ val trim_to_opt : string -> string option
 val truncate_text : max_chars:int -> string -> string
 (** Truncate [text] to [max_chars] (UTF-8 safe). *)
 
-val latest_preview_of_messages :
-  Agent_core.Types.message list -> string option
-(** Latest assistant-text preview suitable for the dashboard list view. *)
+val preview_of_message : Agent_core.Types.message -> string option
+(** A non-system message's text, trimmed and cut for the dashboard list view;
+    [None] when it has none. The list shows the latest message that has one. *)
 
 (** {1 Keeper name validation} *)
 

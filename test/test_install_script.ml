@@ -658,8 +658,14 @@ let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_versio
   (* The cache already holds a packaged mirror (tarballs, checksums, receipt).
      Copying it wholesale removes the per-case python packaging cost that
      pushed the suite past its 601s deadline. *)
+  (* The bundle helper's verify_tree compares each installed dashboard
+     file's mtime against the receipt (release-dashboard-bundle.py), so the
+     copy must preserve the identity tree's timestamps: plain cp -R stamps
+     every copied file with now() and install.sh then rejects the case tree
+     with "installed dashboard digest or build mtime differs". -p also keeps
+     the mode the runtime-file checks in the receipt expect. *)
   check int "fixture copies the cached release mirror"
-    (Sys.command (Printf.sprintf "cp -R %s %s"
+    (Sys.command (Printf.sprintf "cp -R -p %s %s"
        (Filename.quote (Filename.concat cache ".release"))
        (Filename.quote base_path))) 0;
   let release_base_url = "file://" ^ Filename.concat base_path ".release" in
@@ -673,7 +679,7 @@ let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_versio
        managed release identity' assertions in the first failing case)"
       cached_releases;
   check int "fixture copies the installed release identities"
-    (Sys.command (Printf.sprintf "mkdir -p %s && cp -R %s %s"
+    (Sys.command (Printf.sprintf "mkdir -p %s && cp -R -p %s %s"
        (Filename.quote prefix)
        (Filename.quote cached_releases)
        (Filename.quote prefix))) 0;

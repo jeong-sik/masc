@@ -1,0 +1,40 @@
+Testing `tui frame timing'.
+This run has ID `0XX2OPMO'.
+
+  [OK]          summary          0   phase line counts every sample.
+  [OK]          summary          1   tags sort by frame count.
+  [OK]          summary          2   worst frames name their surface.
+  [OK]          summary          3   unsampled phase prints nothing.
+  [OK]          summary          4   ordinals count per phase.
+  [OK]          summary          5   stages retain the Build frame.
+  [OK]          summary          6   opt-in report has a short-run cap.
+  [OK]          summary          7   output stays with its present.
+> [FAIL]        summary          8   presentation keeps callback semantics.
+  [OK]          summary          9   raw time and original owner identities.
+  [OK]          summary         10   reset and dropped identity.
+  [OK]          summary         11   stale reading retains snapshot identity.
+  [OK]          summary         12   raw frame and stage prefix caps.
+  [OK]          summary         13   nested and overlapping stage coverage.
+  [OK]          summary         14   incomplete timer windows stay unknown.
+  [OK]          summary         15   coverage agrees with occupancy oracle.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        summary          8   presentation keeps callback semantics.    │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT stanza enables real recording path
+File "test_tui_frame_timing.ml", line 215, character 2:
+FAIL stanza enables real recording path
+
+   Expected: `true'
+   Received: `false'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Test_tui_frame_timing.test_present_keeps_callback_semantics in file "test_tui_frame_timing.ml", line 215, characters 2-80
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/frame-union-v1/build/_build/_tests/tui frame timing/summary.008.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/frame-union-v1/build/_build/_tests/tui frame timing'.
+1 failure! in 0.040s. 16 tests run.

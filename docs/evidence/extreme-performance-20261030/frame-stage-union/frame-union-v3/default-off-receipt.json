@@ -1,0 +1,40 @@
+{
+  "source_sha256": "0207679df61ead77de7cfefab394a75424331b4712c38596dd4d46f302425cc2",
+  "records": [
+    {
+      "command": [
+        "ocamlfind",
+        "ocamlopt",
+        "-w",
+        "+4+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "yojson,mtime.clock.os,unix,alcotest",
+        "-linkpkg",
+        "masc_tui_frame_timing.cmx",
+        "test_tui_frame_timing_default_off.ml",
+        "-o",
+        "default-off.exe"
+      ],
+      "returncode": 0,
+      "started_unix": 1793346321.27647,
+      "ended_unix": 1793346322.0252008,
+      "MASC_TUI_FRAME_TIMING": "",
+      "stdout": "default-off-0.stdout",
+      "stderr": "default-off-0.stderr"
+    },
+    {
+      "command": [
+        "./default-off.exe",
+        "--color=never"
+      ],
+      "returncode": 0,
+      "started_unix": 1793346322.025375,
+      "ended_unix": 1793346322.4822972,
+      "MASC_TUI_FRAME_TIMING": "",
+      "stdout": "default-off-1.stdout",
+      "stderr": "default-off-1.stderr"
+    }
+  ]
+}

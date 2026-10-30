@@ -426,31 +426,68 @@ module Stage_samples = struct
     in
     population_lines @ frame_lines @ cap_line
 
-  let residual_lines t frames =
-    let totals = Hashtbl.create 16 in
-    List.iter
-      (fun sample ->
-        match sample.frame, sample.ms with
-        | Some frame, Some ms ->
-            let prior = Option.value ~default:0.0 (Hashtbl.find_opt totals frame) in
-            Hashtbl.replace totals frame (prior +. ms)
-        | None, _ | _, None -> ())
-      t.samples;
+  type build_residual = { frame : int; uncovered_ns : int64 }
+  module Frame_map = Map.Make (Int)
+
+  let build_residuals t frames =
+    let by_frame =
+      List.fold_left (fun index (sample : sample) ->
+        match sample.frame with
+        | None -> index
+        | Some frame ->
+            Frame_map.update frame (function
+              | None -> Some [sample]
+              | Some prior -> Some (sample :: prior)) index)
+        Frame_map.empty t.samples
+    in
+    let windows_for (timing : Samples.timing) stages =
+      let rec collect windows = function
+        | [] -> Some windows
+        | sample :: rest ->
+            match sample.window, sample.ms with
+            | None, None -> collect windows rest
+            | None, Some _ -> None
+            | Some (started, completed), (None | Some _) ->
+                if started < timing.started_ns || completed > timing.completed_ns
+                   || completed < started
+                then None
+                else collect ((started, completed) :: windows) rest
+      in
+      collect [] stages
+    in
+    let uncovered (timing : Samples.timing) windows =
+      let windows = List.sort (fun (a, _) (b, _) -> Int64.compare a b) windows in
+      let rec cover until covered = function
+        | [] -> covered
+        | (started, completed) :: rest ->
+            if completed <= until then cover until covered rest
+            else cover completed
+                (Int64.add covered (Int64.sub completed (max until started))) rest
+      in
+      Int64.sub (Int64.sub timing.completed_ns timing.started_ns)
+        (cover timing.started_ns 0L windows)
+    in
     frames.Samples.samples
-    |> List.filter (fun (sample : Samples.sample) ->
-         sample.phase = Build
-         && Hashtbl.mem totals sample.ordinal
-         && (match t.first_dropped_frame with
-             | None -> true
-             | Some first -> sample.ordinal < first))
     |> List.rev
-    |> List.map (fun (sample : Samples.sample) ->
-         let measured =
-           Option.value ~default:0.0 (Hashtbl.find_opt totals sample.ordinal)
-         in
+    |> List.filter_map (fun (sample : Samples.sample) ->
+         match sample.phase, sample.timing, Frame_map.find_opt sample.ordinal by_frame with
+         | Build, Some timing, Some stages
+           when timing.started_ns >= 0L && timing.completed_ns >= timing.started_ns
+                && (match t.first_dropped_frame with
+                    | None -> true
+                    | Some first -> sample.ordinal < first) ->
+             (match windows_for timing stages with
+              | None | Some [] -> None
+              | Some windows -> Some {frame = sample.ordinal;
+                  uncovered_ns = uncovered timing windows})
+         | (Build | Present), (None | Some _), (None | Some _) -> None)
+
+  let residual_lines t frames =
+    build_residuals t frames
+    |> List.map (fun residual ->
          Printf.sprintf
            "  stage frame=%d name=unattributed ms=%.3f (includes timing overhead)"
-           sample.ordinal (max 0.0 (sample.ms -. measured)))
+           residual.frame (Int64.to_float residual.uncovered_ns /. 1e6))
 end
 
 let samples = ref Samples.empty

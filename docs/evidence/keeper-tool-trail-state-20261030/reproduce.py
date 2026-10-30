@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Compile actual trail sources against explicit event/redactor shims; never run Dune."""
 import argparse
+import gzip
 import pathlib
 import shutil
 import subprocess
@@ -26,7 +27,8 @@ def write(path, data):
 
 def common(path):
     path.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(here / 'keeper_chat_events.ml', path / 'keeper_chat_events.ml')
+    event_file = 'keeper_chat_events-initial.ml' if args.scenario == 'initial' else 'keeper_chat_events.ml'
+    shutil.copyfile(here / event_file, path / 'keeper_chat_events.ml')
     for source, name in [('lib/secret_patterns/secret_patterns.ml', 'secret_patterns.ml'),
                          ('lib/keeper/keeper_text_processing.ml', 'keeper_text_processing.ml')]:
         write(path / name, git_file(args.baseline, source))
@@ -37,9 +39,14 @@ def common(path):
 trail = 'lib/keeper/keeper_chat_tool_trail.ml'
 interface = 'lib/keeper/keeper_chat_tool_trail.mli'
 test_path = 'test/test_keeper_chat_tool_trail.ml'
-candidate = (args.candidate_file.read_bytes() if args.candidate_file else
-             git_file(args.candidate, trail) if args.candidate else (root / trail).read_bytes())
-test = git_file(args.candidate, test_path) if args.candidate else (root / test_path).read_bytes()
+if args.candidate_file:
+    candidate = args.candidate_file.read_bytes()
+    if args.candidate_file.suffix == '.gz':
+        candidate = gzip.decompress(candidate)
+else:
+    candidate = git_file(args.candidate, trail) if args.candidate else (root / trail).read_bytes()
+test = ((here / 'test-initial.ml.txt').read_bytes() if args.scenario == 'initial' else
+        git_file(args.candidate, test_path) if args.candidate else (root / test_path).read_bytes())
 sources = [
     'secret_patterns.ml', 'keeper_text_processing.ml', 'keeper_chat_events.ml',
     'observability_redact.ml', 'keeper_chat_tool_trail.mli', 'keeper_chat_tool_trail.ml',

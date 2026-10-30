@@ -100,6 +100,9 @@ their Git blob is `eef229b8de5fd6ed6e15d43091491124dab4332e` and SHA-256 is
 `37e6b2bb7315db44a2d150d48740826b403f44eb7940f413a168c308196d923b`.
 [`initial-samples.csv`](initial-samples.csv) and
 [`initial-retained.csv`](initial-retained.csv) retain its raw results, which
-motivated the added compaction. The saved initial harness is reproducible with
-`--scenario initial --candidate-file docs/evidence/keeper-tool-trail-state-20261030/initial-candidate.ml.txt`;
-it remains a synthetic comparison and is not the final candidate's data.
+motivated the added compaction. The initial run used the saved
+[`keeper_chat_events-initial.ml`](keeper_chat_events-initial.ml) shim and
+[`test-initial.ml.txt`](test-initial.ml.txt), before the later end-event tests.
+Use `--scenario initial --candidate-file docs/evidence/keeper-tool-trail-state-20261030/initial-candidate.original.gz`
+to replay those inputs with the initial harness. This remains a synthetic
+comparison and is not the final candidate's data.

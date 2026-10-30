@@ -252,6 +252,64 @@ let test_a_second_run_changes_nothing () =
     check string "and leaves the bytes as the first wrote them" first (read path))
 ;;
 
+let test_existing_values_keep_their_trailing_comments () =
+  let contents =
+    runtime_base
+    ^ {|
+[heartbeat]
+interval_sec = 30 # keep the measured value
+[web_search]
+cache_ttl_sec = 2.5 # keep this duration
+searxng_url = "http://localhost:8888" # keep this address
+[otel]
+enabled = false # keep this choice
+|}
+  in
+  with_config contents (fun path ->
+    let same_values =
+      [ parsed ~key:"heartbeat.interval_sec" ~value:"30"
+      ; parsed ~key:"web_search.cache_ttl_sec" ~value:"2.5"
+      ; parsed ~key:"web_search.searxng_url" ~value:"http://localhost:8888"
+      ; parsed ~key:"otel.enabled" ~value:"false"
+      ]
+    in
+    check bool "existing values report no change" false (applied path same_values);
+    check string "their original bytes survive" contents (read path);
+    check bool "a separate change is still applied" true
+      (applied path (parsed ~key:"autonomous.enabled" ~value:"true" :: same_values));
+    let updated = read path in
+    check bool "the unchanged lines still have their notes" true
+      (contains updated "interval_sec = 30 # keep the measured value\n"
+       && contains updated "cache_ttl_sec = 2.5 # keep this duration\n"
+       && contains updated "searxng_url = \"http://localhost:8888\" # keep this address\n"
+       && contains updated "enabled = false # keep this choice\n");
+    check (option bool) "the separate change reads back" (Some true)
+      (Keeper_toml_loader.toml_bool_opt (doc_of path) "autonomous.enabled"))
+;;
+
+let test_an_existing_integer_spelling_of_a_float_is_unchanged () =
+  let contents = runtime_base ^ "\n[web_search]\ncache_ttl_sec = 2 # duration\n" in
+  with_config contents (fun path ->
+    check bool "the loader already reads the requested float" false
+      (applied path [ parsed ~key:"web_search.cache_ttl_sec" ~value:"2.0" ]);
+    check string "the spelling and comment stay" contents (read path))
+;;
+
+let test_an_existing_invalid_value_is_still_refused () =
+  let contents = runtime_base ^ "\n[heartbeat]\ninterval_sec = 0 # invalid\n" in
+  with_config contents (fun path ->
+    (match
+       S.apply ~runtime_config_path:path
+         [ parsed ~key:"heartbeat.interval_sec" ~value:"0"
+         ; parsed ~key:"autonomous.enabled" ~value:"true"
+         ]
+     with
+     | Error (S.Not_valid _) -> ()
+     | Ok _ -> fail "the unchanged but invalid value was accepted"
+     | Error error -> fail (S.error_message error));
+    check string "neither the invalid nor the other change was written" contents (read path))
+;;
+
 let test_changes_are_all_or_none () =
   with_config with_tables (fun path ->
     let before = read path in
@@ -369,6 +427,12 @@ let () =
         ; test_case "an existing key is replaced and comments stay" `Quick
             test_an_existing_key_is_replaced_and_comments_stay
         ; test_case "a second run changes nothing" `Quick test_a_second_run_changes_nothing
+        ; test_case "existing values keep their trailing comments" `Quick
+            test_existing_values_keep_their_trailing_comments
+        ; test_case "an integer spelling of a float stays unchanged" `Quick
+            test_an_existing_integer_spelling_of_a_float_is_unchanged
+        ; test_case "an existing invalid value is still refused" `Quick
+            test_an_existing_invalid_value_is_still_refused
         ; test_case "changes are all or none" `Quick test_changes_are_all_or_none
         ; test_case "a key given twice is refused" `Quick test_a_key_given_twice_is_refused
         ; test_case "an inline table is refused, not half written" `Quick

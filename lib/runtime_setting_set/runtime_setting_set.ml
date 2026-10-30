@@ -211,7 +211,19 @@ let checked contents changes =
        if defined_without_a_header contents ~table:change.table
        then raise (Refused (Table_not_reachable change.table)))
     changes;
-  let updated = List.fold_left apply_change contents changes in
+  (* Keep the original line, including its trailing comment and spelling, when
+     the loader already reads the requested value. Different changes address
+     different keys, so the original document suffices for this comparison. *)
+  let original = Result.to_option (Keeper_toml_loader.parse_toml contents) in
+  let updated =
+    List.fold_left
+      (fun text change ->
+         match original with
+         | Some doc when read_back doc change -> text
+         | Some _ | None -> apply_change text change)
+      contents
+      changes
+  in
   (match problems_of_changed_keys updated changes with
    | Error message -> raise (Refused (Not_valid message))
    | Ok (_ :: _ as problems) ->

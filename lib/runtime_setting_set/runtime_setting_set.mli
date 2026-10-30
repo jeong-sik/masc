@@ -14,8 +14,9 @@
     not: the server refuses it when it starts.
 
     A changed string, integer or float line loses its own trailing comment; a
-    boolean keeps it. Comments on other lines stay. A second run with the same
-    arguments leaves the file as the first run wrote it. *)
+    boolean keeps it. A line whose value is already requested stays byte-for-byte,
+    including its trailing comment. Comments on other lines stay. A second run
+    with the same arguments leaves the file as the first run wrote it. *)
 
 type change
 (** One key set to one value, read as the registry row's kind. *)

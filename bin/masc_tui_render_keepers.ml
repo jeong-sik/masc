@@ -1150,7 +1150,8 @@ let terminal_drawing (state : state) ~width =
   let facts = mode_facts @ facts in
   let stale = match observation with
     | Masc_tui_fetched.Stale (_, Execute_stream_stopped _) when Option.is_some stopped -> []
-    | Masc_tui_fetched.Stale (_, detail) ->
+    | Masc_tui_fetched.Stale
+        (_, ((Execute_stream_stopped _ | Execute_read_failed _ | Execute_stream_retrying _) as detail)) ->
         [ Theme.bad () ^ "stale: " ^ sanitize (keeper_execute_failure_detail detail) ^ Ansi.reset ]
     | Ready _ | Absent | Loading | Failed _ -> [] in
   let status = Theme.recede () ^ String.concat " \xc2\xb7 " (mode :: facts) ^ Ansi.reset

@@ -573,6 +573,12 @@ let install_real_masc_binary prefix mirror_dir =
       (fun (name, path) -> [ "--companion"; name; path ])
       companion_spec
   in
+  let runtime_archive = Filename.concat mirror_tag_dir ("masc-runtime-" ^ suffix ^ ".tar.gz") in
+  let runtime_args =
+    if Sys.file_exists runtime_archive then
+      [ "--runtime-archive"; runtime_archive ]
+    else []
+  in
   let bundle_helper =
     Filename.concat (source_root ()) "scripts/release-dashboard-bundle.py"
   in
@@ -582,7 +588,7 @@ let install_real_masc_binary prefix mirror_dir =
          ([ "python3"; bundle_helper; "install"; "--binary"; real_masc_binary ()
           ; "--archive"; archive; "--prefix"; canonical_prefix
           ; "--binary-asset"; platform_release_asset () ]
-            @ companion_args ))
+            @ companion_args @ runtime_args ))
   in
   unlink_if_exists dest;
   check int "fixture installs the managed release identity" 0

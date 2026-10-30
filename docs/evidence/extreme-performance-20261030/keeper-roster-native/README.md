@@ -79,6 +79,13 @@ and whole-TUI CPU **1.380340 s**. It is a single candidate observation. Both
 300 arms have `pair_comparison_eligible=false`; no 300-owner improvement ratio
 is inferred. Failed-arm timing remains in the raw report as diagnostics only.
 
+The successful candidate still records three settlement-read timeouts recovered
+by read-only retries, and 45 fallback waits for HTTP 429, totaling 45.16109092 s
+over the whole workload. The failed control records five observation-read
+failures and ten fallback waits. These are not TUI Build failures or counts
+restricted to the released-model phase. Final operation success does not mean
+that all observation requests completed without retries or waiting.
+
 The [primary analysis](matrix/analysis-v2.json) distinguishes `arm_eligible`
 from `pair_comparison_eligible`. The preserved v1 field `comparison_eligible`
 meant only individual arm eligibility; it must not be read as pair eligibility.

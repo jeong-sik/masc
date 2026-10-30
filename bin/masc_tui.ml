@@ -20857,7 +20857,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
             state.item_account_error <- Some detail)
   | Keeper_sandbox_view_loaded (request, result) -> (
       let selected_keeper = List.nth_opt state.keepers state.keeper_cursor
-        |> Option.map (fun keeper -> keeper.k_name) in
+        |> Option.map (fun (keeper : keeper) -> keeper.k_name) in
       Masc_tui_types.apply_keeper_sandbox_result state ~selected_keeper
         ~authority_ready:(server_authority_ready state) request result)
   | Keeper_sandbox_logs_loaded (keeper_name, generation, result) -> (

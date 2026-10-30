@@ -680,7 +680,7 @@ let handle_bind_for_connector ~sw ~clock state request reqd ~connector_name
         respond_json_value_with_cors ~status:`Bad_request request reqd
           (Channel_gate.error_json "keeper_name is required")
       else
-        match keeper_exists state keeper_name with
+        match keeper_exists ~config:(Mcp_server.workspace_config state) keeper_name with
         | Error err ->
             respond_json_value_with_cors ~status:`Service_unavailable request reqd
               (Channel_gate.error_json err)

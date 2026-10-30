@@ -31,6 +31,12 @@ and passes it through the benchmark CLI.
 
 ## Librarian Continuity Measurement
 
+For a real Keeper's sequence of constraints, corrections, topic changes and
+stop/resume, use the [temporal observation harness](guides/KEEPER-TEMPORAL-CONTINUITY.md).
+It captures exact operation/turn identities, canonical prepared input, replies
+and recorded tool calls. Its semantic assessment is separate from these
+single-snapshot synthetic comparisons and does not create a pass threshold.
+
 `masc-librarian-continuity` measures answers produced from explicit synthetic
 snapshots. It generates a question from a reference turn, then answers in a fresh,
 tool-free context containing only that question, the supplied facts, and unread

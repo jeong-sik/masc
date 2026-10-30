@@ -621,7 +621,7 @@ type build_link_state =
 
 type build_link_plan =
   | Link_create of string
-  | Link_retarget of string
+  | Link_preserve_symlink of { existing : string; expected : string }
   | Link_already_correct
   | Link_refused_real_directory
   | Link_refused_invalid_path of { detail : string; state : build_link_state }
@@ -642,8 +642,8 @@ val plan_build_link : target:string -> build_link_state -> build_link_plan
     the plan never deletes one; the caller reports
     {!Link_refused_real_directory} and the checkout keeps building on the
     unified work volume until the next owned first handoff removes it
-    ({!first_handoff_build_cleanup_script}). Retargeting a stale symlink is
-    different: removing a symlink loses no data. *)
+    ({!first_handoff_build_cleanup_script}). A differently targeted symlink
+    is left in place and reported: its ownership is not established here. *)
 
 val apple_volume_delete_argv : volume_name:string -> string list
 (** [container volume delete NAME], including build-volume recreation. *)
@@ -741,22 +741,20 @@ val build_scan_argv_for
   -> uid:int
   -> gid:int
   -> string list
-(** One [find | while] exec, cwd the keeper's work root: reports every
-    checkout's [_build] state without changing any of it. [find] without
-    [-L] does not descend through a symlink, so an installed link is never
-    walked into. [_build] and [.git] are pruned rather than descended -- one
-    measured [_build] held 61,602 entries. Runs as the keeper's own uid:gid,
-    the owner of everything under the work root. *)
+(** One [find -exec] scan, cwd the keeper's work root: reports each checkout
+    using NUL-framed fields without changing it. [find] without [-L] does not
+    descend through symlinks. [_build] and [.git] are pruned rather than
+    descended. Runs as the keeper's uid:gid; the guest must provide [readlink
+    -n]. *)
 
 type build_scan_row =
   { checkout : string
   ; state : build_link_state
   }
 
-val build_scan_rows_of_output : string -> build_scan_row list
-(** Parses {!build_scan_argv_for}'s stdout. An unrecognized line is dropped,
-    not raised on -- the scan is read-only, so a malformed line costs one
-    missed checkout, not a crashed turn. *)
+val build_scan_rows_of_output : string -> (build_scan_row list, string) result
+(** Parses the NUL-framed stdout of {!build_scan_argv_for}. A malformed or
+    truncated stream is refused as a whole before any link action. *)
 
 type build_link_row =
   { checkout : string
@@ -766,57 +764,54 @@ type build_link_row =
 
 val build_link_rows_of_scan : build_scan_row list -> build_link_row list
 (** Every scanned checkout's target and plan, decided purely
-    ({!plan_build_link}) -- touches no guest state; only
-    {!build_link_apply_argv_for} does. *)
+    ({!plan_build_link}) -- touches no guest state. *)
 
-val build_link_refusal_message : checkout:string -> string
-(** The message a caller reports for a row whose plan is
-    {!Link_refused_real_directory}: a real [_build] the live guest keeps
-    until the next boot's helper removes it, unless the checkout holds
-    {!build_keep_marker}. *)
-
-val build_link_invalid_path_message :
-  checkout:string -> detail:string -> build_link_state -> string
-(** The message a caller reports for {!Link_refused_invalid_path}. A real
-    [_build] adds its next-boot removal, since the refused path is never
-    linked but the boot helper still removes the directory. *)
+val build_link_warning : build_link_plan -> string option
+(** Static warning for preserved or refused entries, without guest-provided
+    paths, targets or refusal details. A scanned [Build_real_directory] can be
+    any existing non-symlink entry; warn that a later first owned handoff can
+    remove it if it is a directory and the keep marker is absent. *)
 
 val build_link_actions : build_link_row list -> (string * string) list
 (** The [(checkout, target)] pairs that actually need a guest command --
-    input to {!build_link_apply_argv_for}. A row already correct, or
+    input to {!build_link_apply_request_for}. A row already correct, or
     refused, needs none. *)
 
 val build_link_targets : build_link_row list -> string list
 (** Every target that must exist before a build runs: the targets of
     {!build_link_actions} and of rows already linked. A fresh boot recreates
     the build volume empty, so an already-correct link dangles until its
-    target is created again -- input to {!build_target_mkdir_argv}. *)
+    target is created again -- input to {!build_target_mkdir_request}. *)
 
-val build_link_apply_argv_for
+val build_link_apply_request_for
   :  Keeper_microvm_backend.t
   -> container_name:string
   -> keeper_work_root:string
   -> uid:int
   -> gid:int
   -> actions:(string * string) list
-  -> string list
-(** [ln -sfn] for every action, in one exec, as the keeper's own uid:gid.
-    [-f] makes each one atomic -- a stale link is replaced without a
-    separate unlink, and [ln] refuses outright rather than clobber a real,
-    non-empty directory, so a checkout that grew real build output between
-    the scan and this call is left alone rather than silently adopted.
-    Dynamic values travel as positional arguments after the script, never
-    interpolated into the script text. *)
+  -> string list * string
+(** The exec argv and its NUL-framed stdin, with checkout and target payload
+    paths absent from argv; the working root is still an argv value. Python 3
+    in isolated mode verifies the complete payload length, field count and
+    SHA-256 before attempting any symlink. The first of [/usr/bin/python3] and
+    [/usr/local/bin/python3] that passes the shell's [-x] check is selected.
+    If neither passes, the helper exits 127. A selected interpreter that fails
+    is not followed by another. An existing destination is not replaced.
+    Checkout parents are not fenced. A failed effect may be partial. *)
 
-val build_target_mkdir_argv : container_name:string -> targets:string list -> string list
-(** [mkdir -p -m 0777] for every target, run as root inside the guest.
+val build_target_mkdir_request : container_name:string -> targets:string list -> string list * string
+(** The exec argv and NUL-framed stdin for creating each target with mode 0777,
+    run as root inside the guest after payload verification by the Python 3
+    helper described in {!build_link_apply_request_for}.
     Necessary because dune does not create the directory a [_build] symlink
     points at -- it [lstat]s [_build], sees the link, and opens
     [_build/.lock] straight away, and the host cannot create the target
-    either since it lives inside the build volume's ext4 image. [-m] applies
+    either since it lives inside the build volume's ext4 image. Mode 0777 applies
     only to newly created directories, since Apple Container's user
-    namespace refuses even guest root changing an existing one's mode. One
-    command for every target; idempotent. *)
+    namespace refuses even guest root changing an existing one's mode. A
+    failed or interrupted effect may be partial. Images need a working Python 3
+    at [/usr/bin/python3] or [/usr/local/bin/python3]. *)
 
 val work_volume_search_argv_for :
   Keeper_microvm_backend.t -> container_name:string -> string list option

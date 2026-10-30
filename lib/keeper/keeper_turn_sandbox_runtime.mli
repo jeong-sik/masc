@@ -219,6 +219,13 @@ module For_testing : sig
 end
 
 module For_testing_microvm : sig
+  type build_link_generation
+
+  val build_link_generation : container_name:string -> build_link_generation option
+  val complete_build_link_scan : container_name:string -> build_link_generation -> bool
+  val build_link_scan_prepared : container_name:string -> bool
+  (** Expose the process-local generation guard for the stale-completion test. *)
+
   val microvm_identity_snapshot_registered : container_name:string -> bool
   (** Whether a guest name still owns a snapshot; exposes no credential data. *)
 

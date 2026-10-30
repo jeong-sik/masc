@@ -2,6 +2,7 @@ type unavailable_output =
   | Capture_directory_unavailable
   | Capture_incomplete
   | Capture_failed
+  | Capture_limit_exceeded
   | Capture_unreadable
   | Capture_permissions_invalid
   | Capture_length_mismatch
@@ -42,7 +43,8 @@ let with_capture_directory ~status use =
 
 let read_complete_stdout ~capture_dir = function
   | Process_output_capture.Incomplete_file _ -> Error Capture_incomplete
-  | Process_output_capture.Capture_failed _ -> Error Capture_failed
+  | Process_output_capture.Capture_failed { limit_exceeded = true; _ } -> Error Capture_limit_exceeded
+  | Process_output_capture.Capture_failed { limit_exceeded = false; _ } -> Error Capture_failed
   | Process_output_capture.Complete_file {path; byte_length} ->
     (match Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.getuid ())
         ~ownership_root:capture_dir path with
@@ -53,26 +55,36 @@ let read_complete_stdout ~capture_dir = function
        else Ok file.content)
 ;;
 
-let read ~timeout_sec ~argv =
+let read_with ?timeout_sec ?stdout_limit ?stderr_limit ?fallback_policy ?env ?cwd ~argv () =
   let status = ref None in
   with_capture_directory ~status (fun directory ->
     let capture_dir = Unix.realpath directory in
-    let ((observed_status, _stdout_preview, _stderr_preview), files) =
-      Process_output_capture.with_capture ~capture_dir (fun output_capture ->
+    let ((observed_status, _stdout_preview, stderr_preview), files) =
+      Process_output_capture.with_capture ?stdout_limit ?stderr_limit ~capture_dir (fun output_capture ->
         let (observed_status, _, _) as result =
-          Process_eio.run_argv_with_status_split_streaming ~timeout_sec ~output_capture
+          Process_eio.run_argv_with_status_split_streaming ?timeout_sec ?env ?cwd ?fallback_policy ~output_capture
             ~on_stdout_chunk:ignore ~on_stderr_chunk:ignore argv in
         status := Some observed_status;
         result) in
     match read_complete_stdout ~capture_dir files.stdout with
-    | Ok stdout -> Ok (observed_status, stdout)
+    | Ok stdout -> Ok (observed_status, stdout, stderr_preview)
     | Error reason -> Error {reason; status = Some observed_status})
+;;
+
+let read ~timeout_sec ~argv =
+  read_with ~timeout_sec ~argv ()
+  |> Result.map (fun (status, stdout, _) -> status, stdout)
+;;
+
+let read_with_environment ?timeout_sec ~stdout_limit ~stderr_limit ~env ~cwd ~argv () =
+  read_with ?timeout_sec ~stdout_limit ~stderr_limit ~fallback_policy:Process_eio.Eio_only ~env ~cwd ~argv ()
 ;;
 
 let unavailable_message = function
   | Capture_directory_unavailable -> "private capture directory unavailable"
   | Capture_incomplete -> "stdout EOF was not established"
   | Capture_failed -> "complete stdout capture unavailable"
+  | Capture_limit_exceeded -> "stdout exceeded the capture byte limit"
   | Capture_unreadable -> "owned capture could not be read"
   | Capture_permissions_invalid -> "capture permissions are not private"
   | Capture_length_mismatch -> "capture byte length changed"

@@ -23,6 +23,7 @@ let value = function Ok value -> value | Error detail -> fail detail
 let keeper = "guest-survival-fixture"
 let backend = Backend.Apple_container
 let network_mode = Profile.Network_none
+let fixture_effect_stderr = "fixture-private-helper-stderr"
 
 let image_digest = "sha256:" ^ String.make 64 'a'
 let image_platform = `Assoc ["architecture", `String "arm64"; "os", `String "linux"]
@@ -198,11 +199,37 @@ let provider root args =
         then Some guest else None
       | [] -> None
       | _ :: _ :: _ -> fail "provider invalid rows" in
+    let build_scan = match guest_rows () with
+      | [guest] ->
+        let name = text (field "id" guest) in
+        "container" :: args = Microvm.build_scan_argv_for backend ~container_name:name
+          ~keeper_work_root:(Microvm.keeper_work_root ~keeper_name:keeper)
+          ~uid:(Unix.getuid ()) ~gid:(Unix.getgid ())
+      | [] -> false
+      | _ :: _ :: _ -> fail "provider invalid rows" in
     (match work_mount_probe with
     | Some guest ->
       print_string (fixture_work_mount_response ~root guest);
       flush stdout
-    | None -> if List.mem "--probe" rest then (
+    | None -> if build_scan then (
+      if Sys.file_exists (file "scan-fail-first") && not (Sys.file_exists (file "scan-failed")) then (
+        write (file "scan-failed") ""; prerr_endline "fixture scan failure"; exit 13);
+      if Sys.file_exists (file "scan-output") then print_string (read (file "scan-output"));
+      flush stdout)
+    else if List.mem "masc-build-mkdir" rest || List.mem "masc-build-link" rest then (
+      if not (List.mem "-i" rest) then fail "build input was not attached";
+      let input = In_channel.input_all stdin in
+      let kind = if List.mem "masc-build-mkdir" rest then "mkdir" else "link" in
+      append (file "build-inputs") (`Assoc [
+        "kind", `String kind;
+        "bytes", `Int (String.length input);
+        "sha256", `String Agent_core_sha256.(digest_string input |> to_hex)]);
+      List.iter (fun status ->
+        if Sys.file_exists (file (Printf.sprintf "build-effect-status-%d-%s" status kind)) then (
+          prerr_endline fixture_effect_stderr;
+          exit status)) [127; 2];
+      if kind = "mkdir" && Sys.file_exists (file "build-mkdir-fails") then exit 19)
+    else if List.mem "--probe" rest then (
       print_string (Exec_ssh_protocol.render_probe {name="masc-exec-shim"; version="3.0.0"; capabilities=[]; release=None; boot_id=None});
       flush stdout)
     else if List.mem "masc-mount-probe" rest then (
@@ -263,6 +290,14 @@ let process_step root operation =
             `Assoc ["id", `String (Microvm.work_volume_trim_name ~keeper_name:keeper)]]);
         Result.bind (prepare_identity ())
           (fun _ -> Turn.microvm_remote_endpoint ~timeout_sec:10. runtime))
+    | "scan-retry" ->
+      let next_turn () =
+        let next = Turn.create ~config ~meta:(meta ()) ~image:(Ok "fixture:image")
+            ~network_mode:effective_network () in
+        Fun.protect ~finally:(fun () -> Turn.cleanup next) (fun () ->
+          Turn.microvm_remote_endpoint ~timeout_sec:10. next) in
+      Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
+        Result.bind (next_turn ()) (fun _ -> next_turn ()))
     | "turn" | "override" -> Turn.microvm_remote_endpoint ~timeout_sec:10. runtime
     | _ -> fail "unknown fixture step" in
   (match endpoint with
@@ -374,6 +409,167 @@ let test_fresh_process_adopts_without_boot_effects () = with_fixture @@ fun root
     (List.for_all adoption_read after);
   check int "one cold run total" 1 (count "run" root);
   check int "one first-handoff frame per process" 2 (List.length (entries root "requests"))
+
+let scan_fixture_output =
+  "ready\000symlink\000/masc-build/ready\000new\000absent\000\000"
+
+let assert_build_input root kind expected =
+  let matches = entries root "build-inputs" |> List.filter (fun item ->
+    field "kind" item = `String kind) in
+  match matches with
+  | [item] ->
+    check int (kind ^ " input byte count") (String.length expected)
+      (match field "bytes" item with `Int bytes -> bytes | _ -> fail "bad input byte count");
+    check string (kind ^ " input digest") Agent_core_sha256.(digest_string expected |> to_hex)
+      (text (field "sha256" item))
+  | _ -> fail (kind ^ " input was not received exactly once")
+
+let build_scan_calls root =
+  let config = Workspace.default_config root in
+  let name = Turn.For_testing_microvm.microvm_container_name ~config ~keeper_name:keeper ~network_mode in
+  let argv = Microvm.build_scan_argv_for backend ~container_name:name
+      ~keeper_work_root:(Microvm.keeper_work_root ~keeper_name:keeper)
+      ~uid:(Unix.getuid ()) ~gid:(Unix.getgid ()) in
+  let expected = match argv with "container" :: args -> args | _ -> fail "expected container scan" in
+  List.filter ((=) expected) (calls root)
+
+let test_scan_failure_retries_on_the_next_turn_without_repeating_handoff () = with_fixture @@ fun root ->
+  write (Filename.concat root "scan-fail-first") "";
+  write (Filename.concat root "scan-output") scan_fixture_output;
+  check bool "three turns remain usable" true (step root "scan-retry" = Unix.WEXITED 0);
+  check int "failed scan and one successful retry" 2 (List.length (build_scan_calls root));
+  check int "first-handoff cleanup was sent only once" 1 (List.length (entries root "requests"));
+  let mkdirs = calls root |> List.filter (List.mem "masc-build-mkdir") in
+  let links = calls root |> List.filter (List.mem "masc-build-link") in
+  check int "the successful retry creates the target once" 1 (List.length mkdirs);
+  check int "the successful retry sends the link action once" 1 (List.length links);
+  assert_build_input root "mkdir" "/masc-build/ready\000/masc-build/new\000";
+  assert_build_input root "link" "new\000/masc-build/new\000"
+
+let test_uncertain_link_effect_is_not_replayed_in_the_same_process () = with_fixture @@ fun root ->
+  write (Filename.concat root "scan-output") scan_fixture_output;
+  write (Filename.concat root "build-mkdir-fails") "";
+  check bool "three turns remain usable" true (step root "scan-retry" = Unix.WEXITED 0);
+  check int "the uncertain effect does not cause another scan" 1 (List.length (build_scan_calls root));
+  let mkdirs = calls root |> List.filter (List.mem "masc-build-mkdir") in
+  check int "the possibly applied mkdir is not replayed" 1 (List.length mkdirs);
+  check int "link application did not follow the failed mkdir" 0
+    (List.length (calls root |> List.filter (List.mem "masc-build-link")));
+  check int "first-handoff cleanup was not replayed" 1 (List.length (entries root "requests"));
+  assert_build_input root "mkdir" "/masc-build/ready\000/masc-build/new\000"
+
+(* The provider returns a failure after receiving its input. Neither status
+   establishes which interpreter or module, if any, was unavailable. *)
+let test_build_effect_failure_is_not_replayed_in_the_same_process () =
+  List.iter (fun (failed_kind, failure_status, expected_links) -> with_fixture (fun root ->
+    write (Filename.concat root "scan-output") scan_fixture_output;
+    write (Filename.concat root (Printf.sprintf "build-effect-status-%d-%s" failure_status failed_kind)) "";
+    let status, stderr = step_captured root "scan-retry" in
+    check bool "three turns remain usable" true (status = Unix.WEXITED 0);
+    let expected_warnings =
+      [ (if failed_kind = "mkdir" then "microvm_build_link_mkdir_failed"
+         else "microvm_build_link_apply_failed");
+        Printf.sprintf "exit=%d" failure_status;
+        "microvm_build_link_effect_unverified";
+        "Keeper User Manual: Build preparation reports a failure" ]
+      @ (if failure_status = 127 then
+          [ "/usr/bin/python3"; "/usr/local/bin/python3";
+            "exit 127 alone does not establish the cause or effect outcome" ]
+         else []) in
+    List.iter (fun expected ->
+      check bool ("warning includes " ^ expected) true
+        (Astring.String.is_infix ~affix:expected stderr)) expected_warnings;
+    check bool "raw helper stderr is not included in the warning" false
+      (Astring.String.is_infix ~affix:fixture_effect_stderr stderr);
+    check int "the uncertain effect does not trigger another scan" 1
+      (List.length (build_scan_calls root));
+    check int "the target preparation is sent once" 1
+      (List.length (calls root |> List.filter (List.mem "masc-build-mkdir")));
+    check int "the link effect is never retried" expected_links
+      (List.length (calls root |> List.filter (List.mem "masc-build-link")));
+    check int "the first handoff is not replayed" 1 (List.length (entries root "requests"));
+    check int "the guest is only started once" 1 (count "run" root);
+    check int "the guest is not stopped" 0 (count "stop" root);
+    check int "the guest is not deleted" 0 (count "delete" root);
+    assert_build_input root "mkdir" "/masc-build/ready\000/masc-build/new\000";
+    if expected_links = 1 then assert_build_input root "link" "new\000/masc-build/new\000"))
+    [ "mkdir", 127, 0; "link", 127, 1; "mkdir", 2, 0; "link", 2, 1 ]
+
+let test_differently_targeted_build_link_is_preserved_without_effects () = with_fixture @@ fun root ->
+  let scan_output = "new\000symlink\000/masc-build/old\000" in
+  let rows = match Microvm.build_scan_rows_of_output scan_output with
+    | Ok rows -> Microvm.build_link_rows_of_scan rows
+    | Error detail -> fail detail in
+  (match rows with
+   | [{ Microvm.checkout = "new";
+        plan = Microvm.Link_preserve_symlink
+          { existing = "/masc-build/old"; expected = "/masc-build/new" }; _ }] -> ()
+   | _ -> fail "different build link target was not preserved");
+  write (Filename.concat root "scan-output") scan_output;
+  check bool "three turns remain usable" true (step root "scan-retry" = Unix.WEXITED 0);
+  check int "the preserved link is scanned once" 1 (List.length (build_scan_calls root));
+  check int "first handoff is sent once" 1 (List.length (entries root "requests"));
+  let effects = calls root |> List.filter (fun args ->
+    List.mem "masc-build-link" args || List.mem "masc-build-mkdir" args) in
+  check int "no target directory or link operation is sent" 0 (List.length effects)
+
+let test_real_build_warning_on_the_actual_scan_path () =
+  let cases =
+    [ "private-valid", "real", "", true
+    ; "private:invalid-real", "real", "", true
+    ; "private:invalid-absent", "absent", "", false
+    ; "private:invalid-link", "symlink", "/private-target", false ] in
+  List.iter (fun (checkout, kind, target, has_risk) -> with_fixture (fun root ->
+    write (Filename.concat root "scan-output") (checkout ^ "\000" ^ kind ^ "\000" ^ target ^ "\000");
+    let status, stderr = step_captured root "scan-retry" in
+    check bool "the real scan path reports a usable turn" true (status = Unix.WEXITED 0);
+    check bool "the warning is emitted" true
+      (Astring.String.is_infix ~affix:"was not changed" stderr);
+    List.iter (fun expected ->
+      check bool ("warning includes " ^ expected) has_risk
+        (Astring.String.is_infix ~affix:expected stderr))
+      ["first owned handoff"; "can stage and delete it"; ".masc-keep-build";
+       "Keeper User Manual: Inspecting _build entries"];
+    check bool "guest checkout and target never enter the warning" false
+      (Astring.String.is_infix ~affix:checkout stderr
+       || Astring.String.is_infix ~affix:"/private-target" stderr);
+    check int "the refusal is scanned once" 1 (List.length (build_scan_calls root));
+    let effects = calls root |> List.filter (fun args ->
+      List.mem "masc-build-link" args || List.mem "masc-build-mkdir" args) in
+    check int "no target directory or link operation is sent" 0 (List.length effects))) cases
+
+let test_invalid_or_oversized_scan_never_dispatches_link_effects () =
+  List.iter (fun output -> with_fixture (fun root ->
+    write (Filename.concat root "scan-output") output;
+    check bool "three turns remain usable" true (step root "scan-retry" = Unix.WEXITED 0);
+    check int "each new turn retries only the read" 3 (List.length (build_scan_calls root));
+    check int "first handoff is still sent once" 1 (List.length (entries root "requests"));
+    let effects = calls root |> List.filter (fun args ->
+      List.mem "masc-build-link" args || List.mem "masc-build-mkdir" args) in
+    check int "invalid or incomplete output dispatches no link effect" 0 (List.length effects)))
+    [ "ready\000absent\000"; String.make (Common.max_process_capture_head_bytes + 1) 'x' ]
+
+let test_forgotten_guest_rejects_old_scan_completion () = with_fixture @@ fun root ->
+  let config = Workspace.default_config root in
+  let meta = meta () in
+  let name = Turn.For_testing_microvm.microvm_container_name ~config ~keeper_name:keeper ~network_mode in
+  let mark () = Turn.For_testing_microvm.mark_microvm_guest_booted ~config ~meta () in
+  let generation () = match Turn.For_testing_microvm.build_link_generation ~container_name:name with
+    | Some generation -> generation | None -> fail "missing root generation" in
+  mark ();
+  let old = generation () in
+  Turn.forget_microvm_guest_booted ~config ~meta ();
+  mark ();
+  let current = generation () in
+  check bool "old scan cannot mark the replacement ready" false
+    (Turn.For_testing_microvm.complete_build_link_scan ~container_name:name old);
+  check bool "replacement remains unprepared" false
+    (Turn.For_testing_microvm.build_link_scan_prepared ~container_name:name);
+  check bool "current scan can complete" true
+    (Turn.For_testing_microvm.complete_build_link_scan ~container_name:name current);
+  check bool "current completion is retained" true
+    (Turn.For_testing_microvm.build_link_scan_prepared ~container_name:name);
+  Turn.forget_microvm_guest_booted ~config ~meta ()
 
 let wrapped_image root = save_json (Filename.concat root "image-entrypoint")
     (strings ["opam"; "exec"; "--"])
@@ -685,6 +881,13 @@ let () =
         test_case "identity refresh preserves guest if helper appears" `Quick test_identity_refresh_preserves_guest_if_helper_appears;
         test_case "boot refused for an unusable identity names the identity" `Quick test_boot_refused_for_unusable_identity_reports_the_identity;
         test_case "fresh process adopts without boot effects" `Quick test_fresh_process_adopts_without_boot_effects;
+        test_case "failed scan retries next turn without repeating handoff" `Quick test_scan_failure_retries_on_the_next_turn_without_repeating_handoff;
+        test_case "uncertain link effect is not replayed" `Quick test_uncertain_link_effect_is_not_replayed_in_the_same_process;
+        test_case "build effect failure is not replayed" `Quick test_build_effect_failure_is_not_replayed_in_the_same_process;
+        test_case "differently targeted build link is preserved without effects" `Quick test_differently_targeted_build_link_is_preserved_without_effects;
+        test_case "real build warnings reach the actual scan path" `Quick test_real_build_warning_on_the_actual_scan_path;
+        test_case "invalid or oversized scan dispatches no link effects" `Quick test_invalid_or_oversized_scan_never_dispatches_link_effects;
+        test_case "forgotten guest rejects old scan completion" `Quick test_forgotten_guest_rejects_old_scan_completion;
         test_case "helper uncertainty preserves guest on adopt and replace" `Quick test_helper_uncertainty_preserves_guest_on_adopt_and_replace;
         test_case "wrapped image adopts without relabelling or boot effects" `Quick test_wrapped_image_adopts_without_relabelling_or_boot_effects;
         test_case "image prefix does not permit command tampering" `Quick test_image_prefix_does_not_permit_command_tampering;

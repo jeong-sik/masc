@@ -1935,9 +1935,10 @@ let test_plan_build_link_never_deletes_real_build_output () =
     true
     (M.plan_build_link ~target (M.Build_symlink target) = M.Link_already_correct);
   Alcotest.(check bool)
-    "stale link -> retarget (removing a symlink loses no data)"
+    "a differently targeted link is preserved"
     true
-    (M.plan_build_link ~target (M.Build_symlink "/masc-build/old") = M.Link_retarget target);
+    (M.plan_build_link ~target (M.Build_symlink "/masc-build/old")
+     = M.Link_preserve_symlink { existing = "/masc-build/old"; expected = target });
   (* The one that matters: the scan runs in a live guest whose build may be
      using a real directory, so it is reported and left for the boot helper. *)
   Alcotest.(check bool)
@@ -1964,9 +1965,10 @@ let test_build_link_target_is_flat_and_unique_per_checkout () =
 ;;
 
 let test_build_link_target_refuses_ambiguous_paths () =
-  ignore (error_exn (M.build_link_target ~playground_relative:"repos:wt/a") : string);
-  ignore (error_exn (M.build_link_target ~playground_relative:"repos//wt") : string);
-  ignore (error_exn (M.build_link_target ~playground_relative:"") : string)
+  List.iter (fun playground_relative ->
+    ignore (error_exn (M.build_link_target ~playground_relative) : string))
+    [ "repos:wt/a"; "repos//wt"; ""; "/absolute"; "."; "..";
+      "../victim"; "repo/../victim"; "repo/./child" ]
 ;;
 
 let test_build_scan_argv_runs_as_the_keeper_in_the_work_root () =
@@ -2005,34 +2007,31 @@ let test_build_scan_rows_of_output_parses_the_three_shapes () =
   Alcotest.(check bool)
     "absent"
     true
-    (M.build_scan_rows_of_output "masc-t362\tabsent"
-     = [ { M.checkout = "masc-t362"; state = M.Build_absent } ]);
+    (M.build_scan_rows_of_output "masc-t362\000absent\000\000"
+     = Ok [ { M.checkout = "masc-t362"; state = M.Build_absent } ]);
   Alcotest.(check bool)
     "real"
     true
-    (M.build_scan_rows_of_output "repos/wt-370\treal"
-     = [ { M.checkout = "repos/wt-370"; state = M.Build_real_directory } ]);
+    (M.build_scan_rows_of_output "repos/wt-370\000real\000\000"
+     = Ok [ { M.checkout = "repos/wt-370"; state = M.Build_real_directory } ]);
   Alcotest.(check bool)
     "symlink carries its current target"
     true
-    (M.build_scan_rows_of_output "masc-t362\tsymlink\t/masc-build/masc-t362"
-     = [ { M.checkout = "masc-t362"; state = M.Build_symlink "/masc-build/masc-t362" } ]);
+    (M.build_scan_rows_of_output "repo\n../victim\tabsent\000symlink\000/old\n../victim\tabsent\n\000"
+     = Ok [ { M.checkout = "repo\n../victim\tabsent";
+              state = M.Build_symlink "/old\n../victim\tabsent\n" } ]);
   Alcotest.(check bool)
-    "an unrecognized line is dropped, not raised on"
+    "empty output has no rows"
     true
-    (M.build_scan_rows_of_output "garbage" = [])
+    (M.build_scan_rows_of_output "" = Ok [])
 ;;
 
-let test_build_scan_rows_of_output_skips_blank_and_malformed_lines () =
-  let raw =
-    "masc-t362\tabsent\n\nrepos/wt-370\treal\ngarbage-line\nlane-smith\tsymlink\t/masc-build/lane-smith\n"
-  in
-  let rows = M.build_scan_rows_of_output raw in
-  Alcotest.(check int) "three valid rows; blank and garbage lines dropped" 3 (List.length rows);
-  Alcotest.(check (list string))
-    "checkouts in order"
-    [ "masc-t362"; "repos/wt-370"; "lane-smith" ]
-    (List.map (fun (r : M.build_scan_row) -> r.checkout) rows)
+let test_build_scan_rows_of_output_refuses_malformed_streams () =
+  List.iter (fun raw ->
+    Alcotest.(check bool) "malformed or truncated stream refuses every row" true
+      (Result.is_error (M.build_scan_rows_of_output raw)))
+    [ "garbage"; "repo\000absent\000"; "repo\000unknown\000\000";
+      "repo\000real\000unexpected\000"; "repo\000absent\000\000bad" ]
 ;;
 
 let test_build_link_rows_of_scan_decides_purely () =
@@ -2058,10 +2057,10 @@ let test_build_link_rows_of_scan_decides_purely () =
     true
     (plan_for "repos/wt-370" = M.Link_already_correct);
   Alcotest.(check bool)
-    "a stale link retargets -- removing a symlink loses no data"
+    "a differently targeted link is preserved"
     true
     (match plan_for "repos/wt-370-stale" with
-     | M.Link_retarget _ -> true
+     | M.Link_preserve_symlink { existing = "/masc-build/old"; _ } -> true
      | _ -> false);
   (* The one that matters: real build output is refused, never deleted. *)
   Alcotest.(check bool)
@@ -2082,8 +2081,8 @@ let test_invalid_build_link_path_keeps_its_refusal_reason () =
   Alcotest.(check bool) "no guest target directory" true (M.build_link_targets rows = [])
 ;;
 
-(* An invalid path over a real [_build]: the path reason and the scanned
-   state both survive, so the caller can still report the next-boot removal. *)
+(* An invalid path over a non-symlink [_build] keeps the scanned state, so the
+   caller can warn about a later handoff without logging the checkout. *)
 let test_invalid_build_link_path_keeps_a_real_directory () =
   let checkout = "repos/ambiguous:name" in
   let rows = M.build_link_rows_of_scan [ { M.checkout; state = M.Build_real_directory } ] in
@@ -2091,21 +2090,40 @@ let test_invalid_build_link_path_keeps_a_real_directory () =
    | [ { target = None; plan = M.Link_refused_invalid_path { state = M.Build_real_directory; _ }; _ } ] -> ()
    | _ -> Alcotest.fail "the real directory under an invalid path was dropped");
   Alcotest.(check bool) "no guest link action" true (M.build_link_actions rows = []);
-  let message state = M.build_link_invalid_path_message ~checkout ~detail:"d" state in
+  let message state = M.build_link_warning
+      (M.Link_refused_invalid_path {detail="private-detail"; state}) in
   Alcotest.(check bool) "only the real directory reports its removal" true
     (message M.Build_real_directory <> message M.Build_absent)
 ;;
 
-let test_build_link_refusal_message_names_the_checkout () =
-  let message = M.build_link_refusal_message ~checkout:"repos/wt-370" in
+let test_build_link_warning_is_static_and_state_aware () =
+  let warning plan = match M.build_link_warning plan with
+    | Some message -> message
+    | None -> Alcotest.fail "refusal must report a warning" in
+  let message = warning M.Link_refused_real_directory in
   Alcotest.(check bool)
-    "names the checkout's _build"
+    "warns that a real directory can be deleted on a later handoff"
     true
-    (Astring.String.is_infix ~affix:"repos/wt-370/_build" message);
+    (Astring.String.is_infix ~affix:"can stage and delete it" message);
   Alcotest.(check bool)
-    "names the marker that keeps it through a boot"
+    "names the keep marker"
     true
-    (Astring.String.is_infix ~affix:M.build_keep_marker message)
+    (Astring.String.is_infix ~affix:M.build_keep_marker message);
+  let detail = "private-detail-should-not-appear" in
+  let invalid state = warning (M.Link_refused_invalid_path {detail; state}) in
+  let real = invalid M.Build_real_directory and absent = invalid M.Build_absent in
+  let symlink = invalid (M.Build_symlink "/private-target-should-not-appear") in
+  Alcotest.(check bool) "invalid non-symlink gets the same preservation warning" true
+    (Astring.String.is_infix ~affix:M.build_keep_marker real);
+  Alcotest.(check bool) "absent entry has no directory removal warning" false
+    (Astring.String.is_infix ~affix:M.build_keep_marker absent);
+  Alcotest.(check bool) "symlink has no directory removal warning" false
+    (Astring.String.is_infix ~affix:M.build_keep_marker symlink);
+  List.iter (fun text ->
+    Alcotest.(check bool) "warning excludes private detail and target" false
+      (Astring.String.is_infix ~affix:detail text
+       || Astring.String.is_infix ~affix:"/private-target-should-not-appear" text))
+    [real; absent; symlink]
 ;;
 
 (* The boot helper's removal runs against a real tree: which directories it
@@ -2221,37 +2239,39 @@ let test_build_output_removal_script_keeps_a_checkout_named_by_a_newline () =
     checkouts
 ;;
 
-let test_build_link_actions_only_includes_create_and_retarget () =
+let test_build_link_actions_only_includes_create () =
   let rows =
     [ { M.checkout = "a"; target = Some "/masc-build/a"; plan = M.Link_create "/masc-build/a" }
-    ; { M.checkout = "b"; target = Some "/masc-build/b"; plan = M.Link_retarget "/masc-build/b" }
+    ; { M.checkout = "b"; target = Some "/masc-build/b";
+        plan = M.Link_preserve_symlink { existing = "/old"; expected = "/masc-build/b" } }
     ; { M.checkout = "c"; target = Some "/masc-build/c"; plan = M.Link_already_correct }
     ; { M.checkout = "d"; target = None; plan = M.Link_refused_real_directory }
     ]
   in
   Alcotest.(check bool)
-    "only create and retarget produce a guest action, in row order"
+    "only an absent destination produces a guest action"
     true
-    (M.build_link_actions rows = [ "a", "/masc-build/a"; "b", "/masc-build/b" ])
+    (M.build_link_actions rows = [ "a", "/masc-build/a" ])
 ;;
 
 let test_build_link_targets_include_already_correct_links () =
   let rows =
     [ { M.checkout = "a"; target = Some "/masc-build/a"; plan = M.Link_create "/masc-build/a" }
-    ; { M.checkout = "b"; target = Some "/masc-build/b"; plan = M.Link_retarget "/masc-build/b" }
+    ; { M.checkout = "b"; target = Some "/masc-build/b";
+        plan = M.Link_preserve_symlink { existing = "/old"; expected = "/masc-build/b" } }
     ; { M.checkout = "c"; target = Some "/masc-build/c"; plan = M.Link_already_correct }
     ; { M.checkout = "d"; target = None; plan = M.Link_refused_real_directory }
     ]
   in
   Alcotest.(check (list string))
     "a fresh build volume is empty, so an already-correct link needs its target made too"
-    [ "/masc-build/a"; "/masc-build/b"; "/masc-build/c" ]
+    [ "/masc-build/a"; "/masc-build/c" ]
     (M.build_link_targets rows)
 ;;
 
 let test_build_link_apply_argv_carries_positional_pairs () =
-  let argv =
-    M.build_link_apply_argv_for
+  let argv, input =
+    M.build_link_apply_request_for
       Backend.Apple_container
       ~container_name:"masc-keeper-vm-polisher-abc"
       ~keeper_work_root:"/masc-work/polisher"
@@ -2268,30 +2288,16 @@ let test_build_link_apply_argv_carries_positional_pairs () =
     "cwd is the keeper's work root"
     true
     (adjacent ~flag:"-w" ~value:"/masc-work/polisher" argv);
-  Alcotest.(check bool)
-    "every pair travels as positional args, checkout then target, in order"
-    true
-    (match List.rev argv with
-     | t2 :: c2 :: t1 :: c1 :: _name :: _script :: "-c" :: "sh" :: _ ->
-       String.equal c1 "masc-t362"
-       && String.equal t1 "/masc-build/masc-t362"
-       && String.equal c2 "repos/wt-370"
-       && String.equal t2 "/masc-build/repos:wt-370"
-     | _ -> false);
-  let script =
-    match List.rev argv with
-    | _ :: _ :: _ :: _ :: _name :: script :: "-c" :: "sh" :: _ -> script
-    | _ -> Alcotest.fail "apply is not a sh -c script with a $0 placeholder before the pairs"
-  in
-  Alcotest.(check bool)
-    "ln -sfn is in the apply script -- atomic, and refuses a real directory"
-    true
-    (Astring.String.is_infix ~affix:"ln -sfn" script)
+  Alcotest.(check bool) "stdin is attached" true (contains "-i" argv);
+  Alcotest.(check string) "pairs are NUL framed on stdin"
+    "masc-t362\000/masc-build/masc-t362\000repos/wt-370\000/masc-build/repos:wt-370\000" input;
+  Alcotest.(check bool) "guest paths are absent from argv" false
+    (contains "masc-t362" argv || contains "/masc-build/masc-t362" argv)
 ;;
 
 let test_build_link_apply_argv_with_no_actions_is_still_a_valid_script () =
-  let argv =
-    M.build_link_apply_argv_for
+  let argv, input =
+    M.build_link_apply_request_for
       Backend.Apple_container
       ~container_name:"masc-keeper-vm-polisher-abc"
       ~keeper_work_root:"/masc-work/polisher"
@@ -2300,11 +2306,249 @@ let test_build_link_apply_argv_with_no_actions_is_still_a_valid_script () =
       ~actions:[]
   in
   Alcotest.(check bool)
-    "no positional pairs beyond the $0 placeholder"
+    "empty input is valid and the request carries no path arguments"
     true
-    (match List.rev argv with
-     | "masc-build-link" :: _script :: "-c" :: "sh" :: _ -> true
-     | _ -> false)
+    (String.equal input "" && List.mem "masc-build-link" argv)
+;;
+
+(* The scan shell uses GNU readlink in the Linux guest. Skip its host test if
+   GNU readlink is unavailable rather than testing a different command. *)
+let gnu_tool names =
+  let rec find = function
+    | [] -> Alcotest.skip ()
+    | name :: rest ->
+      let input = Unix.open_process_in ("command -v " ^ name ^ " 2>/dev/null") in
+      let found = String.trim (In_channel.input_all input) in
+      let status = Unix.close_process_in input in
+      if status = Unix.WEXITED 0 && found <> ""
+         && Sys.command (Filename.quote found ^ " --version >/dev/null 2>&1") = 0
+      then found else find rest
+  in
+  find names
+;;
+
+let build_input_args_after marker argv =
+  let rec find = function
+    | ("/bin/sh" :: "-c" :: _ :: helper :: _ :: name :: _ :: _ :: _ :: _ as command)
+      when String.equal helper "masc-build-helper" && String.equal name marker ->
+      command
+    | _ :: rest -> find rest
+    | [] -> Alcotest.fail "generated build input request not found"
+  in
+  find argv
+;;
+
+let run_build_input ~root ~marker argv input =
+  let input_path = Filename.temp_file ~temp_dir:root "payload-" ".bin" in
+  Fun.protect ~finally:(fun () -> Sys.remove input_path) (fun () ->
+    Out_channel.with_open_bin input_path (fun output -> output_string output input);
+    let input_fd = Unix.openfile input_path [ Unix.O_RDONLY ] 0 in
+    let null_fd = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 in
+    let args = Array.of_list
+      ([ "/bin/sh"; "-c";
+         "cd \"$1\" || exit 1; shift; PYTHONPATH=\"$PWD\"; export PYTHONPATH; exec \"$@\"";
+         "fixture"; root ] @ build_input_args_after marker argv) in
+    let pid = Fun.protect ~finally:(fun () -> Unix.close input_fd; Unix.close null_fd)
+      (fun () -> Unix.create_process "/bin/sh" args input_fd null_fd null_fd) in
+    snd (Unix.waitpid [] pid))
+;;
+
+let replace_build_input_metadata argv ~input ~count =
+  let rec replace = function
+    | "/bin/sh" :: "-c" :: wrapper :: helper :: script :: marker :: _size :: _hash :: _count :: rest
+      when String.equal helper "masc-build-helper" ->
+      [ "/bin/sh"; "-c"; wrapper; helper; script; marker; string_of_int (String.length input);
+        Agent_core_sha256.(digest_string input |> to_hex); string_of_int count ] @ rest
+    | first :: rest -> first :: replace rest
+    | [] -> Alcotest.fail "generated build input request not found"
+  in
+  replace argv
+;;
+
+(* Tests substitute the two fixed literals only inside the generated wrapper;
+   all other arguments and wrapper logic remain those used in production. *)
+let replace_wrapper_path wrapper ~path ~replacement =
+  let result = Buffer.create (String.length wrapper) in
+  let len = String.length wrapper and path_len = String.length path in
+  let rec copy offset count =
+    if offset = len then count
+    else if offset + path_len <= len && String.sub wrapper offset path_len = path then (
+      Buffer.add_string result (Filename.quote replacement);
+      copy (offset + path_len) (count + 1))
+    else (
+      Buffer.add_char result wrapper.[offset];
+      copy (offset + 1) count)
+  in
+  let count = copy 0 0 in
+  Alcotest.(check int) "fixed path occurs in the check and exec" 2 count;
+  Buffer.contents result
+;;
+
+let replace_build_input_paths argv ~python_primary ~python_secondary =
+  let rec replace = function
+    | "/bin/sh" :: "-c" :: wrapper :: helper :: rest
+      when String.equal helper "masc-build-helper" ->
+      let wrapper = replace_wrapper_path wrapper ~path:"/usr/bin/python3" ~replacement:python_primary in
+      let wrapper = replace_wrapper_path wrapper ~path:"/usr/local/bin/python3" ~replacement:python_secondary in
+      [ "/bin/sh"; "-c"; wrapper; helper ] @ rest
+    | first :: rest -> first :: replace rest
+    | [] -> Alcotest.fail "generated build input request not found"
+  in
+  replace argv
+;;
+
+let test_build_input_wrapper_selects_one_interpreter () =
+  let root = temp_dir "build-input-selection-" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let argv, input = M.build_link_apply_request_for Backend.Apple_container
+        ~container_name:"fixture" ~keeper_work_root:"/fixture" ~uid:1 ~gid:1 ~actions:[] in
+    let rec script_arg = function
+      | "/bin/sh" :: "-c" :: _ :: "masc-build-helper" :: script :: _ -> script
+      | _ :: rest -> script_arg rest
+      | [] -> Alcotest.fail "generated build input request not found"
+    in
+    let script = script_arg argv in
+    let marker = Filename.concat root "selected" in
+    let create_program name label status =
+      let path = Filename.concat root name in
+      Out_channel.with_open_bin path (fun output ->
+        output_string output "#!/bin/sh\n";
+        Printf.fprintf output
+          "[ \"$#\" = 8 ] && [ \"$1\" = '-I' ] && [ \"$2\" = '-S' ] && [ \"$3\" = '-c' ] && [ \"$4\" = %s ] && [ \"$5\" = 'masc-build-link' ] && [ \"$6\" = '0' ] && [ \"$7\" = %s ] && [ \"$8\" = '0' ] || exit 90\n"
+          (Filename.quote script) (Filename.quote Agent_core_sha256.(digest_string input |> to_hex));
+        Printf.fprintf output "printf '%%s\\n' %s >> %s\nexit %d\n"
+          (Filename.quote label) (Filename.quote marker) status);
+      Unix.chmod path 0o755;
+      path
+    in
+    let primary = create_program "python-primary" "primary" 0 in
+    let secondary = create_program "python-secondary" "secondary" 0 in
+    let failed_python = create_program "python-failed" "python-failed" 127 in
+    let failed_other = create_program "python-failed-other" "python-failed-other" 2 in
+    let non_executable = create_program "python-non-executable" "non-executable" 0 in
+    Unix.chmod non_executable 0o644;
+    let absent = Filename.concat root "absent" in
+    let check_selection description ~python_primary ~python_secondary ~expected_status ~expected_marker =
+      Out_channel.with_open_bin marker (fun _ -> ());
+      let selected = replace_build_input_paths argv ~python_primary ~python_secondary in
+      let status = run_build_input ~root ~marker:"masc-build-link" selected input in
+      Alcotest.(check bool) (description ^ " status") true (status = Unix.WEXITED expected_status);
+      Alcotest.(check string) (description ^ " selection") expected_marker
+        (In_channel.with_open_bin marker In_channel.input_all)
+    in
+    check_selection "primary Python wins" ~python_primary:primary ~python_secondary:secondary
+      ~expected_status:0 ~expected_marker:"primary\n";
+    check_selection "secondary Python is selected" ~python_primary:absent ~python_secondary:secondary
+      ~expected_status:0 ~expected_marker:"secondary\n";
+    check_selection "non-executable Python is skipped" ~python_primary:non_executable ~python_secondary:secondary
+      ~expected_status:0 ~expected_marker:"secondary\n";
+    check_selection "no interpreter fails" ~python_primary:absent ~python_secondary:absent
+      ~expected_status:127 ~expected_marker:"";
+    check_selection "failed primary does not try secondary" ~python_primary:failed_python ~python_secondary:secondary
+      ~expected_status:127 ~expected_marker:"python-failed\n";
+    check_selection "other failure does not try secondary" ~python_primary:failed_other ~python_secondary:secondary
+      ~expected_status:2 ~expected_marker:"python-failed-other\n";
+    check_selection "failed secondary does not retry" ~python_primary:absent ~python_secondary:failed_python
+      ~expected_status:127 ~expected_marker:"python-failed\n";
+    let checkout = Filename.concat root "checkout" in
+    Unix.mkdir checkout 0o700;
+    let link_argv, link_input = M.build_link_apply_request_for Backend.Apple_container
+        ~container_name:"fixture" ~keeper_work_root:"/fixture" ~uid:1 ~gid:1
+        ~actions:[ "checkout", "/fixture/target" ] in
+    let link_argv = replace_build_input_paths link_argv ~python_primary:absent ~python_secondary:absent in
+    Alcotest.(check bool) "missing Python fails the link request" true
+      (run_build_input ~root ~marker:"masc-build-link" link_argv link_input = Unix.WEXITED 127);
+    Alcotest.(check bool) "missing Python creates no link" false
+      (match Unix.lstat (Filename.concat checkout "_build") with
+       | _ -> true | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false);
+    let target = Filename.concat root "target" in
+    let mkdir_argv, mkdir_input = M.build_target_mkdir_request ~container_name:"fixture" ~targets:[ target ] in
+    let mkdir_argv = replace_build_input_paths mkdir_argv ~python_primary:absent ~python_secondary:absent in
+    Alcotest.(check bool) "missing Python fails the mkdir request" true
+      (run_build_input ~root ~marker:"masc-build-mkdir" mkdir_argv mkdir_input = Unix.WEXITED 127);
+    Alcotest.(check bool) "missing Python creates no target" false (Sys.file_exists target))
+;;
+
+let test_build_scan_does_not_turn_newlines_into_checkout_rows () =
+  let readlink = gnu_tool [ "greadlink"; "readlink" ] in
+  let root = temp_dir "build-scan-framing-" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let bin = Filename.concat root "bin" and work = Filename.concat root "work" in
+    Unix.mkdir bin 0o700; Unix.mkdir work 0o700;
+    Unix.symlink readlink (Filename.concat bin "readlink");
+    let checkout = Filename.concat work "checkout" in
+    Unix.mkdir checkout 0o700;
+    Out_channel.with_open_bin (Filename.concat checkout "dune-project") (fun _ -> ());
+    let original_target = "/fixture/old\n../victim\tabsent\n" in
+    Unix.symlink original_target (Filename.concat checkout "_build");
+    let unusual_name = "odd\nname\tvalue" in
+    let unusual = Filename.concat work unusual_name in
+    Unix.mkdir unusual 0o700;
+    Out_channel.with_open_bin (Filename.concat unusual "dune-project") (fun _ -> ());
+    let argv = M.build_scan_argv_for Backend.Apple_container
+        ~container_name:"fixture" ~keeper_work_root:"/fixture" ~uid:1 ~gid:1 in
+    let script = match List.rev argv with
+      | script :: "-c" :: "sh" :: _ -> script
+      | _ -> Alcotest.fail "scan script not found" in
+    let input = Unix.open_process_args_in "/bin/sh"
+        [| "/bin/sh"; "-c";
+           "cd \"$1\" || exit 1; PATH=\"$2:$PATH\"; export PATH; exec /bin/sh -c \"$3\"";
+           "fixture"; work; bin; script |] in
+    let output = In_channel.input_all input in
+    Alcotest.(check bool) "actual scan succeeded" true (Unix.close_process_in input = Unix.WEXITED 0);
+    let rows = ok_exn (M.build_scan_rows_of_output output) in
+    Alcotest.(check int) "only the two actual checkouts are reported" 2 (List.length rows);
+    let row name = List.find (fun (row : M.build_scan_row) -> String.equal row.checkout name) rows in
+    Alcotest.(check bool) "link target, including its final newline, is data" true
+      ((row "checkout").state = M.Build_symlink original_target);
+    Alcotest.(check bool) "newline in a checkout name is data" true
+      ((row unusual_name).state = M.Build_absent);
+    let actions = M.build_link_rows_of_scan rows |> M.build_link_actions in
+    Alcotest.(check bool) "no forged parent traversal action" false
+      (List.exists (fun (name, _) -> String.equal name "../victim") actions))
+;;
+
+let test_build_link_apply_preserves_racing_entries_and_continues () =
+  let root = temp_dir "build-link-race-" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let checkout name =
+      let dir = Filename.concat root name in Unix.mkdir dir 0o700; dir in
+    let real_dir = checkout "dir" in
+    let regular = checkout "file" in
+    let linked = checkout "linked" in
+    let dangling = checkout "dangling" in
+    ignore (checkout "-leading");
+    let real_build = Filename.concat real_dir "_build" in
+    Unix.mkdir real_build 0o700;
+    let marker = Filename.concat real_build "result" in
+    Out_channel.with_open_bin marker (fun out -> output_string out "directory marker");
+    let regular_build = Filename.concat regular "_build" in
+    Out_channel.with_open_bin regular_build (fun out -> output_string out "file marker");
+    let existing_target = Filename.concat root "existing-target" in
+    Unix.mkdir existing_target 0o700;
+    Unix.symlink existing_target (Filename.concat linked "_build");
+    Unix.symlink "/missing-fixture-target" (Filename.concat dangling "_build");
+    let paths = [ real_build; regular_build; Filename.concat linked "_build";
+                  Filename.concat dangling "_build" ] in
+    let inodes = List.map (fun path -> (Unix.lstat path).st_ino) paths in
+    let actions = List.map (fun name -> name, "/fixture/result")
+        [ "dir"; "file"; "linked"; "dangling"; "-leading" ] in
+    let argv, input = M.build_link_apply_request_for Backend.Apple_container
+        ~container_name:"fixture" ~keeper_work_root:"/fixture" ~uid:1 ~gid:1 ~actions in
+    let status = run_build_input ~root ~marker:"masc-build-link" argv input in
+    Alcotest.(check bool) "collisions are reported" true (status <> Unix.WEXITED 0);
+    Alcotest.(check (list int)) "existing entries keep their inodes" inodes
+      (List.map (fun path -> (Unix.lstat path).st_ino) paths);
+    Alcotest.(check string) "real directory contents survive" "directory marker"
+      (In_channel.with_open_bin marker In_channel.input_all);
+    Alcotest.(check string) "regular file survives" "file marker"
+      (In_channel.with_open_bin regular_build In_channel.input_all);
+    Alcotest.(check string) "existing symlink remains" existing_target
+      (Unix.readlink (Filename.concat linked "_build"));
+    Alcotest.(check string) "dangling symlink remains" "/missing-fixture-target"
+      (Unix.readlink (Filename.concat dangling "_build"));
+    Alcotest.(check string) "a later checkout still gets its new link" "/fixture/result"
+      (Unix.readlink (Filename.concat root "-leading/_build")))
 ;;
 
 let test_build_target_mkdir_argv_runs_as_root_for_every_target () =
@@ -2313,20 +2557,111 @@ let test_build_target_mkdir_argv_runs_as_root_for_every_target () =
      ("Error: open(_build/.lock): No such file or directory"). The host
      cannot create it either, since it lives inside the volume's ext4 image.
      So the guest creates as root with a mode that lets the keeper write. *)
-  let argv =
-    M.build_target_mkdir_argv
+  let argv, input =
+    M.build_target_mkdir_request
       ~container_name:"masc-keeper-vm-polisher-abc"
       ~targets:[ "/masc-build/masc-t362"; "/masc-build/repos:wt-370" ]
   in
   Alcotest.(check bool) "goes through container exec" true (contains "exec" argv);
   Alcotest.(check bool) "names the guest" true (contains "masc-keeper-vm-polisher-abc" argv);
   Alcotest.(check bool) "creates as root" true (adjacent ~flag:"--user" ~value:"0:0" argv);
-  Alcotest.(check bool) "mkdir -p, so repeating is safe" true (adjacent ~flag:"mkdir" ~value:"-p" argv);
-  Alcotest.(check bool) "explicit mode" true (adjacent ~flag:"-m" ~value:"0777" argv);
-  Alcotest.(check bool)
-    "both targets are created in one command"
-    true
-    (contains "/masc-build/masc-t362" argv && contains "/masc-build/repos:wt-370" argv)
+  Alcotest.(check bool) "stdin is attached" true (contains "-i" argv);
+  Alcotest.(check bool) "target paths are not argv" false
+    (contains "/masc-build/masc-t362" argv || contains "/masc-build/repos:wt-370" argv);
+  Alcotest.(check string) "both targets are framed on stdin"
+    "/masc-build/masc-t362\000/masc-build/repos:wt-370\000" input
+;;
+
+let test_build_link_input_is_checked_before_effects () =
+  let root = temp_dir "build-link-input-" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let checkout = Filename.concat root "odd\nname\tvalue" in
+    Unix.mkdir checkout 0o700;
+    let argv, input = M.build_link_apply_request_for Backend.Apple_container
+      ~container_name:"fixture" ~keeper_work_root:"/fixture" ~uid:1 ~gid:1
+      ~actions:[ "odd\nname\tvalue", "/fixture/target" ] in
+    let no_effect description invalid =
+      Alcotest.(check bool) description true
+        (run_build_input ~root ~marker:"masc-build-link" argv invalid <> Unix.WEXITED 0);
+      Alcotest.(check bool) "unverified input cannot create a link" false
+        (match Unix.lstat (Filename.concat checkout "_build") with
+         | _ -> true | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false) in
+    no_effect "short payload rejected" (String.sub input 0 (String.length input - 1));
+    no_effect "extra payload rejected" (input ^ "x");
+    no_effect "changed payload rejected" ("x" ^ String.sub input 1 (String.length input - 1));
+    let missing_nul = String.sub input 0 (String.length input - 1) in
+    let malformed_argv = replace_build_input_metadata argv ~input:missing_nul ~count:2 in
+    Alcotest.(check bool) "matching hash without final NUL is rejected" true
+      (run_build_input ~root ~marker:"masc-build-link" malformed_argv missing_nul <> Unix.WEXITED 0);
+    let odd = "odd\nname\tvalue\000" in
+    let odd_argv = replace_build_input_metadata argv ~input:odd ~count:1 in
+    Alcotest.(check bool) "matching hash with an odd field count is rejected" true
+      (run_build_input ~root ~marker:"masc-build-link" odd_argv odd <> Unix.WEXITED 0);
+    List.iter (fun (description, invalid, count) ->
+      let invalid_argv = replace_build_input_metadata argv ~input:invalid ~count in
+      Alcotest.(check bool) description true
+        (run_build_input ~root ~marker:"masc-build-link" invalid_argv invalid <> Unix.WEXITED 0))
+      [ "single NUL is not an empty payload", "\000", 0
+      ; "empty first field is rejected", "\000/fixture/target\000", 2
+      ; "empty last field is rejected", "odd\nname\tvalue\000\000", 2
+      ; "empty middle field is rejected", "odd\nname\tvalue\000\000/fixture/target\000", 3
+      ];
+    Alcotest.(check bool) "malformed framing created no link" false
+      (match Unix.lstat (Filename.concat checkout "_build") with
+       | _ -> true | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false);
+    let marker = Filename.concat root "module-ran" in
+    Out_channel.with_open_bin (Filename.concat root "hashlib.py") (fun output ->
+      Printf.fprintf output "open(%S, 'w').write('bad')\n" marker);
+    Alcotest.(check bool) "complete payload succeeds" true
+      (run_build_input ~root ~marker:"masc-build-link" argv input = Unix.WEXITED 0);
+    Alcotest.(check bool) "cwd module is never imported" false (Sys.file_exists marker);
+    Alcotest.(check string) "newline and tab are preserved" "/fixture/target"
+      (Unix.readlink (Filename.concat checkout "_build")))
+;;
+
+let test_build_target_input_is_checked_before_effects () =
+  let root = temp_dir "build-target-input-" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let target = Filename.concat root "target" in
+    let argv, input = M.build_target_mkdir_request ~container_name:"fixture" ~targets:[ target ] in
+    let short = String.sub input 0 (String.length input - 1) in
+    Alcotest.(check bool) "incomplete stdin fails" true
+      (run_build_input ~root ~marker:"masc-build-mkdir" argv short <> Unix.WEXITED 0);
+    Alcotest.(check bool) "no target made from incomplete input" false (Sys.file_exists target);
+    let malformed = replace_build_input_metadata argv ~input:short ~count:1 in
+    Alcotest.(check bool) "matching hash without final NUL still fails" true
+      (run_build_input ~root ~marker:"masc-build-mkdir" malformed short <> Unix.WEXITED 0);
+    Alcotest.(check bool) "complete target input succeeds" true
+      (run_build_input ~root ~marker:"masc-build-mkdir" argv input = Unix.WEXITED 0);
+    Unix.chmod target 0o700;
+    Alcotest.(check bool) "existing target succeeds" true
+      (run_build_input ~root ~marker:"masc-build-mkdir" argv input = Unix.WEXITED 0);
+    Alcotest.(check int) "existing mode is preserved" 0o700 ((Unix.stat target).st_perm);
+    let many = List.init 50000 (fun _ -> target) in
+    let large_argv, large_input = M.build_target_mkdir_request ~container_name:"fixture" ~targets:many in
+    Alcotest.(check bool) "payload is larger than one MiB" true (String.length large_input > 1_048_576);
+    Alcotest.(check bool) "large payload is processed without argv expansion" true
+      (run_build_input ~root ~marker:"masc-build-mkdir" large_argv large_input = Unix.WEXITED 0);
+    let nested = Filename.concat root "nested/child" in
+    let nested_argv, nested_input = M.build_target_mkdir_request ~container_name:"fixture" ~targets:[ nested ] in
+    Alcotest.(check bool) "missing parent directories are made" true
+      (run_build_input ~root ~marker:"masc-build-mkdir" nested_argv nested_input = Unix.WEXITED 0);
+    Alcotest.(check bool) "nested target exists" true (Sys.is_directory nested);
+    let alias = Filename.concat root "directory-alias" in
+    Unix.symlink nested alias;
+    let alias_argv, alias_input = M.build_target_mkdir_request ~container_name:"fixture" ~targets:[ alias ] in
+    Alcotest.(check bool) "an existing directory symlink succeeds" true
+      (run_build_input ~root ~marker:"masc-build-mkdir" alias_argv alias_input = Unix.WEXITED 0);
+    let blocked = Filename.concat root "regular-file" in
+    Out_channel.with_open_bin blocked (fun output -> output_string output "preserve");
+    let later = Filename.concat root "later" in
+    let failed_argv, failed_input = M.build_target_mkdir_request ~container_name:"fixture"
+        ~targets:[ Filename.concat blocked "child"; later ] in
+    Alcotest.(check bool) "a regular-file parent is reported" true
+      (run_build_input ~root ~marker:"masc-build-mkdir" failed_argv failed_input <> Unix.WEXITED 0);
+    Alcotest.(check string) "regular-file parent is preserved" "preserve"
+      (In_channel.with_open_bin blocked In_channel.input_all);
+    Alcotest.(check bool) "a later target is still made" true (Sys.is_directory later))
 ;;
 
 let test_volume_create_argv_carries_a_size () =
@@ -4444,30 +4779,40 @@ let () =
             test_build_scan_argv_runs_as_the_keeper_in_the_work_root
         ; Alcotest.test_case "build scan rows of output parses the three shapes" `Quick
             test_build_scan_rows_of_output_parses_the_three_shapes
-        ; Alcotest.test_case "build scan rows of output skips blank and malformed lines" `Quick
-            test_build_scan_rows_of_output_skips_blank_and_malformed_lines
+        ; Alcotest.test_case "build scan refuses malformed and truncated streams" `Quick
+            test_build_scan_rows_of_output_refuses_malformed_streams
         ; Alcotest.test_case "build link rows of scan decides purely" `Quick
             test_build_link_rows_of_scan_decides_purely
         ; Alcotest.test_case "invalid path retains its refusal reason" `Quick
             test_invalid_build_link_path_keeps_its_refusal_reason
         ; Alcotest.test_case "invalid path keeps a real directory" `Quick
             test_invalid_build_link_path_keeps_a_real_directory
-        ; Alcotest.test_case "build link refusal message names the checkout" `Quick
-            test_build_link_refusal_message_names_the_checkout
+        ; Alcotest.test_case "build link warning is static and state aware" `Quick
+            test_build_link_warning_is_static_and_state_aware
         ; Alcotest.test_case "boot removal deletes only unkept dune build output" `Quick
             test_build_output_removal_script_removes_only_unkept_dune_output
         ; Alcotest.test_case "boot removal skips a keeper root that does not exist" `Quick
             test_build_output_removal_script_skips_a_missing_keeper_root
         ; Alcotest.test_case "boot removal keeps a checkout named by a newline" `Quick
             test_build_output_removal_script_keeps_a_checkout_named_by_a_newline
-        ; Alcotest.test_case "build link actions only includes create and retarget" `Quick
-            test_build_link_actions_only_includes_create_and_retarget
+        ; Alcotest.test_case "build link actions only includes create" `Quick
+            test_build_link_actions_only_includes_create
         ; Alcotest.test_case "build link targets include already-correct links" `Quick
             test_build_link_targets_include_already_correct_links
-        ; Alcotest.test_case "build link apply argv carries positional pairs" `Quick
+        ; Alcotest.test_case "build link apply sends pairs on stdin" `Quick
             test_build_link_apply_argv_carries_positional_pairs
         ; Alcotest.test_case "build link apply argv with no actions is still a valid script" `Quick
             test_build_link_apply_argv_with_no_actions_is_still_a_valid_script
+        ; Alcotest.test_case "build input wrapper selects one interpreter" `Quick
+            test_build_input_wrapper_selects_one_interpreter
+        ; Alcotest.test_case "build scan preserves newlines and tabs as data" `Quick
+            test_build_scan_does_not_turn_newlines_into_checkout_rows
+        ; Alcotest.test_case "build link apply preserves racing entries and continues" `Quick
+            test_build_link_apply_preserves_racing_entries_and_continues
+        ; Alcotest.test_case "build link input is checked before effects" `Quick
+            test_build_link_input_is_checked_before_effects
+        ; Alcotest.test_case "build target input is checked before effects" `Quick
+            test_build_target_input_is_checked_before_effects
         ; Alcotest.test_case "build target mkdir argv runs as root for every target" `Quick
             test_build_target_mkdir_argv_runs_as_root_for_every_target
         ] )

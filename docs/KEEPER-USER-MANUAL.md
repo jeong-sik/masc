@@ -108,6 +108,227 @@ identity and shim without starting a guest or cleaning build output. The first
 owned turn handoff per server process stages unkept real `_build` directories
 before deleting them. `.masc-keep-build` preserves a checkout's output.
 
+#### Build preparation reports a failure
+
+`microvm_build_link_mkdir_failed` or `microvm_build_link_apply_failed` can
+report a nonzero exit or signal. Status 127 can mean build preparation could
+not start an interpreter. Execution and transport failures are also possible,
+so no status alone establishes the cause or proves that no effect ran. Preserve the
+guest, volumes, links and any possibly executed effect as unverified; do not
+automatically retry the effect or restart the service or guest to clear the
+warning. The in-process unverified state applies only while that guest
+generation is retained; a restart, forget or replacement can clear it and
+permit another attempt.
+
+In the affected guest, perform these checks both as root and as the Keeper uid
+and gid: target-directory preparation uses root, while link creation uses the
+Keeper identity. A check by one user does not establish access for the other.
+The helper selects `/usr/bin/python3` first, then
+`/usr/local/bin/python3`. If neither passes `-x`, it exits 127 without selecting
+an interpreter. This check only reads permissions; it does not execute or
+validate either interpreter:
+
+```sh
+for guest_runtime in /usr/bin/python3 /usr/local/bin/python3; do
+  if [ -x "$guest_runtime" ]; then
+    printf '%s: -x check passed; execution is not verified\n' "$guest_runtime"
+  else
+    printf '%s: absent or not executable for this user\n' "$guest_runtime"
+  fi
+done
+```
+
+Keep the check's output and any subsequent diagnostics within the affected
+owners' authorized sharing boundary. If a Python path passes `-x` but then
+fails, the helper does not proceed to the
+next candidate. Permission checks do not validate an executable, its loader,
+the guest transport or the prior effect. Reconcile the outstanding effect and
+other workspace owners before planning any change; do not install software,
+replace the guest, restart the service or retry merely because of these checks.
+Ask the operator to arrange a trusted compatible image or interpreter if the
+selected runtime is unavailable. The diagnostics below also require a trusted
+Python at one of those paths. Remote checkout discovery and scheduled attached
+build cleanup separately invoke `python3` through the guest's `PATH`; a fixed
+path check alone does not establish that those commands can run.
+
+#### Inspecting `_build` entries
+
+A link warning does not name the affected checkout. An existing non-symlink
+`_build` may be a directory or another kind of entry. The link scan leaves it
+unchanged. For a checkout with `dune-project`, a later first owned handoff in a
+new server process can stage and delete an actual `_build` directory if the
+checkout's `.masc-keep-build` does not resolve as present when checked. The
+marker prevents that staging for the checkout; it does not recover output
+already staged in `.masc-build-removing` or fence another writer. Coordinate
+with all affected owners before changing anything, and do not restart the
+service or guest merely to investigate the warning.
+
+From an authorized route in a trusted guest, use the Keeper uid and gid that
+run the first handoff and enter its actual work root; replace `reviewer` with
+the sanitized Keeper name. A root-only check does not establish what the
+Keeper can read. This read-only scan reports
+`_build` symlinks, real directories and other entries up to three directory
+levels below the root. It skips `.git`, `_build`, and the root's reserved
+`.masc-build-removing` tree and follows no directory symlinks. The root itself
+and deeper directories are outside the checkout scan. `dune-project: True`
+means the marker resolves as present; `.masc-keep-build: True` means the keep
+marker resolves as present at that instant. A dangling marker is `False`;
+marker read errors are `unverified`. Other errors are printed to stderr and
+can leave the listing incomplete. The pending status does not inspect staged
+contents. All results can become stale while inspected.
+
+The output can expose paths and link targets from a shared volume; view, retain
+and share it only within a boundary authorized by all affected workspace owners.
+The fixed interpreter must come from a trusted guest image; isolated flags do
+not make an untrusted executable safe. The root check is an observation, not
+a fence against later replacement.
+
+```sh
+keeper_work_root=/masc-work/reviewer  # replace with the actual guest path
+[ ! -L "$keeper_work_root" ] || { printf '%s\n' 'Work root is a symlink; stop.' >&2; exit 1; }
+cd -- "$keeper_work_root" || exit 1
+if [ -x /usr/bin/python3 ]; then
+  guest_python=/usr/bin/python3
+elif [ -x /usr/local/bin/python3 ]; then
+  guest_python=/usr/local/bin/python3
+else
+  printf '%s\n' 'No supported Python; ask the operator.' >&2
+  exit 1
+fi
+"$guest_python" -I -S -B - <<'PY'
+import os, stat, sys
+
+def report(error):
+    print("cannot inspect:", repr(error.filename), repr(error), file=sys.stderr)
+
+def exists(path):
+    try:
+        os.stat(path)
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        report(error)
+        return "unverified"
+
+try:
+    os.lstat("./.masc-build-removing")
+    print("pending cleanup: present; contents not inspected")
+except FileNotFoundError:
+    print("pending cleanup: absent")
+except OSError as error:
+    report(error)
+    print("pending cleanup: unverified")
+
+for base, dirs, _ in os.walk(".", topdown=True, followlinks=False, onerror=report):
+    rel = os.path.relpath(base, ".")
+    depth = 0 if rel == "." else len(rel.split(os.sep))
+    dirs[:] = [] if depth >= 3 else [d for d in dirs if d not in (".git", "_build")]
+    if rel == ".":
+        dirs[:] = [d for d in dirs if d != ".masc-build-removing"]
+        continue
+    entry = os.path.join(base, "_build")
+    try:
+        mode = os.lstat(entry).st_mode
+    except FileNotFoundError:
+        continue
+    except OSError as error:
+        report(error)
+        continue
+    if stat.S_ISLNK(mode):
+        kind = "symlink"
+        try:
+            target = repr(os.readlink(entry))
+        except OSError as error:
+            report(error)
+            target = "<unverified>"
+    elif stat.S_ISDIR(mode):
+        kind, target = "directory", "-"
+    else:
+        kind, target = "other", "-"
+    print("checkout:", repr(rel), "_build:", kind, "target:", target,
+          "dune-project:", exists(os.path.join(base, "dune-project")),
+          ".masc-keep-build:", exists(os.path.join(base, ".masc-keep-build")))
+PY
+```
+
+#### A preserved `_build` link after moving a checkout
+
+MASC leaves an `_build` symlink pointing somewhere other than the current
+checkout's expected build target unchanged because its owner is unknown. For
+example, a checkout moved from `old` to `new` can still point at
+`/masc-build/old`. A new boot recreates the build volume empty, so that link
+can become dangling and a Dune build can fail. MASC does not create the old
+target or retarget the link automatically. For a checkout named `new` directly
+under the Keeper work root, the expected target is `/masc-build/new`; for
+`repos/new` it is `/masc-build/repos:new`. A name containing `:` cannot be
+mapped by this scheme, so ask the operator instead of guessing a target. Use
+the read-only scan above to identify affected links.
+
+Inspect the affected checkout **inside that Keeper's guest**, using the
+Keeper's execution route or an authorized guest shell. Select the exact path
+from the scan; quote it as a single path rather than treating the escaped
+representation as a shell command. These commands only
+read the current directory and link; `False` may mean missing, inaccessible,
+or not a directory:
+
+```sh
+if [ -x /usr/bin/python3 ]; then
+  guest_python=/usr/bin/python3
+elif [ -x /usr/local/bin/python3 ]; then
+  guest_python=/usr/local/bin/python3
+else
+  printf '%s\n' 'No supported Python; ask the operator.' >&2
+  exit 1
+fi
+"$guest_python" -I -S - <<'PY'
+import os
+print("checkout:", repr(os.getcwd()))
+print("_build link:", repr(os.readlink("_build")) if os.path.islink("_build") else "<not a symlink>")
+print("target is a directory:", os.path.isdir("_build"))
+PY
+```
+
+If `_build` is not a symlink, or the checkout or mount is not the one expected,
+stop and inspect the actual entry before taking recovery action. An existing
+directory can contain build data.
+
+Confirm the Keeper, workspace, checkout and link owner before changing
+anything. Same-named Keepers in different workspaces may share these volumes.
+Coordinate with their owners to establish that no build or other writer is
+using the checkout or target; a process list from one guest alone is not proof
+of exclusive ownership. If ownership or activity is uncertain, leave the link
+and target intact and ask the operator to investigate.
+
+Once the checkout owner confirms it is safe to build and the operator has
+verified that the guest's `/tmp` is private guest-local storage, a fresh
+directory there can restore a Dune invocation without changing the link or its
+old target. Run this only through an authorized guest execution route that can
+write to `/tmp`:
+
+```sh
+umask 077
+recovery_dir=$(mktemp -d /tmp/masc-dune-recovery.XXXXXXXX) || exit 1
+printf 'Recovery build directory: %s\n' "$recovery_dir"
+DUNE_BUILD_DIR="$recovery_dir" dune build
+```
+
+Use that `DUNE_BUILD_DIR` for subsequent Dune commands. Guest `/tmp` has limited
+space, may consume guest memory, and its contents can disappear when the guest
+stops or is replaced. Directory mode 0700 does not isolate other processes
+running as the same uid. The directory is not automatically removed: after
+confirming its owner and that no build uses it, arrange cleanup of that exact
+directory through the approved operator process. If `/tmp` is not verified as
+guest-local or the route cannot write there, ask the operator; do not move this
+workaround onto an unverified shared volume. Scripts that force `_build` may
+still fail.
+
+For a permanent link repair, coordinate the owner and operator: preserve the
+old link and its target, verify that the correct checkout-specific target belongs
+to this workspace and is not in use, then install and verify the replacement
+without force or bulk deletion. Do not create `/masc-build/old` merely to make
+the old link resolve; another checkout may use it.
+
 Work-volume admission distinguishes an explicit guest observation that the
 mount is absent (`microvm_work_volume_not_mounted`) from a failed or timed-out
 check (`microvm_work_volume_probe_unverified`). The latter leaves the mount

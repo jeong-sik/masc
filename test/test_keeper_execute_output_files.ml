@@ -226,6 +226,29 @@ let test_narrow_lanes_still_store_20000_bytes () =
           (blob_bytes ~base_path "output_artifact" fields)))
     [ "Codex", codex_lane; "Antigravity", antigravity_lane ]
 
+let test_capture_limits_preserve_only_complete_streams () =
+  let root = Filename.temp_dir "capture-limit-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    Eio_main.run (fun _env ->
+      let (), files = Capture.with_capture ~stdout_limit:3 ~stderr_limit:2
+          ~capture_dir:(Filename.concat root "streams") (fun capture ->
+        Capture.append capture ~stream:Capture.Stdout "ab";
+        Capture.append capture ~stream:Capture.Stdout "c";
+        Capture.append capture ~stream:Capture.Stderr "xy";
+        Capture.append capture ~stream:Capture.Stderr "z";
+        Capture.end_of_stream capture ~stream:Capture.Stdout;
+        Capture.end_of_stream capture ~stream:Capture.Stderr) in
+      let stdout_path = complete_path "abc" files.stdout in
+      Alcotest.(check string) "exact limit reaches EOF byte-for-byte" "abc"
+        (In_channel.with_open_bin stdout_path In_channel.input_all);
+      match files.stderr with
+      | Capture.Capture_failed { path = Some path; limit_exceeded = true; _ } ->
+        Alcotest.(check bool) "over-limit file never exceeds its limit" true
+          ((Unix.stat path).st_size <= 2)
+      | Capture.Capture_failed _ -> Alcotest.fail "limit lost its typed failure or owned file"
+      | Capture.Complete_file _ | Capture.Incomplete_file _ ->
+        Alcotest.fail "over-limit stream was reported as complete or merely incomplete"))
+
 let () =
   Alcotest.run "Keeper Execute output publication"
     [ "actual child output",
@@ -237,6 +260,8 @@ let () =
           test_worker_publication_preserves_secret_snapshot
       ; Alcotest.test_case "non-UTF-8 child output survives JSON transport" `Quick
           test_non_utf8_child_output_is_preserved
+      ; Alcotest.test_case "capture limits retain only complete streams" `Quick
+          test_capture_limits_preserve_only_complete_streams
       ]
     ; "lane ceiling",
       [ Alcotest.test_case "Claude Code lane returns 20,000 bytes inline" `Quick

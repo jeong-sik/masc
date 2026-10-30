@@ -783,6 +783,214 @@ let test_bind_fallback_keeps_initialized_cwd_and_capability () =
    | Ok (_, stdout, _) -> failf "fallback bypassed cwd capability: %S" stdout);
   check int "every execution reached the failing Eio pipe boundary" 3 (Atomic.get calls)
 
+(* The exception is raised only after the child's stdout is read. The child
+   writes its marker before stdout, so the first execution is known to have
+   had an effect even though the process runner receives no exit status. *)
+let test_bind_error_after_child_effect_respects_fallback_policy () =
+  let root = Filename.temp_dir "process-bind-after-effect-" "" in
+  let stdin_default_marker = Filename.concat root "stdin-default" in
+  let stdin_eio_only_marker = Filename.concat root "stdin-eio-only" in
+  let streaming_default_marker = Filename.concat root "streaming-default" in
+  let streaming_eio_only_marker = Filename.concat root "streaming-eio-only" in
+  let markers =
+    [ stdin_default_marker; stdin_eio_only_marker
+    ; streaming_default_marker; streaming_eio_only_marker ] in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter (fun path -> if Sys.file_exists path then Sys.remove path) markers;
+      Unix.rmdir root)
+    (fun () ->
+      List.iter (fun path -> Out_channel.with_open_bin path (fun _ -> ())) markers;
+      Eio_main.run @@ fun env ->
+      let original_mgr = Eio.Stdenv.process_mgr env in
+      let pipe_calls = ref 0 in
+      let injected_reads = ref 0 in
+      let module Bind_source = struct
+        type t = [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Resource.t
+        let read_methods = []
+        let single_read source dst =
+          ignore (Eio.Flow.single_read source dst : int);
+          incr injected_reads;
+          raise (Unix.Unix_error (Unix.EADDRINUSE, "bind", "fixture stdout"))
+      end in
+      let handler :
+        (Bind_source.t, [ Eio.Flow.source_ty | Eio.Resource.close_ty ]) Eio.Resource.handler =
+        Eio.Resource.handler
+          [ Eio.Resource.H (Eio.Flow.Pi.Source, (module Bind_source))
+          ; Eio.Resource.H (Eio.Resource.Close, Eio.Flow.close)
+          ]
+      in
+      let module Base = Eio_unix.Process.Make_mgr (struct
+        type t = unit
+        let spawn_unix () ~sw ?cwd ~env ~fds ~executable args =
+          Eio_unix.Process.spawn_unix ~sw ?cwd ~env ~fds ~executable original_mgr args
+      end) in
+      let module Failing = struct
+        include Base
+        let pipe () ~sw =
+          let source, sink = Base.pipe () ~sw in
+          let is_stdout = !pipe_calls mod 2 = 0 in
+          incr pipe_calls;
+          if is_stdout then Eio.Resource.T (source, handler), sink else source, sink
+      end in
+      let proc_mgr = Eio.Resource.T ((), Eio_unix.Process.Pi.mgr_unix (module Failing)) in
+      Process_eio.init ~cwd_default:(Eio.Stdenv.fs env) ~proc_mgr ~clock:(Eio.Stdenv.clock env);
+      Fun.protect ~finally:Process_eio.reset_for_testing (fun () ->
+        let argv marker =
+          [ "/bin/sh"; "-c"; "printf 1 >> \"$1\"; printf x"; "fixture"; marker ]
+        in
+        let run_stdin ?fallback_policy marker =
+          Process_eio.run_argv_with_stdin_and_status_split ?fallback_policy ~stdin_content:""
+            (argv marker)
+        in
+        let run_streaming ?fallback_policy marker =
+          Process_eio.run_argv_with_status_split_streaming ?fallback_policy
+            ~on_stdout_chunk:ignore ~on_stderr_chunk:ignore (argv marker)
+        in
+        let check_pair name
+            (run : ?fallback_policy:Process_eio.fallback_policy -> string ->
+              Unix.process_status * string * string)
+            default_marker eio_only_marker =
+          let default_status, default_stdout, _ = run default_marker in
+          check bool (name ^ " default policy reports the successful Unix retry") true
+            (default_status = Unix.WEXITED 0);
+          check string (name ^ " Unix retry's stdout is returned") "x" default_stdout;
+          check string (name ^ " default policy executes the child twice") "11"
+            (In_channel.with_open_bin default_marker In_channel.input_all);
+          let eio_only_status, _, _ = run ~fallback_policy:Process_eio.Eio_only eio_only_marker in
+          check bool (name ^ " Eio_only returns an error") true
+            (eio_only_status = Unix.WEXITED 127);
+          check string (name ^ " Eio_only executes the child only once") "1"
+            (In_channel.with_open_bin eio_only_marker In_channel.input_all)
+        in
+        check_pair "stdin" run_stdin stdin_default_marker stdin_eio_only_marker;
+        check_pair "streaming" run_streaming streaming_default_marker streaming_eio_only_marker;
+        check int "all Eio executions reached the injected read" 4 !injected_reads;
+        check int "each Eio execution opened stdout and stderr pipes" 8 !pipe_calls))
+
+(* Fill a nonblocking pipe with no reader to measure its capacity on this
+   host. Finish byte by byte because a large atomic write can fail while a
+   smaller amount of space remains. Both ends are closed even on failure. *)
+let observed_pipe_capacity () =
+  let reader, writer = Unix.pipe ~cloexec:true () in
+  Fun.protect
+    ~finally:(fun () ->
+      Fun.protect ~finally:(fun () -> Unix.close reader) (fun () -> Unix.close writer))
+    (fun () ->
+      Unix.set_nonblock writer;
+      let chunk = String.make 4096 'x' in
+      let rec fill total length =
+        match Unix.write_substring writer chunk 0 length with
+        | written when written > 0 -> fill (total + written) length
+        | _ -> fail "pipe write made no progress"
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> fill total length
+        | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+          if length = 1 then total else fill total 1
+      in
+      fill 0 (String.length chunk))
+;;
+
+(* The child records its own execution before closing stdin without reading,
+   then records that it reached the close. Ignore TERM during these short
+   steps so cleanup racing the close cannot erase that observation. The payload
+   exceeds a separately observed host pipe with room for capacity differences.
+   Child exit and stdin-copy scheduling can produce different statuses, so
+   this does not assert EPIPE. A reported timeout fails the test. *)
+let test_eio_only_stdin_closed_early_does_not_replay () =
+  let root = Filename.temp_dir "process-eio-stdin-closed-" "" in
+  let marker = Filename.concat root "executions" in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists marker then Sys.remove marker;
+      Unix.rmdir root)
+    (fun () ->
+      let capacity = observed_pipe_capacity () in
+      check bool "the host pipe has positive capacity" true (capacity > 0);
+      let input_length = max (4 * capacity) (8 * 1024 * 1024) in
+      let stdin_content = String.make input_length 'x' in
+      with_timeout_observer @@ fun timeouts ->
+      with_runtime_reset @@ fun () ->
+      let status, _, _ =
+        Process_eio.run_argv_with_stdin_and_status_split
+          ~fallback_policy:Process_eio.Eio_only
+          ~timeout_sec:10.
+          ~stdin_content
+          [ "/bin/sh"; "-c";
+            "trap '' TERM; printf 'started\\n' >> \"$1\" || exit 3; exec 0<&-; printf 'closed\\n' >> \"$1\" || exit 3; exit 2";
+            "fixture"; marker ]
+      in
+      check int "the operation did not hit its timeout" 0 (List.length !timeouts);
+      check bool "a timeout status is not accepted as a passing test" false
+        (status = Process_eio.timed_out_status);
+      (match status with
+       | Unix.WEXITED 0 -> fail "the early-closing child must not report success"
+       | Unix.WEXITED _ | Unix.WSIGNALED _ -> ()
+       | Unix.WSTOPPED signal -> failf "child remained stopped with signal %d" signal);
+      check bool "the child wrote its execution marker" true (Sys.file_exists marker);
+      check string "one child started and closed stdin" "started\nclosed\n"
+        (In_channel.with_open_bin marker In_channel.input_all))
+;;
+
+(* With no initialized Eio process runtime, Eio_only must reject before even
+   starting a child that could produce more than the capture ceiling. *)
+let with_uninitialized_eio_only_fixture run =
+  Process_eio.reset_for_testing ();
+  let root = Filename.temp_dir "process-eio-only-" "" in
+  let marker = Filename.concat root "child-started" in
+  let capture_dir = Filename.concat root "capture" in
+  Fun.protect
+    ~finally:(fun () ->
+      Process_eio.reset_for_testing ();
+      if Sys.file_exists capture_dir then (
+        Sys.readdir capture_dir
+        |> Array.iter (fun name -> Sys.remove (Filename.concat capture_dir name));
+        Unix.rmdir capture_dir);
+      if Sys.file_exists marker then Sys.remove marker;
+      Unix.rmdir root)
+    (fun () ->
+      let emitted = Common.max_process_capture_head_bytes
+        + Common.max_process_capture_tail_bytes + 1 in
+      let argv =
+        [ "/bin/sh"; "-c"
+        ; "printf started > \"$1\"; exec /usr/bin/head -c \"$2\" /dev/zero >&2"
+        ; "fixture"; marker; string_of_int emitted
+        ]
+      in
+      let stdout_callbacks = ref 0 and stderr_callbacks = ref 0 in
+      let on_stdout_chunk _ = incr stdout_callbacks in
+      let on_stderr_chunk _ = incr stderr_callbacks in
+      let ((status, stdout, _stderr), files) =
+        Process_output_capture.with_capture ~stdout_limit:1 ~stderr_limit:1 ~capture_dir
+          (fun output_capture ->
+            run ~output_capture ~on_stdout_chunk ~on_stderr_chunk argv)
+      in
+      check bool "uninitialized Eio_only returns a failure" true (status = Unix.WEXITED 127);
+      check string "no child stdout is returned" "" stdout;
+      check bool "child did not run before the refusal" false (Sys.file_exists marker);
+      check int "no child stdout callback" 0 !stdout_callbacks;
+      check int "no child stderr callback" 0 !stderr_callbacks;
+      let check_unavailable name = function
+        | Process_output_capture.Capture_failed
+            { path = Some path; limit_exceeded = false; _ } ->
+          check int (name ^ " capture remains empty") 0 (Unix.stat path).st_size
+        | Process_output_capture.Capture_failed _
+        | Process_output_capture.Complete_file _
+        | Process_output_capture.Incomplete_file _ ->
+          fail (name ^ " was not marked unavailable without output")
+      in
+      check_unavailable "stdout" files.stdout;
+      check_unavailable "stderr" files.stderr)
+
+let test_uninitialized_eio_only_stdin_never_starts_child () =
+  with_uninitialized_eio_only_fixture (fun ~output_capture ~on_stdout_chunk ~on_stderr_chunk argv ->
+    Process_eio.run_argv_with_stdin_and_status_split ~fallback_policy:Process_eio.Eio_only
+      ~output_capture ~on_stdout_chunk ~on_stderr_chunk ~stdin_content:"" argv)
+
+let test_uninitialized_eio_only_streaming_never_starts_child () =
+  with_uninitialized_eio_only_fixture (fun ~output_capture ~on_stdout_chunk ~on_stderr_chunk argv ->
+    Process_eio.run_argv_with_status_split_streaming ~fallback_policy:Process_eio.Eio_only
+      ~output_capture ~on_stdout_chunk ~on_stderr_chunk argv)
+
 let test_run_argv_with_status_includes_stderr_on_failure () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -1467,7 +1675,15 @@ let () =
           test_case "unavailable directory refuses before execution" `Quick
             test_fallback_unavailable_cwd_refuses_before_execution;
           test_case "bind fallback keeps initialized cwd and capability" `Quick
-            test_bind_fallback_keeps_initialized_cwd_and_capability ] );
+            test_bind_fallback_keeps_initialized_cwd_and_capability;
+          test_case "bind failure after effect respects fallback policy" `Quick
+            test_bind_error_after_child_effect_respects_fallback_policy;
+          test_case "Eio-only stdin closes early without a replay" `Quick
+            test_eio_only_stdin_closed_early_does_not_replay;
+          test_case "uninitialized Eio-only stdin refuses before spawning" `Quick
+            test_uninitialized_eio_only_stdin_never_starts_child;
+          test_case "uninitialized Eio-only streaming refuses before spawning" `Quick
+            test_uninitialized_eio_only_streaming_never_starts_child ] );
       ( "fallback",
         [
           test_case "retry-on-bind-eaddrinuse" `Quick

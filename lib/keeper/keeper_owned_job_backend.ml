@@ -929,7 +929,7 @@ let capture_directory_unchanged prepared expected =
 let complete_log_file ~stream = function
   | Process_output_capture.Complete_file {path; byte_length} -> Ok (path, byte_length)
   | Incomplete_file {path; byte_length} -> Error (Log_capture_incomplete {stream; path; byte_length})
-  | Capture_failed {path; message} -> Error (Log_capture_failed {stream; path; detail=message})
+  | Capture_failed {path; message; _} -> Error (Log_capture_failed {stream; path; detail=message})
 
 let capture_file_snapshot prepared ~capture_directory ~path ~byte_length =
   let* () = capture_directory_unchanged prepared capture_directory in

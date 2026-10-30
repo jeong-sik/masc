@@ -19,6 +19,7 @@ type unavailable_output = Keeper_microvm_cli_output.unavailable_output =
   | Capture_directory_unavailable
   | Capture_incomplete
   | Capture_failed
+  | Capture_limit_exceeded
   | Capture_unreadable
   | Capture_permissions_invalid
   | Capture_length_mismatch

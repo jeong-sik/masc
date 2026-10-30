@@ -37,7 +37,7 @@ type build_link_state = Keeper_microvm_build_plan.build_link_state =
 
 type build_link_plan = Keeper_microvm_build_plan.build_link_plan =
   | Link_create of string
-  | Link_retarget of string
+  | Link_preserve_symlink of { existing : string; expected : string }
   | Link_already_correct
   | Link_refused_real_directory
   | Link_refused_invalid_path of { detail : string; state : build_link_state }
@@ -2087,33 +2087,30 @@ let recreate_apple_build_volume ~volume_name ~size ~timeout_sec =
    ({!plan_build_link}) stays host-side and pure. The checkouts it walks are
    the ones {!first_handoff_build_cleanup_script} walks at boot. *)
 
-(** One [find] and one read loop, run with the keeper's work root as the
-    exec's [container_cwd] so every path [find] prints is already relative
-    (["./checkout"], not an absolute guest path the host would have to
-    strip). [find] without [-L] does not descend through a symlink -- an
-    installed link, or a dangling one pointing at the build volume, is never
-    walked into: the state read is [lstat], not [stat]. [_build]
-    and [.git] are pruned rather than descended: one measured [_build] held
-    61,602 entries. One line of output per checkout:
-    [<relative path>\tabsent], [<relative path>\treal], or
-    [<relative path>\tsymlink\t<current target>]. *)
+(** One [find], run in the keeper's work root. Paths travel as [find -exec]
+    arguments, never newline-delimited input. Each checkout emits three
+    NUL-terminated fields: path, state and link target (empty for other
+    states). [find] without [-L] does not descend through symlinks; [_build]
+    and [.git] are pruned rather than descended. *)
 let build_scan_script =
   Printf.sprintf
-    {sh|set -e
-find . -maxdepth %d \( -name %s -o -name .git \) -prune -o -type d -print |
-while IFS= read -r d; do
+    {sh|find . -maxdepth %d \( -name %s -o -name .git \) -prune -o -type d -exec sh -c '
+for d do
   [ -e "$d/%s" ] || continue
   rel=${d#./}
   [ "$rel" = "." ] && continue
   b="$d/%s"
   if [ -L "$b" ]; then
-    printf '%%s\tsymlink\t%%s\n' "$rel" "$(readlink "$b")"
+    printf "%%s\000symlink\000" "$rel"
+    readlink -n -- "$b" || exit 1
+    printf "\000"
   elif [ -e "$b" ]; then
-    printf '%%s\treal\n' "$rel"
+    printf "%%s\000real\000\000" "$rel"
   else
-    printf '%%s\tabsent\n' "$rel"
+    printf "%%s\000absent\000\000" "$rel"
   fi
 done
+' sh {} +
 |sh}
     build_root_scan_depth
     build_output_dir_name
@@ -2132,66 +2129,90 @@ let build_scan_argv_for backend ~container_name ~keeper_work_root ~uid ~gid =
     ~command_argv:[ "sh"; "-c"; build_scan_script ]
 ;;
 
-(** The refusal a caller reports for a row whose plan is
-    {!Link_refused_real_directory}: a real [_build] the live guest keeps
-    until the next boot's helper removes it. *)
-let build_link_refusal_message ~checkout =
-  Printf.sprintf
-    "%s/%s is a real directory, so it stays on the unified work volume while \
-     this guest runs. The next guest boot removes it before the guest starts \
-     and this scan then links the checkout to the build volume; a checkout \
-     holding %s keeps it."
-    checkout
-    build_output_dir_name
-    build_keep_marker
-;;
-
-(** The refusal a caller reports for {!Link_refused_invalid_path}. The path
-    names no build target, so this scan never links the checkout. A real
-    [_build] it holds is still removed by the next boot's helper unless the
-    checkout holds the keep marker, so that removal is reported too. *)
-let build_link_invalid_path_message ~checkout ~detail = function
-  | Build_real_directory ->
+(** Scan reports an existing non-symlink entry as [real] without determining
+    its file type. The first-handoff helper removes only real directories. *)
+let build_link_warning plan =
+  let real_entry_risk =
     Printf.sprintf
-      "Build link refused for checkout %S: %s. Its %s is a real directory that \
-       stays on the unified work volume while this guest runs; the next guest \
-       boot removes it unless the checkout holds %s."
-      checkout
-      detail
-      build_output_dir_name
+      "If the entry is a real directory, a later first owned handoff, including after a server restart, can stage and delete it. A %s marker that resolves as present in the checkout prevents that staging; see Keeper User Manual: Inspecting _build entries."
       build_keep_marker
-  | Build_absent | Build_symlink _ ->
-    Printf.sprintf "Build link refused for checkout %S: %s" checkout detail
+  in
+  match plan with
+  | Link_refused_real_directory ->
+    Some ("A checkout has a non-symlink _build entry; its build link was not changed. " ^ real_entry_risk)
+  | Link_refused_invalid_path { state = Build_real_directory; _ } ->
+    Some ("A checkout path cannot be represented as a build link; its non-symlink _build entry was not changed. " ^ real_entry_risk)
+  | Link_refused_invalid_path { state = (Build_absent | Build_symlink _); _ } ->
+    Some "A checkout path cannot be represented as a build link; it was not changed."
+  | Link_preserve_symlink _ ->
+    Some "A checkout's _build link points elsewhere and was left unchanged; if its target is missing, builds can fail. Inspect guest links and verify ownership before repair; see the Keeper User Manual's Apple MicroVM section."
+  | Link_already_correct | Link_create _ -> None
 ;;
 
-(** [ln -sfn] for every action, in one exec. [-f] makes each one atomic --
-    a stale link is replaced without a separate unlink, and [ln] refuses
-    outright rather than clobber a real, non-empty directory, so a checkout
-    that grew real build output between the scan and this call is left
-    alone rather than silently adopted. One guest command covers every
-    action, matching {!build_target_mkdir_argv}'s "one command for every
-    target". Dynamic values travel as positional arguments after the
-    script -- ["masc-build-link"] fills [$0] so the pairs start at [$1] --
-    never interpolated into the script text. *)
+(** Input paths are passed on stdin, not as host CLI arguments. The guest
+    keeps the bounded payload in memory and checks its framing and digest
+    before any effect. Python isolated mode excludes the guest cwd and user
+    Python paths; site initialization is also disabled. An image without a
+    working supported interpreter cannot prepare build links. This does not
+    fence checkout parent paths. *)
+let checked_build_input_script consumer =
+  {py|import hashlib, os, sys
+size, digest, count = int(sys.argv[2]), sys.argv[3], int(sys.argv[4])
+data = sys.stdin.buffer.read(size + 1)
+if len(data) != size or hashlib.sha256(data).hexdigest() != digest:
+    sys.exit(1)
+if data:
+    if not data.endswith(b'\0'):
+        sys.exit(1)
+    fields = data[:-1].split(b'\0')
+else:
+    fields = []
+if len(fields) != count or any(not field for field in fields):
+    sys.exit(1)
+|py} ^ consumer ^ "\n"
+;;
+
 let build_link_apply_script =
-  {sh|set -e
-while [ "$#" -ge 2 ]; do
-  p="$1"; t="$2"; shift 2
-  ln -sfn "$t" "$p/_build"
-done
-|sh}
+  checked_build_input_script
+    {py|if len(fields) % 2:
+    sys.exit(1)
+failed = False
+for checkout, target in zip(fields[::2], fields[1::2]):
+    try:
+        os.symlink(target, checkout + b'/_build')
+    except OSError:
+        failed = True
+sys.exit(1 if failed else 0)|py}
 ;;
 
-let build_link_apply_argv_for backend ~container_name ~keeper_work_root ~uid ~gid ~actions =
-  let positional = List.concat_map (fun (checkout, target) -> [ checkout; target ]) actions in
-  exec_argv_for
-    backend
-    ~container_name
-    ~uid
-    ~gid
-    ~container_cwd:keeper_work_root
-    ~stdin:false
-    ~command_argv:("sh" :: "-c" :: build_link_apply_script :: "masc-build-link" :: positional)
+let build_input values =
+  match values with
+  | [] -> ""
+  | _ :: _ -> String.concat "\000" values ^ "\000"
+;;
+
+let build_input_interpreter =
+  {sh|if [ -x /usr/bin/python3 ]; then
+  exec /usr/bin/python3 -I -S -c "$@"
+fi
+if [ -x /usr/local/bin/python3 ]; then
+  exec /usr/local/bin/python3 -I -S -c "$@"
+fi
+exit 127|sh}
+;;
+
+let build_input_command script name input ~fields =
+  let digest = Agent_core_sha256.(digest_string input |> to_hex) in
+  [ "/bin/sh"; "-c"; build_input_interpreter; "masc-build-helper";
+    script; name; string_of_int (String.length input); digest; string_of_int fields ]
+;;
+
+let build_link_apply_request_for backend ~container_name ~keeper_work_root ~uid ~gid ~actions =
+  let input = build_input (List.concat_map (fun (checkout, target) -> [ checkout; target ]) actions) in
+  let argv = exec_argv_for backend ~container_name ~uid ~gid ~container_cwd:keeper_work_root
+      ~stdin:true ~command_argv:(build_input_command build_link_apply_script "masc-build-link" input
+        ~fields:(List.length actions * 2)) in
+  argv, input
 ;;
 
 (** Create the link targets inside the guest.
@@ -2204,21 +2225,32 @@ let build_link_apply_argv_for backend ~container_name ~keeper_work_root ~uid ~gi
 
     The host cannot create it either, because it lives inside the volume's
     ext4 image. The volume root is initially owned by root, so creation runs
-    as root with an explicit writable mode. [-m] applies only to newly created
+    as root with an explicit writable mode. The mode applies only to newly created
     directories: existing keeper-owned targets remain untouched, which matters
     because Apple Container's user namespace refuses even guest root changing
     their mode. One command covers every target and is idempotent. *)
 let build_target_dir_mode = "0777"
 
-let build_target_mkdir_argv ~container_name ~targets =
-  exec_argv_for
+let build_target_mkdir_request ~container_name ~targets =
+  let input = build_input targets in
+  let script = checked_build_input_script
+      (Printf.sprintf {py|os.umask(0)
+failed = False
+for target in fields:
+    try:
+        os.makedirs(target, mode=0o%s, exist_ok=True)
+    except OSError:
+        failed = True
+sys.exit(1 if failed else 0)|py} build_target_dir_mode) in
+  let argv = exec_argv_for
     Backend.Apple_container
     ~container_name
     ~uid:0
     ~gid:0
     ~container_cwd:build_volume_guest_root
-    ~stdin:false
-    ~command_argv:("mkdir" :: "-p" :: "-m" :: build_target_dir_mode :: targets)
+    ~stdin:true
+    ~command_argv:(build_input_command script "masc-build-mkdir" input ~fields:(List.length targets)) in
+  argv, input
 ;;
 
 (** The keeper's root on the work volume, created inside the guest.

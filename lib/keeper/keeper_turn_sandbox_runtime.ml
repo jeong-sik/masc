@@ -115,23 +115,54 @@ let release_registered_microvm_identity ?expected container_name =
    next start adopts it: it stays out of this set, and the endpoint request
    makes the root before handing the guest out rather than handing out a
    guest every call fails in. *)
-let microvm_work_roots_ready : string list Atomic.t = Atomic.make []
+type microvm_build_links_state =
+  | Build_links_not_prepared
+  | Build_links_effect_unverified
+  | Build_links_prepared
+
+type microvm_work_root_ready =
+  { container_name : string
+  ; generation : unit ref
+  ; build_links_state : microvm_build_links_state
+  }
+
+(* A fresh generation prevents an in-flight link scan from marking a guest
+   ready after its root was forgotten or replaced in this process. *)
+let microvm_work_roots_ready : microvm_work_root_ready list Atomic.t = Atomic.make []
+
+let microvm_work_root_entry container_name =
+  Atomic.get microvm_work_roots_ready
+  |> List.find_opt (fun entry -> String.equal entry.container_name container_name)
+;;
 
 let microvm_work_root_ready container_name =
-  List.exists (String.equal container_name) (Atomic.get microvm_work_roots_ready)
+  Option.is_some (microvm_work_root_entry container_name)
 ;;
 
 let rec mark_microvm_work_root_ready container_name =
   let current = Atomic.get microvm_work_roots_ready in
-  if List.exists (String.equal container_name) current
+  if List.exists (fun entry -> String.equal entry.container_name container_name) current
   then ()
-  else if not (Atomic.compare_and_set microvm_work_roots_ready current (container_name :: current))
+  else if not (Atomic.compare_and_set microvm_work_roots_ready current
+      ({ container_name; generation = ref (); build_links_state = Build_links_not_prepared } :: current))
   then mark_microvm_work_root_ready container_name
+;;
+
+let rec set_microvm_build_links_state container_name generation ~expected state =
+  let current = Atomic.get microvm_work_roots_ready in
+  match List.find_opt (fun entry -> String.equal entry.container_name container_name) current with
+  | Some entry when entry.generation == generation && entry.build_links_state = expected ->
+    let updated = List.map (fun candidate ->
+      if candidate == entry then { candidate with build_links_state = state } else candidate) current in
+    if not (Atomic.compare_and_set microvm_work_roots_ready current updated)
+    then set_microvm_build_links_state container_name generation ~expected state
+    else true
+  | Some _ | None -> false
 ;;
 
 let rec forget_microvm_work_root container_name =
   let current = Atomic.get microvm_work_roots_ready in
-  let updated = List.filter (fun name -> not (String.equal name container_name)) current in
+  let updated = List.filter (fun entry -> not (String.equal entry.container_name container_name)) current in
   if not (Atomic.compare_and_set microvm_work_roots_ready current updated)
   then forget_microvm_work_root container_name
 ;;
@@ -700,6 +731,19 @@ let run_argv_with_stdin_and_status ?timeout_sec ~stdin_content argv =
       argv)
 ;;
 
+(* A failed transport can leave a guest effect running. Do not start another
+   process in response to an Eio bind error for these requests. *)
+let run_build_link_effect ?timeout_sec ~stdin_content argv =
+  Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
+    let status, _, _ =
+      Process_eio.run_argv_with_stdin_and_status_split
+        ?timeout_sec ~fallback_policy:Process_eio.Eio_only
+        ~env:(sandbox_environment ())
+        ~cwd:(Config_dir_resolver.current_working_dir ())
+        ~stdin_content argv in
+    status)
+;;
+
 let run_argv_with_stdin_and_status_split
       ?timeout_sec
       ?on_stdout_chunk
@@ -1147,6 +1191,24 @@ let ensure_microvm_work_volume_mounted ?timeout_sec (t : t) ~backend ~container_
 ;;
 
 module For_testing_microvm = struct
+  type build_link_generation = unit ref
+
+  let build_link_generation ~container_name =
+    Option.map (fun entry -> entry.generation) (microvm_work_root_entry container_name)
+  ;;
+
+  let complete_build_link_scan ~container_name generation =
+    set_microvm_build_links_state container_name generation
+      ~expected:Build_links_not_prepared Build_links_prepared
+  ;;
+
+  let build_link_scan_prepared ~container_name =
+    match microvm_work_root_entry container_name with
+    | Some { build_links_state = Build_links_prepared; _ } -> true
+    | Some { build_links_state = (Build_links_not_prepared | Build_links_effect_unverified); _ }
+    | None -> false
+  ;;
+
   let microvm_container_name = microvm_container_name
 
   let microvm_identity_snapshot_registered ~container_name =
@@ -1233,32 +1295,13 @@ let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~backend ~container_nam
          (Keeper_sandbox_runtime.docker_failure_output_for_log out))
 ;;
 
-(** Point every checkout's [_build] under the keeper's work root at its
-    build volume (RFC-keeper-build-output-returns-to-a-disposable-volume),
-    `Apple_container` only. Best-effort: unlike
-    {!ensure_microvm_keeper_work_root}, a failure here does not fail the
-    turn. The keeper has a tree either way -- a checkout this cannot link
-    keeps writing to the unified work volume, which is correct, just not
-    disposable, the same fallback {!Keeper_sandbox_microvm.plan_build_link}
-    takes for a checkout occupied by real output. Logged, not surfaced, because there
-    is no caller decision for an operator or a keeper to make from inside a
-    turn; the volume-provisioning refusal in {!microvm_guest_provisions}
-    (which does fail the boot) is where a genuinely unusable build volume
-    is reported.
-
-    Run once per guest adoption, not every turn: {!microvm_remote_endpoint} already
-    memoizes {!ensure_microvm_keeper_work_root} the same way, and doing
-    this scan on every tool call inside a turn would be an exec per call
-    for a guest whose checkouts rarely change mid-turn. The gap this
-    leaves: a checkout the keeper creates after this guest's first
-    adoption keeps writing to the unified work volume until the next process
-    handoff stages its real [_build] for deletion through
-    {!Keeper_sandbox_microvm.first_handoff_build_cleanup_script}, then this
-    scan links the checkout. *)
-let ensure_microvm_build_links ?timeout_sec (t : t) ~backend ~container_name =
-  match (backend : Keeper_microvm_backend.t) with
-  | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> ()
-  | Keeper_microvm_backend.Apple_container ->
+(** Best-effort Apple build-link preparation. A read-only scan failure can be
+    retried by a later turn. Once an effect may have been sent, its unknown
+    outcome is retained while this guest generation remains cached. A forget
+    or process restart clears that state; it does not establish workspace
+    ownership or fence an effect already in flight. *)
+let ensure_microvm_build_links ?timeout_sec (t : t) ~container_name ~generation =
+    let backend = Keeper_microvm_backend.Apple_container in
     let keeper_work_root = Keeper_sandbox_microvm.keeper_work_root ~keeper_name:t.meta.name in
     let scan =
       Keeper_sandbox_microvm.build_scan_argv_for
@@ -1268,38 +1311,62 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~backend ~container_name =
         ~uid:t.uid
         ~gid:t.gid
     in
-    (match run_argv_with_status ?timeout_sec scan with
-     | Unix.WEXITED 0, stdout ->
-       let rows =
-         Keeper_sandbox_microvm.build_link_rows_of_scan
-           (Keeper_sandbox_microvm.build_scan_rows_of_output stdout)
-       in
+    let scanned = Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
+      Keeper_microvm_cli_output.read_with_environment ?timeout_sec
+        ~stdout_limit:Common.max_process_capture_head_bytes
+        ~stderr_limit:Common.max_process_capture_tail_bytes
+        ~env:(sandbox_environment ()) ~cwd:(Config_dir_resolver.current_working_dir ())
+        ~argv:scan ()) in
+    let mark ~expected state =
+      set_microvm_build_links_state container_name generation ~expected state in
+    let prepared ~expected = ignore (mark ~expected Build_links_prepared) in
+    let effect_unverified () =
+      Log.Keeper.warn ~keeper_name:t.meta.name
+        "microvm_build_link_effect_unverified: inspect the guest before retrying; this guest generation will not automatically retry while its state is retained; see Keeper User Manual: Build preparation reports a failure" in
+    let effect_failed operation status =
+      Log.Keeper.warn ~keeper_name:t.meta.name "%s: %s"
+        operation (Keeper_sandbox_exec_failure.status_label status);
+      (match status with
+       | Unix.WEXITED 127 ->
+         Log.Keeper.warn ~keeper_name:t.meta.name
+           "microvm_build_link_interpreter_unverified: check guest /usr/bin/python3 and /usr/local/bin/python3 as the user executing this step; exit 127 alone does not establish the cause or effect outcome"
+       | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> ());
+      effect_unverified () in
+    (match scanned with
+     | Ok (Unix.WEXITED 0, stdout, _) ->
+       (match Keeper_sandbox_microvm.build_scan_rows_of_output stdout with
+        | Error detail ->
+          Log.Keeper.warn ~keeper_name:t.meta.name "microvm_build_scan_failed: %s" detail
+        | Ok scanned ->
+       let rows = Keeper_sandbox_microvm.build_link_rows_of_scan scanned in
        List.iter
          (fun (row : Keeper_sandbox_microvm.build_link_row) ->
-           match row.plan with
-           | Link_refused_real_directory ->
-             Log.Keeper.warn ~keeper_name:t.meta.name
-               "%s"
-               (Keeper_sandbox_microvm.build_link_refusal_message ~checkout:row.checkout)
-           | Link_refused_invalid_path { detail; state } ->
-             Log.Keeper.warn ~keeper_name:t.meta.name
-               "%s"
-               (Keeper_sandbox_microvm.build_link_invalid_path_message
-                  ~checkout:row.checkout ~detail state)
-           | Link_already_correct | Link_create _ | Link_retarget _ -> ())
+           match Keeper_sandbox_microvm.build_link_warning row.plan with
+           | Some message -> Log.Keeper.warn ~keeper_name:t.meta.name "%s" message
+           | None -> ())
          rows;
        let actions = Keeper_sandbox_microvm.build_link_actions rows in
        (* Already-correct links need their target too: a fresh boot recreates
           the build volume empty while the work volume keeps the links. *)
        (match Keeper_sandbox_microvm.build_link_targets rows with
-        | [] -> ()
+        | [] -> prepared ~expected:Build_links_not_prepared
         | _ :: _ as targets ->
-          let mkdir = Keeper_sandbox_microvm.build_target_mkdir_argv ~container_name ~targets in
-          (match run_argv_with_status ?timeout_sec mkdir, actions with
-           | (Unix.WEXITED 0, _), [] -> ()
-           | (Unix.WEXITED 0, _), _ :: _ ->
-             let apply =
-               Keeper_sandbox_microvm.build_link_apply_argv_for
+          if mark ~expected:Build_links_not_prepared Build_links_effect_unverified then (
+          let mkdir, mkdir_input =
+            Keeper_sandbox_microvm.build_target_mkdir_request ~container_name ~targets in
+          (try match run_build_link_effect ?timeout_sec ~stdin_content:mkdir_input mkdir, actions with
+           | Unix.WEXITED 0, [] -> prepared ~expected:Build_links_effect_unverified
+           | Unix.WEXITED 0, _ :: _ ->
+             (* This is a local check only: it cannot cancel an already sent
+                guest operation or fence an externally replaced guest. *)
+             let generation_retained =
+               match microvm_work_root_entry container_name with
+               | Some entry -> entry.generation == generation
+                 && entry.build_links_state = Build_links_effect_unverified
+               | None -> false in
+             if not generation_retained then effect_unverified () else
+             let apply, apply_input =
+               Keeper_sandbox_microvm.build_link_apply_request_for
                  backend
                  ~container_name
                  ~keeper_work_root
@@ -1307,20 +1374,33 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~backend ~container_name =
                  ~gid:t.gid
                  ~actions
              in
-             (match run_argv_with_status ?timeout_sec apply with
-              | Unix.WEXITED 0, _ -> ()
-              | (Unix.WEXITED _, out) | (Unix.WSIGNALED _, out) | (Unix.WSTOPPED _, out) ->
-                Log.Keeper.warn ~keeper_name:t.meta.name
-                  "microvm_build_link_apply_failed: %s"
-                  (Keeper_sandbox_runtime.docker_failure_output_for_log out))
-           | ((Unix.WEXITED _, out), _) | ((Unix.WSIGNALED _, out), _) | ((Unix.WSTOPPED _, out), _) ->
-             Log.Keeper.warn ~keeper_name:t.meta.name
-               "microvm_build_link_mkdir_failed: %s"
-               (Keeper_sandbox_runtime.docker_failure_output_for_log out)))
-     | (Unix.WEXITED _, out) | (Unix.WSIGNALED _, out) | (Unix.WSTOPPED _, out) ->
+             (match run_build_link_effect ?timeout_sec ~stdin_content:apply_input apply with
+              | Unix.WEXITED 0 -> prepared ~expected:Build_links_effect_unverified
+              | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status ->
+                effect_failed "microvm_build_link_apply_failed" status)
+           | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), _ ->
+             effect_failed "microvm_build_link_mkdir_failed" status
+           with exn -> effect_unverified (); raise exn))))
+     | Ok (((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), _, _) ->
+       Log.Keeper.warn ~keeper_name:t.meta.name
+         "microvm_build_scan_failed: %s; inspect guest find and readlink support"
+         (Keeper_sandbox_exec_failure.status_label status)
+     | Error ({ reason = Keeper_microvm_cli_output.Capture_limit_exceeded; _ } as error) ->
+       Log.Keeper.warn ~keeper_name:t.meta.name
+         "microvm_build_scan_failed: %s; limit %d bytes; reduce scanned checkouts before retrying"
+         (Keeper_microvm_cli_output.error_message error)
+         Common.max_process_capture_head_bytes
+     | Error ({ reason =
+                  ( Keeper_microvm_cli_output.Capture_directory_unavailable
+                  | Keeper_microvm_cli_output.Capture_incomplete
+                  | Keeper_microvm_cli_output.Capture_failed
+                  | Keeper_microvm_cli_output.Capture_unreadable
+                  | Keeper_microvm_cli_output.Capture_permissions_invalid
+                  | Keeper_microvm_cli_output.Capture_length_mismatch
+                  | Keeper_microvm_cli_output.Capture_cleanup_failed ); _ } as error) ->
        Log.Keeper.warn ~keeper_name:t.meta.name
          "microvm_build_scan_failed: %s"
-         (Keeper_sandbox_runtime.docker_failure_output_for_log out))
+         (Keeper_microvm_cli_output.error_message error))
 ;;
 
 (* Which side of a guest start a failure belongs to. The Keeper's GitHub
@@ -1865,7 +1945,6 @@ let start_process_bound_microvm_container ?timeout_sec (t : t) =
                     ~container_name
                 with
                 | Ok () ->
-                  ensure_microvm_build_links ?timeout_sec t ~backend ~container_name;
                   mark_microvm_work_root_ready container_name;
                   adopt github_identity
                 | Error detail ->
@@ -2126,8 +2205,12 @@ let prepare_apple_first_handoff ~timeout_sec (t : t) snapshot ~container_name =
           Keeper_sandbox_remote.Execution_observed _ ->
           Log.Keeper.warn ~keeper_name:t.meta.name
             "first handoff build cleanup did not confirm success; link scan will preserve remaining real build directories"));
-    ensure_microvm_build_links ~timeout_sec t ~backend ~container_name;
     mark_microvm_work_root_ready container_name);
+  (match microvm_work_root_entry container_name with
+   | Some { generation; build_links_state = Build_links_not_prepared; _ } ->
+     ensure_microvm_build_links ~timeout_sec t ~container_name ~generation
+   | Some { build_links_state = (Build_links_effect_unverified | Build_links_prepared); _ }
+   | None -> ());
   Ok ()
 
 let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
@@ -2869,7 +2952,6 @@ let microvm_remote_endpoint ?timeout_sec (t : t) =
           | (Keeper_microvm_backend.Nerdctl_kata | Keeper_microvm_backend.Microsandbox) as backend ->
             match ensure_microvm_keeper_work_root ?timeout_sec t ~backend ~container_name with
             | Ok () ->
-              ensure_microvm_build_links ?timeout_sec t ~backend ~container_name;
               mark_microvm_work_root_ready container_name;
               Ok ()
             | Error _ as err -> err)

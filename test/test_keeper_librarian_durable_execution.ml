@@ -780,20 +780,30 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
       ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_id:keeper_name
       |> Result.map_error Keeper_librarian_official_progress.read_error_to_string |> get) in
     let before=official () in
-    let expected=[content;"Original admitted external evidence"] |> List.sort String.compare in
-    let check_complete capture =
+    let external_observation : Keeper_counterpart_observation.t =
+      {origin=Connector_attention;channel="agent";workspace_id=None;
+       user_id=Some "original-agent";user_name=Some "Original agent";
+       authority=External;content="Original admitted external evidence"} in
+    let chat_observation : Keeper_counterpart_observation.t =
+      {origin=Durable_chat;channel="direct";workspace_id=None;
+       user_id=Some "external";user_name=Some "External";
+       authority=External;content} in
+    let observations capture =
       let input=Capture.source capture |> Source.input in
-      check int "there is no message-floor coordinate" 0 (List.length input.messages);
-      check (list string) "the real provider request retains every counterpart byte" expected
-        (List.map (fun (o:Keeper_counterpart_observation.t) -> o.content)
-           input.counterpart_observations |> List.sort String.compare) in
+      List.length input.messages, List.length input.tool_observations, input.counterpart_observations in
+    let check_complete capture =
+      check bool "the provider request retains both complete counterpart identities and bytes" true
+        (observations capture = (0,0,[external_observation;chat_observation])) in
+    let initial_requests = ref [] in
     fixture.set_response (fun capture ->
-      check_complete capture;
+      initial_requests := !initial_requests @ [observations capture];
       `Request_entity_too_large,
         {|{"error":{"message":"fixture body too large","type":"invalid_request_error"}}|});
     let deliveries= !(fixture.deliveries) in
     assert_pending (run_worker fixture);
     await_delivery fixture ~after:deliveries;
+    check bool "the refused request retains both complete counterpart identities and bytes" true
+      (!initial_requests = [0,0,[external_observation;chat_observation]]);
     (match run_worker fixture with
      | Error (Consumer.Counterpart_input_capacity_refused {official_range;reports=[report];_}) ->
        check bool "the host receipt names its actual provider input refusal" true
@@ -816,16 +826,80 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
     let restored=Source.of_json source_json |> Result.map_error Source.error_to_string |> get in
     check json "the whole refused original survives strict restoration" source_json (Source.to_json restored);
     check int "only one actual provider request was refused" 1 (F.post_count fixture.server);
-    fixture.set_response (fun capture -> check_complete capture; `OK,F.openai_response (answer capture));
+    let narrowed_refusal = ref [] in
+    fixture.set_response (fun capture ->
+      narrowed_refusal := !narrowed_refusal @ [observations capture];
+      `Request_entity_too_large,
+        {|{"error":{"message":"fixture body too large","type":"invalid_request_error"}}|});
+    let deliveries= !(fixture.deliveries) in
+    assert_pending (run_worker fixture);
+    await_delivery fixture ~after:deliveries;
+    (match run_worker fixture with
+     | Error (Consumer.Counterpart_input_capacity_refused {official_range;reports=[report];_}) ->
+       check bool "the narrowed refusal retains the real provider cause" true
+         (report.provider_input_refusals=[Keeper_librarian_input_refusal.Request_body_refused]);
+       check bool "the narrowed refusal names only the first boundary" true
+         (Option.map (fun (range:Current.official_range_id) -> List.map fst range.turns) official_range=Some [1])
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "the narrowed counterpart refusal was not explicit");
+    let narrowed,narrowed_capture=only_original fixture in
+    check bool "the narrowed refusal uses a distinct original" true
+      (narrowed.Owner.request_id<>rejected.request_id);
+    check bool "the narrowed request preserved the complete external identity and bytes" true
+      (!narrowed_refusal = [0,0,[external_observation]] && observations narrowed_capture = (0,0,[external_observation]));
+    check bool "a second refusal leaves the official cursor unread" true (official ()=before);
+    check bool "a second refusal still has not acknowledged the external row" true
+      (Keeper_external_read_cursor.observation_matches_preparation (cursor ())
+        ~after:0 ~through:1 ~atom:None
+        ~official:(Source.official_range_id (Capture.source narrowed_capture)));
+    no_memory fixture;
+    check int "both refused requests reached the provider" 2 (F.post_count fixture.server);
+    (* The refused original covered both official boundaries. A failed wide
+       pass narrows to the oldest boundary on its next wake: the external row
+       precedes that boundary, while the chat was appended after it. Observe
+       both successful requests before checking their payloads so a failing
+       test assertion does not get swallowed inside the HTTP fixture fiber. *)
+    let recovered = ref [] in
+    fixture.set_response (fun capture ->
+      recovered := !recovered @ [observations capture];
+      `OK,F.openai_response (answer capture));
     drive_advanced fixture;
-    let fresh,_=only_original fixture in
+    let fresh,fresh_capture=only_original fixture in
     check bool "fresh reprocessing uses a new original, not replaying the refused request" true
-      (fresh.Owner.request_id<>rejected.request_id);
-    check bool "official history advances only after a real complete-input commit" true (official ()<>before);
-    check bool "external evidence is acknowledged only after that commit" true
+      (fresh.Owner.request_id<>narrowed.request_id && fresh.request_id<>rejected.request_id);
+    check bool "the first successful request holds only the complete older external row" true
+      (!recovered = [0,0,[external_observation]]);
+    check (option int) "the first successful commit advances only the first official boundary"
+      (Some 1) (Option.map (fun (cursor:Keeper_librarian_official_progress.t) -> cursor.boundary_line) (official ()));
+    let check_coverage expected_line capture =
+      let range=Source.official_range_id (Capture.source capture) |> Option.get in
+      check (list int) "the original names its own official boundary" [expected_line] (List.map fst range.turns);
+      check bool "Memory records the exact successful original's official coverage" true
+        (io (fun () -> Current.committed_official_coverage ~keepers_dir:fixture.keepers_dir
+          ~keeper_id:keeper_name ~receipt_scope:range.receipt_scope |> get) = Some range) in
+    check_coverage 1 fresh_capture;
+    check bool "external evidence is acknowledged only after its successful commit" true
       (Keeper_external_read_cursor.observation_matches_preparation (cursor ())
         ~after:1 ~through:1 ~atom:None ~official:None);
-    check int "one refused and one successful complete-input request" 2 (F.post_count fixture.server))
+    drive_advanced fixture;
+    let final,final_capture=only_original fixture in
+    check bool "the later boundary has its own original request" true
+      (final.Owner.request_id<>fresh.request_id && final.request_id<>narrowed.request_id
+       && final.request_id<>rejected.request_id);
+    check bool "both successful requests preserve counterpart origins and bytes in order" true
+      (!recovered = [0,0,[external_observation]; 0,0,[chat_observation]]);
+    check (option int) "the second successful commit advances the remaining official boundary"
+      (Some 2) (Option.map (fun (cursor:Keeper_librarian_official_progress.t) -> cursor.boundary_line) (official ()));
+    check_coverage 2 final_capture;
+    check bool "the later chat does not change the settled external acknowledgment" true
+      (Keeper_external_read_cursor.observation_matches_preparation (cursor ())
+        ~after:1 ~through:1 ~atom:None ~official:None);
+    check int "two refused and two successful requests reached the provider" 4 (F.post_count fixture.server);
+    (match run_worker fixture with
+     | Ok Consumer.Nothing_to_read -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "successfully consumed counterpart input remained unread");
+    check int "the settled input is not sent again" 4 (F.post_count fixture.server))
 
 let test_untagged_official_counterparts_reach_memory_once () =
   with_fixture ~history_kind:Official (fun ~sw:_ fixture ->

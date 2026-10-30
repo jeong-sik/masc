@@ -313,11 +313,41 @@ let test_non_blank_system_prompt_reaches_thread_start_unchanged () =
                ^ Yojson.Safe.to_string other)))
 ;;
 
+let test_missing_native_guidance_refuses_before_spawn () =
+  let base_path = temp_workspace () in
+  let key = Prompt_names.keeper_codex_native_read in
+  let previous = (Prompt_registry.resolve_prompt key).override_value in
+  Fun.protect
+    ~finally:(fun () ->
+      Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+      (match previous with Some value -> Prompt_registry.set_override key value |> Result.get_ok
+       | None -> Prompt_registry.clear_prompt_override key);
+      cleanup_tree base_path)
+    (fun () ->
+      let empty = Filename.concat base_path "missing-guidance" in
+      Unix.mkdir empty 0o700;
+      Prompt_registry.clear_prompt_override key;
+      Prompt_registry.set_markdown_dir empty;
+      let capture_path = Filename.concat base_path "requests.jsonl" in
+      let cli_path = fixture_script ~base_path ~capture_path in
+      let transmissions = ref 0 in
+      let attempt = run_direct_attempt ~system_prompt:"current keeper instructions" ~base_path ~cli_path
+          ~on_transmitted_model_input:(fun _ -> incr transmissions) in
+      (match attempt.Keeper_codex_runtime.result with
+       | Error error -> check bool "actual Codex adapter returns positive preparation failure" true
+           (Option.is_some (Keeper_internal_error.guidance_preparation_failure error))
+       | Ok _ -> fail "missing guidance dispatched Codex");
+      check bool "no app-server was spawned" false (Sys.file_exists capture_path);
+      check int "no model input was transmitted" 0 !transmissions)
+;;
+
 let () =
   run
     "keeper_codex_blank_system_prompt"
     [ ( "developer instructions"
-      , [ test_case
+      , [ test_case "missing guidance refuses before app-server spawn" `Quick
+            test_missing_native_guidance_refuses_before_spawn
+        ; test_case
             "blank system prompt is refused not defaulted"
             `Quick
             test_blank_system_prompt_is_refused_not_defaulted

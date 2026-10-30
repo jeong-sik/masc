@@ -945,7 +945,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     in
     let* posture_notes =
       native_posture_note native_posture
-      |> Result.map_error (config_error ~field:Prompt_names.keeper_codex_native_read)
+      |> Result.map_error (Keeper_internal_error.guidance_preparation_unavailable
+          ~field:Prompt_names.keeper_codex_native_read)
     in
     let* () = on_guidance_prepared () in
     let tool_surface_sha256 =

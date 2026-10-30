@@ -777,15 +777,9 @@ let run_keeper_invocation_turn_admitted_inner
 	              Inference_utils.timed (fun () ->
                       let dispatch_input =
                         let open Result.Syntax in
-                        let* user_message =
-                          (match official_checkpoint_resume with
-                           | Some _ ->
-                             Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id
-                           | None -> Ok message)
-                          |> Result.map_error
-                               (Keeper_official_client_host.config_error
-                                  ~field:Prompt_names.keeper_official_client_resume)
-                        in
+                        (* Official consume now retains a not-entered preparation
+                           checkpoint. Establish that durable proof before rendering;
+                           the adapter admits dispatch only after guidance succeeds. *)
                         let* () =
                           (match direct_resume with
                            | None | Some (Keeper_agent_run.Gate_continuation _) -> Ok ()
@@ -796,6 +790,15 @@ let run_keeper_invocation_turn_admitted_inner
                              Keeper_direct_runtime_continuation.consume
                                ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id admission)
                           |> Result.map_error (fun detail -> Agent_core.Error.Internal detail)
+                        in
+                        let* user_message =
+                          (match official_checkpoint_resume with
+                           | Some _ ->
+                             Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id
+                           | None -> Ok message)
+                          |> Result.map_error
+                               (Keeper_internal_error.guidance_preparation_unavailable
+                                  ~field:Prompt_names.keeper_official_client_resume)
                         in
                         Ok user_message
                       in

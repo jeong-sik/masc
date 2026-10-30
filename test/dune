@@ -382,6 +382,7 @@
  (libraries alcotest masc masc_tui_keeper_sandbox yojson str))
 
 (tests
+ (deps ../config/prompts/keeper.md)
  (names
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate

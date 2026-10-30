@@ -54,12 +54,13 @@ let load_instructions () =
   |> Result.map String.trim
   |> Result.map_error instruction_error
 
-let load_batch_instructions () =
+let load_batch_instructions ~question_id () =
   let open Result.Syntax in
   let* instructions = load_instructions () in
-  let+ choices = load_choices () in
-  let scope_prompt = Prompt_registry.resolve_prompt
-    Prompt_names.keeper_memory_selection_candidate in
+  let* choices = load_choices () in
+  let+ scope_prompt, _ = Prompt_registry.resolve_and_render_prompt_template
+    Prompt_names.keeper_memory_selection_candidate ["question_id", question_id]
+    |> Result.map_error instruction_error in
   instructions, choices, scope_prompt
 
 let assess ~choices ~instructions ~evaluate ~purpose ~candidate ~source_detail =
@@ -148,8 +149,10 @@ let rec assess_batch ~choices ~instructions ~scope_prompt ~evaluate ~purpose row
           |> Result.map_error (fun detail -> Invalid_answer detail)) questions
 
 let select_many ~evaluate ~resolve ~purpose candidates =
-  if candidates = [] then [] else
-  match load_batch_instructions () with
+  match candidates with
+  | [] -> []
+  | first :: _ ->
+  match load_batch_instructions ~question_id:first.id () with
   | Error reason -> List.map (fun candidate -> Deferred {candidate; reason}) candidates
   | Ok (instructions, choices, scope_prompt) ->
   let initial = assess_batch ~choices ~instructions ~scope_prompt ~evaluate ~purpose
@@ -182,8 +185,10 @@ let select_many ~evaluate ~resolve ~purpose candidates =
   finish staged answers
 
 let select_resolved_many ~evaluate ~purpose rows =
-  if rows = [] then [] else
-  match load_batch_instructions () with
+  match rows with
+  | [] -> []
+  | (first, _) :: _ ->
+  match load_batch_instructions ~question_id:first.id () with
   | Error reason -> List.map (fun (candidate,_) -> Deferred {candidate; reason}) rows
   | Ok (instructions, choices, scope_prompt) ->
   let answers = assess_batch ~choices ~instructions ~scope_prompt ~evaluate ~purpose

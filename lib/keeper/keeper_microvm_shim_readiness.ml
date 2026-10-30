@@ -211,14 +211,22 @@ let inspect_config ~base ~payload_path =
     else Ok Config_canonical
 
 let competing_create (error : Fs_compat.capability_write_error) =
-  match error with
-  | {target_effect = Target_unchanged; cleanup_failures = [];
-     primary_failure = Write_primary_failure {cause = Target_already_exists; _}; _} -> true
-  | {target_effect = Target_unchanged; cleanup_failures = [];
-     primary_failure = Write_primary_failure
-       {stage = Publish_exclusive;
-        cause = Operation_failed {exception_ = Unix.Unix_error (Unix.EEXIST, _, _); _}}; _} -> true
-  | _ -> false
+  error.target_effect = Fs_compat.Target_unchanged
+  && error.cleanup_failures = []
+  && match error.primary_failure with
+     | Recovery_primary_failure _ | Recovery_access_primary_failure _ -> false
+     | Write_primary_failure {stage; cause} ->
+       (match cause with
+        | Target_already_exists -> true
+        | Operation_failed {exception_; _} ->
+          stage = Fs_compat.Publish_exclusive
+          && (match exception_ with
+              | Unix.Unix_error (os_error, _, _) -> os_error = Unix.EEXIST
+              | _ -> false)
+        | Invalid_recovery_target _ | Mutation_contended
+        | Posix_descriptor_unavailable | Unexpected_resource_kind _
+        | Resource_identity_unavailable | Resource_identity_changed
+        | Payload_write_failed _ -> false)
 
 let same_config_stat (left : Eio.File.Stat.t) (right : Eio.File.Stat.t) =
   left.dev = right.dev && left.ino = right.ino && left.kind = right.kind

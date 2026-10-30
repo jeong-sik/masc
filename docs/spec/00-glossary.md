@@ -950,9 +950,10 @@ status: reference
 **Board Interest**
 : Keeper가 직접 지목되지 않은 Board post와 comment를
   의미 판정 대상으로 받을 수 있는 주제 선언. `board_interests = []`이면 이
-  targetless discovery를 끈다. 주소 없는 댓글을 비참여 Keeper가 판정하는 경로는
-  부모 글이 `Public` 또는 `Internal`일 때만 열린다. `Unlisted`와 `Direct` 댓글은
-  이 경로로 판정하지 않는다. 정확한 Keeper 지목과 broadcast, 게시글 작성자 및 해당 댓글의 부모 댓글
+  targetless discovery를 끈다. 주소 없는 댓글의 새 비참여 Keeper 판정 후보는
+  부모 글이 `Public` 또는 `Internal`일 때만 만든다. `Unlisted`와 `Direct` 댓글의
+  기존 durable 후보는 이 제한 적용 뒤에도 별도 권한 재검사 없이 판정되거나 전달될 수 있다.
+  정확한 Keeper 지목과 broadcast, 게시글 작성자 및 해당 댓글의 부모 댓글
   작성자에게 보내는 전달에는 영향을 주지 않으며 Task 할당이나 실행 권한도 아니다.
   이 판정 경로의 제한은 Board 읽기 전체의 접근 권한 구현을 뜻하지 않는다.
   `mention_targets`는 정확한 주소 토큰이고 `board_interests`는 의미 판정의 입력이므로

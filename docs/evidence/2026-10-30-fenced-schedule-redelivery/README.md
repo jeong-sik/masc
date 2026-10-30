@@ -34,7 +34,7 @@ snapshot은 읽은 저장소에서 찾지 못했다. 오류에 나타난 1,048,5
 effect 관측이 확인되지 않을 때 같은 turn의 재시도를 막는다. 반면
 [heartbeat batch 판정](https://github.com/jeong-sik/masc/blob/a97919872890eb9b4e730f65b745ab094ed8ce12/lib/keeper/keeper_heartbeat_loop.ml#L727-L735)은
 실패 자체로 batch를 ACK하지 않아 다른 종료·취소가 없다면 다음 intake가 다시
-선택할 수 있다. 서로
-다른 turn에서 같은 원본이 다시 선택된 것은 표본에서 확인했으나, 실제 외부
+선택할 수 있다. 서로 다른 turn에서 같은 stimulus ID가 재선택된 정황을 시간으로
+대조했으나, 실제 외부
 effect 발생·중복이나 무한 반복은 확인하지 못했다. 임의의 성공 ACK, 무조건
 재생, 운영 큐 변경은 하지 않았다.

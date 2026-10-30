@@ -2824,8 +2824,8 @@ let test_replay_uses_captured_policy_after_override () =
   let _,_,evaluations=record_gate_evaluations ~captured_guidance
     ~respond:(replay_response ~forward:"loses_knowledge" ~reverse:0.9) ~facts ~absorbed in
   let serialized=Gate.guidance_to_yojson captured_guidance in
-  with_guidance_override Masc.Prompt_names.librarian_absorb_forward "Changed consolidation policy" (fun () ->
-  with_guidance_override Masc.Prompt_names.librarian_absorb_reverse "Changed reverse policy" (fun () ->
+  with_guidance_override Prompt_names.librarian_absorb_forward "Changed consolidation policy" (fun () ->
+  with_guidance_override Prompt_names.librarian_absorb_reverse "Changed reverse policy" (fun () ->
     let restored_guidance=match Gate.guidance_of_yojson serialized with
       | Ok value -> value | Error detail -> Alcotest.fail detail in
     let before=restore_gate ~captured_guidance ~facts ~absorbed evaluations |> require_replay in
@@ -2881,7 +2881,7 @@ let test_continuation_uses_original_policy_with_current_live_destinations () =
      Alcotest.fail "fixture must stop before the second request is retained"
    with Prefix_complete -> ());
   Alcotest.(check int) "only the completed prefix was sent" 1 (F.post_count server);
-  with_guidance_override Masc.Prompt_names.librarian_absorb_forward
+  with_guidance_override Prompt_names.librarian_absorb_forward
     (String.make Gate.request_bytes_limit 'x') (fun () ->
     let live=Gate.resolve ~keeper_id in
     let guidance=Gate.guidance_of_yojson serialized |> (function
@@ -2908,7 +2908,7 @@ let test_captured_policy_sizes_the_dispatched_question () =
   let candidate=fact "The source and supported follow-up are useful." in
   let absorbed=absorbed_into candidate [source] in
   let captured_guidance=guidance () in
-  with_guidance_override Masc.Prompt_names.librarian_absorb_pair
+  with_guidance_override Prompt_names.librarian_absorb_pair
     (String.make Gate.request_bytes_limit 'x') (fun () ->
     let captured_questions=ref [] in
     let evaluate ~state ~questions =

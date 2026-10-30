@@ -88,6 +88,107 @@ let with_fixture ?(enabled=true) ?(excluded=false) test =
 let snapshot ~keepers_dir ~keeper_id =
   match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
   | Some snapshot -> snapshot | None -> fail "current snapshot missing"
+let with_prompt_override key value f =
+  let previous=(Prompt_registry.resolve_prompt key).override_value in
+  Prompt_registry.set_override key value |> require;
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some value -> Prompt_registry.set_override key value |> require
+    | None -> Prompt_registry.clear_prompt_override key) f
+let evaluation_journal ~config ~keeper_id =
+  Filename.concat (Filename.concat (Masc.Workspace.keepers_runtime_dir config) keeper_id)
+    "memory-selection-evaluations.jsonl"
+let test_managed_request_context_preserves_exact_evidence () =
+  with_fixture @@ fun ~config ~meta:_ ~keepers_dir ~keeper_id ~observed ~reply ~dispatch ->
+  let before=snapshot ~keepers_dir ~keeper_id in
+  ignore (dispatch ());
+  let original=match !observed with [request] -> request | _ -> fail "one baseline request expected" in
+  let key=Prompt_names.keeper_memory_selection_request_context in
+  with_prompt_override key "MANAGED_EXPLICIT_SELECTION_CONTEXT" @@ fun () ->
+  reply:=(fun body ->
+    Prompt_registry.set_override key "CHANGED_DURING_EVALUATION" |> require;
+    response ~choose:(fun _ -> "not_needed") body);
+  let output=dispatch () in
+  check string "managed instruction permits the actual selection" "completed" (text "status" output);
+  let request=match !observed with request :: [_] -> request | _ -> fail "one managed request expected" in
+  let original_state=member "state" original in
+  let original_purpose=member "current_purpose" original_state in
+  let replace key value json=match json with
+    | `Assoc fields -> `Assoc (List.map (fun (name,prior) -> name,if name=key then value else prior) fields)
+    | _ -> fail "expected request object" in
+  let expected=replace "current_purpose"
+      (replace "request_context" (`String "MANAGED_EXPLICIT_SELECTION_CONTEXT") original_purpose)
+      original_state in
+  check bool "only managed context changes; query, authority and all source JSON remain exact" true
+    (member "state" request=expected);
+  check bool "editable context cannot alter the typed question schema" true
+    (member "questions" request=member "questions" original);
+  let journal=Fs_compat.load_file (evaluation_journal ~config ~keeper_id)
+    |> String.split_on_char '\n' |> List.filter ((<>) "") |> List.map Yojson.Safe.from_string in
+  let id=text "selection_id" output in
+  let completed=List.find (fun row -> member "selection_id" row=`String id
+    && member "status" row=`String "selection_completed") journal in
+  check bool "final durable receipt retains the same context despite an override during judgment" true
+    (member "purpose" completed=member "current_purpose" expected);
+  check bool "selection leaves the current authority unchanged" true (snapshot ~keepers_dir ~keeper_id=before)
+let test_missing_request_context_never_evaluates () =
+  with_fixture @@ fun ~config ~meta ~keepers_dir ~keeper_id ~observed ~reply:_ ~dispatch ->
+  let key=Prompt_names.keeper_memory_selection_request_context in
+  let directory=match Prompt_registry.get_markdown_dir () with
+    | Some directory -> directory | None -> fail "prompt directory unavailable" in
+  let previous=(Prompt_registry.resolve_prompt key).override_value in
+  let missing=Filename.temp_dir "memory-select-missing-context-" "" in
+  Fun.protect ~finally:(fun () ->
+    Prompt_registry.set_markdown_dir directory;
+    (match previous with Some value -> Prompt_registry.set_override key value |> require
+     | None -> Prompt_registry.clear_prompt_override key);
+    Fs_compat.remove_tree missing) @@ fun () ->
+  List.iter (fun name -> Fs_compat.save_file (Filename.concat missing name)
+    (Fs_compat.load_file (Filename.concat directory name)))
+    ["keeper.memory.selection.md";"keeper.memory.selection.criteria.md";"keeper.memory.selection.candidate.md"];
+  Prompt_registry.clear_prompt_override key;
+  Prompt_registry.set_markdown_dir missing;
+  List.iter (fun key -> ignore (Prompt_registry.render_prompt_template key [] |> require))
+    [Prompt_names.keeper_memory_selection;Prompt_names.keeper_memory_selection_current_decision;
+     Prompt_names.keeper_memory_selection_comparison;Prompt_names.keeper_memory_selection_inspect_source;
+     Prompt_names.keeper_memory_selection_not_needed];
+  let question_id=Memory.memory_id (List.hd (snapshot ~keepers_dir ~keeper_id).facts) in
+  ignore (Prompt_registry.render_prompt_template Prompt_names.keeper_memory_selection_candidate
+    ["question_id",question_id] |> require);
+  let journal=evaluation_journal ~config ~keeper_id in
+  let stores=List.map (fun path -> path,Fs_compat.load_file_opt path)
+    [journal;Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
+     Current.durable_range_receipt_path ~keepers_dir ~keeper_id;
+     Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id;Queue.path ~keepers_dir ~keeper_id] in
+  let output=dispatch () in
+  check string "missing owner guidance is an explicit unavailable result" "unavailable" (text "status" output);
+  check string "owner policy failure has its own diagnostic" "selection_prompt_unavailable" (text "reason" output);
+  check bool "the diagnostic identifies the missing owner prompt" true
+    (String_util.contains_substring (text "detail" output) key);
+  check bool "missing guidance cannot establish empty relevance" true
+    (member "incomplete" output=`Bool true && rows "selected" output=[] && member "not_needed_count" output=`Null);
+  check int "missing owner context never reaches the real HTTP evaluator" 0 (List.length !observed);
+  List.iter (fun (path,bytes) -> check (option string) "no evaluation receipt or authority write"
+    bytes (Fs_compat.load_file_opt path)) stores;
+  let before=snapshot ~keepers_dir ~keeper_id in
+  ignore (Current.replace ~keepers_dir ~keeper_id ~expected_revision:(Some before.revision)
+    ~now:(before.updated_at+.1.) ~source:{Current.kind=Explicit_write;trace_id="empty-selection"}
+    ~facts:[] () |> require);
+  let empty=dispatch () in
+  check string "an empty selection needs no unused evaluator context" "completed" (text "status" empty);
+  check int "empty authority submits no candidates" 0 (integer "assessed_count" empty);
+  check int "empty authority invents no omission judgment" 0 (integer "not_needed_count" empty);
+  check int "empty selection never reaches HTTP either" 0 (List.length !observed);
+  let completed=Fs_compat.load_file journal |> String.split_on_char '\n'
+    |> List.filter ((<>) "") |> List.map Yojson.Safe.from_string
+    |> List.find (fun row -> member "status" row=`String "selection_completed"
+      && member "selection_id" row=member "selection_id" empty) in
+  let purpose=member "purpose" completed in
+  check bool "empty completion retains the original query" true (member "current_input" purpose=member "purpose" empty);
+  check bool "empty completion retains Keeper instruction data" true (member "keeper_instructions" purpose=`String meta.instructions);
+  check bool "empty completion retains its exact turn reference" true
+    (member "turn_ref" purpose=Ids.Turn_ref.to_yojson
+      (Ids.Turn_ref.make ~trace_id:"selection-tool-fixture" ~absolute_turn:1));
+  check bool "unused evaluator context is omitted from the empty receipt" true (member "request_context" purpose=`Null)
 let test_grouped_sources_and_compact_results ~limited () =
   with_fixture @@ fun ~config ~meta:_ ~keepers_dir ~keeper_id ~observed ~reply ~dispatch ->
   let before=snapshot ~keepers_dir ~keeper_id in
@@ -375,6 +476,10 @@ let test_receipt_failure_preserves_incomplete_selection ~choice () =
 
 let () = run "personal memory select descriptor HTTP"
   ["selection",[
+    test_case "managed request context preserves exact consumer evidence" `Quick
+      test_managed_request_context_preserves_exact_evidence;
+    test_case "missing owner context never reaches evaluation" `Quick
+      test_missing_request_context_never_evaluates;
     test_case "damaged receipts preserve useful current results and incompleteness" `Quick
       (test_receipt_failure_preserves_incomplete_selection ~choice:"current_decision");
     test_case "damaged receipts cannot turn omission into complete retrieval" `Quick

@@ -2380,9 +2380,6 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
     let* () = check_apple_guest_modes ~base_path:t.config.base_path
         ~keeper_name:t.meta.name ~timeout_sec
       |> Result.map_error (fun detail -> Unadoptable_guest_not_removed detail) in
-    (* A stable name can now be absent after an external removal. Readiness
-       belongs to the old guest and cannot authorize the new build volume. *)
-    forget_microvm_guest_state ~backend ~container_name;
     let* nameserver = microvm_boot_nameserver ~backend ~network_mode:t.network_mode
       |> Result.map_error (fun detail -> Network_unexpressible detail) in
     let* () = List.fold_left (fun previous network_mode ->

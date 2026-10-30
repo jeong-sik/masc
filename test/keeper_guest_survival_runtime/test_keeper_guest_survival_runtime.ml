@@ -216,8 +216,10 @@ let provider root args =
   | "run" :: rest ->
     if not (List.mem "-d" rest) then fail "discard-set volume must never start a helper";
     save_json (file "guest.json") (inspect_from_run root rest)
-  | "stop" :: _ -> ()
+  | "stop" :: _ ->
+    if Sys.file_exists (file "replacement-keep-guest") then exit 19
   | "delete" :: rest ->
+    if Sys.file_exists (file "replacement-keep-guest") then exit 19;
     (match guest_rows () with
      | [row] when List.mem (text (field "id" row)) rest -> Unix.unlink (file "guest.json")
      | [] | [_] -> () | _ -> fail "provider invalid rows")
@@ -648,6 +650,29 @@ let process_step root operation =
           Turn.microvm_remote_endpoint ~timeout_sec:10. next) in
       Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
         Result.bind (next_turn ()) (fun _ -> next_turn ()))
+    | "replace-failed-after-uncertain-build" ->
+      Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
+        (* End the first turn without stopping its persistent guest. The build
+           effect was sent but its outcome was not confirmed. *)
+        Turn.cleanup runtime;
+        let guest_path = Filename.concat root "guest.json" in
+        let original = read guest_path in
+        let run_turn image =
+          let next = Turn.create ~config ~meta:(meta ()) ~image:(Ok image)
+              ~network_mode:effective_network () in
+          Fun.protect ~finally:(fun () -> Turn.cleanup next) (fun () ->
+            Turn.microvm_remote_endpoint ~timeout_sec:10. next) in
+        let marker = Filename.concat root "replacement-keep-guest" in
+        write marker "";
+        let replacement = Fun.protect ~finally:(fun () -> Sys.remove marker) (fun () ->
+          run_turn "fixture:replacement") in
+        (match replacement with
+         | Error detail ->
+           check bool "replacement reached the failed guest removal" true
+             (Astring.String.is_infix ~affix:"microvm_teardown_failed" detail)
+         | Ok _ -> fail "replacement unexpectedly removed the guest");
+        check string "failed replacement kept the original guest" original (read guest_path);
+        run_turn "fixture:image")
     | "identity-foreign" ->
       Result.bind (prepare_identity ()) (fun _ ->
         let directory = value (Keeper_github_identity.ensure_config_dir ~config ~keeper_name:keeper) in
@@ -1180,6 +1205,29 @@ let test_uncertain_link_effect_is_not_replayed_in_the_same_process () = with_fix
     (List.length (calls root |> List.filter (List.mem "masc-build-link")));
   check int "first-handoff cleanup was not replayed" 1 (List.length (entries root "requests"));
   assert_build_input root "mkdir" "/masc-build/ready\000/masc-build/new\000"
+
+let test_failed_replacement_keeps_uncertain_build_effect () =
+  List.iter (fun (failed_kind, expected_links) -> with_fixture (fun root ->
+    write (Filename.concat root "scan-output") scan_fixture_output;
+    write (Filename.concat root ("build-effect-status-2-" ^ failed_kind)) "";
+    let status, stderr = step_captured root "replace-failed-after-uncertain-build" in
+    (match status with
+     | Unix.WEXITED 0 -> ()
+     | _ -> failf "%s: same-process replacement and re-adoption failed: %s" failed_kind stderr);
+    check bool "the first effect outcome is reported unverified" true
+      (Astring.String.is_infix ~affix:"microvm_build_link_effect_unverified" stderr);
+    check int "the same guest is booted once" 1 (count "run" root);
+    check int "replacement attempted to stop the guest" 1 (count "stop" root);
+    check int "replacement attempted to delete the guest" 1 (count "delete" root);
+    check int "first-handoff cleanup is not repeated" 1 (List.length (entries root "requests"));
+    check int "the original scan is not repeated" 1 (List.length (build_scan_calls root));
+    let mkdirs = calls root |> List.filter (List.mem "masc-build-mkdir") in
+    let links = calls root |> List.filter (List.mem "masc-build-link") in
+    check int "target preparation is sent once" 1 (List.length mkdirs);
+    check int "link application is not replayed" expected_links (List.length links);
+    assert_build_input root "mkdir" "/masc-build/ready\000/masc-build/new\000";
+    if expected_links = 1 then assert_build_input root "link" "new\000/masc-build/new\000"))
+    ["mkdir", 0; "link", 1]
 
 (* The provider returns a failure after receiving its input. Neither status
    establishes which interpreter or module, if any, was unavailable. *)
@@ -1795,6 +1843,7 @@ let () =
         test_case "fresh process adopts without boot effects" `Quick test_fresh_process_adopts_without_boot_effects;
         test_case "failed scan retries next turn without repeating handoff" `Quick test_scan_failure_retries_on_the_next_turn_without_repeating_handoff;
         test_case "uncertain link effect is not replayed" `Quick test_uncertain_link_effect_is_not_replayed_in_the_same_process;
+        test_case "failed replacement keeps uncertain build effect" `Quick test_failed_replacement_keeps_uncertain_build_effect;
         test_case "build effect failure is not replayed" `Quick test_build_effect_failure_is_not_replayed_in_the_same_process;
         test_case "differently targeted build link is preserved without effects" `Quick test_differently_targeted_build_link_is_preserved_without_effects;
         test_case "real build warnings reach the actual scan path" `Quick test_real_build_warning_on_the_actual_scan_path;

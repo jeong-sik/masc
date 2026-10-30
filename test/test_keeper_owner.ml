@@ -6279,10 +6279,131 @@ let test_input_writer_is_bound_to_child_and_predecessor () =
   ignore (Owner.begin_stopping owner |> owner_ok)
 ;;
 
+let test_owner_preparation_wait_and_explicit_retry fault () =
+  Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
+  let id = operation_id "kmsg-preparation-owner" in
+  let other = operation_id "kmsg-preparation-independent" in
+  let input = operation_input "Original request with original authority" in
+  let owner_p, owner_resolver = Eio.Promise.create () in
+  let blocked, blocked_resolver = Eio.Promise.create () in
+  let independent, independent_resolver = Eio.Promise.create () in
+  let finished, finished_resolver = Eio.Promise.create () in
+  let attempts = ref 0 in
+  let scope = Keeper_execution_scope_id.direct_operation id in
+  let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
+      (Keeper_repetition_snapshot.Fresh scope) |> Result.get_ok in
+  let checkpoint = Keeper_semantic_execution.Official_client
+      {client_kind=Muse;runtime_id="muse.owner";session_id="owned-session";turn_id="owned-turn";
+       tool_surface_sha256=Keeper_checkpoint_ref.sha256_of_canonical_bytes "owned tools";frame} in
+  let failure = Keeper_internal_error.guidance_preparation_unavailable
+      ~field:Prompt_names.keeper_muse_native_read "missing managed asset" in
+  let check_original owner =
+    let current = Owner.exact_operation owner id |> owner_ok |> Option.get in
+    check bool "Owner retains exact original input" true (current.input=Some input);
+    check bool "Owner retains exact checkpoint" true
+      (Option.equal Keeper_semantic_execution.equal_gate_checkpoint (Some checkpoint)
+        (Owner.direct_checkpoint owner ~operation_id:id |> owner_ok)) in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    let owner = Eio.Promise.await owner_p in
+    let operation = claim () |> owner_ok |> Option.get in
+    if Chat_operation.Operation_id.equal id operation.operation_id then (
+      incr attempts;
+      match !attempts with
+      | 1 ->
+        Owner.defer_direct_checkpoint owner ~operation_id:id ~execution_digest:operation.execution_digest
+          ~checkpoint |> owner_ok |> ignore;
+        Owner.Operation_deferred
+      | 2 ->
+        check_original owner;
+        Owner.resume_direct_checkpoint owner ~operation_id:id ~observed:checkpoint |> owner_ok;
+        let generic_config = Agent_core.Error.Config
+            (Agent_core.Error.InvalidConfig {field="unrelated";detail="not a preparation witness"}) in
+        (match Owner.wait_direct_preparation owner ~operation_id:id
+            ~execution_digest:operation.execution_digest ~observed:checkpoint ~failure:generic_config with
+         | Error _ -> () | Ok _ -> fail "generic Config error gained preparation retry authority");
+        Option.iter Keeper_chat_operation_store.For_testing.fail_next_commit fault;
+        let retained = Owner.wait_direct_preparation owner ~operation_id:id
+            ~execution_digest:operation.execution_digest ~observed:checkpoint ~failure in
+        (match fault,retained with
+         | Some Keeper_chat_operation_store.For_testing.Fail_before_commit, Error _ -> ()
+         | _,result -> result |> owner_ok |> ignore);
+        let operation_state () =
+          Owner.exact_operation owner id |> Result.map_error Owner.error_to_string
+          |> fun result -> Result.bind result (function Some operation -> Ok operation.Chat_operation.state
+            | None -> Error "original operation disappeared") in
+        let pending_continuation () =
+          Owner.direct_checkpoint owner ~operation_id:id |> Result.map_error Owner.error_to_string
+          |> Result.map (Option.map (function
+              | Keeper_semantic_execution.Official_client checkpoint -> Keeper_direct_gate_continuation.Bound_official_client checkpoint
+              | Agent_core checkpoint -> Bound_checkpoint checkpoint)) in
+        (* This is the real stream projection that used to turn the rolled-back
+           preparation wait into Owner.Operation_failed and erase original input. *)
+        Server_routes_http_keeper_stream.For_testing.operation_execution_of_outcome
+          ~operation_state ~pending_continuation
+          ~outcome:(Some (Server_routes_http_keeper_stream.Failed
+            {kind=Turn_failed;detail="typed preparation could not commit its wait"}))
+          ~delivery:(Error "preparation failed")
+      | 3 ->
+        check_original owner;
+        Owner.resume_direct_checkpoint owner ~operation_id:id ~observed:checkpoint |> owner_ok;
+        Owner.enter_direct_preparation owner ~operation_id:id ~execution_digest:operation.execution_digest |> owner_ok;
+        Owner.Operation_succeeded {outcome_ref="original resumed once"}
+      | _ -> fail "preparation wait automatically retried")
+    else (
+      check bool "independent queued operation runs" true
+        (Chat_operation.Operation_id.equal other operation.operation_id);
+      check_original owner;
+      Owner.Operation_succeeded {outcome_ref="independent finished"}) in
+  let path = Filename.temp_file "keeper-owner-preparation-" ".sqlite3" in
+  Unix.unlink path;
+  Eio.Switch.on_release sw (fun () -> if Sys.file_exists path then Unix.unlink path);
+  let owner = Owner.start ~sw
+      ~store:{replace=(fun _ -> Ok ());remove=(fun _ -> Ok ())}
+      ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
+      ~now:(fun () -> 42.) ~keeper_name:"preparation-owner"
+      ~initial_meta:(Some (make_meta "preparation-owner"))
+      ~operation_runner:(Some Owner.{ready=(fun ~keeper_name:_ -> true);execute;
+        on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id ~operations:_ ~execution:_ ->
+          match claimed_operation_id with
+          | Some current when Chat_operation.Operation_id.equal current id ->
+            if !attempts=2 then Eio.Promise.resolve blocked_resolver ()
+            else if !attempts=3 then Eio.Promise.resolve finished_resolver ()
+          | Some current when Chat_operation.Operation_id.equal current other -> Eio.Promise.resolve independent_resolver ()
+          | Some _ | None -> ())}) |> owner_ok in
+  Eio.Promise.resolve owner_resolver owner;
+  Owner.submit_operation owner ~operation_id:id ~source:operation_source ~input |> owner_ok |> ignore;
+  Eio.Promise.await blocked;
+  let waiting = Owner.direct_preparation_wait owner ~operation_id:id |> owner_ok |> Option.get in
+  check int "no automatic retry after child settlement" 2 !attempts;
+  check_original owner;
+  Owner.submit_operation owner ~operation_id:other ~source:operation_source
+    ~input:(operation_input "Independent steering") |> owner_ok |> ignore;
+  Eio.Promise.await independent;
+  check int "independent completion does not retry blocked operation" 2 !attempts;
+  (match Owner.retry_direct_preparation owner ~operation_id:id
+      ~expected_revision:(Int64.pred waiting.revision) ~execution_digest:waiting.execution_digest with
+   | Error _ -> () | Ok _ -> fail "stale retry was admitted");
+  Owner.retry_direct_preparation owner ~operation_id:id
+    ~expected_revision:waiting.revision ~execution_digest:waiting.execution_digest |> owner_ok |> ignore;
+  Eio.Promise.await finished;
+  check int "explicit retry runs original operation exactly once" 3 !attempts;
+  let terminal = Owner.exact_operation owner id |> owner_ok |> Option.get in
+  check bool "successful continuation releases original input" true (Option.is_none terminal.input);
+  check string "original operation completes" "succeeded" (Chat_operation.state_to_string terminal.state);
+  Owner.begin_stopping owner |> owner_ok |> ignore
+;;
+
 let () =
   run
     "keeper owner"
-    [ ( "scheduled source handoff", [
+    [ ( "preparation wait", [
+        test_case "exact retained operation retries only explicitly" `Quick
+          (test_owner_preparation_wait_and_explicit_retry None);
+        test_case "real stream failure after wait rollback retains exact operation" `Quick
+          (test_owner_preparation_wait_and_explicit_retry (Some Keeper_chat_operation_store.For_testing.Fail_before_commit));
+        test_case "wait uncertainty confirms exact committed continuation" `Quick
+          (test_owner_preparation_wait_and_explicit_retry (Some Keeper_chat_operation_store.For_testing.Fail_after_commit)) ] )
+    ; ( "scheduled source handoff", [
         test_case "consumer termination releases additions and rejects late registration" `Quick
           (test_scheduled_source_handoff Ended_consumer_handoff)
       ; test_case "old consumer cleanup cannot erase replacement epoch" `Quick

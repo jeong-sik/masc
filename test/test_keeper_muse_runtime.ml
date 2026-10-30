@@ -911,7 +911,7 @@ type observed_run =
 
 (* [on_stream_event] sees each Keeper stream event as it is emitted;
    [on_transmitted] sees the transmission report after it is recorded. *)
-let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary ?on_tool_execution
+let run_turn_with ?on_guidance_prepared ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary ?on_tool_execution
     ?argument_source ?librarian_front
     ?model_input_projection ?on_model_input_window_observation ?on_carried_front
     ?(initial_messages = [ user_message "MUSE_FIXTURE_HISTORY" ])
@@ -936,7 +936,7 @@ let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_inpu
     }
   in
   let outcome =
-    Keeper_muse_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+    Keeper_muse_runtime.run ?on_guidance_prepared ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
       ?argument_source ?librarian_front
       ?composed_context
       ~configured_reasoning_effort:(Runtime_inference.resolve_reasoning_effort ~runtime_id)
@@ -2945,6 +2945,87 @@ let test_native_none_is_refused_before_spawn () =
       (Sys.file_exists (Filename.concat base_path "selected-home.txt")))
 ;;
 
+let test_missing_native_guidance_is_typed_before_claim () =
+  let key = Prompt_names.keeper_muse_native_read in
+  let previous = (Prompt_registry.resolve_prompt key).override_value in
+  Fun.protect
+    ~finally:(fun () ->
+      Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+      match previous with
+      | Some value -> Prompt_registry.set_override key value |> Result.get_ok
+      | None -> Prompt_registry.clear_prompt_override key)
+    (fun () -> with_scripted_host (fun ~base_path ->
+      let empty = Filename.concat base_path "missing-guidance" in
+      Unix.mkdir empty 0o700;
+      Prompt_registry.clear_prompt_override key;
+      Prompt_registry.set_markdown_dir empty;
+      let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+      (match run.outcome.result with
+       | Error error -> check bool "actual adapter returns positive preparation failure" true
+           (Option.is_some (Keeper_internal_error.guidance_preparation_failure error))
+       | Ok _ -> fail "missing managed guidance dispatched Muse");
+      check bool "no account preparation or client spawn" false
+        (Sys.file_exists (Filename.concat base_path "selected-home.txt"));
+      check bool "no start prompt reached the host" false
+        (Sys.file_exists (Filename.concat base_path "start-prompt.txt"));
+      check int "no input transmission" 0 (List.length run.transmitted);
+      check bool "no session claim changed durable authority" true
+        (Store.load ~base_path ~keeper_name |> Result.get_ok = None)))
+;;
+
+let test_guidance_admission_fault_never_enters_sdk fault () =
+  let module Operations = Keeper_chat_operation_store in
+  let module Semantic = Keeper_semantic_execution in
+  with_scripted_host (fun ~base_path ->
+    let operations = Operations.open_or_create ~path:(Filename.concat base_path "preparation.sqlite3") |> Result.get_ok in
+    Fun.protect ~finally:(fun () ->
+      Operations.For_testing.clear_commit_fault ();
+      Operations.close operations |> Result.get_ok)
+      (fun () ->
+        let operation_id = Keeper_chat_operation.Operation_id.of_string "muse-admission-proof" |> Result.get_ok in
+        let input = `Assoc ["message",`String "original checkpoint input"] in
+        Operations.submit operations ~now:1. ~operation_id ~source:(`String "original caller") ~input
+          |> Result.get_ok |> ignore;
+        let operation = Operations.claim_next operations ~now:2. |> Result.get_ok |> Option.get in
+        let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
+            (Keeper_repetition_snapshot.Fresh (Keeper_execution_scope_id.direct_operation operation_id)) |> Result.get_ok in
+        let checkpoint = Semantic.Official_client {client_kind=Muse;runtime_id;session_id;
+            turn_id="original-turn";tool_surface_sha256=Keeper_checkpoint_ref.sha256_of_canonical_bytes "tools";frame} in
+        Operations.defer_direct_checkpoint operations ~now:3. ~operation_id
+          ~execution_digest:operation.execution_digest ~checkpoint |> Result.get_ok |> ignore;
+        Operations.claim_next operations ~now:4. |> Result.get_ok |> Option.get |> ignore;
+        Operations.resume_direct_checkpoint operations ~now:5. ~operation_id ~observed:checkpoint |> Result.get_ok;
+        let callbacks = ref 0 in
+        let on_guidance_prepared () =
+          incr callbacks;
+          Operations.For_testing.fail_next_commit fault;
+          Operations.enter_direct_preparation operations ~now:6. ~operation_id ~execution_digest:operation.execution_digest
+          |> Result.map_error (fun error -> Agent_core.Error.Internal (Operations.error_to_string error)) in
+        let run = run_turn_with ~on_guidance_prepared ~base_path ~tool:(masc_probe_tool (ref `Null)) () in
+        check int "actual adapter requested write admission once" 1 !callbacks;
+        (match run.outcome.result with Error _ -> () | Ok _ -> fail "unconfirmed write admission entered SDK");
+        check int "no model input was transmitted" 0 (List.length run.transmitted);
+        check bool "account/session preparation follows confirmed admission" false
+          (Sys.file_exists (Filename.concat base_path "selected-home.txt"));
+        check bool "no session was claimed" true (Store.load ~base_path ~keeper_name |> Result.get_ok = None);
+        let execution = Operations.semantic_get operations (Keeper_execution_scope_id.direct_operation operation_id)
+            |> Result.get_ok |> Option.get in
+        (match fault,execution.phase with
+         | Operations.For_testing.Fail_before_commit, Semantic.Preparing_checkpoint original ->
+           check bool "rollback retains exact original checkpoint" true
+             (Semantic.equal_gate_checkpoint checkpoint (Semantic.Official_client original));
+           check bool "rollback retains original input" true (execution.input=Some input);
+           Operations.settle_running_after_restart operations ~now:7. |> Result.get_ok |> ignore;
+           check bool "restart blocks the not-entered preparation" true
+             (Option.is_some (Operations.direct_preparation_wait operations ~operation_id |> Result.get_ok));
+           check bool "restart dispatches nothing automatically" true
+             (Option.is_none (Operations.claim_next operations ~now:8. |> Result.get_ok))
+         | Operations.For_testing.Fail_after_commit, Semantic.Running ->
+           check bool "unconfirmed committed entry grants no preparation retry" true
+             (Option.is_none (Operations.direct_preparation_wait operations ~operation_id |> Result.get_ok))
+         | _ -> fail "write admission fault lost its exact disposition")))
+;;
+
 let test_attached_mcp_approvals_are_exact () =
   let key = Prompt_names.keeper_muse_native_read in
   let previous = (Prompt_registry.resolve_prompt key).override_value in
@@ -3369,7 +3450,12 @@ let () =
         ; test_case "effective system override starts fresh" `Quick test_effective_system_override_starts_fresh
         ; test_case "missing selected auth requires sign-in before spawn" `Quick test_missing_selected_account_auth_requires_sign_in
         ; test_case "invalid goal media refuses before claim and spawn" `Quick test_invalid_goal_media_never_claims_or_spawns
-        ; test_case "native none refuses before spawn" `Quick test_native_none_is_refused_before_spawn ])
+        ; test_case "native none refuses before spawn" `Quick test_native_none_is_refused_before_spawn
+        ; test_case "missing guidance is typed before claim" `Quick test_missing_native_guidance_is_typed_before_claim
+        ; test_case "rolled-back admission never enters SDK" `Quick
+            (test_guidance_admission_fault_never_enters_sdk Keeper_chat_operation_store.For_testing.Fail_before_commit)
+        ; test_case "uncertain admission never enters SDK" `Quick
+            (test_guidance_admission_fault_never_enters_sdk Keeper_chat_operation_store.For_testing.Fail_after_commit) ])
     ; ( "workspace root"
       , [ test_case "the session works in the Keeper's playground" `Quick
             test_the_session_works_in_the_keepers_playground

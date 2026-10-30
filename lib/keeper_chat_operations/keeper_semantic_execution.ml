@@ -527,6 +527,10 @@ let apply ~now action current =
   else
     let unchanged phase = Ok phase in
     let reject () = Error (Invalid_transition ("action is not admitted in " ^ phase_name current.phase)) in
+    let* () = match current.phase, action with
+      | Preparing_checkpoint _, (Enter_official_checkpoint | Wait_preparation _ | Settle Cancelled) -> Ok ()
+      | Preparing_checkpoint _, _ -> reject ()
+      | _ -> Ok () in
     let* phase = match action with
       | Confirm_sources ->
           (match current.phase with
@@ -564,8 +568,7 @@ let apply ~now action current =
             | Keeper_native_call.No_native_call -> Ok ()
             | Active _ | Terminal_unacknowledged _ -> Error Native_call_unsettled in
           let expected = match current.phase with
-            | Preparing_checkpoint checkpoint | Preparation_wait {checkpoint;_}
-            | Recovering {origin=Official_checkpointed checkpoint;_} -> Some checkpoint
+            | Preparing_checkpoint checkpoint | Preparation_wait {checkpoint;_} -> Some checkpoint
             | Preparing | Ready | Running | Suspended _ | Resuming_runtime_retry _ | Resuming_gate _ | Recovering _ | Settled _ -> None in
           if String.trim detail <> "" && gate_checkpoint_owns (Official_client observed) (scope current)
              && Option.fold ~none:false ~some:(fun expected ->

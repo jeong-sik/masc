@@ -1114,13 +1114,22 @@ its own row there. Colours the command wrote are kept, and a tab goes to the
 next stop of eight cells. The command line is the server's summary of the
 command, not a quoted shell line to paste.
 
-While the tab is open the TUI reads the newest 500 rows once a second, and the
-view follows them. The row under the output says `following`, how many
-commands are active (`closed` when none is and the last one ended,
-`state unknown` when none is active and the server has not recorded an end),
-and when it was read. When commands overlap their rows interleave, and each
-row then starts with its stream number as `[3] `, or `[?] ` for a row the
+While the tab is open the TUI holds a connection to the Keeper's Execute output
+stream and keeps the newest 500 rows. A row reaches the screen as the server
+logs it, and the screen is redrawn at most about twenty times a second. The row
+under the output says `following`, how many commands are active (`closed` when
+none is and the last one ended, `state unknown` when none is active and the
+server has not recorded an end), and when the server last said anything on the
+connection. The server sends a keepalive every 15 seconds, so that time moves
+even when the Keeper is idle. When commands overlap their rows interleave, and
+each row then starts with its stream number as `[3] `, or `[?] ` for a row the
 server did not attribute to a stream.
+
+When the connection ends the rows stay, and the row under them adds `stale:`
+and the reason. Two seconds later the TUI opens a new connection, and what the
+server sends first replaces the rows. The TUI does the same when it falls so
+far behind that the server has dropped events it never sent. The server keeps
+only the newest 5,000 events per Keeper, and says so when it skips some.
 
 `k`, `PgUp`, `Home`, or the mouse wheel stops following and holds the screen as
 it was, so output that arrives meanwhile does not move the rows you are

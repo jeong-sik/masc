@@ -110,6 +110,13 @@ val stream_event_json : stream_event -> Yojson.Safe.t
 val sse_frame : Yojson.Safe.t -> string
 (** Serialize one [event: output] SSE frame. *)
 
+val closed_status_text : Yojson.Safe.t -> string
+(** The text of the [status] row that stands for a [task_closed] marker with
+    this status. A snapshot lists a retained close as such a row, and a live
+    reader that sees the same close as a [task_closed] event builds the same
+    row, so the two read alike. A status too long for one row becomes an
+    unknown outcome that says so. *)
+
 val subscribe : keeper_name:string -> subscriber option
 (** Subscribe to events logged for [keeper_name] after this call. Returns
     [None] when the keeper name is empty after normalization. *)

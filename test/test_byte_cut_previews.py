@@ -296,6 +296,11 @@ def strict_walk(root):
                 # for metadata, even when their directories are unreadable.
                 if entry.name in SKIPPED_DIRECTORIES and not entry.name.endswith(".ml"):
                     continue
+                # Non-.ml symlinks cannot be source files, and directories
+                # reached through them are outside os.walk's default scope.
+                # Check the link itself before asking about its target.
+                if not entry.name.endswith(".ml") and stat.S_ISLNK(os.lstat(entry.path).st_mode):
+                    continue
                 if entry.is_dir():
                     names.append(entry.name)
                 else:

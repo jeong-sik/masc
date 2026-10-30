@@ -37,8 +37,8 @@ class SourceWalkTest(unittest.TestCase):
         return self.real_scandir(path)
 
     @contextlib.contextmanager
-    def deny_entry_type(self, path, vanished=False):
-        denied = self.denied
+    def deny_entry_type(self, path, vanished=False, denied=None):
+        denied = self.denied if denied is None else denied
 
         class UnreadableEntry:
             def __init__(self, entry):
@@ -129,6 +129,92 @@ class SourceWalkTest(unittest.TestCase):
             env_reads.main(str(self.names), roots)
         self.assertIn(str(self.sources / "file_link.ml"), str(raised.exception))
         self.assertNotIn(str(self.sources / "dir_link"), str(raised.exception))
+
+    def test_non_ml_symlink_type_error_does_not_block_scan(self):
+        outside = Path(self.tmp.name) / "outside"
+        outside.mkdir()
+        link = self.sources / "external"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f"symlinks unavailable: {error}")
+
+        def unavailable(path):
+            return self.deny_entry_type(path, denied=link)
+
+        roots = [str(self.sources)]
+        expected = {str(self.safe), str(self.hidden)}
+        with mock.patch("os.scandir", side_effect=unavailable):
+            self.assertEqual(set(byte_cut.source_files(roots)), expected)
+            self.assertEqual(set(byte_cut.source_files(roots, strict=True)), expected)
+
+    def test_non_ml_symlink_loop_does_not_block_scan(self):
+        link = self.sources / "loop"
+        try:
+            link.symlink_to("loop")
+        except OSError as error:
+            self.skipTest(f"symlinks unavailable: {error}")
+        with self.assertRaises(OSError) as raised:
+            os.stat(link)
+        self.assertEqual(raised.exception.errno, errno.ELOOP)
+        self.hidden.write_text('let x = Sys.getenv_opt "HOME"\n', encoding="utf-8")
+        roots = [str(self.sources)]
+        expected = {str(self.safe), str(self.hidden)}
+        self.assertEqual(set(byte_cut.source_files(roots)), expected)
+        self.assertEqual(set(byte_cut.source_files(roots, strict=True)), expected)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            env_reads.main(str(self.names), roots)
+        self.assertIn("2 .ml files scanned", output.getvalue())
+
+        ml_link = self.sources / "loop.ml"
+        ml_link.symlink_to("loop.ml")
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as raised:
+                env_reads.main(str(self.names), roots)
+        self.assertIn(str(ml_link), str(raised.exception))
+
+    def test_non_ml_symlink_to_inaccessible_target_does_not_block_scan(self):
+        outside = Path(self.tmp.name) / "outside"
+        outside.mkdir()
+        target = outside / "target"
+        target.mkdir()
+        (target / "owned.ml").write_text('let x = Sys.getenv_opt "MASC_KEEPER_DEBUG"\n', encoding="utf-8")
+        file_target = outside / "outside.ml"
+        file_target.write_text('let x = Sys.getenv_opt "MASC_KEEPER_DEBUG"\n', encoding="utf-8")
+        link = self.sources / "external"
+        file_link = self.sources / "external_file"
+        try:
+            link.symlink_to(target, target_is_directory=True)
+            file_link.symlink_to(file_target)
+        except OSError as error:
+            self.skipTest(f"symlinks unavailable: {error}")
+        self.hidden.write_text('let x = Sys.getenv_opt "HOME"\n', encoding="utf-8")
+        outside.chmod(0)
+        try:
+            if os.access(outside, os.X_OK):
+                self.skipTest("cannot deny access to the symlink target")
+            with self.assertRaises(PermissionError):
+                os.stat(link)
+            with self.assertRaises(PermissionError):
+                os.stat(file_link)
+            roots = [str(self.sources)]
+            expected = {str(self.safe), str(self.hidden)}
+            self.assertEqual(set(byte_cut.source_files(roots)), expected)
+            self.assertEqual(set(byte_cut.source_files(roots, strict=True)), expected)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                env_reads.main(str(self.names), roots)
+            self.assertIn("2 .ml files scanned", output.getvalue())
+
+            ml_link = self.sources / "external.ml"
+            ml_link.symlink_to(file_target)
+            with contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit) as raised:
+                    env_reads.main(str(self.names), roots)
+            self.assertIn(str(ml_link), str(raised.exception))
+        finally:
+            outside.chmod(0o700)
 
     def test_complete_walk_reports_the_hidden_violation(self):
         with self.assertRaises(SystemExit) as raised:

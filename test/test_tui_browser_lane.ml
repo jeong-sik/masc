@@ -291,21 +291,24 @@ let test_screenshot_ownership_and_draft () =
    already. That pins the skip's inputs without driving a terminal. *)
 let test_viewport_cadence_skip_inputs () =
   let pending = { (loaded ()) with load = Loading (9, Viewport_cadence 2) } in
-  let settle response view =
-    let settled, shot = accept_screenshot ~generation:9 (decode_screenshot response) view in
+  (* A cadence tick lands on a loading view; the re-arm mirrors what
+     [cadence_operation] launches between two ticks. *)
+  let settle ~generation response view =
+    let settled, shot = accept_screenshot ~generation (decode_screenshot response) view in
     (settled, Option.get shot) in
-  let settled, shot = settle (screenshot_response ()) pending in
+  let rearm generation view = { view with load = Loading (generation, Viewport_cadence 2) } in
+  let settled, shot = settle ~generation:9 (screenshot_response ()) pending in
   expect "a settled cadence shot is idle and owned by the selected tab"
     (settled.load = Idle && shot.source = Live && shot.tab_id = 2
      && shot.title = "second" && shot.url = "https://example.org/");
   expect "the identical re-read decodes to the same skip inputs"
-    (let _, again = settle (screenshot_response ()) settled in
+    (let _, again = settle ~generation:10 (screenshot_response ()) (rearm 10 settled) in
      again.source = shot.source && again.client_id = shot.client_id
      && again.tab_id = shot.tab_id && again.title = shot.title
      && again.url = shot.url && again.viewport = shot.viewport);
   List.iter (fun (field, response) ->
     expect ("a changed " ^ field ^ " already decodes different, so the skip cannot hold")
-      (let _, changed = settle response settled in
+      (let _, changed = settle ~generation:11 response (rearm 11 settled) in
        not (changed.title = shot.title && changed.url = shot.url
             && changed.viewport = shot.viewport)))
     [ ("title", `Assoc [ "ok", `Bool true; "data", `Assoc [

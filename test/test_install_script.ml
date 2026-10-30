@@ -360,13 +360,16 @@ let expect_install_exit0 ~label:(label : string) (output : string)
   let exit0 = status = Unix.WEXITED 0 in
   if exit0 then check bool label true exit0
   else begin
+    (* Alcotest truncates labels around 40 chars, so the installer tail goes to
+       stderr instead: the CI job log keeps it right above the failure line. *)
     let tail =
       output |> String.split_on_char '\n'
       |> List.filter (fun l -> l <> "")
-      |> List.rev |> List.filteri (fun i _ -> i < 5) |> List.rev
-      |> String.concat " ⏎ "
+      |> List.rev |> List.filteri (fun i _ -> i < 8) |> List.rev
+      |> String.concat "\n"
     in
-    check bool (label ^ " — installer tail: " ^ tail) false exit0
+    Printf.eprintf "[installer tail] %s\n%s\n%!" label tail;
+    check bool label false exit0
   end
 ;;
 

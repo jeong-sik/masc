@@ -612,17 +612,19 @@ let release_identity_cache =
      suite-wide cache and copy the tree per case; upgrade scenarios keep their
      own identity via existing_version, which rewrites dest afterwards. *)
   let cache = lazy (
-    let base = Filename.concat (Filename.get_temp_dir_name ()) "masc-install-identity-cache" in
-    match Sys.file_exists base with
-    | true -> base
-    | false ->
-      ignore (Sys.command ("rm -rf " ^ Filename.quote base));
-      ignore (Sys.command ("mkdir -p " ^ Filename.quote base));
-      ignore (stage_release_mirror base);
-      install_real_masc_binary
-        (Filename.concat base ".local")
-        (Filename.concat base ".release");
-      base)
+    (* Per-process cache dir: a fixed global path would reuse a stale identity
+       across builds and races when suites run concurrently. *)
+    let base =
+      Filename.concat (Filename.get_temp_dir_name ())
+        (Printf.sprintf "masc-install-identity-%d" (Unix.getpid ()))
+    in
+    ignore (Sys.command ("rm -rf " ^ Filename.quote base));
+    ignore (Sys.command ("mkdir -p " ^ Filename.quote base));
+    ignore (stage_release_mirror base);
+    install_real_masc_binary
+      (Filename.concat base ".local")
+      (Filename.concat base ".release");
+    base)
   in
   fun () -> Lazy.force cache
 ;;
@@ -632,13 +634,15 @@ let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_versio
   let script = Filename.concat root "scripts/install.sh" in
   let prefix = Filename.concat base_path ".local" in
   let cache = release_identity_cache () in
-  ignore (Sys.command (Printf.sprintf "cp -R %s %s"
-    (Filename.quote (Filename.concat cache ".release"))
-    (Filename.quote (Filename.concat base_path ".release"))));
+  check int "fixture copies the staged release"
+    (Sys.command (Printf.sprintf "cp -R %s %s"
+       (Filename.quote (Filename.concat cache ".release"))
+       (Filename.quote (Filename.concat base_path ".release")))) 0;
   let release_base_url = "file://" ^ Filename.concat base_path ".release" in
-  ignore (Sys.command (Printf.sprintf "cp -R %s %s"
-    (Filename.quote (Filename.concat cache ".local"))
-    (Filename.quote prefix)));
+  check int "fixture copies the installed identity"
+    (Sys.command (Printf.sprintf "cp -R %s %s"
+       (Filename.quote (Filename.concat cache ".local"))
+       (Filename.quote prefix))) 0;
   Option.iter (fun version ->
     let installed = Filename.concat prefix "masc" in
     unlink_if_exists installed;

@@ -12,8 +12,8 @@ let official_client admission = match admission.authority with Official_client c
 let official_client_original_turn admission = match admission.observed with
   | Semantic.Official_client checkpoint -> Some checkpoint | Semantic.Agent_core _ -> None
 let official_resume_message ~operation_id =
-  Printf.sprintf "Continue the unfinished direct operation %s already present in this conversation. Apply any newer user steering, preserve completed tool results, and continue only remaining work. Do not repeat completed effects."
-    (Keeper_chat_operation.Operation_id.to_string operation_id)
+  Prompt_registry.render_prompt_template Prompt_names.keeper_official_client_resume
+    [ "operation_id", Keeper_chat_operation.Operation_id.to_string operation_id ]
 
 let prepare_official_resume ~(observed : Semantic.official_client_checkpoint) ~expected =
   match expected with

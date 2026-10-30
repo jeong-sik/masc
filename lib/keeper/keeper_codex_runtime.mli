@@ -125,14 +125,10 @@ module For_testing : sig
     observe:(official_turn:int -> identity:Runtime_native_tools.action_identity ->
       tool_name:string -> unit) ->
     Runtime_codex_app_server.stream_event -> unit
-  (** What the developer instructions say about the built-in write path.
-
-      Codex cannot be told to drop its built-in tools, so under
-      [Native_read] the model carries a refused [apply_patch] beside a working
-      [Write]. This names which one the session refused. Empty for every other
-      posture, where nothing about the built-in surface is unusual. Pure;
-      pinned by [test_keeper_codex_write_path_note]. *)
-  val native_posture_note : Runtime_native_tools.posture -> string list
+  (** Resolves the managed guidance for native read mode. Other postures add
+      no guidance. Missing or invalid text returns an error before a session
+      is claimed or a model request is dispatched. *)
+  val native_posture_note : Runtime_native_tools.posture -> (string list, string) result
 
   (** Typed carriage of Codex app-server client errors into agent-core
       errors; rotation class per constructor is pinned by

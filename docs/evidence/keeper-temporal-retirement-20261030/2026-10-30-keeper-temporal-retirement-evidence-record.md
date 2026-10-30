@@ -12,7 +12,7 @@
 
 - 항목: Compiled candidate and helper identities.
 - 출처: [Native run 41038850459](https://github.com/jeong-sik/masc/actions/runs/41038850459), source `0639b9da27c8c535b9c9c47154ef752a716b8a3f`; receipt/executable hashes in [measurement-summary.json](measurement-summary.json). Server SHA-256 `62bc791c87bf45f8261bf1599b18c31ca7ba58cdebbabac3b0faf694043b37c9`; TUI SHA-256 `b222496c3e49364c5b13c5a2e2ccf706d715c9c0eae5cf23f9c5450813141320`. Both are Mach-O arm64 with embedded candidate commit. Actual capture/assessment helper SHA is `aad42389b7d6f63802ab8f1d85995b0c101257655a08a787b238da7f32f520d7`. Final helper at `bed1ac6dcb8290ca38c920fb726a93a25fffe460` has SHA `c2b2d21772adee05f559c298f990dbe51811dc95264f485f8fe9bb50cf905c72`; its later missing-Add-on preflight was fixture-tested, not exercised by this live run. Compiled `lib`, `bin`, `test`, `config` and `addons` are unchanged between those commits.
-- 확인일시: `2026-10-30T19:48:48.234356+09:00`
+- 확인일시: `2026-10-30T19:54:00.106167+09:00`
 - 신뢰도: `High`
 - 제한조건: Candidate evidence is not installed-main or rewritten-head evidence. No formal independent approval, installation or merge is implied.
 
@@ -24,13 +24,13 @@
 
 - 항목: Original-history request omission after retained lane restarts.
 - 출처: Private `artifacts/temporal-continuity-retirement-20261030/live-03/report.json`, SHA `52ee4a1c602fa58b2fe92258425c2f0acd1658e2957abf9e5ba11aeebce212f2`; selected observations, final W and original reply in the summary. There were 12 successful exact operations/turns, 15 timeline steps, two retained lane restarts and one readiness wait. All 1,272 raw event digests and ordered owner-response joins were revalidated. Target turn 11 has generation start boundary line 2, completed boundary line 12, exclusive end_atom 34. Turn 12 has one attributed prepared request: W end 34, organic first 34, body SHA `6bd1b03c48f8ff7ab73db894aede6a49ea35f6ff8689f57b9e7d56f5e26fdb86`, 88,654 bytes, capture `wr-1a18c6018db-e415-0000`. Its SDK body multiset and last canonical input join. Exact turn record has zero tool invocations.
-- 확인일시: `2026-10-30T19:48:48.234356+09:00`
+- 확인일시: `2026-10-30T19:54:00.106167+09:00`
 - 신뢰도: `High` for retained local observations/joins.
 - 제한조건: Omission concerns attributed organic prepared-request ranges. Durable originals remain. Preparation does not prove remote receipt or body/response binding. Other injected context is not isolated.
 
 - 항목: Librarian bootstrap intervention and semantic observation.
 - 출처: W was absent in turns 1–11. At `2026-10-30T19:33:47.173+09:00`, the candidate Add-on was installed into the isolated workspace through ordinary declaration reconciliation; existing unread work drained, the wait completed and turn 12 used W. Candidate package and shared image-worker file hashes were checked. A unique image tag referenced `sha256:ccafc76f0a45817c404e936e654e579f36e97b516d2369f3a6018f246b4b33a7`. Offline assessment SHA `cfaed49c76175a63414c11dcc99d1c3e7ba94d8bb7f29d2a40acec57f3e0fdd5` retains frozen requests/raw responses: 11 measured propositions, actual model `jev-1.14.0`, two earlier W propositions unavailable. Late W probabilities: constraint 0.89, latest investigation 0.92, reconnect rejection 0.94; late reply investigation 0.94. All propositions/values are retained in the summary.
-- 확인일시: `2026-10-30T19:48:48.234356+09:00`
+- 확인일시: `2026-10-30T19:54:00.106167+09:00`
 - 신뢰도: `High` for recorded identity/data; semantic probabilities are model observations, not retention rates.
 - 제한조건: Late bootstrap/catch-up, not steady-state or a matched main/candidate comparison. No direct Librarian invocation, cursor/W edit, context-cap change or destructive history deletion occurred. No probability threshold or continuity pass is used.
 

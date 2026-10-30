@@ -4,11 +4,7 @@ module Io = Keeper_workspace_memory_selection_io
 
 type decision = Applies_to_query | Different_scope | Uncertain
 let label = function Applies_to_query -> "applies_to_query" | Different_scope -> "different_scope" | Uncertain -> "uncertain"
-let choices = Types.choice_set ~options:[Applies_to_query;Different_scope;Uncertain]
-  ~label ~describe:(function
-    | Applies_to_query -> Some "The current successor answers the query about the historical observation's same entity, event and scope, allowing legitimate later changes."
-    | Different_scope -> Some "The current target addresses a different entity, event or scope and does not answer this query through this historical observation."
-    | Uncertain -> Some "The evidence cannot establish whether this current target answers the query in the historical observation's scope.")
+
 type issue =
   | Route_unavailable of Typesafeai_config.unavailable_reason
   | Evaluation_failed of Keeper_workspace_memory_selection.evaluation_error
@@ -44,23 +40,32 @@ let candidate_to_json (candidate : Current.successor_recall_candidate) =
     "current_target",Keeper_memory_os_types.fact_to_json candidate.target;
     "committed_revision_path",`List (List.map Current.revision_evidence_to_json candidate.path);
     "ordered_program_steps",`List (List.map program_step_to_json candidate.program_steps)]
+let load_guidance () =
+  let open Result.Syntax in
+  let render key = Prompt_registry.render_prompt_template key []
+    |> Result.map String.trim
+    |> Result.map_error (fun detail -> Evaluation_failed
+      (Keeper_workspace_memory_selection.Unavailable ("successor selection prompt: " ^ detail))) in
+  let* instructions = render Prompt_names.keeper_memory_successor_selection in
+  let* applies = render Prompt_names.keeper_memory_successor_applies_to_query in
+  let* different = render Prompt_names.keeper_memory_successor_different_scope in
+  let* uncertain = render Prompt_names.keeper_memory_successor_uncertain in
+  let+ choices = Types.choice_set ~options:[Applies_to_query;Different_scope;Uncertain]
+    ~label ~describe:(function Applies_to_query -> Some applies
+      | Different_scope -> Some different | Uncertain -> Some uncertain)
+    |> Result.map_error (fun detail -> Invalid_answer detail) in
+  instructions, choices
+
 let select_with_evaluate ~evaluate ~query candidates =
   if candidates = [] then {selected=[]; unresolved=[]} else
-  match Prompt_registry.render_prompt_template
-      Prompt_names.keeper_memory_successor_selection [] with
-  | Error detail ->
-    let issue = Evaluation_failed (Keeper_workspace_memory_selection.Unavailable
-      ("successor selection prompt: " ^ detail)) in
-    {selected=[]; unresolved=List.map (fun candidate -> candidate, issue) candidates}
-  | Ok instructions ->
+  match load_guidance () with
+  | Error issue -> {selected=[]; unresolved=List.map (fun candidate -> candidate, issue) candidates}
+  | Ok (instructions, choices) ->
   let selected,unresolved = List.fold_left (fun (selected,unresolved) candidate ->
-    let decision = match choices with
-      | Error detail -> Error (Invalid_answer detail)
-      | Ok choices ->
+    let decision =
         let state = `Assoc ["purpose",`String "successor_memory_recall";
           "query",`String query;"evidence",candidate_to_json candidate] in
-        let questions = ["applicability",Types.choice_of_set choices ~instructions:
-          instructions] in
+        let questions = ["applicability",Types.choice_of_set choices ~instructions] in
         (match evaluate ~state ~questions with
          | Error error -> Error (Evaluation_failed error)
          | Ok response -> match response.Types.answers with

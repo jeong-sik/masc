@@ -288,14 +288,6 @@ verdict: PASS|FAIL head: <40-character-current-SHA> by: <Keeper-name>
 Use [approve-guard.sh](../../scripts/review/approve-guard.sh) for APPROVE; its
 `--check` mode checks review eligibility.
 
-The guard compares the reviewer's GitHub account with the PR author and every
-content commit's linked author and committer accounts. It refuses publication
-and approval receipts when a commit account cannot be established, and names
-the affected commit and role. Establish the account linkage or leave a signed
-COMMENT while it is unknown; a Git name or email alone does not prove account
-ownership. Account checks do not establish that the reviewing session was
-independent of the work.
-
 Capture the base SHA and complete diff identity **before source review** and
 keep them with the reviewed head and evidence. Run these commands from the repository
 checkout with authenticated `gh`, Git, Python 3 and `jq` available. The diff helper

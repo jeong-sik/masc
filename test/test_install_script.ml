@@ -345,8 +345,11 @@ let managed_release_dir prefix id =
 ;;
 
 let install_real_masc_binary prefix =
-  let dest = Filename.concat prefix "masc" in
-  let slot = managed_release_dir prefix (String.make 64 '0') in
+  let canonical_prefix = Unix.realpath prefix in
+  let dest = Filename.concat canonical_prefix "masc" in
+  let slot =
+    managed_release_dir canonical_prefix (String.make 64 '0')
+  in
   ignore (Sys.command ("mkdir -p " ^ Filename.quote slot));
   let staged = Filename.concat slot "masc" in
   unlink_if_exists staged;
@@ -357,9 +360,10 @@ let install_real_masc_binary prefix =
   unlink_if_exists dest;
   (* install.sh reads one symlink level: readlink $DEST must literally be
      $canonical_prefix/.masc-releases/<64hex>/masc, and the pointer check
-     compares it with $(cd "$PREFIX" && pwd -P), so plant exactly that
-     canonical slot path — realpath would collapse to the final binary and
-     fail the pattern.  The staged slot itself points at the mirror bytes. *)
+     compares it with $(cd "$PREFIX" && pwd -P).  Both the slot path and the
+     dest symlink must therefore be planted under the realpath-normalized
+     prefix — a symlinked TMPDIR or /var → /private/var would otherwise
+     re-trip the same gate. *)
   Unix.symlink staged dest
 ;;
 

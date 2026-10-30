@@ -142,6 +142,10 @@ val prompt_source : string -> prompt_source
 
 (** {1 Rendering} *)
 
+val resolution_references_variable : prompt_resolution -> variable:string -> bool
+(** Whether the captured template references the exact variable according to
+    the same placeholder parser used by rendering. This performs no lookup. *)
+
 val render_prompt_template :
   string -> (string * string) list -> (string, string) result
 (** Renders the prompt at [key] with the variable

@@ -367,7 +367,8 @@ type durable_preparation = {
 val prepare_durable : now:float -> Keeper_librarian.input ->
   (durable_preparation, string) result
 (** Resolve the original policy and both prompt assets once, on the caller
-    fiber. The synchronous Memory pass consumes this same preparation. *)
+    fiber. When counterpart input is present, the resolved prompt must reference
+    its substitution. The synchronous Memory pass consumes this same preparation. *)
 val validate_durable_preparation : durable_preparation -> (unit, string) result
 (** Pure restoration check of the complete captured input, policy, resolutions,
     substitutions, rendered prompt and schema. No environment/prompt lookup. *)
@@ -425,7 +426,8 @@ val prepare_durable_step : now:float -> context:durable_step_context -> Keeper_l
   (durable_step_preparation, string) result
 (** Resolve the policy and both prompt assets once, on the caller fiber, for one
     floor question. [input] is the question as {!Keeper_librarian_message_floor.Machine}
-    asks it. *)
+    asks it. A question carrying counterpart input requires its substitution in
+    the resolved prompt. *)
 val validate_durable_step_preparation : durable_step_preparation -> (unit, string) result
 (** Pure restoration check: the captured input holds no working context, and the
     substitutions, rendered prompt and continuity schema match the input,

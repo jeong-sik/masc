@@ -901,6 +901,75 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
      | Ok _ -> fail "successfully consumed counterpart input remained unread");
     check int "the settled input is not sent again" 4 (F.post_count fixture.server))
 
+let test_counterpart_prompt_omission_preserves_fresh_source () =
+  with_fixture ~history_kind:Official (fun ~sw:_ fixture ->
+    let previous=(Prompt_registry.resolve_prompt Prompt_names.librarian).override_value in
+    Fun.protect ~finally:(fun () -> match previous with
+      | None -> Prompt_registry.clear_prompt_override Prompt_names.librarian
+      | Some value -> Prompt_registry.set_override Prompt_names.librarian value |> get) (fun () ->
+      let speaker : Keeper_chat_store.speaker =
+        {speaker_id=Some "external";speaker_name=Some "External";
+         speaker_authority=Keeper_chat_store.External} in
+      Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
+        ~content:"Independent speaker evidence" ~speaker ();
+      io (fun () ->
+        official_turn fixture.config ~turn:2 ~time:(Time_compat.now () +. 10.);
+        let session_dir=Keeper_fs.keeper_session_dir fixture.config trace_id in
+        let path file=Keeper_turn_fragments.path ~session_dir file in
+        write (path Keeper_turn_fragments.Main)
+          ({|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"old"}]}|} ^ "\n");
+        write (path Keeper_turn_fragments.Internal) "");
+      let official ()=io (fun () -> Keeper_librarian_official_progress.read
+        ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_id:keeper_name
+        |> Result.map_error Keeper_librarian_official_progress.read_error_to_string |> get) in
+      let before=official () in
+      Prompt_registry.set_override Prompt_names.librarian "Summarize the available history" |> get;
+      (match run_worker fixture with
+       | Error (Consumer.Original_publication_blocked detail) ->
+         check bool "failure names the missing substitution" true
+           (Astring.String.is_infix ~affix:"counterpart_observations" detail)
+       | Error error -> fail (Consumer.error_to_string error)
+       | Ok _ -> fail "a fresh original with the missing counterpart substitution was accepted");
+      check int "no incomplete original was retained" 0 (List.length (observed_originals fixture));
+      check int "no request reached the provider" 0 (F.post_count fixture.server);
+      check bool "official position remains unread" true (official ()=before);
+      let cursor=io (fun () -> Keeper_external_read_cursor.observe
+        ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
+      check int "external input was not acknowledged" 0 (Keeper_external_read_cursor.observation_offset cursor);
+      check bool "the existing cursor preparation can remain pending" true
+        (member "pending" (Keeper_external_read_cursor.observation_to_json cursor) <> `Null);
+      no_memory fixture;
+      Prompt_registry.clear_prompt_override Prompt_names.librarian;
+      let observed=ref [] in
+      fixture.set_response (fun capture ->
+        observed := (Capture.source capture |> Source.input).counterpart_observations;
+        `OK,F.openai_response (answer capture));
+      drive_advanced fixture;
+      check (list string) "restoring the prompt retries the preserved counterpart source"
+        ["Independent speaker evidence";"Original admitted external evidence"]
+        (List.map (fun (o:Keeper_counterpart_observation.t) -> o.content) !observed |> List.sort String.compare);
+      let record,capture=only_original fixture in
+      let source=Capture.source capture in
+      let expected=Source.official_range_id source |> Option.get in
+      check bool "Memory receipt names the corrected original's official range" true
+        (io (fun () -> Current.committed_official_coverage ~keepers_dir:fixture.keepers_dir
+          ~keeper_id:keeper_name ~receipt_scope:expected.receipt_scope |> get)=Some expected);
+      check (list string) "the corrected provider result is committed to Memory"
+        ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir));
+      let through=Keeper_librarian_input_sources.external_through (Source.counterparts source) in
+      check int "the corrected original reads the external admission" 1 through;
+      let settled_cursor=io (fun () -> Keeper_external_read_cursor.observe
+        ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
+      check bool "the external admission is acknowledged through its original frontier" true
+        (Keeper_external_read_cursor.observation_matches_preparation settled_cursor
+          ~after:through ~through ~atom:None ~official:None);
+      check bool "the original is finished after its receipt and ACK" true
+        (match Progress.phase record.Owner.progress with Finished _ -> true
+         | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+         | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
+      check bool "successful recovery advances the official position" true (official ()<>before);
+      check int "only the corrected prompt reached the provider" 1 (F.post_count fixture.server)))
+
 let test_untagged_official_counterparts_reach_memory_once () =
   with_fixture ~history_kind:Official (fun ~sw:_ fixture ->
     let speaker : Keeper_chat_store.speaker =
@@ -2267,6 +2336,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
   test_case "actual mixed original reaches Memory and both receipt/position kinds" `Quick (test_actual_official_or_mixed_path Mixed);
   test_case "counterpart-only capacity refusal preserves source and ACK" `Quick
     test_counterpart_only_provider_capacity_refusal_is_source_preserving;
+  test_case "missing counterpart substitution preserves fresh source until corrected" `Quick
+    test_counterpart_prompt_omission_preserves_fresh_source;
   test_case "untagged official counterparts reach Memory once" `Quick
     test_untagged_official_counterparts_reach_memory_once;
   test_case "production durable queue stops following phases on actual Pending" `Quick test_production_queue_pending_retains_all_sources;

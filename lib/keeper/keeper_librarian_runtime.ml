@@ -423,6 +423,14 @@ let restore_durable_preparation ~source_input ~parsing_now ~policy ~rule_prompt 
   let preparation : durable_preparation = {source_input;parsing_now;policy;rule_prompt;prompt;
     variables;rendered_prompt;output_schema} in
   let+ ()=validate_durable_preparation preparation in preparation
+(* This is an admission check, not a restoration rule: old captures must keep
+   their original prompt and remain decodable even if it omitted the input. *)
+let require_counterpart_template (preparation : durable_preparation) =
+  if preparation.source_input.counterpart_observations = []
+    || Prompt_registry.resolution_references_variable preparation.prompt
+         ~variable:"counterpart_observations"
+  then Ok ()
+  else Error "Librarian prompt must include {{counterpart_observations}} while counterpart input is pending"
 let prepare_durable_with ?continuity ~output_schema ~now source_input =
   let open Result.Syntax in
   let policy : durable_policy = {
@@ -442,6 +450,7 @@ let prepare_durable_with ?continuity ~output_schema ~now source_input =
   let preparation : durable_preparation = {source_input;parsing_now=now;policy;rule_prompt;prompt;
     variables;rendered_prompt;output_schema} in
   let* ()=check_durable_preparation ?continuity ~expected_schema:output_schema preparation in
+  let* ()=require_counterpart_template preparation in
   Ok preparation
 let prepare_durable ~now source_input =
   prepare_durable_with

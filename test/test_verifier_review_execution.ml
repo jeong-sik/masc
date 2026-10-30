@@ -122,7 +122,9 @@ let test_terminal_recovery_ignores_unavailable_producer () = with_fixture (fun e
     ~base_path ~prepare_authority:(fun () -> incr attempts;Error "producer VM is detached")
     ~prepare_notes:(fun _ -> "journal-backed recovered verdict") ~provider_rest:(fun _ -> AR.No_stated_rest) () in
   List.iter (fun () -> match recover () with
-    | Ok {AR.verdict=Some (Approve "checked exact evidence");_} -> ()
+    | Ok (reviewed, {AR.verdict=Some (Approve "checked exact evidence");_}) ->
+      Alcotest.(check bool) "recovery returns the original bound to this execution" true
+        (Yojson.Safe.equal (V.to_json original) (V.to_json reviewed))
     | Ok _ | Error _ -> Alcotest.fail "exact original verdict did not recover") [();()];
   Alcotest.(check int) "recovery never prepares producer access or dispatches another model" 0 !attempts;
   match P.phase (O.progress (O.load_retained ~store ~verification_id ~attempt:0 ~installation_id ~package_id |> owner)) with

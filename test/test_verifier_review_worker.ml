@@ -75,6 +75,7 @@ let domain_notes result =
 let run ?(package=package_id) store authority attempt =
   W.run_attempt ~prepare_notes:domain_notes ~store ~verification_id ~attempt ~installation_id ~package_id:package
     ~base_path:(A.task_review_base_path authority) ~prepare_authority:(fun () -> Ok authority) ~provider_rest:(fun _ -> AR.No_stated_rest) ()
+  |> Result.map snd
 
 let pending ~store ~installation_id ~package_id =
   O.pending_commits ~terminal_pending:Publication.needs_publication
@@ -102,6 +103,7 @@ let run_observed ?on_verdict ~clock ~task ~store ~installation_id ~package_id or
       ~before:task.Masc_domain.task_status ~original)
     ~store ~verification_id:(V.verification_id original) ~attempt:(V.attempt original)
     ~installation_id ~package_id ~base_path:(A.task_review_base_path authority) ~prepare_authority:(fun () -> Ok authority) ~provider_rest:(fun _ -> AR.No_stated_rest) ()
+  |> Result.map snd
 
 let with_reviewer reviewer f =
   let previous = Atomic.get AR.run_llm_reviewer_fn in
@@ -111,6 +113,56 @@ let with_reviewer reviewer f =
     Atomic.set AR.run_llm_reviewer_fn reviewer;
     Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
       (fun () -> Ok ["fixture-reviewer",Types_core.Catalog_slot]); f ())
+
+let test_worker_returns_its_loaded_original () = with_workspace (fun config store ->
+  let a=authority config in
+  let first=original a 0 in
+  retain store first;
+  let earlier=loaded (O.load_for_destination ~store ~verification_id ~attempt:0 ~installation_id ~package_id) in
+  let second=get (V.prepare ~generator_runtime:None ~verification_id ~attempt:0 ~question
+    ~lookup_root:(A.task_review_root a) ~lookup_binding:(A.task_review_binding a)
+    ~lookup_schemas:(List.map (fun (schema:Types_core.tool_schema) -> schema.name)
+      (A.schemas (A.task_review_tools a))) {request with task_title="replacement original"}) in
+  let replacement_store=Masc.Lane_addon_store.create
+    ~root:(Filename.concat (Workspace_core.masc_dir config) "replacement-lane-addons") in
+  retain replacement_store second;
+  let request_id=get (O.attempt_request_id ~verification_id ~attempt:0) in
+  let scope="verifier-reviews" in
+  let replacement=match get (Masc.Lane_addon_store.load_tool_request_owner
+      replacement_store ~scope ~request_id) with
+    | Some value -> value | None -> Alcotest.fail "replacement owner missing" in
+  let digest=get (V.digest second) in
+  let body=match get (Masc.Lane_addon_store.load_tool_request_body
+      replacement_store ~scope ~request_digest:digest) with
+    | Some value -> value | None -> Alcotest.fail "replacement body missing" in
+  (* A private fixture replaces the owner after a separate read. This exercises
+     the identity returned by the worker; it does not claim an owner swap is a
+     supported production transition. *)
+  get (Masc.Lane_addon_store.save_tool_request_body store ~scope ~request_digest:digest body);
+  get (Masc.Lane_addon_store.save_tool_request_owner store ~scope ~request_id replacement);
+  with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
+      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+      ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+    Alcotest.(check string) "worker sends its own loaded prompt" (V.system_prompt_text second) prompt;
+    Ok {AR.selected_runtime_id="fixture-reviewer";evaluator_execution=None;verdict=Some (AR.Approve "checked replacement")}) (fun () ->
+    match W.run_attempt ~prepare_notes:domain_notes ~store ~verification_id ~attempt:0
+      ~installation_id ~package_id ~base_path:config.base_path ~prepare_authority:(fun () -> Ok a)
+      ~provider_rest:(fun _ -> AR.No_stated_rest) () with
+    | Error _ -> Alcotest.fail "replacement original did not run"
+    | Ok (reviewed,result) ->
+      Alcotest.(check bool) "separate earlier read names a different original" true
+        (get (V.digest earlier) <> get (V.digest reviewed));
+      Alcotest.(check bool) "worker returns exactly the original it reviewed" true
+        (Yojson.Safe.equal (V.to_json second) (V.to_json reviewed));
+      let saved=loaded (O.load_retained ~store ~verification_id ~attempt:0 ~installation_id ~package_id) in
+      (match P.phase (O.progress saved) with
+       | Judged judgment ->
+         let retained_result,_=get (O.judgment_of_json ~original:reviewed judgment) in
+         Alcotest.(check bool) "returned result is bound to that retained judgment" true
+           (Yojson.Safe.equal (O.result_to_json result) (O.result_to_json retained_result))
+       | Captured | Admission_wait _ | Dispatch_pending _ | Committing _ | Commit_unknown _
+       | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
+         Alcotest.fail "worker did not retain its judgment")))
 
 let test_frozen_prompt_media_and_lookup () = with_workspace (fun config store ->
   let a = authority config in
@@ -532,6 +584,127 @@ let with_observed_host f = with_workspace_runtime (fun config store clock ->
 let load_host store = loaded (O.load_retained ~store ~verification_id ~attempt:0
   ~installation_id:host_installation ~package_id:host_package)
 
+let test_calibration_uses_original_on_readmission () =
+  with_workspace_runtime (fun config store clock -> Eio.Switch.run (fun sw ->
+    let module Cal = Masc.Eval_calibration in
+    Cal.For_testing.set_store ~base_path:config.Workspace_core.base_path;
+    Fun.protect ~finally:Cal.For_testing.reset_store (fun () ->
+      let task=prepare_domain config in
+      let identity ~actor ~runtime_id ~model_id suffix =
+        get (Runtime_response_identity.make ~execution_id:("execution-" ^ suffix)
+          ~actor ~runtime_id ~response_id:("response-" ^ suffix) ~provider_id:"fixture-provider"
+          ~model_id ~tool_use_id:("call-" ^ suffix) ~provider_turn:1 ~source_tool_use_ordinal:0) in
+      let original_producer=identity ~actor:producer ~runtime_id:"producer-runtime"
+        ~model_id:"original-model" "original" in
+      let wake_producer=identity ~actor:producer ~runtime_id:"producer-runtime"
+        ~model_id:"replacement-model" "replacement" in
+      let evaluator=identity ~actor:"fixture-reviewer" ~runtime_id:"fixture-reviewer"
+        ~model_id:"evaluator-model" "evaluator" in
+      let output note producer_execution = `Assoc [
+        "completion_note", `String note;
+        "producer_execution", Runtime_response_identity.to_yojson producer_execution;
+        "evidence_refs", `List [`String "note:fixture"];
+        "required_artifacts", `List [];
+        "submitted_evidence", `List [Store.submitted_evidence_item_to_yojson
+          (Store.Evidence_note "fixed submitted evidence")]] in
+      let submitted=get (Verification.create_request ~base_path:config.base_path
+        ~task_id ~worker:producer ~request_id:verification_id ~criteria:[]
+        ~output:(output "original completion note" original_producer) ()) in
+      (match get (Verification.producer_execution submitted) with
+       | Some observed -> Alcotest.(check bool) "submission records the original producer execution" true
+           (observed=original_producer)
+       | None -> Alcotest.fail "fixture submission has no producer execution");
+      let path=Filename.concat (Workspace_core.masc_dir config) "calibration-review-runs.jsonl" in
+      let reviewer_calls=ref 0 and expected_prompt=ref None in
+      with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
+          ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+          ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+        incr reviewer_calls;
+        (match !expected_prompt with
+         | Some expected -> Alcotest.(check string) "reviewer receives the retained original" expected prompt
+         | None -> Alcotest.fail "reviewer ran before the original was captured");
+        Ok {AR.selected_runtime_id="fixture-reviewer";evaluator_execution=Some evaluator;
+          verdict=Some (AR.Approve "checked original")}) (fun () ->
+        Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
+          (fun () -> Error "fixture admission unavailable");
+        (match Host.process_original_once ~registry:(R.replay path) ~config ~sw ~clock
+           ~task ~assignee:producer ~verification_id with
+         | Error _ -> () | Ok () -> Alcotest.fail "unavailable admission unexpectedly committed");
+        Alcotest.(check int) "first wake did not dispatch a reviewer" 0 !reviewer_calls;
+        Alcotest.(check int) "no verdict was calibrated before admission" 0
+          (List.length (Dated_jsonl.read_recent (Cal.get_store ()) 10));
+        let captured=load_host store in
+        (match P.phase (O.progress captured) with
+         | Admission_wait _ -> ()
+         | Captured | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+         | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
+           Alcotest.fail "first wake did not retain admission wait");
+        let original=O.original captured in
+        let frozen=V.review_request original in
+        Alcotest.(check (option string)) "original generator runtime remains bound"
+          (Some "producer-runtime") (V.generator_runtime original);
+        expected_prompt:=Some (V.system_prompt_text original);
+        Alcotest.(check string) "captured title" task.Masc_domain.title frozen.AR.task_title;
+        let original_note=Yojson.Safe.Util.(Yojson.Safe.from_string frozen.completion_notes
+          |> member "verification_request" |> member "output" |> member "completion_note" |> to_string) in
+        Alcotest.(check string) "captured completion note" "original completion note" original_note;
+        let backlog=get (Workspace_backlog.read_backlog_r config) in
+        Workspace_core.write_backlog config {backlog with tasks=List.map (fun (task:Masc_domain.task) ->
+          if task.id=task_id then {task with title="edited wake title"} else task) backlog.tasks};
+        (* Replace only fixture input fields while preserving the saved subject
+           and submitted snapshot. No producer or new submission is executed. *)
+        let changed={submitted with output=output "edited wake completion note" wake_producer} in
+        let request_path=Filename.concat (Store.verifications_dir config.base_path)
+          (verification_id ^ ".json") in
+        get (Fs_compat.save_file_atomic request_path
+          (Yojson.Safe.pretty_to_string (Verification.request_to_yojson changed)));
+        let wake_task=task_in_backlog config in
+        Alcotest.(check string) "re-entry sees edited Task title" "edited wake title" wake_task.title;
+        let wake_request=get (Verification.load_request config.base_path verification_id) in
+        Alcotest.(check string) "re-entry sees edited completion note" "edited wake completion note"
+          Yojson.Safe.Util.(wake_request.output |> member "completion_note" |> to_string);
+        (match get (Verification.producer_execution wake_request) with
+         | Some observed ->
+           Alcotest.(check bool) "wake carries the different producer execution" true
+             (observed=wake_producer && observed<>original_producer);
+           Alcotest.(check string) "both producer executions use the same actor" original_producer.actor observed.actor;
+           Alcotest.(check string) "both producer executions use the same runtime" original_producer.runtime_id observed.runtime_id
+         | None -> Alcotest.fail "fixture wake has no producer execution");
+        Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
+          (fun () -> Ok ["fixture-reviewer",Types_core.Catalog_slot]);
+        get (Host.process_original_once ~registry:(R.replay path) ~config ~sw ~clock
+          ~task:wake_task ~assignee:producer ~verification_id);
+        Alcotest.(check int) "re-admission dispatches one reviewer" 1 !reviewer_calls;
+        let rows ()=Dated_jsonl.read_recent (Cal.get_store ()) 10 in
+        let row=match rows () with [row] -> row
+          | _ -> Alcotest.fail "expected exactly one actual calibration row" in
+        let expected_hash=Agent_core_sha256.(digest_string
+          (frozen.task_title ^ "\n" ^ frozen.completion_notes) |> to_hex) in
+        Alcotest.(check string) "calibration title is the reviewed title" frozen.task_title
+          Yojson.Safe.Util.(row |> member "task_title" |> to_string);
+        Alcotest.(check string) "calibration hash binds reviewed title and notes" expected_hash
+          Yojson.Safe.Util.(row |> member "notes_hash" |> to_string);
+        Alcotest.(check string) "calibration row names the original Task" task_id
+          Yojson.Safe.Util.(row |> member "task_id" |> to_string);
+        Alcotest.(check string) "calibration row has the actual verdict" "approve:checked original"
+          Yojson.Safe.Util.(row |> member "verdict" |> to_string);
+        Alcotest.(check bool) "calibration does not attribute the wake producer execution" true
+          (Yojson.Safe.Util.member "producer_execution" row = `Null);
+        Alcotest.(check string) "calibration keeps the original generator runtime" "producer-runtime"
+          Yojson.Safe.Util.(row |> member "generator_runtime" |> to_string);
+        Alcotest.(check bool) "calibration retains the observed evaluator execution" true
+          (Yojson.Safe.equal (Runtime_response_identity.to_yojson evaluator)
+            (Yojson.Safe.Util.member "evaluator_execution" row));
+        let model_pairs=Yojson.Safe.Util.member "model_identity_observation" (Cal.calibration_stats ()) in
+        Alcotest.(check int) "unbound producer is excluded from observed model pairs" 0
+          Yojson.Safe.Util.(model_pairs |> member "observed_verdict_count" |> to_int);
+        Alcotest.(check int) "unbound producer is counted as unobserved" 1
+          Yojson.Safe.Util.(model_pairs |> member "unobserved_causes" |> member "producer" |> to_int);
+        get (Host.process_original_once ~registry:(R.replay path) ~config ~sw ~clock
+          ~task:(task_in_backlog config) ~assignee:producer ~verification_id);
+        Alcotest.(check int) "committed recovery does not dispatch another reviewer" 1 !reviewer_calls;
+        Alcotest.(check bool) "committed recovery does not rewrite calibration" true (rows ()=[row])))))
+
 let operator_act config = function
   | `Cancelled -> get (Workspace.cancel_task_as_operator_r config ~operator_id:"race-operator"
       ~task_id ~reason:"operator won before the retained verifier commit" ()
@@ -843,10 +1016,10 @@ let test_missing_observer_refuses_before_domain_mutation () =
       let result=loaded (if observed then
           run_observed ~clock ~task ~store ~installation_id:host_installation
             ~package_id:host_package first authority
-        else W.run_attempt ~prepare_notes:domain_notes ~store ~verification_id ~attempt:0
+        else (W.run_attempt ~prepare_notes:domain_notes ~store ~verification_id ~attempt:0
           ~installation_id:host_installation ~package_id:host_package
           ~base_path:(A.task_review_base_path authority) ~prepare_authority:(fun () -> Ok authority)
-          ~provider_rest:(fun _ -> AR.No_stated_rest) ()) in
+          ~provider_rest:(fun _ -> AR.No_stated_rest) () |> Result.map snd)) in
       Alcotest.(check int) "fixture actually ran its original reviewer" 1 !calls;
       let judged=load_host store in
       let judgment=match P.phase (O.progress judged) with
@@ -931,6 +1104,7 @@ let () =
   Prompt_registry.load_prompts_from_directory prompts;
   Masc_test_deps.init_unified_tool_registry ();
   Alcotest.run "retained verifier execution" ["execution",[
+    Alcotest.test_case "worker returns its loaded original after an owner replacement" `Quick test_worker_returns_its_loaded_original;
     Alcotest.test_case "frozen prompt, media, lookup and verdict" `Quick test_frozen_prompt_media_and_lookup;
     Alcotest.test_case "missing and changed authority refuse before dispatch" `Quick test_refusals_dispatch_nothing;
     Alcotest.test_case "retry keeps both immutable originals" `Quick test_known_retry_preserves_frozen_original;
@@ -943,6 +1117,7 @@ let () =
     Alcotest.test_case "commit unknown recovers original" `Quick test_commit_unknown_recovers_exact_original;
     Alcotest.test_case "actual inner walk respects retained disposition" `Quick test_actual_inner_walk_respects_retained_disposition;
     Alcotest.test_case "pre-admission configuration repair reuses original" `Quick test_pre_admission_configuration_reenters_same_original;
+    Alcotest.test_case "calibration uses the original on re-admission" `Quick test_calibration_uses_original_on_readmission;
     Alcotest.test_case "invalid inventory refuses allocation" `Quick test_bad_inventory_is_not_partial_authority;
     Alcotest.test_case "Judged boot preserves terminal operator authority" `Quick test_judged_boot_respects_terminal_operator;
     Alcotest.test_case "actual typed refusal race never reapplies" `Quick test_actual_before_apply_authority_race;

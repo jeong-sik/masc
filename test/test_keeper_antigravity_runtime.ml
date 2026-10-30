@@ -1920,6 +1920,7 @@ module Argument_start_fixture = struct
   let check_resume prompt =
     let open Yojson.Safe.Util in
     let messages = List.map (member "message") (envelopes prompt) in
+    check int "Resume carries exactly one recognized envelope" 1 (List.length messages);
     let historical = List.filter (fun message ->
       member "origin" message = `String "conversation") messages in
     check int "Resume omits canonical conversation history" 0 (List.length historical);

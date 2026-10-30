@@ -1040,6 +1040,19 @@ let test_message_stop_without_reason_is_not_tool_authority () =
   A.on_event t Agent_core.Types.MessageStop;
   check (list tool_call) "incomplete terminal omits the tool" [] (A.to_tool_calls t)
 
+let test_stop_before_start_does_not_admit_later_tool () =
+  List.iter (fun with_message_stop ->
+    let t = A.create () in
+    A.on_event t message_stop_reason;
+    if with_message_stop then A.on_event t Agent_core.Types.MessageStop;
+    A.on_event t (message_start "late-start");
+    A.on_event t (start ~index:0 ~tool_id:(Some "late") ~tool_name:(Some "Read"));
+    A.on_event t (json_delta ~index:0 "{}");
+    A.on_event t (stop ~index:0);
+    check (list tool_call) "a start after stop cannot admit a tool" [] (A.to_tool_calls t))
+    [false;true]
+;;
+
 let test_non_tool_events_are_ignored () =
   let t = A.create () in
   A.on_event t (non_tool_start ~index:0 ~content_type:"text");
@@ -1559,6 +1572,8 @@ let () =
             test_block_without_tool_name_is_dropped
         ; test_case "MessageStop without reason is not tool authority" `Quick
             test_message_stop_without_reason_is_not_tool_authority
+        ; test_case "stop before start cannot admit a later tool" `Quick
+            test_stop_before_start_does_not_admit_later_tool
         ; test_case "non-tool events are ignored" `Quick test_non_tool_events_are_ignored
         ; test_case "identity-free non-tool start quarantines active tool" `Quick
             test_identity_free_non_tool_start_quarantines_active_tool

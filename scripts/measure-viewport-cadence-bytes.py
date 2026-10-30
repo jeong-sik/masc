@@ -13,10 +13,10 @@ the PTY master by the TUI process. No instrumentation patch inside the TUI.
 
 The fixture server answers the browser-lane screenshot poll with constant
 fields (source, clientId, tabId, title, url, viewport, elapsed_ms and the
-same PNG payload) for CONSTANT_TICKS, then changes the title for one tick
-(positive control), then returns to constant fields. The TUI's own 2s
-viewport cadence drives the polling; we just count master bytes per
-cadence window.
+same PNG payload) during the constant window, then holds a changed title
+throughout the positive-control window. The TUI's own 2s viewport cadence
+drives polling. Every window records its actual screenshot polls; missing
+or unequal coverage invalidates the comparison.
 """
 
 from __future__ import annotations
@@ -34,7 +34,6 @@ import sys
 import termios
 import threading
 import time
-import zlib
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -47,47 +46,65 @@ PNG_1PX = base64.b64decode(
 )
 
 TICKS_CONSTANT = 5          # condition 2 window: all fields constant
-TICKS_CONTROL = 1           # condition 3: title changes once
+TICKS_CONTROL = 2           # hold the changed title across two cadence periods
 TICKS_TAIL_CONSTANT = 2     # settle back, not measured
 CADENCE_SEC = 2.0           # the TUI's own viewport cadence
 WARMUP_SEC = 14.0           # boot, first fetch, settle of the viewport
-
-
-def make_png(width: int, height: int, level: int) -> bytes:
-    """Minimal truecolor PNG so distinct payloads decode differently."""
-
-    def chunk(tag: bytes, body: bytes) -> bytes:
-        return (
-            struct.pack(">I", len(body))
-            + tag
-            + body
-            + struct.pack(">I", zlib.crc32(tag + body) & 0xFFFFFFFF)
-        )
-
-    raw = b"".join(
-        b"\x00" + bytes([(x * 3) % 256, (y * 7) % 256, level]) * width
-        for y in range(height)
-    )
-    return (
-        b"\x89PNG\r\n\x1a\n"
-        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
-        + chunk(b"IDAT", zlib.compress(raw, 6))
-        + chunk(b"IEND", b"")
-    )
 
 
 class Fixture:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.poll_count = 0
+        self.read_count = 0
+        self.phase = "warmup"
+        self.polls: list[dict[str, Any]] = []
+
+    def set_phase(self, phase: str) -> None:
+        with self.lock:
+            self.phase = phase
+
+    def snapshot(self) -> list[dict[str, Any]]:
+        with self.lock:
+            return list(self.polls)
+
+    def reading_payload(self) -> dict[str, Any]:
+        with self.lock:
+            self.read_count += 1
+        title = "Example Domain — constant"
+        url = "https://example.org/specimen"
+        return {"ok": True, "data": {
+            "source": "live", "clientId": "fixture-client-0001",
+            "tabs": [{"id": 7, "title": title, "url": url, "active": True}],
+            "page": {"tabId": 7, "title": title, "url": url,
+                     "text": "Example Domain", "chars": 14, "truncated": False},
+            "elapsed_ms": 250,
+        }}
+
+    def discovery_payload(self) -> dict[str, Any]:
+        selected = {"ok": True, "data": {
+            "lane": "live", "clientId": "fixture-client-0001",
+            "reason": "available_connected_browser",
+        }}
+        return {"ok": True, "data": {
+            "clients": [{"clientId": "fixture-client-0001", "browser": "firefox",
+                         "transport": "web_extension", "space": None,
+                         "spaceObservation": None, "interactions": [],
+                         "lastActivities": []}],
+            "automatic": {"browse": selected, "work": {
+                "ok": False, "error": {"code": "no_available_browser",
+                                        "message": "This fixture has no work browser"}}},
+        }}
 
     def screenshot_payload(self) -> dict[str, Any]:
         with self.lock:
             self.poll_count += 1
-            n = self.poll_count
+            phase = self.phase
+            self.polls.append({"poll": self.poll_count, "phase": phase,
+                               "at": time.monotonic()})
         title = "Example Domain — constant"
-        # Positive control tick: change a compared field.
-        if n == TICKS_CONSTANT + 1:
+        # The title belongs to the measurement phase, independent of boot polls.
+        if phase == "control":
             title = "Example Domain — changed"
         return {
             "ok": True,
@@ -109,11 +126,8 @@ class Fixture:
         }
 
 
-FIXTURE = Fixture()
-
-
 @contextmanager
-def fixture_server() -> Iterator[int]:
+def fixture_server(fixture: Fixture, base: Path) -> Iterator[int]:
     class Handler(BaseHTTPRequestHandler):
         def _reply(self, payload: bytes, status: int = 200) -> None:
             try:
@@ -127,8 +141,14 @@ def fixture_server() -> Iterator[int]:
 
         def do_GET(self) -> None:  # noqa: N802 - http.server API
             path = self.path.split("?")[0]
-            if path == "/api/v1/health":
-                self._reply(json.dumps({"ok": True, "commit": "fixture"}).encode())
+            if path in ("/health", "/api/v1/health"):
+                self._reply(json.dumps({"ok": True, "version": "fixture",
+                    "build": {"commit": "fixture"},
+                    "paths": {"effective_base_path": str(base),
+                              "effective_masc_root": str(base / ".masc")},
+                    "startup": {"state_ready": True}}).encode())
+            elif path == "/api/v1/dashboard/browser-lane/clients":
+                self._reply(json.dumps(fixture.discovery_payload()).encode())
             elif path == "/api/v1/keepers/turns":
                 self._reply(json.dumps({"schema": "masc.keeper_turns.v1", "keepers": []}).encode())
             elif path == "/api/v1/keepers/asks":
@@ -147,7 +167,9 @@ def fixture_server() -> Iterator[int]:
                 self.rfile.read(length)
             path = self.path.split("?")[0]
             if path == "/api/v1/dashboard/browser-lane/screenshot":
-                self._reply(json.dumps(FIXTURE.screenshot_payload()).encode())
+                self._reply(json.dumps(fixture.screenshot_payload()).encode())
+            elif path == "/api/v1/dashboard/browser-lane/read":
+                self._reply(json.dumps(fixture.reading_payload()).encode())
             else:
                 self._reply(json.dumps({"ok": True}).encode())
 
@@ -161,6 +183,8 @@ def fixture_server() -> Iterator[int]:
         yield int(server.server_address[1])
     finally:
         server.shutdown()
+        server.server_close()
+        thread.join()
 
 
 def drain(master: int, budget_sec: float) -> tuple[int, int]:
@@ -185,6 +209,13 @@ def drain(master: int, budget_sec: float) -> tuple[int, int]:
     return total, chunks
 
 
+def await_browser_read(master: int, fixture: Fixture) -> bool:
+    deadline = time.monotonic() + WARMUP_SEC
+    while fixture.read_count == 0 and time.monotonic() < deadline:
+        drain(master, min(0.1, max(0.0, deadline - time.monotonic())))
+    return fixture.read_count > 0
+
+
 @contextmanager
 def tui_pty(executable: Path, base: Path, api_port: int) -> Iterator[int]:
     master, slave = pty.openpty()
@@ -194,6 +225,8 @@ def tui_pty(executable: Path, base: Path, api_port: int) -> Iterator[int]:
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": str(base),
         "TERM": "xterm-256color",
+        # Advertise an image protocol so the unmodified TUI opens its viewport.
+        "TERM_PROGRAM": "iTerm.app",
         "MASC_BASE_PATH": str(base),
         "MASC_HOST": "127.0.0.1",
         "MASC_TUI_SYNC": "off",
@@ -220,34 +253,48 @@ def tui_pty(executable: Path, base: Path, api_port: int) -> Iterator[int]:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+            proc.wait()
         os.close(master)
 
 
-def measure(executable: Path, base: Path, api_port: int) -> dict[str, Any]:
-    FIXTURE.poll_count = 0
+def measure(executable: Path, base: Path, api_port: int,
+            fixture: Fixture) -> dict[str, Any]:
     result: dict[str, Any] = {"executable": str(executable)}
     with tui_pty(executable, base, api_port) as master:
         # Warm-up: boot, first screenshot, viewport settle.
         boot_bytes, _ = drain(master, WARMUP_SEC)
         result["warmup_bytes"] = boot_bytes
 
-        # Open the browser lane (Ctrl+X = \x18 is the app's toggle; the
-        # screenshot poll only runs with the lane on screen).
-        os.write(master, b"\x18")
-        time.sleep(2.0)
-        drain(master, 2.0)
+        # These are the pinned TUI's browser toggle and viewport commands.
+        os.write(master, b"\x1e")  # Ctrl-^
+        result["browser_read_observed"] = await_browser_read(master, fixture)
+        drain(master, CADENCE_SEC)
+        os.write(master, b"\x0f")  # Ctrl-O
+        drain(master, 2.0 * CADENCE_SEC)
 
         windows = []
-        total_ticks = TICKS_CONSTANT + TICKS_CONTROL + TICKS_TAIL_CONSTANT
-        for i in range(total_ticks):
-            b, c = drain(master, CADENCE_SEC)
-            windows.append({"tick": i + 1, "bytes": b, "chunks": c})
+        phase_polls: dict[str, int] = {}
+        for phase, ticks in (("constant", TICKS_CONSTANT),
+                             ("control", TICKS_CONTROL),
+                             ("tail", TICKS_TAIL_CONSTANT)):
+            fixture.set_phase(phase)
+            for tick in range(ticks):
+                before = len(fixture.snapshot())
+                b, c = drain(master, CADENCE_SEC)
+                windows.append({"phase": phase, "tick": tick + 1,
+                                "bytes": b, "chunks": c,
+                                "polls": len(fixture.snapshot()) - before})
+            phase_polls[phase] = sum(poll["phase"] == phase
+                                     for poll in fixture.snapshot())
         result["windows"] = windows
-        const = sum(w["bytes"] for w in windows[:TICKS_CONSTANT])
-        control = windows[TICKS_CONSTANT]["bytes"]
+        const = sum(w["bytes"] for w in windows if w["phase"] == "constant")
+        control = sum(w["bytes"] for w in windows if w["phase"] == "control")
         result["constant_ticks_bytes"] = const
         result["control_tick_bytes"] = control
-        result["poll_count"] = FIXTURE.poll_count
+        result["phase_polls"] = phase_polls
+        result["polls"] = fixture.snapshot()
+        result["poll_count"] = len(result["polls"])
+        result["read_count"] = fixture.read_count
     return result
 
 
@@ -270,25 +317,37 @@ def main() -> int:
         "definition": "raw bytes written to the PTY master by the TUI",
         "conditions": {
             "constant_ticks": TICKS_CONSTANT,
-            "control_tick": TICKS_CONSTANT + 1,
+            "control_ticks": TICKS_CONTROL,
             "cadence_sec": CADENCE_SEC,
             "warmup_sec": WARMUP_SEC,
             "same_image": True,
         },
     }
     for label, exe in (("before", args.before), ("after", args.after)):
-        with fixture_server() as port, tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             (base / ".masc").mkdir(parents=True, exist_ok=True)
-            report[label] = measure(exe, base, port)
+            fixture = Fixture()
+            with fixture_server(fixture, base) as port:
+                report[label] = measure(exe, base, port, fixture)
 
     before_const = report["before"]["constant_ticks_bytes"]
     after_const = report["after"]["constant_ticks_bytes"]
     before_ctrl = report["before"]["control_tick_bytes"]
     after_ctrl = report["after"]["control_tick_bytes"]
     report["delta_constant"] = before_const - after_const
-    report["skip_effective"] = after_const < before_const
+    expected = {"constant": TICKS_CONSTANT, "control": TICKS_CONTROL,
+                "tail": TICKS_TAIL_CONSTANT}
+    report["poll_coverage_matches"] = all(
+        report[label]["phase_polls"] == expected
+        and report[label]["read_count"] > 0
+        for label in ("before", "after")
+    )
     report["control_flows_both"] = before_ctrl > 0 and after_ctrl > 0
+    report["measurement_valid"] = (report["poll_coverage_matches"]
+                                   and report["control_flows_both"])
+    report["skip_effective"] = (report["measurement_valid"]
+                                and after_const < before_const)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -298,8 +357,9 @@ def main() -> int:
         "delta": report["delta_constant"],
         "skip_effective": report["skip_effective"],
         "control_flows_both": report["control_flows_both"],
+        "measurement_valid": report["measurement_valid"],
     }, indent=2))
-    return 0
+    return 0 if report["measurement_valid"] else 3
 
 
 if __name__ == "__main__":

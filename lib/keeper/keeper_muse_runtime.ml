@@ -30,7 +30,16 @@ let mcp_server_name = "masc"
    note does; it is not an instruction. *)
 let native_posture_note = function
   | Runtime_native_tools.Native_read ->
-    [ "Native reads remain available under the selected Muse profile. Native writes and shell execution are disabled. MASC approves only the attached MCP tool requests; use MASC tools for effects." ]
+    [ "Muse Code's built-in reads remain available under the selected profile; \
+       built-in writes and shell execution are disabled. These restrictions do \
+       not disable the attached MASC MCP tools. Discover their schemas through \
+       the available tool loader; when provided, MASC Execute, Read, Write and \
+       Edit run through the Keeper's configured execution and approval paths. \
+       A built-in network denial describes that call, not GitHub access through \
+       MASC tools. Tool availability does not prove execution success or grant \
+       permission beyond the current request and role. MASC approves only exact \
+       attached MCP tool requests; other native approval requests are refused."
+    ]
   | Runtime_native_tools.Native_full -> []
   | Runtime_native_tools.Native_none -> []
 ;;

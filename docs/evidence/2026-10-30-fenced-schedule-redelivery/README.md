@@ -30,7 +30,7 @@ ID를 재사용하므로 일곱 행을 일곱 개의 고유 event ID로 세지 �
 snapshot은 읽은 저장소에서 찾지 못했다. 오류에 나타난 1,048,576은 provider가
 표현한 context window이며 이 byte 수치에서 변환한 값이 아니다.
 
-실행 경계는 [turn driver](https://github.com/jeong-sik/masc/blob/a97919872890eb9b4e730f65b745ab094ed8ce12/lib/keeper/keeper_turn_driver.ml#L895-L938)의
+실행 경계는 [turn driver](https://github.com/jeong-sik/masc/blob/a97919872890eb9b4e730f65b745ab094ed8ce12/lib/keeper/keeper_turn_driver.ml#L895-L995)의
 effect 관측이 확인되지 않을 때 같은 turn의 재시도를 막는다. 반면
 [heartbeat batch 판정](https://github.com/jeong-sik/masc/blob/a97919872890eb9b4e730f65b745ab094ed8ce12/lib/keeper/keeper_heartbeat_loop.ml#L727-L735)은
 실패 자체로 batch를 ACK하지 않아 다른 종료·취소가 없다면 다음 intake가 다시

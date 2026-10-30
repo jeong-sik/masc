@@ -133,32 +133,132 @@ let post_signal : Board_dispatch.board_signal =
 
 (* Whether the Board router delivers a post recorded for [recipient] to the
    Keeper [keeper]: the question the recorded name has to answer yes to. *)
-let routed_to config ~keeper recipient =
-  match
-    Keeper_meta_store.read_effective_meta config keeper
-    , Keeper_identity.Keeper_id.of_string recipient
-  with
-  | Ok (Some meta), Some id ->
+let routed_to_meta (meta : Keeper_meta_contract.keeper_meta) recipient =
+  match Keeper_identity.Keeper_id.of_string recipient with
+  | None -> fail (Printf.sprintf "%S is not a Keeper id" recipient)
+  | Some id ->
     (match
        Keeper_board_audience.route_for_keeper
          ~audience:(Keeper_board_audience.Targets [ id ])
          ~meta
          ~signal:post_signal
      with
-     | Keeper_world_observation_board_signal.Available (Keeper_board_audience.Deliver _) ->
-       true
+     | Keeper_world_observation_board_signal.Available (Keeper_board_audience.Deliver _) -> true
      | Keeper_world_observation_board_signal.Available
          (Keeper_board_audience.Judge_discoverable | Keeper_board_audience.Ignore)
      | Keeper_world_observation_board_signal.Unavailable _ -> false)
-  | Ok None, _ -> fail (Printf.sprintf "no Keeper named %S" keeper)
-  | Error detail, _ -> fail detail
-  | Ok (Some _), None -> fail (Printf.sprintf "%S is not a Keeper id" recipient)
+;;
+
+let routed_to config ~keeper recipient =
+  match Keeper_meta_store.read_effective_meta config keeper with
+  | Ok (Some meta) -> routed_to_meta meta recipient
+  | Ok None -> fail (Printf.sprintf "no Keeper named %S" keeper)
+  | Error detail -> fail detail
 ;;
 
 let test_a_keepers_own_name_in_any_case config =
   register_keeper config "alice";
   expect_ok "lower case" ([ "alice" ], []) (ask config "alice");
   expect_ok "upper case" ([ "alice" ], []) (ask config "ALICE")
+;;
+
+(* On a case-sensitive filesystem, [Alice.json] is not [alice.json]. A
+   mixed-case Keeper's own name must still be found without decoding an
+   unrelated broken Keeper's metadata. *)
+let test_a_mixed_case_keeper_is_declared_without_an_unrelated_scan config =
+  register_keeper config "Alice";
+  Out_channel.with_open_text (Keeper_types_profile.keeper_meta_path config "broken") (fun oc ->
+    output_string oc "{ this is not json");
+  List.iter (fun spelling ->
+    expect_ok spelling ([ "alice" ], []) (ask config spelling);
+    check bool (spelling ^ " reaches Alice") true (routed_to config ~keeper:"Alice" "alice"))
+    [ "Alice"; "alice"; "ALICE" ]
+;;
+
+(* An own name wins over alias collisions even if its persisted filename has
+   different case. The recorded target is the identity the router matches,
+   so each Keeper that actually answers to it receives the post. *)
+let test_a_mixed_case_own_name_wins_over_alias_collisions config =
+  register_keeper config "Alice";
+  register_keeper config ~mention_targets:[ "bob"; "alice" ] "bob";
+  register_keeper config ~mention_targets:[ "dave"; "alice" ] "dave";
+  List.iter (fun spelling -> expect_ok spelling ([ "alice" ], []) (ask config spelling))
+    [ "Alice"; "alice" ];
+  List.iter (fun keeper ->
+    check bool (keeper ^ " receives alice") true (routed_to config ~keeper "alice"))
+    [ "Alice"; "bob"; "dave" ]
+;;
+
+let test_a_mixed_case_owner_that_does_not_answer_uses_the_alias config =
+  register_keeper config ~mention_targets:[ "operations" ] "Alice";
+  register_keeper config ~mention_targets:[ "bob"; "alice" ] "bob";
+  expect_ok "the alias is declared" ([ "alice" ], []) (ask config "ALICE");
+  check bool "Alice does not answer" false (routed_to config ~keeper:"Alice" "alice");
+  check bool "bob answers" true (routed_to config ~keeper:"bob" "alice")
+;;
+
+(* A filename cannot promote the payload of a different Keeper's alias into
+   an own-name claim and thereby hide another Keeper's conflicting alias. *)
+let test_an_alternate_filename_does_not_promote_a_foreign_alias config =
+  register_keeper config ~mention_targets:[ "alice" ] "bob";
+  let path name = Keeper_types_profile.keeper_meta_path config name in
+  Unix.rename (path "bob") (path "Alice");
+  if Sys.file_exists (path "alice") then Alcotest.skip ();
+  expect_ok "one foreign alias" ([ "alice" ], []) (ask config "alice");
+  register_keeper config ~mention_targets:[ "alice" ] "charlie";
+  expect_error "conflicting foreign aliases" ~mentioning:[ "@alice"; "Alice"; "charlie" ]
+    (ask config "alice")
+;;
+
+(* Registry ownership requires the filename and payload spelling to match,
+   even when their Board identities fold to the same name. *)
+let test_an_alternate_filename_requires_exact_payload_name config =
+  register_keeper config "aLiCe";
+  let path name = Keeper_types_profile.keeper_meta_path config name in
+  if Sys.file_exists (path "Alice") then Alcotest.skip ();
+  Unix.rename (path "aLiCe") (path "Alice");
+  expect_ok "case-fold equal payload is not a matching owner" ([], [ "alice" ])
+    (ask config "alice")
+;;
+
+(* The alternate search cannot accept its first healthy file before checking
+   a later spelling of the same identity. This requires distinct filenames. *)
+let test_all_alternate_spellings_are_read_before_accepting config =
+  register_keeper config "Alice";
+  let path name = Keeper_types_profile.keeper_meta_path config name in
+  if Sys.file_exists (path "aLiCe") then Alcotest.skip ();
+  Out_channel.with_open_text (path "aLiCe") (fun oc ->
+    output_string oc "{ \"unexpected\": true }");
+  expect_error "later undecodable spelling" ~mentioning:[ "@alice"; "aLiCe" ]
+    (ask config "alice");
+  register_keeper config "alice";
+  expect_ok "canonical own-name lookup keeps its fast path" ([ "alice" ], [])
+    (ask config "alice")
+;;
+
+(* Keeper names remain distinct in storage, while their Board identities are
+   case-folded. A single target is therefore delivered to both matching
+   Keepers. Create both on filesystems that can hold both spellings; on other
+   filesystems also check the same router contract using the second metadata
+   value directly. *)
+let test_case_variant_keepers_share_the_recorded_identity config =
+  register_keeper config "Alice";
+  let original = match Keeper_meta_store.read_effective_meta config "Alice" with
+    | Ok (Some meta) -> meta
+    | Ok None -> fail "Alice metadata is missing"
+    | Error detail -> fail detail in
+  let variant = { original with name = "aLiCe" } in
+  List.iter (fun spelling ->
+    expect_ok spelling ([ "alice" ], []) (ask config spelling);
+    check bool "Alice receives the target" true (routed_to_meta original "alice");
+    check bool "aLiCe receives the same target" true (routed_to_meta variant "alice"))
+    [ "Alice"; "alice" ];
+  if not (Sys.file_exists (Keeper_types_profile.keeper_meta_path config "aLiCe"))
+  then (
+    register_keeper config "aLiCe";
+    expect_ok "both persisted names" ([ "alice" ], []) (ask config "alice");
+    check bool "persisted Alice receives it" true (routed_to config ~keeper:"Alice" "alice");
+    check bool "persisted aLiCe receives it" true (routed_to config ~keeper:"aLiCe" "alice"))
 ;;
 
 (* An alias is recorded as the name the author wrote, in lower case.  The
@@ -366,6 +466,20 @@ let () =
     [ ( "lookup"
       , [ test_case "a Keeper's own name in any case" `Quick
             (with_workspace test_a_keepers_own_name_in_any_case)
+        ; test_case "a mixed-case Keeper is declared without an unrelated scan" `Quick
+            (with_workspace test_a_mixed_case_keeper_is_declared_without_an_unrelated_scan)
+        ; test_case "a mixed-case own name wins over alias collisions" `Quick
+            (with_workspace test_a_mixed_case_own_name_wins_over_alias_collisions)
+        ; test_case "a mixed-case owner that does not answer uses the alias" `Quick
+            (with_workspace test_a_mixed_case_owner_that_does_not_answer_uses_the_alias)
+        ; test_case "an alternate filename does not promote a foreign alias" `Quick
+            (with_workspace test_an_alternate_filename_does_not_promote_a_foreign_alias)
+        ; test_case "an alternate filename requires an exact payload name" `Quick
+            (with_workspace test_an_alternate_filename_requires_exact_payload_name)
+        ; test_case "all alternate spellings are read before accepting" `Quick
+            (with_workspace test_all_alternate_spellings_are_read_before_accepting)
+        ; test_case "case-variant Keepers share the recorded identity" `Quick
+            (with_workspace test_case_variant_keepers_share_the_recorded_identity)
         ; test_case "an alias is recorded as the name its Keeper answers to" `Quick
             (with_workspace test_an_alias_is_recorded_as_the_name_its_keeper_answers_to)
         ; test_case "a Keeper that lists only aliases is not declared by its own name" `Quick

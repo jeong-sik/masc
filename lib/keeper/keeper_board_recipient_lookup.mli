@@ -15,9 +15,17 @@ val make : base_path:string -> Recipient_lookup.t
     - A name that cannot be a Keeper name ({!Keeper_id.Keeper_name.of_string}:
       a path component of at most 128 bytes) is not declared.  No file name is
       built from it.
-    - A Keeper's own name is declared when that Keeper answers to it.  A Keeper
-      whose [mention_targets] leave its own name out does not, so the name is
-      looked up among the aliases like any other.
+    - A Keeper's own name is declared when that Keeper answers to it. Keeper
+      identity is case-folded, including when the persisted filename retains
+      uppercase letters on a case-sensitive filesystem. A Keeper whose
+      [mention_targets] leave its own name out does not answer to it, so the
+      name is looked up among the aliases like any other. A matching own name
+      retains priority over alias collisions. The router compares the recorded
+      target with each Keeper's effective target list, subject to its separate
+      suppression of signals authored by that Keeper. When the canonical
+      filename does not answer and alternate spellings are checked, every
+      matching file must be readable, and a file's payload name must exactly
+      match its filename before that file can claim own-name priority.
     - An alias is found by reading every Keeper's settings, once for the write
       and only if a name needs it.  One unreadable setting, or two Keepers
       claiming one alias, fails the lookup.  The detail names the Keeper or the

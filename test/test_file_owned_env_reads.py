@@ -12,6 +12,10 @@ is applied to a literal spelling of a file-owned name (comments removed).
 Parentheses and type constraints around the literal are accepted. It does not
 resolve the called function: a local function named `getenv` or a shadowed
 `Sys` module has the same syntax and is also reported.
+The spelling is compared without decoding ordinary OCaml string escapes, so an
+escaped spelling of a file-owned name can be missed. The shared lexer only
+recognizes ASCII quoted-string delimiters; Unicode delimiters can make code or
+quoted data be misclassified.
 
 The scan also reports advisory candidates when the argument is
 

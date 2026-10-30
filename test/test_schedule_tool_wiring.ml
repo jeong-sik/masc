@@ -2410,6 +2410,92 @@ let test_declared_bounds_match_the_handler () =
 ;;
 
 
+let test_note_pages_keep_older_history_when_new_notes_arrive () =
+  with_config @@ fun config ->
+  let schedule_id = "note-pages" in
+  let other_schedule = "other-note-pages" in
+  List.iter
+    (fun id ->
+       ignore (create_service_exn config ~schedule_id:id ~due_at:future_due_at
+                 ~payload:(keeper_wake_payload "wake") ()))
+    [ schedule_id; other_schedule ];
+  let append id body now =
+    match Schedule_store.append_note config ~schedule_id:id ~author_id:"operator"
+            ~author_kind:Schedule_domain.Human_operator ~body ~now with
+    | Ok (note, _) -> note.Schedule_domain.note_id
+    | Error err -> fail (Schedule_store.store_error_to_string err)
+  in
+  let first_id = append schedule_id "one" 101.0 in
+  let second_id = append schedule_id "two" 102.0 in
+  ignore (append schedule_id "three" 103.0);
+  let fourth_id = append schedule_id "four" 104.0 in
+  ignore (append schedule_id "five" 105.0);
+  let foreign_id = append other_schedule "other" 106.0 in
+  let list_notes id extra =
+    dispatch_exn config Tool_schemas_schedule.List_notes
+      (`Assoc ([ "schedule_id", `String id; "limit", `Int 2 ] @ extra))
+  in
+  let open Yojson.Safe.Util in
+  let bodies result =
+    Tool_result.data result |> member "notes" |> to_list
+    |> List.map (fun note -> note |> member "body" |> to_string)
+  in
+  let newest = list_notes schedule_id [] in
+  check bool "newest page succeeds" true (Tool_result.is_success newest);
+  check (list string) "newest window is oldest first" [ "four"; "five" ] (bodies newest);
+  check int "count includes all notes for this schedule" 5
+    (Tool_result.data newest |> member "total_count" |> to_int);
+  check bool "older notes are reported" true
+    (Tool_result.data newest |> member "has_more_older" |> to_bool);
+  check string "cursor is the oldest returned note" fourth_id
+    (Tool_result.data newest |> member "next_before_note_id" |> to_string);
+  ignore (append schedule_id "six" 107.0);
+  let middle = list_notes schedule_id [ "before_note_id", `String fourth_id ] in
+  check (list string) "a later append does not shift the preceding page"
+    [ "two"; "three" ] (bodies middle);
+  check int "each response counts the state it read" 6
+    (Tool_result.data middle |> member "total_count" |> to_int);
+  check string "the next anchor advances toward older notes" second_id
+    (Tool_result.data middle |> member "next_before_note_id" |> to_string);
+  let oldest = list_notes schedule_id [ "before_note_id", `String second_id ] in
+  check (list string) "oldest page is reachable" [ "one" ] (bodies oldest);
+  check bool "oldest page reports completion" false
+    (Tool_result.data oldest |> member "has_more_older" |> to_bool);
+  check bool "complete history has no next anchor" true
+    (Tool_result.data oldest |> member "next_before_note_id" = `Null);
+  check (list string) "refresh reads the new note" [ "five"; "six" ]
+    (bodies (list_notes schedule_id []));
+  check (list string) "a cursor at the first note yields an empty page" []
+    (bodies (list_notes schedule_id [ "before_note_id", `String first_id ]));
+  ignore (append schedule_id "backdated" 100.5);
+  let refreshed = list_notes schedule_id [] in
+  check (list string) "an earlier timestamp can leave the newest window unchanged"
+    [ "five"; "six" ] (bodies refreshed);
+  check int "the changed count signals that the history must be rescanned" 7
+    (Tool_result.data refreshed |> member "total_count" |> to_int);
+  let rec scan before accumulated =
+    let extra = match before with None -> [] | Some id -> [ "before_note_id", `String id ] in
+    let page = list_notes schedule_id extra in
+    let accumulated = bodies page @ accumulated in
+    match Tool_result.data page |> member "next_before_note_id" with
+    | `Null -> accumulated
+    | `String id -> scan (Some id) accumulated
+    | _ -> fail "the next note anchor must be a string or null"
+  in
+  check (list string) "a fresh scan includes a later backdated append"
+    [ "backdated"; "one"; "two"; "three"; "four"; "five"; "six" ]
+    (scan None []);
+  List.iter
+    (fun (label, cursor) ->
+       check bool label false
+         (Tool_result.is_success (list_notes schedule_id [ "before_note_id", cursor ])))
+    [ "foreign note id is refused", `String foreign_id
+    ; "unknown note id is refused", `String "unknown"
+    ; "blank note id is refused", `String ""
+    ; "non-string note id is refused", `Int 1
+    ]
+;;
+
 let test_note_tool_distinguishes_missing_schedule_from_unreadable_ledger () =
   with_config @@ fun config ->
   let schedule_id = "note-tool-corruption" in
@@ -2700,6 +2786,8 @@ let () =
         ; test_case "cancel refuses corrupt durable owner" `Quick test_cancel_strict_read_error_preserves_pending
         ; test_case "cancel refuses discovery failure" `Quick test_cancel_discovery_error_is_not_empty_success
         ; test_case "partial cancel preserves durable effects and reports failure" `Quick test_cancel_partial_withdrawal_does_not_claim_rollback
+        ; test_case "note pages retain older history across appends" `Quick
+            test_note_pages_keep_older_history_when_new_notes_arrive
         ; test_case "note distinguishes absent schedule from unreadable ledger" `Quick
             test_note_tool_distinguishes_missing_schedule_from_unreadable_ledger
         ; test_case "note reports actual primary write failure" `Quick

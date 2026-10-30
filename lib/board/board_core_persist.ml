@@ -984,8 +984,9 @@ let update_post_with_outcome
       && String.equal seen.title existing.title
       && String.equal seen.body existing.body
     in
-    (* Only the owner's edit is worked out early. Anybody else's is refused
-       under the locks and asks the lookup nothing. *)
+    (* The first plan is made only for the owner of the snapshot. If ownership
+       changes after a snapshot, a plan based on it may still ask the lookup;
+       the editor must own the current post under the locks before any save. *)
     let owned_by_editor (existing : post) =
       String.equal (Agent_id.to_string existing.author) (Agent_id.to_string editor_id)
     in

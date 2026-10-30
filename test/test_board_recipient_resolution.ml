@@ -237,8 +237,8 @@ let test_a_system_post_never_asks_the_lookup =
     check int "the lookup was not asked" 0 !asked)
 ;;
 
-(* The lookup answers once per write, and the signal carries that answer. A
-   dispatcher that asked again to build the signal would get "undeclared", and
+(* The lookup answers once per uncontended write, and the signal carries that
+   answer. A dispatcher that asked again to build the signal would get "undeclared", and
    one that read the text again would get the alias as it was written. *)
 let test_the_write_asks_once_and_the_signal_carries_that_answer =
   let armed = ref false in
@@ -312,9 +312,9 @@ let test_an_edit_resolves_again_with_the_current_declaration =
     check (list string) "so the name is reported" [ "alice" ] unresolved)
 ;;
 
-(* A lookup made per write starts once for each write, however many names the
-   text has, and what it read for one write is not kept for the next. *)
-let test_a_per_write_lookup_starts_once_for_each_write =
+(* A lookup made per write starts once for each uncontended addressed write,
+   however many names the text has, and is started again for the next write. *)
+let test_a_per_write_lookup_starts_once_for_each_uncontended_write =
   let starts = ref 0 in
   let lookup =
     Recipient_lookup.make_per_write (fun () ->
@@ -465,16 +465,21 @@ let test_an_edit_works_out_again_when_the_post_changed_during_the_lookup =
 (* Several changes to the same post can invalidate consecutive plans. Every
    lookup must be outside both locks and the eventual write uses the last plan. *)
 let test_an_edit_replans_after_repeated_changes_without_holding_a_lock =
+  let starts = ref 0 in
   let alice_asked = ref 0 in
+  let missing_asked = ref 0 in
   let during_the_lookup = ref (fun () -> ()) in
   let lookup =
-    Recipient_lookup.make (fun candidate ->
-      if String.equal (spelled candidate) "alice"
-      then (
-        incr alice_asked;
+    Recipient_lookup.make_per_write (fun () ->
+      incr starts;
+      fun candidate ->
         require_no_lock_is_held ();
-        if !alice_asked <= 2 then !during_the_lookup ());
-      declared_from table candidate)
+        if String.equal (spelled candidate) "alice"
+        then (
+          incr alice_asked;
+          if !alice_asked <= 2 then !during_the_lookup ());
+        if String.equal (spelled candidate) "missing" then incr missing_asked;
+        declared_from table candidate)
   in
   started ~lookup (fun () ->
     let post, _ = get (write ~visibility:Board.Public "first") in
@@ -495,7 +500,9 @@ let test_an_edit_replans_after_repeated_changes_without_holding_a_lock =
            ~content:"@alice @missing"
            ())
     in
+    check int "the lookup started once per plan" 3 !starts;
     check int "the lookup was asked after both changes" 3 !alice_asked;
+    check int "each plan asked about the other name" 3 !missing_asked;
     check (list string) "the final audience" [ "alice" ] (target_names edited.audience);
     check (list string) "the final unresolved name" [ "missing" ] unresolved;
     let stored = get (Board_dispatch.get_post ~post_id:(post_id post)) in
@@ -824,9 +831,9 @@ let () =
             `Quick
             test_an_edit_resolves_again_with_the_current_declaration
         ; test_case
-            "a per-write lookup starts once for each write"
+            "a per-write lookup starts once for each uncontended write"
             `Quick
-            test_a_per_write_lookup_starts_once_for_each_write
+            test_a_per_write_lookup_starts_once_for_each_uncontended_write
         ; test_case
             "no write asks the lookup while a lock is held"
             `Quick

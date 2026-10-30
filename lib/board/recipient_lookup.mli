@@ -37,12 +37,15 @@ val make : (Candidate.t -> (Agent_id.t option, string) result) -> t
 val make_per_write
   :  (unit -> Candidate.t -> (Agent_id.t option, string) result)
   -> t
-(** [make_per_write start] calls [start] once for each write and asks the
-    function it returns once per spelling of that write, with the answers of
-    {!make}.  What is costly to read, such as every Keeper's settings, belongs
-    inside [start]: it is then read at most once for the write, and only if a
-    name needs it.  Nothing outlives the write, so a declaration that changes
-    between two writes is read again. *)
+(** [make_per_write start] calls [start] once per {!resolve} call and asks the
+    function it returns once per spelling in that resolution, with the answers
+    of {!make}.  A write normally resolves once, but an edit can resolve again
+    when another edit invalidates its plan. Each resolution starts afresh.
+
+    Costly data, such as the list of every Keeper's settings, can be cached
+    lazily inside [start]: that calculation then runs at most once per
+    resolution, only if a name needs it. Other per-candidate reads can still
+    happen. A concurrent edit can cause the calculation to run again. *)
 
 val none_declared : t
 (** Declares no name: every candidate is prose and nothing is ever an error.

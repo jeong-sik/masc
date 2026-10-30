@@ -17510,6 +17510,13 @@ let keeper_peer_status_for_reading state reading =
   | Some current when current == reading -> keeper_peer_status state
   | Some _ | None -> None
 
+(* Put the recovery key before page details, so it survives narrow rows. *)
+let keeper_peer_failure_status ~page ~retained ~reason =
+  let previous = Option.fold ~none:"" ~some:(fun page ->
+      Printf.sprintf " · page %d retained" page) retained in
+  Printf.sprintf "  failed r retry · page %d%s · %s" page previous
+    (Masc.Tui_terminal_text.sanitize_terminal_text reason)
+
 let keeper_peer_frame_owner state reading =
   match state.keeper_peer_reading, current_detail_reading state with
   | Some peer, Some current when current == reading -> Some peer.kpr_frame_owner
@@ -17584,7 +17591,8 @@ let keeper_peer_read_current (state : state) ~keeper_name ~token =
    failure after the old page so it can wrap, scroll and be searched without
    shifting the old page's existing offsets. *)
 let keeper_peer_failure_lines failure =
-  [""; Printf.sprintf "Page %d read failed:" (keeper_peer_page_number failure.kpf_position);
+  [""; "r:retry";
+   Printf.sprintf "Page %d read failed:" (keeper_peer_page_number failure.kpf_position);
    failure.kpf_reason]
 
 let finish_keeper_peer_reading (state : state) ~keeper_name ~token result =

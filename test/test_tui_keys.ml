@@ -1346,6 +1346,84 @@ let test_keeper_peer_failure_reason_survives_retry () =
   ignore (request_keeper_peer_page state Peer_refresh);
   Alcotest.(check (option string)) "retry keeps the full previous failure" (Some reason) (retained_reason ())
 
+(* The status row may be clipped, so its retry key also belongs to the
+   scrollable document. Use the same wrapping and frame width as the reader. *)
+let test_keeper_peer_retry_is_readable_on_narrow_failures () =
+  let new_state () =
+    let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+    state.view <- Keepers Keeper_list;
+    state in
+  let reason = "connection lost\noriginal detail" in
+  let check_status ~cols state =
+    let status = match keeper_peer_status state with
+      | Some (Keeper_peer_failed {page;retained;reason}) ->
+          keeper_peer_failure_status ~page ~retained ~reason
+      | Some (Keeper_peer_loading _ | Keeper_peer_arrived _
+             | Keeper_peer_current _ | Keeper_peer_unread)
+      | None -> Alcotest.fail "failure status disappeared" in
+    let rendered = Masc_tui_message_layout.fit_width status (Masc_tui_frame.inner_width ~cols) in
+    let words = String.split_on_char ' ' rendered in
+    Alcotest.(check bool) "failure and retry key fit the fixed status" true
+      (List.mem "failed" words && List.mem "r" words && List.mem "retry" words) in
+  let check_document ~cols state =
+    let reading = match current_detail_reading state with
+      | Some reading -> reading
+      | None -> Alcotest.fail "peer reader disappeared" in
+    let inner = Masc_tui_frame.inner_width ~cols in
+    let rows = Masc_tui_detail_reading.rows ~width:(max 1 (inner - 2)) reading in
+    let text = function
+      | Masc_tui_detail_reading.Heading text
+      | Masc_tui_detail_reading.Content text
+      | Masc_tui_detail_reading.Note text -> text in
+    let rendered = List.map (fun row ->
+      Masc_tui_message_layout.fit_width ("  " ^ text row) inner) rows in
+    let has line = List.exists (fun row -> String.trim row = line) rendered in
+    let retry = match List.find_index (fun row -> String.trim row = "r:retry") rendered with
+      | Some index -> index
+      | None -> Alcotest.fail "retry key does not fit a document row" in
+    let height = 3 and count = List.length rows in
+    let reading = Masc_tui_detail_reading.move ~count ~height Masc_tui_detail_reading.First reading in
+    let reading = Masc_tui_detail_reading.move ~count ~height (Masc_tui_detail_reading.By retry) reading in
+    let scroll = Masc_tui_detail_reading.scroll ~count ~height reading in
+    Alcotest.(check bool) "retry row is reachable by scrolling" true
+      (retry >= scroll && retry < scroll + height);
+    Alcotest.(check bool) "both original failure lines remain readable" true
+      (has "connection lost" && has "original detail");
+    Alcotest.(check (option string)) "the original failure remains exact" (Some reason)
+      (match state.keeper_peer_reading with
+       | Some {kpr_failure=Some failure;_} -> Some failure.kpf_reason
+       | Some _ | None -> None) in
+  let initial = new_state () in
+  let first = begin_keeper_peer_reading initial ~keeper_name:"beta" in
+  ignore (stage_keeper_peer_reading initial ~keeper_name:"beta" ~token:first (Error reason));
+  ignore (settle_keeper_peer_reading initial ~input_pending:false);
+  check_status ~cols:20 initial;
+  check_document ~cols:20 initial;
+  let retry = request_keeper_peer_page initial Peer_refresh in
+  Alcotest.(check bool) "the initial failure can be retried" true (Option.is_some retry);
+  check_document ~cols:20 initial;
+  let retained = new_state () in
+  let page : Masc_tui_queue_inspection.peer_page =
+    {snapshot={queued_count=1;relations=[]};next_sequence=Some "10"} in
+  let first = begin_keeper_peer_reading retained ~keeper_name:"beta" in
+  ignore (stage_keeper_peer_reading retained ~keeper_name:"beta" ~token:first (Ok page));
+  ignore (settle_keeper_peer_reading retained ~input_pending:false);
+  let next = match request_keeper_peer_page retained Peer_next with
+    | Some ("beta", token, Some "10") -> token
+    | Some _ | None -> Alcotest.fail "next page did not retain its cursor" in
+  ignore (stage_keeper_peer_reading retained ~keeper_name:"beta" ~token:next (Error reason));
+  ignore (settle_keeper_peer_reading retained ~input_pending:false);
+  Alcotest.(check bool) "a failed later page retains its previous observation" true
+    (match retained.keeper_peer_reading with
+     | Some {kpr_committed=Some (_, observed);_} -> observed = page
+     | Some _ | None -> false);
+  check_status ~cols:40 retained;
+  check_document ~cols:40 retained;
+  let retry = request_keeper_peer_page retained Peer_refresh in
+  Alcotest.(check bool) "retry retains the failed cursor" true
+    (match retry with Some ("beta", _, Some "10") -> true | Some _ | None -> false);
+  check_document ~cols:40 retained
+
 let test_keeper_peer_presented_owner_barrier () =
   let module Presented = Masc_tui_presented in
   let module Frame = Masc_tui_frame_presenter in
@@ -2258,6 +2336,8 @@ let () =
             test_keeper_peer_staged_failure_preserves_visible_page
         ; Alcotest.test_case "Keeper failures remain available during retry" `Quick
             test_keeper_peer_failure_reason_survives_retry
+        ; Alcotest.test_case "Keeper retry remains readable on narrow failures" `Quick
+            test_keeper_peer_retry_is_readable_on_narrow_failures
         ; Alcotest.test_case "Keeper frame ownership quarantines input during output" `Quick
             test_keeper_peer_presented_owner_barrier
         ; Alcotest.test_case "Keepers search and mouse share the ordered projection" `Quick

@@ -279,8 +279,7 @@ let detail_peer_status state reading =
       Some (Theme.info (), Printf.sprintf "  Page %d response received%s%s · awaiting frame"
         page (retained previous) (retry failed))
   | Some (Keeper_peer_failed {page; retained = previous; reason}) ->
-      Some (Theme.warn (), Printf.sprintf "  Page %d failed%s · r retry · %s"
-        page (retained previous) (Terminal_text.single_line reason))
+      Some (Theme.warn (), keeper_peer_failure_status ~page ~retained:previous ~reason)
   | Some (Keeper_peer_current page) ->
       Some (Theme.recede (), Printf.sprintf "  Page %d · queued relationships" page)
   | Some Keeper_peer_unread -> Some (Theme.warn (), "  Relationship page unavailable · r retry")

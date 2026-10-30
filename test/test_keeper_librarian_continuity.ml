@@ -33,7 +33,10 @@ let with_source f =
       history_at_start=(if fresh then B.Fresh_history else B.Continued_history);
       position=B.position_of_messages messages |> get}) in
   f env config save append boundary
-let prepare config = P.prepare ~config ~keeper_name ~trace_id () |> get
+let prepare_all config = P.prepare ~config ~keeper_name ~trace_id () |> get
+(* Individual-turn publication cases explicitly select one turn. Batch cases
+   use prepare_all, the production default. *)
+let prepare config = Option.map P.oldest_completed_turn (prepare_all config)
 let record_prepared_memory config prepared =
   let range_id = P.memory_range_id ~config ~keeper_name prepared |> get in
   ignore (Masc.Keeper_memory_os_current.apply_disposition ~revisions:[] ~durable_range_id:range_id
@@ -312,7 +315,7 @@ let test_historical_sources_survive_narrowing_and_recovery () =
   check bool "multi-turn range preserves A and B, original criterion" true
     (contexts wide = [task_a,2;task_b,4]);
   let narrow = P.narrow wide |> some in
-  check bool "mid-turn cut clips B after A" true (contexts narrow = [task_a,2;task_b,1]);
+  check bool "batch narrowing ends at A's actual completed boundary" true (contexts narrow = [task_a,2]);
   check bool "second cut remains inside A, despite B covering anchor" true
     (contexts (P.narrow narrow |> some) = [task_a,1]);
   let receipt = P.memory_range_id ~config ~keeper_name narrow |> get in
@@ -324,7 +327,40 @@ let test_historical_sources_survive_narrowing_and_recovery () =
   check bool "prefix selection cannot split exact recovery" true
     ((P.select_prefix ~end_atom:1 recovered |> get) == recovered);
   ignore (commit config recovered "Continue Task B");
-  check bool "next suffix contains only remaining B" true (contexts (prepare config |> some) = [task_b,3])
+  check bool "next suffix contains all of B" true (contexts (prepare config |> some) = [task_b,4])
+
+let test_batch_partitions_at_memory_coverage () =
+  List.iter (fun baseline -> with_source @@ fun _env config save _append boundary ->
+    let first = List.map message ["keep user constraint";"pending action"] in
+    let middle = first @ List.map message ["correction";"decision";"unresolved"] in
+    let full = middle @ List.map message ["continue";"still pending";"next evidence";"not complete"] in
+    save full;
+    boundary ~fresh:(not baseline) 1 first;
+    boundary ~fresh:false 2 middle;
+    boundary ~fresh:false 3 full;
+    let already_read_end = if baseline then 5 else 2 in
+    let already_read = P.prepare ~end_atom:already_read_end ~config ~keeper_name ~trace_id () |> get |> some in
+    record_ordinary config already_read ~start_atom:(if baseline then 2 else 0);
+    if baseline then (
+      let unknown = prepare_all config |> some in
+      check int "baseline prefix stays outside ordinary coverage" 2 (P.end_atom unknown);
+      check bool "unknown prefix is not Memory-covered" false
+        (P.memory_committed ~config ~keeper_name unknown |> get);
+      ignore (commit config unknown "Original constraint remains."));
+    let covered = prepare_all config |> some in
+    check int "batch ends at actual Memory frontier" already_read_end (P.end_atom covered);
+    check bool "this interval needs no repeated Memory judgement" true
+      (P.memory_committed ~config ~keeper_name covered |> get);
+    ignore (P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared:covered
+      ~working_state:"Keep the correction and unfinished action." |> get);
+    let unread = prepare_all config |> some in
+    check int "unread suffix starts at Memory frontier" already_read_end (P.start_atom unread);
+    check int "unread suffix reaches latest completed turn" 9 (P.end_atom unread);
+    check bool "coverage does not leak into unread suffix" false
+      (P.memory_committed ~config ~keeper_name unread |> get);
+    check bool "working state cannot certify unread Memory" true
+      (Result.is_error (P.commit ~new_unread_messages:[] ~config ~keeper_name ~prepared:unread
+        ~working_state:"Cannot claim Memory was read."))) [false;true]
 
 let test_historical_gap_is_not_covering_task () =
   with_source @@ fun _env config save append _boundary ->
@@ -352,9 +388,14 @@ let test_completed_turn_work_units () =
     let first = [message "A"; message "B"] in
     let second = first @ [message "C"; message "D"; message "E"] in
     let full = second @ [message "F"; message "G"] in
-    save full;
+    save (full @ [message "unfinished turn must not be folded"]);
     boundary ~fresh 1 first; boundary ~fresh:false 2 second;
     boundary ~fresh:false 3 full;
+    let batch = prepare_all config |> some in
+    check int "default captures all completed turns" 7 (P.end_atom batch);
+    check int "batch contains every completed message once" 7 (List.length (P.messages batch));
+    check bool "batch ends at the actual final turn" true
+      (P.turn_ref batch = Ids.Turn_ref.make ~trace_id ~absolute_turn:3);
     List.iter (fun (endpoint, count, turn) ->
       let prepared = prepare config |> some in
       check int "next completed turn only" endpoint (P.end_atom prepared);
@@ -770,7 +811,7 @@ let narrowing_atom_text mark = String.make narrowing_atom_chars mark
    refused pass carries to the next one and which refusals must not move it at
    all (#37793: one live Keeper walked 12756 -> 6378 -> 3189 ninety-six times
    in a day and committed nothing, because every pass started over). *)
-let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner ?has_waiting
+let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner ?has_waiting ?completed_turn_ends
     ?receipt_answer ?(body_timeouts = [])
     ?(task_context = Masc.Keeper_turn_task_context.No_task)
     ?(atoms = List.map (fun mark -> message (narrowing_atom_text mark)) narrowing_marks)
@@ -820,8 +861,16 @@ let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner ?has_waiting
     (F.resolver_snapshot ~body_timeouts ~source:"narrowing-fixture"
        (List.map (fun id -> { F.id; base_url = server.F.base_url }) slot_ids)));
   save atoms;
-  append (B.Turn_ended {turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
-    task_context; history_at_start=B.Fresh_history;position=B.position_of_messages atoms |> get});
+  let turn_ends = Option.value completed_turn_ends
+    ~default:[snd (Runtime_model_input_tail_window.annotate atoms)] in
+  List.iteri (fun index through ->
+    let selected = Runtime_model_input_tail_window.annotate atoms |> fst
+      |> List.filter_map (fun (message,label) -> match label with
+        | Runtime_model_input_tail_window.Pinned -> Some message
+        | Runtime_model_input_tail_window.Atom atom -> if atom < through then Some message else None) in
+    append (B.Turn_ended {turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:(index+1);
+      task_context;history_at_start=(if index=0 then B.Fresh_history else B.Continued_history);
+      position=B.position_of_messages selected |> get})) turn_ends;
   ignore (Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name ~now:1000.
     ~source:{ kind = Current.Librarian; trace_id } ~absorbed:[] ~new_claims:[] () |> get);
   (* No forget_measurement between passes: that is what a server restart does,
@@ -1926,101 +1975,165 @@ let test_a_continuity_pass_carries_tool_turns_folded_once () =
                {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":"s"}|});
   run ~memory_committed:true ~answer:(`Assoc [ "working_state", `String "s" ])
 
-let selected_source_width body =
-  let context = match historical_request body with
-    | [context] -> context | _ -> fail "expected one selected source span" in
-  let source = U.member "source" context in
-  (source |> U.member "end_atom" |> U.to_int)
-  - (source |> U.member "start_atom" |> U.to_int)
+let selected_message_count body =
+  List.fold_left (fun total context ->
+    total + (context |> U.member "after_message" |> U.to_int)
+      - (context |> U.member "first_message" |> U.to_int)) 0 (historical_request body)
+
+let test_recovery_keeps_the_initial_completed_frontier () =
+  let append_new_turn = ref (fun () -> ()) in
+  let widths = ref [] in
+  narrowing_fixture ~completed_turn_ends:[2;5;8] ~has_waiting:(fun () -> false) ~slot_count:1
+    ~answer:(fun index body ->
+      widths := !widths @ [selected_message_count body];
+      if index = 0 then !append_new_turn ();
+      `OK, (if index = 0 then Exact_output_fixture.openai_response
+        (`Assoc ["working_state",`String "Keep the original constraints."])
+        else accepted_answer))
+  @@ fun ~bodies:_ ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
+  let original = P.prepare ~end_atom:2 ~config ~keeper_name ~trace_id () |> get |> some in
+  record_prepared_memory config original;
+  append_new_turn := (fun () ->
+    let full = List.map (fun mark -> message (narrowing_atom_text mark)) narrowing_marks
+      @ [message "newly completed while original recovery runs"] in
+    let session_dir = Filename.concat (Masc.Keeper_fs.session_store_path config) trace_id in
+    (match C.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
+      ~session_dir ~history_retained:0 (checkpoint full) with
+     | Ok (C.Saved _) -> ()
+     | Ok (C.Stale_noop _) -> fail "appended source was stale"
+     | Error detail -> fail detail);
+    B.append ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+      {B.recorded_at=1001.;event=B.Turn_ended
+        {turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:4;
+         task_context=Masc.Keeper_turn_task_context.No_task;
+         history_at_start=B.Continued_history;position=B.position_of_messages full |> get}}
+    |> Result.map_error B.append_error_to_string |> get);
+  pass ();
+  check (list int) "recover original then only the initially captured suffix"
+    [2;6] !widths;
+  check (option int) "new completed tail is not chased by this wake" (Some 8) (coverage ());
+  pass ();
+  check (list int) "next wake reads exactly the new completed turn"
+    [2;6;1] !widths;
+  check (option int) "next wake catches up" (Some 9) (coverage ())
+
+let test_cached_fit_refusal_reaches_its_original_message_floor () =
+  let module F = Exact_output_fixture in
+  let module Codex = Runtime_codex_app_server in
+  let cli_calls = ref 0 in
+  let widths = ref [] in
+  let measured_limit = ref None in
+  let cli_runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+    incr cli_calls;
+    if !cli_calls = 1 then (
+      let actual_chars = Codex.prompt_char_count prompt |> get in
+      let max_chars = !measured_limit |> some in
+      Error (Masc.Fusion_official_client.Codex_failure (Codex.Rpc_error
+        {method_="turn/start";code=Some (-32602);message="fixture capacity";
+         data=Some (`Assoc ["input_error_code",`String "input_too_large";
+           "actual_chars",`Int actual_chars;"max_chars",`Int max_chars])})))
+    else Error (Masc.Fusion_official_client.Setup_failure "fixture unavailable") in
+  narrowing_fixture ~cli_slot_ids:[F.cli_primary_runtime] ~cli_runner
+    ~has_waiting:(fun () -> true) ~slot_count:1
+    ~answer:(fun _index body ->
+      let width = selected_message_count body in
+      widths := !widths @ [width];
+      if width > 1
+      then `Request_entity_too_large, refused "invalid_request_error"
+      else `OK, accepted_answer)
+  @@ fun ~bodies:_ ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
+  let module Queue = Masc.Keeper_librarian_queue_refresh in
+  let module K = Masc.Keeper_librarian in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Masc.Workspace.base_path in
+  let half = P.prepare ~end_atom:2 ~config ~keeper_name ~trace_id () |> get |> some in
+  let instructions = match Masc.Keeper_meta_store.read_effective_meta_presence config keeper_name |> get with
+    | Meta_present meta -> meta.instructions
+    | Meta_absent | Meta_not_current _ -> fail "missing fixture metadata" in
+  let _, historical_task_contexts = List.fold_left (fun (first_message, contexts) (scope, messages) ->
+    let after_message = first_message + List.length messages in
+    let context : Masc.Keeper_librarian_task_context.t =
+      {scope;first_message;after_message;first_tool_observation=0;after_tool_observation=0} in
+    after_message, contexts @ [context]) (0,[]) (P.source_spans half) in
+  let current = Masc.Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get in
+  let input : K.input =
+    {turn_ref=P.turn_ref half;historical_task_contexts;goal_context=K.No_task;
+     keeper_id=Masc_test_deps.keeper_id_fixture keeper_name;keeper_instructions=instructions;
+     current=Option.map (fun (memory : Masc.Keeper_memory_os_current.t) -> {K.facts=memory.facts}) current;
+     working_context=Masc.Keeper_librarian_context.empty;messages=P.messages half;
+     tool_observations=[];counterpart_observations=[]} in
+  let variables = Masc.Keeper_librarian_runtime.librarian_prompt_variables ~continuity:half input |> get in
+  let _, prompt = Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian variables |> get in
+  let requirement = Agent_core.Exact_output.make_output_requirement
+    ~schema:Masc.Keeper_structured_output_schema.librarian_continuity_output_schema
+    ~minimum_guarantee:Agent_core.Exact_output.Json_syntax in
+  measured_limit := Some (Masc.Keeper_lane_cli_oneshot.prompt_with_schema ~requirement ~prompt
+    |> Codex.prompt_char_count |> get);
+  pass ();
+  check (option int) "refused fitting prefix commits nothing" None (coverage ());
+  check bool "actual CLI capacity is cached" true
+    (Option.is_some (Queue.For_testing.last_input_capacity ~config ~keeper_name));
+  check bool "the refused prefix selected message descent" true
+    (Queue.For_testing.read_limit ~config ~keeper_name ~trace_id = Some Queue.Oldest_turn_messages);
+  let previous_calls = List.length !widths in
+  let refused_prefix = List.hd (List.rev !widths) in
+  check bool "fitting had selected a strict prefix" true (refused_prefix < narrowing_atom_count);
+  pass ();
+  check int "next signal reads one message instead of repeating the fitted prefix" 1
+    (List.nth !widths previous_calls);
+  check (option int) "message floor commits exactly the refused original prefix"
+    (Some refused_prefix) (coverage ());
+  check bool "subsequent turns return to whole-turn selection" true
+    (Queue.For_testing.read_limit ~config ~keeper_name ~trace_id = Some Queue.Oldest_turn)
 
 let test_refused_width_carries_to_the_next_pass () =
   let requested_widths = ref [] in
-  narrowing_fixture ~slot_count:1
+  narrowing_fixture ~completed_turn_ends:[2;5;8] ~slot_count:1
     ~answer:(fun _index body ->
-      let context = match historical_request body with
-        | [context] -> context | _ -> fail "narrowed request should have one source span" in
-      let source = U.member "source" context in
-      let width = (source |> U.member "end_atom" |> U.to_int)
-        - (source |> U.member "start_atom" |> U.to_int) in
-      check int "every retry restarts selected message numbering" 0
-        (context |> U.member "first_message" |> U.to_int);
-      check int "every retry clips offsets to selected atoms" width
-        (context |> U.member "after_message" |> U.to_int);
-      check int "message-only retry has no tool offsets" 0
-        (context |> U.member "after_tool_observation" |> U.to_int);
+      let width = selected_message_count body in
       requested_widths := !requested_widths @ [width];
-      if selected_source_width body > fixture_atom_capacity
+      if width > fixture_atom_capacity
       then `Request_entity_too_large, refused "invalid_request_error"
       else `OK, accepted_answer)
   @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
-  let width () =
-    Masc.Keeper_librarian_queue_refresh.For_testing.limited_width ~config ~keeper_name ~trace_id in
+  let mode () = Masc.Keeper_librarian_queue_refresh.For_testing.read_limit
+    ~config ~keeper_name ~trace_id in
   pass ();
-  check (option int) "a refused source commits nothing" None (coverage ());
-  check bool "the refusal left a width" true (Option.is_some (width ()));
-  check int "the refused pass sends one request and does not retry in place" 1
-    (List.length !bodies);
-  check bool "the first request carried the whole source" true
-    (List.hd !requested_widths > fixture_atom_capacity);
+  check (option int) "the refused batch commits nothing" None (coverage ());
+  check bool "next signal selects a real completed turn" true
+    (mode () = Some Masc.Keeper_librarian_queue_refresh.Oldest_turn);
+  check int "no retry before another signal" 1 (List.length !bodies);
   pass ();
-  (* Without the carried width this pass prepares the whole source again and
-     is refused again, exactly as the live keeper was ninety-six times. *)
-  check int "the second pass sends one request as well" 2 (List.length !bodies);
-  check bool "and it is smaller than the first" true
-    (List.nth !bodies 1 < List.nth !bodies 0);
-  check (option int) "still over the ceiling, so still nothing commits" None (coverage ());
+  check (list int) "the second turn uses its own size, not the first turn's width"
+    [8;2;3] !requested_widths;
+  check (option int) "only the accepted first turn is covered" (Some 2) (coverage ());
+  check bool "the actual refused second turn chooses message descent" true
+    (mode () = Some Masc.Keeper_librarian_queue_refresh.Oldest_turn_messages);
   pass ();
-  check (list int) "actual HTTP requests carry persisted widths 8, 4, then 2"
-    [narrowing_atom_count; narrowing_atom_count / 2; fixture_atom_capacity]
-    (List.take 3 !requested_widths);
-  check (option int) "reading less commits, and the rest follows in the same pass"
-    (Some narrowing_atom_count) (coverage ());
-  check (option int) "reading the backlog to its end releases the width" None (width ());
-  (* Every request after the first commit stayed at the width. A pass that
-     released the width on a commit would have offered the six remaining
-     atoms, which the target refuses. *)
-  check bool "a commit does not release the width" true
-    (List.for_all (fun width -> width <= fixture_atom_capacity)
-       (List.filteri (fun index _ -> index >= 2) !requested_widths))
+  check (option int) "message descent commits the whole second turn" (Some 5) (coverage ());
+  check (list int) "the next turn is tried whole after message descent"
+    [8;2;3;1;1;1;3] !requested_widths;
+  pass ();
+  check (option int) "all completed source is eventually covered" (Some 8) (coverage ());
+  check bool "draining releases the temporary mode" true (mode () = None)
 
-(* RFC-0467: after a committed round, a unit waiting on the lane ends the
-   loop so its durable pass reads the turns that ended meanwhile. The next
-   unit resumes continuity at the same position and width. Without a waiting
-   unit the same refusals end with the whole backlog read in one pass, as in
-   the case above. *)
+(* A waiting unit gets its durable pass after this continuity commit. *)
 let test_a_waiting_unit_ends_the_catch_up_after_a_commit () =
-  let requested_widths = ref [] in
-  narrowing_fixture ~slot_count:1
-    ~answer:(fun _index body ->
-      requested_widths := !requested_widths @ [selected_source_width body];
-      if selected_source_width body > fixture_atom_capacity
-      then `Request_entity_too_large, refused "invalid_request_error"
-      else `OK, accepted_answer)
+  narrowing_fixture ~completed_turn_ends:[2;5;8] ~slot_count:1
+    ~answer:(fun index _body -> `OK,
+      (if index = 0 then Exact_output_fixture.openai_response
+        (`Assoc ["working_state",`String "Keep the original constraints."])
+       else accepted_answer))
   @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
+  let prefix = P.prepare ~end_atom:2 ~config ~keeper_name ~trace_id () |> get |> some in
+  record_ordinary config prefix ~start_atom:0;
   let base_path = config.Masc.Workspace.base_path in
-  let pass_with_waiting_unit () =
-    Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity
-      ~has_waiting:(fun () -> true) ~base_path ~keeper_name () in
-  pass_with_waiting_unit ();
-  pass_with_waiting_unit ();
-  check (option int) "refused rounds commit nothing" None (coverage ());
-  let refused_requests = List.length !bodies in
-  pass_with_waiting_unit ();
-  check int "a waiting unit stops the loop after the first committed round"
-    (refused_requests + 1) (List.length !bodies);
-  check (list int) "waiting-unit requests retain the same 8-to-4-to-2 protocol"
-    [narrowing_atom_count; narrowing_atom_count / 2; fixture_atom_capacity]
-    !requested_widths;
-  (* Two refusals halve eight atoms to a width of two; the one committed
-     round reads exactly that width. *)
-  check (option int) "that round committed one width of the backlog" (Some 2)
-    (coverage ());
+  Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity
+    ~has_waiting:(fun () -> true) ~base_path ~keeper_name ();
+  check int "a waiting unit stops after the Memory-covered prefix" 1 (List.length !bodies);
+  check (option int) "one committed range before yielding" (Some 2) (coverage ());
   pass ();
-  check (option int) "the next unit resumes and reads the rest"
-    (Some narrowing_atom_count) (coverage ());
-  check bool "the resumed unit keeps the narrowed width" true
-    (List.for_all (fun width -> width <= fixture_atom_capacity)
-       (List.filteri (fun index _ -> index >= refused_requests) !requested_widths))
+  check int "remaining completed turns are folded together" 2 (List.length !bodies);
+  check (option int) "the next unit resumes to the captured end" (Some 8) (coverage ())
 
 let test_a_refusal_that_is_not_about_size_keeps_the_width () =
   narrowing_fixture ~slot_count:1
@@ -2036,7 +2149,7 @@ let test_a_refusal_that_is_not_about_size_keeps_the_width () =
 let test_an_unreadable_source_keeps_the_width () =
   narrowing_fixture ~slot_count:1
     ~answer:(fun _index body ->
-      if selected_source_width body > fixture_atom_capacity
+      if selected_message_count body > fixture_atom_capacity
       then `Request_entity_too_large, refused "invalid_request_error"
       else `OK, accepted_answer)
   @@ fun ~bodies ~pass ~coverage ~hide_source ~restart:_ ~config:_ ->
@@ -2060,16 +2173,16 @@ let test_an_unreadable_source_keeps_the_width () =
 let test_a_restart_forgets_the_width () =
   narrowing_fixture ~slot_count:1
     ~answer:(fun _index body ->
-      if selected_source_width body > fixture_atom_capacity
+      if selected_message_count body > fixture_atom_capacity
       then `Request_entity_too_large, refused "invalid_request_error"
       else `OK, accepted_answer)
   @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart ~config ->
   let width () =
-    Masc.Keeper_librarian_queue_refresh.For_testing.limited_width ~config ~keeper_name ~trace_id in
+    Masc.Keeper_librarian_queue_refresh.For_testing.read_limit ~config ~keeper_name ~trace_id in
   pass ();
   check bool "the refusal left a width" true (Option.is_some (width ()));
   restart ();
-  check (option int) "a restart forgets it" None (width ());
+  check bool "a restart forgets it" true (width () = None);
   pass ();
   check int "each pass sends one request" 2 (List.length !bodies);
   check bool "after a restart the pass offers the whole backlog again" true
@@ -2105,7 +2218,7 @@ let test_a_snapshot_that_fails_to_commit_keeps_the_width () =
       else (!break_the_commit (); `OK, accepted_answer))
   @@ fun ~bodies:_ ~pass ~coverage:_ ~hide_source:_ ~restart:_ ~config ->
   let width () =
-    Masc.Keeper_librarian_queue_refresh.For_testing.limited_width ~config ~keeper_name ~trace_id in
+    Masc.Keeper_librarian_queue_refresh.For_testing.read_limit ~config ~keeper_name ~trace_id in
   (* While the model is answering, put a directory where the snapshot is about
      to be written, so the commit fails on disk after a good answer. It fails
      in the same branch a CAS the history moved under does. Coverage is not
@@ -2115,7 +2228,7 @@ let test_a_snapshot_that_fails_to_commit_keeps_the_width () =
   let refused = width () in
   check bool "the size refusal left a width" true (Option.is_some refused);
   pass ();
-  check (option int) "a snapshot that failed to commit leaves it where it was" refused (width ())
+  check bool "a snapshot that failed to commit leaves it where it was" true (refused = width ())
 
 let test_a_size_refusal_anywhere_in_the_walk_narrows () =
   narrowing_fixture ~slot_count:2
@@ -2268,7 +2381,7 @@ let test_append_preserves_unread_source_records () = with_source @@ fun _env con
 
 let ready ?previous config =
   match P.prepare_source ?previous ~config ~keeper_name ~trace_id () |> get with
-  | P.Ready prepared -> prepared
+  | P.Ready prepared -> P.oldest_completed_turn prepared
   | P.No_source _ -> fail "missing continuity source"
 let tool_call id = Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
   [Agent_core.Types.ToolUse {id; name = "read_file"; input = `Assoc ["path", `String id]}]
@@ -2418,7 +2531,10 @@ let () = run "production continuity pair"
     test_case "historical gap is not the covering Task" `Quick test_historical_gap_is_not_covering_task;
     test_case "pending receipt overrides next turn" `Quick test_recovery_overrides_next_turn;
     test_case "queue keeps capacity and alternative opportunity" `Quick test_queue_reuses_capacity_without_gating_alternatives;
-    test_case "a refused width carries to the next pass" `Quick test_refused_width_carries_to_the_next_pass;
+    test_case "a refused batch selects actual turns then the exact message floor" `Quick test_refused_width_carries_to_the_next_pass;
+    test_case "Memory-covered and unread intervals are separate batches" `Quick test_batch_partitions_at_memory_coverage;
+    test_case "original recovery keeps the initial completed frontier" `Quick test_recovery_keeps_the_initial_completed_frontier;
+    test_case "cached fitting refusal reaches the original message floor" `Quick test_cached_fit_refusal_reaches_its_original_message_floor;
     test_case "a waiting unit ends the catch-up after a commit" `Quick
       test_a_waiting_unit_ends_the_catch_up_after_a_commit;
     test_case "a Memory pass carries the counterparts of its turn" `Quick

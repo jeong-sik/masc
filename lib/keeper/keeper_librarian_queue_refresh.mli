@@ -99,11 +99,13 @@ val submit_durable_for_unlaunched
     names are deduplicated and sorted. A queue without metadata is retained;
     discovery does not create a Keeper. Enumeration errors are logged. *)
 
+type read_limit = Oldest_turn | Oldest_turn_messages
+
 module For_testing : sig
-  val limited_width :
-    config:Workspace.config -> keeper_name:string -> trace_id:string -> int option
-  (** The width a later continuity pass will read at, if a refusal left one
-      for this trace. *)
+  val read_limit :
+    config:Workspace.config -> keeper_name:string -> trace_id:string -> read_limit option
+  (** The source unit a refusal selected for the next signal. No atom count
+      is carried from one completed turn to the next. *)
 
   val last_input_capacity :
     config:Workspace.config -> keeper_name:string

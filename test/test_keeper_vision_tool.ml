@@ -2688,14 +2688,18 @@ let test_missing_vision_guidance_never_calls_provider () =
       Prompt_registry.set_markdown_dir empty;
       with_temp_runtime_toml image_capable_vision_runtime_toml (fun () ->
         Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+          let calls = ref 0 in
           let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+            incr calls;
             failwith "missing guidance reached provider" in
           let result = Vt.run_vision ~complete ~sw ~clock:(Eio.Stdenv.clock env)
             ~net:(Eio.Stdenv.net env) ~query:"Read the image"
             ~media_type:"image/png"
             ~bytes:(Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=") () in
+          assert (!calls = 0);
           match result with
-          | Vt.Vo_provider {failure_class=Tool_result.Runtime_failure;_} -> ()
+          | Vt.Vo_provider {failure_class=Tool_result.Runtime_failure;detail} ->
+              assert (String_util.contains_substring detail Prompt_names.keeper_vision_request_header)
           | _ -> failwith "missing guidance was not a runtime configuration failure"))))
 
 let test_generated_sandbox_image_reaches_vision () =

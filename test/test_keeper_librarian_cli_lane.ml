@@ -1155,7 +1155,9 @@ let test_mixed_admission ~depends_on_deferred () =
 
 let test_a_later_report_without_capacity_evidence_keeps_the_refusal () =
   let report evidence : Runtime.not_committed =
-    { input_capacity_evidence = evidence; provider_input_refusals = []; message_descent=Runtime.No_descent_evidence;
+    { input_capacity_evidence = evidence;
+      input_capacity_only = (evidence = Runtime.Input_capacity_refused);
+      provider_input_refusals = []; message_descent=Runtime.No_descent_evidence;
       detail = "fixture"; walk_shows_size = false;
       smaller_range_meets_same_failure = false } in
   let refused = report Runtime.Input_capacity_refused in

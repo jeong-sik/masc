@@ -326,7 +326,7 @@ let rec consume_one ~config ~keeper_name ~wake =
          the Consumer did not narrow the next read as it does after a failed
          commit. Without the mark the same wide range is read again. *)
       Consumer.mark_range_failed ~config ~keeper_name;
-      Ok (Consumer.Memory_not_committed [refusal_report ~store request final]) in
+      Consumer.refused_original (Request.source request) [refusal_report ~store request final] in
   (* Discovery does not initialize an epoch or create a replacement request.
      Any malformed old original fails the full inventory before fresh selection. *)
   let inventory_started=Mtime_clock.now () in

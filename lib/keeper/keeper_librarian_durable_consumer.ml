@@ -1459,11 +1459,58 @@ let consume_one_with_extent
            | Ok () -> Ok (Official_advanced { atom = atom_progress; official })
            | Error error -> Error (Official_progress_write_failed error)))
     in
-    if selected_messages = [] && observations = []
+    (* A turn with no tagged fragments may still have independent speaker or
+       external observations in its interval. Read those before deciding that
+       there is nothing to commit; advancing first would skip chat rows on the
+       next pass. *)
+    (* A bound carried from the trace before this one can sit after this
+       range's end when the wall clock went backwards between the two
+       traces. This commit replaces the atom cursor with this range's end,
+       so the rows above that end are read by the next range: the window
+       here is empty by reading, not by repair.
+
+       That holds only while the atom cursor is the one that inverted the
+       interval. The official cursor is not replaced by this commit, so if
+       it also sits after this range's end, the next range's bound is that
+       same stamp and the rows between would be read by nobody. Then the
+       refusal stands: the pass stops without advancing and the operator
+       sees [Counterpart_interval_non_monotone]. An official line read
+       later moves the official cursor and lifts it; while an official stop
+       holds those lines (RFC §4.10) none is read, so only a range that ends
+       after that stamp, or a purge of the keeper, lifts it. Within one trace
+       the inversion says the position and its boundary disagree. Without
+       new external admissions it stops as before. Newly appended external
+       evidence is independently ordered and can be consumed even when this
+       chat-time interval is empty. *)
+    let carried_from_another_trace =
+      match counterpart_progress with
+      | None -> false
+      | Some { P.position; _ } -> not (String.equal position.P.trace_id trace_id)
+    in
+    let inverted_by_the_carried_bound_alone =
+      carried_from_another_trace
+      && (match official_bound with
+          | None -> true
+          | Some official_bound -> official_bound <= ended_at)
+    in
+    let* counterparts =
+      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+        Keeper_librarian_input_sources.capture_counterparts
+          ~external_after:(Keeper_external_read_cursor.offset external_cursor)
+          ~base_dir:config.Workspace.base_path ~keeper_name ~after ~before:ended_at)
+      |> Result.map_error (fun error -> Counterpart_observations_unreadable error) in
+    let counterpart_observations = Keeper_librarian_input_sources.counterpart_observations counterparts in
+    let external_through = Keeper_librarian_input_sources.external_through counterparts in
+    let* () =
+      match after with
+      | Some after when after > ended_at && not inverted_by_the_carried_bound_alone
+          && external_through = Keeper_external_read_cursor.offset external_cursor ->
+        Error (Counterpart_interval_non_monotone { after; before = ended_at })
+      | None | Some _ -> Ok ()
+    in
+    if selected_messages = [] && observations = [] && counterpart_observations = []
     then (
-      (* Lines whose fragments are all gone or all untagged: nothing for the
-         model, and the position moves past them. Said aloud, because the
-         writer's own loss path ends here too. *)
+      (* No tagged fragments and no independent observations need Memory. *)
       Log.Keeper.warn
         ~keeper_name
         "librarian pass found no fragments for %d official line(s) through line %d; passing them"
@@ -1474,54 +1521,9 @@ let consume_one_with_extent
       let* current, expected_revision =
         current_memory ~keepers_dir:memory_keepers_dir ~keeper_name
       in
-      (* A bound carried from the trace before this one can sit after this
-         range's end when the wall clock went backwards between the two
-         traces. This commit replaces the atom cursor with this range's end,
-         so the rows above that end are read by the next range: the window
-         here is empty by reading, not by repair.
-
-         That holds only while the atom cursor is the one that inverted the
-         interval. The official cursor is not replaced by this commit, so if
-         it also sits after this range's end, the next range's bound is that
-         same stamp and the rows between would be read by nobody. Then the
-         refusal stands: the pass stops without advancing and the operator
-         sees [Counterpart_interval_non_monotone]. An official line read
-         later moves the official cursor and lifts it; while an official stop
-         holds those lines (RFC §4.10) none is read, so only a range that ends
-         after that stamp, or a purge of the keeper, lifts it. Within one trace
-         the inversion says the position and its boundary disagree. Without
-         new external admissions it stops as before. Newly appended external
-         evidence is independently ordered and can be consumed even when this
-         chat-time interval is empty. *)
-      let carried_from_another_trace =
-        match counterpart_progress with
-        | None -> false
-        | Some { P.position; _ } -> not (String.equal position.P.trace_id trace_id)
-      in
-      let inverted_by_the_carried_bound_alone =
-        carried_from_another_trace
-        && (match official_bound with
-            | None -> true
-            | Some official_bound -> official_bound <= ended_at)
-      in
-      let* counterparts =
-        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-          Keeper_librarian_input_sources.capture_counterparts
-            ~external_after:(Keeper_external_read_cursor.offset external_cursor)
-            ~base_dir:config.Workspace.base_path ~keeper_name ~after ~before:ended_at)
-        |> Result.map_error (fun error -> Counterpart_observations_unreadable error) in
-      let counterpart_observations = Keeper_librarian_input_sources.counterpart_observations counterparts in
-      let external_through = Keeper_librarian_input_sources.external_through counterparts in
       let* external_before = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         Keeper_external_read_cursor.observe ~runtime_keepers_dir ~keeper_name)
         |> Result.map_error cursor_error in
-      let* () =
-        match after with
-        | Some after when after > ended_at && not inverted_by_the_carried_bound_alone
-            && external_through = Keeper_external_read_cursor.offset external_cursor ->
-          Error (Counterpart_interval_non_monotone { after; before = ended_at })
-        | None | Some _ -> Ok ()
-      in
       let* () = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
         Keeper_external_read_cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name external_cursor
           ~through:external_through ~atom:atom_next ~official:official_range_id)

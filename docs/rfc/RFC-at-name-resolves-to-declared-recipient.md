@@ -23,7 +23,7 @@ related: []
 
 1. 글에서 찾은 `@토큰` 은 후보일 뿐이다. 선언된 이름과 맞아야 받는 사람이 된다. (§3.1)
 2. 선언된 이름은 Keeper 이름과 `mention_targets` 별칭이다. 사람과 계정 이름이 받는 사람이어야 하면 별칭으로 선언한다. (§3.2)
-3. 선언에 없는 이름은 글 속 말이다. 거절하지 않는다. 쓴 사람에게는 응답의 `unresolved` 로 알려 준다. (§3.3)
+3. board 가 일반 이름 후보를 새로 해석할 때 선언에 없는 이름은 글 속 말이다. 쓰기가 성공하면 응답의 `unresolved` 로 알려 준다. 이때 선언된 대상이 없는 `Direct` 글은 쓰기가 거절된다. 기록된 audience 를 유지하는 고치기는 다시 해석하지 않는다. (§3.3)
 4. 해석은 한 곳에서 하고, board·브로드캐스트·알림은 해석된 결과를 타입으로 받는다. 글을 다시 읽지 않는다. (§3.4)
 
 결정 D1~D5 는 2026-10-29 에 정했다. (§8)
@@ -130,7 +130,9 @@ val resolve :
 
 후보는 글에서 나온 아무 문자열인데, Keeper 메타 파일 이름은 이름 뒤에 접미사를 붙인 것이다 (`lib/core/keeper_runtime_root_entry.ml:21`). 그래서 이름 모양이 아닌 토큰은 후보가 되지 않는다. `Candidate.of_string` 은 ASCII 영문자·숫자·`_`·`-` 로만 된 이름을 받고, 길이는 정하지 않는다 (`Board_addressing.is_routable_target`). 경로 구분자나 `..` 이 든 토큰(`types/node`, `../x`)과 `alice's` 같은 토큰은 `None` 이어서 `declared` 에 닿지 않고 `unresolved` 에도 나오지 않는다.
 
-이름 모양은 필요 조건이다. Keeper 이름 규칙(`Keeper_name.of_string`, `lib/keeper_registry/keeper_id.ml:17`, 128자까지)은 L2c 의 조회가 파일 경로를 만들기 전에 거치고, 이 규칙에 맞지 않는 후보에는 조회 실패가 아니라 `None` 을 돌려준다. 지금은 이 규칙을 거치지 않는 길이 있다. 브로드캐스트의 `resolve_broadcast_mention_target`(`lib/server/server_bootstrap_loops.ml:158`)이 `@이름` 에서 나온 값을 `read_effective_meta` 에 그대로 넘기고, 그 함수는 이름으로 바로 파일 경로를 만든다 (`keeper_meta_path`, `lib/keeper/keeper_types_profile.ml:772`). 이름 뒤에 `.json` 이 붙으므로 이름이 251자 이상이면 파일 이름이 한도(255바이트)를 넘어서 파일 열기가 `ENAMETOOLONG` 으로 실패한다. 브로드캐스트에서 이 실패는 `Deferred Target_state_unavailable` 이고 쓰기 오류가 아니다. L2c 가 같은 길을 그대로 쓰면 D5 때문에 이 실패가 쓰기 오류가 되므로, L2c 는 경로를 만들기 전에 위 이름 규칙을 거친다. board 글은 지금 64자를 넘는 이름을 대상으로 보지 않아서(`Agent_id`) 이런 글도 그냥 쓰인다.
+이름 모양은 필요 조건이다. L2c 의 조회는 Keeper 이름 규칙(`Keeper_name.of_string`, `lib/keeper_registry/keeper_id.ml:17`, 128자까지)에 맞는 후보만 자기 이름의 파일 경로로 쓴다. 규칙에 맞지 않아도 `tool_usage` 같은 예약된 이름은 별칭일 수 있으므로 Keeper 설정 전체에서 별칭을 찾는다. 이 전체 조회에서 설정을 읽지 못하거나 별칭이 충돌하면 조회 오류이고, 조회가 성공했으나 선언이 없으면 `None` 이다. 선언된 이름이 board `Agent_id` 에 들어가지 않으면 조회 오류다. 따라서 129자 이상 별칭도 조회가 성공하고 선언이 없다면 해석 결과의 `unresolved` 에 남지만, 선언됐다면 64자 한도를 넘어 오류가 된다. 대상이 없는 글을 허용할지는 공개 범위에 따른다 (§3.3).
+
+브로드캐스트에는 이 규칙을 거치지 않는 길이 있다. `resolve_broadcast_mention_target`(`lib/server/server_bootstrap_loops.ml:158`)이 `@이름` 에서 나온 값을 `read_effective_meta` 에 그대로 넘기고, 그 함수는 이름으로 바로 파일 경로를 만든다 (`keeper_meta_path`, `lib/keeper/keeper_types_profile.ml:772`). 이름 뒤에 `.json` 이 붙으므로 파일 이름 한도가 255바이트인 파일시스템에서는 이름이 251자 이상이면 파일 열기가 `ENAMETOOLONG` 으로 실패한다. 브로드캐스트에서 이 실패는 `Deferred Target_state_unavailable` 이고 쓰기 오류가 아니다. L2c 가 같은 길을 그대로 쓰면 D5 때문에 이 실패가 쓰기 오류가 되므로, 유효하지 않은 후보로는 파일 경로를 만들지 않는다. L2c 이전 board 는 64자를 넘는 이름을 대상으로 기록하지 않았고, 다른 유효 대상이 없는 `Direct` 글은 쓰기를 거절했다.
 
 `Keeper_id.t` 는 공백을 없애고 소문자로 바꿀 뿐 문자를 거르지 않는다 (`lib/keeper/keeper_identity.ml:42`). 그래서 타입이 위 제한을 대신하지 않는다.
 
@@ -146,7 +148,7 @@ val resolve :
 
 새 파일이나 새 필드를 만들지 않는다.
 
-선언의 기준은 게시판이 글을 Keeper 에게 보낼 때 쓰는 기준과 같다. 라우터는 Keeper 가 `mention_targets` 를 가지면 그 목록만 주소로 보고, 가지지 않으면 Keeper 이름을 주소로 본다 (`Keeper_lane_mentions.effective_target_ids`). 그래서 `mention_targets` 를 가진 Keeper 가 자기 이름을 목록에 넣지 않았으면 그 이름은 선언이 아니다. 선언으로 치면 아무도 받지 않는 대상이 기록되고 쓴 사람은 그 사실을 알 수 없다. 이 이름은 글 속 말이고 `unresolved` 에 나온다. 별칭은 소문자로 맞춘 이름 그대로 기록한다. 브로드캐스트는 목록과 상관없이 Keeper 이름을 먼저 찾아서 이 기준과 다르다. 지금도 다르고 이 RFC 는 바꾸지 않는다. 2026-10-30 에 읽은 설정 41개는 모두 목록에 자기 이름이 있어서 이 차이로 달라지는 Keeper 는 없다.
+선언의 기준은 게시판이 글을 Keeper 에게 보낼 때 쓰는 기준과 같다. 라우터는 Keeper 가 `mention_targets` 를 가지면 그 목록만 주소로 보고, 가지지 않으면 Keeper 이름을 주소로 본다 (`Keeper_lane_mentions.effective_target_ids`). 그래서 `mention_targets` 를 가진 Keeper 가 자기 이름을 목록에 넣지 않았으면 그 Keeper 는 그 이름에 응답하지 않는다. 다른 Keeper 도 그 이름을 선언하지 않았고 조회가 성공했다면 글 속 말이고 해석 결과의 `unresolved` 에 나온다. 다른 Keeper 하나가 별칭으로 선언했고 조회가 성공했다면 그 별칭으로 받는 사람을 찾는다. 별칭은 소문자로 맞춘 이름 그대로 기록한다. 브로드캐스트는 목록과 상관없이 Keeper 이름을 먼저 찾아서 이 기준과 다르다. 지금도 다르고 이 RFC 는 바꾸지 않는다. 2026-10-30 에 읽은 설정 41개는 모두 목록에 자기 이름이 있어서 이 차이로 달라지는 Keeper 는 없다.
 
 자기 이름을 우선하려면 조회한 메타 파일의 Keeper 이름이 확인한 저장 파일 이름과 같은 철자여야 하고 그 Keeper 가 해당 이름에 응답해야 한다. 대소문자를 구별하지 않는 파일시스템에서 다른 철자의 파일이 열릴 수도 있으므로 파일 이름 목록을 확인한다. 메타 읽기와 목록 조회는 별도 관측이어서 그 사이 파일이 교체되면 서로 다른 시점의 값을 결합할 수 있다. 따라서 이 검사는 원자적인 최신 소유권을 보장하지 않는다. 목록을 읽지 못하면 쓰기는 거절하지만, 정상적인 자기 이름 경로에서 다른 Keeper 의 설정 파일은 읽지 않는다. 이 경로가 없을 때 별칭 하나는 Keeper 한 명만 가리킨다. 같은 별칭을 둘 이상이 쓰면 지금도 조회가 오류로 끝난다 (`lib/keeper/keeper_meta_store.ml:466`, 오류 문구 `multiple persisted Keepers claim mention_target`). 그래서 `pangyo-preachers` 처럼 Keeper 여럿이 나눠 쓰는 계정은 별칭으로 선언할 수 없다. 이 RFC 는 이 규칙을 바꾸지 않는다.
 
@@ -156,9 +158,9 @@ val resolve :
 
 ### 3.3 선언에 없는 이름은 글 속 말이다
 
-거절하지 않는다. `@check` 가 든 글은 받는 사람이 없는 글이 된다. board 는 받는 사람이 없는 글에 이미 정해 둔 규칙을 그대로 따른다. 공개·내부 글은 `Discoverable`, 목록 밖(`Unlisted`) 글과 댓글은 `Thread_participants` 다 (`lib/board/board_audience.ml` 의 `audience_for_post`, `audience_for_comment`). `Direct` 글은 받는 사람이 하나는 있어야 해서, 선언된 받는 사람이 없으면 지금처럼 쓰기가 거절된다.
+board 가 일반 이름 후보를 새로 해석할 때 선언에 없는 이름만으로 받는 사람을 만들지는 않는다. `@check` 만 든 글은 주소 해석 결과에 받는 사람이 없다. board 는 받는 사람이 없는 글에 이미 정해 둔 규칙을 그대로 따른다. 공개·내부 글은 `Discoverable`, 목록 밖(`Unlisted`) 글과 댓글은 `Thread_participants` 다 (`lib/board/board_audience.ml` 의 `audience_for_post`, `audience_for_comment`). `Direct` 글은 받는 사람이 하나는 있어야 해서, 새 해석에서 선언된 받는 사람이 없으면 쓰기가 거절된다. 시스템 글은 이름을 해석하지 않으며, `@@` 선택자가 있으면 일반 이름 후보보다 선택자를 먼저 처리한다 (§3.4).
 
-쓴 사람에게는 쓰기 응답에 `unresolved: ["check"]` 를 돌려준다. 응답에만 싣는 값이라 저장 형식은 바뀌지 않는다.
+일반 이름 후보를 새로 해석한 쓰기가 성공하면 쓴 사람에게 응답에 `unresolved: ["check"]` 를 돌려준다. 선언된 대상이 없어 거절된 `Direct` 글은 미선언 이름이 있을 때 오류 문구에 그 이름을 싣는다. 기록된 audience 가 있고 정규화한 제목과 본문이 그대로인 글 고치기는 조회하지 않고 기존 audience 를 유지하며, 응답의 `unresolved` 는 빈 목록이다 (§6). `unresolved` 는 응답에만 싣는 값이라 저장 형식은 바뀌지 않는다.
 
 `unresolved` 만 더하면 고친 것이 아니다. 알려 주기만 하고 글은 계속 사라진다. 이 RFC 는 기준(§3.1~§3.2)과 알림(`unresolved`)을 함께 바꾼다.
 
@@ -212,7 +214,7 @@ val resolve :
 | L1 | `Candidate` 와 `resolve`, 순수 시험. 선언은 인자로 받는다. 이름이 경로가 되기 전의 막음은 `Candidate.of_string` 에 둔다 (§3.1). 재생 도구 `tools/recipient_replay` 가 board 글을 센다 (§7) |
 | L2a | Keeper 의 게시판 스캔과 `Board_dispatch` 의 글 신호(`create_post_once_by_fusion_run_id`, `update_post`)가 글에 기록된 `audience` 를 쓴다. 제목과 본문에서 다시 계산하지 않는다. `audience` 가 기록되지 않은 글은 스캔이 건너뛴다. 댓글은 아직 글자에서 읽는다. 스캔이 닿는 글에서 동작은 바뀌지 않는다 (D4) |
 | L2b | 댓글에도 `audience` 를 기록한다. `add_comment_with_audience` 가 정한 값을 댓글과 함께 저장하고(`lib/board/board_core.ml`), 스캔이 그 값을 쓴다. 스캔이 댓글의 `audience` 를 글자에서 계산하는 길은 없어진다. `Thread_participants` 로 기록된 댓글에서 Keeper 를 깨우는 판단(`wake_reason`)은 아직 글자를 읽고, 그 읽기는 L2d 에서 바꾼다 (§3.4). 이미 쓴 댓글에는 값이 없고, 읽을 때 짐작하지 않는다 (D4) |
-| L2c | board 쓰기 경로(글 만들기·고치기·댓글)가 `resolution` 으로 `audience` 를 정하고 응답에 `unresolved` 를 싣는다. 조회 함수는 `Board_dispatch.init_jsonl` 의 필수 인자(`~recipient_lookup`)로 서버 시작점에서 넘기고, 후보로 파일 경로를 만들기 전에 `Keeper_name.of_string` 을 거친다 (§3.1). 선언 여부는 라우터와 같은 `effective_target_ids` 로 가리고(§3.2), 전체 Keeper 설정 목록은 주소 계산마다 필요한 때 한 번만 읽는다(`Recipient_lookup.make_per_write`). 글 고치기는 락을 잡기 전에 조회하고, 락 안에서 계산에 쓴 값이 그대로일 때만 그 결과를 쓴다. 경합으로 값이 바뀌면 락을 놓고 다시 계산하므로 설정도 다시 읽을 수 있다. 기록된 audience 가 있고 정규화한 제목과 본문이 그대로면 그 audience 를 유지하고 조회하지 않는다. audience 가 없는 이전 글은 같은 내용으로 고쳐도 audience 를 계산한다. 이때 선언 조회가 필요한 주소가 있으면 조회하며, 조회가 실패하면 편집은 저장하지 않는다. 제목·본문·저자가 그대로여서 audience 만 새로 기록된 경우 `content_updated_at` 은 유지되고 `Board_post_updated` 신호는 나가지 않는다. 읽기가 먼저 시작한 백엔드에는 조회가 없어서 주소가 든 글은 거절되고, 이후 `init_jsonl` 이 조회를 넣으면 풀린다. `unresolved` 는 MCP 도구 `masc_board_post`·`masc_board_post_update`·`masc_board_comment` 의 응답에 실린다 |
+| L2c | board 쓰기 경로(글 만들기·고치기·댓글)가 일반 이름 후보를 새로 해석할 때 `resolution` 으로 `audience` 를 정하고 성공 응답에 `unresolved` 를 싣는다. 조회 함수는 `Board_dispatch.init_jsonl` 의 필수 인자(`~recipient_lookup`)로 서버 시작점에서 넘기고, 후보로 파일 경로를 만들기 전에 `Keeper_name.of_string` 을 거친다 (§3.1). 선언 여부는 라우터와 같은 `effective_target_ids` 로 가리고(§3.2), 전체 Keeper 설정 목록은 주소 계산마다 필요한 때 한 번만 읽는다(`Recipient_lookup.make_per_write`). 글 고치기에서 조회가 필요하면 락을 잡기 전에 조회하고, 락 안에서 계산에 쓴 값이 그대로일 때만 그 결과를 쓴다. 경합으로 값이 바뀌면 락을 놓고 다시 계산하므로 설정도 다시 읽을 수 있다. 기록된 audience 가 있고 정규화한 제목과 본문이 그대로면 그 audience 를 유지하고 조회하지 않으며 `unresolved` 는 빈 목록이다. audience 가 없는 이전 글은 같은 내용으로 고쳐도 audience 를 계산한다. 이때 선언 조회가 필요한 주소가 있으면 조회하며, 조회가 실패하면 편집은 저장하지 않는다. 제목·본문·저자가 그대로여서 audience 만 새로 기록된 경우 `content_updated_at` 은 유지되고 `Board_post_updated` 신호는 나가지 않는다. 읽기가 먼저 시작한 백엔드에는 조회가 없어서 주소가 든 글은 거절되고, 이후 `init_jsonl` 이 조회를 넣으면 풀린다. `unresolved` 는 MCP 도구 `masc_board_post`·`masc_board_post_update`·`masc_board_comment` 의 응답에 실린다 |
 | L2d | Keeper 가 글자에서 `@이름` 을 다시 읽는 두 곳(`match_observation`, `wake_reason` 의 `match_signal`)이 기록된 `audience` 를 쓴다. 읽는 쪽을 지우는 일이고 새 상태는 없다. 다만 `match_observation` 은 큐에 쌓인 자극에 `audience` 가 없어서, 글은 그 자리에서 읽는 글의 값을, 댓글은 댓글 목록을 읽어서 가져와야 한다 (§3.4) |
 | L3 | 브로드캐스트 쓰기와 알림이 `resolution` 을 쓰고, 전달은 정해 둔 받는 사람으로 Keeper 를 찾는다. `Board_addressing.routing_target` 을 지운다. 지우기 전에 후보 추출이 선택자 옆의 `@이름` 을 놓치지 않는지 시험한다 (§3.4). 재생 도구에 저장된 메시지를 더한다 (§7) |
 | L4 | gRPC `mentions` 를 후보로 바로 넘기고, 선언에 없는 이름은 오류로 돌려준다 (D3) |
@@ -223,8 +225,8 @@ val resolve :
 
 - 재생: `tools/recipient_replay --keepers <Keeper 설정 폴더> --posts <board_posts.jsonl>` 가 저장된 board 글에 새 규칙을 돌려서 받는 사람이 바뀌는 글을 모두 나열한다. 이름을 뽑는 문법과 후보·분류는 쓰기 경로가 쓸 코드 그대로이고, 선언만 Keeper 설정의 `mention_targets` 에서 읽는다. 쓰기 경로의 조회는 저장된 Keeper 메타를 읽으므로 둘은 다른 읽기다. 기대는 `check`·`runtest`·`all` 과 사람·계정 이름이 받는 사람에서 빠지고, 선언된 Keeper 앞으로 쓴 글은 그대로인 것이다. 빠지는 글은 하나씩 눈으로 확인한다. 시스템 글은 쓰기 경로가 대상을 읽지 않으므로 돌리지 않고 따로 센다. 글 줄은 서버가 글을 읽는 디코더(`Board_votes_json.post_of_yojson`)로 읽는다. 서버가 읽지 못하는 줄은 읽지 못한 줄로 세고 종료 코드가 1 이 된다.
 - 재생 결과(2026-10-29): 대상 지정 글 686개 중 시스템 글 16개를 빼고 670개를 돌렸다. 501개는 그대로이고, 109개는 받는 사람이 비고, 60개는 받는 사람이 줄어든다. 글에서 다시 뽑은 Keeper 가 기록과 다른 글은 0개이고, 조회가 실패한 글도 0개다. 재생은 이름으로 지정받는 Keeper 만 견준다. 받는 사람이 빈 글이 `Discoverable` 이 되어 주의 판단 후보가 되는 것은 견주지 않는다 (§3.3). 도구는 board 글만 돌린다. 메시지는 L3 에서 더한다. 위 숫자는 읽지 못한 줄이 0개이고 종료 코드가 0 인 실행의 것이다. 읽지 못한 줄이 있어 종료 코드가 1 인 실행의 숫자는 이 문서에 옮기지 않는다.
-- 시험: 선언된 이름, 별칭, 같은 별칭을 Keeper 둘이 쓰는 설정, 모르는 이름, 코드 조각 안의 이름, 이름이 섞인 글, 이름 모양이 아닌 토큰(`types/node`, `../x`. 후보가 되지 않아 `declared` 에 닿지 않는다), `@@` 선택자 옆의 `@이름`, 대소문자(`@Alice` 가 Keeper `alice` 에 맞고 `unresolved` 에는 쓴 철자로 나온다), 메타를 못 읽는 Keeper 가 있는 설정(쓰기가 오류로 끝나고 저장되지 않는다), Keeper 이름보다 긴 이름(129자 이상이고, 이름 뒤에 `.json` 이 붙어 파일 이름이 한도를 넘는 251자 이상을 포함한다. 쓰기가 오류로 끝나지 않고 `unresolved` 로 나온다. L2c). `Keeper_id` 는 소문자로 바꾸고, board 의 `Agent_id` 는 대소문자를 구분한다.
-- 응답: 선언에 없는 이름이 `unresolved` 로 나온다. 조회가 실패하면 쓰기가 오류로 끝난다 (D5). gRPC 는 선언에 없는 이름도 오류다 (D3).
+- 시험: 선언된 이름, 별칭, 같은 별칭을 Keeper 둘이 쓰는 설정, 모르는 이름, 코드 조각 안의 이름, 이름이 섞인 글, 이름 모양이 아닌 토큰(`types/node`, `../x`. 후보가 되지 않아 `declared` 에 닿지 않는다), `@@` 선택자 옆의 `@이름`, 대소문자(`@Alice` 가 Keeper `alice` 에 맞고 `unresolved` 에는 쓴 철자로 나온다), 메타를 못 읽는 Keeper 가 있는 설정(쓰기가 오류로 끝나고 저장되지 않는다), Keeper 이름보다 긴 이름(129자 이상이고, 파일 이름 한도가 255바이트인 곳에서 이름 뒤에 `.json` 이 붙으면 한도를 넘는 251자 이상을 포함한다. 별칭 조회가 성공하고 선언이 없으면 해석 결과의 `unresolved` 에 나오며, 선언된 이름은 board 의 64자 한도를 넘어 조회 오류가 된다. 일반 이름 후보를 새로 해석해 선언된 대상이 없는 `Direct` 글은 쓰기를 거절한다 (§3.3). L2c). `Keeper_id` 는 소문자로 바꾸고, board 의 `Agent_id` 는 대소문자를 구분한다.
+- 응답: 일반 이름 후보를 새로 해석한 쓰기가 성공하면 선언에 없는 이름이 `unresolved` 로 나온다. 새 해석에서 선언된 대상이 없는 `Direct` 글은 오류 응답이다 (§3.3). 기록된 audience 를 유지하는 고치기의 `unresolved` 는 빈 목록이다 (§6). 조회가 실패하면 쓰기가 오류로 끝난다 (D5). gRPC 는 선언에 없는 이름도 오류다 (D3).
 - 재생 도구는 일회용으로 두지 않고 저장소에 둔다. 출력에 글 제목이 들어가므로 결과 목록은 저장소에 넣지 않는다.
 
 ## 8. 결정

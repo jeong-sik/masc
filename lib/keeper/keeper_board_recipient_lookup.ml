@@ -24,14 +24,15 @@ let recipient id =
          (Board.show_board_error error))
 ;;
 
-(* The settings are read from disk.  Listing the Keepers makes the directory
-   when it is missing, and that raises [Sys_error] when it cannot be made.  A
-   read that raises is a failed lookup, so the write ends with an error the
-   author gets instead of an exception. *)
+(* The settings are read from disk. Creating a missing directory can raise
+   [Sys_error] with Eio or [Unix.Unix_error] in the Unix fallback. Both are
+   failed lookups; cancellation and other exceptions still propagate. *)
 let reading read =
   match read () with
   | result -> result
   | exception Sys_error detail -> Error detail
+  | exception Unix.Unix_error (error, operation, _) ->
+    Error (Printf.sprintf "%s: %s" operation (Unix.error_message error))
 ;;
 
 (* Keeper names retain their spelling in metadata filenames. On a
@@ -75,14 +76,23 @@ let declared ~config ~all_names ~all_metas candidate =
   | None -> Ok None
   | Some id ->
     let name = Keeper_identity.Keeper_id.to_string id in
-    (* [name] must be a valid Keeper name before any file name is built from
-       it, so a long or odd name never reaches the file system. *)
+    let failed detail =
+      Error (Printf.sprintf "cannot resolve @%s: %s" written detail)
+    in
+    let find_alias () =
+      match Lazy.force all_metas with
+      | Error detail -> failed detail
+      | Ok metas ->
+        (match Keeper_meta_store.keeper_for_mention_target_in metas ~mention_target:name with
+         | Error detail -> failed detail
+         | Ok None -> Ok None
+         | Ok (Some _) -> recipient id)
+    in
+    (* Only an own-name lookup uses [name] as a path. An alias need not obey
+       Keeper filename restrictions, so still scan aliases if this is invalid. *)
     (match Keeper_id.Keeper_name.of_string name with
-     | Error _ -> Ok None
+     | Error _ -> find_alias ()
      | Ok _ ->
-       let failed detail =
-         Error (Printf.sprintf "cannot resolve @%s: %s" written detail)
-       in
        (* A case-insensitive filesystem may open [Alice.json] for [alice].
           Check the actual directory spelling as well as the payload before
           granting the own-name shortcut. The names listing does not read any
@@ -105,18 +115,7 @@ let declared ~config ~all_names ~all_metas candidate =
              (match alternate_own_name_answers ~config ~id ~folded_name:name names with
               | Error detail -> failed detail
               | Ok true -> recipient id
-              | Ok false ->
-                (match Lazy.force all_metas with
-                 | Error detail -> failed detail
-                 | Ok metas ->
-                   (match
-                      Keeper_meta_store.keeper_for_mention_target_in
-                        metas
-                        ~mention_target:name
-                    with
-                    | Error detail -> failed detail
-                    | Ok None -> Ok None
-                    | Ok (Some _) -> recipient id)))
+              | Ok false -> find_alias ())
        in
        (* A file this build cannot read is not "no such Keeper": taking it for
           one would turn the address into prose without a word to the author. *)

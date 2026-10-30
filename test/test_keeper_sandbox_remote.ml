@@ -137,6 +137,12 @@ let stub_main () =
     (* The transport prints a line of its own before the shim runs. *)
     write_all Unix.stderr ("Warning: transport line\n" ^ acceptance ^ "guest-err" ^ trailer ~exit:3 ());
     exit 0
+  | "accept-long-preamble" ->
+    (* A transport line longer than the frame bound, then the frame. *)
+    write_all Unix.stderr
+      (String.make (Exec_ssh_protocol.acceptance_frame_max_bytes + 10) 'w' ^ "\n"
+       ^ acceptance ^ "guest-err" ^ trailer ~exit:3 ());
+    exit 0
   | "accept-silent" -> exit 1
   | "accept-rs-payload" ->
     write_all Unix.stderr ("\x1e{\"not\":\"a frame\"}\x1eguest-err" ^ trailer ~exit:3 ());
@@ -1566,6 +1572,20 @@ let test_a_head_that_is_not_the_frame_stays_payload () =
   | _ -> fail "the run did not finish as a payload result"
 ;;
 
+(* The stream gives up on a frame that starts past the bound, so the text the
+   host reads afterwards must not take it out either: what the caller gets is
+   the same on both paths. *)
+let test_a_frame_past_the_bound_is_kept_by_the_stream_and_the_result () =
+  with_eio @@ fun () ->
+  match run_with_stderr_chunks "accept-long-preamble" with
+  | Masc_exec.Sandbox_target.Ran { stderr; _ }, _, streamed, true ->
+    let frame = Exec_ssh_protocol.render_acceptance_frame Exec_ssh_protocol.newest in
+    check bool "the result still carries the frame" true (contains frame stderr);
+    check bool "the stream still carries the frame" true (contains frame streamed);
+    check string "both paths show the caller the same bytes" streamed stderr
+  | _ -> fail "the run did not finish as a payload result"
+;;
+
 let test_acceptance_evidence_stays_with_an_unknown_effect () =
   with_eio @@ fun () ->
   List.iter (fun (mode, expected, wire_word) ->
@@ -1606,6 +1626,8 @@ let () =
               test_acceptance_frame_never_reaches_the_payload_stderr
           ; test_case "a transport line ahead of the frame stays" `Quick
               test_a_transport_line_ahead_of_the_frame_stays_and_the_frame_goes
+          ; test_case "a frame past the bound is the same on both paths" `Quick
+              test_a_frame_past_the_bound_is_kept_by_the_stream_and_the_result
           ; test_case "a head that is not the frame stays payload" `Quick
               test_a_head_that_is_not_the_frame_stays_payload
           ; test_case "acceptance evidence stays with an unknown effect" `Quick

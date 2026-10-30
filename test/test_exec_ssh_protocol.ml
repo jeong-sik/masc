@@ -506,6 +506,72 @@ let test_acceptance_head_that_is_not_a_frame_is_payload () =
   check bool "short output with no separator is pending" true
     (split_acceptance_head "hello\n" = Head_pending)
 
+(* A stream reader decides one chunk at a time and the host decides again on
+   the whole text afterwards. Both must reach the same answer, so a frame
+   that starts at or past the bound is payload however it arrives. *)
+let test_a_frame_starting_past_the_bound_is_payload () =
+  let open Exec_ssh_protocol in
+  let frame = render_acceptance_frame newest in
+  let last_inside = String.make (acceptance_frame_max_bytes - 1) 'x' in
+  check bool "a frame starting at the last byte inside the bound is read" true
+    (split_acceptance_head (last_inside ^ frame ^ "out")
+     = Head_frame { v = newest; preamble = last_inside; rest = "out" });
+  let first_outside = String.make acceptance_frame_max_bytes 'x' in
+  check bool "a frame starting at the bound is payload" true
+    (split_acceptance_head (first_outside ^ frame) = Head_payload);
+  check bool "so is one starting far past it" true
+    (split_acceptance_head (first_outside ^ first_outside ^ frame) = Head_payload)
+
+(* The host reads stderr in pieces, holding the head while it is pending, and
+   again as a whole once the process is done. The two must agree wherever the
+   pieces are cut. This replays the stream reader on every two-way split of a
+   stream, and on a split into single bytes. *)
+let read_in_pieces pieces =
+  let open Exec_ssh_protocol in
+  let rec go held = function
+    | [] -> (match split_acceptance_head held with
+             | Head_pending -> `Pending held
+             | Head_payload -> `Payload held
+             | Head_frame { v; preamble; rest } -> `Frame (v, preamble, rest))
+    | piece :: later ->
+      (match split_acceptance_head (held ^ piece) with
+       | Head_pending -> go (held ^ piece) later
+       | Head_payload -> `Payload (held ^ piece ^ String.concat "" later)
+       | Head_frame { v; preamble; rest } ->
+         `Frame (v, preamble, rest ^ String.concat "" later))
+  in
+  go "" pieces
+
+let test_a_stream_read_in_pieces_agrees_with_the_whole () =
+  let open Exec_ssh_protocol in
+  let frame = render_acceptance_frame newest in
+  let at k = String.make k 'x' in
+  let spaced = "\x1e{\"masc_request_accepted\": {\"v\": 3}}\x1e" in
+  let streams =
+    [ "frame first", frame ^ "out"
+    ; "a line then the frame", "warn\n" ^ frame ^ "out"
+    ; "frame starting at the last byte inside the bound",
+      at (acceptance_frame_max_bytes - 1) ^ frame ^ "out"
+    ; "frame starting two bytes inside the bound",
+      at (acceptance_frame_max_bytes - 2) ^ frame ^ "out"
+    ; "frame starting at the bound", at acceptance_frame_max_bytes ^ frame
+    ; "a frame spaced differently", spaced ^ "out"
+    ; "a frame of a major no build speaks",
+      "\x1e{\"masc_request_accepted\":{\"v\":99}}\x1eout"
+    ; "a trailer and no frame", "\x1e{\"masc_exec_result\":{}}\x1e"
+    ; "a cut off frame", at 5 ^ String.sub frame 0 9
+    ; "output with no separator", "plain output\n" ]
+  in
+  List.iter (fun (name, stream) ->
+    let whole = read_in_pieces [ stream ] in
+    for cut = 0 to String.length stream do
+      let pieces = [ String.sub stream 0 cut; String.sub stream cut (String.length stream - cut) ] in
+      check bool (Printf.sprintf "%s: cut at %d" name cut) true (read_in_pieces pieces = whole)
+    done;
+    let bytes = List.init (String.length stream) (fun i -> String.make 1 stream.[i]) in
+    check bool (name ^ ": one byte at a time") true (read_in_pieces bytes = whole))
+    streams
+
 (* The stream ended on a head still pending. A frame the wire cut off is not
    payload; everything else is. *)
 let test_a_cut_off_frame_is_not_payload () =
@@ -551,6 +617,10 @@ let () =
           test_acceptance_frame_after_a_transport_line
       ; test_case "is held until it closes" `Quick
           test_acceptance_frame_is_held_until_it_closes
+      ; test_case "a frame starting past the bound is payload" `Quick
+          test_a_frame_starting_past_the_bound_is_payload
+      ; test_case "pieces agree with the whole at every cut" `Quick
+          test_a_stream_read_in_pieces_agrees_with_the_whole
       ; test_case "a cut off frame is not payload" `Quick
           test_a_cut_off_frame_is_not_payload
       ; test_case "a head that is not a frame is payload" `Quick

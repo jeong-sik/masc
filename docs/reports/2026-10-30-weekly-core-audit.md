@@ -7,6 +7,11 @@
 24시간 집계는 재시작을 가로지르므로 모든 실행을 현재 바이너리에 귀속하지 않는다.
 [계측 방법과 집계](../evidence/2026-10-30-weekly-core-audit/README.md).
 
+20:13 KST경 후속 health 조회에서 재기동된 서버는 main과 같은
+`a97919872890eb9b4e730f65b745ab094ed8ce12`를 보고했다. 전체 health는
+`degraded`였다. 후속 운영 관측은 각각 명시한 별도 시각의 읽기다. 이전 관측의 SHA와
+표본을 이 서버의 결과로 바꾸어 해석하지 않는다.
+
 ## 변경 흐름
 
 2026-10-30 17:08:10 KST를 끝으로, 각 행은 직전 24시간의 first-parent
@@ -41,6 +46,8 @@ ID 수정 #46951, retained-result와 Codex fixture 테스트 수정 #46899·#469
 | 기능 | 확인한 경계와 현재 판단 | 남은 검증 |
 | --- | --- | --- |
 | Runtime failover | 소스 확인: 후보 실패를 분류하고 요청 해결 의무·effect 관측을 확인한 뒤 다음 후보로 진행한다. [driver](https://github.com/jeong-sik/masc/blob/8ef0028e911dd83c78bc57362904e0787df72c3e/lib/keeper/keeper_turn_driver.ml), [runtime 시도](https://github.com/jeong-sik/masc/blob/8ef0028e911dd83c78bc57362904e0787df72c3e/lib/keeper/keeper_turn_driver_try_runtime.ml). | 재시작 후 표본에서 실패 뒤 다른 후보가 완료한 사례는 확인하지 못했다. 실제 failover 성공과 중복 effect 방지는 미검증. |
+| Schedule 입력과 결과 불명 | 재기동 후 한 Keeper에서 같은 `schedule_due` stimulus ID가 여러 실패 turn에 다시 전달된 것으로 시간 대조됐다. provider context 초과 로그와 대조한 영수증에는 `effect_review_required` 및 `observation_unavailable`이 기록됐다. turn 내부 재시도는 막히며, 실패 자체는 batch를 ACK하지 않는다. 다른 종료·취소가 없다면 이후 intake가 다시 선택할 수 있다. | 원장 행에는 queue incarnation이 없어 매번 같은 incarnation인지는 미확인이다. 실제 외부 effect가 일어났거나 중복됐다는 뜻도 아니다. 서로 다른 시점의 로그·원장·큐를 결속한 범위와 재기동 후 ACK 관측의 한계는 [익명 집계](../evidence/2026-10-30-fenced-schedule-redelivery/README.md)에 있다. 결과 불명인 동일 항목만 이후 intake에서 보류하고 명시적으로 해제하는 계약은 확인하지 못했다. |
+| 공식 client의 실패 입력 | 위 실패 turn마다 MASC 입력 집계는 메시지 4,325,449 B였으며 이 중 도구 결과는 2,526,116 B, thinking은 743,425 B였다. 각 turn에 대한 Agent Core provider-input snapshot의 정확한 일치는 찾지 못했다. | 집계는 MASC가 client에 넘긴 내용이며 client 자체 이력, 실제 provider wire, token 또는 불필요한 내용의 크기가 아니다. provider가 보고한 1,048,576 token 한도와 byte를 직접 비교하지 않는다. |
 | Keeper microVM 준비 | 17:46 KST경 독립 리뷰를 요청한 한 Keeper에서 Execute 4건이 명령 실행 전 준비 단계에서 거절됐다. 최초 작업 루트 쓰기 확인은 25초에 시간 초과했고, 이후 3건은 guest 프로세스 생성 실패로 볼륨 mount 확인을 마치지 못했다. | 설치본은 첫 시간 초과를 쓰기 불가로 표현한다. 이후 병합된 [#46938](https://github.com/jeong-sik/masc/pull/46938)은 이를 확인 실패로 정정했으나 설치본 반영은 확인되지 않았다. 당시 mount 부재나 timeout의 원인은 미확인이다. |
 | SSH shim 설정 읽기 | 9월 28일 원본을 가리키는 [공개 마스킹 증거](../evidence/2026-09-29-runtime-errors/d2-top5-sanitized.jsonl)의 Read 11건은 원격 shim의 설정 파일 읽기 실패까지만 확인된다. [수정 직전 소스](https://github.com/jeong-sik/masc/blob/651e7d62c3c81edb9d847114679576122955c899/lib/exec_shim/exec_shim.ml#L439-L449)는 Unix 오류 세부를 버렸고, 다음 날 병합된 [#39788](https://github.com/jeong-sik/masc/pull/39788)은 이후 오류에 OS 작업과 설명을 보존하도록 바꿨다. | 10월 30일 확인에서 [조사 문서](../evidence/2026-09-29-runtime-errors/README.md)가 지정한 9월 28일 운영 원본은 해당 경로에 없었고 사용자는 삭제 가능성을 언급했다. 당시 실행된 원격 shim 버전과 errno·근본 원인, 현재 원격 shim 배포 및 Read 복구는 미확인이다. shim 제거에는 이를 대체할 원격 실행과 안전 경계의 검토가 필요하다. |
 | Keeper context 생명주기 | 운영 관측: 6개 Keeper에서 전송 전 직렬화한 본문을 저장한 기록 16건은 411,840–1,926,598 B, 메시지 270–4,387개다. 가장 큰 기록에는 assistant 2,186개와 tool 2,186개가 있고 동일 role·artifact 참조의 반복은 첫 항목을 제외하면 12개다. 외부화된 도구 결과의 마커와 호출 구조도 다수 남았다. | 저장 시각으로 고른 각 turn의 마지막 관측이며 그 시간에 발송된 모든 요청은 아니다. artifact 참조가 다르다고 의미가 다른 것은 아니고 이 중복 수는 wire 절약량이 아니다. 크기 자체가 장애 증거는 아니다. 여러 turn의 보존·삭제를 검증해야 한다. [익명 집계](../evidence/2026-10-30-weekly-core-audit/largest-provider-input-aggregate.json). |
@@ -68,7 +75,7 @@ ID 수정 #46951, retained-result와 Codex fixture 테스트 수정 #46899·#469
 | TUI Keeper 상태와 조작 | 소스 확인: 서버의 `keepalive_running`은 현재 phase에서 turn 실행 가능 여부이고 Paused도 false다. TUI는 이 false를 fiber 부재와 동일하게 취급해 Boot를 제안한다. [상태](https://github.com/jeong-sik/masc/blob/8ef0028e911dd83c78bc57362904e0787df72c3e/lib/keeper/keeper_status_runtime.ml), [조작](https://github.com/jeong-sik/masc/blob/8ef0028e911dd83c78bc57362904e0787df72c3e/bin/masc_tui_keeper_control.ml). | 정지·미등록·살아 있는 paused lane을 구분하고 재개 결과의 새 관측을 받아야 한다. workspace 조건을 추가하는 로컬 후보는 이전 서버의 무타입 409 처리에 회귀가 있어 보류 중이다. |
 | TUI Keeper 삭제 | 감사 기준 소스 확인: TUI가 workspace를 확인한 뒤 purge를 요청하지만, 요청에는 확인한 workspace가 포함되지 않는다. 서버는 수신 시점의 workspace와 Keeper 이름으로 삭제를 접수한다. [클라이언트](https://github.com/jeong-sik/masc/blob/8ef0028e911dd83c78bc57362904e0787df72c3e/bin/masc_tui_http.ml), [서버](https://github.com/jeong-sik/masc/blob/8ef0028e911dd83c78bc57362904e0787df72c3e/lib/server/server_dashboard_http_delete_actions.ml). | 확인과 전송 사이 서버 workspace가 바뀌고 같은 이름이 존재하면 다른 대상에 요청할 수 있다. 실제 발생은 미확인이다. [#46959](https://github.com/jeong-sik/masc/pull/46959)가 새 서버와 새 TUI 조합의 조건 검사를 main에 추가했다. 구버전 조합과 별도 재시도 API, 운영 적용은 미해결이다. |
 | TUI 연결 / 가시성 | 감사 기준 소스에서는 Queue의 Schedule 정의 행에서 순서를 바꾸려 할 때 예정 시각에 작업이 실행된다고 안내했다. [#46973](https://github.com/jeong-sik/masc/pull/46973)은 [이 한 안내](https://github.com/jeong-sik/masc/blob/d44ffd874b064f40875c8d91f64b799fadef9441/bin/masc_tui.ml#L10648-L10653)를 여기서 순서를 바꿀 수 없고 예정된 작업이 기다릴 수 있다고 정정했다. 식별 가능한 개별 pending Event 행에 대한 같은 조작은 `Immediate` 또는 `Low` urgency [변경 요청](https://github.com/jeong-sik/masc/blob/d44ffd874b064f40875c8d91f64b799fadef9441/bin/masc_tui.ml#L10454-L10465) 경로로 간다. | 실제 TUI 렌더링과 운영 적용은 미검증이다. Event 요청의 실제 수락·소비와 다른 Queue·Goal·HITL·Runtime·Memory의 stale/unknown/실패 표시와 실제 조작도 미검증이다. |
-| Terminal-Bench | 저장소에 [4.0 Harbor adapter](https://github.com/jeong-sik/masc/blob/8ef0028e911dd83c78bc57362904e0787df72c3e/benchmarks/terminal_bench/README.md)가 있다. 데이터셋 격리 계획 2개와 설정 렌더링 8개 Python 테스트가 기준 코드에서 통과했다. | 로컬 Harbor는 0.22.0이고 문서의 환경은 0.23.0 고정이다. 실제 태스크·점수·전체 세트는 실행하거나 검증하지 않았다. |
+| Terminal-Bench | 저장소에 [4.0 Harbor adapter](https://github.com/jeong-sik/masc/blob/8ef0028e911dd83c78bc57362904e0787df72c3e/benchmarks/terminal_bench/README.md)가 있다. 데이터셋 격리 계획 2개와 설정 렌더링 8개 Python 테스트가 기준 코드에서 통과했다. | PATH의 Harbor는 0.22.0이지만 프로젝트 `.venv`에는 요구 버전 0.23.0이 있다. 준비된 Linux 배포 manifest의 source commit은 `c9adfa1ac38fc0f68fa5e9cacdd103d83a972dd5`로 위 서버와 다르며, 그 바이너리로 현 코드의 성적을 주장할 수 없다. 실제 태스크·점수·전체 세트는 실행하거나 검증하지 않았다. |
 
 ## 시간축과 용어 경계
 
@@ -107,13 +114,17 @@ boundary·range receipt·progress는 이 turn들을 읽어 기억을 갱신할 �
 
 ## 우선순위
 
-1. 제한 공개 댓글의 비참여자 fanout, Librarian의 무태그 범위 채팅 누락,
+1. 결과 불명 turn의 정확한 입력 원본과 시도를 내구적으로 결속하고, 그 원본을
+   재기동 이후에도 재전달하지 않으면서 다른 입력은 진행할 수 있는 보류와
+   명시적 확인 경계를 검증한다. 단순 순서 변경은 재전달을 막지 못하고 실패
+   종결은 pending 원본을 제거한다.
+2. 제한 공개 댓글의 비참여자 fanout, Librarian의 무태그 범위 채팅 누락,
    TUI Queue 재개의 잘못된 성공 판정을 각각 작은 변경으로 재현·수정한다.
    Board에 이미 남은 후보와 전체 read ACL도 별도로 확인한다.
-2. 실제 provider input, history marker, recall 판정의 증가 원인과 Curator의
+3. 실제 provider input, history marker, recall 판정의 증가 원인과 Curator의
    크기 복귀 정책을 각각 추적한다. 정확한 신뢰 경계와 유효기간이 정의되기
    전에는 기억이나 도구 결과를 버리거나 모델 판정을 재사용하지 않는다. 초과
    뒤 크기를 영구 고정하면 작은 묶음에 장기간 갇힐 수 있으므로 처리량과 안전한
    재증가 근거도 검증해야 한다.
-3. 중지 Keeper 주소 지정, HITL, schedule/drain, TUI 조작의 운영 계약과 실패
+4. 중지 Keeper 주소 지정, HITL, schedule/drain, TUI 조작의 운영 계약과 실패
    복구를 검증한다. 이후 설치된 동일 SHA로 실제 Terminal-Bench 결과를 수집한다.

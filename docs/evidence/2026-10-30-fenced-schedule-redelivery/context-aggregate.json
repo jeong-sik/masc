@@ -1,0 +1,161 @@
+{
+  "observed_at_utc": "2026-10-30T11:13:21.706351+00:00",
+  "binary_reported_commit": "a97919872890eb9b4e730f65b745ab094ed8ce12",
+  "binary_reported_started_at_utc": "2026-10-30T10:49:39Z",
+  "selection": "One not-reported-paused Keeper with a pending stimulus and a runtime observation-gap log that includes a provider 400 context-window refusal after this process started.",
+  "official_client_observation_log_rows": 5,
+  "first_observation_utc": "2026-10-30T10:52:10Z",
+  "latest_observation_utc": "2026-10-30T11:07:43Z",
+  "unique_log_turns": 5,
+  "receipt_records_scanned": 5728,
+  "uniquely_correlated_observations": 5,
+  "unmatched_or_ambiguous_observations": 0,
+  "receipt_join": "Keeper and turn number, with log time inside the receipt start/end window plus two seconds; the log row does not carry the receipt trace identity.",
+  "receipt_disposition_counts": [
+    {
+      "operator_disposition": "effect_review_required",
+      "reason": "provider_attempt_effect_fenced",
+      "completion_contract": "unknown",
+      "count": 5
+    }
+  ],
+  "receipt_lane_attempt_count_distribution": {
+    "1": 5
+  },
+  "receipt_fallback_applied_distribution": {
+    "False": 5
+  },
+  "provider_input_snapshot_records_scanned": 204,
+  "exact_snapshots_per_correlated_receipt": [
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "turn_records_scanned": 1650,
+  "exact_turn_records_per_correlated_receipt": [
+    1,
+    1,
+    1,
+    1,
+    1
+  ],
+  "all_refusals_include_1048576": true,
+  "latest_older_snapshot_body_bytes": 2491644,
+  "latest_older_snapshot_age_at_latest_receipt_seconds": 6193.122,
+  "read_error_counts": {},
+  "limits": [
+    "Receipt correlation uses time and keeper turn number, not a trace field carried on the log row.",
+    "Log rows are observations, not a count of underlying provider requests.",
+    "The provider reported the context window; no actual request token count or wire body was independently captured here.",
+    "An unknown effect is not evidence that a tool ran or that it did not run.",
+    "The older input snapshot is not an exact match for any of these failed turns.",
+    "Attributed component bytes describe MASC-transmitted input, not official-client native history, provider wire bytes, billed tokens, or proof of avoidable content.",
+    "The attribution samples were collected after the initial health and log aggregate; subsequent failed turns can appear in only the later sample."
+  ],
+  "official_client_turn_attribution_samples": [
+    {
+      "observed_at_utc": "2026-10-30T10:52:10Z",
+      "message_attribution_bytes": 4325449,
+      "tool_result_bytes": 2526116,
+      "thinking_bytes": 743425,
+      "user_message_bytes": 511508,
+      "tool_schema_attribution_bytes": 270194,
+      "tool_result_percent_of_attributed_message_bytes": 58.4,
+      "serialized_body_bytes": null,
+      "provider_error_classification": {
+        "status_400_in_error": true,
+        "context_window_refusal_in_error": true,
+        "window_1048576_in_error": true
+      }
+    },
+    {
+      "observed_at_utc": "2026-10-30T10:54:41Z",
+      "message_attribution_bytes": 4325449,
+      "tool_result_bytes": 2526116,
+      "thinking_bytes": 743425,
+      "user_message_bytes": 511508,
+      "tool_schema_attribution_bytes": 270194,
+      "tool_result_percent_of_attributed_message_bytes": 58.4,
+      "serialized_body_bytes": null,
+      "provider_error_classification": {
+        "status_400_in_error": true,
+        "context_window_refusal_in_error": true,
+        "window_1048576_in_error": true
+      }
+    },
+    {
+      "observed_at_utc": "2026-10-30T10:57:38Z",
+      "message_attribution_bytes": 4325449,
+      "tool_result_bytes": 2526116,
+      "thinking_bytes": 743425,
+      "user_message_bytes": 511508,
+      "tool_schema_attribution_bytes": 270194,
+      "tool_result_percent_of_attributed_message_bytes": 58.4,
+      "serialized_body_bytes": null,
+      "provider_error_classification": {
+        "status_400_in_error": true,
+        "context_window_refusal_in_error": true,
+        "window_1048576_in_error": true
+      }
+    },
+    {
+      "observed_at_utc": "2026-10-30T11:04:11Z",
+      "message_attribution_bytes": 4325449,
+      "tool_result_bytes": 2526116,
+      "thinking_bytes": 743425,
+      "user_message_bytes": 511508,
+      "tool_schema_attribution_bytes": 270194,
+      "tool_result_percent_of_attributed_message_bytes": 58.4,
+      "serialized_body_bytes": null,
+      "provider_error_classification": {
+        "status_400_in_error": true,
+        "context_window_refusal_in_error": true,
+        "window_1048576_in_error": true
+      }
+    },
+    {
+      "observed_at_utc": "2026-10-30T11:07:43Z",
+      "message_attribution_bytes": 4325449,
+      "tool_result_bytes": 2526116,
+      "thinking_bytes": 743425,
+      "user_message_bytes": 511508,
+      "tool_schema_attribution_bytes": 270194,
+      "tool_result_percent_of_attributed_message_bytes": 58.4,
+      "serialized_body_bytes": null,
+      "provider_error_classification": {
+        "status_400_in_error": true,
+        "context_window_refusal_in_error": true,
+        "window_1048576_in_error": true
+      }
+    },
+    {
+      "observed_at_utc": "2026-10-30T11:14:04Z",
+      "message_attribution_bytes": 4325449,
+      "tool_result_bytes": 2526116,
+      "thinking_bytes": 743425,
+      "user_message_bytes": 511508,
+      "tool_schema_attribution_bytes": 270194,
+      "tool_result_percent_of_attributed_message_bytes": 58.4,
+      "serialized_body_bytes": null,
+      "provider_error_classification": {
+        "status_400_in_error": true,
+        "context_window_refusal_in_error": true,
+        "window_1048576_in_error": true
+      }
+    }
+  ],
+  "turn_attribution_sampled_at_utc": "2026-10-30T11:14:37.497026+00:00",
+  "snapshot_match_sampled_at_utc": "2026-10-30T11:21:17.821898+00:00",
+  "snapshot_matches_for_attribution_samples": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "snapshot_match_records_scanned": 204,
+  "snapshot_match_read_errors": 0
+}

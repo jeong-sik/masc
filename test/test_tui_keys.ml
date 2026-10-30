@@ -1408,7 +1408,8 @@ let test_keeper_peer_retry_is_readable_on_narrow_failures () =
   check_document ~cols:20 initial;
   let retained = new_state () in
   let page : Masc_tui_queue_inspection.peer_page =
-    {snapshot={queued_count=1;relations=[]};next_sequence=Some "10"} in
+    {snapshot={queued_count=1;relations=[];source_redacted_count=0;source_unverified_count=0};
+     next_sequence=Some "10"} in
   let first = begin_keeper_peer_reading retained ~keeper_name:"beta" in
   ignore (stage_keeper_peer_reading retained ~keeper_name:"beta" ~token:first (Ok page));
   ignore (settle_keeper_peer_reading retained ~input_pending:false);

@@ -654,13 +654,16 @@ class VerdictWithdrawalCase(GuardHarness):
         approval.update(id=89, submitted_at="2026-10-08T04:00:00Z")
         approval["user"]["login"] = "reviewer-account"
         (self.data / "review.json").write_text(json.dumps(approval))
-        request = self.negative_review()
-        request["body"] = f"verdict: FAIL head: {HEAD} by: other-keeper\nsource findings"
-        self.reviews(request, approval)
-        for mode in ("--source-receipt", "--merge-check"):
-            result = self.run_guard(mode)
-            self.assertEqual(result.returncode, 2, result.stderr)
-            self.assertIn("unresolved change requests", result.stderr)
+        for request_head, diagnostic in ((HEAD, "latest structured verdict is FAIL"),
+                                         ("a" * 40, "unresolved change requests")):
+            request = self.negative_review()
+            request["body"] = f"verdict: FAIL head: {request_head} by: other-keeper\nsource findings"
+            self.reviews(request, approval)
+            for mode in ("--source-receipt", "--merge-check"):
+                with self.subTest(request_head=request_head, mode=mode):
+                    result = self.run_guard(mode)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn(diagnostic, result.stderr)
 
     def test_source_receipt_uses_submission_order_when_review_ids_are_reversed(self):
         footer = footer_line().replace(" · reviewed base", " · replaces own CHANGES_REQUESTED 90 · reviewed base")

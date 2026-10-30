@@ -147,7 +147,8 @@ val wake_reason
   :  meta:Keeper_meta_contract.keeper_meta
   -> signal:Board_dispatch.board_signal
   -> wake_assessment board_read
-(** [Not_addressed] and [Unaddressed_comment _] mean the structural reactive
-    pipeline found no deterministic address for this keeper. [Unavailable _]
+(** Assess a recorded [Thread_participants] audience without reinterpreting the
+    signal text as an address. [Not_addressed] and [Unaddressed_comment _] mean
+    the structural reactive pipeline found no deterministic address for this keeper. [Unavailable _]
     names the Board read that answered no row (the post was swept or an id does
     not parse); reading again gives the same answer, so callers consume the source. *)

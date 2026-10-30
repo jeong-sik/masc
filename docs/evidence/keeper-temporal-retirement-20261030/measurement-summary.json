@@ -1,6 +1,6 @@
 {
   "schema": "keeper.temporal_retirement.selected_evidence.v1",
-  "selected_at": "2026-10-30T10:48:48.234356+00:00",
+  "selected_at": "2026-10-30T10:54:00.106167+00:00",
   "proof_scope": "One synthetic live candidate campaign; retained-record consistency, not remote authenticity or a continuity verdict",
   "private_evidence_root": "artifacts/temporal-continuity-retirement-20261030",
   "source_files_sha256": {
@@ -16,7 +16,7 @@
     "production-before.json": "828cca7c7942831b78b17ef7c0282a29399c1f2a93c5a4acf0f129772a5d619a",
     "production-after-cleanup.json": "beba4559efdcaf0f7183d991364a5539617b545d9a1b8cb7539242b120d411f7",
     "tui-01/receipt.json": "bf66cb8bf641b829e22c8b5c57e050de113abc78f6b1e1a2d87631d962543d3d",
-    "select_evidence.py": "879edf24f8fdee49e87059b3d7690e770a3339004bcf5d387dae2ee5969ad9a1"
+    "select_evidence.py": "73a067b818930b4017d94f7f3448717a14a9d084967d857b21066d43783f858d"
   },
   "compiled_candidate": {
     "run_id": "41038850459",
@@ -49,7 +49,7 @@
     "scope": "Exact compiled native candidate; not installed production. Actual later UI capture is recorded separately below."
   },
   "helper_source_at_selection": {
-    "commit": "bed1ac6dcb8290ca38c920fb726a93a25fffe460",
+    "commit": "d4d4459223e962a090491c5d7aa3213fdb2e1c89",
     "sha256": "c2b2d21772adee05f559c298f990dbe51811dc95264f485f8fe9bb50cf905c72",
     "delta": "Post-trial known-addon-unattached preflight is HTTP-fixture tested; capture uses retained aad42389 snapshot. Compiled lib/bin/test/config/addons unchanged."
   },
@@ -69,7 +69,7 @@
     "failed_native": {
       "run_id": 41037289306,
       "source_sha": "23a1529aa956b7f214b774c946eaba0a42689f5c",
-      "outcome": "warning-4 non-exhaustive wildcard in renderer; fixed by explicit variant cases in candidate0639"
+      "outcome": "warning 4 fragile-match caused by wildcard on a closed variant; fixed by explicit variant cases in candidate0639"
     },
     "python": {
       "command": "python3 -m unittest discover -s scripts/tests -p test_keeper_temporal_continuity.py -v",

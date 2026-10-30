@@ -12,6 +12,17 @@
  (name runtest)
  (deps (alias runtest-test_dune_source_discovery)))
 
+(rule
+ (alias runtest-test_measure_viewport_cadence_bytes)
+ (deps ../scripts/measure-viewport-cadence-bytes.py
+       ../scripts/resolve-viewport-cadence-pins.sh
+       ../scripts/tests/test_measure_viewport_cadence_bytes.py)
+ (action (run python3 %{dep:../scripts/tests/test_measure_viewport_cadence_bytes.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_measure_viewport_cadence_bytes)))
+
 (test
  (name test_tui_board_reader)
  (modules test_tui_board_reader)

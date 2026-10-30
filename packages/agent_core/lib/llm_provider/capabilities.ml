@@ -2341,10 +2341,11 @@ let%test "provider_l_capabilities has chat_template_kwargs thinking" =
 ;;
 
 let%test "for_model_id nvidia/nvidia resolves reasoning and tool choice" =
-  (* The nvidia-ultra-253b row left the embedded catalog with #45872's exact
-     identities; nvidia/nvidia is the surviving bare nvidia row. *)
+  (* nvidia/nvidia is the surviving bare nvidia row after #45872's exact
+     identities; its row leaves both flags to the nvidia base template
+     (provider_l), which declares reasoning and tool choice. *)
   match for_model_id "nvidia/nvidia" with
-  | Some c -> c.supports_tool_choice
+  | Some c -> c.supports_reasoning && c.supports_tool_choice
   | None -> false
 ;;
 
@@ -2365,8 +2366,16 @@ let%test "for_model_id qwen3 has chat_template_kwargs thinking control" =
 ;;
 
 (* nvidia-ultra-253b and nvidia/nvidia-core left the embedded catalog with
-   #45872's exact-identity rows; no surviving row carries their properties,
-   so the surviving nvidia rows carry this coverage now. *)
+   #45872's exact-identity rows.  Their reasoning coverage now lives on
+   surviving rows: the nvidia base template (above) and gemma4:31b (below). *)
+
+let%test "for_model_id gemma4:31b keeps the reasoning coverage" =
+  (* gemma4:31b declares supports_reasoning = true and tool_choice = false,
+     so this row pins the reasoning flag independently of the base template. *)
+  match for_model_id "gemma4:31b" with
+  | Some c -> c.supports_reasoning && not c.supports_tool_choice
+  | None -> false
+;;
 
 let%test "for_model_id google/gemma-4-26b-a4b has tools + seed" =
   match for_model_id "google/gemma-4-26b-a4b" with

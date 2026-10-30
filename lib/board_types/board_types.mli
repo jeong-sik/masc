@@ -196,6 +196,8 @@ type comment = {
   parent_id : Comment_id.t option;
   author : Agent_id.t;
   content : string;
+  audience : audience option;
+  (** Persisted write-boundary audience. [None] grants no recipient access. *)
   created_at : float;
   expires_at : float;
   votes_up : int;

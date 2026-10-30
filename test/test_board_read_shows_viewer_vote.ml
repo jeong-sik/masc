@@ -19,6 +19,7 @@ let comment ~id ~author ~content : Board.comment =
   ; parent_id = None
   ; author = Board.Agent_id.of_string author |> Result.get_ok
   ; content
+  ; audience = None
   ; created_at = 0.
   ; expires_at = 0.
   ; votes_up = 1

@@ -242,6 +242,7 @@ type comment = {
   parent_id: Comment_id.t option;
   author: Agent_id.t;
   content: string;
+  audience: audience option; (* None means no recorded audience; never infer it on read. *)
   created_at: float;
   expires_at: float;   (* MANDATORY *)
   votes_up: int;

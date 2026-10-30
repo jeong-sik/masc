@@ -9,7 +9,6 @@ type t =
     [Discoverable] may enter semantic attention judgment. *)
 
 type classification_error =
-  | Invalid_board_audience of Board.board_error
   | Invalid_board_target of string
   | Audience_not_recorded
 
@@ -23,11 +22,10 @@ val of_post : Board.post -> (t, classification_error) result
     records none is [Error Audience_not_recorded]: its title and body are not
     read for an address. *)
 
-val of_comment_text : content:string -> (t, classification_error) result
-(** A comment records no audience, so it is read from its own content. An exact
-    explicit address wins, otherwise the comment is scoped to
-    [Thread_participants]. The post a comment belongs to is not part of it.
-    An unsupported [@@name] selector is [Invalid_board_audience]. *)
+val of_comment : Board.comment -> (t, classification_error) result
+(** The audience the write boundary recorded with the comment. A comment that
+    records none is [Error Audience_not_recorded]: its content is not read for
+    an address, and neither is the post it belongs to. *)
 
 val of_board_audience : Board.audience -> (t, classification_error) result
 (** Project generic Board identities into canonical Keeper lane identities.

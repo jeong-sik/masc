@@ -2457,6 +2457,66 @@ let test_post_audience_survives_edit_and_restart () =
     ; `Null ]
 ;;
 
+let test_comment_audience_survives_restart () =
+  let get = function
+    | Ok value -> value
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let targets (comment : Board.comment) =
+    match comment.audience with
+    | Some (Board.Targets ids) -> List.map Board.Agent_id.to_string ids
+    | _ -> Alcotest.fail "persisted target audience missing"
+  in
+  let post = get (Board_dispatch.create_post ~author:"audience-owner"
+      ~content:"thread root" ~visibility:Board.Internal ~post_kind:Board.Human_post ()) in
+  let post_id = Board.Post_id.to_string post.id in
+  let addressed = get (Board_dispatch.add_comment ~post_id ~author:"commenter"
+      ~content:"@first-reader private evidence" ()) in
+  let plain = get (Board_dispatch.add_comment ~post_id ~author:"commenter"
+      ~content:"thread follow-up" ()) in
+  Alcotest.(check (list string)) "creation retains audience" ["first-reader"]
+    (targets addressed);
+  Alcotest.(check bool) "an unaddressed comment records thread participants" true
+    (plain.audience = Some Board.Thread_participants);
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  let reloaded id =
+    match List.find_opt (fun (c : Board.comment) ->
+            String.equal (Board.Comment_id.to_string c.id) (Board.Comment_id.to_string id))
+            (match Board_dispatch.read_comments ~post_id with
+             | Ok comments -> comments
+             | Error _ -> Alcotest.fail "comments unreadable after restart") with
+    | Some comment -> comment
+    | None -> Alcotest.fail "comment lost across restart"
+  in
+  let restored = reloaded addressed.id in
+  Alcotest.(check (list string)) "restart keeps exact audience" ["first-reader"]
+    (targets restored);
+  Alcotest.(check bool) "restart keeps the unaddressed audience" true
+    ((reloaded plain.id).audience = Some Board.Thread_participants);
+  let wire = Board.comment_to_yojson restored in
+  let without_audience = match wire with
+    | `Assoc fields -> `Assoc (List.remove_assoc "audience" fields)
+    | _ -> Alcotest.fail "comment wire must be an object"
+  in
+  (match Board.comment_of_yojson without_audience with
+   | Some comment -> Alcotest.(check bool) "missing audience is not inferred from content" true
+       (Option.is_none comment.audience)
+   | None -> Alcotest.fail "comment without recorded audience was lost");
+  List.iter (fun audience ->
+    let invalid = match wire with
+      | `Assoc fields -> `Assoc (("audience", audience) :: List.remove_assoc "audience" fields)
+      | _ -> Alcotest.fail "comment wire must be an object"
+    in
+    Alcotest.(check bool) "invalid audience cannot become valid read authority" true
+      (Option.is_none (Board.comment_of_yojson invalid)))
+    [ `Assoc ["kind", `String "targets"; "targets", `List []]
+    ; `Assoc ["kind", `String "targets"; "targets", `List [`String "bad/id"]]
+    ; `Assoc ["kind", `String "broadcast"; "kind", `String "discoverable"]
+    ; `Null ]
+;;
+
 let test_target_case_is_identity_level () =
   (* #25601: the shared grammar (Board_addressing) preserves target case;
      case normalization is an identity-level concern.  Board agent ids are
@@ -2961,6 +3021,8 @@ let () =
         (with_eio test_fusion_creation_emits_the_recorded_audience);
       Alcotest.test_case "post audience survives edit and restart" `Quick
         (with_eio test_post_audience_survives_edit_and_restart);
+      Alcotest.test_case "comment audience survives restart" `Quick
+        (with_eio test_comment_audience_survives_restart);
       Alcotest.test_case "target case is identity-level" `Quick
         (with_eio test_target_case_is_identity_level);
     ];

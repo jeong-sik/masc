@@ -87,17 +87,21 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
 
 let comment_to_yojson (c : comment) : Yojson.Safe.t =
   `Assoc
-    [ "id", `String (Comment_id.to_string c.id)
-    ; "post_id", `String (Post_id.to_string c.post_id)
-    ; ( "parent_id"
-      , Json_util.string_opt_to_json (Option.map Comment_id.to_string c.parent_id) )
-    ; "author", `String (Agent_id.to_string c.author)
-    ; "content", `String c.content
-    ; "created_at", `Float c.created_at
-    ; "expires_at", `Float c.expires_at
-    ; "votes_up", `Int c.votes_up
-    ; "votes_down", `Int c.votes_down
-    ]
+    ([ "id", `String (Comment_id.to_string c.id)
+     ; "post_id", `String (Post_id.to_string c.post_id)
+     ; ( "parent_id"
+       , Json_util.string_opt_to_json (Option.map Comment_id.to_string c.parent_id) )
+     ; "author", `String (Agent_id.to_string c.author)
+     ; "content", `String c.content
+     ; "created_at", `Float c.created_at
+     ; "expires_at", `Float c.expires_at
+     ; "votes_up", `Int c.votes_up
+     ; "votes_down", `Int c.votes_down
+     ]
+     @
+     match c.audience with
+     | Some audience -> [ "audience", Board_audience.to_yojson audience ]
+     | None -> [])
 ;;
 
 let reaction_target_type_to_string = function

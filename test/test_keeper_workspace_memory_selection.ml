@@ -13,7 +13,7 @@ let response choice : Types.eval_response =
          ["current_decision";"comparison";"inspect_source";"not_needed"]}] }
 
 let with_prompt_override key value f =
-  let module Registry = Masc.Prompt_registry in
+  let module Registry = Prompt_registry in
   let previous = (Registry.resolve_prompt key).override_value in
   let require = function Ok () -> () | Error detail -> Alcotest.fail detail in
   Registry.set_override key value |> require;
@@ -22,7 +22,7 @@ let with_prompt_override key value f =
     | None -> Registry.clear_prompt_override key) f
 
 let test_source_can_change_how_a_memory_is_used () =
-  with_prompt_override Masc.Prompt_names.keeper_memory_selection "FROZEN_SELECTION" @@ fun () ->
+  with_prompt_override Prompt_names.keeper_memory_selection "FROZEN_SELECTION" @@ fun () ->
   let events = ref [] in
   let evaluate ~state ~questions =
     (match questions with
@@ -34,7 +34,7 @@ let test_source_can_change_how_a_memory_is_used () =
       (Yojson.Safe.Util.member "current_purpose" state = purpose);
     match Yojson.Safe.Util.member "source_detail" state with
     | `Null ->
-      (match Masc.Prompt_registry.set_override Masc.Prompt_names.keeper_memory_selection
+      (match Prompt_registry.set_override Prompt_names.keeper_memory_selection
           "CHANGED_AFTER_SUMMARY" with
        | Ok () -> () | Error detail -> Alcotest.fail detail);
       events := !events @ ["summary"]; Ok (response "current_decision")
@@ -202,8 +202,8 @@ let test_resolved_partial_answers_and_inspection_stay_deferred () =
       | _ -> false) results)
 
 let test_resolved_capacity_split_keeps_full_details () =
-  with_prompt_override Masc.Prompt_names.keeper_memory_selection "FROZEN_BATCH" @@ fun () ->
-  with_prompt_override Masc.Prompt_names.keeper_memory_selection_candidate
+  with_prompt_override Prompt_names.keeper_memory_selection "FROZEN_BATCH" @@ fun () ->
+  with_prompt_override Prompt_names.keeper_memory_selection_candidate
     "SCOPE {{question_id}}" @@ fun () ->
   let rows = List.map (fun id -> {candidate with id},`Assoc ["original",`String id])
       ["left";"oversized";"right"] in
@@ -216,7 +216,7 @@ let test_resolved_capacity_split_keeps_full_details () =
         Alcotest.(check string) "capacity partitions use captured managed scope"
           ("FROZEN_BATCH SCOPE " ^ id) instructions
       | _ -> Alcotest.fail "expected a selection choice") questions;
-    (match Masc.Prompt_registry.set_override Masc.Prompt_names.keeper_memory_selection_candidate
+    (match Prompt_registry.set_override Prompt_names.keeper_memory_selection_candidate
         "CHANGED_SCOPE {{question_id}}" with
      | Ok () -> () | Error detail -> Alcotest.fail detail);
     Alcotest.(check bool) "split keeps exact purpose" true
@@ -512,7 +512,7 @@ let test_provider_capacity_projection_keeps_whole_records_and_receipts () =
    | Ok Unchanged -> () | _ -> Alcotest.fail "empty evidence projection authorized another retry")
 
 let test_missing_guidance_defers_before_evaluation () =
-  let module Registry = Masc.Prompt_registry in
+  let module Registry = Prompt_registry in
   let directory = match Registry.get_markdown_dir () with
     | Some directory -> directory | None -> Alcotest.fail "fixture prompt directory unavailable" in
   let empty = Filename.temp_dir "missing-selection-policy-" "" in

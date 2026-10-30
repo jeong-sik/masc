@@ -91,3 +91,7 @@ val view : t -> view
 
 val version : t -> int
 (** Changes whenever {!view} may have changed, so a job can post only then. *)
+
+val synchronized : t -> bool
+(** The current connection has supplied an accepted initial frame. Reset by
+    {!started} and by a rejected frame; retained output is not evidence. *)

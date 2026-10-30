@@ -101,6 +101,11 @@ type 'snapshot hold =
 val back : 'snapshot hold -> int
 (** [0] while following. *)
 
+val window :
+  content_height:int -> total_rows:int -> 'snapshot hold -> int * int
+(** The first row and clamped distance from the bottom for the actual content
+    height. A stopped-stream notice does not change the output rows or height. *)
+
 val scroll_to : live:'snapshot option -> back:int -> 'snapshot hold -> 'snapshot hold
 (** Put the window [back] rows above the bottom. [back <= 0] follows. Leaving
     the bottom keeps [live], the reading on screen, so the rows stay still;

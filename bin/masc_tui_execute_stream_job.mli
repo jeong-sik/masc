@@ -1,28 +1,38 @@
-(** The connection loop behind the Terminal tab's Execute output stream.
+(** The connection loop behind the Terminal tab's Execute output stream. *)
 
-    [run] reads one Keeper's stream into [reader], opens another connection a
-    pause after one ends, and hands the reader's view to [on_view] while it
-    changes. It does not return: stop it by cancelling the fiber that runs it.
-    The socket is [observe], so a test can stand in for the server.
+type observe_error =
+  | Transport_failure of string
+  | Http_refusal of { status : int; detail : string }
+  | Unattested of { status : int; detail : string }
 
-    - [observe ~on_chunk] opens one connection and calls [on_chunk] with each
-      piece of the response until the connection ends. [Error] says why it
-      could not be read. An exception [on_chunk] raises ends the connection
-      and passes through [observe].
-    - [on_view] gets the reader's view when {!Masc_tui_execute_stream.version}
-      has moved, at most once every [post_interval_s], and once more just
-      before [on_ended], so rows a connection delivered last are shown under
-      the notice that it ended.
-    - [on_ended reason] is called when a connection ends. [reason] is the
-      reader's refusal when it refused a frame, otherwise what [observe]
-      reported, or that the server closed the stream. *)
+type stop_reason =
+  | Http_status of int
+  | Unattested_response of int
+  | Unexpected_error
+(** Keep the actual status and whether workspace attestation was missing;
+    [Unexpected_error] names a failure outside the connection loop. *)
+
+type ending =
+  | Retry_after of { detail : string; delay_s : float }
+  | Reopen_required of { reason : stop_reason; detail : string }
 
 val run :
   clock:_ Eio.Time.clock ->
   reconnect_s:float ->
+  max_reconnect_s:float ->
+  stable_s:float ->
+  monotonic_now:(unit -> float) ->
   post_interval_s:float ->
   reader:Masc_tui_execute_stream.t ->
-  observe:(on_chunk:(string -> unit) -> (unit, string) result) ->
+  observe:(on_chunk:(string -> unit) -> (unit, observe_error) result) ->
   on_view:(Masc_tui_execute_stream.view -> unit) ->
-  on_ended:(string -> unit) ->
+  on_ended:(ending -> unit) ->
   unit
+(** Retry transport errors, refused frames, normal closes, HTTP 408, 425, 429
+    and 5xx with bounded exponential delays. Other HTTP refusals stop the job;
+    the owner can reopen it when the Terminal tab is entered again.
+
+    A short connection, even one that sent a valid snapshot, does not reset
+    the backoff. Reset only after the connection has stayed open for [stable_s]
+    after accepting its initial frame; [monotonic_now] measures this interval.
+    The posting fiber stops with a permanent refusal or cancellation. *)

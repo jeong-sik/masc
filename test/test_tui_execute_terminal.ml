@@ -238,6 +238,31 @@ let test_back_counts_from_the_bottom () =
   check Alcotest.int "paused three rows up" 3
     (T.back (T.older ~live:(Some "A") ~by:3 T.Following))
 
+let test_stopped_window_preserves_hold_and_reaches_all_output () =
+  let paused = T.older ~live:(Some "frozen") ~by:20 T.Following in
+  let before = T.window ~content_height:9 ~total_rows:100 paused in
+  let stopped = T.window ~content_height:9 ~total_rows:100 paused in
+  check Alcotest.(pair int int) "the frozen first row and back stay put" (71, 20) stopped;
+  check Alcotest.(pair int int) "the stopped notice does not move the frozen window" before stopped;
+  let follows = T.window ~content_height:5 ~total_rows:100 T.Following in
+  let up = T.older ~live:(Some "frozen") ~by:1 T.Following in
+  let up_window = T.window ~content_height:5 ~total_rows:100 up in
+  let down = T.newer ~by:1 up in
+  check Alcotest.(pair int int) "the last five rows remain visible" (95, 0) follows;
+  check Alcotest.(pair int int) "scrolling up moves one row" (94, 1) up_window;
+  check Alcotest.(pair int int) "scrolling down returns to the last rows" follows
+    (T.window ~content_height:5 ~total_rows:100 down);
+  let six_up = T.older ~live:(Some "six") ~by:1 T.Following in
+  check Alcotest.(pair int int) "six rows can scroll up in a five-row view" (0, 1)
+    (T.window ~content_height:5 ~total_rows:6 six_up);
+  check Alcotest.(pair int int) "and back down to the sixth row" (1, 0)
+    (T.window ~content_height:5 ~total_rows:6 (T.newer ~by:1 six_up));
+  let top = T.oldest ~live:(Some "frozen") T.Following in
+  check Alcotest.(pair int int) "oldest remains clamped to the output" (0, 95)
+    (T.window ~content_height:5 ~total_rows:100 top);
+  check Alcotest.(pair int int) "short output stays anchored at the top" (0, 0)
+    (T.window ~content_height:5 ~total_rows:3 paused)
+
 let () =
   Alcotest.run "tui_execute_terminal"
     [ ( "status"
@@ -273,5 +298,7 @@ let () =
             test_the_oldest_row_is_reachable_and_the_count_does_not_wrap
         ; Alcotest.test_case "back counts from the bottom" `Quick
             test_back_counts_from_the_bottom
+        ; Alcotest.test_case "a stopped window preserves hold and reaches all output" `Quick
+            test_stopped_window_preserves_hold_and_reaches_all_output
         ] )
     ]

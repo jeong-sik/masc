@@ -663,21 +663,34 @@ let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_versio
        (Filename.quote (Filename.concat cache ".release"))
        (Filename.quote base_path))) 0;
   let release_base_url = "file://" ^ Filename.concat base_path ".release" in
+  let cached_releases =
+    Filename.concat (Filename.concat cache ".local") ".masc-releases"
+  in
+  if not (Sys.file_exists cached_releases) then
+    Alcotest.failf
+      "release identity cache incomplete: %s does not exist (the cache's \
+       bundle-helper install failed; see the 'fixture installs/commits the \
+       managed release identity' assertions in the first failing case)"
+      cached_releases;
   check int "fixture copies the installed release identities"
     (Sys.command (Printf.sprintf "cp -R %s %s"
-       (Filename.quote
-          (Filename.concat
-             (Filename.concat cache ".local")
-             ".masc-releases"))
+       (Filename.quote cached_releases)
        (Filename.quote prefix))) 0;
   (* install.sh reads one symlink level and compares it against
      <canonical prefix>/.masc-releases/<digest>/masc, so the copied
      identity tree needs a case-local pointer: recreate it here. *)
   let identity_dir =
-    let entries = Array.to_list (Sys.readdir (Filename.concat prefix ".masc-releases")) in
+    let releases = Filename.concat prefix ".masc-releases" in
+    if not (Sys.file_exists releases) then
+      Alcotest.failf
+        "cached release identities missing: %s does not exist (the \
+         suite-wide cache failed to publish .masc-releases; check the \
+         'fixture installs/commits the managed release identity' \
+         assertions above)"
+        releases;
+    let entries = Array.to_list (Sys.readdir releases) in
     match entries with
-    | [ digest ] ->
-        Filename.concat (Filename.concat prefix ".masc-releases") digest
+    | [ digest ] -> Filename.concat releases digest
     | _ ->
         Alcotest.failf "expected exactly one cached release identity, got %d"
           (List.length entries)

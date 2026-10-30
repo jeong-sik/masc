@@ -1,0 +1,3 @@
+### Added
+
+- `Keeper_volume_ownership`: interpret the workspace ownership marker on Apple Keeper volumes (`.masc-volume-owner`, schema 1). Same-named Keepers in different workspaces share volume names by design; this gives dissolution the byte-level verdict (`owned` / `another workspace` / `unverified` with a reason) that #46694's preserve-on-unknown defense currently lacks. Marker-free legacy volumes stay `Unverified` and are preserved, never guessed; this layer only interprets bytes and creates, attaches, or deletes nothing. (#PR)

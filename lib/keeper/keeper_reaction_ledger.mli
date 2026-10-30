@@ -301,12 +301,15 @@ val fleet_summary_json :
   owner_lifecycle:(keeper_name:string -> Keeper_event_queue_persistence.owner_lifecycle) ->
   limit_per_keeper:int ->
   Yojson.Safe.t
-(** Summarize recent reaction-ledger state for a bounded keeper fleet. Pending
-    identities are retained even when the exact durable queue and canonical
-    owner lifecycle establish ordinary runnable or operator-retained work.
-    Recoverable, fenced, unknown, unread, quarantined, or unmatched pending
-    work still requires attention. The displayed identity cap is never used
-    to decide the health verdict. This observation changes no queue state. *)
+(** Summarize recent reaction-ledger state for a bounded keeper fleet. A
+    scheduled occurrence is retained as ordinary pending work when its ledger
+    identity and durable scheduled queue entry agree and the canonical owner
+    lifecycle permits runnable or operator-retained work. Other pending
+    stimulus kinds remain actionable: their ledger IDs need not identify an
+    exact queue entry. Recoverable, fenced, unknown, unread, quarantined, or
+    unmatched pending work still requires attention. The displayed identity
+    cap is never used to decide the health verdict. This observation changes
+    no queue state. *)
 
 val fleet_summary_status_strings : string list
 (** Every value the fleet summary's ["status"] field can carry. A reader that

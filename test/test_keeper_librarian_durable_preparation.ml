@@ -132,6 +132,9 @@ let test_counterpart_template_admission_and_legacy_restore () = with_prompts (fu
     ~policy:old.policy ~rule_prompt:old.rule_prompt ~prompt:old.prompt ~output_schema:old.output_schema |> get in
   R.validate_durable_preparation legacy |> get;
   check bool "old incomplete original still restores" true (legacy.source_input=with_counterpart);
+  check bool "restoration does not authorize a new effect from the legacy prompt" true
+    (Result.is_error (R.require_counterpart_template legacy));
+  R.require_counterpart_template old |> get;
   check bool "fresh counterpart original refuses a prompt without the variable" true
     (Result.is_error (R.prepare_durable ~now:123. with_counterpart));
   let context : R.durable_step_context = {previous_state=None;unread_messages=[]} in
@@ -141,6 +144,8 @@ let test_counterpart_template_admission_and_legacy_restore () = with_prompts (fu
     ~source_input:(R.durable_step_source_input with_counterpart) ~parsing_now:p.parsing_now
     ~policy:p.policy ~rule_prompt:p.rule_prompt ~prompt:p.prompt ~output_schema:p.output_schema |> get in
   R.validate_durable_step_preparation restored_step |> get;
+  check bool "a restored floor question must still pass the live input policy" true
+    (Result.is_error (R.require_counterpart_template restored_step.preparation));
   check bool "fresh counterpart floor step also refuses the missing variable" true
     (Result.is_error (R.prepare_durable_step ~now:123. ~context with_counterpart));
   let refs value variable = Prompt_registry.resolution_references_variable
@@ -154,6 +159,9 @@ let test_counterpart_template_admission_and_legacy_restore () = with_prompts (fu
     "Input: {{ counterpart_observations }}\nAgain: {{counterpart_observations}}" |> get;
   let expected=Keeper_counterpart_observation.render_for_prompt [counterpart] in
   let fresh=R.prepare_durable ~now:124. with_counterpart |> get in
+  R.require_counterpart_template fresh |> get;
+  check bool "repairing today's override does not rewrite the old frozen question" true
+    (Result.is_error (R.require_counterpart_template legacy));
   check string "both actual substitutions contain the original serialized counterpart"
     ("Input: " ^ expected ^ "\nAgain: " ^ expected) fresh.rendered_prompt;
   let fresh_step=R.prepare_durable_step ~now:124. ~context with_counterpart |> get in

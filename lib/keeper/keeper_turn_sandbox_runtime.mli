@@ -82,7 +82,11 @@ val microvm_remote_endpoint_of_running :
     host-side credential snapshot, observes the named running guest and checks
     its workspace, keeper and network labels before returning the endpoint.
     This proves neither the guest's mounted inode nor a fence against later
-    guest replacement. Does not start a guest or prepare build output. *)
+    guest replacement. Refuses an unresolved first-handoff cleanup on the
+    shared work volume; diagnostic reads use {!microvm_attached_endpoint}.
+    Consumes any still-available cleanup opportunity before granting execution
+    so a later prepared handoff preserves output created through this endpoint.
+    Does not start a guest or prepare build output. *)
 
 val microvm_remote_endpoint :
   ?timeout_sec:float -> t -> (Keeper_sandbox_remote.t, string) result
@@ -93,10 +97,15 @@ val microvm_remote_endpoint :
     an observation invalidated it in between, this call fails and can be retried.
     A scope-matched stopped observation also invalidates cached readiness, so a
     later call can reverify the mount, root and shim. Process-owned cleanup and
-    build-link effect states survive readiness invalidation, including absence
-    or replacement of the named guest. Cleanup is reserved before dispatch;
-    only an observed successful execution confirms it. An uncertain cleanup
-    or link effect is never automatically resent by a later handoff. This is
+    build-link effects belong to the backend's Keeper work volume, shared
+    across workspace and network aliases. Cleanup is reserved before endpoint
+    construction and consumed even when the request was not sent. A trusted
+    terminal failure permits best-effort handoff; unresolved destructive
+    cleanup refuses handoff because it may still act on later build output.
+    Guest invalidation retains these effects while allowing a fresh read-only
+    scan and idempotent target creation on the disposable build volume.
+    Unresolved link applications are not resent; only targets of observed
+    correct links are prepared in that case. This is
     process-local evidence, not a durable receipt across server restarts or an
     instance/mount fence against an externally replaced guest.
     If the snapshot is missing or
@@ -527,3 +536,7 @@ val build_cleanup_report_of_string : string -> (build_cleanup_report, string) re
 val cleanup_attached_builds : config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta -> retention_sec:float -> unit ->
   (build_cleanup_report option, string) result
+(** The caller holds the Keeper's exclusive maintenance slot. Apple additionally
+    holds its process-local lifecycle owner across cleanup admission, guest
+    observation and the maintenance command. An unresolved first-handoff
+    cleanup refuses this mutation; attached diagnostic reads remain separate. *)

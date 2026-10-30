@@ -144,25 +144,36 @@ before deleting them. `.masc-keep-build` preserves a checkout's output.
 
 `microvm_build_link_mkdir_failed` or `microvm_build_link_apply_failed` can
 report a nonzero exit or signal. Status 127 can mean build preparation could
-not start an interpreter. Execution and transport failures are also possible,
-so no status alone establishes the cause or proves that no effect ran. Preserve the
-guest, volumes, links and any possibly executed effect as unverified; do not
-automatically retry the effect or restart the service or guest to clear the
-warning. Guest readiness invalidation, observed absence and replacement retain
-the process-owned cleanup and link effect evidence. A confirmed cleanup is not
-sent again for the same normalized workspace base, backend and guest name in
-that server process; an unconfirmed cleanup also prevents subsequent build-link
-effects. This key is not a durable volume identity and does not cover another
-guest name or process. `microvm_build_cleanup_effect_unverified` names
-the affected guest. Missing execution receipts, exceptions and cancellation do
-not establish that cleanup was unsent. Only an explicit request-not-sent result
-permits another automatic cleanup attempt.
+not start an interpreter. A local status alone does not establish the cause
+or prove that no guest effect ran. Preserve the guest, volumes and links for
+inspection; restarting the service or guest does not resolve an unknown effect.
 
-This evidence is process-local: restarting the server loses it, and the current
-cold handoff can attempt cleanup and build links again. Do not restart as a
-recovery action for an unknown effect. Durable no-replay across server restarts
-is not provided. Guest labels do not prove instance or mounted-volume identity,
-and the runtime does not fence an external replacement.
+Cleanup is consumed once per backend and Keeper work volume in this server
+process, including across workspace and network aliases. A request known not
+to have been sent is skipped permanently, since later turns can create new
+build output. Receipt-confirmed successful cleanup is not repeated. A matching
+terminal nonzero result, signal, shim-enforced timeout or explicit pre-spawn
+refusal also consumes cleanup
+and permits best-effort handoff, preserving real `_build` entries. Missing
+receipts, exceptions and cancellation leave cleanup unresolved unless the runner
+publishes authoritative request-not-sent evidence.
+`microvm_build_cleanup_effect_unverified` identifies the Keeper whose new
+execution handoff is unavailable: the original cleanup may still rename later
+output. Attached diagnostic reads remain available when the guest and identity
+can be validated; they do not certify that cleanup has stopped.
+
+Guest readiness invalidation permits a fresh read-only link scan. The build
+volume is disposable, so target-directory creation is idempotent and may run
+again after invalidation. Unresolved symlink applications remain shared across
+aliases and are not resent; only targets of links currently observed to be
+correct are prepared in that case. Real directories and differently targeted
+links are preserved.
+
+These records are process-local and use nominal resource names. A server
+restart loses them and its first handoff can attempt cleanup again. Do not
+restart to recover an unknown effect. Neither durable no-replay across server
+restarts nor physical volume identity or cross-process fencing is provided.
+Guest labels do not fence an external instance or mount replacement.
 
 In the affected guest, perform these checks both as root and as the Keeper uid
 and gid: target-directory preparation uses root, while link creation uses the

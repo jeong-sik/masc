@@ -165,6 +165,74 @@ let fixture_work_mount_response ~root guest =
        | Some _ | None -> "")
     | _ :: _ :: _ -> fail "fixture has duplicate work mount destinations"
 
+(* These directories model the two named volumes. The production cleanup and
+   scan scripts run over this test-owned work tree; build effects retain their
+   guest-visible link targets while their directories live under [root]. *)
+let fixture_work_root root = Filename.concat (Filename.concat root "guest-work") keeper
+let fixture_build_root root = Filename.concat root "guest-build"
+let models_build_filesystem root = Sys.file_exists (Filename.concat root "model-build-filesystem")
+
+let fixture_shell ~cwd script =
+  let previous = Sys.getcwd () in
+  Fun.protect ~finally:(fun () -> Unix.chdir previous) (fun () ->
+    Unix.chdir cwd;
+    let output = Unix.open_process_args_in "/bin/sh" [|"/bin/sh"; "-eu"; "-c"; script|] in
+    let stdout = In_channel.input_all output in
+    Unix.close_process_in output, stdout)
+
+let fixture_build_target root target =
+  match String.split_on_char '/' target with
+  | [""; "masc-build"; leaf] when leaf <> "" && leaf <> "." && leaf <> ".." ->
+    Filename.concat (fixture_build_root root) leaf
+  | _ -> fail "fixture received an invalid build target"
+
+let fixture_build_input_fields input =
+  match List.rev (String.split_on_char '\000' input) with
+  | "" :: fields -> List.rev fields
+  | _ -> fail "fixture received an unterminated build input"
+
+let fixture_apply_build_input root kind input =
+  let fields = fixture_build_input_fields input in
+  match kind with
+  | "mkdir" ->
+    if models_build_filesystem root then
+      List.iter (fun target -> Fs_compat.mkdir_p (fixture_build_target root target)) fields
+  | "link" ->
+    let rec pairs = function
+      | [] -> []
+      | checkout :: target :: rest -> (checkout, target) :: pairs rest
+      | [_] -> fail "fixture received an incomplete link pair" in
+    let actions = pairs fields in
+    if models_build_filesystem root then
+      List.iter (fun (checkout, target) ->
+        let link = Filename.concat (Filename.concat (fixture_work_root root) checkout) "_build" in
+        try Unix.symlink target link with Unix.Unix_error _ -> exit 1) actions;
+    let scan_output = Filename.concat root "scan-output" in
+    if Sys.file_exists scan_output then (
+      let rows = value (Microvm.build_scan_rows_of_output (read scan_output)) in
+      let output = List.map (fun (row : Microvm.build_scan_row) ->
+        let state = match List.assoc_opt row.checkout actions with
+          | Some target -> Microvm.Build_symlink target
+          | None -> row.state in
+        let kind, target = match state with
+          | Microvm.Build_absent -> "absent", ""
+          | Microvm.Build_real_directory -> "real", ""
+          | Microvm.Build_symlink target -> "symlink", target in
+        row.checkout ^ "\000" ^ kind ^ "\000" ^ target ^ "\000") rows in
+      write scan_output (String.concat "" output))
+  | _ -> fail "fixture received an unknown build effect"
+
+let initialize_build_filesystem root =
+  write (Filename.concat root "model-build-filesystem") "";
+  let work = fixture_work_root root in
+  List.iter (fun checkout ->
+    let directory = Filename.concat work checkout in
+    Fs_compat.mkdir_p directory;
+    write (Filename.concat directory "dune-project") "(lang dune 3.20)\n") ["ready"; "new"];
+  Unix.symlink "/masc-build/ready" (Filename.concat work "ready/_build");
+  Fs_compat.mkdir_p (Filename.concat work "new/_build");
+  write (Filename.concat work "new/_build/old-output") "output before the first handoff"
+
 let provider root args =
   let file name = Filename.concat root name in
   append (file "calls") (strings args);
@@ -208,14 +276,20 @@ let provider root args =
   | ["volume"; "list"; "--format"; "json"] ->
     answer (`List (Sys.readdir root |> Array.to_list |> List.filter_map (fun leaf ->
       if Filename.check_suffix leaf ".img" then Some (`Assoc ["id", `String (Filename.chop_suffix leaf ".img")]) else None)))
-  | ["volume"; "delete"; name] -> if Sys.file_exists (file (name ^ ".img")) then Unix.unlink (file (name ^ ".img"))
+  | ["volume"; "delete"; name] ->
+    if Sys.file_exists (file (name ^ ".img")) then Unix.unlink (file (name ^ ".img"));
+    if models_build_filesystem root && name = value (Microvm.build_volume_name ~keeper_name:keeper)
+       && Sys.file_exists (fixture_build_root root) then
+      Fs_compat.remove_tree (fixture_build_root root)
   | "volume" :: "create" :: rest ->
     let name = List.hd (List.rev rest) in
     let bytes = Bytes.make 2048 '\000' in
     Bytes.set_uint16_le bytes (1024 + 0x38) 0xEF53;
     Bytes.set_int32_le bytes (1024 + 0x100)
       (if Sys.file_exists (file "discard-absent") then 0l else 0x0400l);
-    write (file (name ^ ".img")) (Bytes.to_string bytes)
+    write (file (name ^ ".img")) (Bytes.to_string bytes);
+    if models_build_filesystem root && name = value (Microvm.build_volume_name ~keeper_name:keeper) then
+      Fs_compat.mkdir_p (fixture_build_root root)
   | "run" :: rest ->
     if not (List.mem "-d" rest) then fail "discard-set volume must never start a helper";
     save_json (file "guest.json") (inspect_from_run root rest)
@@ -249,7 +323,14 @@ let provider root args =
     | None -> if build_scan then (
       if Sys.file_exists (file "scan-fail-first") && not (Sys.file_exists (file "scan-failed")) then (
         write (file "scan-failed") ""; prerr_endline "fixture scan failure"; exit 13);
-      if Sys.file_exists (file "scan-output") then print_string (read (file "scan-output"));
+      if models_build_filesystem root then (
+        (* [build_scan] matched the complete production argv above; execute
+           the actual received script against the modeled work mount. *)
+        let script = List.hd (List.rev rest) in
+        let status, output = fixture_shell ~cwd:(fixture_work_root root) script in
+        print_string output;
+        match status with Unix.WEXITED 0 -> () | _ -> exit 1)
+      else if Sys.file_exists (file "scan-output") then print_string (read (file "scan-output"));
       flush stdout)
     else if List.mem "masc-build-mkdir" rest || List.mem "masc-build-link" rest then (
       if not (List.mem "-i" rest) then fail "build input was not attached";
@@ -259,11 +340,14 @@ let provider root args =
         "kind", `String kind;
         "bytes", `Int (String.length input);
         "sha256", `String Agent_core_sha256.(digest_string input |> to_hex)]);
+      let applied_before_failure = Sys.file_exists (file "apply-before-build-failure") in
+      if applied_before_failure then fixture_apply_build_input root kind input;
       List.iter (fun status ->
         if Sys.file_exists (file (Printf.sprintf "build-effect-status-%d-%s" status kind)) then (
           prerr_endline fixture_effect_stderr;
           exit status)) [127; 2];
-      if kind = "mkdir" && Sys.file_exists (file "build-mkdir-fails") then exit 19)
+      if kind = "mkdir" && Sys.file_exists (file "build-mkdir-fails") then exit 19;
+      if not applied_before_failure then fixture_apply_build_input root kind input)
     else if List.mem "--probe" rest then (
       print_string (Exec_ssh_protocol.render_probe {name="masc-exec-shim"; version="3.0.0"; capabilities=[]; release=None; boot_id=None});
       flush stdout)
@@ -276,15 +360,40 @@ let provider root args =
       let request, _ = value (Exec_ssh_protocol.decode_request (header ^ read_exact Unix.stdin length)) in
       append (file "requests") (`Assoc ["argv", strings request.argv;
         "environment", `Assoc (List.map (fun (key,v) -> key, `String v) request.env)]);
+      let is_cleanup = request.argv = ["/bin/sh"; "-eu"; "-c";
+          Microvm.first_handoff_build_cleanup_script
+            ~keeper_work_root:(Microvm.keeper_work_root ~keeper_name:keeper)] in
+      let timed_out = is_cleanup && Sys.file_exists (file "cleanup-terminal-timeout") in
+      let refused = is_cleanup && Sys.file_exists (file "cleanup-terminal-refused") in
+      let status =
+        if is_cleanup && models_build_filesystem root && not refused then (
+          let script = Microvm.first_handoff_build_cleanup_script ~keeper_work_root:(fixture_work_root root) in
+          (* Model a shim deadline firing before the first filesystem effect.
+             The local helper is reaped before its terminal trailer is sent. *)
+          let script = if timed_out then "kill -TERM $$\n" ^ script else script in
+          let status, output = fixture_shell ~cwd:root script in
+          print_string output; flush stdout;
+          status)
+        else Unix.WEXITED 0 in
       (match request.argv with
        | "python3" :: "-c" :: _ -> print_string "{\"entries\":[],\"checkouts\":[],\"limit\":null}"; flush stdout
        | _ -> ());
       let execution_receipt : Exec_ssh_protocol.execution_receipt option =
         if Sys.file_exists (file "cleanup-missing-receipt") then None
-        else Some {mode=request.mode; boundary=Sandbox_applied} in
+        else Some {mode=request.mode; boundary=(if refused then Refused else Sandbox_applied)} in
+      let payload_exit, signal = match status with
+        | Unix.WEXITED code -> Some code, None
+        | Unix.WSIGNALED signal when signal = Sys.sigterm ->
+          (* The trailer carries the POSIX signal number, rather than
+             OCaml's abstract [Sys.sigterm] value. *)
+          None, Some 15
+        | Unix.WSIGNALED _ -> fail "fixture cleanup helper died from an unexpected signal"
+        | Unix.WSTOPPED _ -> fail "fixture cleanup helper stopped without terminating" in
       output_string stderr (Exec_ssh_protocol.render_trailer ?execution_receipt
-        {v=request.v; exit=Some 0; signal=None; timed_out=false; shim_error=None; observed_syscalls=[]});
-      flush stderr))
+        {v=request.v; exit=(if refused then None else payload_exit); signal; timed_out;
+         shim_error=(if refused then Some "fixture setup refused before cleanup" else None); observed_syscalls=[]});
+      flush stderr;
+      if refused then exit 1))
   | _ -> fail ("unsupported provider command " ^ String.concat " " args)
 
 let meta () =
@@ -655,6 +764,103 @@ let process_step root operation =
           Turn.microvm_remote_endpoint ~timeout_sec:10. next) in
       Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
         Result.bind (next_turn ()) (fun _ -> next_turn ()))
+    | ("resource-network-alias" | "resource-base-alias"
+      | "resource-link-unknown-network-alias" | "resource-link-unknown-base-alias") as change ->
+      Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
+        let unknown_link = change = "resource-link-unknown-network-alias"
+          || change = "resource-link-unknown-base-alias" in
+        let later = Filename.concat (fixture_work_root root) "later" in
+        Fs_compat.mkdir_p later;
+        write (Filename.concat later "dune-project") "(lang dune 3.20)\n";
+        if not unknown_link then (
+          Fs_compat.mkdir_p (Filename.concat later "_build");
+          write (Filename.concat later "_build/new-output") "output after the first handoff");
+        List.iter (fun marker -> let path = Filename.concat root marker in
+          if Sys.file_exists path then Unix.unlink path)
+          ["build-effect-status-2-link"; "apply-before-build-failure"];
+        Turn.cleanup runtime;
+        (* The old guest is gone while its two named volumes remain. The
+           next guest has a different name but the same work resource. *)
+        Unix.unlink (Filename.concat root "guest.json");
+        let next_config, next_network =
+          if change = "resource-base-alias" || change = "resource-link-unknown-base-alias" then (
+            let next_base = Filename.concat root "resource-next-workspace" in
+            let shim = Config_dir_resolver.microvm_shim_dir ~base_path:next_base in
+            Fs_compat.mkdir_p shim;
+            let binary = Filename.concat shim Microvm.shim_binary_name in
+            write binary "#!/bin/sh\nexit 0\n"; Unix.chmod binary 0o700;
+            value (Keeper_microvm_shim_readiness.initialize ~fs ~base_path:next_base
+              ~payload_path:"/usr/bin:/bin" |> Result.map_error Keeper_microvm_shim_readiness.error_message);
+            Workspace.default_config next_base, network_mode)
+          else config, Profile.Network_inherit in
+        let old_name = Turn.For_testing_microvm.microvm_container_name
+            ~config ~keeper_name:keeper ~network_mode:effective_network in
+        let next_name = Turn.For_testing_microvm.microvm_container_name
+            ~config:next_config ~keeper_name:keeper ~network_mode:next_network in
+        check bool "the new guest uses a different state key" true (old_name <> next_name);
+        let next_meta = {(meta ()) with network_mode=next_network} in
+        let next = Turn.create ~config:next_config ~meta:next_meta ~image:(Ok "fixture:image")
+            ~network_mode:next_network () in
+        Fun.protect ~finally:(fun () -> Turn.cleanup next) (fun () ->
+          Turn.microvm_remote_endpoint ~timeout_sec:10. next))
+    | "resource-reboot" ->
+      Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
+        let later = Filename.concat (fixture_work_root root) "later" in
+        Fs_compat.mkdir_p (Filename.concat later "_build");
+        write (Filename.concat later "dune-project") "(lang dune 3.20)\n";
+        write (Filename.concat later "_build/new-output") "output after the first handoff";
+        write (Filename.concat (fixture_build_root root) "new/compiled") "disposable output";
+        let guest_path = Filename.concat root "guest.json" in
+        save_json guest_path (replace "status" (`Assoc ["state", `String "stopped"]) (json guest_path));
+        (match Turn.microvm_attached_endpoint ~timeout_sec:10. ~config ~meta:(meta ()) () with
+         | Error _ -> ()
+         | Ok _ -> fail "the stopped guest was accepted");
+        check bool "the stopped observation invalidates root readiness" false
+          (Turn.is_microvm_guest_booted ~config ~meta:(meta ()) ());
+        Turn.cleanup runtime;
+        let next = Turn.create ~config ~meta:(meta ()) ~image:(Ok "fixture:image") ~network_mode () in
+        Fun.protect ~finally:(fun () -> Turn.cleanup next) (fun () ->
+          Turn.microvm_remote_endpoint ~timeout_sec:10. next))
+    | "cleanup-terminal-return" ->
+      Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
+        let pending = Filename.concat (fixture_work_root root) ".masc-build-removing" in
+        (match Unix.lstat pending with
+         | {Unix.st_kind=Unix.S_LNK; _} -> Unix.unlink pending
+         | _ -> fail "fixture cleanup blocker changed type"
+         | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+        List.iter (fun marker -> let path = Filename.concat root marker in
+          if Sys.file_exists path then Unix.unlink path)
+          ["cleanup-terminal-timeout"; "cleanup-terminal-refused"];
+        let output = Filename.concat (fixture_work_root root) "new/_build/new-output" in
+        write output "output after a terminal cleanup failure";
+        Turn.forget_microvm_guest_booted ~config ~meta:(meta ()) ();
+        Turn.cleanup runtime;
+        let next = Turn.create ~config ~meta:(meta ()) ~image:(Ok "fixture:image") ~network_mode () in
+        Fun.protect ~finally:(fun () -> Turn.cleanup next) (fun () ->
+          Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. next) (fun _ ->
+            Turn.microvm_remote_endpoint ~timeout_sec:10. next)))
+    | "cleanup-unresolved-return" ->
+      let refuse ~meta runtime =
+        match Turn.microvm_remote_endpoint ~timeout_sec:10. runtime with
+        | Error detail ->
+          check bool "unknown cleanup does not complete root readiness" false
+            (Turn.is_microvm_guest_booted ~config ~meta ());
+          detail
+        | Ok _ -> fail "an unresolved cleanup handed out a mutating endpoint" in
+      ignore (refuse ~meta:(meta ()) runtime);
+      let build = Filename.concat (fixture_work_root root) "new/_build" in
+      Fs_compat.mkdir_p build;
+      write (Filename.concat build "new-output") "external work after the unresolved result";
+      Unix.unlink (Filename.concat root "cleanup-missing-receipt");
+      ignore (refuse ~meta:(meta ()) runtime);
+      Turn.forget_microvm_guest_booted ~config ~meta:(meta ()) ();
+      Turn.cleanup runtime;
+      let next_meta = {(meta ()) with network_mode=Profile.Network_inherit} in
+      let next = Turn.create ~config ~meta:next_meta ~image:(Ok "fixture:image")
+          ~network_mode:Profile.Network_inherit () in
+      let detail = Fun.protect ~finally:(fun () -> Turn.cleanup next) (fun () -> refuse ~meta:next_meta next) in
+      write (Filename.concat root "unresolved-handoffs") "3";
+      Error detail
     | ("effect-stopped-return" | "effect-absent-return" | "effect-replacement"
       | "effect-unknown-return" | "effect-missing-snapshot-return") as change ->
       Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
@@ -1255,6 +1461,16 @@ let assert_build_input root kind expected =
       (text (field "sha256" item))
   | _ -> fail (kind ^ " input was not received exactly once")
 
+let assert_build_inputs root kind expected =
+  let matches = entries root "build-inputs" |> List.filter (fun item ->
+    field "kind" item = `String kind) in
+  check int (kind ^ " input count") (List.length expected) (List.length matches);
+  List.iter2 (fun input item ->
+    check int (kind ^ " input byte count") (String.length input)
+      (match field "bytes" item with `Int bytes -> bytes | _ -> fail "bad input byte count");
+    check string (kind ^ " input digest") Agent_core_sha256.(digest_string input |> to_hex)
+      (text (field "sha256" item))) expected matches
+
 let build_scan_calls root =
   let config = Workspace.default_config root in
   let name = Turn.For_testing_microvm.microvm_container_name ~config ~keeper_name:keeper ~network_mode in
@@ -1263,6 +1479,106 @@ let build_scan_calls root =
       ~uid:(Unix.getuid ()) ~gid:(Unix.getgid ()) in
   let expected = match argv with "container" :: args -> args | _ -> fail "expected container scan" in
   List.filter ((=) expected) (calls root)
+
+let assert_modeled_build_link root checkout =
+  let link = Filename.concat (Filename.concat (fixture_work_root root) checkout) "_build" in
+  let target = "/masc-build/" ^ checkout in
+  check string (checkout ^ " retains its guest build link") target (Unix.readlink link);
+  check bool (checkout ^ " has a directory on the current build volume") true
+    (Sys.is_directory (fixture_build_target root target))
+
+let test_work_resource_alias_does_not_cleanup_later_output () =
+  List.iter (fun operation -> with_fixture (fun root ->
+    initialize_build_filesystem root;
+    let status, stderr = step_captured root operation in
+    (match status with Unix.WEXITED 0 -> ()
+     | _ -> failf "%s: resource alias handoff failed: %s" operation stderr);
+    check string "later build output survives the new guest alias"
+      "output after the first handoff"
+      (read (Filename.concat (fixture_work_root root) "later/_build/new-output"));
+    check string "the later checkout source survives" "(lang dune 3.20)\n"
+      (read (Filename.concat (fixture_work_root root) "later/dune-project"));
+    List.iter (assert_modeled_build_link root) ["ready"; "new"];
+    check int "cleanup is sent once for the shared work resource" 1
+      (List.length (entries root "requests"));
+    check int "the alias boots a different guest" 2 (count "run" root)))
+    ["resource-network-alias"; "resource-base-alias"]
+
+let test_confirmed_reboot_recreates_targets_without_cleanup_replay () = with_fixture @@ fun root ->
+  initialize_build_filesystem root;
+  let status, stderr = step_captured root "resource-reboot" in
+  (match status with Unix.WEXITED 0 -> () | _ -> failf "reboot failed: %s" stderr);
+  List.iter (assert_modeled_build_link root) ["ready"; "new"];
+  check bool "the old disposable build output was removed with its volume" false
+    (Sys.file_exists (Filename.concat (fixture_build_root root) "new/compiled"));
+  check string "later output on the persistent work volume survives reboot"
+    "output after the first handoff"
+    (read (Filename.concat (fixture_work_root root) "later/_build/new-output"));
+  check int "both initial boot and reboot ran" 2 (count "run" root);
+  check int "the reboot did not repeat first-handoff cleanup" 1
+    (List.length (entries root "requests"));
+  check int "the recreated volume triggered a fresh scan" 2 (List.length (build_scan_calls root))
+
+let test_unknown_symlink_effect_survives_resource_aliases () =
+  List.iter (fun operation -> with_fixture (fun root ->
+    initialize_build_filesystem root;
+    write (Filename.concat root "build-effect-status-2-link") "";
+    write (Filename.concat root "apply-before-build-failure") "";
+    let status, stderr = step_captured root operation in
+    (match status with Unix.WEXITED 0 -> ()
+     | _ -> failf "%s: alias recovery failed: %s" operation stderr);
+    List.iter (assert_modeled_build_link root) ["ready"; "new"];
+    let later = Filename.concat (fixture_work_root root) "later" in
+    check string "the later checkout source survives" "(lang dune 3.20)\n"
+      (read (Filename.concat later "dune-project"));
+    let later_link_exists = match Unix.lstat (Filename.concat later "_build") with
+      | _ -> true
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false in
+    check bool "the shared unresolved effect prevents a new symlink apply" false later_link_exists;
+    check bool "only already-correct links get new target directories" false
+      (Sys.file_exists (Filename.concat (fixture_build_root root) "later"));
+    check int "the original symlink application is not replayed" 1
+      (List.length (calls root |> List.filter (List.mem "masc-build-link")));
+    check int "cleanup is not replayed through the alias" 1
+      (List.length (entries root "requests"))))
+    ["resource-link-unknown-network-alias"; "resource-link-unknown-base-alias"]
+
+let test_unresolved_cleanup_refuses_later_handoffs_without_resending () = with_fixture @@ fun root ->
+  initialize_build_filesystem root;
+  write (Filename.concat root "cleanup-missing-receipt") "";
+  let status, stderr = step_captured root "cleanup-unresolved-return" in
+  check bool ("unresolved cleanup refuses execution: " ^ stderr) true (status = Unix.WEXITED 2);
+  check string "three owner handoffs were refused" "3" (read (Filename.concat root "unresolved-handoffs"));
+  check string "external work survives all unresolved handoffs"
+    "external work after the unresolved result"
+    (read (Filename.concat (fixture_work_root root) "new/_build/new-output"));
+  check int "the unresolved cleanup is never resent" 1 (List.length (entries root "requests"));
+  check int "unresolved destructive cleanup prevents build preparation" 0 (List.length (build_scan_calls root))
+
+let test_terminal_cleanup_failure_permits_handoff_without_resending () =
+  List.iter (fun outcome -> with_fixture (fun root ->
+    initialize_build_filesystem root;
+    (match outcome with
+     | `Exit ->
+       let held = Filename.concat root "held-staging" in
+       Unix.mkdir held 0o700;
+       Unix.symlink held (Filename.concat (fixture_work_root root) ".masc-build-removing")
+     | `Timeout -> write (Filename.concat root "cleanup-terminal-timeout") ""
+     | `Refused -> write (Filename.concat root "cleanup-terminal-refused") "");
+    let status, stderr = step_captured root "cleanup-terminal-return" in
+    (match status with Unix.WEXITED 0 -> ()
+     | _ -> failf "terminal cleanup failure blocked a best-effort handoff: %s" stderr);
+    check string "new work is preserved after the terminal cleanup failure"
+      "output after a terminal cleanup failure"
+      (read (Filename.concat (fixture_work_root root) "new/_build/new-output"));
+    check string "the uncleaned real build directory is preserved"
+      "output before the first handoff"
+      (read (Filename.concat (fixture_work_root root) "new/_build/old-output"));
+    assert_modeled_build_link root "ready";
+    check int "terminal failure consumes the cleanup opportunity" 1
+      (List.length (entries root "requests"));
+    check int "root invalidation allows a safe build scan" 2 (List.length (build_scan_calls root))))
+    [`Exit; `Timeout; `Refused]
 
 let test_scan_failure_retries_on_the_next_turn_without_repeating_handoff () = with_fixture @@ fun root ->
   write (Filename.concat root "scan-fail-first") "";
@@ -1314,7 +1630,7 @@ let test_failed_replacement_keeps_uncertain_build_effect () =
 
 let test_guest_readiness_changes_do_not_replay_work_volume_effects () =
   List.iter (fun operation ->
-    List.iter (fun (marker, scans, mkdirs, links) -> with_fixture (fun root ->
+    List.iter (fun (marker, first_links) -> with_fixture (fun root ->
       write (Filename.concat root "scan-output") scan_fixture_output;
       Option.iter (fun marker -> write (Filename.concat root marker) "") marker;
       let status, stderr = step_captured root operation in
@@ -1323,19 +1639,27 @@ let test_guest_readiness_changes_do_not_replay_work_volume_effects () =
        | _ -> failf "%s: retained effect fixture failed: %s" operation stderr);
       check int "cleanup is sent once despite guest readiness loss" 1
         (List.length (entries root "requests"));
-      check int "a cleanup without a receipt prevents later link scans" scans
+      let invalidated = List.mem operation
+          ["effect-stopped-return"; "effect-absent-return"; "effect-replacement"] in
+      let scans = if invalidated then 2 else 1 in
+      let links = if invalidated && first_links = 0 then 1 else first_links in
+      check int "only readiness invalidation permits another read-only scan" scans
         (List.length (build_scan_calls root));
-      check int "a possibly applied target mkdir is not replayed" mkdirs
+      check int "target preparation can repeat after readiness invalidation" scans
         (List.length (calls root |> List.filter (List.mem "masc-build-mkdir")));
-      check int "a possibly applied link is not replayed" links
+      check int "an unresolved symlink apply is not replayed" links
         (List.length (calls root |> List.filter (List.mem "masc-build-link")));
+      let targets = "/masc-build/ready\000/masc-build/new\000" in
+      let later_targets = if marker = Some "build-effect-status-2-link"
+          then "/masc-build/ready\000" else targets in
+      assert_build_inputs root "mkdir" (if invalidated then [targets; later_targets] else [targets]);
+      assert_build_inputs root "link" (if links = 0 then [] else ["new\000/masc-build/new\000"]);
       check int "the returning guest is not booted again" 1 (count "run" root);
       check int "recovery does not stop the returning guest" 0 (count "stop" root);
       check int "recovery does not delete the returning guest" 0 (count "delete" root)))
-      [Some "cleanup-missing-receipt", 0, 0, 0;
-       Some "build-effect-status-2-mkdir", 1, 1, 0;
-       Some "build-effect-status-2-link", 1, 1, 1;
-       None, 1, 1, 1])
+      [Some "build-effect-status-2-mkdir", 0;
+       Some "build-effect-status-2-link", 1;
+       None, 1])
     ["effect-stopped-return"; "effect-absent-return"; "effect-replacement";
      "effect-unknown-return"; "effect-missing-snapshot-return"]
 
@@ -1957,6 +2281,11 @@ let () =
         test_case "identity refresh preserves guest if helper appears" `Quick test_identity_refresh_preserves_guest_if_helper_appears;
         test_case "boot refused for an unusable identity names the identity" `Quick test_boot_refused_for_unusable_identity_reports_the_identity;
         test_case "fresh process adopts without boot effects" `Quick test_fresh_process_adopts_without_boot_effects;
+        test_case "work resource aliases preserve later build output" `Quick test_work_resource_alias_does_not_cleanup_later_output;
+        test_case "reboot restores targets without replaying cleanup" `Quick test_confirmed_reboot_recreates_targets_without_cleanup_replay;
+        test_case "unknown symlink effect survives work resource aliases" `Quick test_unknown_symlink_effect_survives_resource_aliases;
+        test_case "unresolved cleanup refuses later owner handoffs" `Quick test_unresolved_cleanup_refuses_later_handoffs_without_resending;
+        test_case "terminal cleanup failures permit later owner handoffs" `Quick test_terminal_cleanup_failure_permits_handoff_without_resending;
         test_case "failed scan retries next turn without repeating handoff" `Quick test_scan_failure_retries_on_the_next_turn_without_repeating_handoff;
         test_case "uncertain link effect is not replayed" `Quick test_uncertain_link_effect_is_not_replayed_in_the_same_process;
         test_case "failed replacement keeps uncertain build effect" `Quick test_failed_replacement_keeps_uncertain_build_effect;

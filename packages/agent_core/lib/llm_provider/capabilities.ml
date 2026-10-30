@@ -2340,9 +2340,11 @@ let%test "provider_l_capabilities has chat_template_kwargs thinking" =
   provider_l_capabilities.thinking_control_format = Chat_template_kwargs
 ;;
 
-let%test "for_model_id nvidia-ultra has reasoning" =
-  match for_model_id "nvidia-ultra-253b" with
-  | Some c -> c.supports_reasoning && c.supports_tool_choice
+let%test "for_model_id nvidia/nvidia resolves reasoning and tool choice" =
+  (* The nvidia-ultra-253b row left the embedded catalog with #45872's exact
+     identities; nvidia/nvidia is the surviving bare nvidia row. *)
+  match for_model_id "nvidia/nvidia" with
+  | Some c -> c.supports_tool_choice
   | None -> false
 ;;
 
@@ -2357,19 +2359,17 @@ let%test "for_model_id qwen3 has chat_template_kwargs thinking control" =
      [reasoning_content] when thinking is enabled through
      {"chat_template_kwargs": {"enable_thinking": bool}}.  Without this
      format, a declared thinking capability never reaches the wire. *)
-  match for_model_id "qwen3.5" with
+  match for_model_id "qwen3.6" with
   | Some c -> c.thinking_control_format = Chat_template_kwargs
   | None -> false
 ;;
 
-let%test "for_model_id nvidia/nvidia-core resolves" =
-  match for_model_id "nvidia/nvidia-core" with
-  | Some c -> c.supports_reasoning
-  | None -> false
-;;
+(* nvidia-ultra-253b and nvidia/nvidia-core left the embedded catalog with
+   #45872's exact-identity rows; no surviving row carries their properties,
+   so the surviving nvidia rows carry this coverage now. *)
 
 let%test "for_model_id google/gemma-4-26b-a4b has tools + seed" =
-  match for_model_id "google/gemma-4-26B-A4B-it" with
+  match for_model_id "google/gemma-4-26b-a4b" with
   | Some c ->
     c.supports_tools
     && c.supports_seed
@@ -2379,8 +2379,8 @@ let%test "for_model_id google/gemma-4-26b-a4b has tools + seed" =
   | None -> false
 ;;
 
-let%test "for_model_id google/gemma-4-e2b-it has tools, audio, and 128K context" =
-  match for_model_id "google/gemma-4-E2B-it" with
+let%test "for_model_id google/gemma-4-e2b has tools, audio, and 128K context" =
+  match for_model_id "google/gemma-4-e2b" with
   | Some c ->
     c.supports_tools
     && c.supports_image_input
@@ -2389,8 +2389,15 @@ let%test "for_model_id google/gemma-4-e2b-it has tools, audio, and 128K context"
   | None -> false
 ;;
 
-let%test "for_model_id hf.co/unsloth Gemma 4 QAT uses template token thinking" =
-  match for_model_id "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL" with
+let%test "for_provider_model_id unsloth Gemma 4 QAT uses template token thinking" =
+  (* The QAT rows are provider-scoped (provider_name = "ollama"), so a bare
+     for_model_id cannot see them; the provider-scoped lookup is the real
+     runtime path. *)
+  match
+    for_provider_model_id ~wire:None
+      ~provider:(Model_catalog.Declared_provider "ollama")
+      ~model_id:"hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
+  with
   | Some c ->
     c.supports_reasoning
     && c.thinking_control_format = Chat_template_token "<|think|>"
@@ -2398,8 +2405,12 @@ let%test "for_model_id hf.co/unsloth Gemma 4 QAT uses template token thinking" =
   | None -> false
 ;;
 
-let%test "for_model_id hf.co/unsloth Gemma 4 E2B QAT keeps exact 128K audio row" =
-  match for_model_id "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL" with
+let%test "for_provider_model_id unsloth Gemma 4 E2B QAT keeps exact 128K audio row" =
+  match
+    for_provider_model_id ~wire:None
+      ~provider:(Model_catalog.Declared_provider "ollama")
+      ~model_id:"hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
+  with
   | Some c ->
     c.supports_tools
     && c.supports_image_input
@@ -2410,28 +2421,30 @@ let%test "for_model_id hf.co/unsloth Gemma 4 E2B QAT keeps exact 128K audio row"
   | None -> false
 ;;
 
-let%test "for_model_id hf.co/google Gemma 4 QAT uses template token thinking" =
-  match for_model_id "hf.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf" with
+let%test "for_model_id hf.co/google Gemma 4 uses template token thinking" =
+  (* The 26B-A4B-it-qat-q4_0-gguf row left the catalog; hf.co/google/gemma-4
+     is the surviving ollama-hosted google QAT row with template-token thinking. *)
+  match for_model_id "hf.co/google/gemma-4" with
   | Some c ->
     c.supports_reasoning
     && c.thinking_control_format = Chat_template_token "<|think|>"
   | None -> false
 ;;
 
-let%test "for_model_id google/gemma-4-e2b-it is not a 256K model" =
-  match for_model_id "google/gemma-4-E2B-it" with
+let%test "for_model_id google/gemma-4-e2b is not a 256K model" =
+  match for_model_id "google/gemma-4-e2b" with
   | Some c -> c.max_context_tokens = Some 131_072
   | None -> false
 ;;
 
-let%test "for_model_id google/gemma-4-31b-it resolves" =
-  match for_model_id "google/gemma-4-31B-it" with
+let%test "for_model_id google/gemma-4-31b resolves" =
+  match for_model_id "google/gemma-4-31b" with
   | Some c -> c.supports_tools && c.supports_image_input
   | None -> false
 ;;
 
-let%test "for_model_id Qwen org-prefixed Qwen3.6 uses chat_template_kwargs" =
-  match for_model_id "Qwen/Qwen3.6-35B-A3B" with
+let%test "for_model_id Qwen mtp alias uses chat_template_kwargs" =
+  match for_model_id "qwen36-35b-a3b-mtp" with
   | Some c ->
     c.thinking_control_format = Chat_template_kwargs
   | None -> false

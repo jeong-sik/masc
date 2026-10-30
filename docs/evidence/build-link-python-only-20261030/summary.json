@@ -1,0 +1,40 @@
+{
+  "note": "Sanitized derivative of two retained local receipts; host paths and full test-runner output are omitted.",
+  "extracted_tests": {
+    "original_receipt_sha256": "734881852e6aa0617d6a4801f7ecda1edacdd1a76bc38f8f4137cac544ab2fc8",
+    "scope": "exact selected test functions and request builder source, simplified backend/exec/filesystem stubs; not full MASC test suite",
+    "source_sha256": "7d45a03385d41f11ef0d89fd4225d6139fb7356ec7abae28638446b0983ea5ae",
+    "test_sha256": "7b89f9b78d5b61e7adbcac95cc3731fd82596637d3574dd9548b652630c74c84",
+    "compile_exit": 0,
+    "test_exit": 0,
+    "passing_tests": [
+      "interpreter selection",
+      "collision",
+      "link validation",
+      "mkdir validation"
+    ],
+    "compile_warning": "findlib reported multiple digestif.cmi locations",
+    "additional_stub": "Agent_core_sha256 is replaced with Digestif.SHA256"
+  },
+  "synthetic_helper": {
+    "original_receipt_sha256": "60a09a85b63d2bbcea332c66c681c460ffc761e7d2b0d587bbdf491400f050e7",
+    "scope": "source-extracted wrapper and Python helpers in a synthetic temporary directory",
+    "source_sha256": "7d45a03385d41f11ef0d89fd4225d6139fb7356ec7abae28638446b0983ea5ae",
+    "harness_python": "3.14.4",
+    "platform": "darwin",
+    "kernel": "25.6.0",
+    "checks": {
+      "short_rejected_before_link": true,
+      "extra_rejected_before_link": true,
+      "corrupt_rejected_before_link": true,
+      "missing_nul_rejected_before_link": true,
+      "odd_fields_rejected_before_link": true,
+      "empty_field_rejected_before_link": true,
+      "isolated_import_and_unusual_path": true,
+      "collision_preserved_later_link_created": true,
+      "mkdir_validation_and_existing_mode": true,
+      "large_stdin_bytes": 4400000,
+      "empty_payload": true
+    }
+  }
+}

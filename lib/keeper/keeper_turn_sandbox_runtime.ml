@@ -1328,7 +1328,7 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~container_name ~generation 
       (match status with
        | Unix.WEXITED 127 ->
          Log.Keeper.warn ~keeper_name:t.meta.name
-           "microvm_build_link_interpreter_unverified: check guest /usr/bin/python3 and /usr/local/bin/python3, or /usr/bin/env, /usr/bin/perl and Digest::SHA if neither Python path passes -x; exit 127 alone does not establish the cause or effect outcome"
+           "microvm_build_link_interpreter_unverified: check guest /usr/bin/python3 and /usr/local/bin/python3 as the user executing this step; exit 127 alone does not establish the cause or effect outcome"
        | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> ());
       effect_unverified () in
     (match scanned with

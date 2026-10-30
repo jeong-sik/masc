@@ -2168,10 +2168,9 @@ let build_link_invalid_path_message ~checkout ~detail = function
 (** Input paths are passed on stdin, not as host CLI arguments. The guest
     keeps the bounded payload in memory and checks its framing and digest
     before any effect. Python isolated mode excludes the guest cwd and user
-    Python paths; site initialization is also disabled. Older images without
-    Python can use the Perl fallback below, with its environment cleared. An
-    image without a working supported interpreter fails closed. Neither path
-    fences checkout parent paths. *)
+    Python paths; site initialization is also disabled. An image without a
+    working supported interpreter cannot prepare build links. This does not
+    fence checkout parent paths. *)
 let checked_build_input_script consumer =
   {py|import hashlib, os, sys
 size, digest, count = int(sys.argv[2]), sys.argv[3], int(sys.argv[4])
@@ -2202,77 +2201,6 @@ for checkout, target in zip(fields[::2], fields[1::2]):
 sys.exit(1 if failed else 0)|py}
 ;;
 
-(* Both modes share this fallback so their framing and digest checks cannot
-   diverge. Digest::SHA is supplied by the older sandbox image; an image without
-   it exits before any filesystem effect. The environment is cleared by the
-   wrapper, and relative Perl library paths are excluded before module loading. *)
-let build_input_perl_script =
-  {perl|BEGIN { @INC = grep { substr($_, 0, 1) eq '/' } @INC; }
-use strict;
-use warnings;
-use bytes;
-use Digest::SHA qw(sha256_hex);
-
-my ($mode, $size, $digest, $count) = @ARGV;
-defined($count) && $size =~ /\A[0-9]+\z/ && $count =~ /\A[0-9]+\z/
-    && $digest =~ /\A[0-9a-f]{64}\z/ or exit 1;
-binmode(STDIN, ':raw') or exit 1;
-my $data = '';
-while (length($data) <= $size) {
-    my $n = read(STDIN, my $chunk, $size + 1 - length($data));
-    defined($n) or exit 1;
-    last if $n == 0;
-    $data .= $chunk;
-}
-length($data) == $size && sha256_hex($data) eq $digest or exit 1;
-my @fields;
-if (length($data)) {
-    length($data) > 1 && substr($data, -1) eq "\0" or exit 1;
-    @fields = split /\0/, substr($data, 0, -1), -1;
-}
-@fields == $count && !grep { length($_) == 0 } @fields or exit 1;
-
-sub ensure_directory {
-    my ($path) = @_;
-    my $current = $path;
-    $current =~ s{/+\z}{};
-    $current = '/' if $current eq '' && substr($path, 0, 1) eq '/';
-    my @pending;
-    while (!-d $current) {
-        length($current) or return 0;
-        push @pending, $current;
-        my $separator = rindex($current, '/');
-        my $parent = $separator < 0 ? '.' : substr($current, 0, $separator);
-        $parent =~ s{/+\z}{};
-        $parent = '/' if $parent eq '' && $separator >= 0;
-        $current = $parent;
-    }
-    while (@pending) {
-        my $directory = pop @pending;
-        mkdir($directory, 0777) || -d $directory || return 0;
-    }
-    return 1;
-}
-
-my $failed = 0;
-if ($mode eq 'masc-build-mkdir') {
-    umask 0;
-    for my $target (@fields) {
-        ensure_directory($target) || ($failed = 1);
-    }
-} elsif ($mode eq 'masc-build-link') {
-    @fields % 2 == 0 or exit 1;
-    for (my $index = 0; $index < @fields; $index += 2) {
-        my ($checkout, $target) = @fields[$index, $index + 1];
-        symlink($target, $checkout . '/_build') || ($failed = 1);
-    }
-} else {
-    exit 1;
-}
-exit($failed ? 1 : 0);
-|perl}
-;;
-
 let build_input values =
   match values with
   | [] -> ""
@@ -2280,21 +2208,11 @@ let build_input values =
 ;;
 
 let build_input_interpreter =
-  {sh|python_primary=$1
-python_secondary=$2
-env_program=$3
-perl_program=$4
-python_script=$5
-perl_script=$6
-shift 6
-if [ -x "$python_primary" ]; then
-  exec "$python_primary" -I -S -c "$python_script" "$@"
+  {sh|if [ -x /usr/bin/python3 ]; then
+  exec /usr/bin/python3 -I -S -c "$@"
 fi
-if [ -x "$python_secondary" ]; then
-  exec "$python_secondary" -I -S -c "$python_script" "$@"
-fi
-if [ -x "$env_program" ] && [ -x "$perl_program" ]; then
-  exec "$env_program" -i "$perl_program" -C0 -e "$perl_script" "$@"
+if [ -x /usr/local/bin/python3 ]; then
+  exec /usr/local/bin/python3 -I -S -c "$@"
 fi
 exit 127|sh}
 ;;
@@ -2302,9 +2220,7 @@ exit 127|sh}
 let build_input_command script name input ~fields =
   let digest = Agent_core_sha256.(digest_string input |> to_hex) in
   [ "/bin/sh"; "-c"; build_input_interpreter; "masc-build-helper";
-    "/usr/bin/python3"; "/usr/local/bin/python3"; "/usr/bin/env"; "/usr/bin/perl";
-    script; build_input_perl_script; name; string_of_int (String.length input);
-    digest; string_of_int fields ]
+    script; name; string_of_int (String.length input); digest; string_of_int fields ]
 ;;
 
 let build_link_apply_request_for backend ~container_name ~keeper_work_root ~uid ~gid ~actions =

@@ -112,9 +112,8 @@ before deleting them. `.masc-keep-build` preserves a checkout's output.
 
 `microvm_build_link_mkdir_failed` or `microvm_build_link_apply_failed` can
 report a nonzero exit or signal. Status 127 can mean build preparation could
-not start an interpreter; a missing Perl module can return a different nonzero
-status, such as 2. Execution and transport failures are also possible, so no
-status alone establishes the cause or proves that no effect ran. Preserve the
+not start an interpreter. Execution and transport failures are also possible,
+so no status alone establishes the cause or proves that no effect ran. Preserve the
 guest, volumes, links and any possibly executed effect as unverified; do not
 automatically retry the effect or restart the service or guest to clear the
 warning. The in-process unverified state applies only while that guest
@@ -125,12 +124,12 @@ In the affected guest, perform these checks both as root and as the Keeper uid
 and gid: target-directory preparation uses root, while link creation uses the
 Keeper identity. A check by one user does not establish access for the other.
 The helper selects `/usr/bin/python3` first, then
-`/usr/local/bin/python3`; only if neither passes `-x` does it try
-`/usr/bin/env -i /usr/bin/perl -C0` with `Digest::SHA`. This check only reads
-permissions; it does not execute or validate any of them:
+`/usr/local/bin/python3`. If neither passes `-x`, it exits 127 without selecting
+an interpreter. This check only reads permissions; it does not execute or
+validate either interpreter:
 
 ```sh
-for guest_runtime in /usr/bin/python3 /usr/local/bin/python3 /usr/bin/env /usr/bin/perl; do
+for guest_runtime in /usr/bin/python3 /usr/local/bin/python3; do
   if [ -x "$guest_runtime" ]; then
     printf '%s: -x check passed; execution is not verified\n' "$guest_runtime"
   else
@@ -139,30 +138,18 @@ for guest_runtime in /usr/bin/python3 /usr/local/bin/python3 /usr/bin/env /usr/b
 done
 ```
 
-If neither Python path passes `-x` and both Perl-related paths do, an
-authorized operator can check `Digest::SHA` in a trusted guest using the same
-cleared environment and absolute module-path restriction as the helper. Run the
-check separately as root and as the Keeper uid and gid:
-
-```sh
-/usr/bin/env -i /usr/bin/perl -C0 -e \
-  'BEGIN { @INC = grep { substr($_, 0, 1) eq "/" } @INC; } use Digest::SHA qw(sha256_hex); print "Digest::SHA loaded\n";'
-```
-
-This executes Perl and module initialization; use it only with a trusted guest
-image. Its output, including error details and paths, must stay within the
-affected owners' authorized sharing boundary. Success shows only that this
-module loaded for that user at that moment, not that the helper or prior effect
-succeeded. A missing Perl module can report a nonzero status other than 127.
-If a Python path passes `-x` but then fails, the helper does not proceed to the
+Keep the check's output and any subsequent diagnostics within the affected
+owners' authorized sharing boundary. If a Python path passes `-x` but then
+fails, the helper does not proceed to the
 next candidate. Permission checks do not validate an executable, its loader,
 the guest transport or the prior effect. Reconcile the outstanding effect and
 other workspace owners before planning any change; do not install software,
 replace the guest, restart the service or retry merely because of these checks.
-Ask the operator to
-arrange a trusted compatible image or interpreter if the selected runtime is
-unavailable. The Python-only diagnostics below still require a trusted Python
-at one of the two Python paths, even when Perl can run build preparation.
+Ask the operator to arrange a trusted compatible image or interpreter if the
+selected runtime is unavailable. The diagnostics below also require a trusted
+Python at one of those paths. Remote checkout discovery and scheduled attached
+build cleanup separately invoke `python3` through the guest's `PATH`; a fixed
+path check alone does not establish that those commands can run.
 
 #### A preserved `_build` link after moving a checkout
 

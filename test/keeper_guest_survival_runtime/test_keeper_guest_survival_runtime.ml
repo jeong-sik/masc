@@ -473,8 +473,7 @@ let test_build_effect_failure_is_not_replayed_in_the_same_process () =
         "microvm_build_link_effect_unverified";
         "Keeper User Manual: Build preparation reports a failure" ]
       @ (if failure_status = 127 then
-          [ "/usr/bin/python3"; "/usr/local/bin/python3"; "/usr/bin/env";
-            "/usr/bin/perl"; "Digest::SHA";
+          [ "/usr/bin/python3"; "/usr/local/bin/python3";
             "exit 127 alone does not establish the cause or effect outcome" ]
          else []) in
     List.iter (fun expected ->

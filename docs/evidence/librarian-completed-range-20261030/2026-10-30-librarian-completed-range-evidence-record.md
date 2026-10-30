@@ -60,3 +60,15 @@
 - 실제 CLI 한도의 fitting에는 기존 atom 이분 탐색이 남아 있다. 실제 렌더링 크기 predicate로 후보를 검사하는 탐색이며, 중요도·주기·임의 입력 상한이 아니다. 자연어 substring으로 작업 의미나 크기 거절을 추측하는 분기를 추가하지 않았다.
 - 보완 후 재검증 대상은 기존 네 suite와 `test_keeper_librarian_cli_lane`, `test_keeper_librarian_floor_chain`이다. 현재 보완분은 parse-only 18개 파일·diff/changelog 검사를 통과했으며, 새 head의 실행 결과는 PR에 별도로 결속한다. 첫 실행의 성공한 검사도 새 head의 실행 성공으로 이월하지 않는다.
 - 이 실행은 임시 workspace·fixture HTTP/native 응답으로 실제 프로그램·저장소·훅을 실행한 증거다. 운영 Keeper·실제 모델의 N+M 의미 보존·호출 비용 개선·배포 증거는 아니다.
+
+## 추가 관측 — native veto 소비자 재검증
+
+- 출처: [Test 41022080207](https://github.com/jeong-sik/masc/actions/runs/41022080207), head `1ab6f483976029b2eb142c8c7e3b4039cb1b8f46`, ref `feat/librarian-completed-range-20261030`, conclusion `failure`.
+- 확인일시: `2026-10-30T16:56:14+09:00`.
+- 신뢰도: `High` (실제 CI 로그·요청 관측), 운영 의미 보존은 미확인.
+- TARGET_SUITES: `test_keeper_librarian_continuity,test_keeper_memory_lane,test_keeper_librarian_durable_consumer,test_keeper_librarian_capacity_callback,test_keeper_librarian_cli_lane,test_keeper_librarian_floor_chain`.
+- 여섯 실행 파일이 빌드됐고 310개 검사 중 307개가 통과했다. Memory lane·capacity callback·CLI lane·floor chain은 모두 성공했다. 실패 세 건은 continuity 두 건과 durable consumer 한 건이다.
+- 측정 한도 캐시 검사에서 다른 native slot의 `Setup_failure`를 정상적인 축소 근거처럼 사용하던 fixture를, 도구 효과 없는 typed context refusal로 바꿨다. opaque 실패에 대한 제품 veto는 유지한다.
+- Context-only CLI tail은 첫 whole walk에서는 안전한 context refusal이고 첫 메시지 walk에서만 opaque 실패다. 따라서 wake당 API 4회·CLI 2회가 맞다. 메시지 walk의 opaque 실패는 새 unread hole이나 W를 게시하지 않아야 한다.
+- durable checkpoint의 CLI tail은 최초 whole walk부터 opaque다. 따라서 API 1회·CLI 1회 뒤 종료가 맞다. 앞선 API413 관측과 섞여도 `may_descend_messages=false`인지 직접 확인한다.
+- 이 보완은 fixture의 관측과 기대를 맞추는 변경이다. 첫 거절의 근거를 달리한 두 경우를 같은 호출 수로 취급하지 않으며, 새 head의 여섯 suite 결과는 별도로 확인한다.

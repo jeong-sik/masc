@@ -3059,6 +3059,10 @@ let apple_endpoint_of_snapshot_owned ~fs ~scope
          | Apple_stopped reading ->
            let* () = check_apple_guest_scope ~base_path:config.base_path
                ~keeper_name:meta.name ~network_mode ~container_name reading in
+           (* This stopped observation is already under the lifecycle owner.
+              Invalidate before returning so every caller, including captured
+              reads and turn execution, can prepare a later handoff. *)
+           forget_microvm_guest_state ~backend ~container_name;
            Error "microvm guest is not running"
          | Apple_running reading ->
            let* () = check_apple_guest_scope ~base_path:config.base_path

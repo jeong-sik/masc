@@ -877,7 +877,9 @@ let process_step root operation =
             check bool "racing turn fails closed" true
               (Astring.String.is_infix ~affix:"microvm guest readiness changed" detail);
             Turn.microvm_remote_endpoint ~timeout_sec:10. runtime))
-    | "checkout-absent" | "checkout-stopped" | "checkout-unknown" | "read-stopped" ->
+    | "checkout-absent" | "checkout-stopped" | "checkout-unknown" | "read-stopped"
+    | "captured-read-stopped" | "captured-read-absent" | "captured-read-unknown"
+    | "endpoint-stopped" | "endpoint-absent" ->
       Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
         let apple_meta = meta () in
         let kata_meta = {apple_meta with microvm_backend=Some Backend.Nerdctl_kata} in
@@ -908,8 +910,22 @@ let process_step root operation =
         check bool "Kata identity fixture is registered" true
           (Turn.For_testing_microvm.register_process_identity ~container_name:guest
              ~cleanup:(fun () -> kata_identity_cleaned := true));
-        if operation = "checkout-stopped" || operation = "read-stopped" then
+        let captured_authority =
+          if List.mem operation ["captured-read-stopped"; "captured-read-absent"; "captured-read-unknown"] then
+            (match Keeper_sandbox_remote_lane.capture_read_authority ~config ~meta:apple_meta () with
+             | Ok (Some authority) -> Some authority
+             | Ok None -> fail "Apple read authority was missing"
+             | Error detail -> fail detail)
+          else None in
+        let stopped = List.mem operation
+            ["checkout-stopped"; "read-stopped"; "captured-read-stopped"; "endpoint-stopped"] in
+        let absent = List.mem operation ["captured-read-absent"; "endpoint-absent"] in
+        if stopped then
           save_json guest_path (replace "status" (`Assoc ["state", `String "stopped"]) (json guest_path))
+        else if absent then Unix.unlink guest_path
+        else if operation = "captured-read-unknown" then (
+          write (Filename.concat root "inspect-fails-after-run") "";
+          write (Filename.concat root "list-override") "[{}]")
         else (
           Unix.rename snapshot held_snapshot;
           if operation = "checkout-absent" then Unix.unlink guest_path
@@ -918,7 +934,22 @@ let process_step root operation =
             write (Filename.concat root "list-override") "[{}]"));
         let before = read (Filename.concat root "calls") |> String.split_on_char '\n'
           |> List.filter (fun line -> line <> "") |> List.length in
-        if operation = "read-stopped" then (
+        if List.mem operation ["captured-read-stopped"; "captured-read-absent"; "captured-read-unknown"] then (
+          let authority = match captured_authority with
+            | Some authority -> authority
+            | None -> fail "expected captured Apple read authority" in
+          match Keeper_sandbox_read_backend.run_command_with_status ~read_authority:authority
+              ~config ~meta:apple_meta ~command_argv:["/bin/true"] ~max_bytes:1024 ~timeout_sec:10. () with
+          | Error detail ->
+            if stopped || absent then check bool "captured read observes the unavailable guest" true
+                (Astring.String.is_infix ~affix:"microvm guest is not running" detail)
+          | Ok _ -> fail "captured read accepted an unavailable guest")
+        else if operation = "endpoint-stopped" || operation = "endpoint-absent" then (
+          match Turn.microvm_remote_endpoint ~timeout_sec:10. runtime with
+          | Error detail -> check bool "cached turn endpoint observes the unavailable guest" true
+              (Astring.String.is_infix ~affix:"microvm guest is not running" detail)
+          | Ok _ -> fail "cached turn endpoint accepted an unavailable guest")
+        else if operation = "read-stopped" then (
           match Keeper_sandbox_read_backend.run_command_with_status ~config ~meta:apple_meta
               ~command_argv:["/bin/true"] ~max_bytes:1024 ~timeout_sec:10. () with
           | Error detail -> check bool "read backend names stopped guest" true
@@ -931,7 +962,8 @@ let process_step root operation =
           | ("checkout-absent" | "checkout-stopped"), Error (Keeper_playground_checkouts.Root_missing _) -> ()
           | "checkout-unknown", Error (Keeper_playground_checkouts.Root_unreadable _) -> ()
           | _ -> fail "checkout did not preserve the observed absence boundary");
-        let expected_ready = operation = "checkout-unknown" in
+        let unknown = operation = "checkout-unknown" || operation = "captured-read-unknown" in
+        let expected_ready = unknown in
         check bool "Apple readiness follows confirmed observation" expected_ready
           (Turn.is_microvm_guest_booted ~config ~meta:apple_meta ());
         check bool "colliding workspace follows confirmed observation" expected_ready
@@ -950,12 +982,16 @@ let process_step root operation =
         Unix.chmod binary 0o700; Unix.chmod other_binary 0o700;
         let after = read (Filename.concat root "calls") |> String.split_on_char '\n'
           |> List.filter (fun line -> line <> "") |> List.drop before |> List.map Yojson.Safe.from_string in
-        check bool "checkout observation has no guest or volume effect" true
+        check bool "observation has no guest or volume effect" true
           (List.for_all (function `List (`String ("run" | "stop" | "delete" | "exec" | "volume") :: _) -> false
             | _ -> true) after);
-        if operation <> "checkout-stopped" && operation <> "read-stopped" then Unix.rename held_snapshot snapshot;
-        write guest_path saved_guest;
-        if operation = "checkout-unknown" then (
+        if operation = "checkout-absent" || operation = "checkout-unknown" then
+          Unix.rename held_snapshot snapshot;
+        (* The cached turn must be able to recover when its guest remains
+           stopped or absent. Other cases model the same guest returning first. *)
+        if operation <> "endpoint-stopped" && operation <> "endpoint-absent" then
+          write guest_path saved_guest;
+        if unknown then (
           Unix.unlink (Filename.concat root "inspect-fails-after-run");
           Unix.unlink (Filename.concat root "list-override"));
         Turn.microvm_remote_endpoint ~timeout_sec:10. runtime)
@@ -1659,13 +1695,20 @@ let test_checkout_observation_invalidates_before_reacquisition () =
   List.iter (fun operation -> with_fixture (fun root ->
     let status, stderr = step_captured root operation in
     (match status with Unix.WEXITED 0 -> () | _ -> failf "%s failed: %s" operation stderr);
-    check int "one provider boot" 1 (count "run" root);
-    check int "checkout never stops a guest" 0 (count "stop" root);
-    check int "checkout never deletes a guest" 0 (count "delete" root);
+    let retries_stopped_guest = operation = "endpoint-stopped" in
+    let retries_absent_guest = operation = "endpoint-absent" in
+    check int "a still-stopped or absent guest is booted again"
+      (if retries_stopped_guest || retries_absent_guest then 2 else 1) (count "run" root);
+    check int "only reacquisition may stop the still-stopped guest"
+      (if retries_stopped_guest then 1 else 0) (count "stop" root);
+    check int "only reacquisition may delete the still-stopped guest"
+      (if retries_stopped_guest then 1 else 0) (count "delete" root);
     check int "only confirmed absence or stop requires a fresh first handoff"
-      (if operation = "checkout-unknown" then 1 else 2)
+      (if operation = "checkout-unknown" || operation = "captured-read-unknown" then 1 else 2)
       (List.length (entries root "requests"))))
-    ["checkout-absent"; "checkout-stopped"; "checkout-unknown"; "read-stopped"]
+    ["checkout-absent"; "checkout-stopped"; "checkout-unknown"; "read-stopped";
+     "captured-read-stopped"; "captured-read-absent"; "captured-read-unknown";
+     "endpoint-stopped"; "endpoint-absent"]
 
 let test_checkout_observation_cannot_late_forget_handoff () = with_fixture @@ fun root ->
   let status, stderr = step_captured root "checkout-race" in

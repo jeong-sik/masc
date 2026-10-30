@@ -90,7 +90,11 @@ val microvm_remote_endpoint :
     Apple completes its first process handoff under Keeper lifecycle ownership,
     including durable identity validation, shim verification and build cleanup.
     Its final endpoint admission rechecks readiness under that same owner; if
-    an observation invalidated it in between, this call fails and can be retried. *)
+    an observation invalidated it in between, this call fails and can be retried.
+    A scope-matched stopped observation also invalidates cached readiness, so a
+    later call can prepare the guest again. If the snapshot is missing or
+    unreadable, endpoint admission returns the snapshot error before observing
+    the guest; this alone does not clear cached readiness. *)
 
 val microvm_attached_endpoint :
   ?timeout_sec:float ->
@@ -106,10 +110,13 @@ val microvm_attached_endpoint :
 
     Never starts a guest. Apple refuses an absent, stopped, unreadable or
     differently scoped guest before returning an endpoint; the observation
-    does not fence a subsequent replacement. Other backends still reach the
-    guest through [container exec]. For Apple, [timeout_sec] applies to guest
-    inspection, not to the entire endpoint acquisition. Booting for a reader
-    would spend a VM start and write the identity snapshot and work root, which
+    does not fence a subsequent replacement. An observed stopped guest whose
+    scope matches invalidates cached readiness before refusal. Other backends
+    still reach the guest through [container exec]. For Apple, [timeout_sec]
+    applies separately to guest inspection and fallback inventory, not to the
+    entire endpoint acquisition. A missing or unreadable host snapshot is
+    reported before guest observation. Booting for a reader would spend a VM
+    start and write the identity snapshot and work root, which
     belong to the keeper's turn.
     Refused for a non-microvm keeper. *)
 
@@ -127,10 +134,11 @@ val with_apple_attached_endpoint :
   (revision:string -> Keeper_sandbox_remote.t -> ('a, string) result) ->
   ('a, string) result
 (** Validate the Apple guest's scope labels and host-side credential snapshot
-    under the process-local Keeper lifecycle owner. The callback must only inspect the endpoint, not
-    execute a guest command or reacquire the owner. The optional timeout bounds
-    the guest inspection, not the full acquisition and validation. The revision
-    identifies the validated snapshot; it does not prove which inode the guest
+    under the process-local Keeper lifecycle owner. The callback must only inspect
+    the endpoint, not execute a guest command or reacquire the owner. The optional
+    timeout bounds guest inspection and fallback inventory separately, not the full
+    acquisition and validation. The revision identifies the validated snapshot;
+    it does not prove which inode the guest
     actually mounted. Changes after inspection are not fenced. *)
 
 val microvm_guest_absence_reason :

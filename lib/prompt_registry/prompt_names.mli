@@ -151,6 +151,8 @@ val lane_cli_probe_hitl_system : string
 val lane_cli_probe_hitl_user : string
 val keeper_antigravity_system_instructions_label : string
 val keeper_antigravity_current_goal_label : string
+val keeper_muse_native_read : string
+(** Managed explanation of Muse's native read posture and attached MASC tools. *)
 val eval_calibration_few_shot : string
 val eval_calibration_few_shot_example : string
 

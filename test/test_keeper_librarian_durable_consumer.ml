@@ -4216,6 +4216,7 @@ let test_counterpart_capacity_refusal_preserves_complete_source () =
   Keeper_chat_store.append_user_message ~base_dir:config.Workspace.base_path ~keeper_name
     ~speaker ~content ();
   append_official_boundary config ~trace_id ~turn:1 ~recorded_at:(Time_compat.now () +. 10.);
+  append_official_boundary config ~trace_id ~turn:2 ~recorded_at:(Time_compat.now () +. 20.);
   let module Failure = Masc.Keeper_exact_walk_failure in
   let module Exact = Agent_core.Exact_output in
   let capacity = Failure.of_cause (Exact.Provider_response_refused
@@ -4238,7 +4239,7 @@ let test_counterpart_capacity_refusal_preserves_complete_source () =
      check bool "capacity evidence is retained without rewriting it" true (reports = [report]);
      check bool "official-only input does not invent an atom receipt" true (Option.is_none atom_range);
      (match official_range with
-      | Some range -> check (list int) "the unconsumed source line is addressable" [1] (List.map fst range.turns)
+      | Some range -> check (list int) "the complete unconsumed range is addressable" [1;2] (List.map fst range.turns)
       | None -> fail "source boundary coordinates are absent")
    | Error error -> fail (Consumer.error_to_string error)
    | Ok _ -> fail "capacity refusal was not explicit");
@@ -4248,6 +4249,15 @@ let test_counterpart_capacity_refusal_preserves_complete_source () =
    | Some value ->
      let restored = Original.of_json (Original.to_json value) |> Result.map_error Original.error_to_string in
      (match restored with Ok restored -> check_input restored | Error detail -> fail detail));
+  (match consume config (fun value ->
+       check_input value;
+       check bool "capacity-only counterpart refusal does not narrow the recovery chat window" true
+         (Original.extent value=Masc.Keeper_librarian_range.All_unread);
+       check (list int) "the immediate next selection retains both official rows" [1;2]
+         (Original.official_range_id value |> Option.get |> fun range -> List.map fst range.turns);
+       Consumer.Memory_pending) with
+   | Consumer.Pending -> ()
+   | _ -> fail "the complete recovery selection should remain pending");
   let ordinary = {report with Runtime.input_capacity_evidence = Runtime.No_input_capacity_refusal;
     input_capacity_only = false;
     provider_input_refusals = []; message_descent = Runtime.No_descent_evidence;

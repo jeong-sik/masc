@@ -53,4 +53,4 @@ let render ~base_path ~keepers_dir ~keeper_name =
   | exn ->
     Log.Keeper.warn ~keeper_name "working context unavailable; original intake continues: %s"
       (Printexc.to_string exn);
-    None
+    Error (Printexc.to_string exn)

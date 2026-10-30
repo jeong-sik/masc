@@ -263,7 +263,63 @@ let test_native_empty_replaces_held_evidence () =
   | Error _ -> ()
   | Ok _ -> fail "the clearing carrier was inserted after input capacity accounting"
 
-let ()=run "frozen librarian unread requests" ["request",[
+let test_managed_policy_keeps_frozen_request_evidence () =
+  let key=Prompt_names.keeper_context_librarian_unread in
+  require (Prompt_registry.set_override key "MANAGED_UNREAD_OBSERVATION");
+  Fun.protect ~finally:(fun () -> Prompt_registry.clear_prompt_override key) @@ fun () ->
+  let continuity=choose ~snapshot:(Error "unknown snapshot") (Ok [hole]) in
+  let expected=Driver.request_unread continuity in
+  let http=(compose continuity messages).projection.messages in
+  check_carrier expected http;
+  check bool "actual HTTP request consumes the managed policy" true
+    (String_util.contains_substring (T.text_of_message (carrier http)) "MANAGED_UNREAD_OBSERVATION");
+  let official=start_projection (official_front continuity) ~capacity:max_int messages
+    |> Result.map_error Agent_core.Error.to_string |> require in
+  check_carrier expected official;
+  let delivered=Host.resume_prompt ~goal:"Current goal" ~held:[] official in
+  check bool "actual official request consumes the same managed policy" true
+    (String_util.contains_substring delivered.prompt "MANAGED_UNREAD_OBSERVATION");
+  check bool "an override without JSON variables cannot omit frozen evidence" true
+    (resume_has_carrier delivered official)
+
+let test_missing_policy_carries_evidence_and_explicit_error () =
+  let continuity=choose ~snapshot:(Error "unknown snapshot") (Ok [hole]) in
+  let expected=Driver.request_unread continuity in
+  let old=Frozen.attach ~role:T.System Frozen.empty ~include_empty:true messages in
+  let empty_dir=Filename.temp_dir "unread-empty-prompts" "" in
+  Prompt_registry.clear ();
+  Prompt_registry.set_markdown_dir empty_dir;
+  Fun.protect ~finally:(fun () ->
+    Prompt_registry.clear ();
+    Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+    Unix.rmdir empty_dir) @@ fun () ->
+  check bool "text resolution reports a missing policy" true (Result.is_error (Frozen.text expected));
+  let check_error messages =
+    check_carrier expected messages;
+    check bool "adapter exposes the policy error on the exact carrier" true
+      (match List.assoc_opt "masc.librarian_unread_guidance_error" (carrier messages).T.metadata with
+       | Some (`String detail) -> String.length detail > 0
+       | Some _ | None -> false) in
+  check_error (compose continuity messages).projection.messages;
+  let official=Host.project_source ~unread:expected None old
+    |> Result.map_error Agent_core.Error.to_string |> require in
+  check_error official;
+  check int "replacement removes the stale observation even without guidance" 1
+    (List.length (List.filter Window.is_unread_context official));
+  let delivered=Host.resume_prompt ~goal:"Continue" ~held:[] official in
+  check bool "unknown snapshot and exact unread coordinates reach the official request" true
+    (resume_has_carrier delivered official);
+  let cleared=Frozen.attach ~include_empty:true ~role:T.System Frozen.empty official in
+  check_carrier Frozen.empty cleared;
+  check int "ordinary known-empty omission still retires an earlier carrier" 0
+    (List.length (List.filter Window.is_unread_context
+      (Frozen.attach ~role:T.User Frozen.empty official)))
+
+let ()=
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  run "frozen librarian unread requests" ["request",[
+  test_case "managed policy retains frozen evidence in HTTP and official requests" `Quick test_managed_policy_keeps_frozen_request_evidence;
+  test_case "missing policy carries evidence with an explicit diagnostic" `Quick test_missing_policy_carries_evidence_and_explicit_error;
   test_case "absorbed cursor precedes one frozen ledger read and forecast" `Quick test_absorbed_freeze_and_forecast;
   test_case "snapshot and Memory uncertainty remain independent" `Quick test_independent_unknown_and_stale_snapshot;
   test_case "candidate rendering preserves canonical source hashes" `Quick test_candidate_baseline_keeps_original_source;

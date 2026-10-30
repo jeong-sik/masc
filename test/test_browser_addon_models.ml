@@ -24,7 +24,9 @@ let scenario () =
       let configuration=Models.prepare_configuration ~store_root:(Filename.concat root "receipts")
         ~outputs:[{Lane_addon_types.name="locate";schema;request_schema=Lane_addon_types.Package_schema_only}] in
       let models=Models.create ~incarnation ~configuration |> ok in
-      let disabled=Models.create ~incarnation ~configuration:{configuration with outputs=[]} |> ok in
+      let disabled_configuration=Models.prepare_configuration
+        ~store_root:configuration.store_root ~outputs:[] in
+      let disabled=Models.create ~incarnation ~configuration:disabled_configuration |> ok in
       check bool "selection off refuses immediately" true
         (Models.request disabled (request "disabled")=Error (Models.Output_disabled "locate"));
       let owner=Owner.create ~incarnation |> ok in

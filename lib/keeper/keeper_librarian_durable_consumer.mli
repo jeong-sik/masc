@@ -143,6 +143,8 @@ val refused_original
     [Counterpart_input_capacity_refused]. Pending/unknown work is not passed
     here. Historical range-fitting observations such as output limits,
     timeouts and incomplete output also veto the capacity-only diagnosis.
+    All other definite reports yield [Memory_not_committed]; the capacity
+    refusal is this helper's sole error result.
     Performs no I/O and grants no consumption authority. *)
 
 (** How far behind the keeper's Librarian is standing (RFC §4.9, invariant
@@ -181,7 +183,9 @@ val consume_one
     unread turn, of whichever kind ends first in the log. A small successful
     cut keeps that mode until the backlog is empty; a successful all-unread
     pass or a baseline also clears the marker. Durable progress remains the
-    authority across process restarts. [Memory_pending] returns [Pending]
+    authority across process restarts. A counterpart-only capacity refusal
+    cannot descend by messages and keeps only a pre-existing marker, rather
+    than narrowing its recovery range. [Memory_pending] returns [Pending]
     without invoking message-floor inference or changing the pre-existing
     failure marker. A later read still selects from current sources; this
     foundation alone does not retain an immutable original across wakes.

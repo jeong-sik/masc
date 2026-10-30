@@ -1685,6 +1685,10 @@ let consume_one_with_progress_writer_and_floor
      (* Pending is not a failed attempt: retain an earlier failure marker, but
         undo the provisional marker this wrapper installs for exceptions. *)
      if not had_failed_range then clear_failed key
+   | Error (Counterpart_input_capacity_refused _), _ ->
+     (* There is no message to split. Preserve this original's whole recovery
+        range rather than manufacture a smaller chat-time window. *)
+     if not had_failed_range then clear_failed key
    | Ok (Nothing_to_read | Baseline_advanced _), _
    | Ok (Progress_advanced _ | Official_advanced _), R.All_unread -> clear_failed key
    (* Returned only when the atom side has nothing to read: the atom backlog
@@ -1701,7 +1705,6 @@ let consume_one_with_progress_writer_and_floor
    | (Error (Range_stopped _), _) | (Error (Range_end_boundary_missing _), _)
    | (Error (Progress_boundary_missing _), _) | (Error (Memory_snapshot_unreadable _), _)
    | (Error (Counterpart_interval_non_monotone _), _)
-   | (Error (Counterpart_input_capacity_refused _), _)
    | (Error (Counterpart_observations_unreadable _), _) | (Error (Progress_write_failed _), _)
    | (Error (Official_progress_unreadable _), _) | (Error (Official_progress_write_failed _), _)
    | (Error (Official_progress_boundary_missing _), _)

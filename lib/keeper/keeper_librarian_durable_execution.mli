@@ -11,7 +11,15 @@ val consume_one : config:Workspace.config -> keeper_name:string ->
     and later wakes, without fresh selection or a new provider call. Definite
     terminal host refusals preserve their actual diagnostic in
     [Memory_not_committed] without remaining an unfinished frontier; a later
-    wake may freshly select their still-unread source under a new ID.
+    wake may freshly select their still-unread source under a new ID, except
+    capacity-only counterpart refusals: {!Keeper_librarian_durable_refusal}
+    retains and reports their actual original before fresh selection, across
+    ticks and restart. A different configured semantic destination permits a
+    fresh attempt while retaining the earlier refusal; returning to its old
+    configuration blocks again while its range is still relevant. Actual range
+    receipts, or a proved later reader frontier including the original external
+    ACK, permit settlement without claiming unread messages were read.
+    Changed positions do not certify source equality or completed consumption.
     A refused original that read one turn, whose refusal shows that reading
     less may help, is a message floor candidate
     ({!Keeper_librarian_floor_descent}). It is neither archived nor a

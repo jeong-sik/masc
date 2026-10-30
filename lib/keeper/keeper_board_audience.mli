@@ -5,8 +5,9 @@ type t =
   | Broadcast
   | Thread_participants
   | Discoverable
-(** Closed audience sum from the mixed-workload operation contract. Only
-    [Discoverable] may enter semantic attention judgment. *)
+(** Closed audience sum from the mixed-workload operation contract. An
+    unaddressed comment on a public or internal thread can also enter semantic
+    attention judgment for a non-participant. *)
 
 type classification_error =
   | Invalid_board_target of string

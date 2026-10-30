@@ -1555,11 +1555,25 @@ let add_delete_action_routes router =
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
-             match Safe_ops.json_string_opt "agent_name" json with
+             (* Validate and dispatch against one captured workspace.  The
+                check precedes both existing-operation retries and new purges. *)
+             let config = (Mcp_server.workspace_scope state).config in
+             match Workspace.validate_expected_workspace ~config json with
+             | Error Workspace.Invalid_workspace_precondition ->
+               respond_error ~request:req reqd "invalid expected_workspace precondition"
+             | Error Workspace.Workspace_precondition_failed ->
+               let refusal = Request_workspace_precondition.Workspace_mismatch in
+               Http.Response.json_value ~status:`Conflict ~request:req
+                 (Server_refusal.json
+                    ~code:(Request_workspace_precondition.refusal_code refusal)
+                    ~fields:[ "ok", `Bool false ]
+                    (Request_workspace_precondition.refusal_message refusal))
+                 reqd
+             | Ok json ->
+             (match Safe_ops.json_string_opt "agent_name" json with
              | None ->
                respond_error ~request:req reqd (invalid_request "agent_name")
              | Some requested_name ->
-               let config = (Mcp_server.workspace_config state) in
                (match
                   Keeper_dashboard_purge.existing_operation
                     config
@@ -1645,7 +1659,7 @@ let add_delete_action_routes router =
                         reqd)
                     | Ok None ->
                       respond_error ~status:`Not_found ~request:req reqd
-                        "agent or keeper not found")))
+                        "agent or keeper not found"))))
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "agent_name")
          )

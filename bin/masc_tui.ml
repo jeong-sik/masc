@@ -17799,7 +17799,10 @@ let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_op
            Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
              ~action:directive_action ~operator_operation_id ~expected_workspace)
     | Keeper_control.Purge ->
-          Masc_tui_http.post_keeper_purge ~host ~port ~keeper_name
+        (match expected_workspace with
+         | None -> Error "Workspace identity is unavailable; Keeper purge was not sent"
+         | Some expected_workspace ->
+           Masc_tui_http.post_keeper_purge ~host ~port ~keeper_name ~expected_workspace)
   in
   let rec walk ~recovery_available last_outcome steps =
     match steps with

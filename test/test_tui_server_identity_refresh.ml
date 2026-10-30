@@ -17,6 +17,21 @@ let identity base_path : Tui_decode.server_identity =
   ; sid_scheduler = None
   }
 
+let test_keeper_purge_header_and_body_share_workspace () =
+  let workspace = identity "/workspace/a" in
+  let headers = Masc_tui_http.keeper_workspace_headers workspace in
+  let body = Masc_tui_keeper_control.purge_body ~expected_workspace:workspace "alpha"
+    |> Yojson.Safe.from_string in
+  let open Yojson.Safe.Util in
+  let expected = body |> member "expected_workspace" in
+  let header name = List.assoc_opt name headers in
+  Alcotest.(check (option string)) "header base matches body"
+    (Some (expected |> member "base_path" |> to_string))
+    (header Masc.Request_workspace_precondition.expected_base_path_header);
+  Alcotest.(check (option string)) "header root matches body"
+    (Some (expected |> member "masc_root" |> to_string))
+    (header Masc.Request_workspace_precondition.expected_masc_root_header)
+
 let test_chat_file_observation_retains_its_read_epoch () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"chat-files" ~local_base_path:"/workspace/a"
@@ -5589,6 +5604,8 @@ let () =
             test_partial_identity_keeps_definite_mismatches
         ; Alcotest.test_case "deletion inventory waits for workspace reconfirmation" `Quick
             test_deletion_inventory_waits_for_reconfirmed_workspace
+        ; Alcotest.test_case "purge header and body bind the same workspace" `Quick
+            test_keeper_purge_header_and_body_share_workspace
         ; Alcotest.test_case "uncertainty retires reads while admitted operations survive" `Quick
             test_uncertain_identity_retires_reads_not_admitted_operations
         ; Alcotest.test_case "suspension folds a queued lanes reread into resume" `Quick

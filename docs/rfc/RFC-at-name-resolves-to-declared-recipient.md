@@ -148,7 +148,7 @@ val resolve :
 
 선언의 기준은 게시판이 글을 Keeper 에게 보낼 때 쓰는 기준과 같다. 라우터는 Keeper 가 `mention_targets` 를 가지면 그 목록만 주소로 보고, 가지지 않으면 Keeper 이름을 주소로 본다 (`Keeper_lane_mentions.effective_target_ids`). 그래서 `mention_targets` 를 가진 Keeper 가 자기 이름을 목록에 넣지 않았으면 그 이름은 선언이 아니다. 선언으로 치면 아무도 받지 않는 대상이 기록되고 쓴 사람은 그 사실을 알 수 없다. 이 이름은 글 속 말이고 `unresolved` 에 나온다. 별칭은 소문자로 맞춘 이름 그대로 기록한다. 브로드캐스트는 목록과 상관없이 Keeper 이름을 먼저 찾아서 이 기준과 다르다. 지금도 다르고 이 RFC 는 바꾸지 않는다. 2026-10-30 에 읽은 설정 41개는 모두 목록에 자기 이름이 있어서 이 차이로 달라지는 Keeper 는 없다.
 
-자기 이름을 우선하려면 실제 저장된 메타 파일의 이름과 그 안의 Keeper 이름이 같은 철자여야 하고 그 Keeper 가 해당 이름에 응답해야 한다. 대소문자를 구별하지 않는 파일시스템에서 다른 철자의 파일이 열릴 수도 있으므로 파일 이름 목록을 확인한다. 목록을 읽지 못하면 쓰기는 거절하지만, 정상적인 자기 이름 경로에서 다른 Keeper 의 설정 파일은 읽지 않는다. 이 경로가 없을 때 별칭 하나는 Keeper 한 명만 가리킨다. 같은 별칭을 둘 이상이 쓰면 지금도 조회가 오류로 끝난다 (`lib/keeper/keeper_meta_store.ml:466`, 오류 문구 `multiple persisted Keepers claim mention_target`). 그래서 `pangyo-preachers` 처럼 Keeper 여럿이 나눠 쓰는 계정은 별칭으로 선언할 수 없다. 이 RFC 는 이 규칙을 바꾸지 않는다.
+자기 이름을 우선하려면 조회한 메타 파일의 Keeper 이름이 확인한 저장 파일 이름과 같은 철자여야 하고 그 Keeper 가 해당 이름에 응답해야 한다. 대소문자를 구별하지 않는 파일시스템에서 다른 철자의 파일이 열릴 수도 있으므로 파일 이름 목록을 확인한다. 메타 읽기와 목록 조회는 별도 관측이어서 그 사이 파일이 교체되면 서로 다른 시점의 값을 결합할 수 있다. 따라서 이 검사는 원자적인 최신 소유권을 보장하지 않는다. 목록을 읽지 못하면 쓰기는 거절하지만, 정상적인 자기 이름 경로에서 다른 Keeper 의 설정 파일은 읽지 않는다. 이 경로가 없을 때 별칭 하나는 Keeper 한 명만 가리킨다. 같은 별칭을 둘 이상이 쓰면 지금도 조회가 오류로 끝난다 (`lib/keeper/keeper_meta_store.ml:466`, 오류 문구 `multiple persisted Keepers claim mention_target`). 그래서 `pangyo-preachers` 처럼 Keeper 여럿이 나눠 쓰는 계정은 별칭으로 선언할 수 없다. 이 RFC 는 이 규칙을 바꾸지 않는다.
 
 2026-10-29 에 읽은 Keeper 설정 41개는 모두 `mention_targets` 를 가진다. 36개는 자기 이름뿐이고, 5개(`geek-scout`, `jazz-developer`, `e-masc-the-leader`, `mad-scientist`, `rondo`)가 별칭을 더 가진다. `jeong-sik`, `pangyo-preachers`, `be-sleepers`, `anyang-keepers` 는 어디에도 선언돼 있지 않다.
 

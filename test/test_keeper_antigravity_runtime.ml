@@ -1963,6 +1963,54 @@ module Argument_start_fixture = struct
         | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name ~class_
             ~start_time:(Tool_timing.start ()) execution.raw_output
         | Tool_result.Deferred () -> fail "canonical reader cannot defer")
+  let envelopes prompt =
+    String.split_on_char '\n' prompt |> List.filter_map (fun line ->
+      try match Yojson.Safe.from_string line with
+        | `Assoc fields as envelope when List.assoc_opt "schema" fields =
+            Some (`String Keeper_official_client_context_codec.schema) -> Some envelope
+        | _ -> None
+      with Yojson.Json_error _ -> None)
+
+  let check_resume prompt =
+    let open Yojson.Safe.Util in
+    let messages = List.map (member "message") (envelopes prompt) in
+    check int "Resume carries exactly one recognized envelope" 1 (List.length messages);
+    let historical = List.filter (fun message ->
+      member "origin" message = `String "conversation") messages in
+    check int "Resume omits canonical conversation history" 0 (List.length historical);
+    List.iter (fun marker ->
+      check bool "Resume does not replay fixture history" false
+        (String_util.contains_substring prompt marker))
+      ["historical-argument"; "current-argument"; "Earlier completed work"; "Current work"];
+    let receipts = List.filter (fun message ->
+      member "role" message = `String "system"
+      && member "origin" message = `String "agent_instruction"
+      && member "masc_retained_tool_results" (member "metadata" message) = `Bool true)
+      messages in
+    let receipt_text = match receipts with
+      | [message] ->
+        (match member "content_blocks" message with
+         | `List [block] ->
+           check string "retained result carrier uses a text block" "text"
+             (member "type" block |> to_string);
+           member "text" block |> to_string
+         | _ -> fail "retained result carrier has unexpected content")
+      | _ -> fail "Resume must carry the retained tool result once" in
+    let receipt_json = match String.index_opt receipt_text '\n' with
+      | None -> fail "retained result has no receipt payload"
+      | Some at -> String.sub receipt_text (at + 1) (String.length receipt_text - at - 1)
+        |> Yojson.Safe.from_string in
+    let receipt = match receipt_json with
+      | `List [receipt] -> receipt
+      | _ -> fail "expected one retained tool receipt" in
+    check string "retained tool name" "masc_probe" (receipt |> member "tool_name" |> to_string);
+    check bool "retained tool arguments" true
+      (member "arguments" receipt = `Assoc ["marker", `String "from-antigravity"]);
+    check bool "retained tool succeeded" true
+      (receipt |> member "response" |> member "success" = `Bool true);
+    check string "retained original tool result" "MASC_TOOL_RESULT"
+      (receipt |> member "response" |> member "content" |> to_string)
+
   let wire_input id envelopes =
     let open Yojson.Safe.Util in
     let blocks = List.concat_map (fun envelope ->
@@ -2071,13 +2119,7 @@ let test_actual_start_demotes_arguments_but_resume_keeps_them_held () =
             | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error) in
           run F.seed;
           let prompt_path=Filename.concat base_path "antigravity-prompt.txt" in
-          let envelopes=In_channel.with_open_bin prompt_path In_channel.input_all
-            |> String.split_on_char '\n' |> List.filter_map (fun line ->
-              try match Yojson.Safe.from_string line with
-                | `Assoc fields as envelope when List.assoc_opt "schema" fields=
-                    Some (`String Keeper_official_client_context_codec.schema) -> Some envelope
-                | _ -> None
-              with Yojson.Json_error _ -> None) in
+          let envelopes=In_channel.with_open_bin prompt_path In_channel.input_all |> F.envelopes in
           F.check_start ~enabled ~reader envelopes;
           F.check_resume_did_not_store base_path;
           (* A fresh completed seed covers more of the same raw history;
@@ -2088,8 +2130,9 @@ let test_actual_start_demotes_arguments_but_resume_keeps_them_held () =
               Keeper_official_client_host.Held_by_client_session] -> ()
            | _ -> fail "expected one Start and one client-held Resume");
           let resumed=In_channel.with_open_bin prompt_path In_channel.input_all in
-          check bool "Resume omits historical canonical envelopes" false
-            (String_util.contains_substring resumed Keeper_official_client_context_codec.schema);
+          (* This fixture does not ACK the first tool result. Its System
+             carrier uses the same envelope schema as conversation history. *)
+          F.check_resume resumed;
           F.check_resume_did_not_store base_path;
           check bool "raw checkpoint source remains unchanged" true (F.snapshot ()=before))))))
     [true;false]

@@ -8790,6 +8790,35 @@ let carries_extra_system_context envelope =
   Yojson.Safe.Util.(envelope |> member "message" |> member "origin") = `String "system_context"
 ;;
 
+(* The capture also records the separate canonical System carrier. Its base
+   instructions and issued observations are not extra-system-context blocks. *)
+let captured_extra_context_blocks (blocks : Keeper_prompt_capture.block list) =
+  List.filter_map (fun (block : Keeper_prompt_capture.block) ->
+    match block.id with
+    | Keeper_instructions | Active_goals | Completion_authority | Admitted_scheduled_input -> None
+    | Dynamic_context | Temporal_summary | Memory_os_recall | Librarian_working_context
+    | Recalled_memory | Recalled_memory_status | Operator_note | Skill_compositions ->
+      Some (block.id, block.text)) blocks
+;;
+
+let test_capture_separates_system_and_extra_context_blocks () =
+  let block id text : Keeper_prompt_capture.block = {id; text} in
+  let blocks =
+    [ block Keeper_instructions "system base"
+    ; block Active_goals "goal observation"
+    ; block Completion_authority "authority observation"
+    ; block Admitted_scheduled_input "admission observation"
+    ; block Memory_os_recall "memory"
+    ; block Dynamic_context "current context"
+    ; block Temporal_summary "time"
+    ]
+  in
+  check (list (pair string string)) "only extra-context blocks in their issued order"
+    [ "memory_os_recall", "memory"; "dynamic_context", "current context"; "temporal_summary", "time" ]
+    (captured_extra_context_blocks blocks
+     |> List.map (fun (id, text) -> Prompt_block_id.to_string id, text))
+;;
+
 let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
   let base_path = temp_workspace "masc-codex-production-context-" in
   let capture = Filename.temp_file "masc-codex-production-context-" ".jsonl" in
@@ -8885,7 +8914,7 @@ let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
        let issued = Keeper_run_prompt.assemble_extra_system_context
          ~dynamic_context_partition:(Some expected_dynamic_partition)
          ~existing_extra_system_context:None
-         ~blocks:(List.map (fun (block : Keeper_prompt_capture.block) -> block.id,block.text) capture.blocks) in
+         ~blocks:(captured_extra_context_blocks capture.blocks) in
        check (option string) "issuer reproduces the production hook assembly" (Some wire_text)
          issued.extra_system_context;
        let expected_partition = match issued.receipt with
@@ -9942,6 +9971,8 @@ let () =
             "production dynamic context reaches Codex instruction wire"
             `Quick
             (test_production_dynamic_context_reaches_codex_instruction_wire ~project:false)
+        ; test_case "capture separates system and extra context blocks" `Quick
+            test_capture_separates_system_and_extra_context_blocks
         ; test_case "production late context projection reaches Codex wire" `Quick
             (test_production_dynamic_context_reaches_codex_instruction_wire ~project:true)
         ; test_case

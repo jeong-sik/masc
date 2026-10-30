@@ -109,7 +109,10 @@ if len(parts) == 2:
 if parts[2] == 'reviews':
     if number == s.get('invalid_review_number') and s.get('detail_reads',{}).get(number,0) >= 2:
         done([[None]])
-    done(s.get('review_pages', {}).get(number, [[]]))
+    pages = s.get('review_pages', {}).get(number, [[]])
+    if s.get('detail_reads',{}).get(number,0) >= 2:
+        pages = s.get('preflight_review_pages', {}).get(number, pages)
+    done(pages)
 assert parts[2] == 'requested_reviewers'
 if not post:
     if s.get('post_seen') and s.get('readback_error'):
@@ -211,10 +214,41 @@ class WorklistFlow(unittest.TestCase):
         self.assertIn('ambiguous submission times', out['reason'])
         self.assertNotIn('posts', state)
 
+    def test_pending_comment_and_other_dismissal_leave_original_cr_owned(self):
+        cr = {'id':12, 'state':'CHANGES_REQUESTED', 'commit_id':'c'*40,
+              'user':user('reviewer-b'), 'body':'Please fix the finding.',
+              'submitted_at':'2026-10-26T09:00:00Z'}
+        pending = cr | {'id':13, 'state':'PENDING', 'commit_id':None, 'submitted_at':None}
+        comment = cr | {'id':14, 'state':'COMMENTED', 'submitted_at':'2026-10-26T10:00:00Z'}
+        dismissed = cr | {'id':15, 'state':'DISMISSED', 'submitted_at':'2026-10-26T11:00:00Z'}
+        self.state['review_pages'] = {'1':[[cr, pending], [comment, dismissed]]}
+        result, out, state = self.run_cli(request=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(state['posts'], [{'number':1, 'reviewers':['reviewer-b']}])
+        [action] = [a for a in out['actions'] if a['reason'] == 'changed_head_cr']
+        self.assertEqual(action['review_ids'], [12])
+
+    def test_changed_review_body_or_time_before_post_is_not_requested(self):
+        original = {'id':12, 'state':'CHANGES_REQUESTED', 'commit_id':'c'*40,
+                    'user':user('reviewer-b'), 'body':'Please fix the finding.',
+                    'submitted_at':'2026-10-26T09:00:00Z'}
+        for change in ({'body':'Updated finding.'},
+                       {'submitted_at':'2026-10-26T09:00:01Z'},
+                       {'submitted_at':None}):
+            with self.subTest(change=change):
+                self.state = {'pulls':{'1':pull()}, 'review_pages':{'1':[[original]]},
+                              'preflight_review_pages':{'1':[[original | change]]}}
+                result, out, state = self.run_cli(request=True)
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertEqual(out['requests'][0]['state'],
+                                 'unavailable' if change.get('submitted_at', True) is None else 'snapshot_changed')
+                self.assertNotIn('posts', state)
+
     def test_closed_draft_or_changed_head_before_post_skips(self):
         for change in ({'state':'closed'}, {'draft':True},
                        {'head':{'sha':'c'*40, 'ref':'fix/1'}},
-                       {'base':{'sha':'c'*40, 'ref':'main'}}):
+                       {'base':{'sha':'c'*40, 'ref':'main'}},
+                       {'stack':{'number':46935, 'position':5, 'base_ref':'main'}}):
             with self.subTest(change=change):
                 self.state = {'pulls':{'1':pull()}, 'preflight_change':change}
                 result, out, state = self.run_cli(request=True)

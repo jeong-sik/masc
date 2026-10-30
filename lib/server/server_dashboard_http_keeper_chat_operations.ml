@@ -29,6 +29,7 @@ type mutation =
   | Edit
   | Move_to_end
   | Cancel
+  | Retry_preparation
 
 type mutation_route =
   { keeper_name : string
@@ -74,6 +75,7 @@ let mutation_route path =
       | "edit" -> Some Edit
       | "move-to-end" -> Some Move_to_end
       | "cancel" -> Some Cancel
+      | "retry-preparation" -> Some Retry_preparation
       | _ -> None
     in
     Option.map
@@ -517,12 +519,21 @@ let handle_get state request reqd = function
             keeper_name
             (Operation_id.to_string operation.operation_id)
             (Operation.state_to_string operation.state);
-          Server_auth.respond_json_value_with_cors
-            request
-            reqd
-            (public_operation_json
-               ~redaction:(Keeper_secret_redaction.snapshot
-                 ~base_path:(base_path state) ~keeper_name) operation)))
+          (match Registry.direct_preparation_wait ~base_path:(base_path state) ~keeper_name ~operation_id with
+           | Error error -> respond_error request reqd (api_error_of_command_error error)
+           | Ok waiting ->
+             let redaction = Keeper_secret_redaction.snapshot ~base_path:(base_path state) ~keeper_name in
+             let json = public_operation_json ~redaction operation in
+             let preparation_wait = match waiting with
+               | None -> `Null
+               | Some waiting -> `Assoc [
+                   "expected_revision", `Intlit (Int64.to_string waiting.revision);
+                   "execution_digest", `String waiting.execution_digest;
+                   "detail", `String (Keeper_secret_redaction.redact_text redaction waiting.waiting.detail)] in
+             let json = match json with
+               | `Assoc fields -> `Assoc (fields @ ["preparation_wait",preparation_wait])
+               | json -> json in
+             Server_auth.respond_json_value_with_cors request reqd json)))
   | Operation_list { keeper_name } ->
     let state_filter = Server_utils.query_param request "state" in
     (match parse_after_sequence request with
@@ -580,6 +591,25 @@ let parse_edit body =
   | Ok _ -> Error (invalid_input "edit body must contain exactly the input field")
 ;;
 
+let parse_preparation_retry body =
+  let open Result.Syntax in
+  let* fields = strict_object body in
+  if List.sort String.compare (List.map fst fields) <> ["execution_digest";"expected_revision"]
+  then Error (invalid_input "preparation retry requires expected_revision and execution_digest")
+  else
+    let* expected_revision = match List.assoc "expected_revision" fields with
+      | `Int value when value >= 0 -> Ok (Int64.of_int value)
+      | `Intlit value ->
+        (match Int64.of_string_opt value with
+         | Some value when value >= 0L -> Ok value
+         | _ -> Error (invalid_input "expected_revision must be a non-negative int64"))
+      | _ -> Error (invalid_input "expected_revision must be a non-negative int64") in
+    let* execution_digest = match List.assoc "execution_digest" fields with
+      | `String value -> Ok value
+      | _ -> Error (invalid_input "execution_digest must be a string") in
+    Ok (expected_revision,execution_digest)
+;;
+
 let parse_empty mutation body =
   match strict_object body with
   | Ok [] -> Ok ()
@@ -591,6 +621,7 @@ let mutation_to_string = function
   | Edit -> "edit"
   | Move_to_end -> "move_to_end"
   | Cancel -> "cancel"
+  | Retry_preparation -> "retry_preparation"
 ;;
 
 let handle_mutation state request reqd route body =
@@ -617,6 +648,13 @@ let handle_mutation state request reqd route body =
              ~base_path:(base_path state)
              ~keeper_name:route.keeper_name
              operation_id
+           |> Result.map_error api_error_of_command_error)
+      | Retry_preparation ->
+        (match parse_preparation_retry body with
+         | Error error -> Error error
+         | Ok (expected_revision,execution_digest) ->
+           Registry.retry_direct_preparation ~base_path:(base_path state)
+             ~keeper_name:route.keeper_name ~operation_id ~expected_revision ~execution_digest
            |> Result.map_error api_error_of_command_error)
       | Cancel ->
         (match parse_empty "cancel" body with

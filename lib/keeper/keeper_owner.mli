@@ -668,3 +668,13 @@ val direct_gate_binding : t -> operation_id:Chat_operation.Operation_id.t ->
 val direct_gate_bindings : t -> ((Chat_operation.Operation_id.t * Keeper_semantic_execution.gate_binding) list, error) result
 val reconcile_direct_gate_binding : t -> operation_id:Chat_operation.Operation_id.t ->
   binding:Keeper_semantic_execution.gate_binding -> waiting:Keeper_semantic_execution.gate_wait -> (unit, error) result
+
+val direct_preparation_wait : t -> operation_id:Chat_operation.Operation_id.t ->
+  (Keeper_chat_operation_store.preparation_wait_observation option,error) result
+val wait_direct_preparation : t -> operation_id:Chat_operation.Operation_id.t ->
+  execution_digest:string -> observed:Keeper_semantic_execution.gate_checkpoint ->
+  failure:Agent_core.Error.t -> (Chat_operation.t,error) result
+(** Requires the inherited exact executing child and a positive typed guidance
+    preparation failure. No generic Config/transport failure grants this action. *)
+val retry_direct_preparation : t -> operation_id:Chat_operation.Operation_id.t ->
+  expected_revision:int64 -> execution_digest:string -> (Chat_operation.t,error) result

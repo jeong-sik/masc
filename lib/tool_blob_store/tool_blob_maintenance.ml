@@ -380,9 +380,9 @@ let references_in_chat_operation_store ~ownership_root path =
             | Keeper_semantic_execution.Preparing
             | Keeper_semantic_execution.Ready
             | Keeper_semantic_execution.Running
-            | Keeper_semantic_execution.Resuming_runtime_retry _
+            | Keeper_semantic_execution.Resuming_checkpoint _ | Keeper_semantic_execution.Resuming_runtime_retry _
             | Keeper_semantic_execution.Resuming_gate _
-            | Keeper_semantic_execution.Suspended _
+            | Keeper_semantic_execution.Preparation_wait _ | Keeper_semantic_execution.Suspended _
             | Keeper_semantic_execution.Settled _ ->
               after_record)
          with_batch_inputs

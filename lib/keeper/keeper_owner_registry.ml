@@ -995,3 +995,13 @@ let direct_gate_bindings ~base_path ~keeper_name =
 let reconcile_direct_gate_binding ~base_path ~keeper_name ~operation_id ~binding ~waiting =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.reconcile_direct_gate_binding owner ~operation_id ~binding ~waiting)
+
+let direct_preparation_wait ~base_path ~keeper_name ~operation_id =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.direct_preparation_wait owner ~operation_id)
+let wait_direct_preparation ~base_path ~keeper_name ~operation_id ~execution_digest ~observed ~failure =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.wait_direct_preparation owner ~operation_id ~execution_digest ~observed ~failure)
+let retry_direct_preparation ~base_path ~keeper_name ~operation_id ~expected_revision ~execution_digest =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.retry_direct_preparation owner ~operation_id ~expected_revision ~execution_digest)

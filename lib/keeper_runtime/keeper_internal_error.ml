@@ -1302,3 +1302,18 @@ let classify_masc_internal_error (err : Agent_core.Error.t) :
   | Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Mcp _
   | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
   | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ -> None
+
+type Agent_core.Error.carrier += Guidance_preparation_unavailable of Agent_core.Error.t
+
+let guidance_preparation_unavailable ~field detail =
+  let cause = Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field;detail}) in
+  Agent_core.Error.Internal_carried
+    {message=Agent_core.Error.to_string cause;carrier=Guidance_preparation_unavailable cause}
+
+let guidance_preparation_failure = function
+  | Agent_core.Error.Internal_carried {carrier=Guidance_preparation_unavailable cause;_} -> Some (Agent_core.Error.to_string cause)
+  | _ -> None
+
+let without_guidance_preparation_authority = function
+  | Agent_core.Error.Internal_carried {carrier=Guidance_preparation_unavailable cause;_} -> cause
+  | error -> error

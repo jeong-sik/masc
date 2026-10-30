@@ -816,7 +816,8 @@ let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_sou
     in
     let* posture_notes =
       native_posture_note native_posture
-      |> Result.map_error (config_error ~field:Prompt_names.keeper_muse_native_read)
+      |> Result.map_error (Keeper_internal_error.guidance_preparation_unavailable
+          ~field:Prompt_names.keeper_muse_native_read)
     in
     let* account_home = match config.account_home with
       | None -> Error (config_error ~field:"account_home"

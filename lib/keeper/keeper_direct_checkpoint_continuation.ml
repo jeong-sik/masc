@@ -129,3 +129,7 @@ let defer_official ~base_path ~keeper_name ~operation_id ~(settled_session : Nat
 module For_testing = struct
   let prepare_official_resume = prepare_official_resume
 end
+
+let wait_preparation ~base_path ~keeper_name ~operation_id ~execution_digest ~failure admission =
+  Owner.wait_direct_preparation ~base_path ~keeper_name ~operation_id ~execution_digest
+    ~observed:admission.observed ~failure |> owner |> Result.map (fun _ -> ())

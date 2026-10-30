@@ -955,10 +955,10 @@ let render_queue_panel (state : state) (panel : queue_panel) =
     | (Queue_current | Queue_unavailable), Some (Queue_info text | Queue_error text) -> Terminal_text.single_line text
     | Queue_current, None ->
       (match panel.qp_observation with
-       | Some {waiting=Ok _; operations=Ok _} -> "Queue read · r refreshes"
-       | Some {waiting=Ok _; operations=Error _} -> "Inventory read · server messages unavailable"
-       | Some {waiting=Error _; operations=Ok _} -> "Server messages read · inventory unavailable"
-       | Some {waiting=Error _; operations=Error _} -> "Both server reads unavailable · r retries"
+       | Some {waiting=Ok _; operations=Ok _; _} -> "Queue read · r refreshes"
+       | Some {waiting=Ok _; operations=Error _; _} -> "Inventory read · server messages unavailable"
+       | Some {waiting=Error _; operations=Ok _; _} -> "Server messages read · inventory unavailable"
+       | Some {waiting=Error _; operations=Error _; _} -> "Both server reads unavailable · r retries"
        | None -> "Queue observation unavailable · r retries")
     | Queue_unavailable, None -> "Snapshot unavailable · r retries" in
   let hints = Masc_tui_keys.footer_hints_queue state panel in

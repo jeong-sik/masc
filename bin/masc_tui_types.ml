@@ -8949,6 +8949,21 @@ type resource_share_recovery_prompt = {
   recovery_confirmation : Masc_tui_artifact_share_confirmation.t;
 }
 
+type keeper_peer_position = {
+  kpp_after : string option;
+  kpp_previous : string option list;
+}
+
+type keeper_peer_reading = {
+  kpr_keeper : string;
+  kpr_authority : unit ref;
+  kpr_committed : (keeper_peer_position * Masc_tui_queue_inspection.peer_page) option;
+  kpr_pending : (unit ref * keeper_peer_position) option;
+  kpr_retry : keeper_peer_position option;
+}
+
+type keeper_peer_move = Peer_previous | Peer_next | Peer_refresh | Peer_restart
+
 type state = {
   observation_instance : Masc_tui_observation_origin.instance;
   mutable ui_language : ui_language;
@@ -9006,9 +9021,8 @@ type state = {
   mutable detail_reading: (workspace_authority * surface * Masc_tui_detail_reading.t) option;
   (* The roster's peer-queue read belongs to one reader and one workspace
      observation epoch. A late answer must not reopen a closed reader. *)
-  (* The optional token exists only while the request is pending; the epoch
-     remains owned after completion until the reader closes or is replaced. *)
-  mutable keeper_peer_reading: (string * unit ref option * unit ref) option;
+  (* A pending page does not replace the last observed page until it succeeds. *)
+  mutable keeper_peer_reading: keeper_peer_reading option;
   mutable board_reader_owner: (workspace_authority * unit ref) option;
   mutable board_reader: Masc_tui_board_reader.t;
   mutable keeper_deletions_open: bool;
@@ -17429,7 +17443,7 @@ let board_successor (state : state) =
 
 let current_detail_reading (state : state) =
   let peer_owner_current = match state.keeper_peer_reading with
-    | Some (_, _, epoch) -> epoch == state.workspace_read_authority
+    | Some peer -> peer.kpr_authority == state.workspace_read_authority
     | None -> true in
   match state.detail_reading with
   | Some (authority, surface, reading)
@@ -17471,28 +17485,86 @@ let begin_keeper_peer_reading (state : state) ~keeper_name =
   open_detail_reading state
     (Masc_tui_detail_reading.create_observation ~title:("Keeper relationships · " ^ keeper_name)
       [{ heading = "Queued requests"; body = "Loading this Keeper's queued requests…" }]);
-  state.keeper_peer_reading <- Some (keeper_name, Some token, state.workspace_read_authority);
+  state.keeper_peer_reading <- Some {
+    kpr_keeper = keeper_name; kpr_authority = state.workspace_read_authority;
+    kpr_committed = None;
+    kpr_pending = Some (token, {kpp_after = None; kpp_previous = []}); kpr_retry = None };
   token
 
 let keeper_peer_read_current (state : state) ~keeper_name ~token =
   match state.keeper_peer_reading, current_detail_reading state with
-  | Some (name, Some current, authority), Some _ ->
-      String.equal name keeper_name && current == token
-      && authority == state.workspace_read_authority
+  | Some {kpr_keeper; kpr_pending = Some (current, _); kpr_authority; _}, Some _ ->
+      String.equal kpr_keeper keeper_name && current == token
+      && kpr_authority == state.workspace_read_authority
   | (Some _ | None), (Some _ | None) -> false
 
 let finish_keeper_peer_reading (state : state) ~keeper_name ~token result =
-  match current_detail_reading state with
-  | Some reading when keeper_peer_read_current state ~keeper_name ~token ->
-      let body = match result with
-        | Ok lines -> String.concat "\n" lines
-        | Error reason -> "Read unavailable: " ^ reason in
+  match current_detail_reading state, state.keeper_peer_reading with
+  | Some reading, Some ({kpr_pending = Some (_, position); _} as peer)
+    when keeper_peer_read_current state ~keeper_name ~token ->
+      let committed, retry, lines = match result with
+        | Ok page ->
+            Some (position, page), None,
+            Masc_tui_queue_inspection.peer_lines
+              ~page_number:(List.length position.kpp_previous + 1) page
+        | Error reason ->
+            let retained = match peer.kpr_committed with
+              | None -> []
+              | Some (old_position, page) ->
+                  "Previous page retained:" ::
+                  Masc_tui_queue_inspection.peer_lines
+                    ~page_number:(List.length old_position.kpp_previous + 1) page in
+            peer.kpr_committed, Some position, ("Read unavailable: " ^ reason ^ " · r retries") :: retained in
       update_detail_reading state
         (Masc_tui_detail_reading.replace ~title:("Keeper relationships · " ^ keeper_name)
-          [{ heading = "Queued requests"; body }] reading);
-      state.keeper_peer_reading <- Some (keeper_name, None, state.workspace_read_authority);
+          [{ heading = "Queued requests"; body = String.concat "\n" lines }] reading);
+      state.keeper_peer_reading <- Some {peer with kpr_committed = committed; kpr_pending = None; kpr_retry = retry};
       true
-  | Some _ | None -> false
+  | (Some _ | None), (Some _ | None) -> false
+
+(* Each explicit page read owns one sequence boundary and the same reader.
+   Repeated requests for that boundary share the pending read. *)
+let request_keeper_peer_page state move =
+  match current_detail_reading state, state.keeper_peer_reading with
+  | Some reading, Some ({kpr_committed = None; kpr_pending = None; _} as peer)
+    when move = Peer_refresh || move = Peer_restart ->
+      let token = ref () in
+      let position = Option.value ~default:{kpp_after = None; kpp_previous = []} peer.kpr_retry in
+      update_detail_reading state
+        (Masc_tui_detail_reading.replace ~title:("Keeper relationships · " ^ peer.kpr_keeper)
+           [{ heading = "Queued requests"; body = "Loading this Keeper's queued requests…" }] reading);
+      state.keeper_peer_reading <- Some {peer with kpr_pending = Some (token, position); kpr_retry = None};
+      Some (peer.kpr_keeper, token, position.kpp_after)
+  | Some reading, Some ({kpr_committed = Some (position, page); _} as peer) ->
+      let destination = match move with
+        | Peer_refresh -> Some (Option.value ~default:position peer.kpr_retry)
+        | Peer_restart -> Some {kpp_after = None; kpp_previous = []}
+        | Peer_previous ->
+            (match position.kpp_previous with
+             | after :: previous -> Some {kpp_after = after; kpp_previous = previous}
+             | [] -> None)
+        | Peer_next ->
+            Option.map (fun after ->
+              {kpp_after = Some after; kpp_previous = position.kpp_after :: position.kpp_previous})
+              page.next_sequence in
+      (match destination with
+       | None -> None
+       | Some destination when Option.exists (fun (_, pending) -> pending = destination) peer.kpr_pending -> None
+       | Some destination ->
+           let token = ref () in
+           let lines = Masc_tui_queue_inspection.peer_lines
+               ~page_number:(List.length position.kpp_previous + 1) page in
+           let loading = Printf.sprintf "Loading page %d; previous page retained…"
+               (List.length destination.kpp_previous + 1) in
+           update_detail_reading state
+             (Masc_tui_detail_reading.replace ~title:("Keeper relationships · " ^ peer.kpr_keeper)
+                [{ heading = "Queued requests"; body = String.concat "\n" (loading :: lines) }] reading);
+           let retry = match move with
+             | Peer_refresh -> peer.kpr_retry
+             | Peer_previous | Peer_next | Peer_restart -> None in
+           state.keeper_peer_reading <- Some {peer with kpr_pending = Some (token, destination); kpr_retry = retry};
+           Some (peer.kpr_keeper, token, destination.kpp_after))
+  | (Some _ | None), (Some _ | None) -> None
 
 let modal_owns_keys (state : state) =
   Option.is_some (current_board_reader state)

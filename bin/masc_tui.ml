@@ -10339,7 +10339,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
   let module Inbox = Masc_tui_queue_inspection in
   let panel_notice ~failure text =
     match action with
-    | Inbox.Inspect_peers token ->
+    | Inbox.Inspect_peers (token, _) ->
       ignore (finish_keeper_peer_reading state ~keeper_name ~token (Error text))
     | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
     | Cancel_event _ | Prioritize_event _ ->
@@ -10363,7 +10363,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
   let check_authority () =
     if authority = state.workspace_authority && server_authority_ready state
        && (match action with
-           | Inbox.Inspect_peers token -> reading == state.workspace_read_authority
+           | Inbox.Inspect_peers (token, _) -> reading == state.workspace_read_authority
                && keeper_peer_read_current state ~keeper_name ~token
            | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
            | Cancel_event _ | Prioritize_event _ -> true) then Ok ()
@@ -10584,15 +10584,21 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
       | None, _ ->
         let operations = List.concat (List.rev (rows :: reversed_pages)) in
         Ok ({Inbox.id=None; text=Printf.sprintf "Server queued messages · %d" (List.length operations)} :: operations) in
-    let operations = match action with
-      | Inbox.Inspect_peers _ ->
-          Inbox.read_peer_page ~keeper_name ~read_page:(fun () ->
-            get_json ~host ~port ~path:(root ^ "/chat/operations?state=queued"))
-          |> Result.map (fun snapshot ->
-            List.map (fun text -> {Inbox.id=None; text}) (Inbox.peer_lines snapshot))
+    let peer_result = match action with
+      | Inbox.Inspect_peers (_, after_sequence) ->
+          let suffix = Option.fold ~none:"" ~some:(fun value ->
+            "&after_sequence=" ^ Masc_tui_http.percent_encode_query_value value) after_sequence in
+          Some (Inbox.read_peer_page ~keeper_name ~after_sequence ~read_page:(fun () ->
+            get_json ~host ~port ~path:(root ^ "/chat/operations?state=queued" ^ suffix)))
       | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
-      | Cancel_event _ | Prioritize_event _ -> read_messages None Operation_ids.empty [] in
-    Ok {Inbox.waiting; operations} in
+      | Cancel_event _ | Prioritize_event _ -> None in
+    let operations = match action, peer_result with
+      | Inbox.Inspect_peers _, Some result -> Result.map (fun _ -> []) result
+      | Inbox.Inspect_peers _, None -> Error "Keeper relationship page was not read"
+      | (Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
+        | Cancel_event _ | Prioritize_event _), _ -> read_messages None Operation_ids.empty [] in
+    let peer_page = Option.bind peer_result Result.to_option in
+    Ok {Inbox.waiting; operations; peer_page} in
     let observation = try observe () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn) in
@@ -19475,13 +19481,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
          if receipt <> [] then chat_notice state ~keeper_name:(Some keeper_name)
            ~kind:Notice_reply (String.concat " · " receipt));
       dispatch_ready_run_next state ~mailbox keeper_name
-  | Keeper_queue_loaded (keeper_name, _, Masc_tui_queue_inspection.Inspect_peers token, result) ->
+  | Keeper_queue_loaded (keeper_name, _, Masc_tui_queue_inspection.Inspect_peers (token, _), result) ->
       let observation = match result with
         | Error reason -> Error reason
         | Ok (_, Error reason) -> Error reason
         | Ok (_, Ok observation) ->
-            Result.map (List.map (fun (item : Masc_tui_queue_inspection.item) -> item.text))
-              observation.operations in
+            (match observation.operations, observation.peer_page with
+             | Error reason, _ -> Error reason
+             | Ok _, Some page -> Ok page
+             | Ok _, None -> Error "Keeper relationship page is unavailable") in
       ignore (finish_keeper_peer_reading state ~keeper_name ~token observation)
   | Keeper_queue_loaded (keeper_name, control_generation,
       ((Masc_tui_queue_inspection.Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _
@@ -30508,6 +30516,18 @@ and is loaded on demand through keeper_skill.
                 | Some reading -> update_detail_reading state reading
                 | None ->
                   if k="esc" || k="v" then close_detail_reading state
+                  else if Option.is_some state.keeper_peer_reading
+                          && (k="<" || k=">" || k="r" || k="R") then begin
+                    let move = match k with
+                      | "<" -> Peer_previous
+                      | ">" -> Peer_next
+                      | "R" -> Peer_restart
+                      | _ -> Peer_refresh in
+                    Option.iter (fun (keeper_name, token, after_sequence) ->
+                      launch_keeper_queue state ~mailbox:async_messages ~keeper_name
+                        (Masc_tui_queue_inspection.Inspect_peers (token, after_sequence)))
+                      (request_keeper_peer_page state move)
+                  end
                   else
                   let movement = match k with
                     | "j" | "down" | "wheel-down" -> Some (Masc_tui_detail_reading.By 1)
@@ -33524,7 +33544,7 @@ and is loaded on demand through keeper_skill.
             | Some keeper ->
                 let token = begin_keeper_peer_reading state ~keeper_name:keeper.k_name in
                 launch_keeper_queue state ~mailbox:async_messages ~keeper_name:keeper.k_name
-                  (Masc_tui_queue_inspection.Inspect_peers token))
+                  (Masc_tui_queue_inspection.Inspect_peers (token, None)))
        | Some "v" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_items ->
            cycle_item_browser state
        | Some " " when state.view = Keepers Keeper_detail && state.detail_tab = Detail_items ->

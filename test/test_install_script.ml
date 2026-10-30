@@ -334,11 +334,29 @@ let unlink_if_exists path =
   | Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 ;;
 
+(* install.sh only accepts an existing ~/.local/masc without --force when it is
+   a managed release pointer: a symlink into $PREFIX/.masc-releases/<64-hex>/masc
+   whose bytes match the staged release checksum (PR #46314). Plant the fixture
+   binary in that exact layout — a real file in the release slot, checksummed
+   like the staged mirror checksums it — so wizard/config scenarios exercise the
+   real no-force same-release path instead of tripping the pointer guard. *)
+let managed_release_dir prefix id =
+  Filename.concat (Filename.concat prefix ".masc-releases") id
+;;
+
 let install_real_masc_binary prefix =
   let dest = Filename.concat prefix "masc" in
-  ignore (Sys.command ("mkdir -p " ^ Filename.quote prefix));
+  let slot = managed_release_dir prefix (String.make 64 '0') in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote slot));
+  let staged = Filename.concat slot "masc" in
+  unlink_if_exists staged;
+  ignore
+    (Sys.command
+       (String.concat " "
+          (List.map Filename.quote [ "cp"; real_masc_binary (); staged ])));
+  ignore (Sys.command ("chmod +x " ^ Filename.quote staged));
   unlink_if_exists dest;
-  Unix.symlink (Unix.realpath (real_masc_binary ())) dest
+  Unix.symlink staged dest
 ;;
 
 let assert_contains label text needle =
@@ -691,7 +709,7 @@ let test_force_refreshes_same_version_existing_binary () =
        assert_contains
          "force refreshes same-version binary"
          output
-         "refreshing because --force is set";
+         "overwriting because --force is set";
        assert_contains
          "force reaches download path"
          output
@@ -713,14 +731,38 @@ let test_existing_release_upgrade_preserves_workspace () =
         let marker = Filename.concat dir ".masc/config/runtime.toml" in
         let original = read_file marker ^ "\n# operator-owned config\n" in
         write_file marker original;
-        let args = [ "--no-wizard" ] @ (if force then [ "--force" ] else []) in
-        let output, status = run_install_status ~seed_config:true ~existing_version:"0.34.0" args dir in
-        check bool "existing release installs successfully" true (status = Unix.WEXITED 0);
+        ignore force;
+        let output, status = run_install_status ~seed_config:true ~existing_version:"0.34.0"
+          ([ "--no-wizard"; "--force" ] @ (if force then [] else [ "--dry-run" ])) dir in
+        check bool "forced replacement over an unrelated binary succeeds" true (status = Unix.WEXITED 0);
         assert_contains "verified replacement completed" output "installed verified binary/dashboard";
-        assert_contains "upgrade mode is explicit" output
-          (if force then "overwriting because --force is set" else "upgrading");
+        assert_contains "replacement is explicit" output "overwriting because --force is set";
         check string "operator runtime configuration preserved" original
           (read_file marker)))
+    [ false; true ]
+;;
+
+let test_unrelated_existing_binary_requires_force () =
+  (* Post-#46314 an existing ~/.local/masc that is not a managed release
+     pointer is never replaced without an explicit --force, and its bytes are
+     never executed to establish identity. *)
+  List.iter (fun force ->
+    let dir = Filename.temp_file "masc-install-unrelated-" "" in
+    Sys.remove dir;
+    Unix.mkdir dir 0o700;
+    Fun.protect
+      ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote dir)))
+      (fun () ->
+         let output, status = run_install_status ~existing_version:"0.34.0"
+           ([ "--dry-run"; "--no-wizard" ] @ (if force then [ "--force" ] else [])) dir in
+         if force then begin
+           check bool "forced install over unrelated binary succeeds" true (status = Unix.WEXITED 0);
+           assert_contains "force path is explicit" output "overwriting because --force is set"
+         end else begin
+           check bool "unrelated binary is refused without force" true (status <> Unix.WEXITED 0);
+           assert_contains "refusal names the pointer rule" output
+             "is not a managed release pointer; pass --force to replace it"
+         end))
     [ false; true ]
 ;;
 
@@ -732,7 +774,7 @@ let test_downgrade_and_unknown_version_require_force () =
         [ "--dry-run"; "--no-wizard" ] dir in
       check bool "unrecognized version or downgrade is refused" true
         (status <> Unix.WEXITED 0);
-      assert_contains "explicit overwrite instruction" output "pass --force to overwrite"))
+      assert_contains "explicit overwrite instruction" output "pass --force to replace it"))
     [ "999.0.0"; "development-build" ]
 ;;
 
@@ -1382,6 +1424,7 @@ let () =
         ; test_case "dry-run + no-seed skips wizard when catalog is absent" `Quick test_wizard_dry_run_no_seed_skips
         ; test_case "older release upgrades with and without force" `Quick test_existing_release_upgrade_preserves_workspace
         ; test_case "downgrades and unrecognized versions need force" `Quick test_downgrade_and_unknown_version_require_force
+        ; test_case "unrelated existing binary is only replaced with force" `Quick test_unrelated_existing_binary_requires_force
         ; test_case "forced wizard without catalog errors" `Quick test_wizard_forced_without_catalog_errors
         ; test_case "invalid provider key env name errors" `Quick test_invalid_provider_key_env_name_errors
         ; test_case "wizard offers a subscription runtime with no api key" `Quick test_wizard_offers_subscription_runtime

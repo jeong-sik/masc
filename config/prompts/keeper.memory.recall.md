@@ -1,7 +1,7 @@
 ---
 description: Keeper memory recall judgments and criterion policy
 category: keeper
-operator_surface: assembly
+operator_surface: fragment
 ---
 
 Policy for Keeper memory recall judgments. Criterion descriptions define the
